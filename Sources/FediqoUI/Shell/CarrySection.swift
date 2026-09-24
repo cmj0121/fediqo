@@ -25,7 +25,7 @@ struct CarrySection: View {
                         session.carryPicking = true
                     }
                 }
-                .disabled(session.carry.isUp)
+                .disabled(session.carry.isUp || session.nearby.isUp)
                 .padding(.vertical, ShellSpace.tight)
             } header: {
                 ShellSectionHead(title: "carry.title", line: "carry.line", help: "carry.help")

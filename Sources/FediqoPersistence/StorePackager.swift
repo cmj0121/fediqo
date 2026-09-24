@@ -165,8 +165,11 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         }
     }
 
+    public func stagingFolder() -> URL { directory }
+
     public func takeAway(
-        to url: URL, key: PackageKey, pictures: Bool, progress: @escaping @Sendable (PackageProgress) -> Void
+        to url: URL, key: PackageKey, pictures: Bool, contents: PackageSummary.Contents,
+        progress: @escaping @Sendable (PackageProgress) -> Void
     ) async throws {
         if case .password(let password) = key {
             if password.isEmpty { throw PackageFault.emptyPassword }
@@ -177,16 +180,31 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
         let snapshot = await store.snapshot()
-        let staged = try StoreFile(at: scratch)
-        try await staged.save(sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said)
-        let pieces = try pieces(
-            index: scratch.appendingPathComponent(Self.indexName), sources: snapshot.sources.map(\.host),
-            said: snapshot.said, pictures: pictures
-        )
+        let pieces: [Piece]
+        let sources: [PackageSummary.SourceLine]
+        switch contents {
+        case .whole:
+            let staged = try StoreFile(at: scratch)
+            try await staged.save(sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said)
+            pieces = try self.pieces(
+                index: scratch.appendingPathComponent(Self.indexName), sources: snapshot.sources.map(\.host),
+                said: snapshot.said, pictures: pictures
+            )
+            sources = snapshot.sources.map { .init(host: $0.host, kind: $0.kind) }
+        case .signInsOnly:
+            // Only what signs in (#6): the one entry, and the header names the sources it
+            // signs in to and nothing else.
+            let held = try secrets(sources: snapshot.sources.map(\.host))
+            pieces = [Piece(.secrets, name: "secrets", data: held.isEmpty ? Data() : try JSONEncoder().encode(held))]
+            let hosts = Set(held.mastodon.map(\.host) + held.apps.map(\.host) + held.forums.map(\.host))
+            sources = snapshot.sources.filter { hosts.contains($0.host) }.map { .init(host: $0.host, kind: $0.kind) }
+        }
         let total = pieces.reduce(0) { $0 + $1.bytes }
         let summary = PackageSummary(
-            sources: snapshot.sources.map { .init(host: $0.host, kind: $0.kind) },
-            posts: snapshot.notes.count, timelines: timelinesKept(), takenAt: Date(), withPictures: pictures,
+            contents: contents, sources: sources,
+            posts: contents == .whole ? snapshot.notes.count : 0,
+            timelines: contents == .whole ? timelinesKept() : 0, takenAt: Date(),
+            withPictures: pictures && contents == .whole,
             bytes: total, hasSecrets: pieces.contains { $0.kind == .secrets && $0.bytes > 0 },
             device: device, appVersion: appVersion, entryCount: pieces.count
         )

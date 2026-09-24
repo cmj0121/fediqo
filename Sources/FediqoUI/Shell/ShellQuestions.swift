@@ -295,6 +295,94 @@ enum ShellQuestion {
         }
     }
 
+    // MARK: - Moving to and from a device nearby (#253, #6)
+
+    /// #252's question, asked on both devices: what would move, to or from which device, and —
+    /// on the one that will hold it — that a store here is replaced, which is a loss and is
+    /// drawn as one. Sign-ins alone (#6) are asked as that.
+    static func nearbyAsk(_ ask: ShellNearby.Ask, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let summary = ask.offer.summary
+        let sources = summary.sources.map(\.host).joined(separator: ", ")
+        let signInsOnly = summary.contents == .signInsOnly
+        let way = ask.receiving ? "hold" : "move"
+        let title = signInsOnly
+            ? String(format: L10n.t("nearby.ask.\(way).signIns.title", language: language), ask.peer)
+            : counted("nearby.ask.\(way).title", summary.posts, ask.peer, language: language)
+        let size = UsagePane.size(Int(ask.offer.fileBytes), language: language)
+        let line = String(format: L10n.t("nearby.ask.line", language: language), sources, size)
+        var help = String(
+            format: L10n.t(ask.receiving ? "nearby.ask.hold.help" : "nearby.ask.move.help", language: language),
+            ask.peer, summary.device, summary.appVersion
+        )
+        if ask.receiving, ask.held, !signInsOnly {
+            help = String(format: L10n.t("carry.read.ask.help.held", language: language), help)
+        }
+        let replaces = ask.receiving && ask.held && !signInsOnly
+        return ShellConfirmation(
+            symbol: ask.receiving ? "antenna.radiowaves.left.and.right" : "paperplane",
+            title: title, line: line, help: help,
+            choices: [replaces
+                ? .init(yes, L10n.t("carry.read.replace", language: language), role: .destructive)
+                : .init(yes, L10n.t(ask.receiving ? "nearby.ask.hold.go" : "nearby.ask.move.go", language: language), role: .primary)],
+            cancel: L10n.t("nearby.ask.refuse", language: language)
+        )
+    }
+
+    /// A count and a name in one sentence, singular where the count is one and the language has
+    /// it (`L10n.count`'s rule): the count is `%1$d` and the name `%2$@`.
+    static func counted(_ key: String, _ count: Int, _ name: String, language: DummyLanguage? = nil) -> String {
+        let one = key + ".one"
+        let singular = count == 1 ? L10n.t(one, language: language) : one
+        return String(format: singular == one ? L10n.t(key, language: language) : singular, count, name)
+    }
+
+    /// Before the sender joins: the mark its digits and the chosen device's session make, and
+    /// whether the other screen shows the same one. Not the same is the way out, back to the
+    /// list; nothing has joined either way.
+    static func nearbyMark(_ mark: String, peer: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "checkmark.seal",
+            title: String(format: L10n.t("nearby.mark.ask.title", language: language), mark),
+            line: String(format: L10n.t("nearby.mark.ask.line", language: language), peer),
+            help: L10n.t("nearby.mark.ask.help", language: language),
+            choices: [.init(yes, L10n.t("nearby.mark.ask.same", language: language), role: .primary)],
+            cancel: L10n.t("nearby.mark.ask.different", language: language)
+        )
+    }
+
+    /// Why a move nearby stopped, each its own sentence. A refused look nearby is said as that —
+    /// this device was not allowed to look — never as nobody being there.
+    static func nearbyRefused(_ refusal: NearbyRefusal, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let (key, line): (String, String)
+        switch refusal {
+        case .package(let inner):
+            return carryRefused(.package(inner), language: language)
+        case .noRoom(let needed, let free):
+            return carryRefused(.noRoom(needed: needed, free: free), language: language)
+        case .notAllowed, .wrongCode, .refusedThere, .lost, .malformed, .unsure, .guessing, .timedOut:
+            key = "nearby.refused.\(refusal)"
+            line = L10n.t(key + ".line", language: language)
+        case .other(let said):
+            key = "nearby.refused.other"
+            line = String(format: L10n.t(key + ".line", language: language), said)
+        }
+        return ShellConfirmation(
+            symbol: "exclamationmark.triangle", title: L10n.t(key + ".title", language: language),
+            line: line, help: nil, choices: [], cancel: L10n.t("store.newer.ok", language: language)
+        )
+    }
+
+    /// It is done, and where it went or came from.
+    static func nearbyDone(_ summary: PackageSummary, peer: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let line = summary.contents == .signInsOnly
+            ? L10n.t("nearby.done.signIns.line", language: language)
+            : L10n.count("carry.done.read.line", summary.posts, language: language)
+        return ShellConfirmation(
+            symbol: "checkmark.circle", title: String(format: L10n.t("nearby.done.title", language: language), peer),
+            line: line, help: nil, choices: [], cancel: L10n.t("store.newer.ok", language: language)
+        )
+    }
+
     /// Sources that ended a sign-in on their own side.
     static func signedOut(hosts: [String], language: DummyLanguage? = nil) -> ShellConfirmation {
         let named = hosts.joined(separator: ", ")

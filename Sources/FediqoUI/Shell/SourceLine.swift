@@ -56,6 +56,7 @@ extension SourceWork.Purpose {
         case .pagePart: "puzzlepiece"
         case .takeAway: "square.and.arrow.up"
         case .readBack: "square.and.arrow.down"
+        case .nearbyMove: "dot.radiowaves.left.and.right"
         }
     }
 }

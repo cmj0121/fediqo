@@ -75,6 +75,9 @@ final class SourceWork {
         case takeAway
         /// A take-away read back onto this device (#247), listed under `thisDevice` likewise.
         case readBack
+        /// What this device holds, moved to or from a device nearby (#253, #6): listed under the
+        /// name that device gave itself, which is the one place it went or came from.
+        case nearbyMove
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -130,6 +133,21 @@ final class SourceWork {
     /// "this device", where every other line is a host. A space, so no host can ever be it.
     nonisolated static let thisDevice = "this device"
 
+    /// What a device nearby is keyed by in the record (#253): its name behind a mark with a
+    /// space in it, so a device named like a host never reads as a source. `SourceAct.shown`
+    /// draws the name alone.
+    nonisolated static let nearbyMark = "nearby device: "
+
+    /// The record's key for the device nearby called `name`, as the device spells it.
+    nonisolated static func nearbyKey(_ name: String) -> String {
+        nearbyMark + name
+    }
+
+    /// A key as the record folds it: a host lower-cased, a device nearby as it names itself.
+    nonisolated static func foldKey(_ key: String) -> String {
+        key.hasPrefix(nearbyMark) ? key : key.lowercased()
+    }
+
     /// What `begin` hands back and `end` takes. Ending one twice, or one already gone, is nothing.
     struct Token: Hashable, Sendable {
         fileprivate let id: Int
@@ -181,7 +199,7 @@ final class SourceWork {
     ) -> Token {
         let now = Date()
         let entry = Running(
-            host: host.lowercased(), source: source, purpose: purpose, name: Self.named(name), since: now
+            host: Self.foldKey(host), source: source, purpose: purpose, name: Self.named(name), since: now
         )
         let (token, publish) = held.withLock { held -> (Token, Bool) in
             held.next += 1
@@ -205,6 +223,31 @@ final class SourceWork {
             )
             return Self.claim(&held)
         }
+        if publish { schedule() }
+    }
+
+    /// A move to or from the device nearby named `peer` (#253): an admission of its own, listed
+    /// under that device's name, so the record shows exactly one line and where it went. Ended
+    /// with `end` on every way out.
+    nonisolated func beginNearby(peer: String) -> Token {
+        begin(host: Self.nearbyKey(peer), for: .nearbyMove)
+    }
+
+    /// The device nearby a line was begun for named itself after the join: the line, running
+    /// and on the record, is listed under that name from now on. Nothing where the token is gone.
+    nonisolated func renameNearby(_ token: Token, peer: String) {
+        let key = Self.nearbyKey(peer)
+        let publish = held.withLock { held -> Bool in
+            guard let running = held.running[token.id] else { return false }
+            held.running[token.id] = Running(
+                host: key, source: nil, purpose: running.purpose, name: running.name, since: running.since
+            )
+            if let at = held.pending.firstIndex(where: { $0.id == token.id }) {
+                held.pending[at] = held.pending[at].renamed(to: key)
+            }
+            return Self.claim(&held)
+        }
+        Task { @MainActor [weak self] in self?.log.rename(id: token.id, to: key) }
         if publish { schedule() }
     }
 
@@ -579,24 +622,31 @@ struct SourceAct: Identifiable, Equatable, Sendable {
         allowedBy: Allowance.ID? = nil
     ) {
         self.id = id
-        self.reached = reached.lowercased()
+        self.reached = SourceWork.foldKey(reached)
         source = Self.attributed(reached: reached, pointedBy: pointedBy)
         self.purpose = purpose
         self.at = at
         self.allowedBy = allowedBy
     }
 
-    /// A source as the record draws it: a host as itself, and the one key that is no host —
-    /// `SourceWork.thisDevice` — in the shell's words.
+    /// A source as the record draws it: a host as itself, the one key that is no host —
+    /// `SourceWork.thisDevice` — in the shell's words, and a device nearby by its name alone.
     static func shown(_ source: String, language: DummyLanguage? = nil) -> String {
-        source == SourceWork.thisDevice ? L10n.t("work.thisDevice", language: language) : source
+        if source == SourceWork.thisDevice { return L10n.t("work.thisDevice", language: language) }
+        if source.hasPrefix(SourceWork.nearbyMark) { return String(source.dropFirst(SourceWork.nearbyMark.count)) }
+        return source
+    }
+
+    /// The same act, listed under `source` instead.
+    func renamed(to source: String) -> SourceAct {
+        SourceAct(id: id, reached: source, pointedBy: nil, purpose: purpose, at: at, allowedBy: allowedBy)
     }
 
     /// The source an act is listed under: the one that pointed to it where one did, and
     /// otherwise the host it went to. An empty pointer is no pointer.
     static func attributed(reached: String, pointedBy: String?) -> String {
-        let pointer = pointedBy?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        return pointer.isEmpty ? reached.lowercased() : pointer
+        let pointer = pointedBy.map { SourceWork.foldKey($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? ""
+        return pointer.isEmpty ? SourceWork.foldKey(reached) : pointer
     }
 
 
@@ -657,9 +707,18 @@ final class SourceRecord {
         sources = bySource.keys.sorted()
     }
 
+    /// The act `id`, listed under `source` from now on (#253: a device nearby that named itself
+    /// after its line was begun). Rare, so the index is simply rebuilt.
+    func rename(id: Int, to source: String) {
+        guard let at = acts.firstIndex(where: { $0.id == id }) else { return }
+        acts[at] = acts[at].renamed(to: source)
+        bySource = Dictionary(grouping: acts, by: \.source)
+        sources = bySource.keys.sorted()
+    }
+
     /// Newest first, and only `source`'s where one is chosen.
     func listed(from source: String? = nil) -> ReversedCollection<[SourceAct]> {
         guard let source else { return acts.reversed() }
-        return (bySource[source.lowercased()] ?? []).reversed()
+        return (bySource[SourceWork.foldKey(source)] ?? []).reversed()
     }
 }
