@@ -45,11 +45,35 @@ final class Launch {
         // And each forum whose sign-in did not outlive the last run, and whose username and
         // password the reader kept, signs in again by itself (#153) — registered here, before the
         // first frame, so a post read a moment later waits for it rather than asking as a guest.
+        // What an older build left in the system's shared network stores goes, once (#219); and
+        // what an earlier run left in the forum browser's store is swept before anything reads it.
+        SharedStores.forgetOnce()
+        forums.sweepAtLaunch(
+            keeping: opened.sources.map(\.host), onDisk: ForumWebsiteData.isOnDisk(),
+            within: StoreSaver.deadline
+        )
         forums.signInAgain(hosts: opened.sources.filter { $0.kind == .discuz }.map(\.host))
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
         if let media = try? MediaCache.caches() {
             FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host))
         }
+    }
+
+    /// As a run ends: the save, and then nothing of where this run went left behind (#219) — the
+    /// forum browser's store keeps its sources' sign-ins and nothing else. Bounded like the save,
+    /// so a WebKit that stops answering cannot hold a quit up.
+    func end() async {
+        _ = await saver.flush()
+        let hosts = await store.sources().map(\.host)
+        await forums.leaveNothing(keeping: hosts, within: StoreSaver.deadline)
+    }
+
+    /// As the app goes to the background, which may be a moment away to a password manager in the
+    /// middle of a sign-in: the save, and only the forum browser's copies of what it fetched. The
+    /// rest waits for the quit, or for the next launch's sweep.
+    func pause() async {
+        _ = await saver.flush()
+        await forums.dropCache(within: StoreSaver.deadline)
     }
 }
 
@@ -61,10 +85,57 @@ final class Launch {
 final class FediqoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task {
-            _ = await Launch.shared.saver.flush()
+            await Launch.shared.end()
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+}
+#elseif os(iOS)
+/// An iPhone is seldom told it is quitting: a suspended app is killed without a word, and then the
+/// forum browser's store is swept at the next launch (`ForumSessions.sweepAtLaunch`). Where the
+/// system does say so — the app ends while running, or its last scene is let go — the whole of
+/// `end()` runs, bounded by the save's deadline, so the store is swept then and not a launch later.
+@MainActor
+final class FediqoAppDelegate: NSObject, UIApplicationDelegate {
+    /// The one end of this run, whichever of the two ways in asked first: `end()` runs once.
+    private var ending: Task<Void, Never>?
+    private var finished = false
+
+    private func endOnce() {
+        guard ending == nil else { return }
+        ending = Task { @MainActor in
+            await Launch.shared.end()
+            self.finished = true
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        NotificationCenter.default.addObserver(
+            forName: UIScene.didDisconnectNotification, object: nil, queue: .main
+        ) { note in
+            let gone = note.object as? UIScene
+            MainActor.assumeIsolated {
+                let left = UIApplication.shared.connectedScenes.filter { $0 !== gone }
+                guard left.isEmpty else { return }
+                self.endOnce()
+            }
+        }
+        return true
+    }
+
+    /// **Best effort.** Called on the main thread with a few seconds left and nothing awaited
+    /// after it returns, so the run loop is turned here until `end()` is done or four seconds
+    /// pass; the system may end the process sooner, and then the next launch sweeps.
+    func applicationWillTerminate(_ application: UIApplication) {
+        endOnce()
+        let until = Date().addingTimeInterval(4)
+        while !finished, Date() < until {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
     }
 }
 #endif
@@ -74,6 +145,8 @@ final class FediqoAppDelegate: NSObject, NSApplicationDelegate {
 struct FediqoApp: App {
     #if os(macOS)
     @NSApplicationDelegateAdaptor(FediqoAppDelegate.self) private var appDelegate
+    #elseif os(iOS)
+    @UIApplicationDelegateAdaptor(FediqoAppDelegate.self) private var appDelegate
     #endif
     @Environment(\.scenePhase) private var scenePhase
 
@@ -109,7 +182,7 @@ struct FediqoApp: App {
         let grant = BackgroundGrant()
         #endif
         Task {
-            _ = await Launch.shared.saver.flush()
+            await Launch.shared.pause()
             #if os(iOS)
             grant.end()
             #endif

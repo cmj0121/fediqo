@@ -33,8 +33,23 @@ public struct URLSessionClient: HTTPClient, Sendable {
     /// token itself.
     let sameOriginOnly: Bool
 
+    /// The session every client is built on unless one is handed in: **nothing of it is written
+    /// to disk** (#219). `URLSession.shared` keeps an on-disk `URLCache` — every response filed
+    /// under its full address, with when it came — and an on-disk cookie jar under the app's
+    /// Library: a record of which source was asked and when that outlives the run. An ephemeral
+    /// configuration holds its cache, cookies and credentials in memory, for this run only.
+    public static let memoryOnly: URLSession = URLSession(configuration: memoryOnlyConfiguration())
+
+    /// What `memoryOnly` is built from, and what any session this package makes starts from.
+    public static func memoryOnlyConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.urlCredentialStorage = nil
+        return configuration
+    }
+
     public init(
-        session: URLSession = .shared,
+        session: URLSession = URLSessionClient.memoryOnly,
         byteLimit: Int = URLSessionClient.defaultByteLimit,
         sameOriginOnly: Bool = false
     ) {
@@ -101,8 +116,7 @@ extension URLSessionClient: HTTPSender {
     /// token, app registration or page of statuses comes near; and no redirect off the origin a
     /// request was sent to, whatever it carries.
     public static func signedIn() -> URLSessionClient {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.urlCache = nil
+        let configuration = memoryOnlyConfiguration()
         configuration.httpShouldSetCookies = false
         return URLSessionClient(
             session: URLSession(configuration: configuration), byteLimit: 1 << 20,

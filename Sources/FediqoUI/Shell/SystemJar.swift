@@ -1,15 +1,18 @@
+import FediqoCore
 import Foundation
 
 /// What the system's own stores keep of one source, let go of as the reader signs out of it or
 /// removes it (#221).
 ///
 /// **Why there is anything here at all.** A source read without a sign-in is read through the
-/// system's shared session, and that session keeps whatever the source hands it: a forum's guest
-/// session cookie, and — where a source ever asked the system for a password — a credential kept
-/// for it. Neither is the reader's sign-in, but both are a session of some kind this device holds
-/// for that source, and signing out or removing leaves none (#221). A signed-in source's own
-/// traffic never reaches these stores (`URLSessionClient.signedIn()`); the forum's browser keeps
-/// its own, dropped by `ForumSessions.forget(host:)`.
+/// one session every unsigned client shares (`URLSessionClient.memoryOnly`, #219), and that
+/// session keeps, in memory for the run, whatever the source hands it: a forum's guest session
+/// cookie. It is not the reader's sign-in, but it is a session of some kind this device holds for
+/// that source, and signing out or removing leaves none (#221). That session keeps no credential
+/// at all, so there is none to drop unless a test hands a store in. A signed-in source's own
+/// traffic never reaches this jar (`URLSessionClient.signedIn()`); the forum's browser keeps its
+/// own, dropped by `ForumSessions.forget(host:)`. What an older build left in the system's shared
+/// stores is emptied once at launch (`SharedStores.forgetOnce`).
 ///
 /// Matched as a forum's browser records are (`ForumWebEngine.holds`): a cookie's domain belongs to
 /// the source when either name is the other or ends in it, so a cookie filed for the registrable
@@ -18,8 +21,12 @@ import Foundation
 /// own, when its parent goes (`ForumWebEngine.goes`).
 @MainActor
 struct SystemJar {
-    var cookies: HTTPCookieStorage = .shared
-    var credentials: URLCredentialStorage = .shared
+    /// The jar the live session actually uses. `memoryOnly` is ephemeral, and an ephemeral
+    /// configuration always carries an in-memory jar of its own — hence the `!`; the system's
+    /// shared jar is no longer written by anything this app sends.
+    var cookies: HTTPCookieStorage = URLSessionClient.memoryOnly.configuration.httpCookieStorage!
+    /// Nil in the app: the live session keeps no credentials (`memoryOnlyConfiguration`).
+    var credentials: URLCredentialStorage? = URLSessionClient.memoryOnly.configuration.urlCredentialStorage
 
     func forget(host raw: String, keeping others: [String]) {
         let host = raw.lowercased()
@@ -28,6 +35,7 @@ struct SystemJar {
         where ForumWebEngine.goes(cookie.domain, forgetting: host, keeping: others) {
             cookies.deleteCookie(cookie)
         }
+        guard let credentials else { return }
         for (space, kept) in credentials.allCredentials where space.host.lowercased() == host {
             for credential in kept.values {
                 credentials.remove(

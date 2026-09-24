@@ -1,5 +1,6 @@
 import FediqoCore
 import Foundation
+import os
 import Observation
 import Security
 import WebKit
@@ -221,6 +222,8 @@ public final class ForumSessions {
     @ObservationIgnored private var engines: [String: ForumWebEngine] = [:]
     @ObservationIgnored private let makeStore: () -> WKWebsiteDataStore
     @ObservationIgnored private var madeStore: WKWebsiteDataStore?
+    /// The launch's sweep of a store an earlier run left, while it runs (`sweepAtLaunch`).
+    @ObservationIgnored private(set) var sweeping: Task<Void, Never>?
     @ObservationIgnored private var watcher: CookieWatcher?
     /// The forums among the reader's sources: the hosts `reachedHosts` is asked about.
     @ObservationIgnored private var forumHosts: Set<String> = []
@@ -362,6 +365,7 @@ public final class ForumSessions {
         let host = host.lowercased()
         if let held = engines[host] { return held }
         let made = ForumWebEngine(host: host, dataStore: dataStore)
+        made.sweeping = sweeping
         engines[host] = made
         return made
     }
@@ -643,8 +647,11 @@ public final class ForumSessions {
             relaunchIDs[host] = id
             // Read now, not as the task starts: a forget landing before it runs must still count.
             let asked = forgets[host, default: 0]
+            let sweeping = sweeping
             relaunching[host] = Task { [weak self, work] in
                 defer { work.end(token) }
+                // Not until the launch's sweep of an earlier run's store is done (#219).
+                await sweeping?.value
                 await self?.relaunch(host: host, asked: asked, sessions: held, attempt: attempt)
                 // Only while it is still this one: a forget may have ended it and another begun.
                 if let self, self.relaunchIDs[host] == id {
@@ -761,6 +768,62 @@ public final class ForumSessions {
         // for any sibling whose records WebKit filed under the same domain. Decision 13 puts it
         // here on purpose: Clear and Remove both arrive through this one door.
         await readReached()
+    }
+
+    /// Leaves in the store only the sign-ins of `hosts`, the reader's sources (#219): see
+    /// `ForumWebEngine.sweep`. Asked as a run ends, and answered by `limit` whatever WebKit is
+    /// doing, so a store that stops answering cannot hold a quit up. A store never opened this run
+    /// holds nothing this run put there, and is left unopened.
+    public func leaveNothing(keeping hosts: [String], within limit: Duration) async {
+        guard let madeStore else { return }
+        await Self.bounded(limit) { await ForumWebEngine.sweep(madeStore, keeping: hosts) }
+    }
+
+    /// Drops only what WebKit copied of what it fetched (`ForumWebEngine.cache`), as the app goes
+    /// to the background: a sign-in or a browser check the reader stepped away from — to a
+    /// password manager, a code on another app — is still there when they come back.
+    public func dropCache(within limit: Duration) async {
+        guard let madeStore else { return }
+        await Self.bounded(limit) {
+            await madeStore.removeData(ofTypes: ForumWebEngine.cache, modifiedSince: .distantPast)
+        }
+    }
+
+    /// The whole sweep, at launch, of a store an earlier run left on this device (#219) — a run
+    /// that crashed, or that only ever went to the background, left all of it. Relaunched
+    /// sign-ins wait for it, so nothing is swept out from under one.
+    public func sweepAtLaunch(keeping hosts: [String], onDisk: Bool, within limit: Duration) {
+        guard onDisk else { return }
+        let store = dataStore
+        // Bounded like a quit's: a WebKit that stops answering holds the forum's reads up for
+        // `limit` at most, not for the run.
+        sweeping = Task {
+            await Self.bounded(limit) { await ForumWebEngine.sweep(store, keeping: hosts) }
+        }
+    }
+
+    /// Waits for `work`, or for `limit`, whichever is first. Past it the work is left running.
+    static func bounded(
+        _ limit: Duration, _ work: @escaping @MainActor @Sendable () async -> Void
+    ) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let once = OSAllocatedUnfairLock<CheckedContinuation<Void, Never>?>(initialState: continuation)
+            let finish: @Sendable () -> Void = {
+                once.withLock { held -> CheckedContinuation<Void, Never>? in
+                    defer { held = nil }
+                    return held
+                }?.resume()
+            }
+            let timer = Task.detached {
+                try? await Task.sleep(for: limit)
+                finish()
+            }
+            Task { @MainActor in
+                await work()
+                timer.cancel()
+                finish()
+            }
+        }
     }
 
     func refreshSavedHosts() {
