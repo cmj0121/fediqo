@@ -489,7 +489,8 @@ final class ShellPictures {
         }
         // On `SourceWork` while it is on the wire (#164) — and not while it is read from disk,
         // which asks no source anything.
-        let client = WatchedHTTP(http, for: .picture, in: work)
+        // Listed under the source that asked for it, wherever the picture is kept (#218).
+        let client = WatchedHTTP(http, for: .picture, source: host, in: work)
         let disk = disk
         // Unstructured on purpose: the caller is a view's `.task`, and that is cancelled by any
         // rebuild. What it cancels has to be this view's waiting and not the work itself.

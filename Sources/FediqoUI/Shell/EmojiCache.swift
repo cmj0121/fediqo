@@ -40,7 +40,7 @@ final class EmojiCache {
     /// no clock change can walk backwards.
     private var tick: UInt64 = 0
     private var inFlight: [Key: Task<Void, Never>] = [:]
-    /// One download per address, whoever asked for it — see `download(_:)`.
+    /// One download per address, whoever asked for it — see `download(_:for:)`.
     private var downloads: [URL: Task<Data?, Never>] = [:]
     private let gate = EmojiGate(ceiling: EmojiCache.maxInFlight)
     private var cuts: [Cut: [EmojiRun]] = [:]
@@ -268,7 +268,7 @@ final class EmojiCache {
         /// memory until the last host goes**, which is the opposite of what the button promises
         /// the reader. What it costs instead is about ten kilobytes per (host, size) pair against
         /// a 24 MB budget — three orders of magnitude cheaper than duplicating a photograph —
-        /// and `download(_:)` below has already removed the expensive half, which is the request
+        /// and `download(_:for:)` below has already removed the expensive half, which is the request
         /// rather than the decode.
         let host: String
         /// In the key because it changes what is decoded, not only what is fetched: where a
@@ -521,7 +521,7 @@ final class EmojiCache {
             defer { self?.inFlight[key] = nil }
             guard let self else { return }
             var decoded: Decoded?
-            if let data = await download(key.url).value {
+            if let data = await download(key.url, for: key.host).value {
                 decoded = await Task.detached(priority: .utility) {
                     Self.decode(data, ink: pixels, stillOnly: key.still)
                 }.value
@@ -564,10 +564,11 @@ final class EmojiCache {
     /// Every address goes through `HTTPClient`: the live one carries the `https`-only rule and
     /// refuses anything that is not an HTTP response, which is what stops a `file:` or `data:`
     /// address out of a stranger's JSON from reaching `URLSession` at all.
-    private func download(_ url: URL) -> Task<Data?, Never> {
+    private func download(_ url: URL, for source: String) -> Task<Data?, Never> {
         if let running = downloads[url] { return running }
-        // On `SourceWork` while it is on the wire (#164).
-        let http = WatchedHTTP(http, for: .emoji, in: work)
+        // On `SourceWork` while it is on the wire (#164), and in the run's record under the
+        // source whose line asked for it first (#218) — one request, so one act.
+        let http = WatchedHTTP(http, for: .emoji, source: source, in: work)
         let started = Task<Data?, Never> { @MainActor [weak self] in
             defer { self?.downloads[url] = nil }
             guard let self else { return nil }

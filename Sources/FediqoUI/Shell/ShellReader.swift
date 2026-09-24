@@ -24,13 +24,17 @@ struct ShellReading: Identifiable, Hashable, Sendable {
     /// Whether the page's last attempt to move was one this app would not follow. Set where the
     /// gate says no, and cleared by the next move that lands — see `arrived(at:)`.
     var refused: Bool = false
+    /// The source whose post the link was pressed on, which every page this reading loads is
+    /// listed under in the run's record (#218). Nil where the press came from no source.
+    let source: String?
 
     var id: String { url.absoluteString }
 
-    init(url: URL, host: String) {
+    init(url: URL, host: String, source: String? = nil) {
         self.url = url
         showing = url
         self.host = host
+        self.source = source
     }
 
     /// The main frame landed somewhere. **An address with no host moves nothing**, because the
@@ -81,6 +85,10 @@ final class ShellReader {
     /// for a frame first. Nothing here, as on iPad and iPhone, is a sheet.
     @ObservationIgnored var placing: (@MainActor (URL) -> Bool)?
 
+    /// Where each page this reader loads is written to the run's record (#218). The app's own; a
+    /// test hands in another.
+    @ObservationIgnored var work: SourceWork = .shared
+
     /// Opens an address inside the app, and answers whether it did.
     ///
     /// **Decision 9 read again, at the door of a web view.** A `PostLink` is already a checked
@@ -100,13 +108,23 @@ final class ShellReader {
     /// make; here it is somebody else's JavaScript, pointed at the reader's own device or the
     /// network it is on, one press away in a stranger's post. It is not a regression and the
     /// press is the reader's, but nothing in this file should be read as saying otherwise.
+    ///
+    /// `source` is the source whose post the link stands in: what the page is listed under in the
+    /// run's record, wherever it is kept (#218).
     @discardableResult
-    func open(_ url: URL) -> Bool {
+    func open(_ url: URL, from source: String? = nil) -> Bool {
         guard Host.allowsFetch(url), let host = url.host(), !host.isEmpty else { return false }
         let placed = placing?(url) ?? false
-        reading = ShellReading(url: url, host: host)
+        reading = ShellReading(url: url, host: host, source: source)
         inPlace = placed
         return true
+    }
+
+    /// The main frame is about to load `url`, as the reader was allowed to: written to the run's
+    /// record under the source the reading was opened from (#218). What the page itself pulls in
+    /// beside it is WebKit's, and is not seen here.
+    func leaving(for url: URL) {
+        work.note(host: url.host() ?? "", for: .page, source: reading?.source)
     }
 
     /// The page moved, and the chrome follows it. See `ShellReading.host`.
@@ -377,7 +395,9 @@ private struct LinkWebView {
                 // looking at, and a `nil` target frame is a new window — the same press with a
                 // different attribute on it, and the one `createWebViewWith` below folds back
                 // into this view.
-                if !allowed, navigationAction.targetFrame?.isMainFrame ?? true { reader.refuse() }
+                let main = navigationAction.targetFrame?.isMainFrame ?? true
+                if !allowed, main { reader.refuse() }
+                if allowed, main, let url = navigationAction.request.url { reader.leaving(for: url) }
                 decisionHandler(allowed ? .allow : .cancel)
             }
         }

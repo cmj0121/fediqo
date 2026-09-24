@@ -398,6 +398,9 @@ final class ShellSession {
     /// Which tab Preferences is showing (#143): what a person chooses, or which Fediqo this is.
     var preferencesPurpose: PreferencesPane.Purpose = .choices
 
+    /// Whether the record of everything this run has asked of the sources is open (#218).
+    var activityShown = false
+
     /// Tab and ⇧Tab on Preferences, the way they rotate Usage: Settings, This Fediqo, In flight,
     /// and round again.
     @discardableResult

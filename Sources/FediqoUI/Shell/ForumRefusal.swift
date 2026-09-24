@@ -73,7 +73,7 @@ struct ForumRefusalView: View {
                         button(L10n.t("refusal.again"), "arrow.clockwise", onAgain)
                     }
                     if buttons.contains(.page), let page {
-                        button(L10n.t("blog.page"), "doc.richtext") { _ = reader?.open(page) }
+                        button(L10n.t("blog.page"), "doc.richtext") { _ = reader?.open(page, from: host) }
                             .accessibilityHint(Text(L10n.t("refusal.page.hint")))
                     }
                 }

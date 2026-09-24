@@ -1561,7 +1561,7 @@ struct ForumPostBand: View {
         // `SpokenLinks`. Nothing to offer in the four states that have no words — and nothing
         // under a cover either, for `linked`'s reason: an action is a control, and a reader using
         // VoiceOver is not an exception to "the cover draws none".
-        .spokenLinks(in: linked ? Self.words(of: reading) : "")
+        .spokenLinks(in: linked ? Self.words(of: reading) : "", from: thread.host)
     }
 
     /// The waiting state: two plates, the longer one over the shorter, the way a paragraph sits.
