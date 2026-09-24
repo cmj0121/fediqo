@@ -63,6 +63,13 @@ struct TimelineDraft: Identifiable, Equatable {
     mutating func remove(_ id: Rule.ID) {
         rules.removeAll { $0.id == id }
     }
+
+    /// A rule opened and changed takes the place of the one it was: definition order decides
+    /// which rule a hidden post is put down to, so changing a rule never moves it.
+    mutating func replace(_ id: Rule.ID, with rule: Rule) {
+        guard let index = rules.firstIndex(where: { $0.id == id }) else { return }
+        rules[index] = rule
+    }
 }
 
 /// A sentence the timeline shows for a moment. `tick` makes the same sentence twice two toasts.
@@ -326,12 +333,42 @@ struct RuleDraft: Equatable {
         self.tag = tag
     }
 
+    /// A rule already written, opened to be changed: what it names, its effect and its scope, as
+    /// the form would have them had it just been picked. Built back through the same factories,
+    /// so a rule opened and confirmed untouched is the rule it was.
+    ///
+    /// A category for every source is shown under the first source that can hold it, since the
+    /// picker lists categories by source; its scope stays every source until it is changed.
+    init(editing rule: Rule, sources: [Source]) {
+        tag = rule.kind.tag
+        effect = rule.effect
+        switch rule.kind {
+        case .source(let host):
+            target = .source(host)
+        case .author(let handle, let scope):
+            typed = "@" + handle
+            target = .author(typed)
+            self.scope = scope
+        case .keyword(let text, let scope):
+            typed = text
+            target = .keyword(text)
+            self.scope = scope
+        case .category(let category, let scope):
+            let host = RuleText.host(of: scope)
+                ?? sources.first { $0.kind.hasTimelines || $0.kind.hasTrends }?.host ?? ""
+            target = .category(category, on: host)
+            self.scope = scope
+        }
+    }
+
     func scopes(_ sources: [Source]) -> [RuleScope] {
         target.map { RuleBuilder.scopes(for: $0, sources: sources) } ?? []
     }
 
-    func rule(_ sources: [Source]) -> Rule? {
-        target.flatMap { RuleBuilder.rule($0, scope: scope, effect: effect, sources: sources) }
+    /// The rule, where the factories make one. `id` is the rule's own when it is being changed,
+    /// so the timeline keeps one rule and not a removed one and a new one.
+    func rule(_ sources: [Source], id: Rule.ID = UUID()) -> Rule? {
+        target.flatMap { RuleBuilder.rule($0, scope: scope, effect: effect, sources: sources, id: id) }
     }
 
     /// Picks a target, keeping the scope where it is still one of its choices. A category is
@@ -393,6 +430,10 @@ enum EditorAction: Equatable {
     case previousRule
     case toggleRule
     case removeRule
+    /// The lit rule, opened where it is changed.
+    case openRule
+    /// The other of the editor's two tabs.
+    case switchTab
     case removeTimeline
     /// The name field, to rename the timeline.
     case focusName
@@ -436,6 +477,9 @@ enum EditorAction: Equatable {
         switch stage {
         case .rules:
             switch key {
+            // Tab and ⇧Tab, as every page's tabs turn; `t` where Tab is taken by the focus.
+            case KeyEquivalent.tab.character, "\u{19}", "t": return .switchTab
+            case KeyEquivalent.return.character: return .openRule
             case "[": return .earlier
             case "]": return .later
             case "n": return .addRule
@@ -454,23 +498,59 @@ enum EditorAction: Equatable {
             case "x": return .toggleEffect
             case "o": return .nextScope
             case KeyEquivalent.return.character: return .confirmRule
+            case KeyEquivalent.delete.character: return .removeRule
             default: return down ? .nextChoice : up ? .previousChoice : nil
             }
         }
     }
 
-    /// The keycap strip under each stage: the caps, and the key naming what they do.
-    static func strip(for stage: EditorStage) -> [(caps: String, key: String)] {
+    /// The keycap strip under each stage: the caps, and the key naming what they do. A rule
+    /// opened to be changed says it can be removed from there, and is confirmed as a change.
+    static func strip(for stage: EditorStage, changing: Bool = false) -> [(caps: String, key: String)] {
         switch stage {
         case .rules:
-            [("m", "editor.keys.name"), ("[ ]", "editor.keys.move"), ("n", "editor.keys.add"), ("j k", "editor.keys.rule"),
-             ("x", "editor.keys.effect"), ("⌫", "editor.keys.remove"), ("⌘⌫", "editor.keys.removeTimeline"),
+            [("⇥ t", "editor.keys.tab"), ("m", "editor.keys.name"), ("[ ]", "editor.keys.move"), ("n", "editor.keys.add"),
+             ("j k", "editor.keys.rule"), ("↩", "editor.keys.open"), ("x", "editor.keys.effect"),
+             ("⌫", "editor.keys.remove"), ("⌘⌫", "editor.keys.removeTimeline"),
              ("⌘↩", "editor.keys.done"), ("esc", "editor.keys.cancel")]
         case .kinds:
             [("1–4", "editor.keys.kind"), ("esc", "editor.keys.back")]
+        case .form where changing:
+            [("j k", "editor.keys.pick"), ("x", "editor.keys.effect"), ("o ⌥O", "editor.keys.scope"),
+             ("↩", "editor.keys.change"), ("⌫", "editor.keys.remove"), ("esc", "editor.keys.back")]
         case .form:
             [("j k", "editor.keys.pick"), ("x", "editor.keys.effect"), ("o ⌥O", "editor.keys.scope"),
              ("↩", "editor.keys.confirm"), ("esc", "editor.keys.back")]
         }
     }
+}
+
+/// The editor's two tabs (#237): the timeline itself — its name, description and place — and its
+/// rules, so no tab holds a form beside a list.
+enum EditorTab: String, CaseIterable, Identifiable, ShellTab {
+    case timeline
+    case rules
+
+    var id: Self { self }
+
+    var titleKey: String {
+        switch self {
+        case .timeline: "editor.tab.timeline"
+        case .rules: "editor.tab.rules"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .timeline: "pencil.line"
+        case .rules: "line.3.horizontal.decrease.circle"
+        }
+    }
+
+    /// Where the editor opens: a new timeline on its name, one already written on its rules.
+    static func first(isNew: Bool) -> Self {
+        isNew ? .timeline : .rules
+    }
+
+    var other: Self { self == .timeline ? .rules : .timeline }
 }

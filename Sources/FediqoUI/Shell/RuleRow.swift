@@ -43,14 +43,14 @@ enum RuleBuilder {
     }
 
     static func rule(
-        _ target: RuleTarget, scope: RuleScope, effect: RuleEffect, sources: [Source]
+        _ target: RuleTarget, scope: RuleScope, effect: RuleEffect, sources: [Source], id: Rule.ID = UUID()
     ) -> Rule? {
         switch target {
-        case .source(let host): Rule.source(host, effect: effect)
-        case .author(let handle): Rule.author(handle, in: scope, effect: effect, sources: sources)
-        case .keyword(let text): Rule.keyword(text, in: scope, effect: effect)
+        case .source(let host): Rule.source(host, effect: effect, id: id)
+        case .author(let handle): Rule.author(handle, in: scope, effect: effect, sources: sources, id: id)
+        case .keyword(let text): Rule.keyword(text, in: scope, effect: effect, id: id)
         case .category(let category, _):
-            Rule.category(category, in: scope, effect: effect, sources: sources)
+            Rule.category(category, in: scope, effect: effect, sources: sources, id: id)
         }
     }
 
@@ -170,90 +170,44 @@ enum RuleText {
     }
 }
 
-/// One rule in the editor: the effect word, the target (in a dashed socket where it is missing),
-/// the scope, and its two actions. One accessibility element.
+/// One rule in the editor's list (#237), as every list's row (`ShellListRow`): the kind's glyph,
+/// what the rule names, and its effect and scope in a line under it; "missing" as the row's figure
+/// where what it names is gone, and why it still counts behind a (?) after it. Entering the row opens the rule where it is changed or removed.
 struct RuleRowView: View {
     let rule: Rule
     let status: RuleStatus
     let sources: [Source]
-    /// Where `j` and `k` rest: `x` and ⌫ act on this row.
-    var focused = false
-    var onToggle: () -> Void
-    var onRemove: () -> Void
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var missing: Bool { status != .present }
+    /// Where `j` and `k` rest: `x` and ⌫ act on this row, and Return opens it.
+    @Binding var selection: Rule.ID?
+    let onOpen: () -> Void
+    let onStep: (Int) -> Void
 
     var body: some View {
-        HStack(spacing: ShellSpace.snug) {
-            Image(systemName: rule.effect == .include ? "plus.circle" : "minus.circle")
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .accessibilityHidden(true)
-            Button(action: onToggle) {
-                Text(RuleText.effect(rule.effect))
-                    .shellFont(.meta, weight: .semibold)
-                    .foregroundStyle(ShellChrome.selectInk(colorScheme))
-                    .padding(.horizontal, ShellSpace.snug)
-                    .padding(.vertical, ShellSpace.hair)
-                    .background(Capsule(style: .continuous).fill(ShellChrome.selectFill(colorScheme)))
-            }
-            .buttonStyle(.plain)
-            target
-            if missing {
-                Text(L10n.t("rule.missing"))
-                    .shellFont(.mark)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .help(L10n.t("rule.missing.help"))
-            }
-            Spacer(minLength: ShellSpace.snug)
-            if let scope = RuleText.scope(rule) {
-                Text(scope)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(1)
-            }
-            Button(action: onRemove) {
-                Image(systemName: "xmark")
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.vertical, ShellSpace.tight)
-        .padding(.horizontal, ShellSpace.snug)
-        // The rail's lamp: a float fill and a phosphor edge on the row the keys act on.
-        .background(focused ? ShellChrome.floatFill(colorScheme) : .clear)
-        .overlay(alignment: .leading) {
-            if focused {
-                Rectangle().fill(ShellChrome.phosphor(colorScheme)).frame(width: 2)
+        ShellListRow(
+            id: rule.id,
+            title: RuleText.target(rule, sources: sources),
+            brief: RuleText.brief(rule),
+            figure: status == .present ? nil : L10n.t("rule.missing"),
+            selection: $selection,
+            onOpen: onOpen,
+            onStep: onStep
+        ) {
+            Image(systemName: TimelineEditor.kindSymbol(rule.kind.tag))
+        } control: {
+            // Why a missing rule is kept, behind its (?) rather than on the row.
+            if status != .present {
+                ShellHelp("rule.missing.help", about: RuleText.target(rule, sources: sources))
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(RuleText.spoken(rule, status: status, sources: sources))
-        .accessibilityAction(named: Text(L10n.t(rule.effect == .include ? "rule.action.hide" : "rule.action.show")), onToggle)
-        .accessibilityAction(named: Text(L10n.t("rule.action.remove")), onRemove)
     }
+}
 
-    @ViewBuilder
-    private var target: some View {
-        let text = Text(RuleText.target(rule, sources: sources))
-            .shellFont(.body)
-            .lineLimit(1)
-        if missing {
-            // An empty socket: the part is not seated on the plate, and the rule still works.
-            text
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .padding(.horizontal, ShellSpace.snug)
-                .padding(.vertical, ShellSpace.hair)
-                .overlay(
-                    Capsule(style: .continuous)
-                        .strokeBorder(
-                            ShellChrome.hairline(colorScheme),
-                            style: StrokeStyle(lineWidth: 1, dash: [3, 2])
-                        )
-                )
-        } else {
-            text.foregroundStyle(ShellChrome.ink(colorScheme))
-        }
+extension RuleText {
+    /// The row's brief line: the effect, and the scope where the rule has one — "Show, on every
+    /// source".
+    static func brief(_ rule: Rule, language: DummyLanguage? = nil) -> String {
+        let effect = effect(rule.effect, language: language)
+        guard let scope = scope(rule, language: language) else { return effect }
+        return String(format: L10n.t("rule.brief", language: language), effect, scope)
     }
 }

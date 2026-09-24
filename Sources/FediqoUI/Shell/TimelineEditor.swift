@@ -5,16 +5,23 @@ import SwiftUI
 /// and its rules, grouped the way they are evaluated — any of a kind, and across kinds, hides
 /// last — so the list reads as what the timeline does.
 ///
+/// **Two tabs, one style each** (#237): the timeline — its name, description and place — and its
+/// rules, a list whose every row opens the rule where it is changed or removed. Every control is
+/// a glyph that names itself (`ShellIconButton`).
+///
 /// **A draft, applied on Done** (Decision 21). Cancel and Escape on the rules drop it, so a
-/// half-built rule never touches the stream. Adding a rule is a second stage in the same frame, so
-/// the sheet never resizes: pick a kind, pick what it names from what this device holds, then its
-/// effect and scope. **Every control has a key** (`EditorAction`), named in the strip at the foot;
-/// a focused field keeps its letters.
+/// half-built rule never touches the stream. Adding or changing a rule is a second stage in the
+/// same frame, so the sheet never resizes: pick a kind, pick what it names from what this device
+/// holds, then its effect and scope. **Every control has a key** (`EditorAction`), named in the
+/// strip at the foot; a focused field keeps its letters.
 struct TimelineEditor: View {
     @Bindable var session: ShellSession
     @State private var draft: TimelineDraft
+    @State private var tab: EditorTab
     @State private var stage: EditorStage = .rules
     @State private var adding = RuleDraft(.source)
+    /// The rule the form was opened on, where it is changing one rather than adding.
+    @State private var changing: Rule.ID?
     @State private var focusedRule: Rule.ID?
     @State private var confirmingRemove = false
     @FocusState private var focus: Focus?
@@ -30,6 +37,7 @@ struct TimelineEditor: View {
     init(session: ShellSession, draft: TimelineDraft) {
         self.session = session
         _draft = State(initialValue: draft)
+        _tab = State(initialValue: EditorTab.first(isNew: draft.isNew))
     }
 
     private var sources: [Source] { session.sources }
@@ -37,34 +45,13 @@ struct TimelineEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
             header
-            // A field is read and typed into like everything around it, so it moves with the
-            // rest of the scale (#96) — otherwise a rule is composed at one size beside a list
-            // of rules drawn at another.
-            TextField(L10n.t("timeline.name.placeholder"), text: $draft.name)
-                .shellFont(.body)
-                .textFieldStyle(.roundedBorder)
-                .focused($focus, equals: .name)
-                .onSubmit { focus = .keys }
-            TextField(L10n.t("timeline.desc.placeholder"), text: $draft.desc)
-                .shellFont(.body)
-                .textFieldStyle(.roundedBorder)
-                .focused($focus, equals: .desc)
-                .onSubmit { focus = .keys }
-            placeLine
+            ShellTabs(EditorTab.allCases, selected: tab) { select($0) }
             Rectangle().fill(ShellChrome.hairline(colorScheme)).frame(height: ShellSpace.hair)
-            switch stage {
-            case .rules: rulesStage
-            case .kinds: kindsStage
-            case .form: RuleForm(
-                session: session,
-                draft: $adding,
-                choices: Self.choices(for: adding, in: session),
-                focus: $focus,
-                onBack: { perform(.back) },
-                onAdd: { perform(.confirmRule) }
-            )
+            switch tab {
+            case .timeline: timelineTab
+            case .rules: rulesTab
             }
-            keyStrip
+            EditorKeyStrip(stage: stage, changing: changing != nil)
         }
         .padding(ShellSpace.pad)
         #if os(macOS)
@@ -109,34 +96,38 @@ struct TimelineEditor: View {
     }
 
     /// Every rule in the order it is drawn, which is the order `j` and `k` walk.
-    private var drawnRules: [Rule] { bands.flatMap(\.rules) }
+    private var drawnRules: [Rule] { EditorBands(draft.rules).bands.flatMap(\.rules) }
+
+    /// A tab chosen by a press. Leaving the rules mid-way through a rule drops the rule, as Escape
+    /// would; the timeline's draft is kept.
+    private func select(_ picked: EditorTab) {
+        guard picked != tab else { return }
+        tab = picked
+        stage = .rules
+        changing = nil
+        focus = .keys
+    }
 
     private func perform(_ action: EditorAction) {
         switch action {
         case .cancel: session.editing = nil
-        case .back:
-            switch stage {
-            case .rules: session.editing = nil
-            case .kinds: stage = .rules
-            case .form: stage = .kinds
-            }
-            focus = .keys
+        case .back: back()
         case .earlier: draft.move(by: -1)
         case .later: draft.move(by: 1)
-        case .addRule: stage = .kinds
-        case .nextRule: focusedRule = DummyCommand.stepped(drawnRules.map(\.id), from: focusedRule, by: 1)
-        case .previousRule: focusedRule = DummyCommand.stepped(drawnRules.map(\.id), from: focusedRule, by: -1)
-        case .toggleRule:
-            if let focusedRule { draft.toggleEffect(of: focusedRule) }
-        case .removeRule:
-            guard let removed = focusedRule else { return }
-            let ids = drawnRules.map(\.id)
-            focusedRule = DummyCommand.stepped(ids, from: removed, by: 1).flatMap { $0 == removed ? nil : $0 }
-                ?? DummyCommand.stepped(ids, from: removed, by: -1).flatMap { $0 == removed ? nil : $0 }
-            draft.remove(removed)
+        case .switchTab: select(tab.other)
+        case .addRule:
+            tab = .rules
+            changing = nil
+            stage = .kinds
+        case .nextRule, .previousRule, .toggleRule, .removeRule, .openRule:
+            onRules(action)
         case .removeTimeline:
             if !draft.isNew { confirmingRemove = true }
-        case .focusName: focus = .name
+        case .focusName:
+            tab = .timeline
+            // The field is drawn by the tab just put in front, so the keys are handed over once
+            // it is there.
+            Task { @MainActor in focus = .name }
         case .pickKind(let tag):
             adding = RuleDraft(tag)
             stage = .form(tag)
@@ -145,13 +136,77 @@ struct TimelineEditor: View {
         case .previousChoice: adding.step(-1, through: Self.choices(for: adding, in: session), sources: sources)
         case .toggleEffect: adding.toggleEffect()
         case .nextScope: adding.nextScope(sources)
-        case .confirmRule:
+        case .confirmRule: confirm()
+        }
+    }
+
+    /// One stage back: from a rule to its kinds, or to the list where a rule was opened from it.
+    private func back() {
+        switch stage {
+        case .rules: session.editing = nil
+        case .kinds: stage = .rules
+        case .form: stage = changing == nil ? .kinds : .rules
+        }
+        changing = nil
+        focus = .keys
+    }
+
+    /// The keys that act on a rule. From the timeline tab they bring the rules in front first,
+    /// and only `j` and `k` also move: a rule is not switched or removed where it cannot be seen.
+    private func onRules(_ action: EditorAction) {
+        let hidden = tab != .rules
+        tab = .rules
+        switch action {
+        case .nextRule: focusedRule = DummyCommand.stepped(drawnRules.map(\.id), from: focusedRule, by: 1)
+        case .previousRule: focusedRule = DummyCommand.stepped(drawnRules.map(\.id), from: focusedRule, by: -1)
+        case .toggleRule:
+            if !hidden, let focusedRule { draft.toggleEffect(of: focusedRule) }
+        case .removeRule:
+            if case .form = stage, let changing {
+                remove(changing)
+                self.changing = nil
+                stage = .rules
+                focus = .keys
+            } else if !hidden, stage == .rules, let focusedRule {
+                remove(focusedRule)
+            }
+        case .openRule:
+            if !hidden, let focusedRule { open(focusedRule) }
+        default: break
+        }
+    }
+
+    /// Takes a rule out of the draft, and puts the lamp on its neighbour.
+    private func remove(_ removed: Rule.ID) {
+        let ids = drawnRules.map(\.id)
+        focusedRule = DummyCommand.stepped(ids, from: removed, by: 1).flatMap { $0 == removed ? nil : $0 }
+            ?? DummyCommand.stepped(ids, from: removed, by: -1).flatMap { $0 == removed ? nil : $0 }
+        draft.remove(removed)
+    }
+
+    /// A rule of the list, opened in the form it was added through.
+    private func open(_ id: Rule.ID) {
+        guard let rule = draft.rules.first(where: { $0.id == id }) else { return }
+        focusedRule = id
+        changing = id
+        adding = RuleDraft(editing: rule, sources: sources)
+        stage = .form(rule.kind.tag)
+        focus = rule.kind.tag == .author || rule.kind.tag == .keyword ? .text : .keys
+    }
+
+    private func confirm() {
+        if let changing {
+            guard let rule = adding.rule(sources, id: changing) else { return }
+            draft.replace(changing, with: rule)
+            focusedRule = rule.id
+        } else {
             guard let rule = adding.rule(sources) else { return }
             draft.add(rule)
             focusedRule = rule.id
-            stage = .rules
-            focus = .keys
         }
+        changing = nil
+        stage = .rules
+        focus = .keys
     }
 
     /// What `j` and `k` pick from on a kind's stage: this device's sources, the authors it holds
@@ -175,81 +230,56 @@ struct TimelineEditor: View {
 
     private var header: some View {
         HStack {
-            Button(L10n.t("board.choose.cancel")) { perform(.cancel) }
+            ShellIconButton("xmark", name: "editor.cancel", help: "editor.cancel.help") { perform(.cancel) }
             Spacer()
             Text(L10n.t(draft.isNew ? "timeline.new.title" : "timeline.edit.title"))
                 .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
+                .accessibilityAddTraits(.isHeader)
             Spacer()
-            Button(L10n.t("timeline.done")) { session.commit(draft) }
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(!draft.canSave)
-        }
-    }
-
-    /// Where it sits among the reader's timelines, and the two moves. Reordering lives here only
-    /// (Decision 22).
-    private var placeLine: some View {
-        HStack(spacing: ShellSpace.snug) {
-            Text(String(format: L10n.t("timeline.place"), draft.position + 1, draft.places))
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            Spacer()
-            Button(L10n.t("timeline.earlier")) { perform(.earlier) }
-                .disabled(!draft.canMoveEarlier)
-            Button(L10n.t("timeline.later")) { perform(.later) }
-                .disabled(!draft.canMoveLater)
-        }
-        .shellFont(.meta)
-    }
-
-    private var rulesStage: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: ShellSpace.snug) {
-                        if draft.rules.isEmpty {
-                            Text(L10n.t("timeline.rules.empty"))
-                                .shellFont(.meta)
-                                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        }
-                        ForEach(Array(bands.enumerated()), id: \.offset) { index, band in
-                            bandView(band, joined: index > 0 && band.key != "rule.band.hide")
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .onChange(of: focusedRule) { _, id in
-                    if let id { proxy.scrollTo(id) }
-                }
+            ShellIconButton("checkmark", name: "timeline.done", help: "timeline.done.help", tone: .lit) {
+                session.commit(draft)
             }
-            HStack {
-                if !draft.isNew {
-                    Button(L10n.t("timeline.remove")) { perform(.removeTimeline) }
-                        .buttonStyle(.plain)
-                        .shellFont(.meta)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                }
-                Spacer()
-                Button(L10n.t("rule.add")) { perform(.addRule) }
-            }
+            .keyboardShortcut(.return, modifiers: .command)
+            .disabled(!draft.canSave)
         }
     }
 
-    private struct Band {
-        let key: String
-        let rules: [Rule]
+    private var timelineTab: some View {
+        EditorTimelineTab(
+            draft: $draft,
+            focus: $focus,
+            onMove: { perform($0 < 0 ? .earlier : .later) },
+            onRemove: { perform(.removeTimeline) }
+        )
     }
 
-    /// One band per kind that has includes, in the order they are tried, then the hides.
-    private var bands: [Band] {
-        var bands = RuleKind.Tag.allCases.compactMap { tag -> Band? in
-            let rules = draft.rules.filter { $0.effect == .include && $0.kind.tag == tag }
-            return rules.isEmpty ? nil : Band(key: Self.bandKey(tag), rules: rules)
+    @ViewBuilder
+    private var rulesTab: some View {
+        switch stage {
+        case .rules:
+            EditorRulesList(
+                draft: draft,
+                sources: sources,
+                focusedRule: $focusedRule,
+                onOpen: open,
+                onStep: { perform($0 < 0 ? .previousRule : .nextRule) },
+                onAdd: { perform(.addRule) }
+            )
+        case .kinds:
+            EditorKinds(onBack: { perform(.back) }, onPick: { perform(.pickKind($0)) })
+        case .form:
+            RuleForm(
+                session: session,
+                draft: $adding,
+                choices: Self.choices(for: adding, in: session),
+                changing: changing.flatMap { id in draft.rules.first { $0.id == id } },
+                focus: $focus,
+                onBack: { perform(.back) },
+                onConfirm: { perform(.confirmRule) },
+                onRemove: { perform(.removeRule) }
+            )
         }
-        let hides = draft.rules.filter { $0.effect == .exclude }
-        if !hides.isEmpty { bands.append(Band(key: "rule.band.hide", rules: hides)) }
-        return bands
     }
 
     static func bandKey(_ tag: RuleKind.Tag) -> String {
@@ -258,58 +288,6 @@ struct TimelineEditor: View {
         case .author: "rule.band.author"
         case .keyword: "rule.band.keyword"
         case .category: "rule.band.category"
-        }
-    }
-
-    private func bandView(_ band: Band, joined: Bool) -> some View {
-        let compiled = CompiledTimeline(
-            TimelineDefinition(id: draft.id, name: draft.name, rules: draft.rules), sources: sources
-        )
-        return VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            Text((joined ? L10n.t("rule.band.and") + " " : "") + L10n.t(band.key))
-                .textCase(.uppercase)
-                .shellFont(.name)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .padding(.horizontal, ShellSpace.snug)
-                .padding(.vertical, ShellSpace.tight)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(ShellChrome.well(colorScheme), in: RoundedRectangle(cornerRadius: 6))
-                .accessibilityAddTraits(.isHeader)
-            ForEach(band.rules) { rule in
-                RuleRowView(
-                    rule: rule,
-                    status: compiled.status(of: rule),
-                    sources: sources,
-                    focused: rule.id == focusedRule,
-                    onToggle: { draft.toggleEffect(of: rule.id) },
-                    onRemove: { draft.remove(rule.id) }
-                )
-                .id(rule.id)
-            }
-        }
-    }
-
-    private var kindsStage: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.step) {
-            Button("‹ " + L10n.t("rule.back")) { perform(.back) }
-                .buttonStyle(.plain)
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            HStack(spacing: ShellSpace.tight) {
-                ForEach(Array(RuleKind.Tag.allCases.enumerated()), id: \.element) { index, tag in
-                    Button { perform(.pickKind(tag)) } label: {
-                        Text("\(index + 1)  " + L10n.t(Self.kindKey(tag)))
-                            .shellFont(.meta)
-                            .foregroundStyle(ShellChrome.ink(colorScheme))
-                            .padding(.horizontal, ShellSpace.snug)
-                            .padding(.vertical, ShellSpace.tight)
-                            .background(Capsule(style: .continuous).fill(ShellChrome.well(colorScheme)))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(L10n.t(Self.kindKey(tag)))
-                }
-            }
-            Spacer()
         }
     }
 
@@ -322,18 +300,195 @@ struct TimelineEditor: View {
         }
     }
 
-    /// The keys this stage answers, as the keys list draws them.
-    private var keyStrip: some View {
+    /// The glyph a kind of rule leads with, on its pill and on every rule of it in the list.
+    static func kindSymbol(_ tag: RuleKind.Tag) -> String {
+        switch tag {
+        case .source: "server.rack"
+        case .author: "person"
+        case .keyword: "text.magnifyingglass"
+        case .category: "tray.2"
+        }
+    }
+}
+
+/// The rules, grouped the way they are evaluated: one band per kind that has includes, in the
+/// order they are tried, then the hides.
+struct EditorBands {
+    struct Band {
+        let key: String
+        let rules: [Rule]
+    }
+
+    let bands: [Band]
+
+    init(_ rules: [Rule]) {
+        var bands = RuleKind.Tag.allCases.compactMap { tag -> Band? in
+            let kind = rules.filter { $0.effect == .include && $0.kind.tag == tag }
+            return kind.isEmpty ? nil : Band(key: TimelineEditor.bandKey(tag), rules: kind)
+        }
+        let hides = rules.filter { $0.effect == .exclude }
+        if !hides.isEmpty { bands.append(Band(key: "rule.band.hide", rules: hides)) }
+        self.bands = bands
+    }
+}
+
+/// The timeline tab: what it is called, what it is about, where it sits among the reader's
+/// timelines and the two moves — reordering lives here only (Decision 22) — and, for one already
+/// kept, its removal.
+private struct EditorTimelineTab: View {
+    @Binding var draft: TimelineDraft
+    var focus: FocusState<TimelineEditor.Focus?>.Binding
+    let onMove: (Int) -> Void
+    let onRemove: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.step) {
+            // A field is read and typed into like everything around it, so it moves with the
+            // rest of the scale (#96).
+            TextField(L10n.t("timeline.name.placeholder"), text: $draft.name)
+                .shellFont(.body)
+                .textFieldStyle(.roundedBorder)
+                .focused(focus, equals: .name)
+                .onSubmit { focus.wrappedValue = .keys }
+            TextField(L10n.t("timeline.desc.placeholder"), text: $draft.desc)
+                .shellFont(.body)
+                .textFieldStyle(.roundedBorder)
+                .focused(focus, equals: .desc)
+                .onSubmit { focus.wrappedValue = .keys }
+            placeLine
+            Spacer(minLength: 0)
+            if !draft.isNew {
+                ShellIconButton("trash", name: "timeline.remove", help: "timeline.remove.help", tone: .alarm) {
+                    onRemove()
+                }
+            }
+        }
+    }
+
+    private var placeLine: some View {
+        HStack(spacing: ShellSpace.tight) {
+            Text(String(format: L10n.t("timeline.place"), draft.position + 1, draft.places))
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            Spacer()
+            ShellIconButton("arrow.backward", name: "timeline.earlier") { onMove(-1) }
+                .disabled(!draft.canMoveEarlier)
+            ShellIconButton("arrow.forward", name: "timeline.later") { onMove(1) }
+                .disabled(!draft.canMoveLater)
+        }
+    }
+}
+
+/// The rules tab's list: a band heading per group, a row per rule, each row opening its rule.
+private struct EditorRulesList: View {
+    let draft: TimelineDraft
+    let sources: [Source]
+    @Binding var focusedRule: Rule.ID?
+    let onOpen: (Rule.ID) -> Void
+    let onStep: (Int) -> Void
+    let onAdd: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            ScrollViewReader { proxy in
+                ScrollView { list }
+                    .onChange(of: focusedRule) { _, id in
+                        if let id { proxy.scrollTo(id) }
+                    }
+            }
+            HStack {
+                Spacer()
+                ShellIconButton("plus", name: "rule.add", help: "rule.add.help") { onAdd() }
+            }
+        }
+    }
+
+    private var list: some View {
+        let compiled = CompiledTimeline(
+            TimelineDefinition(id: draft.id, name: draft.name, rules: draft.rules), sources: sources
+        )
+        let bands = EditorBands(draft.rules).bands
+        return VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            if draft.rules.isEmpty {
+                Text(L10n.t("timeline.rules.empty"))
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            }
+            ForEach(Array(bands.enumerated()), id: \.offset) { index, band in
+                heading(band, joined: index > 0 && band.key != "rule.band.hide")
+                ForEach(band.rules) { rule in
+                    RuleRowView(
+                        rule: rule,
+                        status: compiled.status(of: rule),
+                        sources: sources,
+                        selection: $focusedRule,
+                        onOpen: { onOpen(rule.id) },
+                        onStep: onStep
+                    )
+                    .id(rule.id)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func heading(_ band: EditorBands.Band, joined: Bool) -> some View {
+        Text((joined ? L10n.t("rule.band.and") + " " : "") + L10n.t(band.key))
+            .textCase(.uppercase)
+            .shellFont(.name)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .padding(.horizontal, ShellSpace.snug)
+            .padding(.vertical, ShellSpace.tight)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ShellChrome.well(colorScheme), in: RoundedRectangle(cornerRadius: 6))
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Which kind of rule to add: a pill per kind, each led by the kind's glyph.
+private struct EditorKinds: View {
+    let onBack: () -> Void
+    let onPick: (RuleKind.Tag) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.step) {
+            ShellIconButton("chevron.backward", name: "rule.back") { onBack() }
+            ScrollView(.horizontal) {
+                HStack(spacing: ShellSpace.tight) {
+                    ForEach(RuleKind.Tag.allCases, id: \.self) { tag in
+                        ShellTabPill(
+                            L10n.t(TimelineEditor.kindKey(tag)),
+                            symbol: TimelineEditor.kindSymbol(tag),
+                            selected: false
+                        ) { onPick(tag) }
+                    }
+                }
+            }
+            .scrollIndicators(.never)
+            Spacer()
+        }
+    }
+}
+
+/// The keys this stage answers, as the keys list draws them.
+private struct EditorKeyStrip: View {
+    let stage: EditorStage
+    let changing: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: ShellSpace.snug) { keyCaps }
-            ScrollView(.horizontal) { HStack(spacing: ShellSpace.snug) { keyCaps } }
+            HStack(spacing: ShellSpace.snug) { caps }
+            ScrollView(.horizontal) { HStack(spacing: ShellSpace.snug) { caps } }
                 .scrollIndicators(.never)
         }
         .accessibilityHidden(true)
     }
 
-    private var keyCaps: some View {
-        ForEach(EditorAction.strip(for: stage), id: \.caps) { line in
+    private var caps: some View {
+        ForEach(EditorAction.strip(for: stage, changing: changing), id: \.caps) { line in
             HStack(spacing: ShellSpace.tight) {
                 Text(line.caps)
                     .shellFont(.reading)
@@ -349,25 +504,32 @@ struct TimelineEditor: View {
     }
 }
 
-/// Adding one rule of one kind: what it names, from what this device holds, then its effect and
-/// its scope. Add stays off until the factory returns a rule.
+/// Adding one rule of one kind, or changing one already written: what it names, from what this
+/// device holds, then its effect and its scope. The confirm press stays off until the factory
+/// returns a rule. A rule being changed can be removed from here, and the press says which rule.
 private struct RuleForm: View {
     let session: ShellSession
     @Binding var draft: RuleDraft
     let choices: [RuleTarget]
+    /// The rule as it was kept, where one is being changed.
+    let changing: Rule?
     var focus: FocusState<TimelineEditor.Focus?>.Binding
     var onBack: () -> Void
-    var onAdd: () -> Void
+    var onConfirm: () -> Void
+    var onRemove: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     private var sources: [Source] { session.sources }
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
-            Button("‹ " + L10n.t(TimelineEditor.kindKey(draft.tag))) { onBack() }
-                .buttonStyle(.plain)
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            HStack(spacing: ShellSpace.tight) {
+                ShellIconButton("chevron.backward", name: changing == nil ? "rule.back.kinds" : "rule.back") { onBack() }
+                Label(L10n.t(TimelineEditor.kindKey(draft.tag)), systemImage: TimelineEditor.kindSymbol(draft.tag))
+                    .shellFont(.name)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .accessibilityAddTraits(.isHeader)
+            }
             if draft.tag == .author || draft.tag == .keyword { field }
             ScrollViewReader { proxy in
                 ScrollView { picker.frame(maxWidth: .infinity, alignment: .leading) }
@@ -375,7 +537,7 @@ private struct RuleForm: View {
                         if let target { proxy.scrollTo(target) }
                     }
             }
-            foot
+            RuleFormFoot(draft: $draft, sources: sources, changing: changing, onConfirm: onConfirm, onRemove: onRemove)
         }
     }
 
@@ -389,8 +551,8 @@ private struct RuleForm: View {
             .textFieldStyle(.roundedBorder)
             .focused(focus, equals: .text)
             .onSubmit {
-                // Return adds where the rule is whole, and otherwise hands the keys back.
-                if draft.rule(sources) != nil { onAdd() } else { focus.wrappedValue = .keys }
+                // Return confirms where the rule is whole, and otherwise hands the keys back.
+                if draft.rule(sources) != nil { onConfirm() } else { focus.wrappedValue = .keys }
             }
             if draft.tag == .keyword {
                 Text(L10n.t("rule.keyword.hint"))
@@ -455,19 +617,32 @@ private struct RuleForm: View {
         .id(choice)
         .accessibilityAddTraits(picked ? .isSelected : [])
     }
+}
 
-    private var foot: some View {
+/// The foot of the rule form: its effect, its scope, the confirm press, and — for a rule being
+/// changed — its removal, beside the rule it removes.
+private struct RuleFormFoot: View {
+    @Binding var draft: RuleDraft
+    let sources: [Source]
+    let changing: Rule?
+    let onConfirm: () -> Void
+    let onRemove: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
         let scopes = draft.scopes(sources)
-        return VStack(alignment: .leading, spacing: ShellSpace.snug) {
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
             HStack(spacing: ShellSpace.tight) {
-                pill(RuleText.effect(.include), on: draft.effect == .include) { draft.effect = .include }
-                pill(RuleText.effect(.exclude), on: draft.effect == .exclude) { draft.effect = .exclude }
+                effectPill(.include, symbol: "eye")
+                effectPill(.exclude, symbol: "eye.slash")
             }
             if scopes.count > 1 {
                 ScrollView(.horizontal) {
                     HStack(spacing: ShellSpace.tight) {
                         ForEach(scopes, id: \.self) { choice in
-                            pill(Self.scopeLabel(choice), on: draft.scope == choice) { draft.scope = choice }
+                            ShellTabPill(
+                                Self.scopeLabel(choice), symbol: Self.scopeSymbol(choice), selected: draft.scope == choice
+                            ) { draft.scope = choice }
                         }
                     }
                 }
@@ -477,12 +652,37 @@ private struct RuleForm: View {
                     .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
-            HStack {
+            HStack(alignment: .center, spacing: ShellSpace.snug) {
+                if let changing { removal(changing) }
                 Spacer()
-                Button(L10n.t("rule.add.confirm"), action: onAdd)
-                    .disabled(draft.rule(sources) == nil)
+                ShellIconButton(
+                    changing == nil ? "plus" : "checkmark",
+                    name: changing == nil ? "rule.add.confirm" : "rule.change.confirm",
+                    tone: .lit,
+                    action: onConfirm
+                )
+                .disabled(draft.rule(sources) == nil)
             }
         }
+    }
+
+    private func effectPill(_ effect: RuleEffect, symbol: String) -> some View {
+        ShellTabPill(RuleText.effect(effect), symbol: symbol, selected: draft.effect == effect) {
+            draft.effect = effect
+        }
+    }
+
+    /// The bin, and the rule it takes away as it was kept — one element to VoiceOver, so the
+    /// press is heard with what it removes.
+    private func removal(_ rule: Rule) -> some View {
+        HStack(spacing: ShellSpace.tight) {
+            ShellIconButton("trash", name: "rule.action.remove", help: "rule.remove.help", tone: .alarm, action: onRemove)
+            Text(RuleText.spoken(rule, status: .present, sources: sources))
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .lineLimit(2)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     static func scopeLabel(_ scope: RuleScope) -> String {
@@ -492,21 +692,10 @@ private struct RuleForm: View {
         }
     }
 
-    private func pill(_ label: String, on: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .lineLimit(1)
-                .fixedSize()
-                .shellFont(.meta, weight: on ? .semibold : .regular)
-                .foregroundStyle(on ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
-                .padding(.horizontal, ShellSpace.snug)
-                .padding(.vertical, ShellSpace.tight)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(on ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
-                )
+    static func scopeSymbol(_ scope: RuleScope) -> String {
+        switch scope {
+        case .every: "globe"
+        case .source: "server.rack"
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
