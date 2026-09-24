@@ -23,15 +23,10 @@ public struct LimitAccountFile: LimitAccountStore {
 
     public func read() -> [LimitAct] {
         guard let data = try? Data(contentsOf: url) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([LimitAct].self, from: data)) ?? []
+        return LimitAccount.lines(from: data)
     }
 
     public func write(_ lines: [LimitAct]) throws {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode(lines).write(to: url, options: .atomic)
+        try LimitAccount.data(lines).write(to: url, options: .atomic)
     }
 }

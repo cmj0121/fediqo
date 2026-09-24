@@ -142,6 +142,15 @@ extension ShellSession {
         if !recorded.isEmpty { await writeLimitAccount() }
     }
 
+    /// The account as it now is on disk, in place of what this run held (#251): after a read
+    /// back, the package's lines are the account and this device's old lines are about a store
+    /// no longer here. Nothing is written: what is on disk is what was just put there.
+    func replaceLimitAccount() async {
+        limitAccount = []
+        limitAccountLoaded = false
+        await loadLimitAccount()
+    }
+
     /// Clears the account (#251). Only the lines go: nothing held, and nothing on disk but the
     /// file they were in, is touched.
     func clearLimitAccount() async {

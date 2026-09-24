@@ -317,6 +317,14 @@ struct CarryHoldsStillTests {
         carry.set(password: "open sesame", with: carrier) { try? await Task.sleep(for: .seconds(5)) }
         #expect(session.holdsStill)
         carry.dismiss()
+        // The running task releases as it ends, which its cancelled sleep makes now.
+        for _ in 0..<200 where session.holdsStill {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!session.holdsStill)
+        // And with nothing running, dismiss itself releases.
+        session.holdsStill = true
+        carry.dismiss()
         #expect(!session.holdsStill)
     }
 

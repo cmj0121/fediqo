@@ -282,9 +282,12 @@ final class ShellCarry {
     /// Except a read back under way, which runs to its end — see `confirmReadBack`.
     func dismiss() {
         if case .reading = step { return }
+        // A task still running releases the hold itself as it ends (`run`); only where none is
+        // running is there nobody else to.
+        let running = task != nil
         task?.cancel()
         task = nil
-        holding?(false)
+        if !running { holding?(false) }
         password = ""
         if let scoped {
             scoped.stopAccessingSecurityScopedResource()

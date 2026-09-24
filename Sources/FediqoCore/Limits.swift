@@ -63,6 +63,31 @@ public enum LimitAccount {
     public static func adding(_ act: LimitAct, to lines: [LimitAct]) -> [LimitAct] {
         Array(([act] + lines).prefix(capacity))
     }
+
+    /// The lines in `data`, **leniently**: a line this build cannot read is skipped and the rest
+    /// are kept, and what is not a list of lines at all is no lines. The account is never a
+    /// reason to refuse a store or a package.
+    public static func lines(from data: Data) -> [LimitAct] {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return ((try? decoder.decode([Line].self, from: data)) ?? []).compactMap(\.act)
+    }
+
+    /// `lines` as JSON, the one shape `lines(from:)` reads.
+    public static func data(_ lines: [LimitAct]) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(lines)
+    }
+
+    /// One line as written, or nothing where it does not decode — so one bad line costs one.
+    private struct Line: Decodable {
+        let act: LimitAct?
+        init(from decoder: any Decoder) {
+            act = try? LimitAct(from: decoder)
+        }
+    }
 }
 
 /// Where the account outlives a relaunch. The app hands the shell a file beside the index; a

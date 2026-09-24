@@ -489,10 +489,12 @@ final class ShellSession {
 
     /// Set while an export or an import of the store runs (#247): the room limit does nothing
     /// meanwhile, so nothing goes out from under a copy being taken or put back. Cleared, the
-    /// check runs again. **The contract for a later unit**: set it before the first byte moves,
-    /// clear it after the last, and clear it on every way out, a failure included. A move this
-    /// session makes itself — a remove, a clear, a drop, a span let go — holds through
-    /// `holdingStill(_:)` instead, which nests.
+    /// check runs again. **The contract**: set it before the first byte moves, clear it after
+    /// the last, and clear it on every way out, a failure included — `ShellCarry` keeps it. A
+    /// move this session makes itself — a remove, a clear, a drop, a span let go — holds through
+    /// `holdingStill(_:)` instead, which nests. **Only the room limit honours it**: the months
+    /// limit, a remove, a span let go and every press of the person's own go ahead regardless,
+    /// because each is the person's act and not a check running by itself.
     var holdsStill = false {
         didSet { if !holdsStill, oldValue { roomMayBeReached() } }
     }
@@ -2248,10 +2250,10 @@ final class ShellSession {
         emojis.clear()
         pictures.disk?.trim()
         cleared += 1
-        // The package's account rides with its store (#251): read again, then the months limit
-        // has its turn on what was read back and writes its line as at a launch.
-        limitAccountLoaded = false
-        await loadLimitAccount()
+        // The package's account rides with its store (#251): this device's lines give way to
+        // it, then the months limit has its turn on what was read back and writes its line as
+        // at a launch.
+        await replaceLimitAccount()
         await keep(months: prefs.keepMonths)
         await reloadFromStore()
     }

@@ -41,6 +41,33 @@ struct LimitAccountTests {
         #expect(first.cache.count() == 1, "clearing the account touched the copies")
     }
 
+    @Test("After a read back the package's lines are the account, and this device's old lines are not written over them")
+    func readBackReplacesTheLines() async throws {
+        let dir = LimitRoom.scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let room = try await LimitRoom(at: dir, notes: LimitRoom.held())
+        await room.session.record(LimitAct(limit: .months, at: origin.addingTimeInterval(-99), posts: 5, sources: [alpha.host]))
+        #expect(room.session.limitAccount.count == 1)
+        // What a read back installs beside the index (#247), as the packager's commit does.
+        let theirs = [LimitAct(limit: .room, at: origin, posts: 2, copies: 3, sources: [beta.host])]
+        try LimitAccountFile(directory: dir).write(theirs)
+
+        await room.session.replaceLimitAccount()
+
+        #expect(room.session.limitAccount == theirs)
+        #expect(try LimitAccountFile(directory: dir).read() == theirs, "the old lines were written over the package's")
+        await room.session.record(LimitAct(limit: .months, at: origin.addingTimeInterval(60), posts: 1, sources: [beta.host]))
+        #expect(room.session.limitAccount.map(\.limit) == [.months, .room], "a months line lands ahead of the package's")
+    }
+
+    @Test("A line this build cannot read costs that line and no other, on disk and in a package")
+    func lenientLines() throws {
+        let good = LimitAct(limit: .room, at: origin, posts: 1, sources: [])
+        let text = "[" + String(decoding: try LimitAccount.data([good]), as: UTF8.self).dropFirst().dropLast() + ",{\"limit\":\"weeks\",\"at\":\"never\"},7]"
+        #expect(LimitAccount.lines(from: Data(text.utf8)) == [good])
+        #expect(LimitAccount.lines(from: Data("{}".utf8)).isEmpty)
+    }
+
     @Test("A session with nowhere to keep the account keeps it for the run")
     func noStoreKeepsForTheRun() async {
         let session = ShellSession(http: FixtureHTTP())

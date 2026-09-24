@@ -506,11 +506,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 staged.said.append(profile)
             case .limits:
                 guard entry.name == Self.limitsName, staged.limits == nil else { throw PackageRefusal.altered }
-                let data = try await Self.whole(entry)
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                guard (try? decoder.decode([LimitAct].self, from: data)) != nil else { throw PackageRefusal.altered }
-                staged.limits = data
+                // Leniently: a line this build cannot read is left out, and the account is never
+                // a reason to refuse the store it rides with.
+                staged.limits = try LimitAccount.data(LimitAccount.lines(from: try await Self.whole(entry)))
             case .picture:
                 let parts = entry.name.split(separator: "/", omittingEmptySubsequences: false)
                 guard parts.count == 2, parts.allSatisfy(Self.isDigest) else { throw PackageRefusal.altered }
