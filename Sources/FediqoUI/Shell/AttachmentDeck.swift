@@ -27,6 +27,13 @@ import SwiftUI
 /// and bottom. What that costs is real — at 96pt most of a tall photograph is off the card — and
 /// `v` is what seeing it properly is for.
 ///
+/// **Spread, where the pictures are the post** (#245). A post of pictures alone draws them where
+/// its words would be, and there the room is the column's width rather than a square: so the
+/// deck lays them out side by side, each a square of the band's height, the one on top first and
+/// the rest after it in the order `m` would bring them, as many as the column shows. The one on
+/// top keeps everything the deck's card has — its counter, its play mark, its player — and a
+/// press on any of them opens the viewer as a press on the card does.
+///
 /// **No edge is drawn round any of it.** The hairline that used to separate card from sheet and
 /// sheet from row went with the fitting: it was chrome standing in for a picture, and now there
 /// is a picture in every one of those rectangles to do the separating itself.
@@ -68,6 +75,9 @@ struct AttachmentDeck: View {
     /// That the playing rectangle has left the screen.
     var onEnded: () -> Void = {}
 
+    /// Laid out side by side across the width it is given, rather than stacked in a square.
+    var spread = false
+
     @Environment(\.colorScheme) private var colorScheme
 
     private enum Card {
@@ -97,7 +107,7 @@ struct AttachmentDeck: View {
     /// the eye can use, and at the bottom because an empty deck would otherwise ask for a
     /// backwards range, which is a crash rather than a blank square.
     private var sheetCount: Int {
-        min(max(attachments.count - 1, 0), Card.sheets)
+        spread ? 0 : min(max(attachments.count - 1, 0), Card.sheets)
     }
 
     private var leaf: CGFloat { side * Card.leafShare }
@@ -131,11 +141,50 @@ struct AttachmentDeck: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            sheets
-            if let showing { card(showing) }
+        if spread {
+            strip
+        } else {
+            ZStack(alignment: .topLeading) {
+                sheets
+                if let showing { card(showing) }
+            }
+            .frame(width: side, height: side, alignment: .topLeading)
         }
-        .frame(width: side, height: side, alignment: .topLeading)
+    }
+
+    /// The pictures side by side: the one on top, then the rest in turning order, each a square
+    /// of `side`, cut where the width ends — never wider and never taller than it was given.
+    private var strip: some View {
+        HStack(spacing: ShellSpace.snug) {
+            if let showing { card(showing) }
+            ForEach(Self.following(top, of: attachments.count), id: \.self) { at in
+                tile(at)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: side, alignment: .topLeading)
+        .clipped()
+    }
+
+    /// The ones a spread draws after the one on top, in the order turning would bring them.
+    nonisolated static func following(_ top: Int, of count: Int, most: Int = 5) -> [Int] {
+        guard count > 1 else { return [] }
+        return (1 ..< min(count, most)).map { folded(top + $0, of: count) }
+    }
+
+    /// One of the pictures after the one on top: a press opens the viewer, as the card does.
+    private func tile(_ at: Int) -> some View {
+        let attachment = attachments[at]
+        let described = attachment.alt.isEmpty ? Self.kind(of: attachment) : attachment.alt
+        return Button(action: onOpen) {
+            RemoteImage(
+                url: attachment.displayURL, tier: .deck, host: host, alt: nil, speaks: false, radius: radius
+            )
+            .frame(width: side, height: side)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(Self.positioned(described, index: at, of: attachments.count)))
+        .accessibilityHint(Text(L10n.t("shortcut.view")))
     }
 
     /// The ones underneath, stepping down and to the right so the stack has a thickness.

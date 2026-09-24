@@ -111,6 +111,7 @@ struct DummyItemRow: View {
 
     /// The shell's own arrangement, measured once at the root (#110).
     @Environment(\.shellLayout) private var shellLayout
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// A narrow page, where the picture beside the words leaves the words a column four
     /// characters wide — a phone held upright, and now a Mac window dragged narrow too, which
     /// used to keep the wide row at every width because the row asked the device rather than the
@@ -202,14 +203,20 @@ struct DummyItemRow: View {
     /// an acceptance line that has to be measurable.
     static let visRole: ShellType = .name
 
-    /// Four bands, and every row has all four whether or not it has anything to put
-    /// in them:
+    /// Three bands, and every row has all three whether or not it has anything to put
+    /// in them — **so every row in a timeline is one height** (#245, rule 6 of #242):
     ///
-    ///     [decorator                                                            ]
     ///     [avatar][name                   ]     [source][visibility][timestamp  ]
-    ///     [words                          ]                        [ attachment ]
+    ///     [decorator                      ]                        [            ]
+    ///     [words, `bodyLines` of them     ]                        [ attachment ]
     ///     [marks                                                                ]
     ///
+    /// Who wrote it and when is one line; the words band is the attachment slot's height, held
+    /// open on a short post and cut on a long one, whose whole is in its thread; the marks are one
+    /// line on a wide page and two on a narrow one or at the accessibility sizes, on every row
+    /// alike. What happened to a post — a reply, a boost, a quote — is the words band's first
+    /// line rather than a band of its own, so a boosted or quoting post is not a line taller than
+    /// the post beside it: it gives its words one line fewer (`bodyLines`).
     var body: some View {
         // Worked out once for the pass and handed down, not read by each band that wants a
         // piece of it: before the hop below has answered, `written` builds the post's own
@@ -332,7 +339,6 @@ struct DummyItemRow: View {
         // three places on the row draw its answer.
         let openQuote = onOpenQuote
         return VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            decorator(openQuote)
             // The row itself is an accessibility container, and a container is not an
             // element — a trait put on it is announced to nobody. The headline is the
             // row's identity, so it is the element that carries the selection.
@@ -349,7 +355,7 @@ struct DummyItemRow: View {
                     personAction
                     quoteAction(openQuote)
                 }
-            mainBox(written)
+            mainBox(written, openQuote)
             quoteBand(openQuote)
             actions
         }
@@ -357,11 +363,12 @@ struct DummyItemRow: View {
     }
 
     /// What happened to this post before it got here — that it is a reply, that
-    /// somebody passed it on. Drawn only when there is something to say: an empty
-    /// line held open on every row costs the list a line per post to say nothing.
+    /// somebody passed it on, that it quotes another. Drawn only when there is something to say,
+    /// as the first line of the words band (#245): it takes one of the words' lines rather than a
+    /// line of the row's own, so a row that has one is exactly as tall as a row that has none.
     @ViewBuilder
     private func decorator(_ openQuote: (() -> Void)?) -> some View {
-        if item.answering != .nothing || item.boostedBy != nil || item.quote != nil {
+        if decorated {
             HStack(spacing: ShellSpace.snug) {
                 if item.answering != .nothing { answered }
                 if let who = item.boostedBy { boosted(by: who) }
@@ -374,6 +381,11 @@ struct DummyItemRow: View {
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .lineLimit(1)
         }
+    }
+
+    /// Whether this post says what happened to it before it got here.
+    var decorated: Bool {
+        item.answering != .nothing || item.boostedBy != nil || item.quote != nil
     }
 
     private var answered: some View {
@@ -640,64 +652,59 @@ struct DummyItemRow: View {
     /// What came attached sits beside the words, never under them, and against the
     /// right edge of the row. A picture below the text pushes the next post off the
     /// screen; out on the edge it is a column you can run your eye down.
-    /// Two columns of a fixed size. The attachment slot is drawn on every row whether
-    /// or not the post brought one, so the words start and stop at the same place all
-    /// the way down the list — a column that moves with the content is a column the
-    /// eye has to find again on every row.
     ///
-    /// A phone has no room for the second column, so it keeps the stack, and an empty
-    /// slot there would be most of a screen of nothing.
+    /// **The band is the slot's height on every row, on every page** (#245). A short post leaves
+    /// the rest of it empty; a long one is cut, and the whole of it is in its thread. The band's
+    /// height is never the post's to choose — a post that arrives after the row is on screen, a
+    /// forum's opening post landing a beat late under the thumb, cannot move the list — and it
+    /// grows only with the reader's type size, alike on every row.
+    ///
+    /// On a wide page the slot is drawn on every row whether or not the post brought one, so the
+    /// words start and stop at the same place all the way down the list. On a narrow page there
+    /// is no room for an empty column: a post with no picture has the width to itself, and a
+    /// picture beside the words is held to the standard size's slot (`slotSide`), so a phone held
+    /// upright at a large type size still leaves the words a column to read in. Either way the
+    /// picture stands in the band and never makes it taller. A post of pictures alone draws them
+    /// where its words would be, side by side and filling the band (`picturePlace`).
     @ViewBuilder
-    private func mainBox(_ written: Written) -> some View {
-        if narrow {
-            VStack(alignment: .leading, spacing: ShellSpace.snug) {
-                // **A post that arrives with the list may size its row; a post that arrives
-                // after the row is on screen may not.** That is the whole of the rule, and it is
-                // what splits these two branches.
-                //
-                // A phone in portrait sizes the words band to the words — deliberately, and
-                // since before any of this: there is no room for a second column, and a long
-                // post has always made a tall row here. That is harmless because the row is
-                // drawn once, at its final height, before the reader ever sees it.
-                //
-                // A forum thread's opening post is the case where it stops being harmless. It
-                // lands a beat after the row is on screen, under the thumb that is scrolling the
-                // list, and a band that grew when it landed would push everything below it —
-                // which is the one thing this unit is not allowed to do. So this kind of row
-                // takes the wide layout's fitting on a phone as well: the same `Box.thumb` band,
-                // held open and clipped, so the four states measure one height on every
-                // platform. The cost, stated: a long first post is truncated on a phone where a
-                // long microblog post is not, and the rest of it is one press away in the
-                // thread — which is what `bodyLines` says about the wide layout too.
-                // **`inFull` is the pane, and the pane is not a list under a thumb.** The
-                // sentence above — a post that arrives after the row is on screen may not size
-                // it — is a rule about the timeline; in the thread pane there is one post, the
-                // reader opened it to read it, and holding it to 96pt on a phone would truncate
-                // the one thing they asked for. See `inFull`.
-                if thread != nil, !inFull {
-                    coveredWords(written)
-                        .frame(height: thumbSide, alignment: .top)
-                        .clipped()
-                } else {
-                    coveredWords(written)
+    private func mainBox(_ written: Written, _ openQuote: (() -> Void)?) -> some View {
+        if inFull {
+            // **`inFull` is the pane, and the pane is not a list under a thumb.** There is one
+            // post, the reader opened it to read it, and holding it to the slot would cut the one
+            // thing they asked for. See `inFull`.
+            if narrow {
+                VStack(alignment: .leading, spacing: ShellSpace.snug) {
+                    wordsColumn(written, openQuote)
+                    if item.hasThumb { coveredThumb }
                 }
-                if item.hasThumb { coveredThumb }
-            }
-        } else if inFull {
-            // The two columns, and neither of them pinned. Top-aligned rather than height-locked,
-            // so the words run to their own length beside a slot that keeps its square.
-            //
-            // **No empty slot over a quoted post's card** (#214). An empty square beside two lines
-            // of words held the card a slot's height away from the words it belongs to; a post
-            // that carries nothing and quotes nothing keeps the slot, and the height it measured.
-            HStack(alignment: .top, spacing: ShellSpace.step) {
-                coveredWords(written)
-                if item.hasThumb || !drawsQuoteCard { coveredThumb }
+            } else {
+                // The two columns, and neither of them pinned. Top-aligned rather than
+                // height-locked, so the words run to their own length beside a slot that keeps
+                // its square.
+                //
+                // **No empty slot over a quoted post's card** (#214). An empty square beside two
+                // lines of words held the card a slot's height away from the words it belongs
+                // to; a post that carries nothing and quotes nothing keeps the slot, and the
+                // height it measured.
+                HStack(alignment: .top, spacing: ShellSpace.step) {
+                    wordsColumn(written, openQuote)
+                    if item.hasThumb || !drawsQuoteCard { coveredThumb }
+                }
             }
         } else {
             HStack(alignment: .top, spacing: ShellSpace.step) {
-                coveredWords(written)
-                coveredThumb
+                if picturePlace == .column {
+                    picturesColumn(openQuote)
+                    // The slot stays open and empty, so the column ends where every row's does.
+                    if !narrow {
+                        Color.clear
+                            .frame(width: slotSide, height: slotSide)
+                            .accessibilityHidden(true)
+                    }
+                } else {
+                    wordsColumn(written, openQuote)
+                    if !narrow || item.hasThumb { coveredThumb }
+                }
             }
             .frame(height: thumbSide, alignment: .top)
             // The frame fixes what this band *takes*; this fixes what it can *draw*. A fixed
@@ -707,6 +714,53 @@ struct DummyItemRow: View {
             // are needed for "server text never changes a row's height" to mean anything.
             .clipped()
         }
+    }
+
+    /// Where a post's pictures are drawn in a timeline: beside the words, in the slot, or — for a
+    /// post of pictures alone — in the column where the words would be (#245). Nothing where it
+    /// brought none.
+    enum PicturePlace: Equatable {
+        case slot
+        case column
+    }
+
+    var picturePlace: PicturePlace? {
+        guard item.hasThumb else { return nil }
+        return Self.picturesAlone(item) && !inFull ? .column : .slot
+    }
+
+    /// Whether a post is pictures and nothing a reader could read beside them: no words, no
+    /// title, no forum thread whose words are still to come — and no cover, whose pictures stay
+    /// under it, in the slot, as they always have.
+    static func picturesAlone(_ item: DummyItem) -> Bool {
+        item.hasThumb && item.title == nil && ForumThreadRef(item) == nil && !item.covered
+            && item.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// A post of pictures alone: what happened to it, then its pictures side by side where the
+    /// words would be, squares of whatever height the band leaves them — so the row is the height
+    /// of every other, and the pictures fill it.
+    private func picturesColumn(_ openQuote: (() -> Void)?) -> some View {
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            decorator(openQuote)
+            GeometryReader { room in
+                AttachmentDeck(
+                    attachments: item.attachments, top: top, side: room.size.height, host: item.source.host,
+                    radius: Box.plate, player: player, onPlay: onPlay, onOpen: onView, onTurn: onTurn,
+                    onEnded: onEnded, spread: true
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The words band's column: what happened to the post, then the post.
+    private func wordsColumn(_ written: Written, _ openQuote: (() -> Void)?) -> some View {
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            decorator(openQuote)
+            coveredWords(written)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Whether the blur is on: the author put a cover here and the reader has not taken it off.
@@ -1001,7 +1055,7 @@ struct DummyItemRow: View {
                     .foregroundStyle(
                         item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
                     )
-                    .lineLimit(narrow ? nil : wordLines)
+                    .lineLimit(wordLines)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1027,11 +1081,22 @@ struct DummyItemRow: View {
     /// What fits in the slot's height beside it. A row that grows to whatever somebody
     /// wrote makes the list a series of unrelated heights; the rest of the post is a
     /// press away, which is what the thread is for.
+    ///
+    /// Four lines, less one for each line the band gives to something else: a title, a board's
+    /// name, and what happened to the post (`decorator`).
     var bodyLines: Int {
         var lines = 4
         if item.title != nil { lines -= 1 }
         if item.source.kind == .board, item.board != nil { lines -= 1 }
+        if decorated { lines -= 1 }
         return max(1, lines)
+    }
+
+    /// The side of the picture's square: the band's own height, except beside the words on a
+    /// narrow page, where it keeps the standard size's so the words keep their column. The pane
+    /// (`inFull`) sets the picture under the words there, at the slot's full side, as it did.
+    private var slotSide: CGFloat {
+        narrow && !inFull ? min(thumbSide, Box.thumb) : thumbSide
     }
 
     /// The slot every row keeps open. Filled when the post brought something, and
@@ -1044,7 +1109,7 @@ struct DummyItemRow: View {
             AttachmentDeck(
                 attachments: item.attachments,
                 top: top,
-                side: thumbSide,
+                side: slotSide,
                 host: item.source.host,
                 radius: Box.plate,
                 player: player,
@@ -1053,22 +1118,36 @@ struct DummyItemRow: View {
                 onTurn: onTurn,
                 onEnded: onEnded
             )
-            .frame(width: thumbSide, height: thumbSide)
+            .frame(width: slotSide, height: slotSide)
         } else {
             Color.clear
-                .frame(width: thumbSide, height: thumbSide)
+                .frame(width: slotSide, height: slotSide)
                 .accessibilityHidden(true)
         }
     }
 
     /// Every mark is a press, and a press has a floor it cannot be squeezed below. On
-    /// a narrow row the two groups take a line each rather than the last of them
-    /// sliding off the edge.
+    /// a narrow row, or at the accessibility sizes, the two groups take a line each rather than
+    /// the last of them sliding off the edge.
+    ///
+    /// **Decided by the page and the type size, never by the row** (#245). Which marks a post
+    /// offers differs from row to row — a post of the reader's own can be taken back, a source
+    /// not signed in to offers none — so a line that broke where one row's marks ran long would
+    /// make that row taller than its neighbours. Every row on a page breaks the same way.
     private var actions: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: ShellSpace.room) { passOn; keep; Spacer(minLength: 0) }
-            VStack(alignment: .leading, spacing: ShellSpace.tight) { passOn; keep }
+        Group {
+            if Self.marksStack(narrow: narrow, size: typeSize) {
+                VStack(alignment: .leading, spacing: ShellSpace.tight) { passOn; keep }
+            } else {
+                HStack(spacing: ShellSpace.room) { passOn; keep; Spacer(minLength: 0) }
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Whether the marks take two lines: on a narrow page, and at the accessibility sizes.
+    static func marksStack(narrow: Bool, size: DynamicTypeSize) -> Bool {
+        narrow || size.isAccessibilitySize
     }
 
     private var passOn: some View {
@@ -1141,6 +1220,8 @@ struct DummyItemRow: View {
                 .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .lineLimit(1)
+                // The sentence gives way before a mark does; the whole of it is still heard.
+                .layoutPriority(-1)
                 .accessibilityLabel(ItemActs.refusalLine(refused))
         }
     }

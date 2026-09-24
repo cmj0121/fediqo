@@ -199,4 +199,119 @@ struct OneHeightTests {
         #expect(heights.count == 1, "one height, got \(heights.sorted())")
     }
     #endif
+
+    // MARK: - #245: every post in a timeline is one height
+
+    private static let posted = Date(timeIntervalSince1970: 1_700_000_000)
+    private static let longPost = String(repeating: "A post that goes on and on about the weather and more. ", count: 30)
+
+    private static func note(
+        body: String = "Short.", title: String? = nil, board: String? = nil, kind: ProtocolKind = .mastodon,
+        reply: Reply? = nil, boostedBy: String? = nil, attachments: [FediqoCore.Attachment] = [],
+        sensitive: Bool? = nil, spoiler: String? = nil, quote: Quote? = nil
+    ) -> DummyItem {
+        DummyItem(Note(
+            id: "n1", source: Source(host: "first.example", kind: kind), author: "Ada",
+            handle: "@ada@author.example", body: body, title: title, board: board, postedAt: posted,
+            categories: [.public], reply: reply, boostedBy: boostedBy, attachments: attachments,
+            sensitive: sensitive, spoiler: spoiler, statusID: "1", quote: quote
+        ))
+    }
+
+    private static func picture(_ name: String) -> FediqoCore.Attachment {
+        FediqoCore.Attachment(kind: .image, previewURL: URL(string: "https://first.example/\(name).jpg"))
+    }
+
+    /// Every shape a post takes in a timeline: short, long, pictured, boosted, answering, quoting,
+    /// covered with and without a warning, a long warning, a forum thread with its title, and all
+    /// of it at once.
+    private static func variants() -> [(String, DummyItem)] {
+        let quoted = QuotedPost(
+            id: "https://first.example/users/bob/statuses/0", statusID: "0", author: "Bob",
+            handle: "@bob@first.example", body: longPost, postedAt: posted, sensitive: false, spoiler: "",
+            audience: .everyone, quoting: nil
+        )
+        let quote = Quote(state: .accepted, post: quoted)
+        return [
+            ("short", note()),
+            ("pictured and long", note(body: longPost, attachments: [picture("a"), picture("b")])),
+            ("pictures alone", note(body: "", attachments: [picture("a"), picture("b"), picture("c")])),
+            ("boosted pictures alone", note(body: " ", boostedBy: "Bob", attachments: [picture("a")])),
+            ("boosted and quoting", note(body: longPost, boostedBy: "Bob", quote: quote)),
+            ("answering, long warning", note(body: longPost, reply: Reply(handle: "@bob@first.example"),
+                                             sensitive: true, spoiler: longPost)),
+            ("thread", note(body: longPost, title: "A thread's title", board: "A board", kind: .discuz)),
+            ("everything", note(body: longPost, reply: Reply(handle: "@bob@first.example"), boostedBy: "Bob",
+                                attachments: [picture("a")], sensitive: true, spoiler: longPost, quote: quote)),
+        ]
+    }
+
+    #if os(macOS)
+    private static func rowHeight(_ item: DummyItem, layout: ShellLayout, size: DynamicTypeSize) -> CGFloat {
+        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
+                               marks: .constant(DummyMarks()), onToast: { _ in })
+            .environment(\.shellLayout, layout)
+        return height(row, size: size, width: layout == .wide ? 720 : 390)
+    }
+
+    /// One case a layout and a size, so no case holds the main actor for long.
+    @Test("Every post in a timeline is one height, wide and narrow, at the standard and the largest type",
+          arguments: [ShellLayout.wide, .narrow], [DynamicTypeSize.large, .accessibility3])
+    func timelineRowIsOneHeight(_ layout: ShellLayout, _ size: DynamicTypeSize) {
+        let measured = Self.variants().map { ($0.0, Self.rowHeight($0.1, layout: layout, size: size)) }
+        let heights = Set(measured.map(\.1))
+        #expect(heights.count == 1, "\(layout) at \(size): \(measured.map { "\($0.0) \($0.1)" })")
+    }
+
+    @Test("The largest type makes every timeline row taller alike")
+    func timelineRowGrowsWithType() {
+        let short = Self.note()
+        #expect(Self.rowHeight(short, layout: .wide, size: .accessibility3) > Self.rowHeight(short, layout: .wide, size: .large))
+    }
+    #endif
+
+    @Test("A post of pictures alone draws them where its words would be; any other post, beside them")
+    func picturesAloneTakeTheColumn() {
+        func place(_ item: DummyItem, inFull: Bool = false) -> DummyItemRow.PicturePlace? {
+            DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
+                         marks: .constant(DummyMarks()), inFull: inFull, onToast: { _ in }).picturePlace
+        }
+        let pictures = [Self.picture("a"), Self.picture("b")]
+        #expect(place(Self.note(body: "", attachments: pictures)) == .column)
+        #expect(place(Self.note(body: " \n ", boostedBy: "Bob", attachments: pictures)) == .column)
+        #expect(place(Self.note(body: "Words.", attachments: pictures)) == .slot)
+        #expect(place(Self.note(body: "", attachments: pictures, sensitive: true, spoiler: "")) == .slot,
+                "a covered post's pictures stay under its cover, in the slot")
+        #expect(place(Self.note(body: "", attachments: pictures, sensitive: true, spoiler: "Weather")) == .slot)
+        #expect(place(Self.note(body: "", attachments: pictures), inFull: true) == .slot, "the thread keeps its layout")
+        #expect(place(Self.note(body: "")) == nil)
+    }
+
+    @Test("A spread draws the one on top first and the rest in turning order")
+    func spreadOrder() {
+        #expect(AttachmentDeck.following(0, of: 1).isEmpty)
+        #expect(AttachmentDeck.following(0, of: 3) == [1, 2])
+        #expect(AttachmentDeck.following(2, of: 3) == [0, 1])
+        #expect(AttachmentDeck.following(0, of: 9) == [1, 2, 3, 4])
+    }
+
+    @Test("What happened to a post takes one of its lines, not a line of its own")
+    func decoratorTakesALine() {
+        func lines(_ item: DummyItem) -> Int {
+            DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
+                         marks: .constant(DummyMarks()), onToast: { _ in }).bodyLines
+        }
+        #expect(lines(Self.note()) == 4, "the wide layout's four lines stay four")
+        #expect(lines(Self.note(boostedBy: "Bob")) == 3)
+        #expect(lines(Self.note(reply: Reply(handle: "@bob@first.example"))) == 3)
+        #expect(lines(Self.note(title: "t", kind: .discuz)) == 3)
+    }
+
+    @Test("The marks break the same way on every row: by the page and the type size alone")
+    func marksBreakByPage() {
+        #expect(!DummyItemRow.marksStack(narrow: false, size: .large))
+        #expect(!DummyItemRow.marksStack(narrow: false, size: .xxxLarge))
+        #expect(DummyItemRow.marksStack(narrow: true, size: .large))
+        #expect(DummyItemRow.marksStack(narrow: false, size: .accessibility1))
+    }
 }

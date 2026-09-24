@@ -17,7 +17,8 @@ import SwiftUI
 /// right price — a layout that remembered where it came from would be two answers for one width.
 public enum ShellLayout: Hashable, Sendable, CaseIterable {
     /// The page alone, the places as tabs, and compose as a button over the page. The rows keep
-    /// their narrow arrangement, where the picture goes under the words rather than beside them.
+    /// their narrow arrangement: no empty slot beside the words, a picture beside them held to
+    /// the standard size's slot, and the marks on two lines (#245).
     case narrow
     /// The rail on the left, the page beside it.
     case wide
