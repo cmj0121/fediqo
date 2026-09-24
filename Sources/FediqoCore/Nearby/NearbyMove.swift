@@ -26,7 +26,8 @@ import Synchronization
 /// still ends on both screens the same way. A wrong code fails the handshake: the receiver
 /// rolls its code and session, so a code that failed opens nothing — one guess per code — and
 /// after `guessCap` wrong codes in one hold the hold is closed as someone guessing. A hold that
-/// nobody joins closes after `holdTimeout`.
+/// nobody is engaged with closes after `holdTimeout`: a period that ends with a device joined
+/// and proven — its question on screen, or its move under way — does not count.
 ///
 /// **The package's key is never the code.** A random 256-bit key locks the package
 /// (`PackageKey.direct`); it crosses only inside the channel the code proved.
@@ -64,7 +65,7 @@ public actor NearbyMove {
     private let device: String
     private let retryDelay: Duration
     private let retries: Int
-    private let holdTimeout: Duration
+    private let holdClock: @Sendable () async throws -> Void
     private let guessCap: Int
 
     private var continuation: AsyncStream<Event>.Continuation?
@@ -75,24 +76,31 @@ public actor NearbyMove {
     private var answered: [String: Bool] = [:]
     /// The offer the question on screen is about, or nothing while none is.
     private var askingID: String?
-    /// The receiver's person said yes to an offer this hold: the timeout no longer applies.
-    private var holdAccepted = false
+    /// A device has joined this hold and proven the code: its question is on screen or its
+    /// move under way, and the hold's timeout does not count the time. Set as it joins — not
+    /// once its offer is accepted, which would let a question left up on screen time out.
+    private var engaged = false
+    /// The receiver's person said yes to an offer this hold: engaged from then on, whatever the
+    /// link does, since a dropped move comes back to carry on.
+    private var committed = false
 
     /// `device` is what this device calls itself, advertised and written into the header.
     /// `retryDelay` and `retries` bound how long a dropped link is waited for; `holdTimeout`
-    /// how long a hold waits for anyone; `guessCap` how many wrong codes one hold takes. Tests
-    /// shorten them.
+    /// how long a hold waits with nobody engaged; `guessCap` how many wrong codes one hold
+    /// takes. `holdClock`, where given, is one period of the hold's timeout in place of
+    /// `holdTimeout` — a test ends each period when it chooses, so no timing decides it.
     public init(
         link: any NearbyLink, carrier: any StoreCarrier, device: String,
         retryDelay: Duration = .seconds(2), retries: Int = 45,
-        holdTimeout: Duration = .seconds(600), guessCap: Int = 5
+        holdTimeout: Duration = .seconds(600), guessCap: Int = 5,
+        holdClock: (@Sendable () async throws -> Void)? = nil
     ) {
         self.link = link
         self.carrier = carrier
         self.device = device
         self.retryDelay = retryDelay
         self.retries = retries
-        self.holdTimeout = holdTimeout
+        self.holdClock = holdClock ?? { try await Task.sleep(for: holdTimeout) }
         self.guessCap = guessCap
     }
 
@@ -149,7 +157,8 @@ public actor NearbyMove {
         stop()
         answered = [:]
         askingID = nil
-        holdAccepted = false
+        engaged = false
+        committed = false
         let (stream, continuation) = AsyncStream<Event>.makeStream()
         self.continuation = continuation
         task = Task {
@@ -166,7 +175,24 @@ public actor NearbyMove {
     }
 
     private func accepted() {
-        holdAccepted = true
+        committed = true
+        engaged = true
+    }
+
+    /// A device joined and proved the code.
+    private func engage() {
+        engaged = true
+    }
+
+    /// The device that joined went before its offer was accepted: the hold is waiting for
+    /// anyone again, and the timeout counts once more.
+    private func disengage() {
+        engaged = committed
+    }
+
+    /// Whether a period of the timeout that ends now ends with nobody engaged.
+    private func idle() -> Bool {
+        !engaged
     }
 
     // MARK: - Holding (the receiver)
@@ -192,11 +218,13 @@ public actor NearbyMove {
             try await withThrowingTaskGroup(of: Void.self) { group in
                 group.addTask { try await self.holdLoop() }
                 group.addTask {
-                    try await Task.sleep(for: self.holdTimeout)
-                    guard await self.holdAccepted else { throw NearbyRefusal.timedOut }
-                    // Accepted: this child must never finish first, or the move would be
-                    // cancelled under it. It parks until the hold loop ends and cancels it.
-                    while true { try await Task.sleep(for: .seconds(3600)) }
+                    // Period by period: one that ends with nobody engaged closes the hold. This
+                    // child never finishes on its own otherwise — finishing first would cancel
+                    // a move under way — and is cancelled when the hold loop ends.
+                    while true {
+                        try await self.holdClock()
+                        if await self.idle() { throw NearbyRefusal.timedOut }
+                    }
                 }
                 try await group.next()
                 group.cancelAll()
@@ -255,6 +283,7 @@ public actor NearbyMove {
                     if try await serve(opened, mailbox: mailbox, accepted: &accepted, code: code, sessionID: sessionID) { return }
                 } catch is NearbyDropped {
                     // The link dropped: what is held stays, and the listen goes up again.
+                    await disengage()
                     try Task.checkCancellation()
                     if accepted != nil { await emit(.reconnecting(peer: accepted?.offer.summary.device ?? "")) }
                 } catch NearbyRefusal.wrongCode {
@@ -280,6 +309,7 @@ public actor NearbyMove {
     private nonisolated func serve(
         _ channel: NearbyChannel, mailbox: Mailbox, accepted: inout Accepted?, code: String, sessionID: String
     ) async throws -> Bool {
+        await engage()
         await emit(.joined)
         guard case .offer(let offer) = try await channel.next() else { throw NearbyRefusal.malformed }
         let peer = offer.summary.device

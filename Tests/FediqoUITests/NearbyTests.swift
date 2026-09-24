@@ -111,46 +111,58 @@ struct NearbyTests {
 
         /// Waits for the step `done` names, woken by the step changing rather than by a clock:
         /// a bound of a few seconds is for a runner that is slow, never a wait a test pays.
+        /// Waits for the step `done` names. **The budget is turns, not wall time**: sixteen
+        /// half-second periods in which this test held the main actor and the step did not come.
+        /// A step is delivered on the main actor, so while other suites hold it for forty
+        /// seconds — which a slow runner does — no step can arrive and none of that is the
+        /// move's delay; such a stall is one turn, not the whole budget.
         func settle(_ nearby: ShellNearby, until done: (ShellNearby.Step?) -> Bool) async {
-            let deadline = ContinuousClock.now + .seconds(8)
-            while ContinuousClock.now < deadline {
+            var turns = 16
+            while turns > 0 {
                 // Armed before the check, so a step assigned between the two is not missed.
                 let changed = StepSignal()
                 withObservationTracking { _ = nearby.step } onChange: { changed.fire() }
                 if done(nearby.step) { return }
-                await changed.wait(most: .milliseconds(500))
+                if await changed.wait(most: .milliseconds(500)) == .clock {
+                    turns -= 1
+                    // Whatever was queued on the main actor behind this wake runs before it is judged.
+                    await Task.yield()
+                }
             }
             if !done(nearby.step) { Issue.record("never settled: \(String(describing: nearby.step))") }
         }
 
-        /// One wake, fired by the step changing or by a clock, whichever is first.
+        /// One wake, fired by the step changing or by a clock, whichever is first — and which.
         final class StepSignal: Sendable {
-        private let held = Mutex<(fired: Bool, waiter: CheckedContinuation<Void, Never>?)>((false, nil))
+            enum Wake: Sendable { case change, clock }
 
-        func fire() {
-            let waiter = held.withLock { held -> CheckedContinuation<Void, Never>? in
-                held.fired = true
-                defer { held.waiter = nil }
-                return held.waiter
-            }
-            waiter?.resume()
-        }
+            private let held = Mutex<(fired: Wake?, waiter: CheckedContinuation<Wake, Never>?)>((nil, nil))
 
-        func wait(most: Duration) async {
-            let clock = Task { [self] in
-                try? await Task.sleep(for: most)
-                fire()
-            }
-            defer { clock.cancel() }
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                let now = held.withLock { held -> Bool in
-                    if held.fired { return true }
-                    held.waiter = continuation
-                    return false
+            func fire(_ wake: Wake = .change) {
+                let (waiter, first) = held.withLock { held -> (CheckedContinuation<Wake, Never>?, Wake?) in
+                    guard held.fired == nil else { return (nil, nil) }
+                    held.fired = wake
+                    defer { held.waiter = nil }
+                    return (held.waiter, wake)
                 }
-                if now { continuation.resume() }
+                if let waiter, let first { waiter.resume(returning: first) }
             }
-        }
+
+            func wait(most: Duration) async -> Wake {
+                let clock = Task { [self] in
+                    try? await Task.sleep(for: most)
+                    fire(.clock)
+                }
+                defer { clock.cancel() }
+                return await withCheckedContinuation { (continuation: CheckedContinuation<Wake, Never>) in
+                    let now = held.withLock { held -> Wake? in
+                        if let fired = held.fired { return fired }
+                        held.waiter = continuation
+                        return nil
+                    }
+                    if let now { continuation.resume(returning: now) }
+                }
+            }
         }
 
         func end() {
