@@ -188,6 +188,8 @@ struct RuleRowView: View {
             title: RuleText.target(rule, sources: sources),
             brief: RuleText.brief(rule),
             figure: status == .present ? nil : L10n.t("rule.missing"),
+            // The kind is only the mark on screen; VoiceOver hears the rule as one sentence.
+            spoken: RuleText.spoken(rule, status: status, sources: sources),
             selection: $selection,
             onOpen: onOpen,
             onStep: onStep

@@ -72,8 +72,9 @@ struct TimelineEditorListTests {
             #expect(EditorAction.from(key, stage: .rules, fieldFocused: true) == nil, "a field keeps its letters")
         }
         #expect(EditorAction.from("t", stage: .kinds, fieldFocused: false) == nil)
-        #expect(EditorAction.from(KeyEquivalent.delete.character, stage: .form(.source), fieldFocused: false) == .removeRule)
-        #expect(EditorAction.from(KeyEquivalent.delete.character, stage: .form(.keyword), fieldFocused: true) == nil)
+        for tag in [RuleKind.Tag.source, .category] {
+            #expect(EditorAction.from(KeyEquivalent.delete.character, stage: .form(tag), fieldFocused: false) == .removeRule)
+        }
         // The existing flow is as it was.
         #expect(EditorAction.from(KeyEquivalent.delete.character, command: true, stage: .rules, fieldFocused: false)
             == .removeTimeline)
@@ -86,14 +87,170 @@ struct TimelineEditorListTests {
         let list = EditorAction.strip(for: .rules)
         #expect(list.contains { $0.key == "editor.keys.open" })
         #expect(list.contains { $0.key == "editor.keys.tab" })
-        let changing = EditorAction.strip(for: .form(.keyword), changing: true)
+        let changing = EditorAction.strip(for: .form(.source), changing: true)
         #expect(changing.contains { $0.key == "editor.keys.remove" && $0.caps == "⌫" })
         #expect(changing.contains { $0.key == "editor.keys.change" })
-        #expect(!EditorAction.strip(for: .form(.keyword)).contains { $0.key == "editor.keys.remove" })
-        for line in list + changing {
+        #expect(!EditorAction.strip(for: .form(.source)).contains { $0.key == "editor.keys.remove" })
+        #expect(!EditorAction.strip(for: .form(.keyword), changing: true).contains { $0.key == "editor.keys.remove" })
+        let timeline = EditorAction.strip(for: .rules, tab: .timeline)
+        #expect(timeline.map(\.caps) == ["⇥ t", "m", "[ ]", "⌘⌫", "⌘↩", "esc"])
+        for line in list + changing + timeline {
             #expect(L10n.t(line.key, language: .english) != line.key)
             #expect(L10n.t(line.key, language: .taiwanese) != line.key)
         }
+    }
+
+    @Test("Tab turns the tabs only while the editor holds the keys; elsewhere it moves the focus, and t still turns")
+    func tabOnlyWhereHeld() {
+        for key: Character in ["\t", "\u{19}"] {
+            #expect(EditorAction.from(key, stage: .rules, fieldFocused: false, keysHeld: true) == .switchTab)
+            #expect(EditorAction.from(key, stage: .rules, fieldFocused: false, keysHeld: false) == nil)
+        }
+        #expect(EditorAction.from("t", stage: .rules, fieldFocused: false, keysHeld: false) == .switchTab)
+    }
+
+    @Test("⌫ in an author or keyword opened is never the whole rule, even with the keys out of the field")
+    func backspaceInATextRuleStays() {
+        for tag in [RuleKind.Tag.author, .keyword] {
+            for focused in [true, false] {
+                #expect(EditorAction.from(KeyEquivalent.delete.character, stage: .form(tag), fieldFocused: focused) == nil)
+            }
+        }
+    }
+
+    @Test("A category for every source opens under the first host whose choices list it")
+    func everySourceCategoryOpensWhereListed() throws {
+        let rule = try #require(Rule.category(.trends, in: .every, sources: sources))
+        let choices: [RuleTarget] = [
+            .category(.public, on: "m.example"), .category(.trends, on: "f.example"), .category(.trends, on: "m.example"),
+        ]
+        let opened = RuleDraft(editing: rule, sources: sources, choices: choices)
+        #expect(opened.target == .category(.trends, on: "f.example"))
+        #expect(opened.scope == .every)
+        #expect(opened.rule(sources, id: rule.id) == rule)
+    }
+
+    // MARK: The editor's moves
+
+    private func flow(_ rules: [Rule]) -> EditorFlow {
+        let base = TimelineDraft(new: 1)
+        return EditorFlow(draft: TimelineDraft(
+            editing: TimelineDefinition(id: base.id, name: "Kept", rules: rules), at: 0, of: 1
+        ))
+    }
+
+    @Test("Opening a lit rule puts its form in front, marked as a change, with the keys where it types")
+    func flowOpens() throws {
+        let all = try rules()
+        var flow = flow(all)
+        #expect(flow.tab == .rules && flow.stage == .rules)
+        flow.step(by: 1)
+        let lit = try #require(flow.focusedRule)
+        #expect(lit == flow.drawnRules[0].id)
+        flow.openLit(sources: sources, choices: [])
+        #expect(flow.changing == lit)
+        #expect(flow.stage == .form(flow.drawnRules[0].kind.tag))
+        #expect(flow.changed?.id == lit)
+
+        flow.open(all[4].id, sources: sources, choices: [])
+        #expect(flow.stage == .form(.keyword) && flow.wantsField)
+        #expect(flow.focusedRule == all[4].id)
+    }
+
+    @Test("Back from an opened rule is the list; from a rule being added, its kinds; from the list, the edit ends")
+    func flowBack() throws {
+        let all = try rules()
+        var flow = flow(all)
+        flow.open(all[0].id, sources: sources, choices: [])
+        let fromOpened = flow.back()
+        #expect(fromOpened)
+        #expect(flow.stage == .rules && flow.changing == nil)
+        flow.addRule()
+        flow.pickKind(.keyword)
+        let fromForm = flow.back()
+        #expect(fromForm)
+        #expect(flow.stage == .kinds)
+        let fromKinds = flow.back()
+        #expect(fromKinds)
+        #expect(flow.stage == .rules)
+        let fromList = flow.back()
+        #expect(!fromList, "nowhere back: the edit is cancelled")
+    }
+
+    @Test("Turning the tab drops a rule half-changed, and keeps the draft")
+    func flowSelectDropsChanging() throws {
+        let all = try rules()
+        var flow = flow(all)
+        flow.open(all[3].id, sources: sources, choices: [])
+        flow.adding.toggleEffect()
+        flow.select(.timeline)
+        #expect(flow.tab == .timeline && flow.stage == .rules && flow.changing == nil)
+        #expect(flow.draft.rules == all, "nothing was confirmed")
+        flow.select(.timeline)
+        #expect(flow.tab == .timeline)
+    }
+
+    @Test("Change keeps the rule's id and place; Add puts a new one last; the lamp is on it either way")
+    func flowConfirms() throws {
+        let all = try rules()
+        var flow = flow(all)
+        flow.open(all[3].id, sources: sources, choices: [])
+        flow.adding.toggleEffect()
+        flow.confirm(sources: sources)
+        #expect(flow.draft.rules.map(\.id) == all.map(\.id))
+        #expect(flow.draft.rules[3].effect == .exclude)
+        #expect(flow.focusedRule == all[3].id && flow.stage == .rules && flow.changing == nil)
+
+        flow.addRule()
+        flow.pickKind(.keyword)
+        flow.adding.type("kotlin", sources: sources)
+        flow.confirm(sources: sources)
+        #expect(flow.draft.rules.count == all.count + 1)
+        #expect(flow.focusedRule == flow.draft.rules.last?.id)
+    }
+
+    @Test("Removing the opened rule lights its neighbour; the last rule's lamp goes to the one before")
+    func flowRemoves() throws {
+        let all = try rules()
+        var flow = flow(all)
+        let drawn = flow.drawnRules.map(\.id)
+        flow.open(drawn[1], sources: sources, choices: [])
+        flow.removeRule()
+        #expect(!flow.draft.rules.contains { $0.id == drawn[1] })
+        #expect(flow.focusedRule == drawn[2])
+        #expect(flow.stage == .rules && flow.changing == nil)
+
+        let last = try #require(flow.drawnRules.last?.id)
+        let before = flow.drawnRules[flow.drawnRules.count - 2].id
+        flow.focusedRule = last
+        flow.removeRule()
+        #expect(flow.focusedRule == before)
+    }
+
+    @Test("From the timeline tab, a rule key only brings the rules in front; j and k also move")
+    func flowFromTimelineTab() throws {
+        let all = try rules()
+        var flow = flow(all)
+        flow.focusedRule = all[0].id
+        flow.select(.timeline)
+        flow.removeRule()
+        #expect(flow.tab == .rules && flow.draft.rules == all)
+        flow.select(.timeline)
+        flow.toggleLit()
+        #expect(flow.tab == .rules && flow.draft.rules == all)
+        flow.select(.timeline)
+        flow.openLit(sources: sources, choices: [])
+        #expect(flow.tab == .rules && flow.stage == .rules)
+        flow.select(.timeline)
+        flow.step(by: 1)
+        #expect(flow.tab == .rules && flow.focusedRule != all[0].id)
+    }
+
+    @Test("A rule row speaks the rule whole, its kind and whether it is missing")
+    func rowSpeaks() throws {
+        let rule = try #require(Rule.keyword("swift", in: .every))
+        let spoken = RuleText.spoken(rule, status: .present, sources: sources, language: .english)
+        #expect(spoken.contains("posts containing"))
     }
 
     // MARK: Tabs and words

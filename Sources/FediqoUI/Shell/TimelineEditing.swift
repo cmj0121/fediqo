@@ -337,9 +337,10 @@ struct RuleDraft: Equatable {
     /// the form would have them had it just been picked. Built back through the same factories,
     /// so a rule opened and confirmed untouched is the rule it was.
     ///
-    /// A category for every source is shown under the first source that can hold it, since the
-    /// picker lists categories by source; its scope stays every source until it is changed.
-    init(editing rule: Rule, sources: [Source]) {
+    /// A category for every source is shown under the first source whose choices hold it
+    /// (`choices`, the picker's own list), since the picker lists categories by source; its
+    /// scope stays every source until it is changed.
+    init(editing rule: Rule, sources: [Source], choices: [RuleTarget] = []) {
         tag = rule.kind.tag
         effect = rule.effect
         switch rule.kind {
@@ -354,9 +355,11 @@ struct RuleDraft: Equatable {
             target = .keyword(text)
             self.scope = scope
         case .category(let category, let scope):
-            let host = RuleText.host(of: scope)
-                ?? sources.first { $0.kind.hasTimelines || $0.kind.hasTrends }?.host ?? ""
-            target = .category(category, on: host)
+            let listed = choices.lazy.compactMap { choice -> String? in
+                guard case .category(category, let host) = choice else { return nil }
+                return host
+            }.first
+            target = .category(category, on: RuleText.host(of: scope) ?? listed ?? sources.first?.host ?? "")
             self.scope = scope
         }
     }
@@ -463,8 +466,14 @@ enum EditorAction: Equatable {
     /// **A focused field owns every letter**; only Escape and ⌥O go past it — ⌥O so a rule's
     /// scope can be changed while its author or keyword is still being typed. With ⌥ held the
     /// key may arrive as the letter it composes, `ø`.
+    ///
+    /// **Tab turns the tabs only while the editor itself holds the keys** (`keysHeld`: the sheet,
+    /// or a lit row of the list). Anywhere else it moves the focus, so every control of the
+    /// timeline tab, and the system's own keyboard reach, are still walked by it. `t` turns them
+    /// wherever a field does not have the keys.
     static func from(
-        _ key: Character, command: Bool = false, option: Bool = false, stage: EditorStage, fieldFocused: Bool
+        _ key: Character, command: Bool = false, option: Bool = false, stage: EditorStage, fieldFocused: Bool,
+        keysHeld: Bool = true
     ) -> EditorAction? {
         if key == KeyEquivalent.escape.character { return escapeIsExitCommand ? nil : escape(at: stage) }
         if option, !command, case .form = stage, key == "o" || key == "ø" { return .nextScope }
@@ -478,7 +487,8 @@ enum EditorAction: Equatable {
         case .rules:
             switch key {
             // Tab and ⇧Tab, as every page's tabs turn; `t` where Tab is taken by the focus.
-            case KeyEquivalent.tab.character, "\u{19}", "t": return .switchTab
+            case KeyEquivalent.tab.character, "\u{19}": return keysHeld ? .switchTab : nil
+            case "t": return .switchTab
             case KeyEquivalent.return.character: return .openRule
             case "[": return .earlier
             case "]": return .later
@@ -498,16 +508,31 @@ enum EditorAction: Equatable {
             case "x": return .toggleEffect
             case "o": return .nextScope
             case KeyEquivalent.return.character: return .confirmRule
-            case KeyEquivalent.delete.character: return .removeRule
+            // Only where the kind has no field: ⌫ after a Return in an unfinished author or
+            // keyword is a slip back into the text, never the whole rule gone.
+            case KeyEquivalent.delete.character: return Self.removesFromForm(stage) ? .removeRule : nil
             default: return down ? .nextChoice : up ? .previousChoice : nil
             }
         }
     }
 
+    /// Whether ⌫ removes the rule open in this stage's form: a source or a category, which have
+    /// no field to type back into.
+    static func removesFromForm(_ stage: EditorStage) -> Bool {
+        stage == .form(.source) || stage == .form(.category)
+    }
+
     /// The keycap strip under each stage: the caps, and the key naming what they do. A rule
-    /// opened to be changed says it can be removed from there, and is confirmed as a change.
-    static func strip(for stage: EditorStage, changing: Bool = false) -> [(caps: String, key: String)] {
-        switch stage {
+    /// opened to be changed says it can be removed from there, and is confirmed as a change. The
+    /// timeline tab names only the keys that act on the timeline.
+    static func strip(
+        for stage: EditorStage, changing: Bool = false, tab: EditorTab = .rules
+    ) -> [(caps: String, key: String)] {
+        if tab == .timeline {
+            return [("⇥ t", "editor.keys.tab"), ("m", "editor.keys.name"), ("[ ]", "editor.keys.move"),
+                    ("⌘⌫", "editor.keys.removeTimeline"), ("⌘↩", "editor.keys.done"), ("esc", "editor.keys.cancel")]
+        }
+        return switch stage {
         case .rules:
             [("⇥ t", "editor.keys.tab"), ("m", "editor.keys.name"), ("[ ]", "editor.keys.move"), ("n", "editor.keys.add"),
              ("j k", "editor.keys.rule"), ("↩", "editor.keys.open"), ("x", "editor.keys.effect"),
@@ -515,9 +540,12 @@ enum EditorAction: Equatable {
              ("⌘↩", "editor.keys.done"), ("esc", "editor.keys.cancel")]
         case .kinds:
             [("1–4", "editor.keys.kind"), ("esc", "editor.keys.back")]
-        case .form where changing:
+        case .form where changing && removesFromForm(stage):
             [("j k", "editor.keys.pick"), ("x", "editor.keys.effect"), ("o ⌥O", "editor.keys.scope"),
              ("↩", "editor.keys.change"), ("⌫", "editor.keys.remove"), ("esc", "editor.keys.back")]
+        case .form where changing:
+            [("j k", "editor.keys.pick"), ("x", "editor.keys.effect"), ("o ⌥O", "editor.keys.scope"),
+             ("↩", "editor.keys.change"), ("esc", "editor.keys.back")]
         case .form:
             [("j k", "editor.keys.pick"), ("x", "editor.keys.effect"), ("o ⌥O", "editor.keys.scope"),
              ("↩", "editor.keys.confirm"), ("esc", "editor.keys.back")]

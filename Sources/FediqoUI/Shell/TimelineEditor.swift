@@ -16,13 +16,7 @@ import SwiftUI
 /// strip at the foot; a focused field keeps its letters.
 struct TimelineEditor: View {
     @Bindable var session: ShellSession
-    @State private var draft: TimelineDraft
-    @State private var tab: EditorTab
-    @State private var stage: EditorStage = .rules
-    @State private var adding = RuleDraft(.source)
-    /// The rule the form was opened on, where it is changing one rather than adding.
-    @State private var changing: Rule.ID?
-    @State private var focusedRule: Rule.ID?
+    @State private var flow: EditorFlow
     @State private var confirmingRemove = false
     @FocusState private var focus: Focus?
     @Environment(\.colorScheme) private var colorScheme
@@ -36,22 +30,22 @@ struct TimelineEditor: View {
 
     init(session: ShellSession, draft: TimelineDraft) {
         self.session = session
-        _draft = State(initialValue: draft)
-        _tab = State(initialValue: EditorTab.first(isNew: draft.isNew))
+        _flow = State(initialValue: EditorFlow(draft: draft))
     }
 
     private var sources: [Source] { session.sources }
+    private var draft: TimelineDraft { flow.draft }
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
             header
-            ShellTabs(EditorTab.allCases, selected: tab) { select($0) }
+            ShellTabs(EditorTab.allCases, selected: flow.tab) { select($0) }
             Rectangle().fill(ShellChrome.hairline(colorScheme)).frame(height: ShellSpace.hair)
-            switch tab {
+            switch flow.tab {
             case .timeline: timelineTab
             case .rules: rulesTab
             }
-            EditorKeyStrip(stage: stage, changing: changing != nil)
+            EditorKeyStrip(stage: flow.stage, changing: flow.changing != nil, tab: flow.tab)
         }
         .padding(ShellSpace.pad)
         #if os(macOS)
@@ -69,8 +63,9 @@ struct TimelineEditor: View {
                 press.key.character,
                 command: press.modifiers.contains(.command),
                 option: press.modifiers.contains(.option),
-                stage: stage,
-                fieldFocused: focus == .name || focus == .desc || focus == .text
+                stage: flow.stage,
+                fieldFocused: focus == .name || focus == .desc || focus == .text,
+                keysHeld: focus == .keys || (flow.tab == .rules && flow.focusedRule != nil)
             )
             guard let action else { return .ignored }
             perform(action)
@@ -79,7 +74,7 @@ struct TimelineEditor: View {
         #if os(macOS)
         // A focused text field takes Escape as a cancel of its own; this is where it lands, and
         // the only place it does (`EditorAction.escapeIsExitCommand`).
-        .onExitCommand { perform(EditorAction.escape(at: stage)) }
+        .onExitCommand { perform(EditorAction.escape(at: flow.stage)) }
         #endif
         .confirmationDialog(
             Text(String(format: L10n.t("timeline.remove.title"), session.removeName(of: draft))),
@@ -95,118 +90,64 @@ struct TimelineEditor: View {
         }
     }
 
-    /// Every rule in the order it is drawn, which is the order `j` and `k` walk.
-    private var drawnRules: [Rule] { EditorBands(draft.rules).bands.flatMap(\.rules) }
-
-    /// A tab chosen by a press. Leaving the rules mid-way through a rule drops the rule, as Escape
-    /// would; the timeline's draft is kept.
     private func select(_ picked: EditorTab) {
-        guard picked != tab else { return }
-        tab = picked
-        stage = .rules
-        changing = nil
+        flow.select(picked)
         focus = .keys
     }
 
     private func perform(_ action: EditorAction) {
         switch action {
         case .cancel: session.editing = nil
-        case .back: back()
-        case .earlier: draft.move(by: -1)
-        case .later: draft.move(by: 1)
-        case .switchTab: select(tab.other)
-        case .addRule:
-            tab = .rules
-            changing = nil
-            stage = .kinds
-        case .nextRule, .previousRule, .toggleRule, .removeRule, .openRule:
-            onRules(action)
+        case .back:
+            if flow.back() { focus = .keys } else { session.editing = nil }
+        case .earlier: flow.draft.move(by: -1)
+        case .later: flow.draft.move(by: 1)
+        case .switchTab: select(flow.tab.other)
+        case .addRule: flow.addRule()
+        case .nextRule: flow.step(by: 1)
+        case .previousRule: flow.step(by: -1)
+        case .toggleRule: flow.toggleLit()
+        case .removeRule:
+            flow.removeRule()
+            if flow.stage == .rules { focus = .keys }
+        case .openRule:
+            flow.openLit(sources: sources, choices: kindChoices)
+            handFocus()
         case .removeTimeline:
             if !draft.isNew { confirmingRemove = true }
         case .focusName:
-            tab = .timeline
-            // The field is drawn by the tab just put in front, so the keys are handed over once
-            // it is there.
-            Task { @MainActor in focus = .name }
+            flow.tab = .timeline
+            handFocus(to: .name)
         case .pickKind(let tag):
-            adding = RuleDraft(tag)
-            stage = .form(tag)
-            focus = tag == .author || tag == .keyword ? .text : .keys
-        case .nextChoice: adding.step(1, through: Self.choices(for: adding, in: session), sources: sources)
-        case .previousChoice: adding.step(-1, through: Self.choices(for: adding, in: session), sources: sources)
-        case .toggleEffect: adding.toggleEffect()
-        case .nextScope: adding.nextScope(sources)
-        case .confirmRule: confirm()
+            flow.pickKind(tag)
+            handFocus()
+        case .nextChoice: flow.adding.step(1, through: Self.choices(for: flow.adding, in: session), sources: sources)
+        case .previousChoice: flow.adding.step(-1, through: Self.choices(for: flow.adding, in: session), sources: sources)
+        case .toggleEffect: flow.adding.toggleEffect()
+        case .nextScope: flow.adding.nextScope(sources)
+        case .confirmRule:
+            flow.confirm(sources: sources)
+            if flow.stage == .rules { focus = .keys }
         }
     }
 
-    /// One stage back: from a rule to its kinds, or to the list where a rule was opened from it.
-    private func back() {
-        switch stage {
-        case .rules: session.editing = nil
-        case .kinds: stage = .rules
-        case .form: stage = changing == nil ? .kinds : .rules
-        }
-        changing = nil
-        focus = .keys
+    /// What the lit rule's kind picks from, for opening it where the picker lists it.
+    private var kindChoices: [RuleTarget] {
+        guard let rule = flow.drawnRules.first(where: { $0.id == flow.focusedRule }) else { return [] }
+        return Self.choices(for: RuleDraft(rule.kind.tag), in: session)
     }
 
-    /// The keys that act on a rule. From the timeline tab they bring the rules in front first,
-    /// and only `j` and `k` also move: a rule is not switched or removed where it cannot be seen.
-    private func onRules(_ action: EditorAction) {
-        let hidden = tab != .rules
-        tab = .rules
-        switch action {
-        case .nextRule: focusedRule = DummyCommand.stepped(drawnRules.map(\.id), from: focusedRule, by: 1)
-        case .previousRule: focusedRule = DummyCommand.stepped(drawnRules.map(\.id), from: focusedRule, by: -1)
-        case .toggleRule:
-            if !hidden, let focusedRule { draft.toggleEffect(of: focusedRule) }
-        case .removeRule:
-            if case .form = stage, let changing {
-                remove(changing)
-                self.changing = nil
-                stage = .rules
-                focus = .keys
-            } else if !hidden, stage == .rules, let focusedRule {
-                remove(focusedRule)
-            }
-        case .openRule:
-            if !hidden, let focusedRule { open(focusedRule) }
-        default: break
-        }
-    }
-
-    /// Takes a rule out of the draft, and puts the lamp on its neighbour.
-    private func remove(_ removed: Rule.ID) {
-        let ids = drawnRules.map(\.id)
-        focusedRule = DummyCommand.stepped(ids, from: removed, by: 1).flatMap { $0 == removed ? nil : $0 }
-            ?? DummyCommand.stepped(ids, from: removed, by: -1).flatMap { $0 == removed ? nil : $0 }
-        draft.remove(removed)
-    }
-
-    /// A rule of the list, opened in the form it was added through.
     private func open(_ id: Rule.ID) {
-        guard let rule = draft.rules.first(where: { $0.id == id }) else { return }
-        focusedRule = id
-        changing = id
-        adding = RuleDraft(editing: rule, sources: sources)
-        stage = .form(rule.kind.tag)
-        focus = rule.kind.tag == .author || rule.kind.tag == .keyword ? .text : .keys
+        let choices = draft.rules.first { $0.id == id }.map { Self.choices(for: RuleDraft($0.kind.tag), in: session) }
+        flow.open(id, sources: sources, choices: choices ?? [])
+        handFocus()
     }
 
-    private func confirm() {
-        if let changing {
-            guard let rule = adding.rule(sources, id: changing) else { return }
-            draft.replace(changing, with: rule)
-            focusedRule = rule.id
-        } else {
-            guard let rule = adding.rule(sources) else { return }
-            draft.add(rule)
-            focusedRule = rule.id
-        }
-        changing = nil
-        stage = .rules
-        focus = .keys
+    /// The keys handed to the stage now in front — its field where it has one — once what it
+    /// draws is there to take them.
+    private func handFocus(to field: Focus? = nil) {
+        let target = field ?? (flow.wantsField ? .text : .keys)
+        Task { @MainActor in focus = target }
     }
 
     /// What `j` and `k` pick from on a kind's stage: this device's sources, the authors it holds
@@ -247,7 +188,7 @@ struct TimelineEditor: View {
 
     private var timelineTab: some View {
         EditorTimelineTab(
-            draft: $draft,
+            draft: $flow.draft,
             focus: $focus,
             onMove: { perform($0 < 0 ? .earlier : .later) },
             onRemove: { perform(.removeTimeline) }
@@ -256,12 +197,12 @@ struct TimelineEditor: View {
 
     @ViewBuilder
     private var rulesTab: some View {
-        switch stage {
+        switch flow.stage {
         case .rules:
             EditorRulesList(
                 draft: draft,
                 sources: sources,
-                focusedRule: $focusedRule,
+                focusedRule: $flow.focusedRule,
                 onOpen: open,
                 onStep: { perform($0 < 0 ? .previousRule : .nextRule) },
                 onAdd: { perform(.addRule) }
@@ -271,9 +212,9 @@ struct TimelineEditor: View {
         case .form:
             RuleForm(
                 session: session,
-                draft: $adding,
-                choices: Self.choices(for: adding, in: session),
-                changing: changing.flatMap { id in draft.rules.first { $0.id == id } },
+                draft: $flow.adding,
+                choices: Self.choices(for: flow.adding, in: session),
+                changing: flow.changed,
                 focus: $focus,
                 onBack: { perform(.back) },
                 onConfirm: { perform(.confirmRule) },
@@ -476,6 +417,7 @@ private struct EditorKinds: View {
 private struct EditorKeyStrip: View {
     let stage: EditorStage
     let changing: Bool
+    let tab: EditorTab
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -488,7 +430,7 @@ private struct EditorKeyStrip: View {
     }
 
     private var caps: some View {
-        ForEach(EditorAction.strip(for: stage, changing: changing), id: \.caps) { line in
+        ForEach(EditorAction.strip(for: stage, changing: changing, tab: tab), id: \.caps) { line in
             HStack(spacing: ShellSpace.tight) {
                 Text(line.caps)
                     .shellFont(.reading)
