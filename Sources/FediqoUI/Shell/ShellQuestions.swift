@@ -122,6 +122,18 @@ enum ShellQuestion {
         )
     }
 
+    /// Clearing the limits' account (#251). **Plain, not a loss**: only the lines go, and they
+    /// were about posts already gone; nothing held goes with them.
+    static func clearAccount(language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "eraser", title: L10n.t("prefs.limits.clear.title", language: language),
+            line: L10n.t("prefs.limits.clear.line", language: language),
+            help: L10n.t("prefs.limits.clear.detail", language: language),
+            choices: [.init(yes, L10n.t("prefs.limits.clear.confirm", language: language), role: .plain)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     /// Letting go now of `posts` posts deleted at their source and `places` settled places (#179,
     /// #204): each counted apart in the title, and the line saying only what goes of each.
     static func letGo(posts: Int, places: Int, language: DummyLanguage? = nil) -> ShellConfirmation {

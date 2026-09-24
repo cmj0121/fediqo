@@ -189,6 +189,7 @@ struct UsagePane: View {
             case .keep:
                 keep(session)
                 GoneSection(session: session)
+                LimitAccountSection(session: session)
             case .copies:
                 copies(session)
             }

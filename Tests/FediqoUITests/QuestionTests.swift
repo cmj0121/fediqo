@@ -25,6 +25,8 @@ struct QuestionTests {
             ShellQuestion.letGo(posts: 4, places: 2, language: language),
             ShellQuestion.letGo(posts: 0, places: 2, language: language),
             ShellQuestion.removeTimeline(named: "Art", language: language),
+            ShellQuestion.tighten(room: 250_000_000, language: language),
+            ShellQuestion.clearAccount(language: language),
             ShellQuestion.storeNewer(language: language),
             ShellQuestion.signedOut(hosts: ["a.example", "b.example"], language: language),
         ] + clearKeys.map { ShellQuestion.clear(host: "a.example", detailKey: $0, language: language) }
