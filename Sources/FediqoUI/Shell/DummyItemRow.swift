@@ -60,6 +60,10 @@ struct DummyItemRow: View {
     /// the same surface. Everything else about the row — the four bands, the slot, the marks, the
     /// cover — is identical, because none of it was ever the problem.
     var inFull: Bool = false
+    /// The words band drawn at the height its contents ask for rather than held to the slot's —
+    /// **a measurement, never a layout**: what a test compares against the held band, so "the
+    /// band holds everything it is given" is measured rather than assumed. No screen sets it.
+    var bandAsked = false
     /// Which attachment is on top. It belongs to the app rather than to this view, so that a
     /// refresh that replaces the list leaves a reader who turned to the third one looking at the
     /// third one. See `ShellDecks`.
@@ -96,6 +100,8 @@ struct DummyItemRow: View {
     var onPlay: () -> Void = {}
     /// Opens what is on top of the deck over the app: the card's own way to the key `v` (#33).
     var onView: () -> Void = {}
+    /// Opens the attachment at this index: a picture pressed in a post of pictures alone (#245).
+    var onViewAt: (Int) -> Void = { _ in }
     /// Turns the deck: the counter's own way to the key `m` (#33).
     var onTurn: () -> Void = {}
     /// That the playing rectangle has left the screen, which the owner answers by stopping.
@@ -706,13 +712,7 @@ struct DummyItemRow: View {
                     if !narrow || item.hasThumb { coveredThumb }
                 }
             }
-            .frame(height: thumbSide, alignment: .top)
-            // The frame fixes what this band *takes*; this fixes what it can *draw*. A fixed
-            // frame does not stop a child rendering outside it, so the worst case the line limit
-            // still allows — the longest warning an instance may send, with the words under it —
-            // would have drawn over the marks below rather than made the row taller. Both halves
-            // are needed for "server text never changes a row's height" to mean anything.
-            .clipped()
+            .modifier(HeldBand(height: thumbSide, asked: bandAsked))
         }
     }
 
@@ -730,12 +730,17 @@ struct DummyItemRow: View {
     }
 
     /// Whether a post is pictures and nothing a reader could read beside them: no words, no
-    /// title, no forum thread whose words are still to come — and no cover, whose pictures stay
-    /// under it, in the slot, as they always have.
+    /// title, no board name, no forum thread whose words are still to come — and no cover, whose
+    /// pictures stay under it, in the slot, as they always have. Words that are only spaces or
+    /// characters that draw nothing (a zero-width space, a joiner, a byte-order mark) are none.
     static func picturesAlone(_ item: DummyItem) -> Bool {
-        item.hasThumb && item.title == nil && ForumThreadRef(item) == nil && !item.covered
-            && item.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        item.hasThumb && item.title == nil && item.board == nil && ForumThreadRef(item) == nil
+            && !item.covered && item.body.trimmingCharacters(in: unseen).isEmpty
     }
+
+    /// What draws nothing a reader could read: white space, and the invisible format characters.
+    private static let unseen = CharacterSet.whitespacesAndNewlines
+        .union(CharacterSet(charactersIn: "\u{200B}\u{200C}\u{200D}\u{2060}\u{FEFF}\u{00AD}"))
 
     /// A post of pictures alone: what happened to it, then its pictures side by side where the
     /// words would be, squares of whatever height the band leaves them — so the row is the height
@@ -747,7 +752,7 @@ struct DummyItemRow: View {
                 AttachmentDeck(
                     attachments: item.attachments, top: top, side: room.size.height, host: item.source.host,
                     radius: Box.plate, player: player, onPlay: onPlay, onOpen: onView, onTurn: onTurn,
-                    onEnded: onEnded, spread: true
+                    onEnded: onEnded, spread: true, onOpenAt: onViewAt
                 )
             }
         }
@@ -1127,7 +1132,7 @@ struct DummyItemRow: View {
     }
 
     /// Every mark is a press, and a press has a floor it cannot be squeezed below. On
-    /// a narrow row, or at the accessibility sizes, the two groups take a line each rather than
+    /// a narrow row, or at the largest sizes, the two groups take a line each rather than
     /// the last of them sliding off the edge.
     ///
     /// **Decided by the page and the type size, never by the row** (#245). Which marks a post
@@ -1145,9 +1150,10 @@ struct DummyItemRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Whether the marks take two lines: on a narrow page, and at the accessibility sizes.
+    /// Whether the marks take two lines: on a narrow page, and from the second-largest ordinary
+    /// size up, where eight marks and a refusal no longer fit a wide column on one line.
     static func marksStack(narrow: Bool, size: DynamicTypeSize) -> Bool {
-        narrow || size.isAccessibilitySize
+        narrow || size >= .xxLarge
     }
 
     private var passOn: some View {
@@ -1377,6 +1383,28 @@ struct DummyItemRow: View {
                 .help(Self.spokenPerson(person))
         } else {
             content
+        }
+    }
+}
+
+/// The words band held to the slot's height — or, measured, left at the height it asks for.
+private struct HeldBand: ViewModifier {
+    let height: CGFloat
+    let asked: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if asked {
+            content.fixedSize(horizontal: false, vertical: true)
+        } else {
+            content
+                .frame(height: height, alignment: .top)
+                // The frame fixes what this band *takes*; this fixes what it can *draw*. A fixed
+                // frame does not stop a child rendering outside it, so the worst case the line
+                // limit still allows would have drawn over the marks below rather than made the
+                // row taller. Both halves are needed for "server text never changes a row's
+                // height" to mean anything.
+                .clipped()
         }
     }
 }

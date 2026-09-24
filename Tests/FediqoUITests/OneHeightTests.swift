@@ -254,9 +254,11 @@ struct OneHeightTests {
     }
 
     #if os(macOS)
-    private static func rowHeight(_ item: DummyItem, layout: ShellLayout, size: DynamicTypeSize) -> CGFloat {
+    private static func rowHeight(
+        _ item: DummyItem, layout: ShellLayout, size: DynamicTypeSize, lifted: Bool = false, asked: Bool = false
+    ) -> CGFloat {
         let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
-                               marks: .constant(DummyMarks()), onToast: { _ in })
+                               marks: .constant(DummyMarks()), bandAsked: asked, lifted: lifted, onToast: { _ in })
             .environment(\.shellLayout, layout)
         return height(row, size: size, width: layout == .wide ? 720 : 390)
     }
@@ -268,6 +270,33 @@ struct OneHeightTests {
         let measured = Self.variants().map { ($0.0, Self.rowHeight($0.1, layout: layout, size: size)) }
         let heights = Set(measured.map(\.1))
         #expect(heights.count == 1, "\(layout) at \(size): \(measured.map { "\($0.0) \($0.1)" })")
+    }
+
+    /// **The band holds what it is given, rather than cutting it mid-line.** Each worst case —
+    /// a reply that is boosted and quotes, on a board, with a title and a long warning, lifted and
+    /// covered — is drawn twice: with the band held to the slot, and with the band at the height
+    /// its contents ask for. The asked-for row may be shorter, never taller.
+    @Test("The words band holds its worst case whole, wide and narrow, at the standard and the largest type",
+          arguments: [ShellLayout.wide, .narrow], [DynamicTypeSize.large, .xxxLarge, .accessibility5])
+    func bandHoldsTheWorstCase(_ layout: ShellLayout, _ size: DynamicTypeSize) {
+        let quote = Quote(state: .pending)
+        let worst = [
+            Self.note(body: Self.longPost, title: "A thread's title " + Self.longPost, board: "A board",
+                      kind: .discuz, reply: Reply(handle: "@bob@first.example"), boostedBy: "Bob",
+                      attachments: [Self.picture("a")], sensitive: true, spoiler: Self.longPost, quote: quote),
+            Self.note(body: Self.longPost, reply: Reply(handle: "@bob@first.example"), boostedBy: "Bob",
+                      attachments: [Self.picture("a")], sensitive: true, spoiler: Self.longPost, quote: quote),
+            Self.note(body: Self.longPost, title: "A title", board: "A board", kind: .discuz,
+                      reply: Reply(handle: "@bob@first.example")),
+            Self.note(body: Self.longPost),
+        ]
+        for item in worst {
+            for lifted in [false, true] {
+                let held = Self.rowHeight(item, layout: layout, size: size, lifted: lifted)
+                let asked = Self.rowHeight(item, layout: layout, size: size, lifted: lifted, asked: true)
+                #expect(asked <= held, "\(layout) \(size) lifted \(lifted): asks \(asked), held \(held)")
+            }
+        }
     }
 
     @Test("The largest type makes every timeline row taller alike")
@@ -286,12 +315,26 @@ struct OneHeightTests {
         let pictures = [Self.picture("a"), Self.picture("b")]
         #expect(place(Self.note(body: "", attachments: pictures)) == .column)
         #expect(place(Self.note(body: " \n ", boostedBy: "Bob", attachments: pictures)) == .column)
+        #expect(place(Self.note(body: "\u{200B}\u{FEFF} \u{200D}", attachments: pictures)) == .column,
+                "characters that draw nothing are no words")
+        #expect(place(Self.note(body: "", board: "A board", kind: .discuz, attachments: pictures)) == .slot,
+                "a board's post keeps its board's name over the words' column")
         #expect(place(Self.note(body: "Words.", attachments: pictures)) == .slot)
         #expect(place(Self.note(body: "", attachments: pictures, sensitive: true, spoiler: "")) == .slot,
                 "a covered post's pictures stay under its cover, in the slot")
         #expect(place(Self.note(body: "", attachments: pictures, sensitive: true, spoiler: "Weather")) == .slot)
         #expect(place(Self.note(body: "", attachments: pictures), inFull: true) == .slot, "the thread keeps its layout")
         #expect(place(Self.note(body: "")) == nil)
+    }
+
+    @Test("A picture pressed in a spread comes to the top, so the viewer opens the one pressed")
+    func pressedPictureOpens() {
+        var decks = ShellDecks()
+        decks.show("a", at: 2, of: 4)
+        #expect(decks.top(of: "a", of: 4) == 2)
+        decks.show("a", at: 5, of: 4)
+        #expect(decks.top(of: "a", of: 4) == 1)
+        #expect(decks.top(of: "b", of: 4) == 0, "another post's deck does not move")
     }
 
     @Test("A board's or a list's name is one line, and two held open at the accessibility sizes")
@@ -335,7 +378,8 @@ struct OneHeightTests {
     @Test("The marks break the same way on every row: by the page and the type size alone")
     func marksBreakByPage() {
         #expect(!DummyItemRow.marksStack(narrow: false, size: .large))
-        #expect(!DummyItemRow.marksStack(narrow: false, size: .xxxLarge))
+        #expect(!DummyItemRow.marksStack(narrow: false, size: .xLarge))
+        #expect(DummyItemRow.marksStack(narrow: false, size: .xxLarge))
         #expect(DummyItemRow.marksStack(narrow: true, size: .large))
         #expect(DummyItemRow.marksStack(narrow: false, size: .accessibility1))
     }

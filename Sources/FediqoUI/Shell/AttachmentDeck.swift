@@ -32,7 +32,8 @@ import SwiftUI
 /// deck lays them out side by side, each a square of the band's height, the one on top first and
 /// the rest after it in the order `m` would bring them, as many as the column shows. The one on
 /// top keeps everything the deck's card has — its counter, its play mark, its player — and a
-/// press on any of them opens the viewer as a press on the card does.
+/// press on any other brings it to the top and opens it (`onOpenAt`), so the viewer shows the
+/// picture pressed.
 ///
 /// **No edge is drawn round any of it.** The hairline that used to separate card from sheet and
 /// sheet from row went with the fitting: it was chrome standing in for a picture, and now there
@@ -77,6 +78,10 @@ struct AttachmentDeck: View {
 
     /// Laid out side by side across the width it is given, rather than stacked in a square.
     var spread = false
+
+    /// Opens the one at this index over the app — a press on a picture of a spread that is not the
+    /// one on top, so what opens is the picture pressed and the one VoiceOver named.
+    var onOpenAt: (Int) -> Void = { _ in }
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -172,11 +177,11 @@ struct AttachmentDeck: View {
         return (1 ..< min(count, most)).map { folded(top + $0, of: count) }
     }
 
-    /// One of the pictures after the one on top: a press opens the viewer, as the card does.
+    /// One of the pictures after the one on top: a press opens that picture in the viewer.
     private func tile(_ at: Int) -> some View {
         let attachment = attachments[at]
         let described = attachment.alt.isEmpty ? Self.kind(of: attachment) : attachment.alt
-        return Button(action: onOpen) {
+        return Button { onOpenAt(at) } label: {
             RemoteImage(
                 url: attachment.displayURL, tier: .deck, host: host, alt: nil, speaks: false, radius: radius
             )

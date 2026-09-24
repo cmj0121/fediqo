@@ -455,6 +455,10 @@ struct TimelinePane: View {
                             onToggleCover: { _ = decks.toggleCover(item.id) },
                             onPlay: { onPlayRow(item) },
                             onView: { onViewRow(item) },
+                            onViewAt: { at in
+                                decks.show(item.id, at: at, of: item.attachments.count)
+                                onViewRow(item)
+                            },
                             onTurn: { onTurnRow(item) },
                             onEnded: { playback.stop() },
                             onToast: showToast
