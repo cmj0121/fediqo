@@ -414,12 +414,13 @@ public struct FediqoRootView: View {
             .id(prefs.language)
     }
 
-    /// How many boards Remove would take from `host`, which is what its question's (?) names.
+    /// How many boards Remove would take from `host` — what its question's line names where there
+    /// are any, since they are the one part of Remove that does not come back.
     ///
     /// **Two whole sentences and two keys, not one sentence with a clause appended.** "the 3 boards
     /// you picked" must never appear over a microblog, and a second half joined on with `+` is a
     /// half no translator can put first. `ShellSession.clear` argues why the boards are the part
-    /// worth naming: pictures come back by themselves and a pick of eight boards out of forty does
+    /// worth naming: pictures come back by themselves, a pick of eight boards out of forty does
     /// not. See `ShellQuestion.remove`.
     static func boards(of host: String, in sources: [Source]) -> Int {
         sources.first { $0.host == host }?.boards.count ?? 0

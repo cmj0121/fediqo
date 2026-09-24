@@ -613,6 +613,7 @@
 "account.remove.title" = "Remove %@?";
 "account.remove.detail" = "Its posts and everything this device holds for it go with it.";
 "account.remove.detail.boards" = "Its posts, everything this device holds for it, and the %d boards you picked go with it. The boards do not come back.";
+"account.remove.line.boards" = "Its posts go, and the %d boards you picked do not come back.";
 "account.remove.confirm" = "Remove";
 
 /* Unit 4 — the join sheet, and what a server says before you take it. */
@@ -859,6 +860,7 @@
 
 /* The shared pieces every screen is built from (#232). */
 "help.about" = "More about %@";
+"confirm.destructive.hint" = "This cannot be undone.";
 "list.open.hint" = "Opens its detail";
 
 /* Preferences says the least first (#233). */

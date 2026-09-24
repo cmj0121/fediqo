@@ -1,6 +1,8 @@
 import SwiftUI
 #if os(macOS)
 import AppKit
+#else
+import GameController
 #endif
 
 /// A question asked before something that cannot be undone (#232) — **#231's rules, applied to
@@ -24,6 +26,9 @@ struct ShellConfirmation: Equatable {
             case destructive
             /// The wider or usual answer, drawn in the lamp's hue.
             case primary
+            /// The answer a key gives (⌘Return), drawn as one of several: a yes that is not a
+            /// loss and must not look like an invitation either — Clear, or reading only.
+            case keyed
             /// One of several answers, none of them a loss.
             case plain
         }
@@ -77,9 +82,10 @@ struct ShellConfirmation: Equatable {
     var warns: Bool { choices.contains { $0.role == .destructive } }
 
     /// The one choice a deliberate chord answers: the first destructive one, or else the first
-    /// primary one. Never bare Return, and never the chord that asks: see `ShellConfirmChord`.
+    /// primary or keyed one. Never bare Return, and never the chord that asks: see
+    /// `ShellConfirmChord`.
     var chorded: Choice? {
-        choices.first { $0.role == .destructive } ?? choices.first { $0.role == .primary }
+        choices.first { $0.role == .destructive } ?? choices.first { $0.role == .primary || $0.role == .keyed }
     }
 }
 
@@ -92,9 +98,14 @@ enum ShellConfirmAnswer: Equatable {
     /// The one door to the act. The question is taken down first, whatever the answer; only a
     /// choice then acts, and on the value that was asked about — not on whatever `item` holds by
     /// the time the answer lands.
+    ///
+    /// **Heard once.** A question already taken down — answered, or put away — takes no second
+    /// answer: a second click on a sheet still sliding away, or Cancel and then a stray yes, acts
+    /// on nothing.
     static func settle<Value>(
         _ answer: Self, asked value: Value, item: Binding<Value?>, onChoice: (Value, String) -> Void
     ) {
+        guard item.wrappedValue != nil else { return }
         item.wrappedValue = nil
         if case .choice(let id) = answer { onChoice(value, id) }
     }
@@ -109,15 +120,18 @@ enum ShellConfirmAnswer: Equatable {
 /// **Cancel holds the keyboard.** It is the default focus and Escape's key; bare Return is given
 /// to nothing, so a reader who pressed Return to open this cannot answer it with the same finger.
 /// A yes has a chord of its own — ⌘D for a destructive one, ⌘Return for the usual one — that no
-/// reflex reaches, heard only once the question has settled (`ShellConfirmChord`). A destructive press is drawn in the alarm hue and carries the destructive role,
-/// so VoiceOver says so before it is pressed.
+/// reflex reaches, heard only once the question has settled (`ShellConfirmChord`). A destructive
+/// press is drawn in the alarm hue, and its hint tells VoiceOver it cannot be undone. Only the
+/// first answer is taken; the card hears nothing after it.
 struct ShellConfirmCard: View {
     let question: ShellConfirmation
     let answer: (ShellConfirmAnswer) -> Void
 
     @FocusState private var focus: String?
-    /// Whether a chord may answer yet. See `ShellConfirmChord`.
+    /// Whether a choice may answer yet. See `ShellConfirmChord`.
     @State private var armed = false
+    /// Whether this card has been answered. Only the first answer counts.
+    @State private var answered = false
     @Environment(\.colorScheme) private var colorScheme
     @ShellMetric(relativeTo: .title3) private var side: CGFloat = 36
     @ShellMetric(relativeTo: .body) private var measure: CGFloat = 340
@@ -139,6 +153,10 @@ struct ShellConfirmCard: View {
         .defaultFocus($focus, question.firstFocus)
         .task {
             try? await Task.sleep(for: ShellConfirmChord.settle)
+            // Not while a key is still held down from before the question.
+            while ShellConfirmChord.keyHeld(), !Task.isCancelled {
+                try? await Task.sleep(for: ShellConfirmChord.poll)
+            }
             armed = true
         }
     }
@@ -181,16 +199,25 @@ struct ShellConfirmCard: View {
     @ViewBuilder
     private var pressList: some View {
         if let cancel = question.cancel {
-            Button(cancel, role: .cancel) { answer(.cancel) }
+            Button(cancel, role: .cancel) { once(.cancel) }
                 .keyboardShortcut(.cancelAction)
                 .focused($focus, equals: Self.cancelFocus)
         }
         ForEach(question.choices) { choice in
             ShellConfirmPress(choice: choice, chorded: choice == question.chorded, armed: armed) {
-                answer(.choice(choice.id))
+                once(.choice(choice.id))
             }
             .focused($focus, equals: choice.id)
         }
+    }
+}
+
+extension ShellConfirmCard {
+    /// Hands on the first answer, and nothing after it.
+    fileprivate func once(_ given: ShellConfirmAnswer) {
+        guard !answered else { return }
+        answered = true
+        answer(given)
     }
 }
 
@@ -201,12 +228,14 @@ struct ShellConfirmCard: View {
 /// ⌘⌫ is not used, because the timeline editor asks to remove a timeline with ⌘⌫, and the key that
 /// asks must never be the key that answers.
 ///
-/// **A chord is heard only once the question has been up a moment, and never as a repeat.** A key
-/// held down from before the question — ⌘Return saving a timeline, say — repeats into it, and
-/// that repeat must not be taken for a yes. Pointer and touch are not held to either: a press is
-/// always meant.
+/// **A choice is heard only once the question has been up a moment, and a key never as a
+/// repeat.** A key held down from before the question — ⌘Return saving a timeline, say — repeats
+/// into it, and that repeat must not be taken for a yes. A pointer or a finger is held to the same
+/// moment: a double click or tap that opened the question must not also answer it. On a phone or
+/// tablet, where a key's repeat cannot be read, the moment also waits for every key to be let go.
 enum ShellConfirmChord {
     static let settle: Duration = .milliseconds(350)
+    static let poll: Duration = .milliseconds(50)
 
     static func chord(for role: ShellConfirmation.Choice.Role) -> KeyboardShortcut {
         role == .destructive
@@ -214,10 +243,21 @@ enum ShellConfirmChord {
             : KeyboardShortcut(.return, modifiers: .command)
     }
 
-    /// Whether an answer is heard: anything not from a key, and from a key only when the question
-    /// has settled and the key was not held down into it.
+    /// Whether an answer is heard: only once the question has settled, and from a key only when
+    /// that key was not held down into it.
     static func heard(byKey: Bool, armed: Bool, repeating: Bool) -> Bool {
-        !byKey || (armed && !repeating)
+        armed && !(byKey && repeating)
+    }
+
+    /// Whether a key is held down right now, where that can be told apart from a repeat only this
+    /// way — a hardware keyboard on a phone or tablet. A Mac reads the repeat itself.
+    @MainActor
+    static func keyHeld() -> Bool {
+        #if os(macOS)
+        false
+        #else
+        GCKeyboard.coalesced?.keyboardInput?.isAnyKeyPressed ?? false
+        #endif
     }
 
     /// What the press in hand came from: a key, and whether that key is repeating.
@@ -244,6 +284,7 @@ private struct ShellConfirmPress: View {
     var body: some View {
         Button(choice.label, role: choice.role == .destructive ? .destructive : nil, action: press)
             .tint(tint)
+            .accessibilityHint(choice.role == .destructive ? L10n.t("confirm.destructive.hint") : "")
             .keyboardShortcut(chorded && armed ? ShellConfirmChord.chord(for: choice.role) : nil)
     }
 
@@ -257,7 +298,7 @@ private struct ShellConfirmPress: View {
         switch choice.role {
         case .destructive: ShellChrome.alarm(colorScheme)
         case .primary: ShellChrome.selectInk(colorScheme)
-        case .plain: nil
+        case .keyed, .plain: nil
         }
     }
 }

@@ -27,11 +27,14 @@ enum ShellQuestion {
         )
     }
 
-    /// Removing a source. The boards it takes, which do not come back, are behind the (?).
+    /// Removing a source. The boards it takes do not come back, so where there are any the line
+    /// itself names them; the (?) says the rest.
     static func remove(host: String, boards: Int, language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellConfirmation(
             symbol: "trash", title: String(format: L10n.t("account.remove.title", language: language), host),
-            line: L10n.t("account.remove.detail", language: language),
+            line: boards > 0
+                ? String(format: L10n.t("account.remove.line.boards", language: language), boards)
+                : L10n.t("account.remove.detail", language: language),
             help: boards > 0
                 ? String(format: L10n.t("account.remove.detail.boards", language: language), boards) : nil,
             choices: [.init(yes, L10n.t("account.remove.confirm", language: language), role: .destructive)],
@@ -42,14 +45,20 @@ enum ShellQuestion {
     /// Clearing what a source left here. `detailKey` is `SourceRow.clearDetailKey`'s answer for
     /// this host; the line follows it, so a saved password's going is said on the line itself.
     ///
-    /// **Primary and not destructive**, for decision 29's reason: the weight of the yes matches
-    /// the weight of the act, and most of what Clear drops comes back.
+    /// **Keyed and not destructive**, for decision 29's reason: the weight of the yes matches the
+    /// weight of the act, and most of what Clear drops comes back — so ⌘Return answers it, and it
+    /// is drawn as a plain press. **Except where a saved password goes**: that does not come back,
+    /// so that Clear is a loss, drawn and chorded (⌘D) as one.
     static func clear(host: String, detailKey: String, language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellConfirmation(
             symbol: "eraser", title: String(format: L10n.t("account.clear.title", language: language), host),
             line: L10n.t(clearLineKey(detailKey), language: language),
             help: L10n.t(detailKey, language: language),
-            choices: [.init(yes, L10n.t("account.clear.confirm", language: language), role: .primary)],
+            choices: [.init(
+                yes, L10n.t("account.clear.confirm", language: language),
+                role: detailKey == SourceRow.clearDetailKey(hasPassword: true, reachedSignIn: false)
+                    ? .destructive : .keyed
+            )],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
     }
@@ -59,16 +68,17 @@ enum ShellQuestion {
         detailKey.replacingOccurrences(of: "account.clear.detail", with: "account.clear.line")
     }
 
-    /// Reading, or reading and writing, on a source being signed in to. Neither is a loss, so the
-    /// wider is the usual answer and the narrower comes first.
+    /// Reading, or reading and writing, on a source being signed in to. Neither is a loss, and
+    /// neither is lit: the narrower comes first and is the one a key answers (⌘Return), so the
+    /// answer given without looking is the one that grants the least.
     static func signIn(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellConfirmation(
             symbol: "key", title: String(format: L10n.t("account.signin.ask.title", language: language), host),
             line: L10n.t("account.signin.ask.line", language: language),
             help: L10n.t("account.signin.ask.detail", language: language),
             choices: [
-                .init(signInRead, L10n.t("account.signin.ask.read", language: language), role: .plain),
-                .init(signInWrite, L10n.t("account.signin.ask.write", language: language), role: .primary),
+                .init(signInRead, L10n.t("account.signin.ask.read", language: language), role: .keyed),
+                .init(signInWrite, L10n.t("account.signin.ask.write", language: language), role: .plain),
             ],
             cancel: L10n.t("board.choose.cancel", language: language)
         )

@@ -299,12 +299,38 @@ struct ShellPiecesTests {
         #expect(acted.value == ["6 remove"])
     }
 
+    @Test("A question is answered once: a second answer, or a yes after Cancel, acts on nothing")
+    func confirmAnsweredOnce() {
+        let item = Box<Int?>(6)
+        let acted = Box<[String]>([])
+        ShellConfirmAnswer.settle(.choice("remove"), asked: 6, item: item.binding) { value, id in
+            acted.value.append("\(value) \(id)")
+        }
+        ShellConfirmAnswer.settle(.choice("remove"), asked: 6, item: item.binding) { value, id in
+            acted.value.append("\(value) \(id)")
+        }
+        #expect(acted.value == ["6 remove"])
+
+        item.value = 2
+        ShellConfirmAnswer.settle(.cancel, asked: 2, item: item.binding) { value, id in
+            acted.value.append("\(value) \(id)")
+        }
+        ShellConfirmAnswer.settle(.choice("remove"), asked: 2, item: item.binding) { value, id in
+            acted.value.append("\(value) \(id)")
+        }
+        #expect(acted.value == ["6 remove"])
+        #expect(item.value == nil)
+    }
+
     @Test("A yes by key is heard only once the question has settled, and never from a held key")
     func chordsWait() {
-        #expect(ShellConfirmChord.heard(byKey: false, armed: false, repeating: false))
+        // A pointer or a finger waits for the question to settle too, as a key does.
+        #expect(!ShellConfirmChord.heard(byKey: false, armed: false, repeating: false))
+        #expect(ShellConfirmChord.heard(byKey: false, armed: true, repeating: false))
         #expect(!ShellConfirmChord.heard(byKey: true, armed: false, repeating: false))
         #expect(!ShellConfirmChord.heard(byKey: true, armed: true, repeating: true))
         #expect(ShellConfirmChord.heard(byKey: true, armed: true, repeating: false))
+        #expect(!ShellConfirmChord.keyHeld(), "a Mac reads the repeat itself")
         // The key that asks to remove a timeline (⌘⌫) is not the key that answers.
         let destructive = ShellConfirmChord.chord(for: .destructive)
         #expect(destructive.key == "d" && destructive.modifiers == .command)

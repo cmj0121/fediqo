@@ -592,6 +592,7 @@
 "account.remove.title" = "移除 %@？";
 "account.remove.detail" = "它的文章，還有這個裝置為它留的東西，都會跟著一起不見。";
 "account.remove.detail.boards" = "它的文章、這個裝置為它留的東西，還有你挑的 %d 個版塊，都會跟著一起不見。版塊不會自己回來。";
+"account.remove.line.boards" = "它的文章會不見，你挑的 %d 個版塊也不會回來。";
 "account.remove.confirm" = "移除";
 
 /* Unit 4 — the join sheet, and what a server says before you take it. */
@@ -837,6 +838,7 @@
 
 /* The shared pieces every screen is built from (#232). */
 "help.about" = "關於「%@」的說明";
+"confirm.destructive.hint" = "這個動作無法復原。";
 "list.open.hint" = "打開詳細內容";
 
 /* Preferences says the least first (#233). */

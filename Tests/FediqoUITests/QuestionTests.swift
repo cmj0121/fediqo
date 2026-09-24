@@ -43,6 +43,7 @@ struct QuestionTests {
             #expect(!question.line.isEmpty && !question.line.contains("\n"))
             #expect(!question.line.contains("%"), "\(question.line) was left unformatted")
             #expect(question.line.count <= 70, "\(question.line) is more than a line")
+            if question.warns { #expect(question.choices.contains { $0.role == .destructive }) }
             #expect(question.help != question.line)
             if let help = question.help { #expect(help.count > question.line.count) }
         }
@@ -93,15 +94,34 @@ struct QuestionTests {
         let notice = ShellQuestion.storeNewer(language: .english)
         #expect(notice.choices.isEmpty && notice.cancel == L10n.t("store.newer.ok", language: .english))
         #expect(ShellQuestion.signedOut(hosts: ["a"], language: .english).choices.isEmpty)
-        // Clear's weight is its act's: the usual yes, not a loss (decision 29).
-        #expect(!ShellQuestion.clear(host: "a", detailKey: Self.clearKeys[2], language: .english).warns)
     }
 
-    @Test("Signing in offers reading first and reading-and-writing second, neither a loss")
+    @Test("Clear is a plain press answered by ⌘Return, except where a saved password goes")
+    func clearWeighsItsAct() {
+        for key in Self.clearKeys.prefix(2) {
+            let clear = ShellQuestion.clear(host: "a", detailKey: key, language: .english)
+            #expect(!clear.warns)
+            #expect(clear.chorded?.role == .keyed)
+            #expect(ShellConfirmChord.chord(for: .keyed).key == .return)
+        }
+        let password = ShellQuestion.clear(host: "a", detailKey: Self.clearKeys[2], language: .english)
+        #expect(password.warns)
+        #expect(password.chorded?.role == .destructive)
+    }
+
+    @Test("Remove with boards names, on its line, the boards that do not come back")
+    func removeNamesTheBoards() {
+        #expect(ShellQuestion.remove(host: "a", boards: 3, language: .english).line.contains("3 boards"))
+        #expect(ShellQuestion.remove(host: "a", boards: 3, language: .taiwanese).line.contains("3"))
+        #expect(!ShellQuestion.remove(host: "a", boards: 0, language: .english).line.contains("boards"))
+    }
+
+    @Test("Signing in offers reading first, neither lit, and a key answers only with reading")
     func signInChoices() {
         let question = ShellQuestion.signIn(host: "a", language: .english)
         #expect(question.choices.map(\.id) == [ShellQuestion.signInRead, ShellQuestion.signInWrite])
-        #expect(question.choices.map(\.role) == [.plain, .primary])
+        #expect(question.choices.map(\.role) == [.keyed, .plain])
+        #expect(question.chorded?.id == ShellQuestion.signInRead)
         #expect(!question.warns)
     }
 
@@ -113,7 +133,8 @@ struct QuestionTests {
         let keys = [
             "withdraw.line", "store.newer.line", "account.signin.ask.line", "account.mastodon.ended.line",
             "prefs.drop.copies.line", "prefs.keep.shorten.line", "prefs.gone.ask.line",
-            "prefs.gone.ask.line.places", "prefs.gone.ask.line.placesonly",
+            "prefs.gone.ask.line.places", "prefs.gone.ask.line.placesonly", "account.remove.line.boards",
+            "confirm.destructive.hint",
         ] + Self.clearKeys.map(ShellQuestion.clearLineKey)
         for lproj in ["en", "zh-TW", "zh-Hant"] {
             let strings = try String(

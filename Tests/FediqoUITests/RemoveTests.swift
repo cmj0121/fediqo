@@ -395,6 +395,8 @@ struct RemoveTests {
         #expect(asked(alpha).line == L10n.t("account.remove.detail", language: .english))
         #expect(asked(alpha).help == nil)
         #expect(asked(beta).help == String(format: L10n.t("account.remove.detail.boards", language: .english), 2))
+        #expect(asked(beta).line == String(format: L10n.t("account.remove.line.boards", language: .english), 2))
+        #expect(asked(beta).line.contains("2 boards"))
         // A host with no row left — the list moved under the question — still gets a true sentence
         // rather than a claim about boards nobody can count.
         #expect(asked("gone.test").help == nil)
