@@ -500,11 +500,23 @@ public actor ItemStore {
     ///
     /// Silent where the host is not here, for the reason `subscribe(host:to:)` is: nothing in this
     /// package puts a source in the list, or takes one out of it, by a side door.
-    public func remove(host raw: String) {
+    ///
+    /// **`keepingPosts` leaves the notes where they are** (#250): the reader chose that a removed
+    /// source's posts stay. They are still drawn by `all()` and found by a search, and they go
+    /// the way any other note goes — by the window, or by a later story's limit. What stops is
+    /// everything that reads by the source: `ingest(_:ifSourceHere:)`, `keep`, `markGone` and
+    /// the rest all ask `sourceList` first, so nothing new lands under a host that has gone.
+    /// Each note still names its source, so a row can say which host it was read through and
+    /// that the host is no longer here.
+    public func remove(host raw: String, keepingPosts: Bool = false) {
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
         saidByHost[host] = nil
         sourcesWatcher?(sourceList.map(\.host))
+        if keepingPosts {
+            changed(shown: false, aside: false)
+            return
+        }
         let aside = notes.contains { $0.key.host == host && $0.value.holding == .aside }
         notes = notes.filter { $0.key.host != host }
         arrival = arrival.filter { $0.key.host != host }

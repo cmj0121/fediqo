@@ -373,6 +373,12 @@
 "prefs.askEvery.one" = "每分鐘";
 "prefs.askEvery.many" = "每 %d 分鐘";
 "prefs.askEvery.footer" = "Fediqo 開著的時候，每過這段時間就再問一次這台裝置上的每個來源，眼前的時間軸會自己更新。按 r 仍然立刻重新載入。";
+"prefs.removed.head" = "移除來源的時候";
+"prefs.removed.brief" = "它的貼文怎麼辦。";
+"prefs.removed.footer" = "移除來源會拿走這台裝置為它留的一切：登入、圖片、你挑的版塊。它的貼文可以跟著一起不見，也可以留下——標記為來自已不在這裡的來源，仍會出現在「全部」與搜尋裡，並像其他貼文一樣放下。移除前的提問會說明是哪一種。";
+"prefs.removed" = "它的貼文";
+"prefs.removed.go" = "跟著不見";
+"prefs.removed.stay" = "留下";
 
 "prefs.tab.choices" = "設定";
 "prefs.tab.build" = "這個 Fediqo";
@@ -448,6 +454,11 @@
 "prefs.keep.months" = "最近 %d 個月";
 "item.gone" = "來源已刪除";
 "item.gone.detail" = "它的來源表示已不再有這則貼文。它會帶著標記留在這裡，直到你放下它，也無法再對它送出任何東西。";
+"item.left" = "來源已移除";
+"item.left.detail" = "你移除了讀到這則貼文的來源，並留下了它的貼文。它會帶著標記留在這裡，直到你放下它，也不會再連到它的來源。";
+"thread.source.left" = "它的來源已不在這台裝置上，所以不會再讀到它底下的內容。";
+"usage.removed.line" = "依你的選擇留下；和其他貼文一樣，會依保留期間放下。";
+"usage.removed.help" = "你移除了這個來源並留下它的貼文。它們仍會出現在「全部」與搜尋裡，標記為來自已不在這裡的來源，並像其他貼文一樣依保留期間放下。這台裝置沒有為它留下其他東西，也不會再連到它；再次加入會重新讀取。";
 "prefs.gone" = "來源已刪除的貼文";
 "prefs.gone.wait" = "多久後放下";
 "prefs.gone.never" = "永不";
@@ -595,6 +606,10 @@
 "account.remove.detail.boards" = "它的文章、這個裝置為它留的東西，還有你挑的 %d 個版塊，都會跟著一起不見。版塊不會自己回來。";
 "account.remove.line.boards" = "它的文章會不見，你挑的 %d 個版塊也不會回來。";
 "account.remove.confirm" = "移除";
+"account.remove.line.stay" = "它的文章會留下，並標記為來自已不在這裡的來源。";
+"account.remove.line.stay.boards" = "它的文章會留下；你挑的 %d 個版塊不會回來。";
+"account.remove.detail.stay" = "它的文章會留在這台裝置上，標記為來自已不在這裡的來源，直到你放下它們。這個裝置為它留的其他東西都會跟著一起不見。";
+"account.remove.detail.stay.boards" = "它的文章會留在這台裝置上，標記為來自已不在這裡的來源，直到你放下它們。這個裝置為它留的其他東西，還有你挑的 %d 個版塊，都會跟著一起不見。版塊不會自己回來。";
 
 /* Unit 4 — the join sheet, and what a server says before you take it. */
 "join.close" = "關閉";

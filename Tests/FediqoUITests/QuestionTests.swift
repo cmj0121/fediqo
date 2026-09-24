@@ -17,6 +17,8 @@ struct QuestionTests {
         [
             ShellQuestion.remove(host: "a.example", boards: 0, language: language),
             ShellQuestion.remove(host: "a.example", boards: 3, language: language),
+            ShellQuestion.remove(host: "a.example", boards: 0, postsStay: true, language: language),
+            ShellQuestion.remove(host: "a.example", boards: 3, postsStay: true, language: language),
             ShellQuestion.signIn(host: "a.example", language: language),
             ShellQuestion.dropCopies(language: language),
             ShellQuestion.shorten(months: 6, language: language),
@@ -134,7 +136,7 @@ struct QuestionTests {
             "withdraw.line", "store.newer.line", "account.signin.ask.line", "account.mastodon.ended.line",
             "prefs.drop.copies.line", "prefs.keep.shorten.line", "prefs.gone.ask.line",
             "prefs.gone.ask.line.places", "prefs.gone.ask.line.placesonly", "account.remove.line.boards",
-            "confirm.destructive.hint",
+            "account.remove.line.stay", "account.remove.line.stay.boards", "confirm.destructive.hint",
         ] + Self.clearKeys.map(ShellQuestion.clearLineKey)
         for lproj in ["en", "zh-TW", "zh-Hant"] {
             let strings = try String(

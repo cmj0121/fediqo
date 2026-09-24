@@ -155,6 +155,7 @@ struct PreferencesPane: View {
             }
         }
         askAgain
+        removed
         Section {
             Toggle(L10n.t("prefs.latest"), isOn: latestIsOn)
             if prefs.latestDate != nil {
@@ -176,6 +177,20 @@ struct PreferencesPane: View {
             }
         } header: {
             ShellSectionHead(title: "prefs.askEvery.head", line: "prefs.askEvery.brief", help: "prefs.askEvery.footer")
+        }
+    }
+
+    /// What happens to a removed source's posts (#250): they go with it, or they stay. One
+    /// choice, in `askAgain`'s shape; Remove honours it without asking again.
+    private var removed: some View {
+        @Bindable var prefs = prefs
+        return Section {
+            Picker(L10n.t("prefs.removed"), selection: $prefs.removedPostsStay) {
+                Text(L10n.t("prefs.removed.go")).tag(false)
+                Text(L10n.t("prefs.removed.stay")).tag(true)
+            }
+        } header: {
+            ShellSectionHead(title: "prefs.removed.head", line: "prefs.removed.brief", help: "prefs.removed.footer")
         }
     }
 
