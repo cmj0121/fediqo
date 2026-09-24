@@ -39,9 +39,10 @@ struct NearbyCodeTests {
         ).withUnsafeBytes { Data($0) }
         #expect(bytes == expected)
         #expect(NearbyCode.pskIdentity(sessionID: "abc") == Data("fediqo-nearby-1 abc".utf8))
-        let mark = NearbyCode.mark(sessionID: "abc")
-        #expect(mark.count == 4 && mark.allSatisfy(\.isHexDigit) && mark == NearbyCode.mark(sessionID: "abc"))
-        #expect(mark != NearbyCode.mark(sessionID: "abd"))
+        let mark = NearbyCode.mark(code: "123456", sessionID: "abc")
+        #expect(mark.count == 4 && mark.allSatisfy(\.isHexDigit) && mark == NearbyCode.mark(code: " 123456 ", sessionID: "abc"))
+        #expect(mark != NearbyCode.mark(code: "123456", sessionID: "abd"), "bound to the session")
+        #expect(mark != NearbyCode.mark(code: "123457", sessionID: "abc"), "bound to the code, which a twin does not know")
     }
 
     @Test("The link's parameters are TLS over TCP with peer-to-peer on, and nothing is started")
@@ -56,7 +57,8 @@ struct NearbyCodeTests {
         #expect(NWNearbyLink.suite.rawValue == 0xCCAC)
         #expect(NWNearbyLink.suiteHolds(NWNearbyLink.suite))
         #expect(!NWNearbyLink.suiteHolds(nil))
-        #expect(!NWNearbyLink.suiteHolds(tls_ciphersuite_t(rawValue: 0x00AE)!), "plain PSK is refused")
+        #expect(NWNearbyLink.fallbackSuite.rawValue == 0x00A8 && NWNearbyLink.suiteHolds(NWNearbyLink.fallbackSuite))
+        #expect(!NWNearbyLink.suiteHolds(tls_ciphersuite_t(rawValue: 0x00AE)!), "another PSK suite is refused")
         #expect(!NWNearbyLink.suiteHolds(.AES_128_GCM_SHA256), "a certificate suite is refused")
     }
 

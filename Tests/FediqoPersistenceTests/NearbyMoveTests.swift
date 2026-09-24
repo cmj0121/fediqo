@@ -393,6 +393,63 @@ struct NearbyMoveTests {
         #expect(await timed.until("timed out", Self.isRefused) == .refused(.timedOut))
     }
 
+    @Test("A hold's timeout never cuts a move it accepted, however long the move takes")
+    func timeoutParksOnceAccepted() async throws {
+        let from = try await PackagerFixture.populated()
+        let onto = try await Device()
+        let link = PipeNearbyLink()
+        // The link drops once and the sender waits longer than the hold's timeout to rejoin.
+        link.cutNext(afterBytesFrames: 0)
+        let sender = NearbyMove(link: link, carrier: from.packager(), device: "a laptop", retryDelay: .milliseconds(300), retries: 5)
+        let receiver = NearbyMove(link: link, carrier: onto.packager(), device: "a tablet", holdTimeout: .milliseconds(150))
+        defer { from.remove(); onto.remove() }
+        let held = Watch(await receiver.hold())
+        guard case .code(let code, _)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else { return }
+        for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        let sent = Watch(await sender.offer(to: link.peers[0], code: code, pictures: false, contents: .whole))
+        await sent.until("the sender's question", Self.isAsking)
+        await held.until("the receiver's question", Self.isAsking)
+        await sender.answer(true)
+        await receiver.answer(true)
+        await held.until("the receiver done", Self.isDone)
+        await sent.until("the sender done", Self.isDone)
+        #expect(!held.events.contains(where: Self.isRefused))
+        #expect(await onto.store.snapshot().notes.count == 3)
+    }
+
+    @Test("A yes to a question the link dropped under is nothing: the question comes down, and the next offer is asked afresh")
+    func staleAnswer() async throws {
+        let pair = Pair(from: try await PackagerFixture.populated(), onto: try await Device())
+        defer { pair.remove() }
+        let (held, code, peer) = await pair.hold()
+        var sent = Watch(await pair.sender.offer(to: peer, code: code, pictures: false, contents: .whole))
+        await sent.until("the sender's question", Self.isAsking)
+        await held.until("the receiver's question", Self.isAsking)
+        // The sender walks out of reach while the receiver's question is up.
+        pair.link.cut()
+        await pair.sender.stop()
+        for _ in 0..<300 where held.events.filter({ if case .code = $0 { true } else { false } }).count < 2 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        let codes = held.events.compactMap { if case .code(let next, _) = $0 { next } else { nil } }
+        #expect(codes == [code, code], "back to the code, the same one: \(held.events)")
+        // A late yes lands on no question.
+        await pair.receiver.answer(true)
+        // A fresh offer is asked about, and waits.
+        for _ in 0..<100 where pair.link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        let again = NearbyMove(link: pair.link, carrier: pair.from.packager(), device: "a laptop", retryDelay: .milliseconds(20), retries: 5)
+        sent = Watch(await again.offer(to: pair.link.peers[0], code: code, pictures: false, contents: .whole))
+        await sent.until("the sender's question", Self.isAsking)
+        await again.answer(true)
+        await held.until("asked again", { held.events.filter(Self.isAsking).count == 2 && Self.isAsking($0) })
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!held.events.contains { if case .moving = $0 { true } else { false } }, "nothing moves on the stale yes")
+        await pair.receiver.answer(true)
+        await held.until("done", Self.isDone)
+        await sent.until("done", Self.isDone)
+        await again.stop()
+    }
+
     @Test("Not allowed to look nearby is said as that, on either side")
     func notAllowed() async throws {
         let pair = Pair(from: try await PackagerFixture.populated(), onto: try await Device())

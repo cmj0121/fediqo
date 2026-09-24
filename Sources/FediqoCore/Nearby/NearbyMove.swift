@@ -69,8 +69,12 @@ public actor NearbyMove {
 
     private var continuation: AsyncStream<Event>.Continuation?
     private var task: Task<Void, Never>?
-    private var pending: [CheckedContinuation<Bool, Never>] = []
-    private var answered: Bool?
+    /// Waiters and answers, keyed by the offer asked about: a yes given to one offer is never
+    /// taken for the next.
+    private var pending: [String: [CheckedContinuation<Bool, Never>]] = [:]
+    private var answered: [String: Bool] = [:]
+    /// The offer the question on screen is about, or nothing while none is.
+    private var askingID: String?
     /// The receiver's person said yes to an offer this hold: the timeout no longer applies.
     private var holdAccepted = false
 
@@ -96,31 +100,45 @@ public actor NearbyMove {
 
     /// The person's answer to the question, on this side. Heard once; a later one is nothing.
     public func answer(_ yes: Bool) {
-        guard answered == nil else { return }
-        answered = yes
-        resumeWaiters(yes)
+        guard let id = askingID, answered[id] == nil else { return }
+        answered[id] = yes
+        resumeWaiters(for: id, yes)
     }
 
     /// Whatever is running stops, and the stream ends. Nothing half done is kept.
     public func stop() {
         task?.cancel()
         task = nil
-        resumeWaiters(false)
+        for id in pending.keys { resumeWaiters(for: id, false) }
+        askingID = nil
         continuation?.finish()
         continuation = nil
     }
 
-    private func resumeWaiters(_ yes: Bool) {
-        let waiters = pending
-        pending = []
+    private func resumeWaiters(for id: String, _ yes: Bool) {
+        let waiters = pending.removeValue(forKey: id) ?? []
         for waiter in waiters { waiter.resume(returning: yes) }
     }
 
-    /// The answer, once given. Every waiter — one per connection the question was up on — is
-    /// resumed by the one answer, so a link that dropped while asking leaves nothing hanging.
-    fileprivate func awaitAnswer() async -> Bool {
-        if let answered { return answered }
-        return await withCheckedContinuation { pending.append($0) }
+    /// The question about `id` is up on this side.
+    private func ask(_ id: String) {
+        askingID = id
+    }
+
+    /// The question about `id` is withdrawn — the link dropped before the answer reached the
+    /// wire — so an answer given late is nothing, and the next offer is asked afresh.
+    private func withdraw(_ id: String) {
+        if askingID == id { askingID = nil }
+        answered[id] = nil
+        resumeWaiters(for: id, false)
+    }
+
+    /// The answer about `id`, once given. Every waiter on it — one per connection the question
+    /// was up on — is resumed by the one answer, so a link that dropped while asking leaves
+    /// nothing hanging.
+    fileprivate func awaitAnswer(for id: String) async -> Bool {
+        if let answered = answered[id] { return answered }
+        return await withCheckedContinuation { pending[id, default: []].append($0) }
     }
 
     private func emit(_ event: Event) {
@@ -129,7 +147,8 @@ public actor NearbyMove {
 
     private func start(_ body: @escaping @Sendable () async -> Void) -> AsyncStream<Event> {
         stop()
-        answered = nil
+        answered = [:]
+        askingID = nil
         holdAccepted = false
         let (stream, continuation) = AsyncStream<Event>.makeStream()
         self.continuation = continuation
@@ -163,7 +182,7 @@ public actor NearbyMove {
         let folder: URL
         let file: URL
         let held: Bool
-        var key: Data?
+        var key: SymmetricKey?
         /// Read back whole: a join with the same offer is answered `done`.
         var finished = false
     }
@@ -175,6 +194,9 @@ public actor NearbyMove {
                 group.addTask {
                     try await Task.sleep(for: self.holdTimeout)
                     guard await self.holdAccepted else { throw NearbyRefusal.timedOut }
+                    // Accepted: this child must never finish first, or the move would be
+                    // cancelled under it. It parks until the hold loop ends and cancels it.
+                    while true { try await Task.sleep(for: .seconds(3600)) }
                 }
                 try await group.next()
                 group.cancelAll()
@@ -197,50 +219,67 @@ public actor NearbyMove {
             // Whatever was staged goes on every way out of this code: done, refused, stopped.
             defer { if let accepted { try? FileManager.default.removeItem(at: accepted.folder) } }
             var roll = false
-            for try await arrival in link.advertise(name: device, sessionID: sessionID, psk: psk) {
-                switch arrival {
-                case .failedHandshake:
-                    guesses += 1
-                    guard guesses < guessCap else { throw NearbyRefusal.guessing }
-                    // One guess per code — until the code was proven, when a stranger's guess
-                    // must not cut the move.
-                    if accepted == nil { roll = true }
-                case .joined(let connection):
-                    let mailbox = Mailbox(connection)
-                    defer {
-                        mailbox.close()
-                        connection.close()
-                    }
-                    do {
-                        let channel = try await NearbyChannel.open(
-                            over: connection, inbox: mailbox, role: .receiver, psk: psk, sessionID: sessionID
-                        )
-                        if try await serve(channel, mailbox: mailbox, accepted: &accepted) { return }
-                    } catch is NearbyDropped {
-                        // The link dropped: what is held stays, and the next join goes on.
-                        try Task.checkCancellation()
-                        if accepted != nil { await emit(.reconnecting(peer: accepted?.offer.summary.device ?? "")) }
-                    } catch NearbyRefusal.wrongCode {
-                        // The proof did not match: a guess, counted like a failed handshake.
+            // One listen per join: the listener is up only while nobody is joined, so a probe
+            // cannot reach a move in progress, and comes back only after a drop.
+            while !roll {
+                var joined: (any NearbyPeerConnection)?
+                for try await arrival in link.advertise(name: device, sessionID: sessionID, psk: psk) {
+                    switch arrival {
+                    case .failedHandshake:
+                        // A handshake that failed is a guess — until the code was proven, when
+                        // nothing a stranger does is counted against the move.
+                        guard accepted == nil else { continue }
                         guesses += 1
                         guard guesses < guessCap else { throw NearbyRefusal.guessing }
-                        if accepted == nil { roll = true }
-                    } catch {
-                        try Task.checkCancellation()
-                        try? await connection.send(.refuse)
-                        throw error
+                        roll = true
+                    case .joined(let connection):
+                        joined = connection
                     }
+                    break
                 }
-                if roll { break }
+                guard !roll, let connection = joined else {
+                    if roll { break }
+                    return
+                }
+                let mailbox = Mailbox(connection)
+                defer {
+                    mailbox.close()
+                    connection.close()
+                }
+                var channel: NearbyChannel?
+                do {
+                    let opened = try await NearbyChannel.open(
+                        over: connection, inbox: mailbox, role: .receiver, psk: psk, sessionID: sessionID
+                    )
+                    channel = opened
+                    if try await serve(opened, mailbox: mailbox, accepted: &accepted, code: code, sessionID: sessionID) { return }
+                } catch is NearbyDropped {
+                    // The link dropped: what is held stays, and the listen goes up again.
+                    try Task.checkCancellation()
+                    if accepted != nil { await emit(.reconnecting(peer: accepted?.offer.summary.device ?? "")) }
+                } catch NearbyRefusal.wrongCode {
+                    // The proof did not match: a guess, counted like a failed handshake.
+                    guard accepted == nil else { continue }
+                    guesses += 1
+                    guard guesses < guessCap else { throw NearbyRefusal.guessing }
+                    roll = true
+                } catch {
+                    // Said inside the channel where one is open, so the other side hears a
+                    // refusal and not a word it cannot read — a hold put away included.
+                    if let channel { try? await channel.send(.refuse) } else { try? await connection.send(.refuse) }
+                    try Task.checkCancellation()
+                    throw error
+                }
             }
-            guard roll else { return }
         }
     }
 
     /// One connection on the receiving side, the channel open. True once the hold is over —
     /// this side said no; false where the link dropped or the move finished, and a later join
     /// carries on or is answered `done`.
-    private nonisolated func serve(_ channel: NearbyChannel, mailbox: Mailbox, accepted: inout Accepted?) async throws -> Bool {
+    private nonisolated func serve(
+        _ channel: NearbyChannel, mailbox: Mailbox, accepted: inout Accepted?, code: String, sessionID: String
+    ) async throws -> Bool {
         await emit(.joined)
         guard case .offer(let offer) = try await channel.next() else { throw NearbyRefusal.malformed }
         let peer = offer.summary.device
@@ -262,14 +301,35 @@ public actor NearbyMove {
             let (needed, overflow) = offer.fileBytes.multipliedReportingOverflow(by: 3)
             guard !overflow, needed <= Int64(Int.max) else { throw NearbyRefusal.malformed }
             guard weight.free >= Int(needed) else { throw NearbyRefusal.noRoom(needed: Int(needed), free: weight.free) }
+            await ask(offer.id)
             await emit(.asking(offer, peer: peer, held: weight.holdsStore))
-            guard try await mailbox.waitAnswer(of: self, sealed: channel) else {
+            let yes: Bool
+            do {
+                // The sender says nothing while this question is up but a refusal, which
+                // `waitAnswer` throws; any other word is out of turn.
+                let (answer, heard) = try await mailbox.waitAnswer(of: self, for: offer.id, sealed: channel)
+                guard heard == nil else { throw NearbyRefusal.malformed }
+                yes = answer
+            } catch {
+                // The link went before the answer reached it: the question comes down, and a
+                // late answer is nothing — the next offer is asked afresh.
+                await withdraw(offer.id)
+                await emit(.code(code, sessionID: sessionID))
+                throw error
+            }
+            guard yes else {
                 try? await channel.send(.refuse)
                 await emit(.closed)
                 return true
             }
+            do {
+                try await channel.send(.accept)
+            } catch {
+                await withdraw(offer.id)
+                await emit(.code(code, sessionID: sessionID))
+                throw error
+            }
             await self.accepted()
-            try await channel.send(.accept)
             fresh = true
             // Staged only once the yes was heard on the wire: a link that drops on the way
             // leaves nothing to sweep.
@@ -281,9 +341,9 @@ public actor NearbyMove {
         }
         guard var held = accepted else { throw NearbyRefusal.malformed }
         if !fresh { try await channel.send(.accept) }
-        let key: Data
+        let key: SymmetricKey
         switch try await channel.next() {
-        case .key(let sent): key = sent
+        case .key(let sent): key = SymmetricKey(data: sent)
         case .refuse: throw NearbyRefusal.refusedThere
         default: throw NearbyRefusal.malformed
         }
@@ -315,7 +375,7 @@ public actor NearbyMove {
                 try handle.synchronize()
                 try handle.close()
                 await emit(.settling(peer: peer))
-                let packageKey = PackageKey.direct(SymmetricKey(data: key))
+                let packageKey = PackageKey.direct(key)
                 // The identical read back (#252): proven whole here before anything changes —
                 // and the header proven to be the one the question was asked from.
                 let summary = try await carrier.preview(held.file, key: packageKey)
@@ -420,13 +480,21 @@ public actor NearbyMove {
         peer: String, sentDone: inout Bool
     ) async throws -> Bool {
         try await channel.send(.offer(offer))
-        if await answered == nil { await emit(.asking(offer, peer: peer, held: false)) }
-        guard try await mailbox.waitAnswer(of: self, sealed: channel) else {
+        if await answered[offer.id] == nil {
+            await ask(offer.id)
+            await emit(.asking(offer, peer: peer, held: false))
+        }
+        // The receiver may say yes before this side does: its word, heard while the question
+        // is up here, is kept for the step that expects it.
+        let (yes, heard) = try await mailbox.waitAnswer(of: self, for: offer.id, sealed: channel)
+        guard yes else {
             try? await channel.send(.refuse)
             return false
         }
         await emit(.waiting(peer: peer))
-        switch try await channel.next() {
+        let word: NearbyFrame
+        if let heard { word = heard } else { word = try await channel.next() }
+        switch word {
         case .accept: break
         case .done:
             // Read back before the link dropped: the word that was missed.
@@ -484,6 +552,8 @@ final class Mailbox: NearbyInbox, Sendable {
     private struct Held {
         var queue: [Incoming] = []
         var waiter: CheckedContinuation<Incoming, Never>?
+        /// The pump, waiting for the one frame it pushed to be taken before it reads another.
+        var blocked: CheckedContinuation<Void, Never>?
         var closed = false
     }
 
@@ -491,9 +561,14 @@ final class Mailbox: NearbyInbox, Sendable {
     private let pump = Mutex<Task<Void, Never>?>(nil)
 
     init(_ connection: any NearbyPeerConnection) {
+        // One frame ahead of the consumer and no more: a sender faster than this disk waits on
+        // the wire rather than in this memory.
         let task = Task { [self] in
             do {
-                for try await frame in connection.frames { push(.frame(frame)) }
+                for try await frame in connection.frames {
+                    push(.frame(frame))
+                    await taken()
+                }
             } catch {}
             push(.ended)
         }
@@ -502,7 +577,25 @@ final class Mailbox: NearbyInbox, Sendable {
 
     func close() {
         pump.withLock { $0?.cancel() }
+        let blocked = held.withLock { held -> CheckedContinuation<Void, Never>? in
+            held.closed = true
+            defer { held.blocked = nil }
+            return held.blocked
+        }
+        blocked?.resume()
         push(.ended)
+    }
+
+    /// Waits until the queue is empty again — the frame pushed was taken — or the mailbox closed.
+    private func taken() async {
+        await withCheckedContinuation { continuation in
+            let now = held.withLock { held -> Bool in
+                if held.closed || held.queue.isEmpty { return true }
+                held.blocked = continuation
+                return false
+            }
+            if now { continuation.resume() }
+        }
     }
 
     private func push(_ incoming: Incoming) {
@@ -519,11 +612,16 @@ final class Mailbox: NearbyInbox, Sendable {
 
     private func take() async -> Incoming {
         await withCheckedContinuation { continuation in
-            let ready = held.withLock { held -> Incoming? in
-                if !held.queue.isEmpty { return held.queue.removeFirst() }
+            let (ready, blocked) = held.withLock { held -> (Incoming?, CheckedContinuation<Void, Never>?) in
+                if !held.queue.isEmpty {
+                    let next = held.queue.removeFirst()
+                    defer { held.blocked = nil }
+                    return (next, held.queue.isEmpty ? held.blocked : nil)
+                }
                 held.waiter = continuation
-                return nil
+                return (nil, nil)
             }
+            blocked?.resume()
             if let ready { continuation.resume(returning: ready) }
         }
     }
@@ -540,22 +638,26 @@ final class Mailbox: NearbyInbox, Sendable {
         }
     }
 
-    /// The person's answer, or what the peer said first: a refusal is `refusedThere`, anything
-    /// else it says is out of turn, and an ending is a drop. `sealed` is the channel the peer's
-    /// word rides in, once one is open.
-    func waitAnswer(of move: NearbyMove, sealed channel: NearbyChannel? = nil) async throws -> Bool {
+    /// The person's answer, and one word the peer said meanwhile, if any: a refusal is thrown
+    /// as `refusedThere`, a second word is out of turn, and an ending is a drop. `sealed` is the
+    /// channel the peer's word rides in, once one is open.
+    func waitAnswer(
+        of move: NearbyMove, for id: String, sealed channel: NearbyChannel? = nil
+    ) async throws -> (yes: Bool, heard: NearbyFrame?) {
         let waiter = Task { [self] in
-            let yes = await move.awaitAnswer()
+            let yes = await move.awaitAnswer(for: id)
             push(.answer(yes))
         }
         defer { waiter.cancel() }
+        var heard: NearbyFrame?
         while true {
             switch await take() {
-            case .answer(let yes): return yes
+            case .answer(let yes): return (yes, heard)
             case .frame(let frame):
                 let word = try channel.map { try $0.unseal(frame) } ?? frame
                 if case .refuse = word { throw NearbyRefusal.refusedThere }
-                throw NearbyRefusal.malformed
+                guard heard == nil else { throw NearbyRefusal.malformed }
+                heard = word
             case .ended: throw NearbyDropped()
             }
         }

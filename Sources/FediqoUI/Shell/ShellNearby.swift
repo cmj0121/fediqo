@@ -37,6 +37,9 @@ final class ShellNearby {
         case holding(code: String)
         /// The sender is looking at the devices nearby.
         case browsing([NearbyPeer])
+        /// The sender typed the code; before joining, the person is asked whether the other
+        /// screen shows the same mark.
+        case checkingMark(MarkCheck)
         /// The sender is writing the package.
         case packing(PackageProgress)
         case connecting(peer: String)
@@ -50,6 +53,14 @@ final class ShellNearby {
         case settling(peer: String)
         case done(PackageSummary, peer: String)
         case refused(NearbyRefusal)
+    }
+
+    /// What the sender is about to join with, held while the mark is checked.
+    struct MarkCheck: Equatable {
+        let peer: NearbyPeer
+        let code: String
+        let rides: Rides
+        let mark: String
     }
 
     struct Ask: Equatable {
@@ -96,6 +107,8 @@ final class ShellNearby {
     @ObservationIgnored private var pictures: DiskCopies?
     @ObservationIgnored private var adopt: (@MainActor () async -> Void)?
     @ObservationIgnored private var holding = false
+    /// The devices last listed, for the list to come back to.
+    @ObservationIgnored private var lastPeers: [NearbyPeer] = []
 
     init(work: SourceWork = .shared) {
         self.work = work
@@ -106,7 +119,7 @@ final class ShellNearby {
     /// The question or notice up right now, where the step is one.
     var asking: Step? {
         switch step {
-        case .asking, .refused, .done: step
+        case .asking, .refused, .done, .checkingMark: step
         default: nil
         }
     }
@@ -190,7 +203,9 @@ final class ShellNearby {
             if let weight = try? await carrier.weigh() { self?.weight = weight }
             do {
                 for try await peers in link.browse() {
-                    guard let self, case .browsing = self.step else { return }
+                    guard let self else { return }
+                    self.lastPeers = peers
+                    guard case .browsing = self.step else { continue }
                     self.step = .browsing(peers)
                     if let picked = self.picked, !peers.contains(picked) { self.picked = nil }
                 }
@@ -201,25 +216,41 @@ final class ShellNearby {
         }
     }
 
-    /// The person picked a device, typed its code and chose what rides. `save` writes the store
-    /// to disk first, so the package holds what is on screen.
-    func offer(
-        code: String, rides: Rides, with carrier: any StoreCarrier, link: any NearbyLink, device: String,
-        save: @escaping @MainActor () async -> Void
-    ) {
+    /// The person picked a device, typed its code and chose what rides. Before anything joins,
+    /// the mark the digits and that device's session make is shown and the person asked whether
+    /// the other screen shows the same: a device that does not know the code cannot show it.
+    func offer(code: String, rides: Rides) {
         guard case .browsing = step, let peer = picked, NearbyCode.isWellFormed(code) else { return }
+        let digits = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.code = digits
+        mark = NearbyCode.mark(code: digits, sessionID: peer.sessionID)
+        step = .checkingMark(MarkCheck(peer: peer, code: digits, rides: rides, mark: mark))
+    }
+
+    /// The other screen shows the same mark: the package is written and the device joined.
+    /// `save` writes the store to disk first, so the package holds what is on screen.
+    func markMatched(
+        with carrier: any StoreCarrier, link: any NearbyLink, device: String, save: @escaping @MainActor () async -> Void
+    ) {
+        guard case .checkingMark(let check) = step else { return }
         browsing?.cancel()
         browsing = nil
-        self.code = code.trimmingCharacters(in: .whitespacesAndNewlines)
         step = .packing(PackageProgress(done: 0, total: 0))
         hold(true)
         let move = NearbyMove(link: link, carrier: carrier, device: device)
         self.move = move
-        let code = self.code
         follow {
             await save()
-            return await move.offer(to: peer, code: code, pictures: rides.pictures, contents: rides.contents)
+            return await move.offer(to: check.peer, code: check.code, pictures: check.rides.pictures, contents: check.rides.contents)
         }
+    }
+
+    /// The other screen shows something else: nothing joins, and the list is back.
+    func markMismatched() {
+        guard case .checkingMark = step else { return }
+        code = ""
+        mark = ""
+        step = .browsing(lastPeers)
     }
 
     // MARK: - Answering
@@ -311,7 +342,7 @@ final class ShellNearby {
         switch event {
         case .code(let code, let sessionID):
             self.code = code
-            mark = NearbyCode.mark(sessionID: sessionID)
+            mark = NearbyCode.mark(code: code, sessionID: sessionID)
             step = .holding(code: code)
         case .joined:
             // A device proved the code; its line is begun before its offer names it.

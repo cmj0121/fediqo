@@ -46,6 +46,7 @@ struct QuestionTests {
             ShellQuestion.nearbyAsk(.init(offer: nearby, peer: "a tablet", held: true, receiving: true), language: language),
             ShellQuestion.nearbyAsk(.init(offer: nearby, peer: "a tablet", held: false, receiving: false), language: language),
             ShellQuestion.nearbyRefused(.notAllowed, language: language),
+            ShellQuestion.nearbyMark("AB12", peer: "a tablet", language: language),
             ShellQuestion.nearbyRefused(.wrongCode, language: language),
             ShellQuestion.nearbyDone(carried, peer: "a tablet", language: language),
         ] + clearKeys.map { ShellQuestion.clear(host: "a.example", detailKey: $0, language: language) }

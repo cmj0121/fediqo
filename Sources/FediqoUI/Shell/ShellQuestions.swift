@@ -336,6 +336,20 @@ enum ShellQuestion {
         return String(format: singular == one ? L10n.t(key, language: language) : singular, count, name)
     }
 
+    /// Before the sender joins: the mark its digits and the chosen device's session make, and
+    /// whether the other screen shows the same one. Not the same is the way out, back to the
+    /// list; nothing has joined either way.
+    static func nearbyMark(_ mark: String, peer: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "checkmark.seal",
+            title: String(format: L10n.t("nearby.mark.ask.title", language: language), mark),
+            line: String(format: L10n.t("nearby.mark.ask.line", language: language), peer),
+            help: L10n.t("nearby.mark.ask.help", language: language),
+            choices: [.init(yes, L10n.t("nearby.mark.ask.same", language: language), role: .primary)],
+            cancel: L10n.t("nearby.mark.ask.different", language: language)
+        )
+    }
+
     /// Why a move nearby stopped, each its own sentence. A refused look nearby is said as that —
     /// this device was not allowed to look — never as nobody being there.
     static func nearbyRefused(_ refusal: NearbyRefusal, language: DummyLanguage? = nil) -> ShellConfirmation {

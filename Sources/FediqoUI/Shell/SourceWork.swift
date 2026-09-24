@@ -138,9 +138,14 @@ final class SourceWork {
     /// draws the name alone.
     nonisolated static let nearbyMark = "nearby device: "
 
-    /// The record's key for the device nearby called `name`.
+    /// The record's key for the device nearby called `name`, as the device spells it.
     nonisolated static func nearbyKey(_ name: String) -> String {
         nearbyMark + name
+    }
+
+    /// A key as the record folds it: a host lower-cased, a device nearby as it names itself.
+    nonisolated static func foldKey(_ key: String) -> String {
+        key.hasPrefix(nearbyMark) ? key : key.lowercased()
     }
 
     /// What `begin` hands back and `end` takes. Ending one twice, or one already gone, is nothing.
@@ -194,7 +199,7 @@ final class SourceWork {
     ) -> Token {
         let now = Date()
         let entry = Running(
-            host: host.lowercased(), source: source, purpose: purpose, name: Self.named(name), since: now
+            host: Self.foldKey(host), source: source, purpose: purpose, name: Self.named(name), since: now
         )
         let (token, publish) = held.withLock { held -> (Token, Bool) in
             held.next += 1
@@ -231,7 +236,7 @@ final class SourceWork {
     /// The device nearby a line was begun for named itself after the join: the line, running
     /// and on the record, is listed under that name from now on. Nothing where the token is gone.
     nonisolated func renameNearby(_ token: Token, peer: String) {
-        let key = Self.nearbyKey(peer).lowercased()
+        let key = Self.nearbyKey(peer)
         let publish = held.withLock { held -> Bool in
             guard let running = held.running[token.id] else { return false }
             held.running[token.id] = Running(
@@ -617,7 +622,7 @@ struct SourceAct: Identifiable, Equatable, Sendable {
         allowedBy: Allowance.ID? = nil
     ) {
         self.id = id
-        self.reached = reached.lowercased()
+        self.reached = SourceWork.foldKey(reached)
         source = Self.attributed(reached: reached, pointedBy: pointedBy)
         self.purpose = purpose
         self.at = at
@@ -640,8 +645,8 @@ struct SourceAct: Identifiable, Equatable, Sendable {
     /// The source an act is listed under: the one that pointed to it where one did, and
     /// otherwise the host it went to. An empty pointer is no pointer.
     static func attributed(reached: String, pointedBy: String?) -> String {
-        let pointer = pointedBy?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        return pointer.isEmpty ? reached.lowercased() : pointer
+        let pointer = pointedBy.map { SourceWork.foldKey($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? ""
+        return pointer.isEmpty ? SourceWork.foldKey(reached) : pointer
     }
 
 
@@ -714,6 +719,6 @@ final class SourceRecord {
     /// Newest first, and only `source`'s where one is chosen.
     func listed(from source: String? = nil) -> ReversedCollection<[SourceAct]> {
         guard let source else { return acts.reversed() }
-        return (bySource[source.lowercased()] ?? []).reversed()
+        return (bySource[SourceWork.foldKey(source)] ?? []).reversed()
     }
 }

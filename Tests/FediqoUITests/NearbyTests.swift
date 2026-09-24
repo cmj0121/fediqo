@@ -100,7 +100,11 @@ struct NearbyTests {
         func offer(rides: ShellNearby.Rides = .withoutPictures) async {
             guard case .holding(let code) = holding.step else { Issue.record("no code"); return }
             offering.picked = offering.peers.first
-            offering.offer(code: code, rides: rides, with: from, link: link, device: "a laptop") {}
+            offering.offer(code: code, rides: rides)
+            guard case .checkingMark(let check) = offering.step else { Issue.record("no mark asked"); return }
+            #expect(check.mark == holding.mark, "the sender works the receiver's mark out from the digits")
+            #expect(offering.asking == offering.step)
+            offering.markMatched(with: from, link: link, device: "a laptop") {}
             await settle(offering) { if case .asking = $0 { true } else { false } }
             await settle(holding) { if case .asking = $0 { true } else { false } }
         }
@@ -154,6 +158,8 @@ struct NearbyTests {
         let sent = two.offering.work.record
         #expect(held.count == 1 && held[0].purpose == .nearbyMove && held[0].source == SourceWork.nearbyKey("a laptop"))
         #expect(sent.count == 1 && sent[0].purpose == .nearbyMove && sent[0].source == SourceWork.nearbyKey("a tablet"))
+        #expect(SourceWork.nearbyKey("Rex's iPad") == SourceWork.foldKey(SourceWork.nearbyKey("Rex's iPad")), "a device's name keeps its case")
+        #expect(SourceWork.foldKey("A.Example") == "a.example")
         #expect(SourceAct.shown(held[0].source) == "a laptop", "drawn by its name, keyed so it never reads as a host")
         #expect(two.holding.work.log.sources == [SourceWork.nearbyKey("a laptop")], "renamed from the unnamed join, not added beside it")
         #expect(two.holding.mark.count == 4)
@@ -202,7 +208,13 @@ struct NearbyTests {
         await two.begin()
         guard case .holding(let code) = two.holding.step else { return }
         two.offering.picked = two.offering.peers.first
-        two.offering.offer(code: code == "000000" ? "000001" : "000000", rides: .withoutPictures, with: two.from, link: two.link, device: "a laptop") {}
+        two.offering.offer(code: code == "000000" ? "000001" : "000000", rides: .withoutPictures)
+        guard case .checkingMark(let check) = two.offering.step else { return }
+        #expect(check.mark != two.holding.mark, "a wrong code shows a different mark before anything joins")
+        two.offering.markMismatched()
+        #expect(two.offering.sheet == .pick && two.offering.work.record.isEmpty, "not the same: back to the list, nothing joined")
+        two.offering.offer(code: code == "000000" ? "000001" : "000000", rides: .withoutPictures)
+        two.offering.markMatched(with: two.from, link: two.link, device: "a laptop") {}
         await two.settle(two.offering) { $0 == .refused(.wrongCode) }
         await two.settle(two.holding) { if case .holding(let next) = $0 { next != code } else { false } }
         #expect(two.offering.work.record.count == 1, "the try is on the record, under the device pointed at")
@@ -220,7 +232,7 @@ struct NearbyTests {
         nearby.dismiss()
         // An ill-formed code or no device picked goes nowhere.
         nearby.beginOffer(with: two.from, link: two.link)
-        nearby.offer(code: "12345", rides: .withoutPictures, with: two.from, link: two.link, device: "a laptop") {}
+        nearby.offer(code: "12345", rides: .withoutPictures)
         if case .browsing = nearby.step {} else { Issue.record("went with five digits") }
         nearby.dismiss()
     }
@@ -240,7 +252,9 @@ struct NearbyTests {
         #expect(!session.holdsStill)
         guard case .holding(let code) = holding.step else { Issue.record("no code"); return }
         session.nearby.picked = session.nearby.peers.first
-        session.nearby.offer(code: code, rides: .withoutPictures, with: from, link: link, device: "a laptop") {}
+        session.nearby.offer(code: code, rides: .withoutPictures)
+        #expect(!session.holdsStill, "nothing held while the mark is asked")
+        session.nearby.markMatched(with: from, link: link, device: "a laptop") {}
         #expect(session.holdsStill, "not held before the first byte moved")
         for _ in 0..<400 { if case .asking = session.nearby.step { break }; try? await Task.sleep(for: .milliseconds(10)) }
         #expect(session.holdsStill)
@@ -312,6 +326,9 @@ struct NearbyTests {
         #expect(denied.title == "This device was not allowed to look nearby")
         #expect(!denied.title.lowercased().contains("nobody") && !denied.line.lowercased().contains("nobody"))
         #expect(ShellQuestion.nearbyRefused(.package(.altered), language: .english) == ShellQuestion.carryRefused(.package(.altered), language: .english))
+        let mark = ShellQuestion.nearbyMark("AB12", peer: "a tablet", language: .english)
+        #expect(mark.title == "Does the other screen show AB12?" && mark.line.contains("a tablet"))
+        #expect(!mark.warns && mark.cancel == "Not the same" && mark.choices.map(\.id) == [ShellQuestion.yes])
     }
 
     @Test("The progress line says which way, how far, and a plain estimate from the pace; the code reads by threes")
@@ -350,6 +367,7 @@ struct NearbyTests {
             "nearby.ask.line", "nearby.ask.hold.help", "nearby.ask.move.help", "nearby.ask.hold.go", "nearby.ask.move.go",
             "nearby.ask.refuse", "nearby.done.title", "nearby.done.signIns.line",
             "nearby.unnamed", "nearby.mark.spoken", "nearby.mark.line",
+            "nearby.mark.ask.title", "nearby.mark.ask.line", "nearby.mark.ask.help", "nearby.mark.ask.same", "nearby.mark.ask.different",
         ] + ["notAllowed", "wrongCode", "refusedThere", "lost", "malformed", "unsure", "guessing", "timedOut", "other"]
             .flatMap { ["nearby.refused.\($0).title", "nearby.refused.\($0).line"] }
         let resources = URL(fileURLWithPath: #filePath)

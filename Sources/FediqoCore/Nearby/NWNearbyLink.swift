@@ -24,8 +24,13 @@ import Synchronization
 public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
     /// How long a join may take before it is a device out of reach.
     public static let connectTimeout: Duration = .seconds(20)
-    /// The one suite this link speaks: PSK for the code, ECDHE for forward secrecy.
+    /// The suites this link speaks, in order of preference: ECDHE-PSK with ChaCha20-Poly1305,
+    /// and plain PSK with AES-128-GCM for a device that cannot negotiate the first. Forward
+    /// secrecy is the in-band channel's job either way — every frame is sealed under a key
+    /// agreed fresh on each join — so the transport's part is to keep a stranger off the
+    /// connection at all. **To be confirmed on two devices**: which of the two they settle on.
     public static let suite = tls_ciphersuite_t(rawValue: 0xCCAC)!
+    public static let fallbackSuite = tls_ciphersuite_t(rawValue: 0x00A8)!
 
     private let queue = DispatchQueue(label: "dev.mini-poc.fediqo.nearby")
     private let endpoints = Mutex<[String: NWEndpoint]>([:])
@@ -40,6 +45,7 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         let identity = NearbyCode.pskIdentity(sessionID: sessionID).withUnsafeBytes { DispatchData(bytes: $0) }
         sec_protocol_options_add_pre_shared_key(tls.securityProtocolOptions, key as __DispatchData, identity as __DispatchData)
         sec_protocol_options_append_tls_ciphersuite(tls.securityProtocolOptions, suite)
+        sec_protocol_options_append_tls_ciphersuite(tls.securityProtocolOptions, fallbackSuite)
         sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
         sec_protocol_options_set_max_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
         let tcp = NWProtocolTCP.Options()
@@ -50,9 +56,15 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         return parameters
     }
 
-    /// Whether a negotiated suite is the one asked for. Anything else is refused.
+    /// Whether a negotiated suite is one of the two asked for. Anything else — a certificate
+    /// suite, a default the framework still offered — is refused.
     public static func suiteHolds(_ negotiated: tls_ciphersuite_t?) -> Bool {
-        negotiated == suite
+        negotiated == suite || negotiated == fallbackSuite
+    }
+
+    /// Whether an error is the local-network permission refused.
+    static func isPolicy(_ error: NWError) -> Bool {
+        (refusal(error) as? NearbyRefusal) == .notAllowed
     }
 
     public func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
@@ -72,8 +84,11 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         let open = Mutex<[ObjectIdentifier: NWPeerConnection]>([:])
         listener.stateUpdateHandler = { state in
             switch state {
-            case .failed(let error), .waiting(let error):
+            case .failed(let error):
                 continuation.finish(throwing: Self.refusal(error))
+            case .waiting(let error):
+                // Waiting is a network not there yet, unless it is the permission refused.
+                if Self.isPolicy(error) { continuation.finish(throwing: NearbyRefusal.notAllowed) }
             case .cancelled:
                 continuation.finish()
             default:
@@ -157,7 +172,7 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         guard ready else {
             // A handshake that fails against a device that is there is the code; a device that
             // cannot be reached at all is a drop, to be tried again.
-            throw wrapped.failedHandshake ? NearbyRefusal.wrongCode : NearbyDropped()
+            throw wrapped.failedHandshake || wrapped.reset ? NearbyRefusal.wrongCode : NearbyDropped()
         }
         return wrapped
     }
@@ -187,6 +202,9 @@ final class NWPeerConnection: NearbyPeerConnection, @unchecked Sendable {
     private struct Opening: Sendable {
         var opened: (@Sendable (Bool) -> Void)?
         var failedHandshake = false
+        /// The other side closed the connection under the handshake: on the joining side, the
+        /// holder refusing the proof; on the holding side, a bare probe, which is not a guess.
+        var reset = false
         var ready = false
     }
 
@@ -198,8 +216,11 @@ final class NWPeerConnection: NearbyPeerConnection, @unchecked Sendable {
         self.peerName = peerName
     }
 
-    /// Whether the handshake, rather than the reach, is what failed.
+    /// Whether the handshake itself — TLS bytes exchanged and refused — is what failed.
     var failedHandshake: Bool { state.withLock { $0.failedHandshake } }
+
+    /// Whether the other side closed under the handshake.
+    var reset: Bool { state.withLock { $0.reset } }
 
     /// Starts the connection; `done` is told once whether it came up — and it comes up only on
     /// the one suite asked for. `timeout` is how long that may take.
@@ -216,14 +237,19 @@ final class NWPeerConnection: NearbyPeerConnection, @unchecked Sendable {
                 }
                 self.state.withLock { $0.ready = true }
                 self.take(handshakeFailed: false)?(true)
+            case .waiting(let error) where !NWNearbyLink.isPolicy(error):
+                // Not there yet: the attempt stands until the timeout ends it.
+                break
             case .failed(let error), .waiting(let error):
-                // A handshake refused reads as a TLS error, or — where the other side closed
-                // on the proof — as the connection reset under it; a device out of reach reads
-                // as anything else.
+                // A handshake refused reads as a TLS error, or — on the joining side, where the
+                // holder closed on the proof — as the connection reset under it; a device out
+                // of reach reads as anything else. On the holding side a reset is a bare probe.
                 let handshake: Bool
                 switch error {
                 case .tls: handshake = true
-                case .posix(let code): handshake = code == .ECONNRESET || code == .EPIPE
+                case .posix(let code):
+                    handshake = false
+                    if self.peerName != nil, code == .ECONNRESET || code == .EPIPE { self.state.withLock { $0.reset = true } }
                 default: handshake = false
                 }
                 self.take(handshakeFailed: handshake)?(false)

@@ -161,7 +161,11 @@ struct NearbyFlow: ViewModifier {
     }
 
     private var asking: Binding<ShellNearby.Step?> {
-        Binding(get: { session?.nearby.asking }, set: { if $0 == nil { session?.nearby.dismiss() } })
+        Binding(get: { session?.nearby.asking }, set: {
+            guard $0 == nil else { return }
+            // The mark question put away is "not the same": back to the list, not out.
+            if case .checkingMark = session?.nearby.step { session?.nearby.markMismatched() } else { session?.nearby.dismiss() }
+        })
     }
 
     private var sheet: Binding<ShellNearby.Sheet?> {
@@ -170,6 +174,7 @@ struct NearbyFlow: ViewModifier {
 
     static func question(_ step: ShellNearby.Step) -> ShellConfirmation {
         switch step {
+        case .checkingMark(let check): ShellQuestion.nearbyMark(check.mark, peer: check.peer.name)
         case .asking(let ask): ShellQuestion.nearbyAsk(ask)
         case .refused(let refusal): ShellQuestion.nearbyRefused(refusal)
         case .done(let summary, let peer): ShellQuestion.nearbyDone(summary, peer: peer)
@@ -180,6 +185,12 @@ struct NearbyFlow: ViewModifier {
     private func answer(_ step: ShellNearby.Step, _ id: String) {
         guard let session else { return }
         switch step {
+        case .checkingMark:
+            guard id == ShellQuestion.yes, let carrier = session.carrier, let link = session.nearbyLink else {
+                session.nearby.markMismatched()
+                return
+            }
+            session.nearby.markMatched(with: carrier, link: link, device: session.deviceName) { await session.persist?() }
         case .asking: session.nearby.answer(id == ShellQuestion.yes)
         default: session.nearby.dismiss()
         }
@@ -309,7 +320,6 @@ struct NearbyPickSheet: View {
                 ForEach(peers) { peer in
                     ShellListRow(
                         id: peer, title: peer.name, brief: L10n.t("nearby.pick.row.brief"),
-                        figure: NearbyCode.mark(sessionID: peer.sessionID),
                         selection: $nearby.picked, onOpen: { focused = true }
                     ) {
                         Image(systemName: "antenna.radiowaves.left.and.right")
@@ -372,9 +382,7 @@ struct NearbyPickSheet: View {
     }
 
     private func go() {
-        guard ready, let carrier = session.carrier, let link = session.nearbyLink else { return }
-        session.nearby.offer(code: code, rides: rides, with: carrier, link: link, device: session.deviceName) {
-            await session.persist?()
-        }
+        guard ready else { return }
+        session.nearby.offer(code: code, rides: rides)
     }
 }
