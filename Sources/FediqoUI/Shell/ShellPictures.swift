@@ -467,6 +467,11 @@ final class ShellPictures {
         await work(for: key, host: Self.tag(host)).value
     }
 
+    /// Whether a fetch of this picture has begun, queued or on the wire. Asked by tests only.
+    func isFetching(_ url: URL, scale: CGFloat, tier: Tier) -> Bool {
+        inFlight[Key(url: url, scale: scale, tier: tier)] != nil
+    }
+
     /// A press asking again: lifts the mark of nothing for this address and runs the same
     /// `fetch` a first ask does. Does not bump `generation`, so a retry of one picture is not
     /// a cohort of every other miss. A nil URL is still nothing to try. A second miss writes
@@ -489,8 +494,8 @@ final class ShellPictures {
         }
         // On `SourceWork` while it is on the wire (#164) — and not while it is read from disk,
         // which asks no source anything.
-        // Listed under the source that asked for it, wherever the picture is kept (#218).
-        let client = WatchedHTTP(http, for: .picture, source: host, in: work)
+        let http = http
+        let work = work
         let disk = disk
         // Unstructured on purpose: the caller is a view's `.task`, and that is cancelled by any
         // rebuild. What it cancels has to be this view's waiting and not the work itself.
@@ -505,6 +510,18 @@ final class ShellPictures {
                 answer = .success(Loaded(image: kept, fresh: nil))
             } else {
                 await self.enter()
+                // **Asked only for a source still waiting on it** (#221). A fetch queued behind
+                // the gate when every source it was for was cleared or removed would otherwise go
+                // out the moment a slot came free, and be recorded against a source that is gone.
+                // Listed under the source that asked for it while it still wants it, and otherwise
+                // under whoever else is waiting (#218).
+                let waiting = self.inFlight[key]?.hosts ?? []
+                guard let owner = waiting.contains(host) ? host : waiting.min() else {
+                    self.leave()
+                    self.inFlight[key] = nil
+                    return
+                }
+                let client = WatchedHTTP(http, for: .picture, source: owner, in: work)
                 answer = await Self.load(key.url, using: client, maxPixels: key.tier.maxPixels)
                 self.leave()
             }

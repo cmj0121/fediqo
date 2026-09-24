@@ -352,15 +352,48 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     ///
     /// WebKit files its records under a site's registrable domain, not the host a reader typed,
     /// so a record belongs here when either name is the other or ends in it. That is coarser
-    /// than a host: two forums under one registrable domain share their records, and clearing
-    /// one clears both. The alternative — keeping records a Clear should have dropped — is the
-    /// worse error.
-    static func forget(host: String, in store: WKWebsiteDataStore) async {
+    /// than a host: two forums under one registrable domain share their records.
+    ///
+    /// **Every cookie a request to this host would carry goes, whoever else it is sent to.** A
+    /// parent-domain cookie two forums share is one session for both, and forgetting one ends it
+    /// for both: keeping a session a sign-out should have dropped is the worse error.
+    ///
+    /// **What is not sent to this host is all that is kept** (#221), and only where another forum
+    /// still added shares the record (`keeping`): a neighbour's own host-only cookie, or the
+    /// sub-domain cookie of a forum under this one. Where none shares it, the record goes whole.
+    /// What else a shared record holds — local storage, IndexedDB, cache — stays with it, since
+    /// it cannot be told apart per host.
+    static func forget(host: String, in store: WKWebsiteDataStore, keeping: Set<String> = []) async {
+        let host = host.lowercased()
+        let others = keeping.map { $0.lowercased() }.filter { $0 != host }
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
         let records = await store.dataRecords(ofTypes: types)
         let mine = records.filter { holds($0.displayName, for: host) }
-        guard !mine.isEmpty else { return }
-        await store.removeData(ofTypes: types, for: mine)
+        let shared = mine.filter { record in others.contains { holds(record.displayName, for: $0) } }
+        let whole = mine.filter { record in !shared.contains { $0.displayName == record.displayName } }
+        if !whole.isEmpty { await store.removeData(ofTypes: types, for: whole) }
+        guard !shared.isEmpty else { return }
+        let jar = store.httpCookieStore
+        for cookie in await jar.allCookies()
+        where goes(cookie.domain, forgetting: host, keeping: others) {
+            await jar.deleteCookie(cookie)
+        }
+    }
+
+    /// Whether a cookie filed under `domain` goes as `host` is forgotten: it is sent to that host,
+    /// or it belongs to it and no forum still added is sent it.
+    static func goes(_ domain: String, forgetting host: String, keeping others: [String]) -> Bool {
+        sent(domain, to: host)
+            || (holds(domain, for: host) && !others.contains(where: { sent(domain, to: $0) }))
+    }
+
+    /// Whether a cookie filed under `domain` goes out with a request to `host`: the host is that
+    /// domain, or under it. Narrower than `holds` on purpose.
+    static func sent(_ domain: String, to host: String) -> Bool {
+        var name = domain.lowercased()
+        if name.hasPrefix(".") { name.removeFirst() }
+        let host = host.lowercased()
+        return !name.isEmpty && (host == name || host.hasSuffix("." + name))
     }
 
     /// Whether a record or cookie filed under `name` belongs to `host`. A cookie's domain may

@@ -233,12 +233,15 @@ public final class MastodonSessions {
     /// The token leaves this device first; then the server is asked to forget it, and whatever it
     /// answers changes nothing here.
     ///
-    /// **This signs the app out, not the browser.** The sign-in page ran in the shared Safari
-    /// session (decision 9), so the reader stays signed in to the server's website in Safari, and
-    /// the next sign-in here can be one tap. Signing out of the website is Safari's business.
+    /// **Nothing is left that could sign in as the reader there** (#221). The sign-in page runs
+    /// in a session of its own that keeps nothing (`WebAuthBrowser`), so no website session of
+    /// this sign-in outlives it either.
     ///
     /// `forgettingApp` drops the app registration too — Clear and Remove, after which nothing of
-    /// this source's sign-in is left on the device. A plain sign-out keeps it for next time.
+    /// this source's sign-in is left on the device. A plain sign-out keeps it for next time: it names
+    /// this app to the server and signs nobody in without the reader on the server's own page
+    /// (#221), and one made afresh at every sign-in would pile up on a server that has no way to
+    /// drop one.
     func signOut(host raw: String, forgettingApp: Bool = false) async {
         let host = raw.lowercased()
         signOuts[host, default: 0] += 1
@@ -328,12 +331,14 @@ public final class MastodonSessions {
     }
 }
 
-/// The system's web authentication sheet, in the shared Safari session (decision 9): a reader
-/// already signed in to their server in Safari is one tap from done.
+/// The system's web authentication sheet, **in a session of its own that keeps nothing** (#221).
 ///
-/// **The cost of that, accepted in decision 9:** the server's web session outlives an app
-/// sign-out. Signing out here forgets the token and revokes it; the reader is still signed in to
-/// the website in Safari, and a second account on the same server means signing out there first.
+/// It used to share Safari's session (decision 9), so a reader already signed in there was one
+/// tap from done — and the server's web session this sign-in made outlived a sign-out here: the
+/// token was gone and revoked, and the device could still sign in as the reader, one tap away.
+/// Signing out now leaves nothing that can. The cost, said out loud: each sign-in asks for the
+/// reader's password on the server's page (a password manager can still fill it), and a
+/// session the reader already has in Safari is neither used nor touched.
 struct WebAuthBrowser: OAuthBrowser {
     let session: WebAuthenticationSession
 
@@ -342,7 +347,7 @@ struct WebAuthBrowser: OAuthBrowser {
             return try await session.authenticate(
                 using: url,
                 callback: .customScheme(callbackScheme),
-                preferredBrowserSession: .shared,
+                preferredBrowserSession: .ephemeral,
                 additionalHeaderFields: [:]
             )
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {

@@ -102,7 +102,7 @@ extension ShellReload {
         let host = switch reach {
         case .more(let stretch), .missing(let stretch, _): stretch.host
         }
-        guard session.editing == nil else { return false }
+        guard session.editing == nil, !gone.contains(host.lowercased()) else { return false }
         let busy = [Ask.timeline, .held].filter(asking.contains)
         guard !busy.contains(where: { readingHosts[$0]?.contains(host) ?? true }) else { return false }
         guard !asking.contains(.more) else {
