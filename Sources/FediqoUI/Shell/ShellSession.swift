@@ -449,14 +449,40 @@ final class ShellSession {
         return true
     }
 
-    /// Which tab Preferences is showing (#143): what a person chooses, or which Fediqo this is.
-    var preferencesPurpose: PreferencesPane.Purpose = .choices
+    /// Which tab Preferences is showing (#143). A detail opened on one tab is not waiting on the
+    /// next.
+    var preferencesPurpose: PreferencesPane.Purpose = .choices {
+        didSet { if preferencesPurpose != oldValue { preferencesOpened = nil } }
+    }
+
+    /// The detail Preferences is showing in place of a tab's list (#233): an allowed entry, or
+    /// adding a host; nothing is the list. Here rather than in the tab's own state so Escape — which
+    /// the shell hears before any view — closes it before anything further out.
+    var preferencesOpened: PreferencesPane.Detail? {
+        didSet { if let oldValue, preferencesOpened == nil { preferencesReturning = oldValue } }
+    }
+
+    /// The detail last closed, so the list lights its row again and a keyboard reader keeps their
+    /// place.
+    private(set) var preferencesReturning: PreferencesPane.Detail?
+
+    /// Escape on Preferences: back from a detail to its list. Only a detail on screen is closed,
+    /// so Escape is never spent on one nobody can see.
+    @discardableResult
+    func closePreferencesDetail(own: @autoclosure () -> [Allowance.ID] = AllowanceBook.shared.own.map(\.id)) -> Bool {
+        guard let opened = preferencesOpened, opened.shown(on: preferencesPurpose, own: own()) else { return false }
+        preferencesOpened = nil
+        return true
+    }
 
     /// Whether the record of everything this run has asked of the sources is open (#218).
     var activityShown = false
+    /// The source the record opens narrowed to — a line of work in flight entered (#233); nil
+    /// for every source.
+    var activityFrom: String?
 
     /// Tab and ⇧Tab on Preferences, the way they rotate Usage: Settings, This Fediqo, In flight,
-    /// and round again.
+    /// Allowed, Your hosts, and round again — closing a detail left open, as a pill does.
     @discardableResult
     func rotatePreferencesTab(by step: Int) -> Bool {
         preferencesPurpose = DummyCommand.advanced(

@@ -4,12 +4,16 @@ import SwiftUI
 /// Language, theme, type, and the latest date every timeline stops at (#22) — what a person
 /// chooses. What this device holds is on `UsagePane` (#21).
 ///
-/// **Four tabs, in Usage's shape** (#143, #164, #226): what a person chooses, which Fediqo this
-/// is, what it is asking of the sources right now, and what it may reach beyond them. The same pills at the head of the same grouped
+/// **Five tabs, in Usage's shape** (#143, #164, #226, #233): what a person chooses, which Fediqo
+/// this is, what it is asking of the sources right now, what the app starts with letting through
+/// beyond them, and the hosts the person added. The same pills at the head of the same grouped
 /// `Form`, and the same key — Tab and ⇧Tab rotate them (`ShellSession.rotatePreferencesTab`) — so
 /// the page is reached and walked on a Mac and on a phone the way Usage already is. The second
-/// tab is `BuildStampSection`, whole, the third `SourceWorkSection`, and the fourth
-/// `AllowanceSection`.
+/// tab is `BuildStampSection`, whole, the third `SourceWorkSection`, the fourth
+/// `AllowanceSection` and the fifth `OwnHostsSection`: each one style, a list or a form, never
+/// both (#231).
+///
+/// **Every setting says one short line**, and its long explanation is behind the (?) beside it.
 struct PreferencesPane: View {
     @Environment(DummyPrefs.self) private var prefs
     @Environment(\.colorScheme) private var colorScheme
@@ -28,6 +32,7 @@ struct PreferencesPane: View {
         case build
         case work
         case reach
+        case hosts
 
         var id: Self { self }
 
@@ -37,6 +42,7 @@ struct PreferencesPane: View {
             case .build: "prefs.tab.build"
             case .work: "prefs.tab.work"
             case .reach: "prefs.tab.reach"
+            case .hosts: "prefs.tab.hosts"
             }
         }
 
@@ -46,22 +52,47 @@ struct PreferencesPane: View {
             case .build: "info.circle"
             case .work: "arrow.up.arrow.down"
             case .reach: "checkmark.shield"
+            case .hosts: "globe"
             }
         }
     }
 
+    /// A detail a tab shows in place of its list (#233): one of the allowed entries — the app's
+    /// own on Allowed, the person's on Your hosts — or adding a host.
+    enum Detail: Equatable {
+        case entry(Allowance.ID)
+        case adding
+
+        /// Whether it is on screen with `purpose` the tab in front, and `own` the hosts the
+        /// person added: a detail of another tab, or of a host since removed, is not.
+        func shown(on purpose: Purpose, own: [Allowance.ID]) -> Bool {
+            switch self {
+            case .entry(let id) where Allowance.ID.builtIn.contains(id): purpose == .reach
+            case .entry(let id): purpose == .hosts && own.contains(id)
+            case .adding: purpose == .hosts
+            }
+        }
+    }
+
+    /// Where the detail is kept with no shell round the pane — a preview, a test.
+    @State private var unhosted: Detail?
+
     private var purpose: Purpose { session?.preferencesPurpose ?? .choices }
+
+    /// The detail open, on the session where there is one, so Escape reaches it.
+    private var opened: Binding<Detail?> {
+        Binding(
+            get: { session?.preferencesOpened ?? unhosted },
+            set: { detail in
+                if let session { session.preferencesOpened = detail } else { unhosted = detail }
+            }
+        )
+    }
 
     var body: some View {
         Form {
             Section { tabs }
-            switch purpose {
-            case .choices: choices
-            case .build: BuildStampSection(stamp: stamp)
-            case .work: SourceWorkSection(work: session?.work ?? .shared)
-                if let session { ActivityEntry(session: session) }
-            case .reach: AllowanceSection(book: .shared, sources: session?.sources.map(\.host) ?? [])
-            }
+            page
         }
         .formStyle(.grouped)
         // **The pane the type size is chosen on has to move with it** (#96). A `Form`'s rows
@@ -76,6 +107,32 @@ struct PreferencesPane: View {
         .scrollIndicators(.never)
         .clearsFloatingCorner()
         .padding(ShellSpace.snug)
+    }
+
+    /// The tab the page is on, whole.
+    @ViewBuilder
+    private var page: some View {
+        switch purpose {
+        case .choices: choices
+        case .build: BuildStampSection(stamp: stamp)
+        case .work: SourceWorkSection(work: session?.work ?? .shared, onOpen: openRecord)
+            if let session { ActivityEntry(session: session) }
+        case .reach: AllowanceSection(book: .shared, opened: opened, returning: session?.preferencesReturning)
+        case .hosts: OwnHostsSection(
+                book: .shared, sources: session?.sources.map(\.host) ?? [], opened: opened,
+                returning: session?.preferencesReturning, onTyping: typing
+            )
+        }
+    }
+
+    /// A line of work in flight, entered: this run's record, narrowed to its source.
+    private func openRecord(_ source: String) {
+        if let session { ActivityEntry.open(session, from: source) }
+    }
+
+    /// The host field holds the keyboard, and the shell's single keys leave it alone.
+    private func typing(_ now: Bool) {
+        session?.searchFocused = now
     }
 
     /// What a person chooses: the page as it was before it had tabs.
@@ -104,8 +161,9 @@ struct PreferencesPane: View {
                 DatePicker(L10n.t("prefs.latest.date"), selection: latestDay, displayedComponents: .date)
             }
         } footer: {
-            Text(L10n.t("prefs.latest.footer"))
+            Text(L10n.t("prefs.latest.brief"))
                 .shellFont(.meta)
+                .shellHelp("prefs.latest.footer", about: L10n.t("prefs.latest"))
         }
     }
 
@@ -119,8 +177,9 @@ struct PreferencesPane: View {
                 }
             }
         } footer: {
-            Text(L10n.t("prefs.askEvery.footer"))
+            Text(L10n.t("prefs.askEvery.brief"))
                 .shellFont(.meta)
+                .shellHelp("prefs.askEvery.footer", about: L10n.t("prefs.askEvery"))
         }
     }
 

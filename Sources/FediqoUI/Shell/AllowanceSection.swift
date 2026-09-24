@@ -1,168 +1,131 @@
 import SwiftUI
 
-/// Preferences' fourth tab (#226): everything the app may reach beyond a source, as a list the
-/// person reads and edits. Everything said is `Allowance`'s and everything changed is
-/// `AllowanceBook`'s, which is where both are decided and tested; this lays them out.
+/// Preferences' Allowed tab (#226, #233): what the app starts with letting through beyond a
+/// source, as a list. Everything said is `Allowance`'s and everything changed is `AllowanceBook`'s,
+/// which is where both are decided and tested; this lays them out.
 ///
-/// **The app's own entries** each say what they let through, when, and why, with a switch: off,
-/// what it let through is refused like anything else, at once. **The person's own** are a host
-/// for one of their sources, marked as theirs, with a way to remove each and a way to add one.
+/// **A row is the brief** — what it is, when it applies, and whether it is on. **Entering it opens
+/// its detail**, in place of the list, where it is explained and switched: off, what it let
+/// through is refused like anything else, at once. The hosts the person added are a tab of their
+/// own (`OwnHostsSection`).
 struct AllowanceSection: View {
     let book: AllowanceBook
-    /// The sources the person has, as a host is added for one of them.
-    let sources: [String]
+    /// The detail open — Preferences' own, kept on the session so Escape closes it.
+    @Binding var opened: PreferencesPane.Detail?
+    /// The detail last closed, whose row the list lights again.
+    let returning: PreferencesPane.Detail?
 
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var typed = ""
-    @State private var chosen = ""
-    @State private var refusal: AllowanceBook.Refusal?
+    @State private var lit: Allowance.ID?
 
     var body: some View {
+        if case .entry(let id) = opened, let entry = Allowance.standing.first(where: { $0.id == id }) {
+            AllowanceDetail(entry: entry, on: on(entry.id)) { opened = nil }
+        } else {
+            list
+        }
+    }
+
+    private var list: some View {
         Section {
             ForEach(Allowance.standing) { entry in
-                Toggle(isOn: on(entry.id)) { EntryText(entry: entry) }
-                    .accessibilityLabel(Text(entry.spoken()))
+                ShellListRow(
+                    id: entry.id, title: entry.title(), brief: entry.whenText(),
+                    figure: Self.figure(on: book.isOn(entry.id)),
+                    selection: $lit, onOpen: { opened = .entry(entry.id) }, onStep: step
+                ) {
+                    Image(systemName: entry.symbol)
+                }
             }
+            .onAppear { if case .entry(let id) = returning { lit = id } }
         } header: {
             Text(L10n.t("allow.builtIn"))
         } footer: {
-            Text(L10n.t("allow.builtIn.footer"))
+            Text(L10n.t("allow.builtIn.brief"))
                 .shellFont(.meta)
-        }
-        Section {
-            if book.own.isEmpty {
-                Text(L10n.t("allow.own.none"))
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            }
-            ForEach(book.own) { entry in
-                HStack(alignment: .top, spacing: ShellSpace.step) {
-                    EntryText(entry: entry, gone: !served(entry))
-                    Spacer(minLength: 0)
-                    Button(role: .destructive) {
-                        book.remove(entry.id)
-                    } label: {
-                        Image(systemName: "minus.circle")
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel(String(format: L10n.t("allow.own.remove"), entry.title()))
-                }
-                .accessibilityElement(children: .contain)
-            }
-            adding
-        } header: {
-            Text(L10n.t("allow.own"))
-        } footer: {
-            Text(L10n.t("allow.own.footer"))
-                .shellFont(.meta)
+                .shellHelp("allow.builtIn.footer", about: L10n.t("allow.builtIn"))
         }
     }
 
-    /// A host, and the source it is for.
-    @ViewBuilder
-    private var adding: some View {
-        if sources.isEmpty {
-            Text(L10n.t("allow.own.noSource"))
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-        } else {
-            Picker(L10n.t("allow.own.source"), selection: source) {
-                ForEach(sources, id: \.self) { Text($0).tag($0) }
-            }
-            HStack(spacing: ShellSpace.snug) {
-                TextField(L10n.t("allow.own.host"), text: $typed)
-                    .textFieldStyle(.plain)
-                    .onSubmit(add)
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                    #endif
-                    .autocorrectionDisabled()
-                    .accessibilityLabel(L10n.t("allow.own.host"))
-                Button(L10n.t("allow.own.add"), action: add)
-                    .disabled(typed.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-            if let refusal {
-                Text(Self.sentence(refusal))
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.alarm(colorScheme))
-            }
-        }
+    /// What a row says of its switch.
+    static func figure(on: Bool, language: DummyLanguage? = nil) -> String {
+        L10n.t(on ? "allow.row.on" : "allow.row.off", language: language)
     }
 
-    /// The source a host is added for: the one chosen while it is still a source, the first
-    /// otherwise.
-    private var source: Binding<String> {
-        Binding(
-            get: { sources.contains(chosen) ? chosen : sources.first ?? "" },
-            set: { chosen = $0 }
-        )
+    private func step(_ by: Int) {
+        lit = ShellListStep.stepped(Allowance.ID.builtIn, from: lit, by: by)
     }
 
     private func on(_ id: Allowance.ID) -> Binding<Bool> {
         Binding(get: { book.isOn(id) }, set: { book.set(id, on: $0) })
     }
+}
 
-    /// Whether the source an entry serves is among the person's now.
-    private func served(_ entry: Allowance) -> Bool {
-        sources.contains { SourceWork.fold($0) == entry.source }
-    }
+/// One of the app's own entries, opened: its switch, then what it lets through, when, why, and
+/// the hosts. **The switch holds the keyboard as the detail opens, and Return flips it** — only
+/// there, and once a press — so a detail opened from the keyboard is worked from it.
+struct AllowanceDetail: View {
+    let entry: Allowance
+    @Binding var on: Bool
+    let onBack: () -> Void
 
-    private func add() {
-        refusal = book.add(typed, for: source.wrappedValue)
-        if refusal == nil { typed = "" }
-    }
-
-    static func sentence(_ refusal: AllowanceBook.Refusal, language: DummyLanguage? = nil) -> String {
-        switch refusal {
-        case .notAHost: L10n.t("allow.own.refused.notAHost", language: language)
-        case .itsOwnHost: L10n.t("allow.own.refused.itsOwnHost", language: language)
-        case .alreadyThere: L10n.t("allow.own.refused.alreadyThere", language: language)
-        case .wildcard: L10n.t("allow.own.refused.wildcard", language: language)
-        case .address: L10n.t("allow.own.refused.address", language: language)
-        case .port: L10n.t("allow.own.refused.port", language: language)
-        case .path: L10n.t("allow.own.refused.path", language: language)
+    var body: some View {
+        Section {
+            Toggle(L10n.t("allow.detail.on"), isOn: $on)
+                .modifier(ReturnSwitches(on: $on))
+                .accessibilityLabel(String(format: L10n.t("allow.detail.on.spoken"), entry.title()))
+                .accessibilityHint(L10n.t("allow.detail.on.hint"))
+            AllowanceFacts(entry: entry)
+        } header: {
+            ShellDetailHead(entry.title(), onBack: onBack) { Image(systemName: entry.symbol) }
+        } footer: {
+            Text(L10n.t("allow.builtIn.brief"))
+                .shellFont(.meta)
+                .shellHelp("allow.builtIn.footer", about: entry.title())
         }
     }
 }
 
-/// One entry as the list says it: what it is — marked where it is the person's — what it lets
-/// through, when, why, and the hosts.
-struct EntryText: View {
-    let entry: Allowance
-    /// Whether the source it serves is no longer one the person has.
-    var gone = false
+/// Return on the switch that holds the keyboard flips it. **Only the key going down**, so a
+/// held Return is one flip and not a flicker; and only while this switch is focused, so a
+/// Return anywhere else on the window is not heard here.
+struct ReturnSwitches: ViewModifier {
+    @Binding var on: Bool
+    @FocusState private var focused: Bool
 
-    @Environment(\.colorScheme) private var colorScheme
+    func body(content: Content) -> some View {
+        content
+            .focusable()
+            .focused($focused)
+            .onAppear { focused = true }
+            .onKeyPress(.return, phases: .down) { _ in
+                on.toggle()
+                return .handled
+            }
+    }
+}
+
+/// What an entry says of itself, one fact a row: what it lets through, when, why, and the hosts.
+struct AllowanceFacts: View {
+    let entry: Allowance
 
     var body: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            HStack(spacing: ShellSpace.snug) {
-                Text(entry.title())
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if entry.source != nil {
-                    Text(L10n.t("allow.own.mark"))
-                        .shellFont(.meta, weight: .semibold)
-                        .foregroundStyle(ShellChrome.selectInk(colorScheme))
-                        .padding(.horizontal, ShellSpace.snug)
-                        .background(Capsule(style: .continuous).fill(ShellChrome.selectFill(colorScheme)))
-                }
-            }
-            Group {
-                Text(entry.what())
-                Text(entry.whenText())
-                Text(entry.why())
-                Text(entry.hostsText())
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                if gone {
-                    Text(L10n.t("allow.own.gone"))
-                        .foregroundStyle(ShellChrome.alarm(colorScheme))
-                }
-            }
-            .shellFont(.meta)
-            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            .fixedSize(horizontal: false, vertical: true)
+        ShellDetailFact(label: L10n.t("allow.detail.what"), value: entry.what())
+        ShellDetailFact(label: L10n.t("allow.detail.when"), value: entry.whenText())
+        ShellDetailFact(label: L10n.t("allow.detail.why"), value: entry.why())
+        ShellDetailFact(label: L10n.t("allow.detail.hosts"), value: entry.hostsText())
+    }
+}
+
+extension Allowance {
+    /// The glyph an entry leads its row with.
+    var symbol: String {
+        if source != nil { return "globe" }
+        switch id {
+        case .directory: return "list.bullet.rectangle"
+        case .forumChallenge: return "shield.lefthalf.filled"
+        case .personCheck: return "person.badge.shield.checkmark"
+        case .signInPage: return "arrow.up.forward.square"
+        default: return "checkmark.shield"
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(entry.spoken() + (gone ? L10n.t("allow.spoken.joiner") + L10n.t("allow.own.gone") : "")))
     }
 }

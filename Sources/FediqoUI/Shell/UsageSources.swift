@@ -41,10 +41,7 @@ struct UsageSourceList: View {
 
     /// ↑ and ↓ move the lamp through the sources, and stop at either end.
     private func step(_ by: Int) {
-        let hosts = session.sources.map(\.host)
-        guard !hosts.isEmpty else { return }
-        let at = lit.flatMap { hosts.firstIndex(of: $0) } ?? (by > 0 ? -1 : hosts.count)
-        lit = hosts[max(0, min(hosts.count - 1, at + by))]
+        lit = ShellListStep.stepped(session.sources.map(\.host), from: lit, by: by)
     }
 }
 
@@ -83,15 +80,9 @@ struct UsageSourceDetail: View {
 
     /// Back, the source's mark and host, and Clear.
     private var masthead: some View {
-        HStack(spacing: ShellSpace.snug) {
-            ShellIconButton("chevron.left", name: "usage.source.back") { session.usageOpened = nil }
+        ShellDetailHead(source.host, back: "usage.source.back", onBack: { session.usageOpened = nil }) {
             UsageSourceMark(source: source)
-            Text(source.host)
-                .shellFont(.pane)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-                .lineLimit(2)
-                .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: ShellSpace.snug)
+        } trailing: {
             ShellIconButton("trash", name: "prefs.cache.clear", help: "usage.source.clear.help", tone: .alarm) {
                 session.clearing = source.host
             }

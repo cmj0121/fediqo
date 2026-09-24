@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Everything this run has asked of the sources (#218): newest first, each line the source it
-/// was for, what for, and when it left — and narrowed to one source where one is chosen.
+/// Everything this run has asked of the sources (#218, #236): newest first, a row each — the
+/// source it was for, what for, and when it left — and narrowed to one source where one is
+/// chosen. **Entering a row opens its detail** in place of the list: what it was for, when, where
+/// it went if a source pointed elsewhere, and the entry that let it through, where one did.
 ///
 /// Everything drawn is `SourceRecord` read through `SourceAct`, which is where what a line may
 /// say is decided and tested; this lays the lines out. **Looking sends nothing**: no request is
@@ -12,21 +14,30 @@ import SwiftUI
 /// the whole of it on a redraw.
 ///
 /// A sheet on both: on a Mac over the window it was asked from, on a phone a page of its own.
-/// Opened from Preferences' in-flight tab.
+/// Opened from Preferences' in-flight tab. Its close is an icon button, and Escape — the detail's
+/// back while a detail is open, so Escape leaves one step at a time.
 struct ActivityPanel: View {
     let log: SourceRecord
     let onClose: () -> Void
 
     /// The one source the list is narrowed to; nil for every source.
     @State private var chosen: String?
+    @State private var lit: Int?
+    @State private var opened: SourceAct?
     @Environment(\.colorScheme) private var colorScheme
+
+    /// Narrowed to `source` from the start, where the record holds a line for it.
+    init(log: SourceRecord, from source: String? = nil, onClose: @escaping () -> Void) {
+        self.log = log
+        self.onClose = onClose
+        _chosen = State(initialValue: Self.stillChosen(source, among: log.sources))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            Rectangle().fill(ShellChrome.hairline(colorScheme)).frame(height: ShellSpace.hair)
-                .accessibilityHidden(true)
-            lines
+            ShellRule()
+            page
                 .shellFont(.body)
                 .scrollContentBackground(.hidden)
         }
@@ -47,6 +58,15 @@ struct ActivityPanel: View {
         chosen.flatMap { sources.contains($0) ? $0 : nil }
     }
 
+    @ViewBuilder
+    private var page: some View {
+        if let opened {
+            ActivityDetail(act: opened) { self.opened = nil }
+        } else {
+            lines
+        }
+    }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             HStack(spacing: ShellSpace.step) {
@@ -55,11 +75,13 @@ struct ActivityPanel: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
-                Button(L10n.t("activity.close"), action: onClose)
-                    .keyboardShortcut(.cancelAction)
+                ShellIconButton("xmark", name: "activity.close", action: onClose)
+                    .keyboardShortcut(opened == nil ? .cancelAction : nil)
             }
-            filter
-                .shellFont(.body)
+            if opened == nil {
+                filter
+                    .shellFont(.body)
+            }
         }
         .padding(ShellSpace.pad)
     }
@@ -83,63 +105,89 @@ struct ActivityPanel: View {
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 } else {
                     ForEach(listed) { act in
-                        ActivityLine(act: act)
+                        SourceLineRow(
+                            id: act.id, source: act.source, purpose: act.purpose, what: act.purposeText(),
+                            when: act.time(), selection: $lit, onOpen: { opened = act },
+                            onStep: { lit = ShellListStep.stepped(listed.map(\.id), from: lit, by: $0) }
+                        )
                     }
                 }
             } footer: {
-                VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                    Text(L10n.t("activity.footer"))
-                    if log.dropped > 0 {
-                        Text(L10n.count("activity.dropped", log.dropped))
-                    }
-                }
-                .shellFont(.meta)
+                footer
             }
         }
     }
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            Text(L10n.t("activity.brief"))
+                .shellHelp("activity.footer", about: L10n.t("activity.title"))
+            if log.dropped > 0 {
+                Text(L10n.count("activity.dropped", log.dropped))
+            }
+        }
+        .shellFont(.meta)
+    }
 }
 
-/// One line of the record: the source, then what for and when under it, and which entry let it
-/// through where one did (#226) — one element to VoiceOver, read in that order.
-struct ActivityLine: View {
+/// One line of the record, opened: its source at the head, then what it was for, when it left,
+/// where it went where a source pointed elsewhere, and the entry that let it through, where one
+/// did (#226).
+struct ActivityDetail: View {
     let act: SourceAct
-    @Environment(\.colorScheme) private var colorScheme
+    let onBack: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            Text(act.source)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            HStack(spacing: ShellSpace.snug) {
-                Text(act.purposeText())
-                Spacer(minLength: 0)
-                Text(act.time())
-                    .monospacedDigit()
+        ScrollView {
+            VStack(alignment: .leading, spacing: ShellSpace.step) {
+                ShellDetailHead(act.source, escapes: true, onBack: onBack) { Image(systemName: act.purpose.symbol) }
+                ForEach(Self.facts(act), id: \.label) { fact in
+                    ShellDetailFact(label: fact.label, value: fact.value)
+                }
             }
-            .shellFont(.meta)
-            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            if let allowed = act.allowedText() {
-                Text(allowed)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            }
+            .padding(ShellSpace.pad)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(act.spoken()))
+    }
+
+    /// What the detail says, label and value, in order.
+    static func facts(_ act: SourceAct, language: DummyLanguage? = nil) -> [(label: String, value: String)] {
+        var facts = [
+            (L10n.t("activity.detail.purpose", language: language), act.purposeText(language: language)),
+            (L10n.t("activity.detail.time", language: language), act.time(language: language)),
+        ]
+        if act.reached != act.source {
+            facts.append((L10n.t("activity.detail.reached", language: language), act.reached))
+        }
+        if let entry = act.allowedBy {
+            facts.append((L10n.t("activity.detail.allowed", language: language), entry.name(language: language)))
+        }
+        return facts
     }
 }
 
-/// The way to the record from Preferences' in-flight tab, under what is running now.
+/// The way to the record from Preferences' in-flight tab, under what is running now: a row of
+/// its own, entered as any row is.
 struct ActivityEntry: View {
     let session: ShellSession
 
+    @State private var lit: Bool?
+
     var body: some View {
         Section {
-            Button(L10n.t("activity.open")) { session.activityShown = true }
-        } footer: {
-            Text(L10n.t("activity.open.footer"))
-                .shellFont(.meta)
+            ShellListRow(
+                id: true, title: L10n.t("activity.title"), brief: L10n.t("activity.open.brief"),
+                selection: $lit, onOpen: { Self.open(session) }
+            ) {
+                Image(systemName: "clock.arrow.circlepath")
+            }
         }
+    }
+
+    /// The record, narrowed to `source` where one is given and the record holds a line for it.
+    static func open(_ session: ShellSession, from source: String? = nil) {
+        session.activityFrom = source
+        session.activityShown = true
     }
 }
 
@@ -151,7 +199,7 @@ struct ActivitySheet: ViewModifier {
 
     func body(content: Content) -> some View {
         content.sheet(isPresented: shown) {
-            ActivityPanel(log: session.work.log) { session.activityShown = false }
+            ActivityPanel(log: session.work.log, from: session.activityFrom) { session.activityShown = false }
         }
     }
 

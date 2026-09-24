@@ -92,6 +92,9 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
             // The keyboard follows the lamp: a row lit by ↓ takes the focus, so Return is heard
             // by the row that is lit and not by the one the step left.
             .onChange(of: selected) { _, now in if now { focused = true } }
+            // And a row lit as it appears — the one a detail was opened from, handed back as the
+            // list returns — takes it too, so a keyboard reader goes on from where they were.
+            .onAppear { if selected { focused = true } }
             .onKeyPress(.return) { enter() ? .handled : .ignored }
             .onKeyPress(keys: [.upArrow, .downArrow]) { key in
                 step(up: key.key == .upArrow) ? .handled : .ignored
@@ -253,5 +256,13 @@ struct ShellListRowFace<Mark: View>: View {
             }
             if stacked { figureText }
         }
+    }
+}
+
+/// A list's ↑ and ↓ (`ShellListRow.onStep`): the row after or before the lit one, or the first
+/// or last where none is lit — the timeline's own step, over any list's ids.
+enum ShellListStep {
+    static func stepped<ID: Equatable>(_ ids: [ID], from lit: ID?, by step: Int) -> ID? {
+        DummyCommand.stepped(ids, from: lit, by: step) ?? lit
     }
 }
