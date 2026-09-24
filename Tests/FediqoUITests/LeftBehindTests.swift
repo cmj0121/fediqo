@@ -136,14 +136,14 @@ struct LeftBehindTests {
         let store = WKWebsiteDataStore.nonPersistent()
         for (name, domain) in [
             ("x7Kq_2132_auth", "bbs.example.org"), ("cf_clearance", ".bbs.example.org"),
-            ("_ga", "tracker.example"), ("sid", "removed.example"),
+            ("_ga", "tracker.example"), ("sid", "removed.example"), ("ad", "ads.bbs.example.org"),
         ] {
             await store.httpCookieStore.setCookie(ForumDeviceStoreTests.cookie(name, domain: domain))
         }
         let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
         _ = forums.dataStore
         await forums.dropCache(within: .seconds(5))
-        #expect(await store.httpCookieStore.allCookies().count == 4, "going to the background keeps every cookie")
+        #expect(await store.httpCookieStore.allCookies().count == 5, "going to the background keeps every cookie")
         await forums.leaveNothing(keeping: ["BBS.example.org", "m.example"], within: .seconds(5))
         let left = await store.httpCookieStore.allCookies()
         #expect(Set(left.map(\.name)) == ["x7Kq_2132_auth", "cf_clearance"])

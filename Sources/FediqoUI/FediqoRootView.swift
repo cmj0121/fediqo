@@ -1385,6 +1385,8 @@ public struct FediqoRootView: View {
     /// step of the walk wherever one may be taken, and a sheet elsewhere; on iPad and iPhone it is
     /// always the sheet.
     private func placeLinksInPage() {
+        let reload = session.reload
+        linkReader.gone = { [weak reload] source in reload?.gone.contains(source) ?? false }
         #if os(macOS)
         linkReader.placing = { url in placeLink(url) }
         #endif

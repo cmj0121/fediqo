@@ -42,6 +42,10 @@ final class EmojiCache {
     private var inFlight: [Key: Task<Void, Never>] = [:]
     /// One download per address, whoever asked for it — see `download(_:for:)`.
     private var downloads: [URL: Task<Data?, Never>] = [:]
+    /// Who is waiting on each download, with how many times each had been forgotten when it
+    /// asked — so a download one source was forgotten under still goes out for another waiting
+    /// on the same address, and is recorded under that one (#221).
+    private var askers: [URL: [String: Int]] = [:]
     private let gate = EmojiGate(ceiling: EmojiCache.maxInFlight)
     private var cuts: [Cut: [EmojiRun]] = [:]
     private var cutOrder: [Cut] = []
@@ -51,6 +55,9 @@ final class EmojiCache {
     /// Private, and it publishes nothing: this is not a signal any view subscribes to, which is
     /// the one thing a counter like this must not become here.
     private var epoch: UInt64 = 0
+    /// How many times each source has been forgotten, so a download queued for it before a Clear
+    /// or a Remove does not go out after one (#221).
+    private var forgets: [String: Int] = [:]
 
     init(http: HTTPClient = URLSessionClient()) {
         self.http = http
@@ -517,11 +524,12 @@ final class EmojiCache {
         // Read before the first suspension, so it is the cohort this work belongs to rather than
         // whatever the epoch has become by the time the picture lands.
         let mine = epoch
+        let asked = forgets[key.host.lowercased(), default: 0]
         let started = Task { @MainActor [weak self] in
             defer { self?.inFlight[key] = nil }
             guard let self else { return }
             var decoded: Decoded?
-            if let data = await download(key.url, for: key.host).value {
+            if let data = await download(key.url, for: key.host, asked: asked).value {
                 decoded = await Task.detached(priority: .utility) {
                     Self.decode(data, ink: pixels, stillOnly: key.still)
                 }.value
@@ -564,17 +572,37 @@ final class EmojiCache {
     /// Every address goes through `HTTPClient`: the live one carries the `https`-only rule and
     /// refuses anything that is not an HTTP response, which is what stops a `file:` or `data:`
     /// address out of a stranger's JSON from reaching `URLSession` at all.
-    private func download(_ url: URL, for source: String) -> Task<Data?, Never> {
+    ///
+    /// `asked` is how many times `source` had been forgotten when the line asked, so a download
+    /// asked for before a Clear or a Remove of it does not go out after one (#221).
+    /// Whether `source` is waiting on a download of `url`, queued or on the wire. Asked by tests
+    /// only.
+    func isDownloading(_ url: URL, for source: String) -> Bool {
+        downloads[url] != nil && askers[url]?[source.lowercased()] != nil
+    }
+
+    private func download(_ url: URL, for source: String, asked: Int) -> Task<Data?, Never> {
+        let source = source.lowercased()
+        askers[url, default: [:]][source] = asked
         if let running = downloads[url] { return running }
-        // On `SourceWork` while it is on the wire (#164), and in the run's record under the
-        // source whose line asked for it first (#218) — one request, so one act.
-        let http = WatchedHTTP(http, for: .emoji, source: source, in: work)
+        let http = http
+        let work = work
         let started = Task<Data?, Never> { @MainActor [weak self] in
-            defer { self?.downloads[url] = nil }
+            defer {
+                self?.downloads[url] = nil
+                self?.askers[url] = nil
+            }
             guard let self else { return nil }
             await gate.enter()
             defer { gate.leave() }
-            guard let (data, response) = try? await http.data(from: url),
+            // Only for a source still waiting on it: one cleared or removed while this waited
+            // for the gate is asked nothing, and nothing is recorded against it (#221). On
+            // `SourceWork` while it is on the wire (#164), and in the run's record under the
+            // source whose line asked for it first where that one still wants it (#218).
+            let waiting = (askers[url] ?? [:]).filter { forgets[$0.key, default: 0] == $0.value }.keys
+            guard let owner = waiting.contains(source) ? source : waiting.min() else { return nil }
+            let watched = WatchedHTTP(http, for: .emoji, source: owner, in: work)
+            guard let (data, response) = try? await watched.data(from: url),
                   (200..<300).contains(response.statusCode)
             else { return nil }
             return data
@@ -650,6 +678,7 @@ final class EmojiCache {
     func forget(host: String) {
         let host = host.lowercased()
         epoch &+= 1
+        forgets[host, default: 0] += 1
         for (key, entry) in entries where key.host == host {
             cost -= entry.cost
             entries.removeValue(forKey: key)
