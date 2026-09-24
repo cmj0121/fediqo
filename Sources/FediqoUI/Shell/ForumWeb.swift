@@ -363,6 +363,39 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         await store.removeData(ofTypes: types, for: mine)
     }
 
+    /// Drops from `store` everything that is not a sign-in to one of `hosts` (#219).
+    ///
+    /// **The store is kept between runs for one thing: a forum's session cookie**, so a sign-in
+    /// outlives a relaunch (#5, #153). Everything else WebKit files there beside it — its disk
+    /// cache of every page and picture it fetched, local and session storage, service workers,
+    /// its own tracking-prevention statistics — is a record of which page of which forum was
+    /// read, and when. That goes. So do the cookies of any site that is not one of `hosts`: they
+    /// name somewhere this device went and are nobody's sign-in here.
+    static func sweep(_ store: WKWebsiteDataStore, keeping hosts: some Sequence<String>) async {
+        let hosts = Array(hosts)
+        let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
+        var kept: [WKWebsiteDataRecord] = []
+        var dropped: [WKWebsiteDataRecord] = []
+        for record in records {
+            if hosts.contains(where: { holds(record.displayName, for: $0) }) {
+                kept.append(record)
+            } else {
+                dropped.append(record)
+            }
+        }
+        if !dropped.isEmpty {
+            await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: dropped)
+        }
+        if !kept.isEmpty {
+            await store.removeData(ofTypes: leftBehind, for: kept)
+        }
+    }
+
+    /// What `sweep` drops even for a source's own site: everything but its cookies.
+    static var leftBehind: Set<String> {
+        WKWebsiteDataStore.allWebsiteDataTypes().subtracting([WKWebsiteDataTypeCookies])
+    }
+
     /// Whether a record or cookie filed under `name` belongs to `host`. A cookie's domain may
     /// carry a leading dot, which says "and every subdomain" and is not part of the name.
     static func holds(_ name: String, for host: String) -> Bool {

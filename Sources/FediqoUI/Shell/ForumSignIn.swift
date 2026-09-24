@@ -710,6 +710,14 @@ public final class ForumSessions {
         await readReached()
     }
 
+    /// Leaves in the store only the sign-ins of `hosts`, the reader's sources (#219): see
+    /// `ForumWebEngine.sweep`. Asked as a run ends. A store never opened this run holds nothing
+    /// this run put there, and is left unopened.
+    public func leaveNothing(keeping hosts: some Sequence<String>) async {
+        guard let madeStore else { return }
+        await ForumWebEngine.sweep(madeStore, keeping: hosts)
+    }
+
     func refreshSavedHosts() {
         do {
             savedHosts = try credentials.savedHosts()

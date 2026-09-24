@@ -51,6 +51,13 @@ final class Launch {
             FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host))
         }
     }
+
+    /// As a run ends: the save, and then nothing of where this run went left behind (#219) — the
+    /// forum browser's store keeps its sources' sign-ins and nothing else.
+    func end() async {
+        _ = await saver.flush()
+        await forums.leaveNothing(keeping: await store.sources().map(\.host))
+    }
 }
 
 #if os(macOS)
@@ -61,7 +68,7 @@ final class Launch {
 final class FediqoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task {
-            _ = await Launch.shared.saver.flush()
+            await Launch.shared.end()
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
@@ -109,7 +116,7 @@ struct FediqoApp: App {
         let grant = BackgroundGrant()
         #endif
         Task {
-            _ = await Launch.shared.saver.flush()
+            await Launch.shared.end()
             #if os(iOS)
             grant.end()
             #endif
