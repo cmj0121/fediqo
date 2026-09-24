@@ -139,12 +139,15 @@ struct ShellPiecesTests {
         #expect(other.accessory == "circle.dashed")
     }
 
-    @Test("Every migrated page's tabs lead with a glyph of their own")
+    @Test("Every migrated page's tabs lead with a glyph; a timeline's glyph says its kind")
     func migratedTabsHaveGlyphs() {
         let preferences = PreferencesPane.Purpose.allCases.map(\.symbol)
         let usage = UsagePane.Purpose.allCases.map(\.symbol)
         let guide = DummyShortcutGroup.allCases.map(\.symbol)
-        let timeline = [TimelineQuery.all, .trends, .written(UUID())].map(\.symbol)
+        // One glyph per kind of timeline: every written one shares its kind's, and the kinds differ.
+        let written = TimelineQuery.written(UUID()).symbol
+        #expect(TimelineQuery.written(UUID()).symbol == written)
+        let timeline = [TimelineQuery.all.symbol, TimelineQuery.trends.symbol, written]
         for set in [preferences, usage, guide, timeline] {
             #expect(Set(set).count == set.count)
             #expect(set.allSatisfy { !$0.isEmpty })
@@ -159,12 +162,17 @@ struct ShellPiecesTests {
 
     // MARK: The list row
 
-    private let stepped = Box<[Int]>([])
+    private static let ids = ["one", "two"]
 
+    /// A row of a two-row list that walks by `onStep`: a step moves the lamp, as a list would.
     private func row(_ id: String, _ selection: Box<String?>, _ opened: Box<[String]>) -> ShellListRow<String, Image, EmptyView> {
         ShellListRow(
             id: id, title: "mastodon.social", brief: "12 posts, 3 pictures", figure: "4.2 MB",
-            selection: selection.binding, onOpen: { opened.value.append(id) }, onStep: { stepped.value.append($0) }
+            selection: selection.binding, onOpen: { opened.value.append(id) },
+            onStep: { step in
+                let at = Self.ids.firstIndex(of: selection.value ?? id) ?? 0
+                selection.value = Self.ids[max(0, min(Self.ids.count - 1, at + step))]
+            }
         ) {
             Image(systemName: "server.rack")
         }
@@ -193,9 +201,26 @@ struct ShellPiecesTests {
         #expect(two.enter())
         #expect(opened.value == ["one", "one", "two"])
 
+    }
+
+    @Test("After ↓ lights the next row, Return opens that row and not the one the step left")
+    func stepThenEnter() {
+        let selection = Box<String?>("one")
+        let opened = Box<[String]>([])
+        let one = row("one", selection, opened)
+        let two = row("two", selection, opened)
+
+        #expect(one.step(up: false))
+        #expect(selection.value == "two")
+        #expect(!one.enter())
+        #expect(two.enter())
+        #expect(opened.value == ["two"])
+
         #expect(two.step(up: true))
-        #expect(two.step(up: false))
-        #expect(stepped.value == [-1, 1])
+        #expect(selection.value == "one")
+        #expect(!two.enter())
+        #expect(one.enter())
+        #expect(opened.value == ["two", "one"])
     }
 
     @Test("At the accessibility sizes a row's figure goes under its title")
@@ -272,6 +297,34 @@ struct ShellPiecesTests {
         }
         #expect(item.value == nil)
         #expect(acted.value == ["6 remove"])
+    }
+
+    @Test("A yes by key is heard only once the question has settled, and never from a held key")
+    func chordsWait() {
+        #expect(ShellConfirmChord.heard(byKey: false, armed: false, repeating: false))
+        #expect(!ShellConfirmChord.heard(byKey: true, armed: false, repeating: false))
+        #expect(!ShellConfirmChord.heard(byKey: true, armed: true, repeating: true))
+        #expect(ShellConfirmChord.heard(byKey: true, armed: true, repeating: false))
+        // The key that asks to remove a timeline (⌘⌫) is not the key that answers.
+        let destructive = ShellConfirmChord.chord(for: .destructive)
+        #expect(destructive.key == "d" && destructive.modifiers == .command)
+        #expect(destructive.key != .delete)
+        #expect(EditorAction.from("d", command: true, stage: .rules, fieldFocused: false) != .removeTimeline)
+        #expect(EditorAction.from(KeyEquivalent.delete.character, command: true, stage: .rules, fieldFocused: false)
+            == .removeTimeline)
+        #expect(ShellConfirmChord.chord(for: .primary).key == .return)
+        #expect(ShellConfirmChord.chord(for: .primary).modifiers == .command)
+    }
+
+    @Test("The keyboard starts on Cancel, or else on the first choice that is not a loss")
+    func confirmFocus() {
+        #expect(removing.firstFocus == ShellConfirmCard.cancelFocus)
+        var open = signingIn
+        open.cancel = nil
+        #expect(open.firstFocus == "read")
+        #expect(notice.firstFocus == ShellConfirmCard.cancelFocus)
+        #expect(!ShellConfirmation.wellFormed(choices: removing.choices, cancel: nil))
+        #expect(ShellConfirmation.wellFormed(choices: signingIn.choices, cancel: nil))
     }
 
     @Test("A question warns and chords only where a choice is a loss; a yes is never bare Return")

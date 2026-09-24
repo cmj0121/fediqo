@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// A question asked before something that cannot be undone (#232) — **#231's rules, applied to
 /// the one screen that must not be answered by accident.**
@@ -43,14 +46,38 @@ struct ShellConfirmation: Equatable {
     /// What the question used to say at length. Nothing where the line says it all.
     var help: String?
     var choices: [Choice]
-    /// The press that changes nothing. Escape and every other way out answer it too.
-    var cancel: String? = L10n.t("board.choose.cancel")
+    /// The press that changes nothing. Escape and every other way out answer it too. Never absent
+    /// from a question with a loss in it.
+    var cancel: String?
+
+    init(
+        symbol: String, title: String, line: String, help: String?, choices: [Choice],
+        cancel: String? = L10n.t("board.choose.cancel")
+    ) {
+        self.symbol = symbol
+        self.title = title
+        self.line = line
+        self.help = help
+        self.choices = choices
+        self.cancel = cancel
+        assert(Self.wellFormed(choices: choices, cancel: cancel), "a destructive choice needs a way out")
+    }
+
+    /// A question with a loss in it always has a press that changes nothing.
+    static func wellFormed(choices: [Choice], cancel: String?) -> Bool {
+        cancel != nil || !choices.contains { $0.role == .destructive }
+    }
+
+    /// Where the keyboard starts: Cancel, or else the first choice that is not a loss.
+    var firstFocus: String? {
+        cancel != nil ? ShellConfirmCard.cancelFocus : choices.first { $0.role != .destructive }?.id
+    }
 
     /// Whether the question is a warning. Only then is its glyph drawn in the alarm hue.
     var warns: Bool { choices.contains { $0.role == .destructive } }
 
     /// The one choice a deliberate chord answers: the first destructive one, or else the first
-    /// primary one. Never bare Return.
+    /// primary one. Never bare Return, and never the chord that asks: see `ShellConfirmChord`.
     var chorded: Choice? {
         choices.first { $0.role == .destructive } ?? choices.first { $0.role == .primary }
     }
@@ -81,14 +108,16 @@ enum ShellConfirmAnswer: Equatable {
 ///
 /// **Cancel holds the keyboard.** It is the default focus and Escape's key; bare Return is given
 /// to nothing, so a reader who pressed Return to open this cannot answer it with the same finger.
-/// A yes has a chord of its own — ⌘⌫ for a destructive one, ⌘Return for the usual one — that no
-/// reflex reaches. A destructive press is drawn in the alarm hue and carries the destructive role,
+/// A yes has a chord of its own — ⌘D for a destructive one, ⌘Return for the usual one — that no
+/// reflex reaches, heard only once the question has settled (`ShellConfirmChord`). A destructive press is drawn in the alarm hue and carries the destructive role,
 /// so VoiceOver says so before it is pressed.
 struct ShellConfirmCard: View {
     let question: ShellConfirmation
     let answer: (ShellConfirmAnswer) -> Void
 
     @FocusState private var focus: String?
+    /// Whether a chord may answer yet. See `ShellConfirmChord`.
+    @State private var armed = false
     @Environment(\.colorScheme) private var colorScheme
     @ShellMetric(relativeTo: .title3) private var side: CGFloat = 36
     @ShellMetric(relativeTo: .body) private var measure: CGFloat = 340
@@ -107,7 +136,11 @@ struct ShellConfirmCard: View {
         .padding(ShellSpace.room)
         .frame(maxWidth: measure)
         .background(ShellChrome.page(colorScheme))
-        .defaultFocus($focus, question.cancel != nil ? Self.cancelFocus : question.choices.first?.id)
+        .defaultFocus($focus, question.firstFocus)
+        .task {
+            try? await Task.sleep(for: ShellConfirmChord.settle)
+            armed = true
+        }
     }
 
     private var glyph: some View {
@@ -153,7 +186,7 @@ struct ShellConfirmCard: View {
                 .focused($focus, equals: Self.cancelFocus)
         }
         ForEach(question.choices) { choice in
-            ShellConfirmPress(choice: choice, chorded: choice == question.chorded) {
+            ShellConfirmPress(choice: choice, chorded: choice == question.chorded, armed: armed) {
                 answer(.choice(choice.id))
             }
             .focused($focus, equals: choice.id)
@@ -161,23 +194,63 @@ struct ShellConfirmCard: View {
     }
 }
 
-/// One choice: its role said and drawn, and its chord where it has one.
+/// How a yes is answered from the keyboard, and when it is not.
+///
+/// **⌘D for a loss and ⌘Return for the usual answer.** ⌘D is the Mac's own key for the
+/// destructive answer of a question ("Delete", "Don't Save"), and nothing in this app asks with it.
+/// ⌘⌫ is not used, because the timeline editor asks to remove a timeline with ⌘⌫, and the key that
+/// asks must never be the key that answers.
+///
+/// **A chord is heard only once the question has been up a moment, and never as a repeat.** A key
+/// held down from before the question — ⌘Return saving a timeline, say — repeats into it, and
+/// that repeat must not be taken for a yes. Pointer and touch are not held to either: a press is
+/// always meant.
+enum ShellConfirmChord {
+    static let settle: Duration = .milliseconds(350)
+
+    static func chord(for role: ShellConfirmation.Choice.Role) -> KeyboardShortcut {
+        role == .destructive
+            ? KeyboardShortcut("d", modifiers: .command)
+            : KeyboardShortcut(.return, modifiers: .command)
+    }
+
+    /// Whether an answer is heard: anything not from a key, and from a key only when the question
+    /// has settled and the key was not held down into it.
+    static func heard(byKey: Bool, armed: Bool, repeating: Bool) -> Bool {
+        !byKey || (armed && !repeating)
+    }
+
+    /// What the press in hand came from: a key, and whether that key is repeating.
+    @MainActor
+    static func current() -> (byKey: Bool, repeating: Bool) {
+        #if os(macOS)
+        guard let event = NSApp.currentEvent, event.type == .keyDown else { return (false, false) }
+        return (true, event.isARepeat)
+        #else
+        return (false, false)
+        #endif
+    }
+}
+
+/// One choice: its role said and drawn, and its chord where it has one — held off until the
+/// question has settled.
 private struct ShellConfirmPress: View {
     let choice: ShellConfirmation.Choice
     let chorded: Bool
+    let armed: Bool
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        Button(choice.label, role: choice.role == .destructive ? .destructive : nil, action: action)
+        Button(choice.label, role: choice.role == .destructive ? .destructive : nil, action: press)
             .tint(tint)
-            .keyboardShortcut(chorded ? chord : nil)
+            .keyboardShortcut(chorded && armed ? ShellConfirmChord.chord(for: choice.role) : nil)
     }
 
-    private var chord: KeyboardShortcut {
-        choice.role == .destructive
-            ? KeyboardShortcut(.delete, modifiers: .command)
-            : KeyboardShortcut(.return, modifiers: .command)
+    private func press() {
+        let source = ShellConfirmChord.current()
+        guard ShellConfirmChord.heard(byKey: source.byKey, armed: armed, repeating: source.repeating) else { return }
+        action()
     }
 
     private var tint: Color? {
@@ -233,6 +306,7 @@ struct ShellConfirm<Value>: ViewModifier {
     private var sheet: some View {
         if let value = item ?? shown {
             ShellConfirmSheet(question: question(value)) { answer in
+                shown = value
                 ShellConfirmAnswer.settle(answer, asked: value, item: $item, onChoice: onChoice)
             }
         }
@@ -240,7 +314,13 @@ struct ShellConfirm<Value>: ViewModifier {
 
     /// Up while there is something to ask about; any way down clears it.
     private var asking: Binding<Bool> {
-        Binding(get: { item != nil }, set: { if !$0 { item = nil } })
+        Binding(get: { item != nil }, set: { up in
+            guard !up else { return }
+            // What is on the sheet as it leaves: the value asked about last, even if it changed
+            // while the sheet was up.
+            if let asked = item { shown = asked }
+            item = nil
+        })
     }
 }
 

@@ -21,8 +21,8 @@ enum ShellListEntry {
 ///             a brief line, two at most
 ///
 /// **Entering, three ways, one outcome.** A press lights the row and a second press opens it
-/// (`ShellListEntry.pressed`). Return opens the row if it is lit or holds the keyboard, and ↑ and
-/// ↓ hand the list a step where it takes one (`onStep`). VoiceOver, whose reader activates once,
+/// (`ShellListEntry.pressed`). Return opens the lit row, and ↑ and ↓ hand the list a step where
+/// it takes one (`onStep`); the keyboard's focus follows the lamp. VoiceOver, whose reader activates once,
 /// opens in one — the row's default action. Focus does not light a row, because a click focuses
 /// before it presses and would turn every first press into an open; a focused row wears the hover
 /// plate instead.
@@ -85,14 +85,22 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
             .focusable()
             .focusEffectDisabled()
             .focused($focused)
+            // The keyboard follows the lamp: a row lit by ↓ takes the focus, so Return is heard
+            // by the row that is lit and not by the one the step left.
+            .onChange(of: selected) { _, now in if now { focused = true } }
             .onKeyPress(.return) { enter() ? .handled : .ignored }
             .onKeyPress(keys: [.upArrow, .downArrow]) { key in
                 step(up: key.key == .upArrow) ? .handled : .ignored
             }
             .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAddTraits(traits)
             .accessibilityHint(L10n.t("list.open.hint"))
             .accessibilityAction { onOpen() }
+    }
+
+    /// A row is a press, and the lit one says so.
+    private var traits: AccessibilityTraits {
+        selected ? [.isButton, .isSelected] : .isButton
     }
 
     /// A press: light the row, or open the row already lit.
@@ -103,9 +111,11 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
         }
     }
 
-    /// Return: the row opens if it is lit or holds the keyboard. Refused on any other row.
+    /// Return: the lit row opens. A row that holds the keyboard opens too, but only in a list that
+    /// does not walk by `onStep` — there the lamp is the one answer to "which row", and a focus
+    /// left behind by a step is not.
     func enter() -> Bool {
-        guard selected || focused else { return false }
+        guard selected || (onStep == nil && focused) else { return false }
         onOpen()
         return true
     }
