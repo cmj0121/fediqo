@@ -627,6 +627,9 @@ final class ShellReload {
                 failures[other] = named.filter { !answered.contains($0) }
             }
         }
+        // A read got through, so who the reader is there can be learnt now, where the network
+        // was dark when it was first asked (#222).
+        await session.mastodon.learnWhoAgain(among: answered, within: deadline)
     }
 
     /// The open thread's post and its thread, from the host it came through, and not the

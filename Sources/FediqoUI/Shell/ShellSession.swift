@@ -541,9 +541,16 @@ final class ShellSession {
             postLimits[host] = MastodonWrite.limit(advertised: profile.statusLimit)
             return
         }
-        postLimits[host] = await MastodonClient(
-            http: WatchedHTTP(http, for: .serverCheck, in: work), host: host
-        ).statusLimit()
+        do {
+            postLimits[host] = try await MastodonClient(
+                http: WatchedHTTP(http, for: .serverCheck, in: work), host: host
+            ).statusLimit()
+        } catch where ShellPictures.absence(from: error) == .unreachable {
+            // Not remembered: the next open asks again once the network is back (#222), and
+            // `postLimit(of:)` says Mastodon's own 500 meanwhile.
+        } catch {
+            postLimits[host] = MastodonWrite.defaultLimit
+        }
     }
 
     var canPost: Bool {

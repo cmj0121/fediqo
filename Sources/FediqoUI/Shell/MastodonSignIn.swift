@@ -52,6 +52,11 @@ public final class MastodonSessions {
     /// then nothing there is offered for taking back — the safe side of not knowing.
     private(set) var handles: [String: String] = [:]
 
+    /// Hosts whose account check found the network dark (#222) — a launch with no network, most
+    /// often — and so are asked again as soon as a read gets through to them, rather than going
+    /// unknown until a relaunch. `learnWhoAgain(among:)` is that second ask.
+    @ObservationIgnored private var unlearned: Set<String> = []
+
     public init(
         tokens: any MastodonTokenStore = KeychainMastodonTokens(),
         sender: any HTTPSender = URLSessionClient.signedIn()
@@ -179,15 +184,29 @@ public final class MastodonSessions {
     /// Asks the source who the reader is on it (#109). Silent on any failure: not knowing offers
     /// nothing for taking back, which is the one safe answer, and a 401 is told as `verifyAll`
     /// tells it.
-    func learnWho(host raw: String) async {
+    func learnWho(host raw: String, within limit: Duration? = nil) async {
         let host = raw.lowercased()
-        guard let door = authorized(host: host, for: .signInCheck) else { return }
+        unlearned.remove(host)
+        guard let door = authorized(host: host, within: limit, for: .signInCheck) else { return }
         do {
             let handle = try await door.handle()
             if isSignedIn(host: host) { handles[host] = handle }
         } catch MastodonAuthError.signedOut {
             endedByServer(host: host)
+        } catch where ShellPictures.absence(from: error) == .unreachable {
+            if isSignedIn(host: host) { unlearned.insert(host) }
         } catch {}
+    }
+
+    /// Asks who the reader is again on each of `hosts` whose last account check the network was
+    /// dark for (#222). A reload calls it with the hosts it just read, so the network coming back
+    /// is noticed by the first read that gets through; a host asked and answered is not asked
+    /// again, and one never dark is never asked here at all.
+    func learnWhoAgain(among hosts: Set<String>, within limit: Duration) async {
+        let due = unlearned.intersection(hosts.map { $0.lowercased() })
+        for host in due.sorted() {
+            await learnWho(host: host, within: limit)
+        }
     }
 
     /// A write this source turned away (#69). The row says so and keeps saying it until the source
@@ -278,7 +297,8 @@ public final class MastodonSessions {
     }
 
     /// At launch: asks each server whether it still honours its token. Only a 401 signs out; a
-    /// server that cannot be reached leaves the sign-in as it was.
+    /// server that cannot be reached leaves the sign-in as it was, and is asked again by the first
+    /// read that reaches it (`learnWhoAgain`).
     ///
     /// **The same answer says who the reader is there** (#109), so asking it is not a second
     /// request: `learnWho` reads the account check's own body.

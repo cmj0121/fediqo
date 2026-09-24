@@ -157,10 +157,13 @@ public struct MastodonClient: Sendable {
         Probe.kind(from: try await instanceDocument())
     }
 
-    /// How many characters a status on this server may be, or Mastodon's 500 where it did not
-    /// say. Unauthenticated, the same document a preview already fetches.
-    public func statusLimit() async -> Int {
-        guard let data = try? await instanceDocument() else { return MastodonWrite.defaultLimit }
+    /// How many characters a status on this server may be, or Mastodon's 500 where it answered
+    /// without saying. Unauthenticated, the same document a preview already fetches.
+    ///
+    /// **Throws where the document did not come**, so a caller that remembers the answer can tell
+    /// a dark network, which is worth asking again, from a server that answered (#222).
+    public func statusLimit() async throws -> Int {
+        let data = try await instanceDocument()
         let advertised = (try? MastodonJSON.decoder.decode(InstanceDTO.self, from: data))?
             .configuration?.statuses?.maxCharacters
         return MastodonWrite.limit(advertised: advertised)
