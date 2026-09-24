@@ -60,7 +60,7 @@ struct StoreSaverTests {
         let release = Gate()
         let landed = Landed()
         let calls = Mutexed()
-        let saver = StoreSaver(store: store) { sources, notes in
+        let saver = StoreSaver(store: store) { sources, notes, _ in
             if calls.next() == 1 {
                 await entered.open()
                 await release.wait()
@@ -85,7 +85,7 @@ struct StoreSaverTests {
     func unchangedIsNotWrittenAgain() async throws {
         let landed = Landed()
         let store = ItemStore(sources: [alpha], notes: [note("1", from: alpha)])
-        let saver = StoreSaver(store: store) { _, notes in _ = await landed.record(notes) }
+        let saver = StoreSaver(store: store) { _, notes, _ in _ = await landed.record(notes) }
         try await saver.save()
         try await saver.save()
         #expect(await landed.writes.count == 1)
@@ -102,7 +102,7 @@ struct StoreSaverTests {
         let landed = Landed()
         let calls = Mutexed()
         let store = ItemStore(sources: [alpha], notes: [note("1", from: alpha)])
-        let saver = StoreSaver(store: store) { _, notes in
+        let saver = StoreSaver(store: store) { _, notes, _ in
             if calls.next() == 1 {
                 await entered.open()
                 await release.wait()
@@ -123,7 +123,7 @@ struct StoreSaverTests {
     func failureIsReported() async throws {
         let landed = Landed()
         let calls = Mutexed()
-        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [note("1", from: alpha)])) { _, notes in
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [note("1", from: alpha)])) { _, notes, _ in
             if calls.next() == 1 { throw Refused() }
             _ = await landed.record(notes)
         }
@@ -160,7 +160,7 @@ struct StoreSaverTests {
     func flushWaitsForTheWrite() async {
         let release = Gate()
         let landed = Landed()
-        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [note("1", from: alpha)])) { _, notes in
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [note("1", from: alpha)])) { _, notes, _ in
             await release.wait()
             _ = await landed.record(notes)
         }
@@ -178,14 +178,14 @@ struct StoreSaverTests {
     @Test("A write that hangs does not hold a flush past the deadline", .timeLimit(.minutes(1)))
     func flushTimesOut() async {
         let never = Gate()
-        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _ in await never.wait() }
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _, _ in await never.wait() }
         #expect(await saver.flush(deadline: .milliseconds(50)) == .timedOut)
         await never.open()
     }
 
     @Test("A write that fails still lets a flush answer, and says so")
     func flushReportsFailure() async {
-        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _ in throw Refused() }
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _, _ in throw Refused() }
         #expect(await saver.flush(deadline: .seconds(60)) == .failed)
     }
 }

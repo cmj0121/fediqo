@@ -32,7 +32,7 @@ final class Launch {
     /// that gap would have to be held back or it would write the empty store over the index.
     private init() {
         let opened = StoreFile.openApplicationSupport()
-        store = ItemStore(sources: opened.sources, notes: opened.notes)
+        store = ItemStore(sources: opened.sources, notes: opened.notes, said: opened.said)
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
