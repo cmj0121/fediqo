@@ -93,7 +93,8 @@ public struct FediqoRootView: View {
         mastodon: MastodonSessions = MastodonSessions(),
         persist: (@MainActor () async -> Void)? = nil,
         measureStore: (@Sendable () async -> Int)? = nil,
-        compactStore: (@Sendable () async -> Void)? = nil,
+        compactStore: (@Sendable () async throws -> Void)? = nil,
+        weighStore: (@Sendable () async -> Int)? = nil,
         limits: (any LimitAccountStore)? = nil,
         storeIsNewer: Bool = false,
         storeNoticeSeen: (@MainActor () -> Void)? = nil
@@ -105,6 +106,7 @@ public struct FediqoRootView: View {
         session.persist = persist
         session.measureStore = measureStore
         session.compactStore = compactStore
+        session.weighStore = weighStore
         session.limitStore = limits
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)
@@ -208,6 +210,10 @@ public struct FediqoRootView: View {
                 await session.loadLimitAccount()
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
+                // Then the room (#249), judged once what is held is known and the months limit
+                // has had its turn — the one order in which each limit acts once at a launch.
+                session.roomBytes = prefs.roomBytes
+                await session.keepWithinRoom()
                 // The store has now said what is held, which is the first moment this launch can
                 // be asked where it lands (#101). Asked here and nowhere else, so it is asked
                 // once.

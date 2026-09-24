@@ -17,6 +17,15 @@ struct LimitRoom {
     let file: StoreFile
     let cache: MediaCache
     let pictures: ShellPictures
+    /// How the rebuild behaves: how many more times it is to throw, and how often it ran.
+    let compaction = Compaction()
+
+    final class Compaction: @unchecked Sendable {
+        var failing = 0
+        var ran = 0
+        var landed = 0
+        struct Refused: Error {}
+    }
 
     /// What the index weighs now, as the app measures it.
     var index: Int { file.bytesOnDisk() }
@@ -52,9 +61,19 @@ struct LimitRoom {
         session = ShellSession(http: FixtureHTTP(), store: store, pictures: pictures, emojis: EmojiCache())
         let saver = StoreSaver(store: store, file: file)
         let file = self.file
+        let compaction = self.compaction
         session.persist = { try? await saver.save() }
         session.measureStore = { file.bytesOnDisk() }
-        session.compactStore = { try? await file.compact() }
+        session.weighStore = { file.bytesHeld() }
+        session.compactStore = {
+            compaction.ran += 1
+            if compaction.failing > 0 {
+                compaction.failing -= 1
+                throw Compaction.Refused()
+            }
+            try await file.compact()
+            compaction.landed += 1
+        }
         session.limitStore = try LimitAccountFile(directory: dir)
         await session.reloadFromStore()
         await session.persist?()

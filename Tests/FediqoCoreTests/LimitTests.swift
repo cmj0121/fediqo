@@ -96,13 +96,15 @@ struct LimitTests {
         #expect(RoomPolicy.choices == [100_000_000, 250_000_000, 500_000_000, 1_000_000_000, 2_000_000_000])
     }
 
-    @Test("How many posts to let go is judged by the average post, at least one and never more than held")
+    @Test("A round lets go at most half the average's guess and a quarter of what is held, at least one")
     func postsToLetGo() {
         #expect(RoomPolicy.postsToLetGo(over: 0, bytes: 1_000, posts: 10) == 0)
         #expect(RoomPolicy.postsToLetGo(over: 50, bytes: 1_000, posts: 10) == 1)
-        #expect(RoomPolicy.postsToLetGo(over: 250, bytes: 1_000, posts: 10) == 3)
-        #expect(RoomPolicy.postsToLetGo(over: 5_000, bytes: 1_000, posts: 10) == 10)
-        #expect(RoomPolicy.postsToLetGo(over: 5, bytes: 0, posts: 10) == 5, "a store of no weight is judged a byte a post")
+        #expect(RoomPolicy.postsToLetGo(over: 250, bytes: 1_000, posts: 10) == 2, "half of three, rounded up")
+        #expect(RoomPolicy.postsToLetGo(over: 5_000, bytes: 1_000, posts: 10) == 2, "a quarter of ten")
+        #expect(RoomPolicy.postsToLetGo(over: 50_000, bytes: 100_000, posts: 1_000) == 250, "half the guess of 500")
+        #expect(RoomPolicy.postsToLetGo(over: 5, bytes: 0, posts: 10) == 2, "a store of no weight is judged a byte a post")
+        #expect(RoomPolicy.postsToLetGo(over: 5, bytes: 100, posts: 3) == 1, "a quarter of three is still one")
         #expect(RoomPolicy.postsToLetGo(over: 5, bytes: 100, posts: 0) == 0)
     }
 

@@ -859,6 +859,12 @@ final class ShellPictures {
         await disk?.bytes(hosts: hosts.map(Self.tag)) ?? [:]
     }
 
+    /// What every copy on disk weighs, all hosts together: what the room limit measures, the
+    /// same set `trimDisk` acts on. Nothing where no copies are kept.
+    func diskTotal() async -> Int? {
+        await disk?.measure()
+    }
+
     /// Drops the copies on disk, oldest written first, until they weigh no more than `cap`: the
     /// room limit's first step (#249). What is held in memory stays and still draws; a copy
     /// dropped comes back when its picture is read again. Nothing where no copies are kept.

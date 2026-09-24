@@ -121,6 +121,20 @@ final class DiskCopies: Sendable {
         }
     }
 
+    /// What every copy on this device weighs, all hosts together — **the set a trim acts on**
+    /// (#249): the running total where it is known, and one measure of the copies where it is
+    /// not, which is then the running total.
+    func measure() async -> Int {
+        await withCheckedContinuation { done in
+            queue.async { [copies, tally] in
+                if let total = tally.total { return done.resume(returning: total) }
+                let total = copies.trim(toBytes: .max)
+                tally.total = total
+                done.resume(returning: total)
+            }
+        }
+    }
+
     /// The running total, as the queue has it once everything asked before has run.
     func total() async -> Int? {
         await withCheckedContinuation { done in

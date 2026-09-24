@@ -148,3 +148,121 @@ struct RoomLimitTests {
         #expect(tighten.cancel != nil)
     }
 }
+
+/// The room check under what can go wrong around it (#249, review): a rebuild that fails, a
+/// save that does not land, a launch with both limits, a check asked for while one runs, and
+/// the store's own moves.
+@MainActor
+@Suite("The room check, judged by what the rows weigh", .serialized)
+struct RoomCheckTests {
+    private let origin = LimitRoom.origin
+    private let alpha = LimitRoom.alpha
+    private let beta = LimitRoom.beta
+
+    @Test("A rebuild that throws costs no extra post: the rounds are judged by what the rows weigh, and the next check rebuilds")
+    func failedCompactDropsNothingExtra() async throws {
+        let dir = LimitRoom.scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let room = try await LimitRoom(at: dir, notes: LimitRoom.held())
+        room.compaction.failing = 1
+        let limit = room.index / 2
+        room.session.roomBytes = limit
+
+        let act = try #require(await room.session.keepWithinRoom(at: origin))
+
+        #expect(room.compaction.ran == 1)
+        #expect(room.compaction.landed == 0)
+        #expect(room.file.bytesHeld() <= limit, "the rows still weigh more than the room")
+        #expect(room.index > limit, "the file kept its size, as a failed rebuild leaves it")
+        let held = room.session.holdings.posts
+        #expect(held == 60 - act.posts)
+        #expect(room.file.bytesHeld() > limit - 8 * 4_100, "more went than the room asked for")
+
+        #expect(await room.session.keepWithinRoom(at: origin) == nil, "posts went for a file size the rows did not have")
+        #expect(room.session.holdings.posts == held)
+        #expect(room.compaction.landed == 1, "the next check did not rebuild")
+        #expect(room.index <= limit)
+        #expect(room.session.storeBytes == room.index)
+    }
+
+    @Test("A save that does not land ends the check after one round rather than being tried again")
+    func saveThatDoesNotLandStops() async throws {
+        let dir = LimitRoom.scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let room = try await LimitRoom(at: dir, notes: LimitRoom.held())
+        room.session.persist = {}
+        room.session.roomBytes = room.index / 2
+
+        let act = try #require(await room.session.keepWithinRoom(at: origin))
+
+        #expect(act.posts == RoomPolicy.postsToLetGo(over: room.index / 2, bytes: room.index, posts: 60), "one round and no more")
+        #expect(try room.file.load().notes.count == 60, "nothing landed on disk")
+        #expect(room.session.holdings.posts == 60 - act.posts)
+    }
+
+    @Test("At a launch with both limits set, each acts once, in order, and the room is not cut past")
+    func launchSequence() async throws {
+        let dir = LimitRoom.scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let earlier = try await LimitRoom(at: dir, notes: LimitRoom.held() + [LimitRoom.note("old", daysAgo: 400, from: beta)])
+        await earlier.session.record(LimitAct(limit: .room, at: origin.addingTimeInterval(-86_400), posts: 1, sources: ["alpha.test"]))
+        let limit = earlier.index / 2
+
+        // The root task's order: the account, the months, what is held, then the room.
+        let opened = StoreFile.open(at: dir)
+        let room = try await LimitRoom(at: dir, notes: opened.notes)
+        await room.session.loadLimitAccount()
+        #expect(await room.session.keep(months: 3, from: origin) == 1)
+        await room.session.reloadFromStore()
+        room.session.roomBytes = limit
+        let act = try #require(await room.session.keepWithinRoom(at: origin))
+
+        #expect(room.session.limitAccount.map(\.limit) == [.room, .months, .room], "the earlier run's line was written over")
+        #expect(act.posts > 0)
+        #expect(room.index <= limit)
+        #expect(room.file.bytesHeld() > limit - 4 * 4_100, "cut past the room by more than the last rounds could")
+        #expect(try LimitAccountFile(directory: dir).read().count == 3)
+    }
+
+    @Test("A check asked for while one runs is run once it ends")
+    func askedAgainRuns() async throws {
+        let dir = LimitRoom.scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let room = try await LimitRoom(at: dir, notes: LimitRoom.held())
+        room.session.roomBytes = 100_000_000
+        room.session.roomChecking = true
+        #expect(await room.session.keepWithinRoom(at: origin) == nil)
+        #expect(room.session.roomAskedAgain)
+        room.session.roomChecking = false
+        #expect(await room.session.keepWithinRoom(at: origin) == nil)
+        #expect(!room.session.roomAskedAgain)
+        #expect(room.session.roomCheck != nil, "the check that ended did not ask again")
+        room.session.roomCheck?.cancel()
+        room.session.roomCheck = nil
+    }
+
+    @Test("The session's own moves hold the store still, nested, and ask for the check as they end")
+    func ownMovesHoldStill() async throws {
+        let dir = LimitRoom.scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let room = try await LimitRoom(at: dir, notes: LimitRoom.held())
+        room.session.roomBytes = 1_000
+        let inside: LimitAct? = await room.session.holdingStill {
+            await room.session.holdingStill {
+                await room.session.keepWithinRoom(at: origin)
+            }
+        }
+        #expect(inside == nil)
+        #expect(room.session.holdings.posts == 60)
+        #expect(room.session.holding == 0)
+        #expect(room.session.roomCheck != nil, "the move ending did not ask for the check")
+        room.session.roomCheck?.cancel()
+        room.session.roomCheck = nil
+        // Through a real move: a span let go holds too, and what went is not the room's.
+        room.session.roomBytes = 100_000_000
+        #expect(await room.session.letGo(span: origin.addingTimeInterval(-86_400 * 3)..<origin, host: nil) == 3)
+        #expect(room.session.limitAccount.isEmpty)
+        room.session.roomCheck?.cancel()
+        room.session.roomCheck = nil
+    }
+}

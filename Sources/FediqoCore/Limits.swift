@@ -96,12 +96,16 @@ public enum RoomPolicy {
         return new < old
     }
 
-    /// How many of `posts` posts to let go to win back `over` bytes, judged by the average a post
-    /// weighs in a store of `bytes` — at least one, and never more than there are. The caller
-    /// measures again once they are gone and asks again where the guess fell short.
+    /// How many of `posts` posts to let go this round to win back `over` bytes, judged by the
+    /// average a post weighs in a store of `bytes` — **and never the whole guess at once**: half
+    /// of it, and no more than a quarter of what is held, so a store of a few heavy posts and many
+    /// light ones cannot be cut past the room by an average that fits neither. At least one, and
+    /// never more than there are. The caller weighs again once they are gone and asks again
+    /// while it is still over.
     public static func postsToLetGo(over: Int, bytes: Int, posts: Int) -> Int {
         guard over > 0, posts > 0 else { return 0 }
         let each = max(1, bytes / posts)
-        return min(posts, max(1, Int((Double(over) / Double(each)).rounded(.up))))
+        let guess = Int((Double(over) / Double(each)).rounded(.up))
+        return min(posts, max(1, min((guess + 1) / 2, max(1, posts / 4))))
     }
 }

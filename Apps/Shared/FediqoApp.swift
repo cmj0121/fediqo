@@ -40,7 +40,9 @@ final class Launch {
         // It is also `nil` when the index was written by a newer build, which is left as found.
         saver = StoreSaver(store: store, file: opened.file)
         file = opened.file
-        limits = try? LimitAccountFile(directory: StoreFile.applicationSupport)
+        // Only beside an index this run writes: a run that must not write the index (a newer
+        // build's, or one that could not be set aside) writes no lines about it either.
+        limits = opened.file == nil ? nil : try? LimitAccountFile(directory: StoreFile.applicationSupport)
         storeIsNewer = opened.storeIsNewer
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).
@@ -169,9 +171,15 @@ struct FediqoApp: App {
 
     /// Gives the index back what rows let go of left in it (#249), or nothing where this run
     /// has no index.
-    private var compactStore: (@Sendable () async -> Void)? {
+    private var compactStore: (@Sendable () async throws -> Void)? {
         guard let file = Launch.shared.file else { return nil }
-        return { try? await file.compact() }
+        return { try await file.compact() }
+    }
+
+    /// What the rows held weigh, whatever the file does (#249); nothing where this run has no index.
+    private var weighStore: (@Sendable () async -> Int)? {
+        guard let file = Launch.shared.file else { return nil }
+        return { file.bytesHeld() }
     }
 
     var body: some Scene {
@@ -179,7 +187,7 @@ struct FediqoApp: App {
             FediqoRootView(
                 store: Launch.shared.store, forums: Launch.shared.forums,
                 mastodon: Launch.shared.mastodon, persist: save,
-                measureStore: measureStore, compactStore: compactStore,
+                measureStore: measureStore, compactStore: compactStore, weighStore: weighStore,
                 limits: Launch.shared.limits,
                 storeIsNewer: Launch.shared.storeIsNewer,
                 storeNoticeSeen: { Launch.shared.storeIsNewer = false }

@@ -905,7 +905,7 @@
 "prefs.room.none" = "不限";
 "prefs.room.figure" = "索引 %1$@ · 圖片副本 %2$@";
 "prefs.room.within" = "已用 %1$@，共 %2$@";
-"prefs.room.tighten.title" = "只給索引 %@ 的空間？";
+"prefs.room.tighten.title" = "只給這台裝置存放的內容 %@ 的空間？";
 "prefs.room.tighten.line" = "超過時先放下圖片副本，再放下最舊的貼文。";
 "prefs.room.tighten.detail" = "這台裝置所持有的內容會立即量測，並從此以這個空間為限。磁碟上的圖片副本先走，最舊的先，再次讀取時會回來；只有在這樣仍不夠時，才放下最舊的貼文，不分來源。每個來源仍保持加入。改成更大的空間或「不限」則不會放下任何內容。";
 "prefs.limits" = "上限放下了什麼";
