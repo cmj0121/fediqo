@@ -61,7 +61,7 @@ struct NearbyMoveTests {
         /// The receiver holding, with its code, and the peer the sender sees.
         func hold() async -> (Watch, String, NearbyPeer) {
             let held = Watch(await receiver.hold())
-            guard case .code(let code)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else {
+            guard case .code(let code, _)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else {
                 return (held, "", NearbyPeer(id: "", name: "", sessionID: ""))
             }
             for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
@@ -187,7 +187,7 @@ struct NearbyMoveTests {
         let wrong = code == "000000" ? "000001" : "000000"
         let sent = Watch(await pair.sender.offer(to: peer, code: wrong, pictures: false, contents: .whole))
         #expect(await sent.until("wrong code", Self.isRefused) == .refused(.wrongCode))
-        let rolled = await held.until("a new code", { if case .code(let next) = $0 { next != code } else { false } })
+        let rolled = await held.until("a new code", { if case .code(let next, _) = $0 { next != code } else { false } })
         #expect(rolled != nil)
         #expect(!held.events.contains(where: Self.isAsking))
         for _ in 0..<100 where pair.link.peers.first?.sessionID == peer.sessionID { try? await Task.sleep(for: .milliseconds(5)) }
@@ -229,15 +229,15 @@ struct NearbyMoveTests {
         let before = try onto.fingerprint()
 
         let held = Watch(await receiver.hold())
-        guard case .code(let code)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else { return }
+        guard case .code(let code, _)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else { return }
         for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
         let sent = Watch(await sender.offer(to: link.peers[0], code: code, pictures: true, contents: .whole))
         await sent.until("the sender's question", Self.isAsking)
         await held.until("the receiver's question", Self.isAsking)
         await sender.answer(true)
         await receiver.answer(true)
-        #expect(await held.until("refused", Self.isRefused) == .refused(.package(.altered)))
-        #expect(await sent.until("refused there", Self.isRefused) == .refused(.refusedThere))
+        // A byte changed inside a sealed frame fails its tag before anything is written.
+        #expect(await held.until("refused", Self.isRefused) == .refused(.malformed))
         #expect(try onto.fingerprint() == before)
         #expect(await onto.store.sources().isEmpty)
         let left = (try? FileManager.default.contentsOfDirectory(atPath: onto.directory.path)) ?? []
@@ -269,6 +269,130 @@ struct NearbyMoveTests {
         #expect(try pair.onto.credentials.credential(host: other.host)?.password == "keep", "another host's sign-in stays")
     }
 
+    /// A sender written by hand over the channel, for what `NearbyMove` would never send: an
+    /// offer that does not match its package, or a package altered on disk. Hands back the
+    /// receiver's last word and its watch.
+    private func handSend(
+        _ pair: Pair, file: URL, key: SymmetricKey, offer: NearbyOffer
+    ) async throws -> (NearbyFrame?, Watch) {
+        let (held, code, peer) = await pair.hold()
+        let psk = NearbyCode.psk(code: code, sessionID: peer.sessionID)
+        let connection = try await pair.link.connect(to: peer, psk: psk)
+        defer { connection.close() }
+        let channel = try await NearbyChannel.open(
+            over: connection, inbox: PlainInbox(connection), role: .sender, psk: psk, sessionID: peer.sessionID
+        )
+        try await channel.send(.offer(offer))
+        await held.until("the receiver's question", Self.isAsking)
+        await pair.receiver.answer(true)
+        guard case .accept = try await channel.next() else { return (nil, held) }
+        try await channel.send(.key(key.withUnsafeBytes { Data($0) }))
+        guard case .have(let have) = try await channel.next(), have == 0 else { return (nil, held) }
+        let handle = try FileHandle(forReadingFrom: file)
+        while let chunk = try handle.read(upToCount: NearbyFrame.mostBytes), !chunk.isEmpty {
+            try await channel.send(.bytes(chunk))
+        }
+        try await channel.send(.done)
+        let answer = try? await channel.next()
+        await held.until("refused or done", { Self.isRefused($0) || Self.isDone($0) })
+        return (answer ?? .refuse, held)
+    }
+
+    @Test("A package altered on disk is refused by #252's checks; an offer that is not its package is refused before")
+    func alteredAndMismatched() async throws {
+        let from = try await PackagerFixture.populated()
+        let onto = try await Device()
+        let pair = Pair(from: from, onto: onto)
+        defer { pair.remove() }
+        let before = try onto.fingerprint()
+        let file = PackagerFixture.package()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let key = SymmetricKey(size: .bits256)
+        try await from.packager().takeAway(to: file, key: .direct(key), pictures: false, contents: .whole) { _ in }
+        let summary = try await from.packager().preview(file, key: .direct(key))
+        let bytes = Int64(try Data(contentsOf: file).count)
+
+        // The offer says twice the posts the header does.
+        let wrong = PackageSummary(
+            contents: summary.contents, sources: summary.sources, posts: summary.posts * 2, timelines: summary.timelines,
+            takenAt: summary.takenAt, withPictures: summary.withPictures, bytes: summary.bytes, hasSecrets: summary.hasSecrets,
+            device: summary.device, appVersion: summary.appVersion, entryCount: summary.entryCount
+        )
+        var (answer, held) = try await handSend(pair, file: file, key: key, offer: NearbyOffer(summary: wrong, fileBytes: bytes))
+        #expect(answer == .refuse)
+        #expect(held.events.first(where: Self.isRefused) == .refused(.malformed))
+        await pair.receiver.stop()
+
+        // The file itself, one byte changed inside an entry.
+        var data = try Data(contentsOf: file)
+        data[data.count / 2] ^= 0x01
+        try data.write(to: file)
+        (answer, held) = try await handSend(pair, file: file, key: key, offer: NearbyOffer(summary: summary, fileBytes: bytes))
+        #expect(answer == .refuse)
+        #expect(held.events.first(where: Self.isRefused) == .refused(.package(.altered)))
+        await pair.receiver.stop()
+        #expect(try onto.fingerprint() == before)
+        #expect(await onto.store.sources().isEmpty)
+    }
+
+    @Test("A link cut on the receiver's last word: it adopted once, and the sender rejoins to hear done")
+    func cutOnTheLastWord() async throws {
+        let pair = Pair(from: try await PackagerFixture.populated(), onto: try await Device())
+        defer { pair.remove() }
+        pair.link.cutNextBeforeLastWord()
+        let (sent, held) = await moveWhole(pair, pictures: false)
+        #expect(held.events.filter(Self.isDone).count == 1)
+        #expect(sent.events.contains { if case .reconnecting = $0 { true } else { false } })
+        #expect(sent.events.filter(Self.isDone).count == 1 && !sent.events.contains(where: Self.isRefused))
+        #expect(await pair.onto.store.snapshot().notes.count == 3)
+    }
+
+    @Test("A recording of the wire holds nothing in the clear past the opening, and the code alone opens none of it")
+    func wireIsSealed() async throws {
+        let pair = Pair(from: try await PackagerFixture.populated(), onto: try await Device())
+        defer { pair.remove() }
+        let (_, held) = await moveWhole(pair, pictures: false)
+        guard case .asking(let offer, _, _)? = held.events.first(where: Self.isAsking) else { return }
+        let transcript = pair.link.transcript
+        #expect(transcript.count > 6)
+        let tags = Set(transcript.compactMap(\.first))
+        #expect(tags == [NearbyFrame.Tag.hello.rawValue, NearbyFrame.Tag.confirm.rawValue, NearbyFrame.Tag.sealed.rawValue], "\(tags)")
+        let offerJSON = try JSONEncoder().encode(offer)
+        for frame in transcript {
+            #expect(!frame.contains(Data(offer.id.utf8)) && frame.count != offerJSON.count + 1)
+        }
+        // The code and the session id, which a sniffer has, derive the transport key — and
+        // that key opens no sealed frame.
+        let session = pair.link.peers.first?.sessionID ?? ""
+        let psk = NearbyCode.psk(code: "000000", sessionID: session)
+        for frame in transcript where frame.first == NearbyFrame.Tag.sealed.rawValue {
+            let box = try? AES.GCM.SealedBox(combined: frame.dropFirst())
+            #expect(box.flatMap { try? AES.GCM.open($0, using: psk) } == nil)
+        }
+    }
+
+    @Test("Too many wrong codes close the hold as someone guessing; a hold nobody joins closes in time")
+    func guessingAndTimeout() async throws {
+        let onto = try await Device()
+        defer { onto.remove() }
+        let link = PipeNearbyLink()
+        let receiver = NearbyMove(link: link, carrier: onto.packager(), device: "a tablet", guessCap: 3)
+        let held = Watch(await receiver.hold())
+        guard case .code? = await held.until("a code", { if case .code = $0 { true } else { false } }) else { return }
+        for _ in 0..<3 {
+            for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+            guard let peer = link.peers.first else { break }
+            _ = try? await link.connect(to: peer, psk: NearbyCode.psk(code: "wrong", sessionID: peer.sessionID))
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(await held.until("guessing", Self.isRefused) == .refused(.guessing))
+        #expect(held.events.filter { if case .code = $0 { true } else { false } }.count == 3, "rolled on each guess but the last")
+
+        let quick = NearbyMove(link: link, carrier: onto.packager(), device: "a tablet", holdTimeout: .milliseconds(50))
+        let timed = Watch(await quick.hold())
+        #expect(await timed.until("timed out", Self.isRefused) == .refused(.timedOut))
+    }
+
     @Test("Not allowed to look nearby is said as that, on either side")
     func notAllowed() async throws {
         let pair = Pair(from: try await PackagerFixture.populated(), onto: try await Device())
@@ -287,7 +411,21 @@ struct NearbyMoveTests {
     }
 }
 
-/// A link that changes one byte of the package on its way: what a splice looks like to the
+/// A connection's frames read one at a time, for a sender written by hand.
+final class PlainInbox: NearbyInbox, @unchecked Sendable {
+    private var iterator: AsyncThrowingStream<NearbyFrame, any Error>.Iterator
+
+    init(_ connection: any NearbyPeerConnection) {
+        iterator = connection.frames.makeAsyncIterator()
+    }
+
+    func next() async throws -> NearbyFrame {
+        guard let frame = try await iterator.next() else { throw NearbyDropped() }
+        return frame
+    }
+}
+
+/// A link that changes one byte of a sealed frame on its way: what a splice looks like to the
 /// receiver.
 final class TamperingLink: NearbyLink, @unchecked Sendable {
     private let inner: PipeNearbyLink
@@ -316,11 +454,11 @@ final class TamperingLink: NearbyLink, @unchecked Sendable {
         var frames: AsyncThrowingStream<NearbyFrame, any Error> { inner.frames }
 
         func send(_ frame: NearbyFrame) async throws {
-            // The second frame of bytes: past the prelude and header, inside an entry.
-            if case .bytes(var data) = frame, data.count == NearbyFrame.mostBytes, !tampered {
+            // A sealed frame the size of a chunk: a byte of the package on the wire.
+            if case .sealed(var data) = frame, data.count > NearbyFrame.mostBytes, !tampered {
                 tampered = true
                 data[data.count / 2] ^= 0x01
-                try await inner.send(.bytes(data))
+                try await inner.send(.sealed(data))
                 return
             }
             try await inner.send(frame)

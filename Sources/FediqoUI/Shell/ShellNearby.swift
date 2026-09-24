@@ -79,6 +79,8 @@ final class ShellNearby {
     var picked: NearbyPeer?
     /// The code as typed on the sender, or shown on the receiver, for the line beside progress.
     private(set) var code = ""
+    /// The receiver's session mark (`NearbyCode.fingerprint`), shown beside its code.
+    private(set) var mark = ""
     /// What the sender weighed, for the pick sheet's sizes.
     private(set) var weight: PackageWeight?
     /// When bytes began to move, for the estimate.
@@ -260,6 +262,7 @@ final class ShellNearby {
         side = nil
         picked = nil
         code = ""
+        mark = ""
         since = nil
     }
 
@@ -306,9 +309,13 @@ final class ShellNearby {
     /// One event of the move, as a step.
     private func took(_ event: NearbyMove.Event) {
         switch event {
-        case .code(let code):
+        case .code(let code, let sessionID):
             self.code = code
+            mark = NearbyCode.mark(sessionID: sessionID)
             step = .holding(code: code)
+        case .joined:
+            // A device proved the code; its line is begun before its offer names it.
+            begin(peer: L10n.t("nearby.unnamed"))
         case .packing(let progress):
             // Taken only while still packing: a late figure never moves a later step back.
             if case .packing = step { step = .packing(progress) }
@@ -317,7 +324,7 @@ final class ShellNearby {
             begin(peer: peer)
             step = .connecting(peer: peer)
         case .asking(let offer, let peer, let held):
-            begin(peer: peer)
+            name(peer)
             step = .asking(Ask(offer: offer, peer: peer, held: held, receiving: side == .holding))
         case .waiting(let peer):
             step = .waiting(peer: peer)
@@ -349,5 +356,15 @@ final class ShellNearby {
     private func begin(peer: String) {
         guard token == nil, !peer.isEmpty else { return }
         token = work.beginNearby(peer: peer)
+    }
+
+    /// The other device named itself: the line begun at the join is listed under that name.
+    private func name(_ peer: String) {
+        guard !peer.isEmpty else { return }
+        guard let token else {
+            begin(peer: peer)
+            return
+        }
+        work.renameNearby(token, peer: peer)
     }
 }

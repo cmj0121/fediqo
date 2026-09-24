@@ -28,6 +28,11 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
         /// The next pair drops itself after this many `bytes` frames, as a walk out of range
         /// midway would.
         var cutAfterBytesFrames: Int?
+        /// The next pair drops itself as the holding side sends its last word, so the sender
+        /// never hears it.
+        var cutBeforeLastWord = false
+        /// Every frame that crossed any pair, as bytes: what a recording of the wire would hold.
+        var transcript: [Data] = []
     }
 
     private let room = Mutex(Room())
@@ -53,6 +58,17 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
     /// have crossed.
     public func cutNext(afterBytesFrames frames: Int) {
         room.withLock { $0.cutAfterBytesFrames = frames }
+    }
+
+    /// The next pair joined drops itself as the holding side's last frame is sent, so the
+    /// joining side never hears that word.
+    public func cutNextBeforeLastWord() {
+        room.withLock { $0.cutBeforeLastWord = true }
+    }
+
+    /// Every frame that crossed, in order, as it would be recorded off the wire.
+    public var transcript: [Data] {
+        room.withLock { $0.transcript }
     }
 
     /// Every joined pair drops at once, without a word.
@@ -117,11 +133,13 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
             holding.arrivals.yield(.failedHandshake)
             throw NearbyRefusal.wrongCode
         }
-        let pair = PipePair()
+        let pair = PipePair(record: { [weak self] data in self?.room.withLock { $0.transcript.append(data) } })
         room.withLock { room in
             room.pairs.append(pair)
             pair.cutAfterBytesFrames = room.cutAfterBytesFrames
             room.cutAfterBytesFrames = nil
+            pair.cutBeforeLastWord = room.cutBeforeLastWord
+            room.cutBeforeLastWord = false
         }
         let (ours, theirs) = pair.ends(name: peer.name)
         holding.arrivals.yield(.joined(theirs))
@@ -144,13 +162,18 @@ final class PipePair: Sendable {
         var cut = false
         var bytesFrames = 0
         var cutAfterBytesFrames: Int?
+        var cutBeforeLastWord = false
+        /// How many frames the holding side has sent past the channel's opening.
+        var sealedFromB = 0
     }
 
     private let wires = Mutex(Wires())
     private let framesA: AsyncThrowingStream<NearbyFrame, any Error>
     private let framesB: AsyncThrowingStream<NearbyFrame, any Error>
+    private let record: @Sendable (Data) -> Void
 
-    init() {
+    init(record: @escaping @Sendable (Data) -> Void = { _ in }) {
+        self.record = record
         let (a, toA) = AsyncThrowingStream<NearbyFrame, any Error>.makeStream()
         let (b, toB) = AsyncThrowingStream<NearbyFrame, any Error>.makeStream()
         framesA = a
@@ -175,14 +198,28 @@ final class PipePair: Sendable {
         set { wires.withLock { $0.cutAfterBytesFrames = newValue } }
     }
 
+    /// Set before the first frame: the holding side's last word is cut rather than delivered.
+    var cutBeforeLastWord: Bool {
+        get { wires.withLock { $0.cutBeforeLastWord } }
+        set { wires.withLock { $0.cutBeforeLastWord = newValue } }
+    }
+
     func send(_ frame: NearbyFrame, from side: Side) throws {
         let data = try frame.encode()
         let decoded = try NearbyFrame.decode(data)
+        record(data)
         let (to, cutNow) = wires.withLock { wires -> (AsyncThrowingStream<NearbyFrame, any Error>.Continuation?, Bool) in
             guard !wires.cut else { return (nil, false) }
-            if case .bytes = decoded {
-                wires.bytesFrames += 1
-                if let limit = wires.cutAfterBytesFrames, wires.bytesFrames > limit { return (nil, true) }
+            if case .sealed = decoded {
+                // Sealed frames are opaque here; what is counted is their number, and the
+                // holding side's last word is the third it sends after `have`: accept, have,
+                // done — where nothing dropped before.
+                if side == .b {
+                    wires.sealedFromB += 1
+                    if wires.cutBeforeLastWord, wires.sealedFromB == 3 { return (nil, true) }
+                }
+                wires.bytesFrames += side == .a ? 1 : 0
+                if side == .a, let limit = wires.cutAfterBytesFrames, wires.bytesFrames > limit + 2 { return (nil, true) }
             }
             return (side == .a ? wires.toB : wires.toA, false)
         }

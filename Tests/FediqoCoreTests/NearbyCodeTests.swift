@@ -39,6 +39,9 @@ struct NearbyCodeTests {
         ).withUnsafeBytes { Data($0) }
         #expect(bytes == expected)
         #expect(NearbyCode.pskIdentity(sessionID: "abc") == Data("fediqo-nearby-1 abc".utf8))
+        let mark = NearbyCode.mark(sessionID: "abc")
+        #expect(mark.count == 4 && mark.allSatisfy(\.isHexDigit) && mark == NearbyCode.mark(sessionID: "abc"))
+        #expect(mark != NearbyCode.mark(sessionID: "abd"))
     }
 
     @Test("The link's parameters are TLS over TCP with peer-to-peer on, and nothing is started")
@@ -49,6 +52,12 @@ struct NearbyCodeTests {
         #expect(stack.applicationProtocols.contains { $0 is NWProtocolTLS.Options })
         #expect(stack.transportProtocol is NWProtocolTCP.Options)
         #expect(NearbyCode.service == "_fediqo._tcp")
+        // The one suite: ECDHE-PSK with ChaCha20-Poly1305 (0xCCAC), and no other holds.
+        #expect(NWNearbyLink.suite.rawValue == 0xCCAC)
+        #expect(NWNearbyLink.suiteHolds(NWNearbyLink.suite))
+        #expect(!NWNearbyLink.suiteHolds(nil))
+        #expect(!NWNearbyLink.suiteHolds(tls_ciphersuite_t(rawValue: 0x00AE)!), "plain PSK is refused")
+        #expect(!NWNearbyLink.suiteHolds(.AES_128_GCM_SHA256), "a certificate suite is refused")
     }
 
     @Test("A denied local network is said as not allowed; anything else as itself")
@@ -61,6 +70,79 @@ struct NearbyCodeTests {
         #expect(NearbyRefusal(PackageRefusal.altered) == .package(.altered))
         #expect(NearbyRefusal(PackageFault.noRoom(needed: 3, free: 1)) == .noRoom(needed: 3, free: 1))
         #expect(NearbyRefusal(NearbyRefusal.wrongCode) == .wrongCode)
+    }
+}
+
+/// The channel over a joined pair: key agreement bound to the code, proofs both ways, and every
+/// frame after sealed.
+@Suite("The channel between two devices")
+struct NearbyChannelTests {
+    /// Two ends of a pipe, joined under `psk` on the holding side and `joining` on the other.
+    private func ends(_ link: PipeNearbyLink, psk: SymmetricKey, joining: SymmetricKey) async throws
+        -> (any NearbyPeerConnection, any NearbyPeerConnection)
+    {
+        let arrivals = link.advertise(name: "a", sessionID: "s", psk: psk)
+        let sender = try await link.connect(to: NearbyPeer(id: "s", name: "a", sessionID: "s"), psk: joining)
+        for try await arrival in arrivals {
+            if case .joined(let receiver) = arrival { return (sender, receiver) }
+        }
+        throw NearbyDropped()
+    }
+
+    @Test("Both sides agree a key, prove it, and every frame after crosses sealed and in order")
+    func agrees() async throws {
+        let link = PipeNearbyLink()
+        let psk = NearbyCode.psk(code: "123456", sessionID: "s")
+        let (a, b) = try await ends(link, psk: psk, joining: psk)
+        async let sender = NearbyChannel.open(over: a, inbox: PlainInbox(a), role: .sender, psk: psk, sessionID: "s")
+        async let receiver = NearbyChannel.open(over: b, inbox: PlainInbox(b), role: .receiver, psk: psk, sessionID: "s")
+        let (s, r) = try await (sender, receiver)
+        try await s.send(.have(7))
+        try await s.send(.bytes(Data("x".utf8)))
+        try await r.send(.done)
+        #expect(try await r.next() == .have(7))
+        #expect(try await r.next() == .bytes(Data("x".utf8)))
+        #expect(try await s.next() == .done)
+        let tags = Set(link.transcript.compactMap(\.first))
+        #expect(tags == [NearbyFrame.Tag.hello.rawValue, NearbyFrame.Tag.confirm.rawValue, NearbyFrame.Tag.sealed.rawValue])
+        // A sealed frame replayed is out of order for the counter, and refused.
+        let replay = link.transcript.last { $0.first == NearbyFrame.Tag.sealed.rawValue }!
+        #expect(throws: NearbyRefusal.malformed) { try s.unseal(try NearbyFrame.decode(replay)) }
+        #expect(throws: NearbyRefusal.malformed) { try r.unseal(.accept) }
+    }
+
+    @Test("A code that differs fails the proof as a wrong code, and no key is agreed")
+    func wrongCode() async throws {
+        let link = PipeNearbyLink()
+        let psk = NearbyCode.psk(code: "123456", sessionID: "s")
+        let other = NearbyCode.psk(code: "123457", sessionID: "s")
+        // Both got past the transport (as a sniffer who recorded it has): only the proof tells.
+        let (a, b) = try await ends(link, psk: psk, joining: psk)
+        let sender = Task { try await NearbyChannel.open(over: a, inbox: PlainInbox(a), role: .sender, psk: other, sessionID: "s") }
+        let receiver = Task { try await NearbyChannel.open(over: b, inbox: PlainInbox(b), role: .receiver, psk: psk, sessionID: "s") }
+        let senderOutcome = await sender.result
+        let receiverOutcome = await receiver.result
+        #expect(senderOutcome.refusal == .wrongCode && receiverOutcome.refusal == .wrongCode)
+    }
+}
+
+extension Result where Failure == any Error {
+    var refusal: NearbyRefusal? {
+        if case .failure(let error) = self { error as? NearbyRefusal } else { nil }
+    }
+}
+
+/// A connection's frames read one at a time.
+final class PlainInbox: NearbyInbox, @unchecked Sendable {
+    private var iterator: AsyncThrowingStream<NearbyFrame, any Error>.Iterator
+
+    init(_ connection: any NearbyPeerConnection) {
+        iterator = connection.frames.makeAsyncIterator()
+    }
+
+    func next() async throws -> NearbyFrame {
+        guard let frame = try await iterator.next() else { throw NearbyDropped() }
+        return frame
     }
 }
 
@@ -79,6 +161,7 @@ struct NearbyFrameTests {
             .offer(NearbyOffer(id: "o1", summary: Self.summary, fileBytes: 12_345)),
             .accept, .refuse, .key(Data(repeating: 7, count: 32)), .have(0), .have(1 << 40),
             .bytes(Data("hello".utf8)), .bytes(Data(repeating: 1, count: NearbyFrame.mostBytes)), .done,
+            .hello(Data(repeating: 2, count: 65)), .confirm(Data(repeating: 3, count: 32)), .sealed(Data(repeating: 4, count: 40)),
         ]
         for frame in frames {
             #expect(try NearbyFrame.decode(try frame.encode()) == frame)
@@ -93,6 +176,8 @@ struct NearbyFrameTests {
             Data([5, 1, 2, 3]), Data([5]) + Data(repeating: 0xFF, count: 8), Data([6]),
             Data([6]) + Data(repeating: 1, count: NearbyFrame.mostBytes + 1), Data([1]) + Data("{}".utf8),
             Data([1]) + Data(#"{"id":"","summary":{},"fileBytes":-1}"#.utf8),
+            Data([8]) + Data(repeating: 2, count: 32), Data([9]) + Data(repeating: 3, count: 31), Data([10]) + Data(repeating: 4, count: 27),
+            Data([1]) + Data(#"{"id":"x","summary":{"header":{"contents":"whole","sources":[],"posts":0,"timelines":0,"hasSecrets":false,"device":"","appVersion":"","entryCount":0},"takenAt":0,"withPictures":false,"bytes":0},"fileBytes":1099511627777}"#.utf8),
         ]
         for data in bad {
             #expect(throws: NearbyRefusal.malformed) { try NearbyFrame.decode(data) }

@@ -40,6 +40,14 @@ public enum NearbyCode {
         )
     }
 
+    /// Four hex characters of the session id's digest, shown beside the code on the device
+    /// holding and beside its name on the device choosing, so a second device advertising the
+    /// same name is told apart by the person before a code is typed.
+    public static func mark(sessionID: String) -> String {
+        let digest = SHA256.hash(data: Data(sessionID.utf8))
+        return digest.prefix(2).map { String(format: "%02X", $0) }.joined()
+    }
+
     /// The identity both sides name the key by in the handshake: the session id, which is
     /// public.
     public static func pskIdentity(sessionID: String) -> Data {

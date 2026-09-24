@@ -133,6 +133,16 @@ final class SourceWork {
     /// "this device", where every other line is a host. A space, so no host can ever be it.
     nonisolated static let thisDevice = "this device"
 
+    /// What a device nearby is keyed by in the record (#253): its name behind a mark with a
+    /// space in it, so a device named like a host never reads as a source. `SourceAct.shown`
+    /// draws the name alone.
+    nonisolated static let nearbyMark = "nearby device: "
+
+    /// The record's key for the device nearby called `name`.
+    nonisolated static func nearbyKey(_ name: String) -> String {
+        nearbyMark + name
+    }
+
     /// What `begin` hands back and `end` takes. Ending one twice, or one already gone, is nothing.
     struct Token: Hashable, Sendable {
         fileprivate let id: Int
@@ -215,7 +225,25 @@ final class SourceWork {
     /// under that device's name, so the record shows exactly one line and where it went. Ended
     /// with `end` on every way out.
     nonisolated func beginNearby(peer: String) -> Token {
-        begin(host: peer, for: .nearbyMove)
+        begin(host: Self.nearbyKey(peer), for: .nearbyMove)
+    }
+
+    /// The device nearby a line was begun for named itself after the join: the line, running
+    /// and on the record, is listed under that name from now on. Nothing where the token is gone.
+    nonisolated func renameNearby(_ token: Token, peer: String) {
+        let key = Self.nearbyKey(peer).lowercased()
+        let publish = held.withLock { held -> Bool in
+            guard let running = held.running[token.id] else { return false }
+            held.running[token.id] = Running(
+                host: key, source: nil, purpose: running.purpose, name: running.name, since: running.since
+            )
+            if let at = held.pending.firstIndex(where: { $0.id == token.id }) {
+                held.pending[at] = held.pending[at].renamed(to: key)
+            }
+            return Self.claim(&held)
+        }
+        Task { @MainActor [weak self] in self?.log.rename(id: token.id, to: key) }
+        if publish { schedule() }
     }
 
     // MARK: - Whose it is (#220)
@@ -596,10 +624,17 @@ struct SourceAct: Identifiable, Equatable, Sendable {
         self.allowedBy = allowedBy
     }
 
-    /// A source as the record draws it: a host as itself, and the one key that is no host —
-    /// `SourceWork.thisDevice` — in the shell's words.
+    /// A source as the record draws it: a host as itself, the one key that is no host —
+    /// `SourceWork.thisDevice` — in the shell's words, and a device nearby by its name alone.
     static func shown(_ source: String, language: DummyLanguage? = nil) -> String {
-        source == SourceWork.thisDevice ? L10n.t("work.thisDevice", language: language) : source
+        if source == SourceWork.thisDevice { return L10n.t("work.thisDevice", language: language) }
+        if source.hasPrefix(SourceWork.nearbyMark) { return String(source.dropFirst(SourceWork.nearbyMark.count)) }
+        return source
+    }
+
+    /// The same act, listed under `source` instead.
+    func renamed(to source: String) -> SourceAct {
+        SourceAct(id: id, reached: source, pointedBy: nil, purpose: purpose, at: at, allowedBy: allowedBy)
     }
 
     /// The source an act is listed under: the one that pointed to it where one did, and
@@ -663,6 +698,15 @@ final class SourceRecord {
         let cut = acts.count - Self.trimmedTo
         acts.removeFirst(cut)
         dropped += cut
+        bySource = Dictionary(grouping: acts, by: \.source)
+        sources = bySource.keys.sorted()
+    }
+
+    /// The act `id`, listed under `source` from now on (#253: a device nearby that named itself
+    /// after its line was begun). Rare, so the index is simply rebuilt.
+    func rename(id: Int, to source: String) {
+        guard let at = acts.firstIndex(where: { $0.id == id }) else { return }
+        acts[at] = acts[at].renamed(to: source)
         bySource = Dictionary(grouping: acts, by: \.source)
         sources = bySource.keys.sorted()
     }

@@ -1063,10 +1063,10 @@
 "nearby.code.spoken" = "The code to type on the other device";
 "nearby.hold.sheet.title" = "Hold from nearby";
 "nearby.hold.sheet.line" = "On the other device, press Move to nearby and type this code.";
-"nearby.hold.sheet.help" = "The code is new each time, and a wrong one gets one try: it becomes the key the two devices join under, so a device that does not show the same six digits never connects. Nothing moves until this device has shown what would arrive and you have said yes.";
+"nearby.hold.sheet.help" = "The mark beside the name here matches the one beside this device in the list there; two devices with one name are told apart by it. The code is new each time, and a wrong one gets one try: it becomes the key the two devices join under, so a device that does not show the same six digits never connects. Nothing moves until this device has shown what would arrive and you have said yes.";
 "nearby.pick.sheet.title" = "Move to nearby";
 "nearby.pick.sheet.line" = "Choose the device that is holding, and type the code it shows.";
-"nearby.pick.sheet.help" = "Only your devices with Fediqo open on Hold from nearby are listed, by the name each gives itself. The code on that device's screen is the proof both sides agree on; a wrong one connects nothing. With pictures, the whole of what this device shows moves; without them, far less, and pictures come back as posts are read again. Sign-ins only moves nothing but what signs in to your sources.";
+"nearby.pick.sheet.help" = "Only your devices with Fediqo open on Hold from nearby are listed, by the name each gives itself, with a four-character mark that matches the one on that device's screen. The code on that device's screen is the proof both sides agree on; a wrong one connects nothing. With pictures, the whole of what this device shows moves; without them, far less, and pictures come back as posts are read again. Sign-ins only moves nothing but what signs in to your sources.";
 "nearby.pick.looking" = "Looking nearby";
 "nearby.pick.row.brief" = "Holding from nearby";
 "nearby.pick.code" = "Six-digit code";
@@ -1101,3 +1101,12 @@
 "nearby.refused.other.line" = "Nothing was left half done: %@";
 "nearby.done.title" = "Done with %@";
 "nearby.done.signIns.line" = "The sign-ins are here now, and nothing else changed.";
+"nearby.unnamed" = "a device nearby";
+"nearby.mark.spoken" = "Mark %@";
+"nearby.mark.line" = "The mark beside the name here matches the one beside this device in the list there.";
+"nearby.refused.unsure.title" = "The link dropped on the last word";
+"nearby.refused.unsure.line" = "Everything was sent; the other device's screen says whether it arrived whole.";
+"nearby.refused.guessing.title" = "Someone nearby is guessing";
+"nearby.refused.guessing.line" = "Too many wrong codes, so the hold was closed. Nothing changed.";
+"nearby.refused.timedOut.title" = "Nobody joined";
+"nearby.refused.timedOut.line" = "The hold waited ten minutes and was closed. Nothing changed.";

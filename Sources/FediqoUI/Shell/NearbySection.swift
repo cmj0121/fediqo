@@ -150,7 +150,10 @@ struct NearbyFlow: ViewModifier {
             .sheet(item: sheet) { sheet in
                 switch sheet {
                 case .hold(let code):
-                    NearbyHoldSheet(code: code, name: session?.deviceName ?? "", onCancel: { session?.nearby.dismiss() })
+                    NearbyHoldSheet(
+                        code: code, name: session?.deviceName ?? "", mark: session?.nearby.mark ?? "",
+                        onCancel: { session?.nearby.dismiss() }
+                    )
                 case .pick:
                     if let session { NearbyPickSheet(session: session) }
                 }
@@ -188,6 +191,9 @@ struct NearbyFlow: ViewModifier {
 struct NearbyHoldSheet: View {
     let code: String
     let name: String
+    /// The session's mark, beside the code: the same four characters the sender sees beside
+    /// this name, so two devices with one name are told apart before a code is typed.
+    let mark: String
     let onCancel: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
@@ -200,9 +206,18 @@ struct NearbyHoldSheet: View {
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .accessibilityAddTraits(.isHeader)
             digits
-            Text(name)
-                .shellFont(.name)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
+            HStack(spacing: ShellSpace.snug) {
+                Text(name)
+                    .shellFont(.name)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                if !mark.isEmpty {
+                    Text(mark)
+                        .shellFont(.meta)
+                        .monospaced()
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                        .accessibilityLabel(String(format: L10n.t("nearby.mark.spoken"), mark))
+                }
+            }
             Text(L10n.t("nearby.hold.sheet.line"))
                 .shellFont(.body)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
@@ -294,6 +309,7 @@ struct NearbyPickSheet: View {
                 ForEach(peers) { peer in
                     ShellListRow(
                         id: peer, title: peer.name, brief: L10n.t("nearby.pick.row.brief"),
+                        figure: NearbyCode.mark(sessionID: peer.sessionID),
                         selection: $nearby.picked, onOpen: { focused = true }
                     ) {
                         Image(systemName: "antenna.radiowaves.left.and.right")

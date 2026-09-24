@@ -70,6 +70,13 @@ public enum NearbyRefusal: Error, Sendable, Equatable {
     case refusedThere
     /// The link dropped and did not come back.
     case lost
+    /// The link dropped after everything was sent and did not come back to say whether the
+    /// other device read it back: the outcome is on that device's screen, not this one's.
+    case unsure
+    /// Too many wrong codes in one hold: someone nearby is guessing, and the hold is closed.
+    case guessing
+    /// Nobody joined while the hold was up.
+    case timedOut
     /// The other device sent something no build of ours would: the move is closed.
     case malformed
     /// What arrived is not as it was sent (#252's checks), or cannot be read back here.
@@ -88,4 +95,11 @@ public enum NearbyRefusal: Error, Sendable, Equatable {
         default: self = .other(error.localizedDescription)
         }
     }
+}
+
+/// The link ended without a word — the peer went out of reach, the app was put away — which
+/// is not a refusal: the sender joins again and the receiver waits. A link throws this, and
+/// nothing else, for a drop.
+public struct NearbyDropped: Error, Sendable, Equatable {
+    public init() {}
 }

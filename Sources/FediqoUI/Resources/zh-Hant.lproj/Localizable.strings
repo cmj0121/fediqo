@@ -1035,10 +1035,10 @@
 "nearby.code.spoken" = "要在另一部裝置輸入的代碼";
 "nearby.hold.sheet.title" = "接收鄰近裝置";
 "nearby.hold.sheet.line" = "在另一部裝置按「搬到鄰近裝置」，選這個名稱，然後輸入這組代碼。";
-"nearby.hold.sheet.help" = "代碼每次都不同，輸錯只有一次機會：它會成為兩部裝置連線用的金鑰，沒有顯示同一組六位數的裝置永遠連不上。在這部裝置顯示會收到什麼、而你說好之前，什麼都不會搬。";
+"nearby.hold.sheet.help" = "這裡名稱旁的標記，會和對方清單裡這部裝置旁的標記一致；同名的兩部裝置就靠它分辨。代碼每次都不同，輸錯只有一次機會：它會成為兩部裝置連線用的金鑰，沒有顯示同一組六位數的裝置永遠連不上。在這部裝置顯示會收到什麼、而你說好之前，什麼都不會搬。";
 "nearby.pick.sheet.title" = "搬到鄰近裝置";
 "nearby.pick.sheet.line" = "選擇正在接收的裝置，然後輸入它顯示的代碼。";
-"nearby.pick.sheet.help" = "只會列出開著 Fediqo 並按下「接收鄰近裝置」的你的裝置，依各自的名稱顯示。那部裝置螢幕上的代碼就是雙方同意的憑證；輸錯就連不上。連圖片一起搬，這部裝置顯示的一切都會過去；不帶圖片小得多，圖片會在貼文重新讀取時回來。「只搬登入憑證」只會搬登入各來源的憑證，其他都不搬。";
+"nearby.pick.sheet.help" = "只會列出開著 Fediqo 並按下「接收鄰近裝置」的你的裝置，依各自的名稱顯示，並附上一個四字元的標記，與那部裝置畫面上的一致。那部裝置螢幕上的代碼就是雙方同意的憑證；輸錯就連不上。連圖片一起搬，這部裝置顯示的一切都會過去；不帶圖片小得多，圖片會在貼文重新讀取時回來。「只搬登入憑證」只會搬登入各來源的憑證，其他都不搬。";
 "nearby.pick.looking" = "正在尋找鄰近裝置";
 "nearby.pick.row.brief" = "正在接收鄰近裝置";
 "nearby.pick.code" = "六位數代碼";
@@ -1071,3 +1071,12 @@
 "nearby.refused.other.line" = "沒有留下做到一半的東西：%@";
 "nearby.done.title" = "與 %@ 之間完成了";
 "nearby.done.signIns.line" = "登入憑證已經在這裡，其他都沒有改變。";
+"nearby.unnamed" = "鄰近的裝置";
+"nearby.mark.spoken" = "標記 %@";
+"nearby.mark.line" = "這裡名稱旁的標記，會和對方清單裡這部裝置旁的標記一致。";
+"nearby.refused.unsure.title" = "連線在最後一步中斷了";
+"nearby.refused.unsure.line" = "全部都已送出；是否完整收到，看另一部裝置的畫面。";
+"nearby.refused.guessing.title" = "附近有人在猜代碼";
+"nearby.refused.guessing.line" = "代碼輸錯太多次，接收已經關閉。什麼都沒改變。";
+"nearby.refused.timedOut.title" = "沒有裝置加入";
+"nearby.refused.timedOut.line" = "等了十分鐘沒有人加入，接收已經關閉。什麼都沒改變。";

@@ -4,37 +4,55 @@ import Network
 import Synchronization
 
 /// The real link (#253): Bonjour `_fediqo._tcp` with peer-to-peer on, and TLS 1.2 under a
-/// pre-shared key — Apple's own documented pattern for two devices nearby, and nothing else.
-/// Thin on purpose: what it does is find, advertise and join; every decision is `NearbyMove`'s,
-/// and every frame is `NearbyFrame`'s. Not exercised on a runner, which has no radio; the
-/// parameters it builds are (`parameters(psk:sessionID:)`).
+/// pre-shared key with an ephemeral key exchange — Apple's own documented pattern for two
+/// devices nearby, and nothing else. Thin on purpose: what it does is find, advertise and
+/// join; every decision is `NearbyMove`'s, every word is `NearbyChannel`'s, and every frame is
+/// `NearbyFrame`'s. Not exercised on a runner, which has no radio; the parameters it builds
+/// and the refusals it maps are (`parameters(psk:sessionID:)`, `refusal(_:)`, `suiteHolds`).
+///
+/// **The suite is checked, not assumed.** The options ask for
+/// `TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256` on TLS 1.2 exactly; once a connection is
+/// ready, the suite it actually negotiated is read back, and any other — a default the
+/// framework still offered, a certificate path — is refused as a failed handshake rather than
+/// used. A device that cannot negotiate it fails closed.
 ///
 /// **What a refusal reads as.** A device not allowed to look nearby — the local-network
 /// permission refused — has its browser or listener fail with a policy error, and that is
 /// `NearbyRefusal.notAllowed`: said as that, never as "nobody nearby". A handshake that fails
 /// on the joining side is `.wrongCode`; on the holding side it is `.failedHandshake`, so the
-/// code is rolled.
+/// code is rolled — and only a handshake: a probe that never got that far rolls nothing.
 public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
+    /// How long a join may take before it is a device out of reach.
+    public static let connectTimeout: Duration = .seconds(20)
+    /// The one suite this link speaks: PSK for the code, ECDHE for forward secrecy.
+    public static let suite = tls_ciphersuite_t(rawValue: 0xCCAC)!
+
     private let queue = DispatchQueue(label: "dev.mini-poc.fediqo.nearby")
     private let endpoints = Mutex<[String: NWEndpoint]>([:])
 
     public init() {}
 
-    /// TLS 1.2 or later, under `psk` named by the session id, and only the PSK ciphersuite —
+    /// TLS 1.2 exactly, under `psk` named by the session id, asking for the ECDHE-PSK suite —
     /// so no certificate is ever asked for or trusted — over TCP, with peer-to-peer on.
     public static func parameters(psk: SymmetricKey, sessionID: String) -> NWParameters {
         let tls = NWProtocolTLS.Options()
         let key = psk.withUnsafeBytes { DispatchData(bytes: $0) }
         let identity = NearbyCode.pskIdentity(sessionID: sessionID).withUnsafeBytes { DispatchData(bytes: $0) }
         sec_protocol_options_add_pre_shared_key(tls.securityProtocolOptions, key as __DispatchData, identity as __DispatchData)
-        sec_protocol_options_append_tls_ciphersuite(tls.securityProtocolOptions, tls_ciphersuite_t(rawValue: TLS_PSK_WITH_AES_128_GCM_SHA256)!)
+        sec_protocol_options_append_tls_ciphersuite(tls.securityProtocolOptions, suite)
         sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
+        sec_protocol_options_set_max_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
         let tcp = NWProtocolTCP.Options()
         tcp.enableKeepalive = true
         tcp.keepaliveIdle = 5
         let parameters = NWParameters(tls: tls, tcp: tcp)
         parameters.includePeerToPeer = true
         return parameters
+    }
+
+    /// Whether a negotiated suite is the one asked for. Anything else is refused.
+    public static func suiteHolds(_ negotiated: tls_ciphersuite_t?) -> Bool {
+        negotiated == suite
     }
 
     public func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
@@ -49,6 +67,9 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         var txt = NWTXTRecord()
         txt["id"] = sessionID
         listener.service = NWListener.Service(name: name, type: NearbyCode.service, txtRecord: txt)
+        // Every connection handed over and not yet closed by its taker: cancelled with the
+        // listen, so a stream put away leaves no socket open.
+        let open = Mutex<[ObjectIdentifier: NWPeerConnection]>([:])
         listener.stateUpdateHandler = { state in
             switch state {
             case .failed(let error), .waiting(let error):
@@ -61,11 +82,26 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         }
         listener.newConnectionHandler = { [queue] connection in
             let peer = NWPeerConnection(connection, peerName: nil, queue: queue)
+            open.withLock { $0[ObjectIdentifier(peer)] = peer }
             peer.open { ready in
-                continuation.yield(ready ? .joined(peer) : .failedHandshake)
+                if ready {
+                    continuation.yield(.joined(peer))
+                } else {
+                    open.withLock { $0[ObjectIdentifier(peer)] = nil }
+                    // Only a handshake that failed is a guess; a probe that never got that
+                    // far, or the framework's own racing attempt, rolls nothing.
+                    if peer.failedHandshake { continuation.yield(.failedHandshake) }
+                }
             }
         }
-        continuation.onTermination = { _ in listener.cancel() }
+        continuation.onTermination = { _ in
+            listener.cancel()
+            let peers = open.withLock { held in
+                defer { held = [:] }
+                return Array(held.values)
+            }
+            for peer in peers { peer.close() }
+        }
         listener.start(queue: queue)
         return stream
     }
@@ -109,8 +145,14 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         guard let endpoint = endpoints.withLock({ $0[peer.id] }) else { throw NearbyDropped() }
         let connection = NWConnection(to: endpoint, using: Self.parameters(psk: psk, sessionID: peer.sessionID))
         let wrapped = NWPeerConnection(connection, peerName: peer.name, queue: queue)
-        let ready = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            wrapped.open { continuation.resume(returning: $0) }
+        // A join put away — the person pressed Cancel — cancels the attempt, and one that takes
+        // longer than a device in reach would is a device out of reach.
+        let ready = await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                wrapped.open(timeout: Self.connectTimeout) { continuation.resume(returning: $0) }
+            }
+        } onCancel: {
+            wrapped.close()
         }
         guard ready else {
             // A handshake that fails against a device that is there is the code; a device that
@@ -134,15 +176,18 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
 }
 
 /// One `NWConnection`, framed: `u32` length, then a `NearbyFrame` as it encodes.
+///
+/// **Pulled, not pushed.** A frame is read off the socket only when the consumer asks for the
+/// next one, so a disk slower than the radio holds the radio back rather than filling memory.
 final class NWPeerConnection: NearbyPeerConnection, @unchecked Sendable {
     private let connection: NWConnection
     private let queue: DispatchQueue
     let peerName: String?
-    let frames: AsyncThrowingStream<NearbyFrame, any Error>
-    private let incoming: AsyncThrowingStream<NearbyFrame, any Error>.Continuation
+
     private struct Opening: Sendable {
         var opened: (@Sendable (Bool) -> Void)?
         var failedHandshake = false
+        var ready = false
     }
 
     private let state = Mutex(Opening())
@@ -151,34 +196,60 @@ final class NWPeerConnection: NearbyPeerConnection, @unchecked Sendable {
         self.connection = connection
         self.queue = queue
         self.peerName = peerName
-        (frames, incoming) = AsyncThrowingStream<NearbyFrame, any Error>.makeStream()
     }
 
     /// Whether the handshake, rather than the reach, is what failed.
     var failedHandshake: Bool { state.withLock { $0.failedHandshake } }
 
-    /// Starts the connection; `done` is told once whether it came up.
-    func open(_ done: @escaping @Sendable (Bool) -> Void) {
+    /// Starts the connection; `done` is told once whether it came up — and it comes up only on
+    /// the one suite asked for. `timeout` is how long that may take.
+    func open(timeout: Duration? = nil, _ done: @escaping @Sendable (Bool) -> Void) {
         state.withLock { $0.opened = done }
         connection.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
             case .ready:
+                guard self.suiteHolds() else {
+                    self.take(handshakeFailed: true)?(false)
+                    self.connection.cancel()
+                    return
+                }
+                self.state.withLock { $0.ready = true }
                 self.take(handshakeFailed: false)?(true)
-                self.receive()
-            case .failed(let error):
+            case .failed(let error), .waiting(let error):
+                // A handshake refused reads as a TLS error, or — where the other side closed
+                // on the proof — as the connection reset under it; a device out of reach reads
+                // as anything else.
                 let handshake: Bool
-                if case .tls = error { handshake = true } else { handshake = false }
+                switch error {
+                case .tls: handshake = true
+                case .posix(let code): handshake = code == .ECONNRESET || code == .EPIPE
+                default: handshake = false
+                }
                 self.take(handshakeFailed: handshake)?(false)
-                self.incoming.finish(throwing: NearbyDropped())
+                self.connection.cancel()
             case .cancelled:
                 self.take(handshakeFailed: false)?(false)
-                self.incoming.finish()
             default:
                 break
             }
         }
+        if let timeout {
+            queue.asyncAfter(deadline: .now() + .nanoseconds(Int(timeout / .nanoseconds(1)))) { [weak self] in
+                guard let self, let opened = self.take(handshakeFailed: false) else { return }
+                opened(false)
+                self.connection.cancel()
+            }
+        }
         connection.start(queue: queue)
+    }
+
+    /// Whether the suite the connection negotiated is the one asked for.
+    private func suiteHolds() -> Bool {
+        guard let metadata = connection.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata else {
+            return false
+        }
+        return NWNearbyLink.suiteHolds(sec_protocol_metadata_get_negotiated_tls_ciphersuite(metadata.securityProtocolMetadata))
     }
 
     /// The opening's callback, once, and whether the handshake is what failed.
@@ -190,32 +261,28 @@ final class NWPeerConnection: NearbyPeerConnection, @unchecked Sendable {
         }
     }
 
-    private func receive() {
-        connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { [weak self] head, _, _, error in
-            guard let self else { return }
-            guard let head, head.count == 4, error == nil else {
-                self.incoming.finish(throwing: NearbyDropped())
-                return
-            }
-            let length = Int(head.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }.littleEndian)
-            guard length >= 1, length <= NearbyFrame.mostFrameBytes else {
-                self.incoming.finish(throwing: NearbyRefusal.malformed)
-                return
-            }
-            self.connection.receive(minimumIncompleteLength: length, maximumLength: length) { [weak self] body, _, _, error in
-                guard let self else { return }
-                guard let body, body.count == length, error == nil else {
-                    self.incoming.finish(throwing: NearbyDropped())
+    /// Every frame, one read per frame asked for.
+    var frames: AsyncThrowingStream<NearbyFrame, any Error> {
+        AsyncThrowingStream { try await self.readFrame() }
+    }
+
+    private func receive(_ length: Int) async throws -> Data {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, any Error>) in
+            connection.receive(minimumIncompleteLength: length, maximumLength: length) { data, _, _, error in
+                guard let data, data.count == length, error == nil else {
+                    continuation.resume(throwing: NearbyDropped())
                     return
                 }
-                do {
-                    self.incoming.yield(try NearbyFrame.decode(body))
-                    self.receive()
-                } catch {
-                    self.incoming.finish(throwing: error)
-                }
+                continuation.resume(returning: data)
             }
         }
+    }
+
+    private func readFrame() async throws -> NearbyFrame {
+        let head = try await receive(4)
+        let length = Int(head.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }.littleEndian)
+        guard length >= 1, length <= NearbyFrame.mostFrameBytes else { throw NearbyRefusal.malformed }
+        return try NearbyFrame.decode(try await receive(length))
     }
 
     func send(_ frame: NearbyFrame) async throws {

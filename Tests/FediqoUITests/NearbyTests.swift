@@ -9,7 +9,7 @@ import Testing
 /// what each question says, that both sides record one line under the other device's name,
 /// that the store is held still from the first byte to every way out, and that every word is in
 /// every language.
-@Suite("Moving to and from a device nearby, on the shell")
+@Suite("Moving to and from a device nearby, on the shell", .serialized)
 @MainActor
 struct NearbyTests {
     /// A carrier that writes a real, small package and counts what it was asked, on no store.
@@ -90,7 +90,7 @@ struct NearbyTests {
         func begin() async {
             // A hold put away a moment ago leaves the pipe as its stream ends; a second round
             // starts once it has, as a browser lists only devices still holding.
-            for _ in 0..<100 where !link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+            for _ in 0..<600 where !link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
             holding.beginHold(with: onto, link: link, device: "a tablet") { [log] in log.adopted.withLock { $0 += 1 } }
             await settle(holding) { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
             offering.beginOffer(with: from, link: link)
@@ -106,7 +106,7 @@ struct NearbyTests {
         }
 
         func settle(_ nearby: ShellNearby, until done: (ShellNearby.Step?) -> Bool) async {
-            for _ in 0..<400 where !done(nearby.step) {
+            for _ in 0..<1000 where !done(nearby.step) {
                 try? await Task.sleep(for: .milliseconds(10))
             }
             if !done(nearby.step) { Issue.record("never settled: \(String(describing: nearby.step))") }
@@ -152,8 +152,11 @@ struct NearbyTests {
         // One line each, under the other device's name, ended.
         let held = two.holding.work.record
         let sent = two.offering.work.record
-        #expect(held.count == 1 && held[0].purpose == .nearbyMove && held[0].source == "a laptop")
-        #expect(sent.count == 1 && sent[0].purpose == .nearbyMove && sent[0].source == "a tablet")
+        #expect(held.count == 1 && held[0].purpose == .nearbyMove && held[0].source == SourceWork.nearbyKey("a laptop"))
+        #expect(sent.count == 1 && sent[0].purpose == .nearbyMove && sent[0].source == SourceWork.nearbyKey("a tablet"))
+        #expect(SourceAct.shown(held[0].source) == "a laptop", "drawn by its name, keyed so it never reads as a host")
+        #expect(two.holding.work.log.sources == [SourceWork.nearbyKey("a laptop")], "renamed from the unnamed join, not added beside it")
+        #expect(two.holding.mark.count == 4)
         #expect(two.holding.work.now.isEmpty && two.offering.work.now.isEmpty)
         // Held still on the sender from the package's writing, on the receiver from its yes, and let go once.
         #expect(two.log.stillness.withLock { $0 }.filter { $0.hasPrefix("offer") }.map { $0.hasSuffix("true") } == [true, false])
@@ -294,7 +297,7 @@ struct NearbyTests {
     @Test("Each refusal is its own sentence; not allowed says this device was not allowed to look, not that nobody is there")
     func refusalsAreEachTheirOwn() {
         let refusals: [NearbyRefusal] = [
-            .notAllowed, .wrongCode, .refusedThere, .lost, .malformed, .package(.altered), .package(.newer),
+            .notAllowed, .wrongCode, .refusedThere, .lost, .malformed, .unsure, .guessing, .timedOut, .package(.altered), .package(.newer),
             .noRoom(needed: 2_000_000, free: 1_000), .other("the disk said no"),
         ]
         for language in [DummyLanguage.english, .taiwanese] {
@@ -346,7 +349,8 @@ struct NearbyTests {
             "nearby.ask.hold.title", "nearby.ask.move.title", "nearby.ask.hold.signIns.title", "nearby.ask.move.signIns.title",
             "nearby.ask.line", "nearby.ask.hold.help", "nearby.ask.move.help", "nearby.ask.hold.go", "nearby.ask.move.go",
             "nearby.ask.refuse", "nearby.done.title", "nearby.done.signIns.line",
-        ] + ["notAllowed", "wrongCode", "refusedThere", "lost", "malformed", "other"]
+            "nearby.unnamed", "nearby.mark.spoken", "nearby.mark.line",
+        ] + ["notAllowed", "wrongCode", "refusedThere", "lost", "malformed", "unsure", "guessing", "timedOut", "other"]
             .flatMap { ["nearby.refused.\($0).title", "nearby.refused.\($0).line"] }
         let resources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

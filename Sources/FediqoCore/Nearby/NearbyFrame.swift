@@ -5,6 +5,8 @@ import Foundation
 /// frames, unchanged from the file on the sender's disk, so every check #252 makes on a file
 /// is made on what arrived.
 ///
+///     both    ──hello──▶◀──hello──          a fresh key-agreement key each, and
+///             ──confirm▶◀─confirm─          proof each holds the code (`NearbyChannel`)
 ///     sender  ──offer──▶  receiver          what would move, for the question on both screens
 ///             ◀─accept──                    the receiver's person said yes (or `refuse`)
 ///             ──key────▶                    the package's own key, sent only inside the session
@@ -12,6 +14,10 @@ import Foundation
 ///             ──bytes──▶ …                  the file from that offset
 ///             ──done───▶                    nothing more to send
 ///             ◀─done────                    read back whole; both may close
+///
+/// Everything after the confirmation rides as `sealed`: the frame's own encoding, sealed under
+/// the key the two agreed (`NearbyChannel`), so a recording of the wire and the code together
+/// open nothing.
 public enum NearbyFrame: Sendable, Equatable {
     case offer(NearbyOffer)
     case accept
@@ -22,13 +28,19 @@ public enum NearbyFrame: Sendable, Equatable {
     case have(Int64)
     case bytes(Data)
     case done
+    /// A fresh P-256 key-agreement public key (X9.63, 65 bytes): the first thing each side sends.
+    case hello(Data)
+    /// Proof of the agreed key and the code: an HMAC over the two keys.
+    case confirm(Data)
+    /// Any frame after the confirmation, sealed under the agreed key.
+    case sealed(Data)
 
     /// The most a `bytes` frame carries, and the most any frame may be on the wire.
     public static let mostBytes = 256 * 1024
     static let mostFrameBytes = mostBytes + 4096
 
-    enum Tag: UInt8 {
-        case offer = 1, accept, refuse, key, have, bytes, done
+    public enum Tag: UInt8 {
+        case offer = 1, accept, refuse, key, have, bytes, done, hello, confirm, sealed
     }
 
     /// The frame as it rides: tag, then its bytes.
@@ -50,6 +62,15 @@ public enum NearbyFrame: Sendable, Equatable {
             out.append(Tag.bytes.rawValue)
             out.append(data)
         case .done: out.append(Tag.done.rawValue)
+        case .hello(let key):
+            out.append(Tag.hello.rawValue)
+            out.append(key)
+        case .confirm(let mac):
+            out.append(Tag.confirm.rawValue)
+            out.append(mac)
+        case .sealed(let box):
+            out.append(Tag.sealed.rawValue)
+            out.append(box)
         }
         return out
     }
@@ -91,6 +112,15 @@ public enum NearbyFrame: Sendable, Equatable {
         case .done:
             guard body.isEmpty else { throw NearbyRefusal.malformed }
             return .done
+        case .hello:
+            guard body.count == 65 else { throw NearbyRefusal.malformed }
+            return .hello(Data(body))
+        case .confirm:
+            guard body.count == 32 else { throw NearbyRefusal.malformed }
+            return .confirm(Data(body))
+        case .sealed:
+            guard body.count >= 28 else { throw NearbyRefusal.malformed }
+            return .sealed(Data(body))
         }
     }
 }
@@ -103,6 +133,10 @@ public struct NearbyOffer: Sendable, Equatable, Codable {
     public let summary: PackageSummary
     /// The package file's length in bytes: what the wire carries, and what `have` counts.
     public let fileBytes: Int64
+
+    /// The longest file an offer may name: a terabyte, past any store, so the room check's
+    /// arithmetic never overflows on a number a stranger typed.
+    public static let mostFileBytes: Int64 = 1 << 40
 
     public init(id: String = UUID().uuidString, summary: PackageSummary, fileBytes: Int64) {
         self.id = id
@@ -119,7 +153,7 @@ public struct NearbyOffer: Sendable, Equatable, Codable {
         id = try container.decode(String.self, forKey: .id)
         summary = try container.decode(PackageSummary.self, forKey: .summary)
         fileBytes = try container.decode(Int64.self, forKey: .fileBytes)
-        guard fileBytes >= 0, !id.isEmpty, id.count <= 64 else { throw NearbyRefusal.malformed }
+        guard fileBytes >= 0, fileBytes <= Self.mostFileBytes, !id.isEmpty, id.count <= 64 else { throw NearbyRefusal.malformed }
     }
 
     public func encode(to encoder: any Encoder) throws {

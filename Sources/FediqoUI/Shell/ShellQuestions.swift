@@ -345,7 +345,7 @@ enum ShellQuestion {
             return carryRefused(.package(inner), language: language)
         case .noRoom(let needed, let free):
             return carryRefused(.noRoom(needed: needed, free: free), language: language)
-        case .notAllowed, .wrongCode, .refusedThere, .lost, .malformed:
+        case .notAllowed, .wrongCode, .refusedThere, .lost, .malformed, .unsure, .guessing, .timedOut:
             key = "nearby.refused.\(refusal)"
             line = L10n.t(key + ".line", language: language)
         case .other(let said):
