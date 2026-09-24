@@ -873,3 +873,11 @@
 "activity.detail.time" = "送出時間";
 "activity.detail.reached" = "實際連到";
 "activity.detail.allowed" = "放行的項目";
+"prefs.askEvery.head" = "再問一次";
+"prefs.latest.head" = "時間軸停在哪裡";
+"activity.list" = "請求";
+"join.browse.protocols" = "協定";
+"join.browse.servers" = "來源";
+"board.choose.boards" = "版塊";
+"list.choose.lists" = "列表";
+"forum.signin.page" = "論壇自己的頁面";

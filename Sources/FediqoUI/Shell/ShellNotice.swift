@@ -13,7 +13,7 @@ struct ShellNotice: View {
     let detail: String
     /// A whole empty page fills the pane; a thread with nothing under it does not.
     var fills = true
-    /// The longer explanation behind a (?) under the detail, where the detail is kept short.
+    /// The longer explanation behind a (?) after the detail, where the detail is kept short.
     var help: String?
 
     @Environment(\.colorScheme) private var colorScheme
@@ -41,7 +41,9 @@ struct ShellNotice: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+        // The (?) after the line it explains, on the notice's own heading rather than under it
+        // (#244): an empty place is its own group, and its title and line are that group's head.
+        HStack(alignment: .lastTextBaseline, spacing: ShellSpace.tight) {
             words
             if let help { ShellHelp(verbatim: help, about: title) }
         }

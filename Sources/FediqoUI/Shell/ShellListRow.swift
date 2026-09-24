@@ -240,6 +240,8 @@ struct ShellListRowFace<Mark: View>: View {
 
     private var plate: some View {
         mark
+            // A glyph grows with the plate it sits on; a drawn mark keeps its own size.
+            .shellFont(.name)
             .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
             .frame(width: side, height: side)
             .background(

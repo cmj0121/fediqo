@@ -258,8 +258,8 @@ struct AccountPane: View {
         }
     }
 
-    /// Nothing has been joined yet. The octopus, the promise, and one short line under it — and
-    /// then the one control that does anything about it.
+    /// Nothing has been joined yet. The octopus and the promise — and then the one control that
+    /// does anything about it, whose own heading says what to do (#244).
     private var hero: some View {
         HStack(alignment: .top, spacing: ShellSpace.pad) {
             Image("Mascot", bundle: .module)
@@ -272,11 +272,6 @@ struct AccountPane: View {
                     .shellFont(.display)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
-                Text(L10n.t("account.hero.line"))
-                    .shellFont(.body)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .shellHelp("account.hero.detail", about: L10n.t("account.hero.line"))
             }
             .frame(maxWidth: Metrics.saying, alignment: .leading)
         }
@@ -319,16 +314,19 @@ struct AccountPane: View {
 
     private var adding: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            if Self.tabbed(sources: session.sources.count) {
-                Text(L10n.t("account.add.line"))
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .shellHelp("account.add.detail", about: L10n.t("account.add.title"))
-            }
+            // The field's own heading, with what it is for and the rest behind its (?) (#244):
+            // before any source, the first thing to do; after, how to add another.
+            let keys = Self.addingKeys(tabbed: Self.tabbed(sources: session.sources.count))
+            ShellSectionHead(title: "account.add.title", line: keys.line, help: keys.help)
             fieldRow
             if statusVisible { status }
         }
+    }
+
+    /// What the adding field's heading says: the first thing to do on a page with no source yet,
+    /// and how to add another on the tab beside the list.
+    static func addingKeys(tabbed: Bool) -> (line: String, help: String) {
+        tabbed ? ("account.add.line", "account.add.detail") : ("account.hero.line", "account.hero.detail")
     }
 
     /// The field, and the way in for a reader who does not have a hostname to type.
@@ -570,14 +568,12 @@ struct AccountPane: View {
     /// largest single loss and it is not recoverable inside decision 34.
     private var sources: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            // One short line, and behind its (?) which question this list answers, what Remove
-            // costs, and that a short row is short on purpose (#235) — the legend that stood
-            // under the list, now that every mark names itself.
-            Text(L10n.t("account.sources.line"))
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-                .shellHelp(verbatim: Self.sourcesHelp(), about: L10n.t("account.sources.title"))
+            // The list's heading (#244): one short line, and behind its (?) which question this
+            // list answers, what Remove costs, what the marks and the word on a row mean, and
+            // where what a source left is counted — the lines that stood under the list.
+            ShellSectionHead(
+                L10n.t("account.sources.title"), line: L10n.t("account.sources.line"), help: Self.sourcesHelp()
+            )
             askedAgain
             // **A plain stack, because the page is the thing that scrolls.** A `ScrollView` here
             // would be the inner one the page comment above is about.
@@ -652,17 +648,6 @@ struct AccountPane: View {
             // fires when the macOS rail is expanded or collapsed — which moves the page by about
             // 150pt and should flip the regime.
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
-            // **The word each row carries, in one line; the reason a row cannot say for itself is
-            // behind its (?)** — the same sentence on every forum row for ever, so said once.
-            Text(L10n.t("account.sources.writing.line"))
-                .shellFont(.mark)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-                .shellHelp("account.sources.writing", about: L10n.t("account.sources.writing.line"))
-            Text(L10n.t("account.sources.held"))
-                .shellFont(.mark)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -715,10 +700,14 @@ struct AccountPane: View {
     }
 
     /// What the sources list's (?) says: which question the list answers and what Remove costs,
-    /// then what the marks on a row mean — two keys, one bubble.
+    /// what the marks on a row mean, what the word beside a host says, and where what each source
+    /// left is counted — four keys, one bubble.
     static func sourcesHelp(language: DummyLanguage? = nil) -> String {
-        L10n.t("account.sources.detail", language: language) + "\n\n"
-            + L10n.t("account.sources.marks", language: language)
+        [
+            "account.sources.detail", "account.sources.marks", "account.sources.writing", "account.sources.held",
+        ]
+        .map { L10n.t($0, language: language) }
+        .joined(separator: "\n\n")
     }
 
     /// The sources on this page whose sign-in predates the question (#69).

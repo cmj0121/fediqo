@@ -1,3 +1,4 @@
+import FediqoCore
 import Foundation
 import SwiftUI
 import Testing
@@ -87,4 +88,115 @@ struct OneHeightTests {
             }
         }
     }
+
+    // MARK: - #244: every description on its group's heading
+
+    private static var shell: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/FediqoUI/Shell")
+    }
+
+    /// **Read off the sources, so a screen added tomorrow is held to it too.** A group's foot is
+    /// where descriptions used to live; no group has one now, and the footer piece Usage kept for
+    /// it is gone rather than kept beside the heading.
+    @Test("No group carries a description at its foot")
+    func noFooters() throws {
+        let files = try FileManager.default.contentsOfDirectory(at: Self.shell, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        #expect(!files.isEmpty)
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            #expect(!text.contains("} footer: {"), "\(file.lastPathComponent) has a group footer")
+            #expect(!text.contains("UsageFooter("), "\(file.lastPathComponent) draws a footer line")
+        }
+    }
+
+    @Test("Every list a join step shows has a heading with its line; a preview heads itself")
+    func joinStepsHaveHeadings() {
+        let offer = JoinOffer(host: "forum.example", kind: .discuz, categories: [])
+        let stages: [JoinStage] = [
+            .browsing, .browsingServers(.mastodon), .choosingBoards(offer, from: .joined(subscribed: [], ticked: [])),
+            .choosingLists(ListChoice(host: "m.example", offered: [], ticked: [])),
+        ]
+        for stage in stages {
+            for language in [DummyLanguage.english, .taiwanese] {
+                let head = JoinSheet.head(for: stage, language: language)
+                #expect(head != nil, "\(stage) has no heading")
+                #expect(head?.title.isEmpty == false && head?.line.isEmpty == false)
+            }
+        }
+        #expect(JoinSheet.head(for: nil) == nil)
+        #expect(JoinSheet.head(for: .choosingBoards(offer, from: .joined(subscribed: [], ticked: [])))?.help
+            == L10n.t("board.choose.detail.change"))
+    }
+
+    @Test("The record's heading says newest first, and how many old lines went where any did")
+    func activityLine() {
+        #expect(ActivityPanel.line(dropped: 0, language: .english) == L10n.t("activity.brief", language: .english))
+        let dropped = ActivityPanel.line(dropped: 3, language: .taiwanese)
+        #expect(dropped.hasPrefix(L10n.t("activity.brief", language: .taiwanese)))
+        #expect(dropped.contains("3"))
+    }
+
+    @Test("The adding field's heading says the first thing to do, or how to add another")
+    func addingHeading() {
+        #expect(AccountPane.addingKeys(tabbed: false) == ("account.hero.line", "account.hero.detail"))
+        #expect(AccountPane.addingKeys(tabbed: true) == ("account.add.line", "account.add.detail"))
+    }
+
+    @Test("The sources list's (?) holds what stood under the list")
+    func sourcesHelpHoldsTheFoot() {
+        for language in [DummyLanguage.english, .taiwanese] {
+            let help = AccountPane.sourcesHelp(language: language)
+            #expect(help.contains(L10n.t("account.sources.writing", language: language)))
+            #expect(help.contains(L10n.t("account.sources.held", language: language)))
+        }
+    }
+
+    @Test("A source row's brief line says one sentence: a refusal first, then the forum's notice")
+    func statusLine() {
+        let refused = (host: "a.example", key: "account.source.boards.unread")
+        #expect(SourceRow.statusLine(refusal: nil, notice: nil, host: "a.example") == nil)
+        #expect(SourceRow.statusLine(refusal: nil, notice: "n", host: "a.example") == "n")
+        #expect(SourceRow.statusLine(refusal: refused, notice: "n", host: "b.example") == "n")
+        #expect(SourceRow.statusLine(refusal: refused, notice: "n", host: "a.example")
+            == String(format: L10n.t("account.source.boards.unread"), "a.example"))
+    }
+
+    @Test("Every new heading is in all three languages")
+    func headingStrings() throws {
+        let resources = Self.shell.deletingLastPathComponent().appendingPathComponent("Resources")
+        for lproj in ["en", "zh-TW", "zh-Hant"] {
+            let strings = try String(
+                contentsOf: resources.appendingPathComponent("\(lproj).lproj/Localizable.strings"), encoding: .utf8
+            )
+            for key in ["prefs.askEvery.head", "prefs.latest.head", "activity.list", "join.browse.protocols",
+                        "join.browse.servers", "board.choose.boards", "list.choose.lists", "forum.signin.page"] {
+                #expect(strings.contains("\"\(key)\" = "), "\(lproj) is missing \(key)")
+            }
+        }
+    }
+
+    #if os(macOS)
+    @Test("A source row on Account is one height at rest, waiting, refused or with a notice")
+    func sourceRowIsOneHeight() {
+        let source = Source(host: "forum.example", kind: .discuz)
+        let row = SourceRow(source: source, profile: .unasked(host: "forum.example", kind: .discuz))
+        func drawn(waiting: String? = nil, refusal: (host: String, key: String)? = nil, notice: String? = nil) -> some View {
+            SourceRowView(
+                row: row, signedIn: false, width: 900, widest: SourceRow.controls(of: source),
+                actsLive: true, waiting: waiting, refusal: refusal, notice: notice,
+                signIn: {}, clear: {}, remove: {}, changeBoards: {}, open: {}
+            )
+        }
+        let heights = Set([
+            Self.height(drawn(), size: .large, width: 900),
+            Self.height(drawn(waiting: "Signing in to forum.example…"), size: .large, width: 900),
+            Self.height(drawn(refusal: (host: "forum.example", key: "account.source.boards.unread")), size: .large, width: 900),
+            Self.height(drawn(notice: Self.long), size: .large, width: 900),
+        ])
+        #expect(heights.count == 1, "one height, got \(heights.sorted())")
+    }
+    #endif
 }

@@ -54,9 +54,7 @@ struct GoneSection: View {
                 }
             }
         } header: {
-            Text(L10n.t("prefs.gone"))
-        } footer: {
-            UsageFooter(line: "usage.gone.line", help: "prefs.gone.footer", about: L10n.t("prefs.gone"))
+            ShellSectionHead(title: "prefs.gone", line: "usage.gone.line", help: "prefs.gone.footer")
         }
         .shellConfirm($asking, question: { ShellQuestion.letGo(posts: $0.posts, places: $0.places) }) { _, _ in
             Task { went = await session.letAllGoneGo() }

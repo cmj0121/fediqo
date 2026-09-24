@@ -895,3 +895,11 @@
 "activity.detail.time" = "When it left";
 "activity.detail.reached" = "Went to";
 "activity.detail.allowed" = "Let through by";
+"prefs.askEvery.head" = "Asking again";
+"prefs.latest.head" = "Where timelines stop";
+"activity.list" = "Requests";
+"join.browse.protocols" = "Protocols";
+"join.browse.servers" = "Servers";
+"board.choose.boards" = "Boards";
+"list.choose.lists" = "Lists";
+"forum.signin.page" = "The forum's own page";

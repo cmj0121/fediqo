@@ -152,6 +152,7 @@ struct BoardPickerList: View {
                             $0[VerticalAlignment.center] + anchor
                         }
                     VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                        // One line each, cut at the end (#244): every board is one height.
                         Text(board.name)
                             .shellFont(.name)
                             .foregroundStyle(
@@ -159,9 +160,9 @@ struct BoardPickerList: View {
                                     ? ShellChrome.selectInk(colorScheme)
                                     : ShellChrome.ink(colorScheme)
                             )
-                            .fixedSize(horizontal: false, vertical: true)
-                            .multilineTextAlignment(.leading)
+                            .lineLimit(1)
                         figures(board)
+                            .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -239,7 +240,6 @@ struct BoardPickerList: View {
             stated(board)
                 .shellFont(.reading)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -353,8 +353,7 @@ struct ListPickerList: View {
                     .foregroundStyle(
                         on ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme)
                     )
-                    .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(.leading)
+                    .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, ShellSpace.pad)

@@ -79,17 +79,15 @@ struct ForumSignInSheet: View {
         .padding(ShellSpace.pad)
     }
 
-    /// Why the forum's page is up, in one line, with the rest behind its (?) where there is more.
-    @ViewBuilder
+    /// The heading of the forum's page below (#244): what it is, why it is up in one line, and
+    /// the rest behind that line's (?) where there is more — on the page's own heading, not
+    /// under the sheet's title.
     private var explanation: some View {
-        let line = Text(request.stop.explanation())
-            .shellFont(.meta)
-            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-        if let more = request.stop.moreKey {
-            line.shellHelp(more, about: request.stop.explanation())
-        } else {
-            line
-        }
+        ShellSectionHead(
+            L10n.t("forum.signin.page"), line: request.stop.explanation(),
+            help: request.stop.moreKey.map { L10n.t($0) }
+        )
+        .padding(.top, ShellSpace.snug)
     }
 
     /// What ticking the box does, in one line; the whole promise is behind its (?) (#235).

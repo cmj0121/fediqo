@@ -33,9 +33,7 @@ struct UsageSourceList: View {
             }
             .onAppear { if let returning { lit = returning } }
         } header: {
-            Text(L10n.t("prefs.cache"))
-        } footer: {
-            UsageFooter(line: "usage.cache.line", help: "prefs.cache.footer", about: L10n.t("prefs.cache"))
+            ShellSectionHead(title: "prefs.cache", line: "usage.cache.line", help: "prefs.cache.footer")
         }
     }
 
@@ -72,9 +70,7 @@ struct UsageSourceDetail: View {
             postLine
             passwordLine
         } header: {
-            Text(L10n.t("prefs.cache"))
-        } footer: {
-            UsageFooter(line: "usage.cache.line", help: "prefs.cache.footer", about: L10n.t("prefs.cache"))
+            ShellSectionHead(title: "prefs.cache")
         }
     }
 
@@ -157,20 +153,5 @@ struct UsageSourceMark: View {
         )
         .frame(width: glyph, height: glyph)
         .accessibilityHidden(true)
-    }
-}
-
-/// A section's footer on Usage: one short line, and the long explanation behind its (?).
-struct UsageFooter: View {
-    let line: String
-    let help: String
-    let about: String
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        Text(L10n.t(line))
-            .shellFont(.mark)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-            .shellHelp(help, about: about)
     }
 }
