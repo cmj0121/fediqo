@@ -145,6 +145,14 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// was ranked and which board it is in, which is what decides whether reaching it may read
     /// its opening post (`ForumPosts.readsWhenReached`). Empty on a fixture.
     public var categories: Set<FediqoCore.Category> = []
+    /// When this copy's source said it no longer has this post — `Note.goneSince`, carried so
+    /// every place a row is drawn marks it the same way (#179). Nothing on a post its source still
+    /// has. **This copy's fact**, which is what its acts are read off; what the row says is
+    /// `goneEverywhere`.
+    public var goneSince: Date?
+    /// Where a timeline this copy arrived through is not whole next to it — `Note.gaps`, carried
+    /// so the list can say so at its place (#201). **This copy's**, of its own source's timelines.
+    public var gaps: Set<TimelineGap> = []
     /// Whether the author covered it, or nothing where the source never said. Carried as the
     /// three answers it has, not folded down to two — see `covered`.
     public let sensitive: Bool?
@@ -159,6 +167,12 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let emojis: [CustomEmoji]
     public let counts: DummyCounts
     public let marks: DummyMarks
+    /// The post this one quotes (#214) — `Note.quote`, carried so every place a row is drawn
+    /// draws the quote the same way. Nothing on a post that quotes none, which is most.
+    public var quote: Quote?
+    /// The row the quoted post is, where the quote came with the post in full: what opening the
+    /// quote walks to. Nothing where it may not be shown, or came as an id alone.
+    public var quotedRowID: String?
     /// Every other copy of this post this device holds, from the other sources that carried it,
     /// in the order they arrived (#114). Empty for a post held from one source, which is most.
     ///
@@ -169,6 +183,14 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// they came rather than one this app assembled out of the two. What counts as the same post
     /// is `SamePost`'s answer, a fact the sources stated; this only carries it.
     public private(set) var otherCopies: [DummyItem] = []
+
+    /// Whether the row is marked as gone from its source (#179): **every** copy's source has said
+    /// so. A post one server deleted and another still carries is still there to read and to act
+    /// on through the other, and a row saying nothing can be sent while its acts go through the
+    /// live copy would be the mark and the acts disagreeing about one post.
+    public var goneEverywhere: Bool {
+        goneSince != nil && otherCopies.allSatisfy { $0.goneSince != nil }
+    }
 
     /// Every source this post came through, the row's own first. One for most rows.
     public var sources: [DummySource] { [source] + otherCopies.map(\.source) }
@@ -256,10 +278,10 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         return url
     }
 
-    /// The page opening this row reads, where opening it reads a page rather than a
-    /// conversation: a forum's ranked blog, whose words the ranking list gave and whose page is
-    /// the rest of it. Read in the app's own reader (#34), in place on a Mac (#169) — never by a
-    /// parser of this app's, and never before the reader opens it. Nothing for every other row.
+    /// The forum's own page for this row, where there is one worth offering beside what the app
+    /// reads of it: a forum's ranked blog. Opening the row reads the blog in the app (#209); this
+    /// is what its pane offers where that read could not be had — read in the app's own reader
+    /// (#34), in place on a Mac (#169). Nothing for every other row.
     public var page: URL? {
         DiscuzBlogRow.isBlog(noteID) ? outwardURL : nil
     }
@@ -329,10 +351,17 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         handle = note.handle
         titleKey = nil
         titleText = note.title
-        body = note.body
+        // **A ranked blog read is drawn from what was read of it** (#209): its words, its date and
+        // its author's picture, where its page gave them, over what the ranking list wrote. A
+        // thread's opening post is not — its row draws it through `ForumPostBand`, which also
+        // knows when it is on its way.
+        let blog = DiscuzBlogRow.isBlog(note.id) ? note.opening : nil
+        // A blog read and found to hold no words keeps what the list wrote of it: the excerpt is
+        // still the forum's own line about it, and the pane says the page had no words.
+        body = blog.map(\.words).flatMap { $0.isEmpty ? nil : $0 } ?? note.body
         boardKey = nil
         boardText = note.board
-        postedAt = note.postedAt
+        postedAt = blog?.postedAt ?? note.postedAt
         workRelated = false
         answering = Self.answering(note.reply)
         boostedBy = note.boostedBy
@@ -340,11 +369,13 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         favourited = note.favourited
         statusID = note.statusID
         audience = note.audience.map(DummyAudience.init)
-        avatarURL = note.avatarURL
+        avatarURL = note.avatarURL ?? blog?.avatarURL
         url = note.url
         attachments = note.attachments
         opening = note.opening
         categories = note.categories
+        goneSince = note.goneSince
+        gaps = note.gaps
         sensitive = note.sensitive
         spoiler = note.spoiler
         emojis = note.emojis
@@ -354,6 +385,8 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
             favourites: note.counts.favourites
         )
         marks = DummyMarks()
+        quote = note.quote
+        quotedRowID = note.quotedKey?.rowID
     }
 
     /// Which shape of row a protocol gets. **The protocol stays behind; the timeline sees a

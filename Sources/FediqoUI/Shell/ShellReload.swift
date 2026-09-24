@@ -1,6 +1,7 @@
 import FediqoCore
 import Foundation
 import Observation
+import SwiftUI
 
 // `r` (#29): what the reader is looking at, asked for again, and nothing else.
 //
@@ -13,40 +14,129 @@ import Observation
 // Every request a reload makes has its own deadline, and a reload can be stopped: a server that
 // trickles cannot hold `r` for ever. What is read as the reader is registered per host, so a
 // sign-out, Clear or Remove stops it before anything it brings lands.
+//
+// **One of each kind at a time, not one at a time** (#175): a thread read again does not wait on
+// the timeline's reload, nor the timeline's on the thread. So what each kind last said is kept as
+// that kind's, and a thread starting or ending neither clears nor overwrites the timeline's.
+//
+// **The third ask is nobody's press** (#95): every source this device holds, each for its usual
+// reads, asked again each time the wait this device keeps has passed — a minute unless a person
+// picks another. It says what it is doing in the same toast as `r`, lands through the store like
+// every other ask, and leaves the page where the reader had it: the list keeps its top row
+// (`HoldsPlace`) and only a pressed timeline re-centres the lamp. Esc does not stop it, since
+// nobody started it; the next wait simply asks again.
+//
+// **The fourth is a search's** (#176): Return in the search field asks the sources of the timeline
+// in front that can be searched for posts matching its words. What they send is held aside —
+// found by a search, drawn by no timeline — and the search, which reads the store and nothing
+// else, renews as it lands. A new search ends the last one's ask; closing the search ends it too.
+//
+// **The fifth is a hashtag's** (#124): a tag pressed asks the sources of the timeline in front that
+// keep tags — a Mastodon, a Discourse with tagging on (#197) — for their posts under it, held aside
+// as a search's are. It is said on the tag's own page, where the answer would be, and not in the
+// toast; leaving the page ends it, and switching timeline under it asks the new one's sources.
 
-/// One reload at a time, and the sources the last one could not read.
+/// One reload of each kind at a time, and the sources the last one could not read.
 @MainActor
 @Observable
 final class ShellReload {
-    /// Whether a reload is on the wire. A second `r` meanwhile starts nothing.
-    private(set) var running = false
-    /// The hosts the last reload could not read, in the order they were asked.
-    private(set) var failed: [String] = []
-    /// Bumped as each reload ends, so the list can centre the selected post again.
+    /// What a reload asks for. Two of the same kind are one too many — the second would ask the
+    /// same servers the same thing — and two of different kinds are two errands, each let run.
+    enum Ask: Hashable, Sendable {
+        /// The timeline in front: its sources, each for what its rules draw.
+        case timeline
+        /// The open thread: its post and what is around it.
+        case thread
+        /// Every source this device holds, each for its usual reads, on the wait it keeps (#95).
+        case held
+        /// A search's words, asked of the sources of the timeline in front that can be searched.
+        case search
+        /// A hashtag's posts, asked of the sources of the timeline in front that keep tags (#197).
+        case tag
+        /// The next, older stretch of the timeline in front, asked as the reader nears its end
+        /// (#87), or one timeline read on from a place that says more belong there (#201). See
+        /// `ShellMore.swift` and `ShellReadOn.swift`.
+        case more
+        /// The thread open in front, asked again on the wait (#198). Said at the thread's own
+        /// foot, not in the toast. See `ShellRenewal.swift`.
+        case renew
+    }
+
+    /// The kinds of reload on the wire now. A second `r` of a kind already here starts nothing.
+    private(set) var asking: Set<Ask> = []
+    /// Whether any reload the toast speaks for is on the wire. Not a tag's ask, which its own
+    /// page speaks for (#124), nor an open thread's renewal, which its foot does (#198).
+    var running: Bool { !asking.subtracting([.tag, .renew]).isEmpty }
+    /// Whether the only reload on the wire is the wait's, which nobody pressed for (#95).
+    var onlyWaiting: Bool { asking.subtracting([.tag, .renew]) == [.held] }
+    /// The hosts the last reload of each kind could not read, the timeline's first and each in
+    /// the order they were asked — a host both missed named once.
+    var failed: [String] {
+        var named: Set<String> = []
+        return [Ask.timeline, .more, .thread, .held].flatMap { failures[$0] ?? [] }
+            .filter { named.insert($0).inserted }
+    }
+    /// What the last search asked of the sources, and what it could not ask (#176). Nothing while
+    /// no search has been sent to them.
+    private(set) var reach: SearchReach?
+    /// The sources the last search asked that did not answer, in the timeline's order.
+    var searchFailed: [String] { failures[.search] ?? [] }
+    /// Each kind's own `failed`, cleared as that kind starts again — and a host's name let go of
+    /// as soon as another timeline read, `r`'s or the wait's, reads it whole.
+    private(set) var failures: [Ask: [String]] = [:]
+    /// Bumped as each reload of the timeline ends, so the list can centre the selected post again.
+    /// A thread read again leaves the list under it where it was.
     private(set) var landed = 0
-    /// An open post the last reload could not find on its server, and why. Never guessed at.
+    /// An open post the last thread reload could not find on its server, and why. Never guessed at.
     private(set) var unfindable: Unfindable?
     /// A source the last reload found speaking something this app does not read (#86). One, not
     /// a list, for `unfindable`'s reason: the sentence names one host and there is one line to
-    /// say it on.
-    private(set) var unspoken: Unspoken?
-    /// The last reload was stopped by the reader before it finished.
-    private(set) var stopped = false
-    /// What the running reload's own pieces of work are listed as on `SourceWork` (#170): a
-    /// timeline's reads, or an open thread's. The toast names one of those and counts the rest,
-    /// and nothing else that happens to be on the wire meanwhile — a picture, an emoji, a
+    /// say it on. The timeline's first, then the wait's.
+    var unspoken: Unspoken? { unspokens[.timeline] ?? unspokens[.held] }
+    /// Each kind's own `unspoken`, as `failures` is kept: a wait starting does not take back what
+    /// the timeline's `r` found, nor the reverse (#95).
+    private var unspokens: [Ask: Unspoken] = [:]
+    /// The last reload of some kind was stopped by the reader before it finished.
+    var stopped: Bool { !halted.isEmpty }
+    /// The kinds whose last reload was stopped, each cleared as that kind starts again. Never
+    /// `.held`: Esc stops what was pressed, and nobody pressed for that one.
+    private var halted: Set<Ask> = []
+    /// What the running reloads' own pieces of work are listed as on `SourceWork` (#170): a
+    /// timeline's reads, an open thread's, or both. The toast names one of those and counts the
+    /// rest, and nothing else that happens to be on the wire meanwhile — a picture, an emoji, a
     /// server asked what it is.
-    private(set) var reading: Set<SourceWork.Purpose> = []
+    var reading: Set<SourceWork.Purpose> {
+        asking.reduce(into: []) { $0.formUnion(Self.purposes(of: $1)) }
+    }
 
     /// How long one request of a reload may take before it counts as failed.
     @ObservationIgnored var deadline: Duration = .seconds(30)
+    /// Where each stretch a listing reads toward its end has got to (#87).
+    @ObservationIgnored var stretches = ShellStretches()
+    /// Places reached while another ask for more was out, each read on as that one ends (#201).
+    @ObservationIgnored var pendingReadOn = PendingReadOn()
+    /// The hosts each running read of many sources — `r`'s, the wait's — is reading (#201).
+    @ObservationIgnored var readingHosts: [Ask: Set<String>] = [:]
+    /// The thread open in front of this window, which the wait asks again (#198). Nothing with no
+    /// thread in front. See `ShellRenewal.swift`.
+    @ObservationIgnored var inFront: DummyItem?
+    /// The thread whose renewal is on the wire, so the pane leaving ends its own and no other.
+    @ObservationIgnored var renewing: String?
+    /// The rows a thread opening has read again for their quote this run (#214), so one whose
+    /// read still brought none is not read again on every open.
+    @ObservationIgnored private var readForQuote: Set<String> = []
 
-    /// The running reload's work, and its waiter — resumed when the work ends or is stopped.
-    @ObservationIgnored private var work: Task<Void, Never>?
-    @ObservationIgnored private var waiter: CheckedContinuation<Void, Never>?
-    /// Which run `work` and `waiter` belong to. A stopped run's work goes on until it notices;
-    /// when it ends it must not end whichever run started after it.
+    /// Each running reload's work, and its waiter — resumed when the work ends or is stopped.
+    @ObservationIgnored private var runs: [Ask: Run] = [:]
+    /// Counts every run started. A stopped run's work goes on until it notices; when it ends it
+    /// must not end whichever run of its kind started after it.
     @ObservationIgnored private var generation = 0
+
+    private struct Run {
+        let generation: Int
+        let work: Task<Void, Never>
+        let waiter: CheckedContinuation<Void, Never>
+    }
     /// Work read as the reader, per host, so `stop(host:)` can end it.
     @ObservationIgnored private var asYou: [String: [UUID: () -> Void]] = [:]
 
@@ -86,68 +176,456 @@ final class ShellReload {
 
     /// The timeline's one quiet line about `r`: on the wire, stopped, or what did not answer.
     /// Nothing once a reload has landed whole.
+    ///
+    /// A search's ask says it is on its way, and afterwards which sources it could not search, in
+    /// the same line and after everything a reload has to say (#176).
     var line: String? {
-        if running { return L10n.t("timeline.reload.progress") }
+        if asking.contains(where: { $0 != .search && $0 != .tag && $0 != .renew }) {
+            return L10n.t("timeline.reload.progress")
+        }
+        if asking.contains(.search), let reach {
+            return String(format: L10n.t("search.asking"), reach.asked.joined(separator: ", "))
+        }
         if stopped { return L10n.t("timeline.reload.stopped") }
         if let unfindable { return unfindable.sentence }
         // **Before the failures, because it is the more particular fact.** A server that told
         // this app what it now speaks answered perfectly well; saying "did not answer" about it
         // would be this device reporting its own refusal to read as the server's silence.
         if let unspoken { return unspoken.sentence }
-        guard !failed.isEmpty else { return nil }
-        return String(format: L10n.t("timeline.reload.failed"), failed.joined(separator: ", "))
+        if !failed.isEmpty {
+            return String(format: L10n.t("timeline.reload.failed"), failed.joined(separator: ", "))
+        }
+        if !searchFailed.isEmpty {
+            return String(format: L10n.t("search.failed"), searchFailed.joined(separator: ", "))
+        }
+        guard !searchRefused.isEmpty else { return nil }
+        return String(format: L10n.t("search.scope"), searchRefused.joined(separator: ", "))
+    }
+
+    /// Which sources a search asked, and which of the timeline's it did not because they cannot be
+    /// searched from here (#176) — said under the field, so the results say where they came from.
+    struct SearchReach: Equatable, Sendable {
+        /// Asked, in the timeline's order.
+        let asked: [String]
+        /// The timeline's sources that cannot be searched from here, and so were not asked.
+        let unasked: [String]
+
+        /// Nothing where the timeline has no source at all.
+        var sentence: String? {
+            var said: [String] = []
+            if !asked.isEmpty {
+                said.append(String(format: L10n.t("search.reach.asked"), asked.joined(separator: ", ")))
+            }
+            if !unasked.isEmpty {
+                said.append(String(format: L10n.t("search.reach.notAsked"), unasked.joined(separator: ", ")))
+            }
+            return said.isEmpty ? nil : said.joined(separator: " ")
+        }
+
+        /// **Only a Mastodon this device is signed in to can be searched.** Its server answers a
+        /// search of its posts to an account it knows (`MastodonSearch`); a forum's search pages
+        /// are not something this app reads, and a source it does not speak is not asked at all.
+        ///
+        /// **Nor one the timeline reads only some categories of** — Trends, a written timeline
+        /// of somebody's Home or one board. What a search finds arrives through no category, so
+        /// no such rule could ever let it through: asking would put finds in the store that this
+        /// timeline can never show, and the line would say a source was asked for nothing.
+        @MainActor
+        static func of(_ asks: [FetchAsk], in session: ShellSession) -> SearchReach {
+            let asked = asks.filter { ask in
+                ask.categories == nil
+                    && session.sources.first { $0.host == ask.host }?.kind == .mastodon
+                    && session.mastodon.token(host: ask.host) != nil
+            }.map(\.host)
+            return SearchReach(asked: asked, unasked: asks.map(\.host).filter { !asked.contains($0) })
+        }
+    }
+
+    /// Return in the search field: `pattern`'s words asked of the sources of `query` that can be
+    /// searched, each landing — held aside — as it answers, so what this device held is shown at
+    /// once and what a source finds joins it (#176). Ends the last search's ask first: the reader
+    /// has moved on from it. Nothing asked where the pattern has no words or no source can be
+    /// searched, and the reach still says which were not asked.
+    func search(_ pattern: String, timeline query: TimelineQuery, in session: ShellSession) async {
+        // The same search still on its way — a Return that waited for the index, lighting its
+        // first result — is let run rather than asked again.
+        if asking.contains(.search), searchedFor == SearchedFor(pattern: pattern, query: query) { return }
+        endSearch()
+        searchedFor = SearchedFor(pattern: pattern, query: query)
+        guard let words = MastodonSearch.words(of: pattern) else { return }
+        let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
+            .sourcesToAsk()
+        let reach = SearchReach.of(asks, in: session)
+        self.reach = reach
+        guard !reach.asked.isEmpty else { return }
+        await run(.search) {
+            var came: [String: Found] = [:]
+            await withTaskGroup(of: (String, Found).self) { group in
+                for host in reach.asked {
+                    group.addTask { (host, await self.found(words, on: host, in: session)) }
+                }
+                for await (host, answer) in group {
+                    came[host] = answer
+                    await session.reloadFromStore()
+                }
+            }
+            guard !Task.isCancelled else { return }
+            self.failures[.search] = reach.asked.filter { came[$0] == .missed }
+            self.searchRefused = reach.asked.filter { came[$0] == .refused }
+        }
+    }
+
+    /// The timeline under an open search changed (#145): a search sent to the sources is sent
+    /// again to the new one's, whose sources and rules are what the results are now asked of —
+    /// rather than the last timeline's ask running on and its line naming sources this one may
+    /// not have. Nothing where no Return has been made since the search opened.
+    ///
+    /// **Only what was sent, and only to what is in front.** Where the field has been typed in
+    /// since Return (`pattern` differs), what was sent is no longer the search, so its ask ends
+    /// and nothing is sent until the next Return. And a switch answered late — another switch
+    /// since — sends nothing to a timeline that is no longer in front.
+    func searchSwitched(to query: TimelineQuery, pattern: String, in session: ShellSession) async {
+        guard reach != nil, let last = searchedFor, last.query != query,
+              query == session.currentTimeline
+        else { return }
+        guard pattern == last.pattern else {
+            endSearch()
+            return
+        }
+        await search(last.pattern, timeline: query, in: session)
+    }
+
+    /// The sources the last search asked whose token may not search — issued before `read:search`
+    /// was asked for. Said as a sign-in to make again, not as a server that did not answer.
+    private(set) var searchRefused: [String] = []
+
+    private enum Found: Sendable {
+        case answered
+        case missed
+        case refused
+    }
+
+    /// What the search on its way was sent for.
+    @ObservationIgnored private var searchedFor: SearchedFor?
+
+    private struct SearchedFor: Equatable {
+        let pattern: String
+        let query: TimelineQuery
+    }
+
+    /// The tag whose page asked its sources, the timeline it asked them for, and which it asked
+    /// and which it did not (#124, #197). Nothing with no such page.
+    private(set) var tagAsk: TagAsk?
+    /// The sources the tag's ask could not reach.
+    var tagFailed: [String] { failures[.tag] ?? [] }
+    /// The sources the tag's ask is waiting on now, or nothing once it has finished.
+    var tagAsking: [String] { asking.contains(.tag) ? tagAsk?.reach.asked ?? [] : [] }
+    /// What the sources sent under each tag this run, by the tag as `HeldUnderTag` folds it
+    /// (#197). A forum's topic carries its tags beside its words and not in them, so the page
+    /// finds what a source filed under the tag by this as well as by the words.
+    private(set) var sentUnderTag: [String: Set<NoteKey>] = [:]
+    /// The forums that said this run that they keep no tags: not asked again until the next.
+    @ObservationIgnored private var tagsTurnedOff: Set<String> = []
+
+    struct TagAsk: Equatable, Sendable {
+        let tag: PostTag
+        let timeline: TimelineQuery
+        let reach: TagReach
+    }
+
+    /// Which of the timeline's sources a tag's page asked, and why each of the rest was not (#197)
+    /// — said on the page, so what it shows says where it came from, as a search's reach does.
+    struct TagReach: Equatable, Sendable {
+        /// Asked, in the timeline's order.
+        let asked: [String]
+        /// Read by the timeline for only some of their categories.
+        let partial: [String]
+        /// Of a kind that keeps no tags of its own.
+        let tagless: [String]
+        /// Forums that said they have tagging turned off.
+        let tagsOff: [String]
+
+        /// Nothing where the timeline has no source at all.
+        var sentence: String? {
+            let said = [
+                (asked, "tag.reach.asked"), (partial, "tag.reach.partial"),
+                (tagless, "tag.reach.tagless"), (tagsOff, "tag.reach.tagsOff"),
+            ].filter { !$0.0.isEmpty }.map { String(format: L10n.t($0.1), $0.0.joined(separator: ", ")) }
+            return said.isEmpty ? nil : said.joined(separator: " ")
+        }
+
+        /// **A tag's page is a search for a tag**, so a source is asked only where a search's
+        /// finds could show: never one the timeline reads only some categories of, since what
+        /// arrives under a tag arrives through none (`SearchReach.of`'s reason).
+        ///
+        /// **And only where the tag is the source's own idea.** A Mastodon keeps a timeline per
+        /// tag, public where its timelines are, so it is asked signed in or not; a Discourse
+        /// files topics under tags where the forum has tagging on, and says so when asked. A
+        /// Discuz! has no tags, and reading a tag as a word to search its text for is a search,
+        /// not this.
+        @MainActor
+        static func of(_ asks: [FetchAsk], in session: ShellSession, tagsOff: Set<String>) -> TagReach {
+            var asked: [String] = [], partial: [String] = [], tagless: [String] = [], off: [String] = []
+            for ask in asks {
+                switch (ask.categories, session.sources.first { $0.host == ask.host }?.kind) {
+                case (.some, _): partial.append(ask.host)
+                case (nil, .mastodon): asked.append(ask.host)
+                case (nil, .discourse) where tagsOff.contains(ask.host): off.append(ask.host)
+                case (nil, .discourse): asked.append(ask.host)
+                default: tagless.append(ask.host)
+                }
+            }
+            return TagReach(asked: asked, partial: partial, tagless: tagless, tagsOff: off)
+        }
+    }
+
+    /// A tag pressed: the sources of `query` that keep tags asked for their posts under `tag`,
+    /// each landing — held aside — as it answers, so what this device held is on the page at once
+    /// and what they send joins it (#124). Which are asked is `TagReach.of`'s (#197), and a forum
+    /// that answers that it keeps no tags is said to. Ends the last tag's ask first.
+    func tag(_ tag: PostTag, timeline query: TimelineQuery, in session: ShellSession) async {
+        endTag()
+        let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
+            .sourcesToAsk()
+        let reach = TagReach.of(asks, in: session, tagsOff: tagsTurnedOff)
+        tagAsk = TagAsk(tag: tag, timeline: query, reach: reach)
+        guard !reach.asked.isEmpty else { return }
+        await run(.tag) {
+            var came: [String: Tagged] = [:]
+            await withTaskGroup(of: (String, Tagged).self) { group in
+                for host in reach.asked {
+                    group.addTask { (host, await self.under(tag, on: host, in: session)) }
+                }
+                for await (host, answer) in group {
+                    came[host] = answer
+                    await session.reloadFromStore()
+                }
+            }
+            guard !Task.isCancelled else { return }
+            self.failures[.tag] = reach.asked.filter { came[$0] == .missed }
+            let off = reach.asked.filter { came[$0] == .tagsOff }
+            guard !off.isEmpty else { return }
+            // Asked, and answered that there are no tags to ask for: said as such, not as asked.
+            self.tagsTurnedOff.formUnion(off)
+            self.tagAsk = TagAsk(tag: tag, timeline: query, reach: TagReach(
+                asked: reach.asked.filter { !off.contains($0) }, partial: reach.partial,
+                tagless: reach.tagless, tagsOff: reach.tagsOff + off
+            ))
+        }
+    }
+
+    /// The timeline under an open tag's page changed (#197): the tag is asked again of the new
+    /// one's sources, and the reach follows. `searchSwitched`'s guard: a switch answered late —
+    /// another since — asks nothing of a timeline no longer in front.
+    func tagSwitched(to query: TimelineQuery, in session: ShellSession) async {
+        guard let last = tagAsk, last.timeline != query, query == session.currentTimeline else { return }
+        await tag(last.tag, timeline: query, in: session)
+    }
+
+    private enum Tagged: Sendable {
+        case answered
+        case missed
+        case tagsOff
+    }
+
+    /// The tag's page left: its ask ends where it is, and what it said goes.
+    func endTag() {
+        end(.tag)
+        failures[.tag] = nil
+        tagAsk = nil
+    }
+
+    /// One source asked for its posts under `tag`, what it sent held aside and remembered as sent
+    /// under it. A forum's topics land as the rows its front page draws, under the same ids, so a
+    /// topic on both is one row.
+    private func under(_ tag: PostTag, on host: String, in session: ShellSession) async -> Tagged {
+        guard let source = session.sources.first(where: { $0.host == host }) else { return .missed }
+        let stamp = Source(host: host, kind: source.kind)
+        let name = SourceWork.Name.called(tag.text)
+        do {
+            let notes: [Note]
+            if source.kind == .discourse {
+                let http = timed(transport(host, in: session), for: .timeline, name: name, in: session)
+                guard case .topics(let topics) = try await DiscourseClient(http: http, host: host)
+                    .topics(under: tag, source: stamp)
+                else { return .tagsOff }
+                notes = topics
+            } else if let door = session.mastodon.authorized(host: host, within: deadline, for: .timeline, name: name) {
+                notes = try await asReader(host) { try await MastodonTag(door: door).posts(under: tag, source: stamp) }
+            } else {
+                let http = timed(session.http, for: .timeline, name: name, in: session)
+                notes = try await MastodonTag(http: http, host: host).posts(under: tag, source: stamp)
+            }
+            try Task.checkCancellation()
+            await session.store.hold(notes, ifSourceHere: host)
+            sentUnderTag[HeldUnderTag.folded(tag), default: []].formUnion(notes.map(\.key))
+            return .answered
+        } catch MastodonAuthError.signedOut {
+            session.mastodon.endedByServer(host: host)
+            return .missed
+        } catch {
+            return Cancellation.happened(error) ? .answered : .missed
+        }
+    }
+
+    /// The search closed, or another sent: its ask ends where it is, and what it said goes.
+    func endSearch() {
+        end(.search)
+        failures[.search] = nil
+        searchRefused = []
+        reach = nil
+    }
+
+    /// One source searched for `words`, what it found held aside. Whether it answered.
+    private func found(_ words: String, on host: String, in session: ShellSession) async -> Found {
+        guard let source = session.sources.first(where: { $0.host == host }),
+              let door = session.mastodon.authorized(host: host, within: deadline, for: .search)
+        else { return .missed }
+        let stamp = Source(host: host, kind: source.kind)
+        do {
+            let notes = try await asReader(host) {
+                try await MastodonSearch(door: door).statuses(matching: words, source: stamp)
+            }
+            try Task.checkCancellation()
+            await session.store.hold(notes, ifSourceHere: host)
+            return .answered
+        } catch MastodonAuthError.signedOut {
+            session.mastodon.endedByServer(host: host)
+            return .missed
+        } catch MastodonAuthError.http(403) {
+            return .refused
+        } catch {
+            return Cancellation.happened(error) ? .answered : .missed
+        }
     }
 
     /// The newest posts for `query`, from its own sources only — a written timeline's as the
     /// session holds it now. Each source lands as it answers, so one that fails or is slow holds
     /// back none of the others. Nothing while the timeline editor is up: it owns the keys.
     func timeline(_ query: TimelineQuery, in session: ShellSession) async {
-        guard !running, session.editing == nil else { return }
-        reading = [.timeline]
-        await run {
-            let sources = session.sources
-            let asks = CompiledTimeline(query.definition(among: session.written), sources: sources)
+        guard !asking.contains(.timeline), session.editing == nil else { return }
+        await run(.timeline) {
+            let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
                 .sourcesToAsk()
-            // What the last run found is not this run's fact about any server. Cleared here
-            // rather than at the end, so a run that is stopped halfway leaves nothing standing.
-            self.unspoken = nil
+            await self.read(asks, as: .timeline, in: session)
+        }
+    }
 
-            // **Every server is asked what it is before any of them is spoken to** — #86.
-            //
-            // Here and not inside each read, for two reasons. They go out together, so the whole
-            // reload waits one round trip rather than each source waiting its own; and the
-            // answers are in before `reprojectSources` below projects them onto the sources, so
-            // the reads under it work from what the servers just said. A host answers this once
-            // and is not asked again until a Clear or a Remove.
-            await withTaskGroup(of: Void.self) { group in
-                for ask in asks where sources.first(where: { $0.host == ask.host })?.kind.hasTimelines == true {
-                    let asking = self.timed(session.http, for: .serverCheck, in: session)
-                    group.addTask { await session.flavours.ask(ask.host, through: asking) }
+    /// Every source this device holds, each for its usual reads — the ask nobody presses (#95).
+    /// Each lands as it answers, as a timeline's do, and one that fails is named while the others
+    /// land. Nothing while one is already on its way, and nothing where no source is held.
+    ///
+    /// **Nor while `r` reads the timeline.** Both would read the same servers at once — a
+    /// stranger's forum, which is never asked in parallel, among them — for what `r` is already
+    /// bringing; the next wait asks again. **Nor while an ask for more is out** (#87), which may be
+    /// on a forum's next page.
+    func held(in session: ShellSession) async {
+        guard asking.isDisjoint(with: [.held, .timeline, .more]), !session.sources.isEmpty else { return }
+        await run(.held) {
+            let asks = session.sources.map { FetchAsk(host: $0.host, categories: nil) }
+            await self.read(asks, as: .held, in: session)
+        }
+    }
+
+    /// `held(in:)` each time `wait` has passed, until the task running this is cancelled — the
+    /// root view's, so a window closed or a wait chosen anew ends this one, and an ask of it
+    /// still on the wire with it (#95). That is not the reader stopping it, so it says nothing.
+    ///
+    /// **The wait is counted from the end of the last ask**, not on a clock of its own: a slow
+    /// round cannot pile the next one up behind it, and an ask still running as the wait comes
+    /// round starts nothing. `sleep` is `Task.sleep` but for a test, which drives it by hand.
+    ///
+    /// **One clock per store, not per window.** Every window of the app reads the one store, and
+    /// each runs this; the wait is the device's, so only the window that asked first asks
+    /// (`WaitKeeper`), and the rest renew from what it lands. It closing hands the clock on.
+    ///
+    /// **And the threads open in front, on the same clock** (#198). Each window's open thread is
+    /// asked again by whichever window keeps the wait, once its sources have been — after, and
+    /// not beside, so a forum is not asked for its boards and a topic's page at once. A window
+    /// whose loop ends takes its thread off the round with it.
+    func keepAsking(
+        every wait: Duration, in session: ShellSession,
+        sleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) async {
+        let me = UUID()
+        WaitKeeper.join(session.store, as: me) { [weak self, weak session] asked in
+            guard let self, let session else { return nil }
+            return await self.renew(in: session, asked: asked)
+        }
+        defer {
+            WaitKeeper.release(session.store, from: me)
+            WaitKeeper.leave(session.store, as: me)
+        }
+        while true {
+            do { try await sleep(wait) } catch { return }
+            guard WaitKeeper.claim(session.store, for: me) else { continue }
+            await withTaskCancellationHandler {
+                await held(in: session)
+                await WaitKeeper.renewThreads(on: session.store)
+            } onCancel: {
+                Task { @MainActor in
+                    self.end(.held)
+                    self.end(.renew)
                 }
             }
-            guard !Task.isCancelled else { return }
-            await session.reprojectSources()
-            let spoken = session.sources
+        }
+    }
 
-            var unread: Set<String> = []
-            await withTaskGroup(of: (String, Bool).self) { group in
-                for ask in asks {
-                    guard let source = spoken.first(where: { $0.host == ask.host }) else { continue }
-                    // It answered, and it answered as something this app does not read. Nothing
-                    // failed, so it is not reported silent; it is its own sentence, said once.
-                    guard SourceJoin.reads(source.kind) else {
-                        self.unspoken = self.unspoken ?? Unspoken(host: source.host, kind: source.kind)
-                        continue
-                    }
-                    group.addTask { (ask.host, await self.read(source, for: ask.categories, in: session)) }
+    /// `asks`, each source read into the store as it answers, as `kind`: what did not answer is
+    /// that kind's to say.
+    func read(_ asks: [FetchAsk], as kind: Ask, in session: ShellSession) async {
+        let sources = session.sources
+        readingHosts[kind] = Set(asks.map(\.host))
+        // What the last run found is not this run's fact about any server. Cleared here
+        // rather than at the end, so a run that is stopped halfway leaves nothing standing.
+        unspokens[kind] = nil
+
+        // **Every server is asked what it is before any of them is spoken to** — #86.
+        //
+        // Here and not inside each read, for two reasons. They go out together, so the whole
+        // reload waits one round trip rather than each source waiting its own; and the
+        // answers are in before `reprojectSources` below projects them onto the sources, so
+        // the reads under it work from what the servers just said. A host answers this once
+        // and is not asked again until a Clear or a Remove.
+        await withTaskGroup(of: Void.self) { group in
+            for ask in asks where sources.first(where: { $0.host == ask.host })?.kind.hasTimelines == true {
+                let asking = self.timed(session.http, for: .serverCheck, in: session)
+                group.addTask { await session.flavours.ask(ask.host, through: asking) }
+            }
+        }
+        guard !Task.isCancelled else { return }
+        await session.reprojectSources()
+        let spoken = session.sources
+
+        var unread: Set<String> = []
+        await withTaskGroup(of: (String, Bool).self) { group in
+            for ask in asks {
+                guard let source = spoken.first(where: { $0.host == ask.host }) else { continue }
+                // It answered, and it answered as something this app does not read. Nothing
+                // failed, so it is not reported silent; it is its own sentence, said once.
+                guard SourceJoin.reads(source.kind) else {
+                    self.unspokens[kind] = self.unspokens[kind] ?? Unspoken(host: source.host, kind: source.kind)
+                    continue
                 }
-                for await (host, read) in group {
-                    if !read { unread.insert(host) }
-                    await session.reloadFromStore()
+                group.addTask {
+                    (ask.host, await self.read(source, for: ask.categories, revisits: kind != .held, in: session))
                 }
             }
-            guard !Task.isCancelled else { return }
-            self.failed = asks.map(\.host).filter(unread.contains)
+            for await (host, read) in group {
+                if !read { unread.insert(host) }
+                await session.reloadFromStore()
+            }
+        }
+        guard !Task.isCancelled else { return }
+        failures[kind] = asks.map(\.host).filter(unread.contains)
+        // **A host that answered now is not still failing** (#95): what `r` said about it goes
+        // when a wait reads it whole, and the reverse, rather than standing until that kind runs
+        // again. A thread's failure is about its post, which this did not read.
+        let answered = Set(asks.map(\.host)).subtracting(unread)
+        for other in [Ask.timeline, .held, .more] where other != kind {
+            if let named = failures[other], named.contains(where: answered.contains) {
+                failures[other] = named.filter { !answered.contains($0) }
+            }
         }
     }
 
@@ -159,12 +637,18 @@ final class ShellReload {
     /// topic from its own page; both replace only rows already held (`ItemStore.refresh`), so an
     /// edited post shows its new words and a post this device never held does not arrive in All.
     func thread(_ item: DummyItem, in session: ShellSession) async {
-        guard !running, session.editing == nil else { return }
-        reading = [.conversation, .forumPost, .forumReplies]
-        await run {
+        guard !asking.contains(.thread), session.editing == nil else { return }
+        await run(.thread) {
             if let ref = ForumThreadRef(item) {
                 let read = await session.posts.reload(ref, within: self.deadline)
-                if !read, !Task.isCancelled { self.failed = [ref.host] }
+                if !read, !Task.isCancelled { self.failures[.thread] = [ref.host] }
+                return
+            }
+            // A ranked blog's page, read again (#209). What is kept stays drawn if it does not
+            // come back, and the pane says why where its words would be.
+            if DiscuzBlogRow.isBlog(item.noteID) {
+                let read = await session.blogs.again(item)
+                if !read, !Task.isCancelled { self.failures[.thread] = [item.source.host] }
                 return
             }
             guard let held = session.heldNote(item.id) else { return }
@@ -183,16 +667,18 @@ final class ShellReload {
                 // adopted by that read — see `ShellConversations.read`.
                 await session.reloadFromStore()
                 await session.conversations.again(item, in: session)
-            case .failed: self.failed = [held.source.host]
+            case .gone: break
+            case .failed: self.failures[.thread] = [held.source.host]
             case .unfindable(let why): self.unfindable = why
             }
         }
     }
 
-    /// `r`: a reload of `thread` where one is open, or else of `query` — unless one is running,
-    /// which a second press leaves alone: it starts nothing and stops nothing (#29). Esc stops it.
+    /// `r`: a reload of `thread` where one is open, or else of `query` — unless that one is
+    /// running, which a second press leaves alone: it starts nothing and stops nothing (#29). A
+    /// reload of the other kind running meanwhile is no reason to refuse (#175). Esc stops both.
     func press(thread: DummyItem?, timeline query: TimelineQuery, in session: ShellSession) {
-        guard !running else { return }
+        guard !asking.contains(thread == nil ? .timeline : .thread) else { return }
         Task {
             if let thread {
                 await self.thread(thread, in: session)
@@ -202,13 +688,35 @@ final class ShellReload {
         }
     }
 
-    /// Stops the running reload — Esc. What it had not landed does not land.
+    /// What `ask` could not read, as it ends.
+    func record(_ hosts: [String], for ask: Ask) {
+        failures[ask] = hosts
+    }
+
+    /// What the last reload of `ask` said, let go of — as it starts again, and as the thread it
+    /// was about is closed, so a line about a thread nobody is reading does not stand under the
+    /// timeline.
+    func forget(_ ask: Ask) {
+        failures[ask] = nil
+        halted.remove(ask)
+        if ask == .thread { unfindable = nil }
+    }
+
+    /// Stops every running reload that was pressed for — Esc. What they had not landed does not
+    /// land. The ask on a wait goes on: nobody started it, and Esc has a thread or a search to
+    /// close instead of being spent on it once a minute (#95). A search's goes when Esc closes
+    /// the search (`endSearch`). Nor the ask for more: scrolling started it, not a key (#87).
+    /// Nor a tag's: leaving its page ends it (#124). Nor an open thread's renewal, which is the
+    /// wait's and ends as the thread is left (#198).
     @discardableResult
     func stop() -> Bool {
-        guard running, let work else { return false }
-        work.cancel()
-        stopped = true
-        finish(generation)
+        let pressed = asking.subtracting([.held, .search, .tag, .more, .renew])
+        guard !pressed.isEmpty else { return false }
+        halted.formUnion(pressed)
+        for (ask, run) in runs where pressed.contains(ask) {
+            run.work.cancel()
+            finish(ask, run.generation)
+        }
         return true
     }
 
@@ -219,35 +727,76 @@ final class ShellReload {
     }
 
     /// One reload: its state set, its work started, and this waiting until it ends or is stopped.
-    private func run(_ body: @escaping @MainActor () async -> Void) async {
+    ///
+    /// What the last reload of this kind said is cleared as this one starts: a failure it named
+    /// is asked again now. **A timeline's start clears the thread's too**, since `r` reaches the
+    /// timeline only with no thread in front, and a thread left behind has nothing left to say
+    /// about it. A thread's start leaves the timeline's standing, which is still true (#175).
+    func run(_ ask: Ask, _ body: @escaping @MainActor () async -> Void) async {
         generation += 1
         let mine = generation
-        running = true
-        failed = []
-        unfindable = nil
-        stopped = false
+        asking.insert(ask)
+        forget(ask)
+        if ask == .timeline {
+            forget(.thread)
+            // And what asking for more said, and where a forum's pages had got to: the newest
+            // page read again moves every page under it along by what it brought (#87).
+            forget(.more)
+            stretches.restart()
+            // An ask for more still out ends here, so `r` and it never read one forum at once;
+            // what it had not landed does not land, and the next scroll asks again.
+            end(.more)
+        }
+        // `r` reads what a renewal is reading, so the renewal ends rather than ask one forum
+        // beside it (#198); the next wait asks again.
+        if ask == .timeline || ask == .thread { end(.renew) }
         await withCheckedContinuation { continuation in
-            waiter = continuation
-            work = Task { @MainActor in
+            let work = Task { @MainActor in
                 await body()
-                self.finish(mine)
+                self.finish(ask, mine)
             }
+            runs[ask] = Run(generation: mine, work: work, waiter: continuation)
         }
     }
 
-    /// Ends run `run`, once, and only while it is still the current one.
-    private func finish(_ run: Int) {
-        guard run == generation, let waiter else { return }
-        self.waiter = nil
-        work = nil
-        running = false
-        landed += 1
-        waiter.resume()
+    /// Ends `ask`'s run, if one is running, without saying it was stopped: nobody stopped it,
+    /// its window went (#95).
+    func end(_ ask: Ask) {
+        guard let run = runs[ask] else { return }
+        run.work.cancel()
+        finish(ask, run.generation)
+    }
+
+    /// Ends run `generation` of `ask`, once, and only while it is still that kind's current one.
+    private func finish(_ ask: Ask, _ generation: Int) {
+        guard let run = runs[ask], run.generation == generation else { return }
+        runs[ask] = nil
+        asking.remove(ask)
+        readingHosts[ask] = nil
+        if ask == .timeline { landed += 1 }
+        run.waiter.resume()
+        if ask == .more { readOnPending() }
+    }
+
+    private static func purposes(of ask: Ask) -> Set<SourceWork.Purpose> {
+        switch ask {
+        case .timeline: [.timeline]
+        case .thread: [.conversation, .forumPost, .forumReplies]
+        case .held: [.timeline]
+        // None, so the toast says the search's own line rather than naming its pieces as a
+        // reload's; they are still listed under Preferences as a search's.
+        case .search: []
+        // None: its own page says it, and the toast is not the tag's.
+        case .tag: []
+        case .more: [.timeline]
+        // None: the thread's foot says it, and the toast is not the thread's.
+        case .renew: []
+        }
     }
 
     /// Work read as the reader on `host`, registered so `stop(host:)` can end it, and ended too
     /// if the reload is stopped.
-    private func asReader<T: Sendable>(
+    func asReader<T: Sendable>(
         _ host: String, _ read: @escaping @MainActor () async throws -> T
     ) async throws -> T {
         let host = host.lowercased()
@@ -262,8 +811,35 @@ final class ShellReload {
         }
     }
 
+    /// A post held from before this device read quotes, read again as its thread opens (#214).
+    ///
+    /// **Why the open, and only for these.** A row kept by an earlier build was read with its
+    /// quote spelled into its words as an `RE:` address, and nothing reads it again by itself:
+    /// a timeline reads on only from the newest post it holds (#201), and opening the thread
+    /// reads the posts around it, not the post (#90). So a reader who opens it would see the
+    /// address and no quote until they pressed `r`. The post read here is `r`'s own read of it,
+    /// once, quietly: what it says lands in the store, and a failure changes nothing drawn.
+    ///
+    /// Once a run per row, and not beside `r` or a renewal of the same thread already on the wire.
+    func readQuoteIfHeldBefore(_ item: DummyItem, in session: ShellSession) async {
+        guard !readForQuote.contains(item.id), !asking.contains(.thread), renewing != item.id,
+              let held = session.heldNote(item.id), Self.heldBeforeQuotes(held)
+        else { return }
+        readForQuote.insert(item.id)
+        _ = await again(held, in: session)
+    }
+
+    /// Whether `note` looks like a quote post kept before quotes were read: a microblog post with
+    /// no quote whose words open with the `RE:` address a quoting server writes.
+    static func heldBeforeQuotes(_ note: Note) -> Bool {
+        note.quote == nil && note.source.kind == .mastodon && note.body.hasPrefix("RE: http")
+    }
+
     private enum Again: Sendable {
         case read
+        /// Its source said it no longer has the post, and the row is marked so (#179). There is
+        /// no thread to ask for around a post that is not there, and nothing failed.
+        case gone
         case failed
         case unfindable(Unfindable)
     }
@@ -336,7 +912,19 @@ final class ShellReload {
             return .unfindable(signedIn ? .notFound(host: host) : .signedOut(host: host))
         }
         try Task.checkCancellation()
-        let note = try await post.post(id: id, source: stamp)
+        let note: Note
+        do {
+            note = try await post.post(id: id, source: stamp)
+        } catch {
+            // The source has just said, of this one post, that it no longer has it (#179). The
+            // post stays, marked; what the reader asked for — the post read again — was answered.
+            guard await session.sourceSaysGone(
+                error, of: held, id: id, signedIn: signedIn, within: session.reload.deadline
+            ) else { throw error }
+            try Task.checkCancellation()
+            await session.markGone(held.key)
+            return .gone
+        }
         try Task.checkCancellation()
         await session.store.refresh([note], ifSourceHere: host)
         // **The thread around it is not asked for here.** It was, until #90 gave the conversation
@@ -348,9 +936,11 @@ final class ShellReload {
     }
 
     /// Reads one source for `categories`, or for its usual reads where nil, into the store.
-    /// Returns whether it came back.
+    /// Returns whether it came back. `revisits` is whether a forum's rows read their opening posts
+    /// again when reached: a press asks what the forum says now, and a wait does not (#95).
     private func read(
-        _ source: Source, for categories: Set<FediqoCore.Category>?, in session: ShellSession
+        _ source: Source, for categories: Set<FediqoCore.Category>?, revisits: Bool,
+        in session: ShellSession
     ) async -> Bool {
         let host = source.host
         // What a note records is which server it came from, not that server's subscriptions.
@@ -363,16 +953,17 @@ final class ShellReload {
                     http: self.timed(session.http, for: .timeline, name: name, in: session), host: host
                 )
             }
-            let publicRead = { try await client(.public).publicTimeline(source: stamp) }
+            // Read on from the newest post held of it, not its newest stretch alone (#201).
+            let publicRead = { await self.readOnPublic(client(.public), stamp: stamp, in: session) }
             let trendsRead = { try await client(.trends).trending(source: stamp) }
             var read: Bool
             if let categories {
                 read = true
-                if categories.contains(.public) { read = await land(host, in: session, publicRead) && read }
+                if categories.contains(.public) { read = await publicRead() && read }
                 if categories.contains(.trends) { read = await land(host, in: session, trendsRead) && read }
             } else {
                 // The join's rule: a server with no trends still has a timeline, and the reverse.
-                let publicCame = await land(host, in: session, publicRead)
+                let publicCame = await publicRead()
                 let trendsCame = await land(host, in: session, trendsRead)
                 read = publicCame || trendsCame
             }
@@ -414,7 +1005,7 @@ final class ShellReload {
             // row is reached, not now. The words kept with a row are what the forum said the
             // last time; a reader who pressed `r` asked what it says now. Only where the forum
             // answered: a reload that did not get through leaves the kept words standing.
-            if listed, read, !Task.isCancelled { session.posts.revisit(host: host) }
+            if revisits, listed, read, !Task.isCancelled { session.posts.revisit(host: host) }
             return read
         case .discourse:
             // A Discourse's front page is its one read; it has no boards this app picks.
@@ -526,7 +1117,7 @@ final class ShellReload {
 
     /// Bounded by the reload's deadline, and on `SourceWork` for what it is (#164) while it runs.
     /// `name` is the timeline or board it reads, by the name the reader knows, where it reads one.
-    private func timed(
+    func timed(
         _ http: any HTTPClient, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil,
         in session: ShellSession
     ) -> any HTTPClient {
@@ -553,9 +1144,79 @@ final class ShellReload {
     }
 
     /// A forum signed in to is read through its own browser, as a join reads it.
-    private func transport(_ host: String, in session: ShellSession) -> any HTTPClient {
+    func transport(_ host: String, in session: ShellSession) -> any HTTPClient {
         session.forums.readTransport(host: host, else: session.http)
     }
+}
+
+/// Which window's wait asks, per store (#95). The first to reach its wait takes the clock and
+/// keeps it until its loop ends; every other window's wait passes and asks nothing, and renews
+/// from what the store is brought all the same. Keyed on the store rather than held on it, since
+/// the store is an actor of the core and knows nothing of windows.
+@MainActor
+enum WaitKeeper {
+    private static var keepers: [ObjectIdentifier: UUID] = [:]
+
+    /// Whether `me` asks on `store`'s wait: it already does, or nobody does.
+    static func claim(_ store: ItemStore, for me: UUID) -> Bool {
+        let key = ObjectIdentifier(store)
+        if let keeper = keepers[key], keeper != me { return false }
+        keepers[key] = me
+        return true
+    }
+
+    /// `me`'s loop ended: the next window to reach its wait asks.
+    static func release(_ store: ItemStore, from me: UUID) {
+        let key = ObjectIdentifier(store)
+        if keepers[key] == me { keepers[key] = nil }
+    }
+
+    /// Each window's way to renew the thread it has open, per store (#198) — every window's, the
+    /// keeper's own among them, so a thread open in a window that does not keep the clock is
+    /// asked again on the one that does.
+    private static var renewers: [ObjectIdentifier: [UUID: Renewer]] = [:]
+
+    /// One window's renewal: handed what this round has asked already, and saying what it asked.
+    typealias Renewer = @MainActor (_ asked: Set<String>) async -> String?
+
+    /// `me`'s window, on `store`'s round of open threads while its loop runs.
+    static func join(_ store: ItemStore, as me: UUID, renew: @escaping Renewer) {
+        renewers[ObjectIdentifier(store), default: [:]][me] = renew
+    }
+
+    /// `me`'s loop ended: its thread is off the round.
+    static func leave(_ store: ItemStore, as me: UUID) {
+        let key = ObjectIdentifier(store)
+        renewers[key]?[me] = nil
+        if renewers[key]?.isEmpty == true { renewers[key] = nil }
+    }
+
+    /// Every window's open thread on `store`, asked again one window after the other — a thread
+    /// open in two windows asked once, and the second drawn from what the first landed.
+    static func renewThreads(on store: ItemStore) async {
+        var asked: Set<String> = []
+        for renew in Array((renewers[ObjectIdentifier(store)] ?? [:]).values) {
+            guard !Task.isCancelled else { return }
+            if let id = await renew(asked) { asked.insert(id) }
+        }
+    }
+}
+
+/// While this window is open, the sources this device holds are asked again each time `minutes`
+/// have passed (#95). A wait chosen anew starts counting again from the choice. A modifier of its
+/// own so the root view's chain, long enough already for the compiler the CI builds with, does
+/// not grow a closure.
+struct AsksOnAWait: ViewModifier {
+    let session: ShellSession
+    let minutes: Int
+
+    func body(content: Content) -> some View {
+        content.task(id: minutes) {
+            await session.reload.keepAsking(every: Self.wait(minutes), in: session)
+        }
+    }
+
+    static func wait(_ minutes: Int) -> Duration { .seconds(minutes * 60) }
 }
 
 /// Every request through it ends within `limit`: past it, the request is cancelled and fails as

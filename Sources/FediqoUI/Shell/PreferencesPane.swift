@@ -83,6 +83,7 @@ struct PreferencesPane: View {
                 Text(L10n.t("prefs.fontSize.\(size.rawValue)")).tag(size)
             }
         }
+        askAgain
         Section {
             Toggle(L10n.t("prefs.latest"), isOn: latestIsOn)
             if prefs.latestDate != nil {
@@ -92,6 +93,26 @@ struct PreferencesPane: View {
             Text(L10n.t("prefs.latest.footer"))
                 .shellFont(.meta)
         }
+    }
+
+    /// How long this device waits before asking the sources it holds again (#95).
+    private var askAgain: some View {
+        @Bindable var prefs = prefs
+        return Section {
+            Picker(L10n.t("prefs.askEvery"), selection: $prefs.askMinutes) {
+                ForEach(DummyPrefs.waits, id: \.self) { minutes in
+                    Text(Self.wait(minutes)).tag(minutes)
+                }
+            }
+        } footer: {
+            Text(L10n.t("prefs.askEvery.footer"))
+                .shellFont(.meta)
+        }
+    }
+
+    /// One wait as the picker names it.
+    static func wait(_ minutes: Int) -> String {
+        minutes == 1 ? L10n.t("prefs.askEvery.one") : String(format: L10n.t("prefs.askEvery.many"), minutes)
     }
 
     /// The same pills Usage and the timeline use: one selected, the rest a well. Tab rotates

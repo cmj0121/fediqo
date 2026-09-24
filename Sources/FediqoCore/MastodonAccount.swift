@@ -54,16 +54,12 @@ public struct MastodonAccount: Sendable {
                 complete = false
             }
         }
-        var notes: [Note] = []
-        if let home = try await attempt({
-            try await statuses("/api/v1/timelines/home", source: source, category: .home)
-        }) {
-            notes += home
-        } else {
+        if try await attempt({
+            try await readOn("/api/v1/timelines/home", source: source, category: .home)
+        }) == nil {
             complete = false
         }
-        let (read, all) = try await statuses(of: lists, source: source)
-        try await ingest(notes + read)
+        let all = try await readOn(lists, source: source)
         return complete && all
     }
 
@@ -74,18 +70,12 @@ public struct MastodonAccount: Sendable {
     public func read(home: Bool, lists ids: Set<String>) async throws -> Bool {
         guard let source = await source() else { return true }
         var complete = true
-        var notes: [Note] = []
-        if home {
-            if let read = try await attempt({
-                try await statuses("/api/v1/timelines/home", source: source, category: .home)
-            }) {
-                notes += read
-            } else {
-                complete = false
-            }
+        if home, try await attempt({
+            try await readOn("/api/v1/timelines/home", source: source, category: .home)
+        }) == nil {
+            complete = false
         }
-        let (read, all) = try await statuses(of: source.lists.filter { ids.contains($0.id) }, source: source)
-        try await ingest(notes + read)
+        let all = try await readOn(source.lists.filter { ids.contains($0.id) }, source: source)
         return complete && all
     }
 
@@ -96,11 +86,48 @@ public struct MastodonAccount: Sendable {
         guard let source = await source() else { return true }
         let before = Set(source.lists.map(\.id))
         await store.subscribe(host: host, toLists: picks)
-        let (read, all) = try await statuses(
-            of: picks.filter { !before.contains($0.id) }, source: source
-        )
-        try await ingest(read)
-        return all
+        return try await readOn(picks.filter { !before.contains($0.id) }, source: source)
+    }
+
+    /// The stretch of Home, or of one list this source reads, older than the post `maxID` names —
+    /// the next of a listing read toward its end (#87). Into the store, and handed back as the page
+    /// carried it so the caller can tell a stretch that brought nothing from one that did.
+    ///
+    /// Throws what the read threw: this is one read, and a caller asked for exactly it.
+    public func older(_ category: Category, than maxID: String) async throws -> [Note] {
+        guard let source = await source(), let path = Self.path(of: category, in: source) else { return [] }
+        let notes = try await statuses(path, source: source, category: category, olderThan: maxID)
+        try await ingest(notes)
+        return notes
+    }
+
+    /// Home, or one list this source reads, read down from the place below `key` where posts may
+    /// be missing (#204), and landed with what it says of that place. Nothing where `key` carries
+    /// no such mark in it. `me` is who the reader is there, where known (`ItemStore.missing`).
+    ///
+    /// Throws what the read threw — a stretch after the first once what came before it has landed.
+    public func readDown(
+        _ category: Category, below key: NoteKey, writtenBy me: String? = nil, at moment: Date = Date()
+    ) async throws {
+        guard let source = await source(), let path = Self.path(of: category, in: source),
+              let place = await store.missing(below: key, in: category, writtenBy: me, signedIn: true)
+        else { return }
+        let down = try await MastodonReadOn.readDown(from: place) { maxID in
+            try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))
+        }
+        try Task.checkCancellation()
+        await store.land(down, below: key, of: category, at: moment, ifSourceHere: host)
+        if let stopped = down.stopped { throw stopped }
+    }
+
+    /// Where Home, or a list this source still reads, is asked. Nothing for anything else.
+    private static func path(of category: Category, in source: Source) -> String? {
+        switch category {
+        case .home: "/api/v1/timelines/home"
+        case .list(let id) where source.lists.contains(where: { $0.id == id }) && ListSubscription.isPathSegment(id):
+            "/api/v1/timelines/list/\(id)"
+        default: nil
+        }
     }
 
     private func source() async -> Source? {
@@ -114,33 +141,56 @@ public struct MastodonAccount: Sendable {
         await store.ingest(notes, ifSourceHere: host)
     }
 
-    private func statuses(
-        of lists: [ListSubscription], source: Source
-    ) async throws -> (notes: [Note], all: Bool) {
-        var notes: [Note] = []
+    /// Each of `lists` read on and landed, one after another. Whether every one came back.
+    private func readOn(_ lists: [ListSubscription], source: Source) async throws -> Bool {
         var all = true
         // Checked again here, not only when the server named it: these ids come back out of the
         // store, and a tampered one must not reach the signed-in path.
         for list in lists where ListSubscription.isPathSegment(list.id) {
-            if let read = try await attempt({
-                try await statuses(
+            if try await attempt({
+                try await readOn(
                     "/api/v1/timelines/list/\(list.id)", source: source, category: .list(id: list.id)
                 )
-            }) {
-                notes += read
-            } else {
+            }) == nil {
                 all = false
             }
         }
-        return (notes, all)
+        return all
     }
 
-    private func statuses(_ path: String, source: Source, category: Category) async throws -> [Note] {
+    /// One timeline read on from the newest post held of it (#201), and landed as it answers, so
+    /// one that fails after it holds back none of what it brought.
+    ///
+    /// A stretch that failed after the first lands what came before it, then fails the read.
+    private func readOn(_ path: String, source: Source, category: Category) async throws {
+        let anchor = await store.newestListedID(host: host, category: category)
+        let held = anchor == nil ? await store.held(host: host, category: category) : []
+        let read = try await MastodonReadOn.read(from: anchor, holding: held) { minID in
+            try await listed(path, source: source, category: category, query: try MastodonPage.newer(than: minID))
+        } older: { maxID in
+            try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))
+        }
+        try Task.checkCancellation()
+        await store.land(read, of: category, ifSourceHere: host)
+        if let stopped = read.stopped { throw stopped }
+    }
+
+    private func statuses(
+        _ path: String, source: Source, category: Category, olderThan maxID: String? = nil
+    ) async throws -> [Note] {
+        try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))
+            .map(\.note)
+    }
+
+    /// One page, each post with the id the timeline lists it under — a boost's own.
+    private func listed(
+        _ path: String, source: Source, category: Category, query: [URLQueryItem]
+    ) async throws -> [Listed] {
         let data = try await reading(category).get(
-            path: path, query: [URLQueryItem(name: "limit", value: "40")]
+            path: path, query: [URLQueryItem(name: "limit", value: String(MastodonReadOn.limit))] + query
         )
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
-            $0.asNote(source: source, category: category)
+            $0.listed(source: source, category: category)
         }
     }
 

@@ -409,4 +409,75 @@ struct DiscourseTests {
             #expect(!Fediqo.userAgent.contains(browser))
         }
     }
+
+    // MARK: - Under a tag (#197)
+
+    private static let tagged = #"""
+    {"users":[{"id":1,"username":"wren","name":"Wren","avatar_template":null}],
+     "topic_list":{"topics":[{"id":41207,"title":"Retry defaults","slug":"retry-defaults",
+       "created_at":"2026-04-02T09:12:41.508Z","posts_count":3,"reply_count":2,"category_id":6,
+       "tags":["swift"],"posters":[{"description":"Original Poster","user_id":1}]},
+      {"id":41208,"title":"Tags as objects","slug":"tags-as-objects",
+       "created_at":"2026-04-01T09:12:41.508Z","posts_count":1,"category_id":6,
+       "tags":[{"id":3,"name":"swift","slug":"swift"}],
+       "posters":[{"description":"Original Poster","user_id":1}]}]}}
+    """#
+
+    @Test("A tag's listing is the name as one segment, and nothing else")
+    func tagPath() throws {
+        for text in ["#swift", "#台灣", "#café", "#snake_case", "#2024"] {
+            let tag = try #require(PostTag(text))
+            let path = try DiscourseClient.path(under: tag, host: Self.host)
+            #expect(path == "/tag/" + tag.name + ".json")
+            let url = try #require(Host.httpsURL(host: Self.host, path: path))
+            #expect(url.pathComponents == ["/", "tag", tag.name + ".json"])
+        }
+    }
+
+    @Test("Topics under a tag are the rows the front page draws, under the same ids")
+    func underATagIsTheFrontPagesRow() async throws {
+        let http = FixtureHTTP([
+            "/tag/swift.json": .text(Self.tagged), "/latest.json": .text(Self.tagged),
+            "/site.json": .text(#"{"categories":[{"id":6,"name":"Dev"}]}"#),
+        ])
+        let client = DiscourseClient(http: http, host: Self.host)
+        let front = try await client.latest(source: Self.source)
+        let under = try await client.topics(under: try #require(PostTag("#swift")), source: Self.source)
+        #expect(under == .topics(front))
+        // Tags sent as names by an older forum and as objects by a current one both read.
+        #expect(front.map(\.id) == ["discourse:\(Self.host):41207", "discourse:\(Self.host):41208"])
+        #expect(front.first?.board == "Dev")
+    }
+
+    @Test("Tags turned off is the forum's own answer, told apart from a tag nobody used and a failure")
+    func tagsTurnedOff() async throws {
+        let swift = try #require(PostTag("#swift"))
+        let notFound = #"{"errors":["The requested URL or resource could not be found."],"error_type":"not_found"}"#
+        let off = DiscourseClient(http: FixtureHTTP([
+            "/tag/swift.json": .text(notFound, status: 404), "/tags.json": .text(notFound, status: 404),
+            "/site.json": .fail,
+        ]), host: Self.host)
+        #expect(try await off.topics(under: swift, source: Self.source) == .tagsOff)
+
+        // A 404 page from something in front of the forum is not the forum's word: a miss.
+        let proxied = DiscourseClient(http: FixtureHTTP([
+            "/tag/swift.json": .text("", status: 404), "/tags.json": .text("<html>Not Found</html>", status: 404),
+            "/site.json": .fail,
+        ]), host: Self.host)
+        await #expect(throws: DiscourseRequestError.http(404)) {
+            try await proxied.topics(under: swift, source: Self.source)
+        }
+
+        let unused = DiscourseClient(http: FixtureHTTP([
+            "/tag/swift.json": .text("", status: 404), "/tags.json": .text(#"{"tags":[]}"#), "/site.json": .fail,
+        ]), host: Self.host)
+        #expect(try await unused.topics(under: swift, source: Self.source) == .topics([]))
+
+        let refused = DiscourseClient(http: FixtureHTTP([
+            "/tag/swift.json": .text("", status: 403), "/site.json": .fail,
+        ]), host: Self.host)
+        await #expect(throws: DiscourseRequestError.refused(403)) {
+            try await refused.topics(under: swift, source: Self.source)
+        }
+    }
 }

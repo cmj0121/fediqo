@@ -218,6 +218,30 @@ private var migrator: DatabaseMigrator {
             try db.execute(sql: "UPDATE note SET categories = ? WHERE rowid = ?", arguments: [json, rowid])
         }
     }
+    // Whether a timeline may show a row, or whether this device only holds it (#175). Nothing
+    // already stored is disturbed: every row on disk arrived through a timeline read, which is the
+    // only way a row could get here before this existed, and the column's default says so.
+    //
+    // **A migration id rather than an optional field in `facts`.** An older build knows nothing of
+    // this column, and an older build that read this store would draw every search hit and every
+    // thread answer in All — silently putting rows somewhere nobody read them from. The id is what
+    // makes it refuse the store instead, which is `CategoryRow`'s rule reaching a second marker.
+    migrator.registerMigration("v3-holding") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "holding", .text).notNull().defaults(to: Holding.arrived.rawValue)
+        }
+    }
+    // When a read of one post heard its source say it no longer has it (#179), or NULL. Every row
+    // already stored is one no source has said that of, so the NULL every row takes is the truth.
+    //
+    // **A migration id for `v3-holding`'s reason.** An older build reading this store would draw
+    // a post its source deleted with no mark and every act offered on it — a boost pressed on a
+    // post that is not there. The id makes it refuse the store instead.
+    migrator.registerMigration("v4-gone") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "gone_at", .datetime)
+        }
+    }
     return migrator
 }
 
@@ -373,6 +397,146 @@ private struct NoteFacts: Codable {
     /// written before 0.4.0 learned it reads as a row nobody has reached, which it is to this
     /// build, and an earlier build decoding this row ignores the key.
     var opening: OpeningRow?
+    /// `Note.gaps` (#201): where a timeline this row came through is not whole next to it.
+    /// Additive and optional, so no migration id, for `opening`'s reasons: a row written before
+    /// reads as one no read said that of, and an older build ignores the key and draws no mark,
+    /// which is all it drew before. A kind or a category this build does not know is dropped.
+    var gaps: [GapRow]?
+    /// `Note.listed` (#201): the id each timeline listed this row under, which is what that
+    /// timeline is read on from. Additive and optional for `gaps`' reasons: a row written before
+    /// reads as listed by nothing, which leaves its timeline to be read as one held nowhere.
+    var listed: [ListedRow]?
+    /// `Note.audience` (#208), as `Audience`'s own spelling. Additive and optional for `boosted`'s
+    /// reasons: a row written before reads as a source that never said, which the next read that
+    /// does say fills in, and a spelling this build does not know reads the same way.
+    var audience: String?
+    /// `Note.counts` (#208), or nothing where the source counted nothing. Additive and optional
+    /// for `boosted`'s reasons: a row written before reads as counted by nobody.
+    var counts: CountsRow?
+    /// `Note.quote` (#214): the post this row quotes, what a row draws of it, so it shows with
+    /// the network off. Additive and optional for `boosted`'s reasons: a row written before reads
+    /// as one that quotes nothing until a read says otherwise, and an older build ignores the key.
+    var quote: QuoteRow?
+}
+
+/// `Quote` as `NoteFacts` writes it: the state in the source's spelling, and the quoted post.
+private struct QuoteRow: Codable {
+    var state: String
+    var statusID: String?
+    var post: QuotedRow?
+
+    init(_ quote: Quote) {
+        state = quote.state.rawValue
+        statusID = quote.statusID
+        post = quote.post.map(QuotedRow.init)
+    }
+
+    var quote: Quote {
+        Quote(state: Quote.State(wire: state), post: post?.post, statusID: statusID)
+    }
+}
+
+/// `QuotedPost` as `NoteFacts` writes it: every fact a row draws, and its own quote as a state
+/// and an id — one level, as it was read.
+private struct QuotedRow: Codable {
+    var id: String
+    var statusID: String?
+    var author: String
+    var handle: String
+    var body: String
+    var postedAt: Date
+    var avatarURL: URL?
+    var attachments: [AttachmentRow]
+    var sensitive: Bool?
+    var spoiler: String?
+    var emojis: [EmojiRow]
+    var url: URL?
+    var audience: String?
+    var reply: ReplyRow?
+    var quotingState: String?
+    var quotingStatusID: String?
+
+    init(_ post: QuotedPost) {
+        id = post.id
+        statusID = post.statusID
+        author = post.author
+        handle = post.handle
+        body = post.body
+        postedAt = post.postedAt
+        avatarURL = post.avatarURL
+        attachments = post.attachments.map(AttachmentRow.init)
+        sensitive = post.sensitive
+        spoiler = post.spoiler
+        emojis = post.emojis.map(EmojiRow.init)
+        url = post.url
+        audience = post.audience?.rawValue
+        reply = post.reply.map { ReplyRow(handle: $0.handle, inReplyToId: $0.inReplyToId) }
+        quotingState = post.quoting?.state.rawValue
+        quotingStatusID = post.quoting?.statusID
+    }
+
+    var post: QuotedPost {
+        QuotedPost(
+            id: id, statusID: statusID, author: author, handle: handle, body: body,
+            postedAt: postedAt, avatarURL: avatarURL, attachments: attachments.map(\.attachment),
+            sensitive: sensitive, spoiler: spoiler, emojis: emojis.map(\.emoji), url: url,
+            audience: audience.flatMap(Audience.init(rawValue:)),
+            reply: reply.map { Reply(handle: $0.handle, inReplyToId: $0.inReplyToId) },
+            quoting: quotingState.map { NestedQuote(state: Quote.State(wire: $0), statusID: quotingStatusID) }
+        )
+    }
+}
+
+/// `Counts` as `NoteFacts` writes it.
+private struct CountsRow: Codable {
+    var replies: Int?
+    var reblogs: Int?
+    var favourites: Int?
+
+    /// Nothing for counts that state nothing, so a row with none writes no key.
+    init?(_ counts: Counts) {
+        guard counts != Counts() else { return nil }
+        replies = counts.replies
+        reblogs = counts.reblogs
+        favourites = counts.favourites
+    }
+
+    var counts: Counts { Counts(replies: replies, reblogs: reblogs, favourites: favourites) }
+}
+
+/// One timeline's listing of a row, as `NoteFacts` writes it.
+private struct ListedRow: Codable {
+    var category: CategoryRow
+    var id: String
+}
+
+/// `TimelineGap` as `NoteFacts` writes it.
+private struct GapRow: Codable {
+    var kind: String
+    var category: CategoryRow
+    /// `TimelineGap.since` (#204): when a settled place was said, which the wait counts from.
+    /// Additive and optional for `NoteFacts.gaps`' reasons; an older build drops the kind anyway.
+    var since: Date?
+    /// `TimelineGap.from` (#204): the id a moved place reads down from, for `since`'s reasons.
+    /// An older build reads the place as where its post was listed, which is where it read before.
+    var from: String?
+
+    init(_ gap: TimelineGap) {
+        kind = gap.kind.rawValue
+        category = CategoryRow(gap.category)
+        since = gap.since
+        from = gap.from
+    }
+
+    /// Nothing for a settled place with no moment, which no wait could ever reach.
+    var gap: TimelineGap? {
+        guard let kind = TimelineGap.Kind(rawValue: kind), let category = category.category,
+              kind != .settled || since != nil
+        else { return nil }
+        return TimelineGap(
+            kind, in: category, since: kind == .settled ? since : nil, from: kind == .mayBeMissing ? from : nil
+        )
+    }
 }
 
 /// `ForumOpening` as `NoteFacts` writes it.
@@ -380,15 +544,24 @@ private struct OpeningRow: Codable {
     var words: String
     var quoted: [QuotationRow]
     var avatarURL: URL?
+    /// A kept reply's floor and date (#177). Additive and optional, for `opening`'s reasons: a row
+    /// written before reads as an opening post, which it is, and an older build ignores the keys.
+    var floor: Int?
+    var postedAt: Date?
 
     init(_ opening: ForumOpening) {
         words = opening.words
         quoted = opening.quoted.map(QuotationRow.init)
         avatarURL = opening.avatarURL
+        floor = opening.floor
+        postedAt = opening.postedAt
     }
 
     var opening: ForumOpening {
-        ForumOpening(words: words, quoted: quoted.map(\.quotation), avatarURL: avatarURL)
+        ForumOpening(
+            words: words, quoted: quoted.map(\.quotation), avatarURL: avatarURL,
+            floor: floor, postedAt: postedAt
+        )
     }
 }
 
@@ -471,11 +644,19 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var categories: [CategoryRow]
     /// A `facts` that is not JSON throws when the row is fetched, so the load fails closed.
     var facts: NoteFacts
+    /// `Note.holding` (#175). A column rather than a field in `facts`, and with a migration id
+    /// behind it, because an older build must refuse this store rather than show a row nobody
+    /// read from a timeline in All.
+    var holding: String
+    /// `Note.goneSince` (#179). A column behind its own migration id, for `holding`'s reason.
+    var gone_at: Date?
 
     init(_ note: Note) {
         host = note.source.host
         id = note.id
         posted_at = note.postedAt
+        holding = note.holding.rawValue
+        gone_at = note.goneSince
         categories = note.categories.map(CategoryRow.init).sorted()
         facts = NoteFacts(
             author: note.author,
@@ -495,7 +676,14 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             statusID: note.statusID,
             boosted: note.boosted,
             favourited: note.favourited,
-            opening: note.opening.map(OpeningRow.init)
+            opening: note.opening.map(OpeningRow.init),
+            gaps: note.gaps.isEmpty ? nil : note.gaps.map(GapRow.init).sorted { ($0.kind, $0.category) < ($1.kind, $1.category) },
+            listed: note.listed.isEmpty ? nil : note.listed
+                .map { ListedRow(category: CategoryRow($0.key), id: $0.value) }
+                .sorted { $0.category < $1.category },
+            audience: note.audience?.rawValue,
+            counts: CountsRow(note.counts),
+            quote: note.quote.map(QuoteRow.init)
         )
     }
 
@@ -522,14 +710,27 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             boosterHandle: facts.boosterHandle,
             boosted: facts.boosted,
             favourited: facts.favourited,
+            audience: facts.audience.flatMap(Audience.init(rawValue:)),
             avatarURL: facts.avatarURL,
             attachments: facts.attachments.map(\.attachment),
             sensitive: facts.sensitive,
             spoiler: facts.spoiler,
             emojis: facts.emojis.map(\.emoji),
             url: facts.url,
+            counts: facts.counts?.counts ?? Counts(),
             statusID: facts.statusID,
-            opening: facts.opening?.opening
+            opening: facts.opening?.opening,
+            // A spelling this build does not know cannot reach here — the migration id makes an
+            // older store's rows carry the default and a newer store be refused outright — so the
+            // fallback is the one every row written before this column had.
+            holding: Holding(rawValue: holding) ?? .arrived,
+            goneSince: gone_at,
+            gaps: Set(facts.gaps?.compactMap(\.gap) ?? []),
+            listed: Dictionary(
+                (facts.listed ?? []).compactMap { row in row.category.category.map { ($0, row.id) } },
+                uniquingKeysWith: { a, _ in a }
+            ),
+            quote: facts.quote?.quote
         )
     }
 }

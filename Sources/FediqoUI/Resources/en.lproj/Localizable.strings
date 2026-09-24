@@ -92,6 +92,8 @@
 "shortcut.answer" = "Answer the post you are on, from inside its conversation";
 "shortcut.withdraw" = "Take back the post you are on, where you wrote it";
 "shortcut.person" = "Open whoever wrote the post you are on";
+"shortcut.tag" = "Open a hashtag of the post: what this device holds under it";
+"shortcut.quote" = "Open the post this one quotes";
 "shortcut.reload" = "Reload this timeline, or the open thread";
 "shortcut.dismiss" = "Close what is in front, or unfocus";
 "shortcut.search" = "Search the posts this device holds";
@@ -121,6 +123,9 @@
 "timeline.reload.failed" = "Could not reload %@.";
 "timeline.reload.unspoken" = "%1$@ now answers as %2$@, which Fediqo does not read. What it brought here is still here.";
 "timeline.reload.stopped" = "Reload stopped.";
+"timeline.gap.more" = "More posts from %@ belong here. Reaching this reads them.";
+"timeline.gap.missing" = "Posts from %@ may be missing here. Reaching this reads down to what is held.";
+"timeline.gap.settled" = "%1$@: %2$@ no longer has the posts that lay here.";
 "thread.reload.unfindable" = "This post can't be reloaded: sign in to %@ to find it there.";
 "thread.reload.notfound" = "This post can't be reloaded: %@ did not find it.";
 "thread.reload.scope" = "This post can't be reloaded: sign in to %@ again to let Fediqo find it.";
@@ -211,8 +216,13 @@
 "search.placeholder" = "Search %@: * any run, ? one character";
 "search.label" = "Search the posts %@ shows";
 "search.found" = "%d found";
+"search.asking" = "Searching %@…";
+"search.failed" = "Could not search %@.";
+"search.scope" = "Could not search %@: sign in to it again to let Fediqo search there.";
+"search.reach.asked" = "Also asked %@.";
+"search.reach.notAsked" = "Not asked, as they cannot be searched from here: %@.";
 "search.empty.title" = "Nothing in %@ matches";
-"search.empty.detail" = "Only the posts this timeline shows, already on this device, are searched. Try fewer characters, or * for any run of them.";
+"search.empty.detail" = "Only the posts this timeline shows are searched: what this device holds, and what its sources sent back when asked. Try fewer characters, or * for any run of them.";
 "search.indexing.title" = "Searching…";
 "search.indexing.detail" = "Reading the posts this device holds, once, so each key only matches.";
 
@@ -234,6 +244,35 @@
 "item.covered.mark" = "Covered";
 "item.lifted.mark" = "Was covered";
 "item.covered.warning" = "Author's warning: %@";
+"quote.spoken" = "Quoting %1$@: %2$@";
+"quote.covered" = "covered";
+"quote.covered.warning" = "covered — %@";
+"quote.open" = "Open the quoted post";
+"quote.lift" = "Lift the quoted post's cover";
+"quote.cover" = "Cover the quoted post again";
+"quote.nested" = "It quotes another post in turn — open it to read that one.";
+"quote.nested.hidden" = "It quotes another post in turn, which cannot be shown here.";
+"quote.state.shallow" = "Quotes another post — open it to read it.";
+"quote.state.pending" = "Quotes a post whose author has not allowed the quote yet.";
+"quote.state.rejected" = "Quotes a post whose author did not allow the quote.";
+"quote.state.revoked" = "Quoted a post whose author has since taken the permission back.";
+"quote.state.deleted" = "Quoted a post that has since been deleted at its source.";
+"quote.state.unauthorized" = "Quotes a post you may not see.";
+"quote.state.blockedAccount" = "Quotes a post by someone you blocked.";
+"quote.state.blockedDomain" = "Quotes a post from a server you blocked.";
+"quote.state.mutedAccount" = "Quotes a post by someone you muted.";
+"quote.state.unknown" = "Quotes a post that cannot be shown here.";
+"quote.decorator" = "quoting %@";
+"quote.short.shallow" = "quoting another post";
+"quote.short.pending" = "quote not yet allowed";
+"quote.short.rejected" = "quote not allowed";
+"quote.short.revoked" = "quote taken back";
+"quote.short.deleted" = "quoted post deleted at its source";
+"quote.short.unauthorized" = "quoted post hidden from you";
+"quote.short.blockedAccount" = "quoting someone you blocked";
+"quote.short.blockedDomain" = "quoting a server you blocked";
+"quote.short.mutedAccount" = "quoting someone you muted";
+"quote.short.unknown" = "quoted post not shown";
 "item.covered.show" = "Show it";
 "item.covered.label" = "Press s to show it";
 
@@ -303,6 +342,10 @@
 "prefs.latest" = "Stop at a latest date";
 "prefs.latest.date" = "Latest date";
 "prefs.latest.footer" = "Every timeline shows nothing posted after the end of this day, in this device's time zone. Newer posts stay on this device; turn this off to see them again.";
+"prefs.askEvery" = "Ask the sources again";
+"prefs.askEvery.one" = "Every minute";
+"prefs.askEvery.many" = "Every %d minutes";
+"prefs.askEvery.footer" = "While Fediqo is open, every source on this device is asked again after this wait, and the timeline in front renews itself. r still reloads at once.";
 
 "prefs.tab.choices" = "Settings";
 "prefs.tab.build" = "This Fediqo";
@@ -329,6 +372,7 @@
 "work.purpose.signIn" = "Signing in";
 "work.purpose.signOut" = "Signing out";
 "work.purpose.write" = "Sending what you wrote or pressed";
+"work.purpose.search" = "Searching a server";
 "about.title" = "This Fediqo";
 "about.version" = "Version";
 "about.build" = "Build";
@@ -366,6 +410,36 @@
 "prefs.keep.shorten.detail" = "Posts older than that go from this device now, and any read later are not kept. Every source stays joined. A longer window, or Forever, drops nothing.";
 "prefs.keep.months" = "Latest %d months";
 "prefs.keep.months.one" = "Latest %d month";
+"item.gone" = "Deleted at source";
+"item.gone.detail" = "Its source says it no longer has this post. It stays here, marked, until you let it go, and nothing can be sent to it.";
+"prefs.gone" = "Posts deleted at their source";
+"prefs.gone.wait" = "Let them go after";
+"prefs.gone.never" = "Never";
+"prefs.gone.days" = "%d days";
+"prefs.gone.days.one" = "%d day";
+"prefs.gone.keepwins" = "Keep posts holds only the latest %d months, which is shorter, so it lets them go first.";
+"prefs.gone.keepwins.one" = "Keep posts holds only the latest %d month, which is shorter, so it lets them go first.";
+"prefs.gone.now" = "Let them all go now";
+"prefs.gone.ask" = "Let go of %d posts deleted at their source?";
+"prefs.gone.ask.one" = "Let go of %d post deleted at its source?";
+"prefs.gone.ask.detail" = "They go from this device now, from every screen. Nothing else is touched, and every source stays joined.";
+"prefs.gone.confirm" = "Let go";
+"prefs.gone.went" = "%d posts went.";
+"prefs.gone.went.one" = "%d post went.";
+"prefs.gone.went.none" = "None were held.";
+"prefs.gone.footer" = "A post is marked deleted only when this device reads that one post again and its source says it is not there. A post that simply did not arrive is never marked, and never let go here. What you took back yourself goes at once. Where a timeline's source no longer has what lay between two posts, that place is marked the same way and goes the same way; the posts beside it stay.";
+"prefs.gone.posts" = "%d posts";
+"prefs.gone.posts.one" = "%d post";
+"prefs.gone.places" = "%d places";
+"prefs.gone.places.one" = "%d place";
+"prefs.gone.ask.places" = "Let go of %d places whose source no longer has what lay there?";
+"prefs.gone.ask.places.one" = "Let go of %d place whose source no longer has what lay there?";
+"prefs.gone.ask.both" = "Let go of %1$@ deleted at their source, and %2$@ whose source no longer has what lay there?";
+"prefs.gone.ask.detail.places" = "Posts go from this device now, from every screen. A place loses only its mark, and the post it sits by stays. Nothing else is touched, and every source stays joined.";
+"prefs.gone.ask.detail.placesonly" = "Only their marks go, and the posts they sit by stay. Nothing else is touched, and every source stays joined.";
+"prefs.gone.went.places" = "%d places went.";
+"prefs.gone.went.places.one" = "%d place went.";
+"prefs.gone.went.both" = "%1$@ and %2$@ went.";
 "prefs.drop.copies" = "Drop picture copies";
 "prefs.drop.copies.title" = "Drop every picture copy on this device?";
 "prefs.drop.copies.detail" = "The pictures held in memory and on disk go, from every source. Every post stays and still draws; its pictures are read again from their links as you scroll.";
@@ -469,6 +543,17 @@
 "thread.replies.count" = "%d replies";
 "thread.reply.floor" = "#%d";
 "thread.reply.quoted" = "Quoted: %@";
+
+/* #177 — the foot of a thread read to its end. The end is said as the end, and a part that did
+   not arrive is said where it would have been. */
+"thread.more.loading" = "Reading further…";
+"thread.more.end" = "This is the end of the thread.";
+"thread.more.read" = "Read further";
+"thread.more.cut" = "%@ gives no more of this thread here. There are answers it did not hand over.";
+"thread.more.again" = "Try the rest again";
+"thread.more.unreachable" = "The rest of this thread did not arrive.";
+"thread.more.refused" = "%@ would not let this app read further into this thread.";
+"thread.more.unreadable" = "The next page answered, but there was nothing on it this app could read.";
 
 /* Unit F7 — reading a thread properly. */
 "thread.open" = "Open on %@";
@@ -630,6 +715,14 @@
 "person.held" = "%d posts here";
 "person.held.one" = "%d post here";
 "person.none" = "Nothing of theirs has reached this device yet.";
+"tag.asking" = "Asking %1$@ for %2$@…";
+"tag.failed" = "Could not ask %1$@ for %2$@.";
+"tag.retry" = "Try again";
+"tag.none" = "Nothing under %@ has reached this device.";
+"tag.reach.asked" = "Asked %@.";
+"tag.reach.partial" = "Not asked, as this timeline shows only some of what they send: %@.";
+"tag.reach.tagless" = "Not asked, as they keep no tags: %@.";
+"tag.reach.tagsOff" = "Nothing to ask, as tags are turned off on %@.";
 "item.person.open" = "Open %@";
 
 /* One post more than one source carried (#114). The row is drawn as the first; these name the rest. */
@@ -638,3 +731,26 @@
 "item.source.join" = ", ";
 "thread.copies.title" = "As each source carried it";
 "thread.copies.from" = "From %@";
+"blog.title" = "Blog";
+"blog.reading" = "Reading the blog…";
+"blog.refused" = "%@ would not let this app read this blog.";
+"blog.unreadable" = "This forum answered, but there was no blog on it this app could read.";
+"blog.unreachable" = "This blog could not be reached.";
+"blog.page" = "Read its page";
+"refusal.signIn" = "This forum shows this only to readers who are signed in.";
+"refusal.signIn.action" = "Sign in to %@";
+"refusal.password" = "Its author keeps this behind a password.";
+"refusal.password.field" = "The author's password";
+"refusal.password.open" = "Open";
+"refusal.password.trying" = "Trying the password…";
+"refusal.password.wrong" = "That password did not open it. Type it again.";
+"refusal.password.note" = "The password goes only to %@, for this one opening, and is not kept on this device.";
+"refusal.private" = "Its author shows this only to their friends, or only to themselves.";
+"refusal.gone" = "Deleted at source. Its forum says it is not there any more.";
+"refusal.blogsOff" = "This forum has its blogs switched off.";
+"refusal.standing" = "This forum asks for more standing than this account has.";
+"refusal.points" = "This forum asks for more than this account has to read here.";
+"refusal.price" = "Its author asks a price to read this. This app never pays.";
+"refusal.asked" = "The forum says: “%@”";
+"refusal.again" = "Try again";
+"refusal.page.hint" = "Opens the forum's own page for this.";

@@ -44,7 +44,7 @@ final class ShellSession {
     let mastodon: MastodonSessions
 
     /// One thread's opening post, fetched when its row is scrolled to — D30 — and the rest of
-    /// the topic on request — D31.
+    /// the topic as its thread opens — D31, asked at once since #198.
     ///
     /// On the session for the reason the two picture caches and `forums` are: **what Clear
     /// presses and what Usage draws have to be the same object**. It is built here rather
@@ -52,6 +52,10 @@ final class ShellSession {
     /// and this session's forum browsers, without which a thread on a forum the reader signed in
     /// to comes back withheld.
     let posts: ForumPosts
+
+    /// A forum's ranked blogs, read as the reader opens them (#209). Beside `posts` and for its
+    /// reason: what the blog's pane draws and what a Clear presses are the same object.
+    let blogs: ForumBlogs
 
     /// Every act on a post this run has in the air, and every one that did not land — #106.
     ///
@@ -258,6 +262,8 @@ final class ShellSession {
     @ObservationIgnored var drawnTimeline: DrawnTimeline?
     /// The person's page last drawn and what it was drawn from. See `heldPosts(of:)`.
     @ObservationIgnored var drawnPerson: HeldByPerson?
+    /// The tag's page last drawn and what it was drawn from. See `heldPosts(under:)`.
+    @ObservationIgnored var drawnTag: HeldTag?
     /// How many times the rules ran for the stream: the test's window on `drawnTimeline`.
     @ObservationIgnored var timelineEvaluations = 0
     /// Each tab's missing-rule mark as last worked out, so a redraw compiles no tab again.
@@ -287,8 +293,38 @@ final class ShellSession {
             holdings = Holdings(notes: notes, per: heldPeriod)
             textIndexIsCurrent = false
             notesRevision += 1
+            heldRevision += 1
+            searchTextIsCurrent = false
         }
     }
+
+    /// Every post this device holds aside (#175) — what a search brought back, a thread's answers
+    /// — which no timeline draws. **Read by the search alone** (#176): a search finds what this
+    /// device holds, and holding a search's finds aside is what keeps All from growing by them.
+    private(set) var aside: [Note] = [] {
+        didSet {
+            heldRevision += 1
+            searchTextIsCurrent = false
+        }
+    }
+    /// Bumped as `notes` or `aside` is assigned: what a search's answer is kept against.
+    private(set) var heldRevision = 0
+
+    /// Everything a search reads: what the timelines draw, and what is held aside.
+    var searchable: [Note] { aside.isEmpty ? notes : notes + aside }
+
+    /// `textIndex` over `searchable`, for a search through a timeline whose rules read text. The
+    /// same as it where nothing is held aside, which is most of the time.
+    var searchTextIndex: TextIndex {
+        guard !aside.isEmpty else { return textIndex }
+        if !searchTextIsCurrent {
+            builtSearchText = TextIndex(searchable, reusing: builtSearchText ?? builtTextIndex)
+            searchTextIsCurrent = true
+        }
+        return builtSearchText ?? TextIndex([])
+    }
+    @ObservationIgnored private var builtSearchText: TextIndex?
+    @ObservationIgnored private var searchTextIsCurrent = false
 
     /// The row at the top of the stream, as the reader last left it scrolled (#110).
     ///
@@ -309,18 +345,33 @@ final class ShellSession {
     /// the conversation the reader pressed for. The row id is split once and each note's key
     /// compared to it, so walking past a note builds nothing; the row is built once, for the one
     /// note that matched.
+    ///
+    /// **A row held aside too** (#176, #124, #178): a search's find, a post under a tag or an
+    /// answer read in a thread is a row a reader presses like any other, and the conversation it
+    /// opens is looked up here — `heldNote(_:)`'s one rule, so the row a press opens and the note
+    /// its marks act on are found the same way.
     func held(_ rowID: String) -> DummyItem? {
         heldNote(rowID).map(DummyItem.init)
     }
 
-    /// The store row one row id stands for, in `notes`. See `held(_:)`.
+    /// The store row one row id stands for: in `notes`, and **in what is held aside too** (#178).
+    /// See `held(_:)`.
+    ///
+    /// A search hit the sources sent (#176) and an answer read in a thread (#177) are held aside
+    /// and drawn where they were found, and a press on one opens the conversation around it and
+    /// acts on it — which is this lookup. Found in `notes` only, the press opened nothing: the
+    /// pane drew the page under it, and the marks under the post acted on nothing. **Nothing here
+    /// puts a row in All**: `notes` stays what `ItemStore.all()` draws, and a row found here keeps
+    /// where it is held through every read and act, `Note.refreshed(over:)`'s rule. What `aside`
+    /// leaves out — a forum topic's kept replies, which are not threads — is not found here either.
     func heldNote(_ rowID: String) -> Note? {
         guard let key = NoteKey(rowID: rowID) else { return nil }
-        return notes.first { $0.source.host == key.host && $0.id == key.id }
+        let matches = { (note: Note) in note.source.host == key.host && note.id == key.id }
+        return notes.first(where: matches) ?? aside.first(where: matches)
     }
 
     /// The note behind a row, wherever this run holds it: a store row, or an answer read in an
-    /// open conversation, which #90 keeps out of the store.
+    /// open conversation this run has not adopted from the store yet.
     func note(ofRow rowID: String) -> Note? {
         heldNote(rowID) ?? conversations.note(rowID)
     }
@@ -405,6 +456,7 @@ final class ShellSession {
         forums: ForumSessions = ForumSessions(),
         mastodon: MastodonSessions = MastodonSessions(),
         posts: ForumPosts? = nil,
+        blogs: ForumBlogs? = nil,
         timelines: WrittenTimelineStore? = nil
     ) {
         self.http = http
@@ -423,8 +475,19 @@ final class ShellSession {
         // 274KB — so it carries its own far tighter ceiling. See `ForumPosts.maxBytes`, and the
         // plan's standing item about per-caller response ceilings, of which this is the first.
         self.posts = posts ?? ForumPosts(through: forums)
+        // Built with the same forum browsers, for `posts`' reason (#209).
+        self.blogs = blogs ?? ForumBlogs(through: forums)
         // An opening post read is kept with its row (#154). Weak: the cache is this session's.
         self.posts.keeping = { [weak self] key, opening in self?.keep(opening, for: key) }
+        // A topic's replies land in the store and are read back from it (#177). Weak, likewise.
+        self.posts.landing = { [weak self] host, tid, replies in
+            await self?.land(replies, host: host, tid: tid) ?? []
+        }
+        self.posts.reading = { [weak self] host, tid in
+            await self?.keptReplies(host: host, tid: tid) ?? []
+        }
+        // A blog read is kept with its row (#209). Weak, likewise.
+        self.blogs.landing = { [weak self] key, blog in await self?.keep(blog, for: key) }
         switch timelines?.load() {
         case .timelines(let kept)?: written = kept
         case .unreadable?: timelinesUnreadable = true
@@ -603,7 +666,8 @@ final class ShellSession {
         return PostActs.on(
             mastodon.writing(host: copy.source.host, kind: kind),
             nameable: copy.statusID != nil,
-            mine: isMine(copy)
+            mine: isMine(copy),
+            gone: copy.goneSince != nil
         )
     }
 
@@ -783,7 +847,7 @@ final class ShellSession {
         ComposerSheet.canSend(
             text: answerDraft(target),
             limit: postLimit(of: target.item.source.host),
-            hasSource: acts(on: target.item).offers(.answer)
+            hasSource: acts(on: held(target.item.id) ?? target.item).offers(.answer)
         )
     }
 
@@ -798,7 +862,9 @@ final class ShellSession {
         let host = item.source.host
         let text = ComposerSheet.trimmed(answerDraft(target))
         guard !text.isEmpty, text.count <= postLimit(of: host) else { return }
-        guard acts(on: item).offers(.answer),
+        // Asked of the row as it is now, not as the sheet opened on it: a post its source said
+        // was gone while the answer was being written offers nothing to answer (#179).
+        guard acts(on: held(item.id) ?? item).offers(.answer),
               let answered = note(ofRow: item.id),
               let door = mastodon.authorized(host: host, for: .write)
         else { throw MastodonWriteError.noSource }
@@ -1849,6 +1915,22 @@ final class ShellSession {
         await adopt()
     }
 
+    /// The store, followed: each time it says it changed, what it holds is adopted again — so a
+    /// landing renews the screen reading it with no key pressed (#175), whoever asked for it.
+    ///
+    /// **Until the task running it is cancelled**, which is the one way it ends: the root view's
+    /// own `.task`, so a window closed stops following. A store that changed nothing says nothing
+    /// (`ItemStore.changes()`), so an ask that brought nothing new redraws nothing. The rows keep
+    /// their ids across an adopt, which is what keeps the selected post selected.
+    func followStore() async {
+        // Listening before the first adopt, so a landing between the two is not missed.
+        let changes = await store.changes()
+        await adopt()
+        for await _ in changes {
+            await adopt()
+        }
+    }
+
     /// Only the sources, projected again through what each server has just said it is — for a
     /// reload that has asked every server and has not read anything yet, so has no notes to adopt.
     func reprojectSources() async {
@@ -1861,20 +1943,56 @@ final class ShellSession {
     /// **Each half assigned only where it moved.** Both have observers behind them — the forums
     /// watched, the boards each forum is read for, the holdings counted and the text index
     /// dropped — and every view reading the session redraws on an assignment, so a reload that
-    /// changed nothing used to pay for all of it. The notes are compared by the store's revision
-    /// rather than row by row: unchanged since the last adopt, and nothing here has assigned
-    /// `notes` since either, they are what the store holds.
+    /// changed nothing used to pay for all of it. The notes are compared by the store's count of
+    /// what `all()` draws rather than row by row: unchanged since the last adopt, and nothing here
+    /// has assigned `notes` since either, they are what the store holds. **That count and not the
+    /// revision** (#175), so a post held aside — written down, drawn nowhere — replaces nothing.
     private func adopt() async {
         await adoptSources()
-        let revision = await store.revision
-        if adopted?.store != revision || adopted?.notes != notesRevision {
+        let asideRevision = await store.asideRevision
+        let drawn = await store.drawn
+        if adopted?.store != drawn || adopted?.notes != notesRevision {
             notes = await store.all()
-            adopted = (store: revision, notes: notesRevision)
+            adopted = (store: drawn, notes: notesRevision)
+        }
+        // What is held aside has a count of its own, as what is drawn has, so a landing only
+        // the timelines see neither reads it again nor redraws a search (#176).
+        //
+        // **A forum topic's kept replies are not among them** (#177): each is a post of a thread,
+        // not a thread, and a search drawing one would draw it as a row that opens nowhere. A
+        // microblog answer is a post in its own right, and stays.
+        if adoptedAside != asideRevision {
+            aside = await store.aside().filter { DiscuzPost(held: $0) == nil }
+            adoptedAside = asideRevision
+        }
+        if heldRevision != renewedConversations {
+            renewConversation()
+            renewedConversations = heldRevision
         }
         rebuildQueries()
     }
 
-    /// The store's revision and `notesRevision` as the last adopt left them. Read in a hop before
+    /// `heldRevision` as the open conversations last drew from what is held.
+    @ObservationIgnored private var renewedConversations: Int?
+
+    /// The conversation in front drawn again from what this device holds of its posts (#193): the
+    /// store's copy of each, in the thread's own order. Only the thread in front, and only the
+    /// posts it draws are looked for, so an adopt with no thread open walks nothing; a thread left
+    /// is drawn again as it opens (`ShellReload.opened`).
+    func renewConversation() {
+        guard let front = reload.inFront else { return }
+        let wanted = conversations.drawnKeys(around: front.id)
+        guard !wanted.isEmpty else { return }
+        var held: [NoteKey: Note] = [:]
+        for note in notes where wanted.contains(note.key) { held[note.key] = note }
+        for note in aside where wanted.contains(note.key) { held[note.key] = note }
+        conversations.renew(front.id, from: held)
+    }
+
+    /// The store's `asideRevision` as the last adopt read what is held aside.
+    @ObservationIgnored private var adoptedAside: Int?
+
+    /// The store's `drawn` and `notesRevision` as the last adopt left them. Read in a hop before
     /// the notes, so a write landing between the two is adopted again next time, never missed.
     @ObservationIgnored private var adopted: (store: Int, notes: Int)?
 
@@ -2031,6 +2149,9 @@ final class ShellSession {
         // then there is nothing to hand them to.
         keep(posts.openings(host: host))
         posts.forget(host: host)
+        // A blog read is already its row's (#209); what goes is a read on the wire, and why one
+        // came to nothing.
+        blogs.forget(host: host)
         // Seven became eight, for the same reason: an open thread's answers are this device's
         // copy of that server's words too.
         conversations.forget(host: host)
@@ -2096,6 +2217,78 @@ final class ShellSession {
             guard await store.keep([key: opening]) else { return }
             await persist?()
         }
+    }
+
+    /// A ranked blog just read, kept with its row and saved — **and drawn at once** (#209).
+    ///
+    /// Written into `notes` where `keep(_:for:)` above is not, and for the opposite of its reason:
+    /// that one lands as the reader scrolls, and a row redrawn for each would be the timeline
+    /// redrawn for each; this one lands because the reader opened this very blog, whose pane is
+    /// drawn from the row and has nothing else to draw the words from. One row, once.
+    ///
+    /// **And kept as a change to what is drawn**, so a read of the store that was already on its
+    /// way — begun before the keep, and handing back the row without it — is followed by another
+    /// that has it, rather than drawing the row as it was until something else moves.
+    func keep(_ blog: DiscuzBlog, for key: NoteKey) async {
+        let opening = blog.opening
+        notes = notes.map { $0.key == key && $0.opening != opening ? $0.with(opening: opening) : $0 }
+        guard await store.keep([key: opening], shown: true) else { return }
+        await persist?()
+    }
+
+    /// One page of a topic's replies, landed in the store **held aside** and saved, and the topic
+    /// as the store now holds it (#177).
+    ///
+    /// Aside, because a reply read in a thread is not a row All grew by (#175). A reply already
+    /// held takes the words just read — **never the forum's notice over them**, #154's rule for an
+    /// opening post, so a guest's read of a page does not undo what a member's read kept.
+    ///
+    /// **A reply the page gave no date keeps the one it was first kept with.** Stamped with each
+    /// read's moment, every re-read would move the row, write the whole store down again, and keep
+    /// it inside the reader's keep-for window for ever.
+    func land(_ replies: [DiscuzPost], host: String, tid: Int) async -> [DiscuzPost] {
+        let read = Date()
+        let first = Dictionary(
+            await store.held(host: host, idPrefix: DiscuzPost.heldPrefix(host: host, tid: tid))
+                .map { ($0.id, $0.postedAt) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let notes = replies.map { reply in
+            let id = DiscuzPost.heldPrefix(host: host, tid: tid) + String(reply.pid)
+            return reply.asNote(host: host, read: first[id] ?? read)
+        }
+        await store.hold(notes, ifSourceHere: host)
+        await store.refresh(notes.filter { $0.opening != nil }, ifSourceHere: host)
+        await persist?()
+        return await keptReplies(host: host, tid: tid)
+    }
+
+    /// Every reply of one topic this device holds, in reading order: by page, and on a page in the
+    /// order the store took them — which is the order the page wrote them, so a forum that lists a
+    /// topic newest first reads back newest first too.
+    func keptReplies(host: String, tid: Int) async -> [DiscuzPost] {
+        await store.held(host: host, idPrefix: DiscuzPost.heldPrefix(host: host, tid: tid))
+            .compactMap(DiscuzPost.init(held:))
+            .enumerated()
+            .sorted { ($0.element.page, $0.offset) < ($1.element.page, $1.offset) }
+            .map(\.element)
+    }
+
+    /// Every further read of an open thread stopped — a forum's next page, a conversation's next
+    /// part (#177). The thread closing, and Esc, which stops these as it stops a reload.
+    @discardableResult
+    func stopReadingFurther() -> Bool {
+        let paging = posts.stopPaging()
+        let further = conversations.stopReadingFurther()
+        return paging || further
+    }
+
+    /// The further reads of one thread stopped — **its pane closing**. Only its own: a reader who
+    /// opens a reply's thread from inside this one closes this pane as the next one opens, and the
+    /// next one's first ask is not this pane's to stop.
+    func stopReadingFurther(of item: DummyItem) {
+        if let thread = ForumThreadRef(item) { posts.stopPaging(of: thread) }
+        conversations.stopReadingFurther(of: item.id)
     }
 
     /// This run's opening posts for rows still held, handed to the store **and** to the rows drawn

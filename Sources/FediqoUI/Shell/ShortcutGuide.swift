@@ -15,7 +15,10 @@ struct ShortcutGuide: View {
         /// fits inside this at the standard type size, so none of them scrolls. Where a narrow
         /// window or a larger type size makes a tab longer than the window, the page scrolls
         /// instead of being cut off.
-        static let plate = CGSize(width: 600, height: 400)
+        ///
+        /// 440 since #124 gave Read a ninth line, `t`, and 472 since #214 gave it a tenth, `o`;
+        /// the width is unchanged.
+        static let plate = CGSize(width: 600, height: 472)
         /// Between the heading's parts and the page below them.
         static let gap: CGFloat = 12
     }

@@ -288,9 +288,9 @@ struct DiscuzRankedThread: Equatable, Sendable {
 /// **A row of its own kind, and never a thread.** A blog lives in its author's space, not in a
 /// board; it has no floors, no replies this app reads and no thread number, and its number is
 /// counted apart from threads' — `500` is a plausible thread too. So its id is
-/// `discuz:<host>:blog:<id>`, which `ForumThreadRef` will not take for a thread, and it is read
-/// from the ranking list alone: its words are the excerpt the list wrote, and opening it opens
-/// its page.
+/// `discuz:<host>:blog:<id>`, which `ForumThreadRef` will not take for a thread. Reached, it is
+/// the ranking list alone: its words are the excerpt the list wrote. Opened, its own page is read
+/// (`DiscuzClient.blog`, #209) and what that brings is kept with the row as its opening.
 struct DiscuzRankedBlog: Equatable, Sendable {
     let rank: Int?
     let id: Int
@@ -308,25 +308,31 @@ struct DiscuzRankedBlog: Equatable, Sendable {
             source: source,
             author: author,
             handle: DiscuzHandle.of(author, host: host),
-            // **The excerpt is the body, because it is what the page states.** Unlike a thread's
-            // opening post, which is fetched when reached and kept apart (#154), nothing more of
-            // a blog is ever read into its row — so what the list said is its words, and a
-            // keyword rule or the search reads them as it reads any post's.
+            // **The excerpt is the body, because it is what the page states.** What its own page
+            // says is read only when the reader opens it, and kept apart as a thread's opening
+            // post is (#154, #209) — so what the list said stays its words here, and a keyword
+            // rule or the search reads them as it reads any post's.
             body: excerpt,
             title: title,
             board: nil,
             postedAt: postedAt ?? .distantPast,
             categories: [.trends],
-            url: Host.httpsURL(
-                host: host,
-                path: "/home.php",
-                query: [
-                    URLQueryItem(name: "mod", value: "space"),
-                    URLQueryItem(name: "uid", value: String(uid)),
-                    URLQueryItem(name: "do", value: "blog"),
-                    URLQueryItem(name: "id", value: String(id)),
-                ]
-            )
+            url: Self.address(host: host, uid: uid, id: id)
+        )
+    }
+
+    /// `home.php?mod=space&uid=…&do=blog&id=…` — the page a blog is served at, built out of a
+    /// parsed host and two integers. The row's address, and the one `DiscuzClient.blog` reads.
+    static func address(host: String, uid: Int, id: Int) -> URL? {
+        Host.httpsURL(
+            host: host,
+            path: "/home.php",
+            query: [
+                URLQueryItem(name: "mod", value: "space"),
+                URLQueryItem(name: "uid", value: String(uid)),
+                URLQueryItem(name: "do", value: "blog"),
+                URLQueryItem(name: "id", value: String(id)),
+            ]
         )
     }
 
@@ -349,5 +355,26 @@ public enum DiscuzBlogRow {
               let id = Int(parts[3])
         else { return false }
         return id > 0
+    }
+
+    /// Whose blog a row is and which — the two numbers `DiscuzClient.blog` reads it by — or
+    /// nothing where the row is not a blog's.
+    ///
+    /// The blog's number is the row id's; its author's is read back out of the row's address,
+    /// which `DiscuzRankedBlog.asNote` built out of integers and nothing else writes. An address
+    /// naming a different blog than the id is not this row's, and gives nothing.
+    public static func address(noteID: String, url: URL?) -> (uid: Int, id: Int)? {
+        guard isBlog(noteID), let id = noteID.split(separator: ":").last.flatMap({ Int($0) }),
+              let url, let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              let uid = items.first(where: { $0.name == "uid" })?.value.flatMap(Int.init), uid > 0,
+              items.first(where: { $0.name == "id" })?.value.flatMap(Int.init) == id
+        else { return nil }
+        return (uid, id)
+    }
+
+    /// The page a blog's row stands for, built as `DiscuzClient.blog` builds it — where the
+    /// author's password is typed (#213).
+    public static func page(host: String, uid: Int, id: Int) -> URL? {
+        DiscuzRankedBlog.address(host: host, uid: uid, id: id)
     }
 }

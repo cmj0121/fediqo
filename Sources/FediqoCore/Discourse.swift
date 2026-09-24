@@ -33,7 +33,63 @@ public struct DiscourseClient: Sendable {
     /// answer `/site.json` — an old version, a plugin, a permission — still has a readable front
     /// page, and a topic with no section named is a topic with one less line on it rather than a
     /// topic nobody can read.
-    public func latest(source: Source) async throws -> [Note] {
+    public func latest(source: Source, page: Int = 0) async throws -> [Note] {
+        // Discourse counts its pages from nought; past the first is the next stretch (#87).
+        try await listing(
+            "/latest.json",
+            query: page > 0 ? [URLQueryItem(name: "page", value: String(page))] : [],
+            source: source
+        )
+    }
+
+    /// What this forum lists under one tag (#197): `/tag/{name}.json`, the front page's shape
+    /// narrowed to the topics tagged so — or `.tagsOff` where the forum has tagging turned off.
+    ///
+    /// **The same rows `latest` draws**, read by the same code under the same ids and with the
+    /// same section names, so a topic both on the front page and under the tag is one row in the
+    /// store and never two.
+    ///
+    /// **Tags off is asked, not guessed.** A tag's listing answers 404 both where the forum has
+    /// no such tag and where it keeps no tags at all. Only on a 404 is the tag index asked, which
+    /// answers wherever tagging is on: Discourse's own not-found again is the forum saying it
+    /// keeps no tags, and any other success is a tag nobody has used there — nothing under it,
+    /// and no fault.
+    public func topics(under tag: PostTag, source: Source) async throws -> DiscourseTagged {
+        let path = try Self.path(under: tag, host: host)
+        do {
+            return .topics(try await listing(path, query: [], source: source))
+        } catch DiscourseRequestError.http(404) {
+            guard let url = Host.httpsURL(host: host, path: "/tags.json") else {
+                throw DiscourseRequestError.invalidURL
+            }
+            let (data, response) = try await http.data(from: url)
+            // **Only in Discourse's own words.** A 404 page from whatever stands in front of the
+            // forum is not the forum saying anything, and is a miss to try again, not a setting.
+            if response.statusCode == 404 {
+                guard (try? DiscourseJSON.decoder.decode(NotFoundDTO.self, from: data))?.errorType == "not_found"
+                else { throw DiscourseRequestError.http(404) }
+                return .tagsOff
+            }
+            try Self.check(response.statusCode)
+            return .topics([])
+        }
+    }
+
+    /// A tag's listing, as a path whose last segment is the name and `.json` and nothing else —
+    /// `MastodonTag.path`'s rule, refused rather than trusted for its reason: a name that would
+    /// add a segment, climb one or end the path early never reaches a forum.
+    static func path(under tag: PostTag, host: String) throws -> String {
+        let name = tag.name
+        let path = "/tag/" + name + ".json"
+        guard !name.contains(where: { "/?#%\\".contains($0) }),
+              let url = Host.httpsURL(host: host, path: path),
+              url.pathComponents == ["/", "tag", name + ".json"]
+        else { throw DiscourseRequestError.invalidURL }
+        return path
+    }
+
+    /// One of the forum's topic listings, newest topic first, with its section names beside it.
+    private func listing(_ path: String, query: [URLQueryItem], source: Source) async throws -> [Note] {
         async let sections: [Int: String] = {
             do {
                 return try await categories()
@@ -47,9 +103,7 @@ public struct DiscourseClient: Sendable {
         }()
 
         guard let url = Host.httpsURL(
-            host: host,
-            path: "/latest.json",
-            query: [URLQueryItem(name: "order", value: "created")]
+            host: host, path: path, query: [URLQueryItem(name: "order", value: "created")] + query
         ) else {
             throw DiscourseRequestError.invalidURL
         }
@@ -172,6 +226,13 @@ public struct DiscourseClient: Sendable {
         default: throw DiscourseRequestError.http(status)
         }
     }
+}
+
+/// What a forum said when asked for its topics under a tag (#197).
+public enum DiscourseTagged: Equatable, Sendable {
+    case topics([Note])
+    /// The forum keeps no tags: tagging is turned off there.
+    case tagsOff
 }
 
 public enum DiscourseRequestError: Error, Equatable, Sendable {
@@ -366,6 +427,11 @@ struct TopicDTO: Decodable, Sendable {
             )
         )
     }
+}
+
+/// The body Discourse answers a 404 with: `{"errors":[…],"error_type":"not_found"}`.
+struct NotFoundDTO: Decodable, Sendable {
+    let errorType: String?
 }
 
 struct SiteDTO: Decodable, Sendable {

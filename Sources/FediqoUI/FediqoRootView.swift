@@ -59,6 +59,11 @@ public struct FediqoRootView: View {
     /// pane that owned it would be a pane the next surface to draw a post's words could not
     /// reach.
     @State private var linkReader = ShellReader()
+    /// Where a hashtag pressed in a post's words goes (#124): this view's walk, handed down as the
+    /// link reader is.
+    @State private var tags = ShellTags()
+    /// Where a press on a quote goes (#214): this view's walk, handed down as the tags are.
+    @State private var quotes = ShellQuotes()
     /// Up once at launch when the index on disk was written by a newer build and this run left it
     /// alone: without it the reader sees an empty app and nothing to say why.
     @State private var storeIsNewer: Bool
@@ -165,6 +170,8 @@ public struct FediqoRootView: View {
                 // Before anything can be pressed: a page read out of a post is drawn in place on
                 // a Mac (#169), and the reader asks the walk here where it may be.
                 placeLinksInPage()
+                tags.placing = { tag, row in openTag(tag, from: row) }
+                placeQuotes()
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
                 // The store has now said what is held, which is the first moment this launch can
@@ -173,10 +180,16 @@ public struct FediqoRootView: View {
                 if let landing = launch.settle(availability, standingOn: place) {
                     place = landing
                 }
+                // Last, because it does not return: from here every landing renews what is in
+                // front, with no key pressed (#175).
+                await session.followStore()
             }
             .onChange(of: prefs.keepMonths) { _, months in
                 Task { await session.keep(months: months) }
             }
+            // Posts their source deleted go on this device's wait (#179).
+            .modifier(LettingGoneGo(session: session))
+            .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
@@ -200,7 +213,8 @@ public struct FediqoRootView: View {
             // lamp back to. Where the lamp lands is #100's, and `TimelinePane` answers it on the
             // same change. Here rather than in the pane because the walk is held here — the pane
             // used to do it through a binding whose one meaning was "close the thread".
-            .onChange(of: session.timelineID) { _, _ in clearWalk() }
+            // A tag's page in front stays, and is asked again of the new timeline (#197).
+            .onChange(of: session.timelineID) { left, arrived in timelineSwitched(from: left, to: arrived) }
             .sheet(isPresented: $composing) {
                 ComposerSheet()
                     #if os(iOS)
@@ -365,6 +379,8 @@ public struct FediqoRootView: View {
             // has no identity, so it would differ on every pass of this view and invalidate every
             // line on the screen with it. See `ShellReader`.
             .environment(\.shellReader, linkReader)
+            .environment(\.shellTags, tags)
+            .environment(\.shellQuotes, quotes)
             .environment(\.locale, prefs.language.locale)
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
@@ -492,7 +508,7 @@ public struct FediqoRootView: View {
             // One step back, whichever kind of step it was. The two lines used to be two
             // methods over two pieces of state; they are one walk now, and unwinding it in the
             // order the reader walked is the whole of what a press to leave does (#122).
-            case .person, .thread, .link: return leaveWalk()
+            case .person, .tag, .thread, .link: return leaveWalk()
             case .search, .shortcuts, .selection, nil: return false
             }
         case .reload:
@@ -519,6 +535,10 @@ public struct FediqoRootView: View {
             return onFocusedItem { session.askToWithdraw($0) }
         case .openAuthor:
             return openAuthor()
+        case .openTag:
+            return openTagFocused()
+        case .openQuote:
+            return onFocusedItem { openQuote(of: $0) }
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -536,13 +556,15 @@ public struct FediqoRootView: View {
             return session.editCurrentTimeline()
         case .dismiss:
             // A running reload is the first thing Escape stops (#29); the next one leaves.
+            // So is a thread's next page on its way (#177), before the thread itself closes.
             if place == .timeline, session.reload.stop() { return true }
+            if place == .timeline, session.stopReadingFurther() { return true }
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
             case .shortcuts:
                 showingShortcuts = false
                 return true
-            case .person, .thread, .link: return leaveWalk()
+            case .person, .tag, .thread, .link: return leaveWalk()
             case .search:
                 closeSearch()
                 return true
@@ -578,6 +600,7 @@ public struct FediqoRootView: View {
         // (#122). That is what lets the order between them go unasked: `outermost` is handed at
         // most one of them, and `DummyCommand.canWalk` asks about the pair rather than either.
         case .person: walk.openedPerson != nil
+        case .tag: walk.openedTag != nil
         case .thread: walk.openedThread != nil
         case .link: walk.openedLink != nil
         case .search: search.isOpen
@@ -888,20 +911,33 @@ public struct FediqoRootView: View {
         if search.isOpen {
             search.focus()
         } else {
-            search.open(from: selectedItemID, over: session.notes)
+            search.open(from: selectedItemID, over: session.searchable)
             selectedItemID = nil
         }
         return true
     }
 
-    /// The timeline back as it was, with the post that was selected before the search.
+    /// The timeline back as it was, with the post that was selected before the search. Its ask
+    /// of the sources ends with it (#176).
     private func closeSearch() {
         clearWalk()
         selectedItemID = search.close()
+        session.reload.endSearch()
+    }
+
+    /// Return in the field: the first result lit, and the pattern asked of the sources of the
+    /// timeline in front as well (#176). What this device holds is already lit; what the sources
+    /// send lands in the store and joins it.
+    private func searchSubmitted() {
+        selectedItemID = streamItems.first?.id
+        let pattern = search.pattern
+        let timeline = session.currentTimeline
+        Task { await session.reload.search(pattern, timeline: timeline, in: session) }
     }
 
     /// The field emptied: the timeline is back, so the post selected before the search is too.
     private func searchCleared() {
+        session.reload.endSearch()
         search.cleared { selection in
             clearWalk()
             selectedItemID = selection
@@ -919,6 +955,8 @@ public struct FediqoRootView: View {
         switch walk.standing {
         case .person(let person):
             return session.heldPosts(of: person)
+        case .tag(let tag):
+            return session.heldPosts(under: tag, latest: prefs.latestDate)
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems }
             return session.conversations.conversation(around: item).inOrder
@@ -946,7 +984,7 @@ public struct FediqoRootView: View {
         // A page read out of a post is somebody else's page, and its top is its own business.
         case .link:
             return false
-        case .person, .thread, nil:
+        case .person, .tag, .thread, nil:
             guard let first = currentListItems.first else { return false }
             selectedItemID = first.id
         }
@@ -980,7 +1018,8 @@ public struct FediqoRootView: View {
                 return decks.toggleCover(item.id)
             case .replies:
                 guard let thread = ForumThreadRef(item) else { return false }
-                Task { await session.posts.fetchReplies(thread) }
+                // The replies, or the next page of them where they are drawn (#177).
+                Task { await session.posts.press(thread) }
                 return true
             case .nothing:
                 return false
@@ -1028,13 +1067,16 @@ public struct FediqoRootView: View {
     /// 1. **The pane is open on this very post.** The replies are drawn in `DummyThreadPane` and
     ///    nowhere else, so from the timeline `s` would put a page on the wire for something the
     ///    reader cannot see — work with no visible result, which is the fault the whole unit is
-    ///    about. A reader reaches the replies the way they always have: `Return`, then `s`.
+    ///    about. `Return` reads the first page of replies as the pane opens (#198); `s` there
+    ///    asks it again where it did not arrive, and the next page after it.
     /// 2. **With no viewer over it.** `onActedItem` hands `s` the viewed post while the viewer is
     ///    up, and a fetch landing behind an opaque picture is the same invisible work one layer
     ///    further out. With the viewer open `s` keeps its one old meaning and nothing else.
     /// 3. **It is a Discuz! thread whose replies want asking for.** A Discourse topic and a
     ///    microblog post are both `nil` at `ForumThreadRef`, for the reason that type gives, and
-    ///    `wantsPressing` is where "asking again could change the answer" already lives.
+    ///    `wantsPressing` is where "asking again could change the answer" already lives — and,
+    ///    since #177, whether the next page of them could: a reply is no row the keys walk, so
+    ///    `s` is how a reader on the keys reads a topic past its first page.
     ///
     /// **`standing(of:)` stamps interest, and that is fine here.** It is the same read the pane's
     /// body makes on every pass; stamping more often can only make an entry look *less* stale to
@@ -1043,7 +1085,7 @@ public struct FediqoRootView: View {
         guard place == .timeline, viewedItem == nil, walk.openedThread == item.id,
               let thread = ForumThreadRef(item)
         else { return false }
-        return session.posts.standing(of: thread).wantsPressing
+        return session.posts.wantsPressing(thread)
     }
 
     /// Whether the reader may walk one step further out from where they are: `Return` and the
@@ -1080,10 +1122,10 @@ public struct FediqoRootView: View {
     private func openThread(_ id: String) -> Bool {
         guard Self.canWalk(place: place, open: openLayers) else { return false }
         selectedItemID = id
-        // **A forum's ranked blog is a page, not a conversation**: opening it reads its page in
-        // the app's own reader, as a link pressed in its words would — on a Mac in place of the
-        // timeline (#169), and Back returns to this row.
-        if let page = session.held(id)?.page { return linkReader.open(page) }
+        // A forum's ranked blog opens here too, and reads in the app (#209): its pane is a
+        // thread's, with no replies under it, and its page is what that pane offers where the
+        // blog could not be read. Leaving it gives back this row, as leaving a thread does.
+        //
         // The lamp is read back after the press has moved it, which is how a conversation comes
         // back to its own opening post and a person's page comes back to the row the lamp was
         // on: one sentence for what used to be two. See `ShellWalk`.
@@ -1111,6 +1153,8 @@ public struct FediqoRootView: View {
         // rather than an oversight: what is drawn there is what this device already holds, and a
         // reload that went and got more of the world would be 0.5.0 arriving through `r`.
         case .person: return false
+        // A tag's page asks for itself as it opens, and says so there with a way to ask again.
+        case .tag: return false
         // A page read out of a post is not a timeline; there is nothing of ours on it to ask for.
         case .link: return false
         case .thread, .selection, nil: return true
@@ -1118,8 +1162,8 @@ public struct FediqoRootView: View {
     }
 
     /// `r`: the open thread, or else the selected timeline — and only on what the reader can see,
-    /// so not under the viewer, the keys list or the timeline editor. A second press while one
-    /// runs is taken and does nothing; Esc is what stops it.
+    /// so not under the viewer, the keys list or the timeline editor. A second press while the
+    /// same one runs is taken and does nothing (`ShellReload.press`); Esc is what stops it.
     private func reload() -> Bool {
         guard Self.canReload(
             place: place,
@@ -1127,11 +1171,95 @@ public struct FediqoRootView: View {
             hasSources: !session.sources.isEmpty,
             open: openLayers
         ) else { return false }
-        if session.reload.running { return true }
         // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
         let opened = walk.openedThread.flatMap(session.held)
         session.reload.press(thread: opened, timeline: session.currentTimeline, in: session)
         return true
+    }
+
+    // MARK: - A hashtag — #124
+
+    /// A hashtag pressed in a post's words: what this device holds under it, over whatever it was
+    /// pressed on, and its sources asked for more.
+    ///
+    /// **The row the press was made on is lit first**, so the walk remembers that row and leaving
+    /// gives it back — the post the press was made from, on its row. A face does not do this,
+    /// because a face is not a post; the words a tag is written in are. Words that stand on no
+    /// row leave the lamp where it is.
+    private func openTag(_ tag: PostTag, from row: String?) -> Bool {
+        guard Self.canWalk(place: place, open: openLayers),
+              Self.opensAnew(tag, standing: walk.openedTag)
+        else { return false }
+        // Refused before anything moves, as `openThread` is: a press that opens nothing leaves
+        // the lamp where it was.
+        let lamp = row ?? selectedItemID
+        guard walk.walk(to: .tag(tag), from: lamp) else { return false }
+        selectedItemID = lamp
+        let timeline = session.currentTimeline
+        Task {
+            // Asked only while this is still the page in front: a press answered after the page
+            // was left, or another tag opened, asks for nothing nobody is reading.
+            guard walk.openedTag == tag else { return }
+            await session.reload.tag(tag, timeline: timeline, in: session)
+        }
+        return true
+    }
+
+    /// Whether pressing `tag` opens a page, where `standing` is the tag whose page is in front:
+    /// `#SWIFT` pressed on `#Swift`'s page is the page already open (#124).
+    static func opensAnew(_ tag: PostTag, standing: PostTag?) -> Bool {
+        standing.map { !HeldUnderTag.same($0, tag) } ?? true
+    }
+
+    /// `t` — a hashtag of the post the lamp is on (#124): the press a finger makes on its pill,
+    /// from the keyboard. The first the post carries that is not the page already in front, so on
+    /// a tag's page `t` goes on to the post's other tag rather than standing still. Refused where
+    /// the post is covered and its words are not drawn, as its pills are not.
+    private func openTagFocused() -> Bool {
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        return onFocusedItem { item in
+            guard let tag = Self.tagToOpen(in: item, lifted: decks.isLifted(item.id), standing: walk.openedTag)
+            else { return false }
+            return openTag(tag, from: item.id)
+        }
+    }
+
+    /// Which of a post's tags `t` opens, given whether its cover is lifted and the tag in front.
+    static func tagToOpen(in item: DummyItem, lifted: Bool, standing: PostTag?) -> PostTag? {
+        guard !item.covered || lifted else { return nil }
+        return PostTag.found(in: item.body).first { tag in
+            standing.map { !HeldUnderTag.same($0, tag) } ?? true
+        }
+    }
+
+    // MARK: - A quoted post — #214
+
+    /// The quote's press and `o`, answered by the walk: set once, before anything can be pressed.
+    private func placeQuotes() {
+        quotes.opening = { item in openQuote(of: item) }
+        quotes.target = { item in session.quotedRow(of: item) }
+    }
+
+    /// The post `item` quotes, opened as a post of its own over whatever it was quoted on.
+    ///
+    /// **The quoting post is the lamp the step remembers**, so leaving the quoted post gives back
+    /// the post that quoted it — on the timeline, in its thread, or wherever it was pressed. Refused
+    /// before anything moves, as `openThread` is: a quote that may not be shown, or one this device
+    /// holds nothing of, opens nothing and leaves the lamp where it was.
+    private func openQuote(of item: DummyItem) -> Bool {
+        guard Self.canWalk(place: place, open: openLayers),
+              let lamp = Self.walkToQuote(from: item, quoted: session.quotedRow(of: item), on: &walk)
+        else { return false }
+        selectedItemID = lamp
+        return true
+    }
+
+    /// The step onto the quoted post, remembering the quoting post as the lamp to give back: the
+    /// row the lamp goes to now, or nothing where there is no step to take. Static, so a test can
+    /// walk it without a window.
+    static func walkToQuote(from item: DummyItem, quoted: String?, on walk: inout ShellWalk) -> String? {
+        guard let quoted, walk.walk(to: .thread(quoted), from: item.id) else { return nil }
+        return quoted
     }
 
     // MARK: - Whoever wrote it — #99
@@ -1188,6 +1316,8 @@ public struct FediqoRootView: View {
         // The page read out of a post goes with its step, and the page under it — never torn
         // down — is simply in front again (#169).
         if case .link = left.step { linkReader.close() }
+        // A tag's ask goes with its page (#124).
+        if case .tag = left.step { session.reload.endTag() }
         selectedItemID = left.lamp
         return true
     }
@@ -1199,11 +1329,53 @@ public struct FediqoRootView: View {
         _ = leaveWalk()
     }
 
+    /// A timeline switched: the walk ends, unless a tag's page is in front — that stays, and asks
+    /// the sources of the timeline now in front (#197). `tagSwitched` asks nothing of a timeline
+    /// already switched away from by the time it runs.
+    ///
+    /// **The places are this handler's, whole, where the page stays**, and `TimelinePane` leaves
+    /// them alone while it stands on a tag: two handlers of one change, each writing the lamp,
+    /// would answer by whichever ran last. The lamp stays on the page's row where the page still
+    /// shows it under the new timeline's rules, and goes out where it does not.
+    private func timelineSwitched(from left: TimelineQuery?, to arrived: TimelineQuery?) {
+        let hadLink = walk.openedLink != nil
+        guard let tag = Self.timelineSwitched(
+            on: &walk, places: &session.timelinePlaces, from: left, to: arrived,
+            shown: session.timelineItems(latest: prefs.latestDate).map(\.id),
+            results: session.searched(search, latest: prefs.latestDate)?.map(\.id)
+        ) else { return clearWalk() }
+        if hadLink { linkReader.close() }
+        if let lamp = selectedItemID,
+           !session.heldPosts(under: tag, latest: prefs.latestDate).contains(where: { $0.id == lamp }) {
+            selectedItemID = nil
+        }
+        let timeline = session.currentTimeline
+        Task { await session.reload.tagSwitched(to: timeline, in: session) }
+    }
+
+    /// `timelineSwitched`'s walk and places, given what it reads, so a test takes the step the
+    /// root takes. With a search open the row under the page is a result, and the timeline's place
+    /// is the search's parked post, which `TimelinePane` files (#145): the row is kept where the
+    /// new timeline's `results` still hold it, and goes out where they do not. `results` is
+    /// nothing with no search open.
+    static func timelineSwitched(
+        on walk: inout ShellWalk, places: inout TimelinePlaces,
+        from left: TimelineQuery?, to arrived: TimelineQuery?, shown: [String], results: [String]?
+    ) -> PostTag? {
+        walk.timelineSwitched { lamp in
+            guard let results else {
+                return places.switched(from: left, to: arrived, standingOn: lamp, among: shown)
+            }
+            return lamp.flatMap { results.contains($0) ? $0 : nil }
+        }
+    }
+
     /// Back to the stream in one go, for a list that has been replaced. A page read out of a post
     /// that was one of the steps goes with them: nothing is left for it to be drawn in place of,
     /// and a reading left open would be presented as a sheet instead.
     private func clearWalk() {
         if walk.openedLink != nil { linkReader.close() }
+        session.reload.endTag()
         walk.clear()
     }
 
@@ -1434,7 +1606,8 @@ public struct FediqoRootView: View {
                         search: search,
                         timeline: session.name(of: session.currentTimeline),
                         found: search.isIndexed ? searchItems?.count : nil,
-                        onSubmit: { selectedItemID = streamItems.first?.id },
+                        reach: session.reload.reach?.sentence,
+                        onSubmit: searchSubmitted,
                         onCleared: searchCleared,
                         onClose: closeSearch
                     )

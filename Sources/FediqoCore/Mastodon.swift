@@ -9,13 +9,46 @@ public struct MastodonClient: Sendable {
         self.host = host
     }
 
-    public func publicTimeline(source: Source) async throws -> [Note] {
+    /// The public timeline's newest page, or where `olderThan` names a post, the page of posts
+    /// older than it — the next stretch of a listing read toward its end (#87).
+    public func publicTimeline(source: Source, olderThan maxID: String? = nil) async throws -> [Note] {
         try await statuses(
             path: "/api/v1/timelines/public",
-            limit: 40,
+            limit: MastodonReadOn.limit,
+            olderThan: maxID,
             source: source,
             category: .public
         )
+    }
+
+    /// The public timeline read on from `anchor`, the newest post held of it (#201): stretch
+    /// after stretch toward the newest, or the newest stretch alone where nothing is held.
+    /// `held` is the posts held of it, which a read with no anchor looks for (`MastodonReadOn`).
+    public func publicTimeline(
+        source: Source, readingOnFrom anchor: String?, holding held: Set<NoteKey> = []
+    ) async throws -> ReadOn {
+        try await MastodonReadOn.read(from: anchor, holding: held) { minID in
+            try await listed(
+                path: "/api/v1/timelines/public", limit: MastodonReadOn.limit,
+                query: try MastodonPage.newer(than: minID), source: source, category: .public
+            )
+        } older: { maxID in
+            try await listed(
+                path: "/api/v1/timelines/public", limit: MastodonReadOn.limit,
+                query: try MastodonPage.older(than: maxID), source: source, category: .public
+            )
+        }
+    }
+
+    /// The public timeline read down from a place posts may be missing (#204), toward what is held
+    /// below it (`MastodonReadOn.readDown`).
+    public func publicTimeline(source: Source, readingDownFrom place: MissingPlace) async throws -> ReadDown {
+        try await MastodonReadOn.readDown(from: place) { maxID in
+            try await listed(
+                path: "/api/v1/timelines/public", limit: MastodonReadOn.limit,
+                query: try MastodonPage.older(than: maxID), source: source, category: .public
+            )
+        }
     }
 
     public func trending(source: Source) async throws -> [Note] {
@@ -136,13 +169,27 @@ public struct MastodonClient: Sendable {
     private func statuses(
         path: String,
         limit: Int,
+        olderThan maxID: String? = nil,
         source: Source,
         category: Category
     ) async throws -> [Note] {
+        try await listed(
+            path: path, limit: limit, query: try MastodonPage.older(than: maxID), source: source, category: category
+        ).map(\.note)
+    }
+
+    /// One page, each post with the id the timeline lists it under — a boost's own.
+    private func listed(
+        path: String,
+        limit: Int,
+        query: [URLQueryItem],
+        source: Source,
+        category: Category
+    ) async throws -> [Listed] {
         guard let url = Host.httpsURL(
             host: host,
             path: path,
-            query: [URLQueryItem(name: "limit", value: String(limit))]
+            query: [URLQueryItem(name: "limit", value: String(limit))] + query
         ) else {
             throw MastodonRequestError.invalidURL
         }
@@ -151,7 +198,7 @@ public struct MastodonClient: Sendable {
             throw MastodonRequestError.http(response.statusCode)
         }
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
-            $0.asNote(source: source, category: category)
+            $0.listed(source: source, category: category)
         }
     }
 }
@@ -312,6 +359,48 @@ struct StatusDTO: Decodable, Sendable {
     /// The pictures the words are partly written in. Absent on the odd server, which is a post
     /// written in letters alone rather than a status worth failing.
     let emojis: [Emoji]?
+    /// The post this one quotes (#214), on a server that has quotes (Mastodon 4.4 on). Absent on
+    /// one that has none, and `null` on a status that quotes nothing: both are no quote.
+    ///
+    /// **Read leniently** (`Lenient`): a `quote` of a shape this build cannot read — a fork's own
+    /// idea, a string — is no quote, and never costs the reader the status or the page it is on.
+    let quote: Lenient<QuoteDTO>?
+
+    /// A value read where it can be and nothing where it cannot, rather than a failed decode.
+    struct Lenient<Wrapped: Decodable & Sendable>: Decodable, Sendable {
+        let value: Wrapped?
+
+        init(from decoder: any Decoder) throws {
+            value = try? Wrapped(from: decoder)
+        }
+    }
+
+    /// The quote this status states, or nothing — including a `quote` that names no state, which
+    /// is no quote this app can say anything about (and whose `RE:` line is then kept).
+    func quote(source: Source) -> Quote? {
+        quote?.value?.asQuote(source: source)
+    }
+
+    /// Mastodon's `Quote`, or its `ShallowQuote` a level down: a state, and the quoted status in
+    /// full or by its id alone.
+    struct QuoteDTO: Decodable, Sendable {
+        let state: String?
+        let quotedStatus: Box<StatusDTO>?
+        let quotedStatusId: String?
+
+        /// What a note keeps of it. The quoted status is read the way any status is, through
+        /// the same source, and cut to what a row draws of it (`QuotedPost`). Nothing where no
+        /// state was said.
+        func asQuote(source: Source) -> Quote? {
+            guard state != nil else { return nil }
+            let quoted = quotedStatus?.value
+            return Quote(
+                state: Quote.State(wire: state),
+                post: quoted.map { QuotedPost($0.asNote(source: source, categories: [])) },
+                statusID: quoted?.id ?? quotedStatusId
+            )
+        }
+    }
 
     struct Account: Decodable, Sendable {
         let displayName: String
@@ -402,12 +491,21 @@ struct StatusDTO: Decodable, Sendable {
         }
     }
 
+    /// This status as a timeline listed it (#201): the post, carrying the id the listing gave it
+    /// — a boost's own — as that timeline's.
+    func listed(source: Source, category: Category) -> Listed {
+        var note = asNote(source: source, category: category)
+        note.listed = [category: id]
+        return (id, note)
+    }
+
     func asNote(source: Source, category: Category) -> Note {
         asNote(source: source, categories: [category])
     }
 
     func asNote(source: Source, categories: Set<Category>) -> Note {
         let subject = reblog?.value ?? self
+        let quote = subject.quote(source: source)
         // Named once, so the name the row draws and the pictures that name is written in
         // cannot come to disagree about whether there is a booster at all.
         let booster = reblog == nil ? nil : account
@@ -422,7 +520,11 @@ struct StatusDTO: Decodable, Sendable {
             source: source,
             author: subject.account.name,
             handle: Self.handle(subject.account.acct, host: host),
-            body: HTMLText.plain(subject.content),
+            // A quoting post's `RE:` line is the quote spelled as an address for readers that draw
+            // none (#214); this one draws the quote. A post with no quote keeps every word.
+            body: HTMLText.plain(
+                quote == nil ? subject.content : HTMLText.withoutQuoteLine(subject.content)
+            ),
             postedAt: subject.createdAt,
             categories: categories,
             reply: Self.reply(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),
@@ -456,7 +558,9 @@ struct StatusDTO: Decodable, Sendable {
                 favourites: subject.favouritesCount
             ),
             // The post's own id on this server, the boosted one's on a boost: what the row is.
-            statusID: subject.id
+            statusID: subject.id,
+            // The boosted post's quote on a boost, as every other fact here (#214).
+            quote: quote
         )
     }
 
@@ -507,5 +611,16 @@ final class Box<Wrapped: Decodable & Sendable>: Decodable, Sendable {
     let value: Wrapped
     init(from decoder: any Decoder) throws {
         value = try Wrapped(from: decoder)
+    }
+}
+
+/// The one way a Mastodon read asks for the stretch before a post (#87): `max_id`, checked as a
+/// list id is, since the id came back out of the store. **One that is not an id asks nothing**:
+/// dropping it would ask for the newest page instead, which is not the page anybody asked for.
+enum MastodonPage {
+    static func older(than maxID: String?) throws -> [URLQueryItem] {
+        guard let maxID else { return [] }
+        guard ListSubscription.isPathSegment(maxID) else { throw MastodonRequestError.invalidURL }
+        return [URLQueryItem(name: "max_id", value: maxID)]
     }
 }

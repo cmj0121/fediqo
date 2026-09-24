@@ -6,8 +6,9 @@ import Observation
 ///
 /// **A layer, not a query.** While it is open its results stand in for the stream — `j`, `k` and
 /// Return walk them — and leaving it puts back the timeline and the post selected before it
-/// opened. So does emptying the field. It reads the notes the session holds and asks no source
-/// anything.
+/// opened. So does emptying the field. It reads the notes the session holds, those held aside
+/// among them; Return also asks the sources of the timeline in front that can be searched
+/// (`ShellReload.search`), and what they send back is held aside and found here (#176).
 ///
 /// **Asked of the timeline in front** (#145). What it finds is what that timeline lets through —
 /// its sources, its categories, its rules, and the latest date — matched against the pattern
@@ -45,8 +46,8 @@ final class ShellSearch {
         let pattern: String
         /// The timeline searched: switching with the search open searches the new one.
         let timeline: TimelineDefinition
-        /// `ShellSession.notesRevision`: bumped whenever the notes are replaced, so comparing it
-        /// costs nothing however many notes there are.
+        /// `ShellSession.heldRevision`: bumped whenever the notes or what is held aside are
+        /// replaced, so comparing it costs nothing however many notes there are.
         let revision: Int
         let sources: [Source]
         let latest: LatestDate?
@@ -234,7 +235,7 @@ final class ShellSearch {
     func items(
         in timeline: TimelineDefinition,
         text: @autoclosure () -> TextIndex,
-        from notes: [Note],
+        from notes: @autoclosure () -> [Note],
         revision: Int,
         sources: [Source],
         latest: LatestDate?
@@ -245,7 +246,7 @@ final class ShellSearch {
         guard isIndexed else { return [] }
         let key = Key(pattern: pattern, timeline: timeline, revision: revision, sources: sources, latest: latest)
         if let cached, cached.key == key { return cached.items }
-        let shown = CompiledTimeline(timeline, sources: []).shown(notes, timeline.readsText ? text() : TextIndex([]))
+        let shown = CompiledTimeline(timeline, sources: []).shown(notes(), timeline.readsText ? text() : TextIndex([]))
         let found = search.found(shown, index)
         // One post is one row here as it is on the timeline (#114): a search that drew a merged
         // row twice would be the complaint #10 left for later, arriving through the search field.

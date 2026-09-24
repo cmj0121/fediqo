@@ -124,7 +124,7 @@ enum ForumReading: Equatable, Sendable {
 }
 
 /// One thread's opening post, fetched when its row is scrolled to, and cached — **D30** — and
-/// the rest of the same topic on request — **D31**.
+/// the rest of the same topic as its thread opens — **D31**, asked at once since #198.
 ///
 /// ## Why this is a cache and not a fetch
 ///
@@ -197,7 +197,8 @@ final class ForumPosts {
     enum Part: Hashable, Sendable, CaseIterable {
         /// The first post of the topic — D30, fetched when the row is scrolled to.
         case opening
-        /// Everything else the first page of the topic carried — D31, fetched on request.
+        /// Everything else the first page of the topic carried — D31, fetched as it opens — and
+        /// every later page read since, as the reader neared the foot (#177). See `Paging`.
         case replies
     }
 
@@ -220,7 +221,7 @@ final class ForumPosts {
     /// a fourth that is about this device rather than about the forum. Every Core case is mapped
     /// in `absence(for:)` **over a `switch` with no `default:`**, so a ninth breaks the build
     /// there rather than arriving on screen as the wrong sentence.
-    enum Absence: Error, Equatable, Sendable {
+    enum Absence: Error, ShellThreadAbsence {
         /// The forum answered and said no: a filter, a notice page, a challenge, a status that
         /// means refused. Signing in is what would change this answer, not waiting.
         case refused
@@ -243,9 +244,23 @@ final class ForumPosts {
         /// posts and a screen wants at most a dozen, so if a reader ever sees it, something has
         /// asked for far more at once than a screen can show.
         case crowded
+        /// The forum said **why** (#213): a sign-in, a password, its author's privacy, gone, blogs
+        /// switched off, or standing, points or a price it asked for. Each is said in its own way
+        /// and offers only what could help — `ForumRefusalView`.
+        case refusal(DiscuzRefusal)
 
         /// Whether asking again could ever change the answer by itself.
         var asksAgain: Bool { self == .unreachable }
+
+        /// Whether a sign-in landing on the forum could change this answer — what is forgotten
+        /// and asked again when one does (#153).
+        var signInMayChange: Bool {
+            switch self {
+            case .refused, .unreadable: true
+            case .refusal(let refusal): refusal.signInMayChange
+            case .unreachable, .crowded: false
+            }
+        }
     }
 
     /// How much post text is held, in bytes.
@@ -566,6 +581,304 @@ final class ForumPosts {
         await work(for: key).value
     }
 
+    // MARK: - The topic read to its end — #177
+
+    /// How far one topic's replies have been read, and what the next ask is.
+    struct Paging: Equatable, Sendable {
+        /// The furthest page that has landed.
+        var last: Int
+        /// The page the next ask is for: the one after `last` where it pointed at one, and `last`
+        /// itself again where it did not — a last page is where a new reply turns up.
+        var next: Int
+        var further: ShellThreadFurther<Absence>
+    }
+
+    /// Each open topic's paging, keyed as its replies are. Observed: the foot of the thread draws it.
+    private(set) var paging: [Key: Paging] = [:]
+
+    /// A later page on the wire, so a foot drawn twice waits on one ask rather than making two.
+    @ObservationIgnored private var pageWork: [Key: Task<Void, Never>] = [:]
+
+    /// Pages whose forum was cleared while they were on the wire — `cleared`'s rule, kept apart
+    /// from it because a page and the first read can be in the air for one topic at once.
+    @ObservationIgnored private var clearedPages: Set<Key> = []
+
+    /// Where what a page brought is landed — **the store, held aside and saved** — and what it
+    /// hands back is every reply of that topic the store now holds, in reading order. Set by the
+    /// session; nothing where there is none, which is a test's, and then this run's own copy is
+    /// the whole of it.
+    @ObservationIgnored var landing: (@MainActor (_ host: String, _ tid: Int, [DiscuzPost]) async -> [DiscuzPost])?
+
+    /// What the store holds of a topic's replies, read back — so a topic read on another day, or
+    /// with the network off, opens with what was read. Set by the session, as `landing` is.
+    @ObservationIgnored var reading: (@MainActor (_ host: String, _ tid: Int) async -> [DiscuzPost])?
+
+    /// How far `ref`'s replies have been read, where they have been read at all.
+    func further(of ref: ForumThreadRef) -> ShellThreadFurther<Absence>? {
+        paging[Key(ref, .replies)]?.further
+    }
+
+    /// Whether `s` on this open topic could do anything: its replies asked for, or the next page
+    /// of them. **The one answer the key and the pane's two ways in read.**
+    func wantsPressing(_ ref: ForumThreadRef) -> Bool {
+        standing(of: ref).wantsPressing || further(of: ref)?.wantsAsking == true
+    }
+
+    /// `s`, or a press on either way in: the replies where nobody has asked for them, and the
+    /// next page of them where somebody has.
+    func press(_ ref: ForumThreadRef) async {
+        if standing(of: ref).wantsPressing {
+            await fetchReplies(ref)
+        } else {
+            heldBack.remove(Key(ref, .replies))
+            await more(ref)
+        }
+    }
+
+    /// Topics whose next page the reader stopped (Esc, or closing the thread): **the foot does not
+    /// ask for them by itself** until it is pressed, `s` is, or it comes into view again. Without
+    /// this a stop put the foot back at "more", the foot in view asked again at once, and the next
+    /// Esc was spent stopping that — so a reader on the keys could never leave the thread.
+    private(set) var heldBack: Set<Key> = []
+
+    /// Whether the foot of `ref` is waiting for the reader rather than reading on by itself.
+    func isHeldBack(_ ref: ForumThreadRef) -> Bool {
+        heldBack.contains(Key(ref, .replies))
+    }
+
+    /// The foot of `ref` in view — **the automatic ask**. `appeared` is the foot coming into view,
+    /// which is the reader scrolling to it again and lets go of a stop; a page landing under a foot
+    /// already in view does not.
+    func reached(_ ref: ForumThreadRef, appeared: Bool) async {
+        let key = Key(ref, .replies)
+        if appeared { heldBack.remove(key) }
+        guard !heldBack.contains(key) else { return }
+        await more(ref)
+    }
+
+    /// The replies this device kept of `ref`, drawn with no request — **a topic opened again, or
+    /// opened with the network off**. Only where this run holds none of its own yet; the foot then
+    /// asks the last page read again, which is where a reply added since would be.
+    func recall(_ ref: ForumThreadRef) async {
+        let key = Key(ref, .replies)
+        guard entries[key] == nil, inFlight[key] == nil, let reading else { return }
+        let kept = await reading(key.host, key.tid)
+        guard entries[key] == nil, inFlight[key] == nil, !kept.isEmpty else { return }
+        keep(kept, for: key, startedAt: interest[key] ?? 0)
+        let last = kept.map(\.page).max() ?? 1
+        paging[key] = Paging(last: last, next: last, further: .more)
+    }
+
+    /// The topic opened (#198): the replies this device kept drawn at once, and — where it kept
+    /// none — the first page of them asked for with no press. **D31's press is gone for the first
+    /// page**; see `DummyThreadPane.rest(of:)` for why.
+    func open(_ ref: ForumThreadRef) async {
+        let key = Key(ref, .replies)
+        opened.insert(key)
+        opening.insert(key)
+        defer { opening.remove(key) }
+        await recall(ref)
+        if standing(of: ref).wantsPressing { await fetchReplies(ref) }
+    }
+
+    /// Topics whose pane is opening them now, and topics a pane has opened this run — so an
+    /// unasked topic reads as on its way while its opening is, or before it has begun, and offers
+    /// the way in once nothing is asking: a Clear, or the network coming back, can put a topic
+    /// already opened back to unasked (#198).
+    private(set) var opening: Set<Key> = []
+    @ObservationIgnored private var opened: Set<Key> = []
+
+    /// Whether `ref`'s unasked replies are being asked for by its opening, rather than waiting
+    /// for the reader.
+    func isOpening(_ ref: ForumThreadRef) -> Bool {
+        let key = Key(ref, .replies)
+        return opening.contains(key) || !opened.contains(key)
+    }
+
+    /// A renewal's page on the wire, per topic — **apart from `pageWork`**, so Esc, which stops
+    /// what the reader's scrolling asked for, is not spent on what the wait asked for and does not
+    /// hold the foot back. Only the topic being left ends it (`stopPaging(of:)`).
+    @ObservationIgnored private var renewWork: [Key: Task<Void, Never>] = [:]
+
+    /// The open topic asked again on this device's wait (#198): **the last page read**, which is
+    /// where a reply added since turns up, and where a reply already drawn shows its new words.
+    /// What it brings lands in the store first and is laid in as a page for more is — nothing
+    /// drawn moves — and a page that does not arrive says so at the foot, above which every reply
+    /// already drawn stays.
+    ///
+    /// A topic whose first read did not arrive is asked for it again, where asking could help. A
+    /// page already on the wire for it is let be: the next wait asks again. Cancelled — the topic
+    /// left — nothing it brings lands.
+    func renew(_ ref: ForumThreadRef) async {
+        let key = Key(ref, .replies)
+        guard pageWork[key] == nil, renewWork[key] == nil, inFlight[key] == nil else { return }
+        // Never read, or read and let go of — a Clear, the network coming back: its first page,
+        // unless the forum said something asking again cannot change.
+        guard entries[key] != nil else {
+            guard missing[key]?.asksAgain ?? true else { return }
+            let first = work(for: key)
+            await withTaskCancellationHandler { await first.value } onCancel: { first.cancel() }
+            return
+        }
+        // A topic the forum said had no replies is one page with nothing on it.
+        let before = paging[key] ?? Paging(last: 1, next: 1, further: .end)
+        // Its foot says it is on its way — under replies, every wait; under nobody, only where the
+        // last ask did not arrive and this is it asked again, as a lone post's is. A topic nobody
+        // answered does not say "on its way" once a minute.
+        let retry = if case .failed = before.further { true } else { false }
+        if entries[key]?.posts.isEmpty == false || retry {
+            paging[key] = Paging(last: before.last, next: before.next, further: .coming)
+        }
+        let task = Task { @MainActor in await self.page(before.last, of: key, was: before) }
+        renewWork[key] = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        if renewWork[key] == task { renewWork[key] = nil }
+    }
+
+    /// The open topic drawn again from what this device holds, where another window's renewal
+    /// has just read it (#198): each reply drawn takes the words kept, in its place, and a reply
+    /// only the store has follows them. Nothing asked of the forum.
+    func redraw(_ ref: ForumThreadRef) async {
+        let key = Key(ref, .replies)
+        guard let held = entries[key], let reading else { return }
+        let kept = await reading(key.host, key.tid)
+        guard entries[key] != nil, !kept.isEmpty else { return }
+        let drawn = Self.merged(held: held.posts, read: kept, kept: [])
+        guard drawn != held.posts else { return }
+        keep(drawn, for: key, startedAt: interest[key] ?? 0)
+        if paging[key] == nil { paging[key] = Paging(last: 1, next: 1, further: .end) }
+    }
+
+    /// The next page of `ref`'s replies, asked of the forum — **the reader nearing the foot of the
+    /// topic**, or pressing for it. Nothing where the topic is not being read further: not asked
+    /// yet, at its end, or failed in a way asking again cannot change.
+    ///
+    /// What the page brings lands in the store first and the topic is drawn again from what it
+    /// holds, below what is already drawn — so the reply being read does not move. A page that
+    /// does not arrive leaves every reply already drawn where it was and says so at the foot.
+    func more(_ ref: ForumThreadRef) async {
+        let key = Key(ref, .replies)
+        if let running = pageWork[key] {
+            await running.value
+            return
+        }
+        // A renewal is reading this topic: the forum is not asked twice at once, and the foot
+        // asks again once it lands.
+        guard renewWork[key] == nil else { return }
+        guard let before = paging[key], before.further.wantsAsking else { return }
+        paging[key]?.further = .coming
+        let task = Task { @MainActor in await self.page(before.next, of: key, was: before) }
+        pageWork[key] = task
+        await task.value
+        // Only this ask's own record: a stop and a new ask may have replaced it meanwhile.
+        if pageWork[key] == task { pageWork[key] = nil }
+    }
+
+    /// Every page on the wire let go of — the thread closed, or Esc. What they had not landed
+    /// does not land, and each foot is put back where it was, to be asked again when reached.
+    @discardableResult
+    func stopPaging() -> Bool {
+        guard !pageWork.isEmpty else { return false }
+        for task in pageWork.values { task.cancel() }
+        heldBack.formUnion(pageWork.keys)
+        pageWork = [:]
+        return true
+    }
+
+    /// `stopPaging()` for one topic only — its pane closing, which must not stop the pane opened
+    /// in its place.
+    func stopPaging(of ref: ForumThreadRef) {
+        let key = Key(ref, .replies)
+        renewWork.removeValue(forKey: key)?.cancel()
+        guard let task = pageWork.removeValue(forKey: key) else { return }
+        task.cancel()
+        heldBack.insert(key)
+    }
+
+    private func page(_ number: Int, of key: Key, was before: Paging) async {
+        defer { clearedPages.remove(key) }
+        // The rules `work` states for the first page, in its order: a forum still signing in is
+        // waited for, the reader is chosen after it, and the gate is taken last.
+        if let forums { await forums.settled(host: key.host) }
+        let client = client(for: key.host, part: .replies, within: nil)
+        await enter()
+        let answer: Result<DiscuzReplies, Absence>
+        do {
+            answer = .success(try await client.replies(tid: key.tid, page: number))
+        } catch {
+            answer = .failure(Self.absence(for: error))
+        }
+        leave()
+        guard !clearedPages.contains(key) else { return }
+        // Stopped: nothing it brought lands, and the foot is as it was before it asked.
+        guard !Task.isCancelled else {
+            paging[key] = before
+            return
+        }
+        switch answer {
+        case .success(let page):
+            let landed = await landed(page.posts, for: key)
+            guard !clearedPages.contains(key) else { return }
+            keep(landed, for: key, startedAt: interest[key] ?? 0)
+            // **The page's own word, and only that**: it points at the next one, or this is the
+            // last. A forum answers a page past its last with its last, which points nowhere.
+            paging[key] = Paging(
+                last: number,
+                next: page.continues ? number + 1 : number,
+                further: page.continues ? .more : .end
+            )
+        case .failure(let absence):
+            // The page that was to come next stays the one asked for next: a renewal's page is the
+            // last read again, and failing it does not move the foot back onto it.
+            paging[key] = Paging(last: before.last, next: before.next, further: .failed(absence))
+        }
+    }
+
+    /// The replies' first page has just landed: the topic is read further from here. **A reload of
+    /// the first page does not forget how far the reader got** — they are asked on from the last
+    /// page they read rather than sent back to the second.
+    private func paged(_ key: Key, first continues: Bool, landed: Bool) {
+        guard landed else {
+            paging[key] = nil
+            return
+        }
+        if let known = paging[key], known.last > 1 {
+            paging[key] = Paging(last: known.last, next: known.last, further: .more)
+        } else {
+            paging[key] = Paging(
+                last: 1, next: continues ? 2 : 1, further: continues ? .more : .end
+            )
+        }
+    }
+
+    /// What one page brought, landed, and the topic as it now stands: this run's replies with the
+    /// page's laid in where they were, then whatever else the store holds of it.
+    private func landed(_ read: [DiscuzPost], for key: Key) async -> [DiscuzPost] {
+        let kept = await landing?(key.host, key.tid, read) ?? []
+        return Self.merged(held: entries[key]?.posts ?? [], read: read, kept: kept)
+    }
+
+    /// One topic from three answers. **Nothing already drawn moves**: a reply held keeps its place
+    /// and takes the words just read, a reply new to this run follows everything held, and what
+    /// only the store had comes last. Keyed by the post's number, `DiscuzPost`'s key.
+    static func merged(held: [DiscuzPost], read: [DiscuzPost], kept: [DiscuzPost]) -> [DiscuzPost] {
+        var order = held
+        var at = Dictionary(held.enumerated().map { ($1.pid, $0) }, uniquingKeysWith: { first, _ in first })
+        for post in read {
+            if let index = at[post.pid] {
+                order[index] = post
+            } else {
+                at[post.pid] = order.count
+                order.append(post)
+            }
+        }
+        for post in kept where at[post.pid] == nil {
+            at[post.pid] = order.count
+            order.append(post)
+        }
+        return order
+    }
+
     // MARK: - The wire
 
     /// The fetch of one part, started unless one is running. `limit` bounds each request of it.
@@ -591,13 +904,18 @@ final class ForumPosts {
             let client = self.client(for: key.host, part: part, within: limit)
             await self.enter()
             let answer: Result<[DiscuzPost], Absence>
+            // Whether the replies' first page points at a second (#177).
+            var continues = false
             do {
                 // **No `default:`.** A part falling through would fetch the wrong half of a
                 // thread and draw it in the right place, which is a wrong answer the compiler
                 // would not mention.
                 switch part {
                 case .opening: answer = .success([try await client.post(tid: tid)])
-                case .replies: answer = .success(try await client.replies(tid: tid))
+                case .replies:
+                    let first = try await client.replies(tid: tid, page: 1)
+                    continues = first.continues
+                    answer = .success(first.posts)
                 }
             } catch {
                 answer = .failure(Self.absence(for: error))
@@ -641,6 +959,15 @@ final class ForumPosts {
             }
 
             switch answer {
+            case .success(let posts) where part == .replies:
+                // **The store first, then the thread** (#177): what the page brought is held
+                // aside and saved, and what is drawn is what the store now holds of this topic —
+                // so a topic read once is there with the network off. Re-read after the landing's
+                // suspension, for the reason the guard above gives.
+                let landed = await self.landed(posts, for: key)
+                guard !self.cleared.contains(key) else { return }
+                self.keep(landed, for: key, startedAt: self.interest[key] ?? 0)
+                self.paged(key, first: continues, landed: !landed.isEmpty)
             case .success(let posts):
                 self.keep(
                     posts,
@@ -695,6 +1022,8 @@ final class ForumPosts {
         switch discuz {
         case .challenged, .restricted, .refused, .http, .invalidURL:
             return .refused
+        case .refusal(let refusal):
+            return .refusal(refusal)
         case .undecodable, .noThreads, .noBoards, .noPosts:
             return .unreadable
         }
@@ -885,6 +1214,14 @@ final class ForumPosts {
         for key in Array(rows.keys) where key.host == host {
             rows.removeValue(forKey: key)
         }
+        // A page on the wire lands nothing afterwards, and how far a topic was read goes with it.
+        for key in Array(pageWork.keys) + Array(renewWork.keys) where key.host == host {
+            clearedPages.insert(key)
+        }
+        for key in Array(paging.keys) where key.host == host {
+            paging.removeValue(forKey: key)
+        }
+        heldBack = heldBack.filter { $0.host != host }
         generation += 1
     }
 
@@ -906,8 +1243,7 @@ final class ForumPosts {
             dropEntry(key)
             dropped = true
         }
-        for (key, absence) in missing where key.host == host
-            && (absence == .refused || absence == .unreadable) {
+        for (key, absence) in missing where key.host == host && absence.signInMayChange {
             missing.removeValue(forKey: key)
             dropped = true
         }
@@ -919,7 +1255,7 @@ final class ForumPosts {
     private static func isGuestShaped(_ answer: Result<[DiscuzPost], Absence>) -> Bool {
         switch answer {
         case .success(let posts): posts.contains(where: \.isWithheld)
-        case .failure(let absence): absence == .refused || absence == .unreadable
+        case .failure(let absence): absence.signInMayChange
         }
     }
 
@@ -1207,8 +1543,11 @@ struct ForumPostBand: View {
                 // here would be this app talking over an author who simply posted a photograph,
                 // and it is told apart from the waiting state by the plates above.
                 Color.clear.frame(height: 0)
+            case .absent where Self.saidBelow(reading, inFull: inFull):
+                // The opened thread says it once, under this post, with its help (#213).
+                Color.clear.frame(height: 0)
             case .absent(let absence):
-                said("exclamationmark.triangle", Self.sentence(for: absence))
+                said(ForumRefusalView.glyph(for: absence), Self.sentence(for: absence))
             case .unread:
                 said("hand.raised", L10n.t("item.forum.unread"))
             }
@@ -1216,6 +1555,7 @@ struct ForumPostBand: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(Self.spoken(reading)))
+        .accessibilityHidden(Self.saidBelow(reading, inFull: inFull))
         // **Here rather than inside the words**, because `.ignore` above throws away everything
         // the children offered, the actions `EmojiText` hangs on its own element included. See
         // `SpokenLinks`. Nothing to offer in the four states that have no words — and nothing
@@ -1279,6 +1619,13 @@ struct ForumPostBand: View {
         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 
+    /// Whether the band keeps quiet because the opened thread's refusal view says it (#213) — a
+    /// refusal, in the opened thread and not in a list, so it is said and spoken once.
+    static func saidBelow(_ reading: ForumReading, inFull: Bool) -> Bool {
+        guard inFull, case .absent(.refusal) = reading else { return false }
+        return true
+    }
+
     /// Which sentence one kind of nothing gets. **No `default:`** — a fifth `Absence` has to be
     /// given words rather than quietly inheriting somebody else's.
     ///
@@ -1290,6 +1637,7 @@ struct ForumPostBand: View {
         case .unreadable: L10n.t("item.forum.unreadable")
         case .unreachable: L10n.t("item.forum.unreachable")
         case .crowded: L10n.t("item.forum.crowded")
+        case .refusal(let refusal): ForumRefusalView.sentence(for: refusal)
         }
     }
 

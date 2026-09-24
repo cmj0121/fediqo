@@ -92,6 +92,8 @@
 "shortcut.answer" = "在討論串裡回應你所在的這則貼文";
 "shortcut.withdraw" = "收回你所在的這則貼文（限你自己寫的）";
 "shortcut.person" = "打開你所在這則貼文的作者";
+"shortcut.tag" = "打開這篇的主題標籤：這台裝置上在它底下的貼文";
+"shortcut.quote" = "打開這則貼文引用的貼文";
 "shortcut.reload" = "重新載入這條時間軸，或打開的討論串";
 "shortcut.dismiss" = "關掉眼前的東西，或取消選取";
 "shortcut.search" = "搜尋這台裝置上的貼文";
@@ -121,6 +123,9 @@
 "timeline.reload.failed" = "無法重新載入 %@。";
 "timeline.reload.unspoken" = "%1$@ 現在自稱是 %2$@，Fediqo 讀不了。它先前帶來的東西仍然都在。";
 "timeline.reload.stopped" = "已停止重新載入。";
+"timeline.gap.more" = "這裡還有來自 %@ 的貼文，捲到或按下這裡就會讀取。";
+"timeline.gap.missing" = "這裡可能缺少來自 %@ 的貼文，捲到或按下這裡就會往下讀到已有的貼文。";
+"timeline.gap.settled" = "%1$@：來源 %2$@ 已不再有這裡原本的貼文。";
 "thread.reload.unfindable" = "這篇無法重新載入：登入 %@ 才能在那裡找到它。";
 "thread.reload.notfound" = "這篇無法重新載入：%@ 找不到它。";
 "thread.reload.scope" = "這篇無法重新載入：請重新登入 %@，讓 Fediqo 能找到它。";
@@ -210,8 +215,13 @@
 "search.placeholder" = "搜尋「%@」：* 任意多字，? 一個字";
 "search.label" = "搜尋「%@」顯示的貼文";
 "search.found" = "找到 %d 則";
+"search.asking" = "正在搜尋 %@…";
+"search.failed" = "無法搜尋 %@。";
+"search.scope" = "無法搜尋 %@：請重新登入，讓 Fediqo 能在那裡搜尋。";
+"search.reach.asked" = "也問了 %@。";
+"search.reach.notAsked" = "沒有問，因為從這裡無法搜尋：%@。";
 "search.empty.title" = "「%@」裡沒有相符的貼文";
-"search.empty.detail" = "只會搜尋這個時間軸會顯示、已經在這台裝置上的貼文。試著少打幾個字，或用 * 代表任意多字。";
+"search.empty.detail" = "只會搜尋這個時間軸會顯示的貼文：這台裝置上有的，以及問過的來源送回來的。試著少打幾個字，或用 * 代表任意多字。";
 "search.indexing.title" = "搜尋中…";
 "search.indexing.detail" = "正在讀一次這台裝置上的貼文，之後每打一個字只需比對。";
 
@@ -233,6 +243,35 @@
 "item.covered.mark" = "已蓋住";
 "item.lifted.mark" = "原本蓋著";
 "item.covered.warning" = "作者的警告：%@";
+"quote.spoken" = "引用 %1$@：%2$@";
+"quote.covered" = "已蓋住";
+"quote.covered.warning" = "已蓋住：%@";
+"quote.open" = "打開被引用的貼文";
+"quote.lift" = "掀開被引用貼文的遮蓋";
+"quote.cover" = "把被引用的貼文再蓋上";
+"quote.nested" = "它又引用了另一則貼文——打開它就能讀那一則。";
+"quote.nested.hidden" = "它又引用了另一則貼文，但這裡無法顯示。";
+"quote.state.shallow" = "引用了另一則貼文——打開它就能讀。";
+"quote.state.pending" = "引用了一則貼文，但它的作者還沒允許這次引用。";
+"quote.state.rejected" = "引用了一則貼文，但它的作者不允許這次引用。";
+"quote.state.revoked" = "引用了一則貼文，但它的作者後來收回了允許。";
+"quote.state.deleted" = "引用的貼文已在來源刪除。";
+"quote.state.unauthorized" = "引用了一則你無權看到的貼文。";
+"quote.state.blockedAccount" = "引用了你封鎖的人的貼文。";
+"quote.state.blockedDomain" = "引用了你封鎖的來源上的貼文。";
+"quote.state.mutedAccount" = "引用了你靜音的人的貼文。";
+"quote.state.unknown" = "引用了一則這裡無法顯示的貼文。";
+"quote.decorator" = "引用 %@";
+"quote.short.shallow" = "引用了另一則貼文";
+"quote.short.pending" = "引用尚未獲允許";
+"quote.short.rejected" = "引用未獲允許";
+"quote.short.revoked" = "引用已被收回";
+"quote.short.deleted" = "被引用的貼文已在來源刪除";
+"quote.short.unauthorized" = "被引用的貼文你無權看到";
+"quote.short.blockedAccount" = "引用了你封鎖的人";
+"quote.short.blockedDomain" = "引用了你封鎖的來源";
+"quote.short.mutedAccount" = "引用了你靜音的人";
+"quote.short.unknown" = "被引用的貼文無法顯示";
 "item.covered.show" = "掀開";
 "item.covered.label" = "按 s 掀開";
 
@@ -302,6 +341,10 @@
 "prefs.latest" = "只看到某一天為止";
 "prefs.latest.date" = "最晚日期";
 "prefs.latest.footer" = "每個時間軸都不顯示這一天結束後（依這台裝置的時區）發佈的貼文。較新的貼文仍留在這台裝置上；關掉這項就會再看到。";
+"prefs.askEvery" = "再問一次來源";
+"prefs.askEvery.one" = "每分鐘";
+"prefs.askEvery.many" = "每 %d 分鐘";
+"prefs.askEvery.footer" = "Fediqo 開著的時候，每過這段時間就再問一次這台裝置上的每個來源，眼前的時間軸會自己更新。按 r 仍然立刻重新載入。";
 
 "prefs.tab.choices" = "設定";
 "prefs.tab.build" = "這個 Fediqo";
@@ -327,6 +370,7 @@
 "work.purpose.signIn" = "登入中";
 "work.purpose.signOut" = "登出中";
 "work.purpose.write" = "送出你寫的或按下的內容";
+"work.purpose.search" = "搜尋一個來源";
 "about.title" = "這個 Fediqo";
 "about.version" = "版本";
 "about.build" = "組建";
@@ -360,6 +404,28 @@
 "prefs.keep.shorten.title" = "只保留最近 %d 個月？";
 "prefs.keep.shorten.detail" = "比這更舊的貼文會立即從這台裝置上移除，之後讀到的也不會存下。每個來源仍保持加入。改成更長的期間或「永久」則不會捨棄任何內容。";
 "prefs.keep.months" = "最近 %d 個月";
+"item.gone" = "來源已刪除";
+"item.gone.detail" = "它的來源表示已不再有這則貼文。它會帶著標記留在這裡，直到你放下它，也無法再對它送出任何東西。";
+"prefs.gone" = "來源已刪除的貼文";
+"prefs.gone.wait" = "多久後放下";
+"prefs.gone.never" = "永不";
+"prefs.gone.days" = "%d 天";
+"prefs.gone.keepwins" = "「保留貼文」只保留最近 %d 個月，比這更短，所以會先放下它們。";
+"prefs.gone.now" = "現在全部放下";
+"prefs.gone.ask" = "要放下 %d 則來源已刪除的貼文嗎？";
+"prefs.gone.ask.detail" = "它們會立即從這台裝置、從每個畫面上移除。其他內容都不受影響，每個來源仍保持加入。";
+"prefs.gone.confirm" = "放下";
+"prefs.gone.went" = "已放下 %d 則貼文。";
+"prefs.gone.went.none" = "沒有這樣的貼文。";
+"prefs.gone.footer" = "只有在這台裝置再次讀取那一則貼文、而來源表示它已不在時，才會標為已刪除。單純沒有送達的貼文不會被標記，也不會在這裡被放下。你自己收回的貼文會立即移除。時間軸上來源已不再有兩則貼文之間原本內容的地方，也會以同樣方式標記、同樣方式放下；旁邊的貼文仍會保留。";
+"prefs.gone.posts" = "%d 則";
+"prefs.gone.places" = "%d 處";
+"prefs.gone.ask.places" = "要放下 %d 處來源已不再有原本貼文的標記嗎？";
+"prefs.gone.ask.both" = "要放下 %1$@來源已刪除的貼文，以及 %2$@來源已不再有原本貼文的標記嗎？";
+"prefs.gone.ask.detail.places" = "貼文會立即從這台裝置、從每個畫面上移除。標記只會移除標記本身，旁邊的貼文仍會保留。其他內容都不受影響，每個來源仍保持加入。";
+"prefs.gone.ask.detail.placesonly" = "只會移除標記本身，旁邊的貼文仍會保留。其他內容都不受影響，每個來源仍保持加入。";
+"prefs.gone.went.places" = "已放下 %d 處標記。";
+"prefs.gone.went.both" = "已放下 %1$@貼文和 %2$@標記。";
 "prefs.drop.copies" = "捨棄圖片副本";
 "prefs.drop.copies.title" = "捨棄這台裝置上所有的圖片副本？";
 "prefs.drop.copies.detail" = "所有來源存在記憶體與磁碟上的圖片都會移除。每則貼文都會留下並照常顯示；捲動時會從連結重新讀取圖片。";
@@ -460,6 +526,14 @@
 "thread.replies.count" = "%d 則回覆";
 "thread.reply.floor" = "#%d";
 "thread.reply.quoted" = "引用：%@";
+"thread.more.loading" = "正在往下讀…";
+"thread.more.end" = "討論串到這裡結束。";
+"thread.more.read" = "繼續往下讀";
+"thread.more.cut" = "%@ 在這裡不再給出這個討論串的其餘部分，還有它沒交出來的回覆。";
+"thread.more.again" = "再讀一次後面的部分";
+"thread.more.unreachable" = "這個討論串後面的部分沒有送達。";
+"thread.more.refused" = "%@ 不讓這個 app 往下讀這個討論串。";
+"thread.more.unreadable" = "下一頁有回應，但上面沒有這個 app 讀得懂的內容。";
 
 /* Unit F7 — reading a thread properly. */
 "thread.open" = "在 %@ 開啟";
@@ -620,6 +694,14 @@
 "person.through" = "從 %@ 讀到的";
 "person.held" = "這裡有 %d 則";
 "person.none" = "這台裝置上還沒有他們的貼文。";
+"tag.asking" = "正在向 %1$@ 詢問 %2$@…";
+"tag.failed" = "無法向 %1$@ 詢問 %2$@。";
+"tag.retry" = "再試一次";
+"tag.none" = "這台裝置上還沒有 %@ 底下的貼文。";
+"tag.reach.asked" = "問了 %@。";
+"tag.reach.partial" = "沒有問，因為這個時間軸只顯示它們送來的一部分：%@。";
+"tag.reach.tagless" = "沒有問，因為它們沒有標籤：%@。";
+"tag.reach.tagsOff" = "沒有可問的，因為 %@ 關閉了標籤。";
 "item.person.open" = "打開 %@";
 
 /* One post more than one source carried (#114). The row is drawn as the first; these name the rest. */
@@ -628,3 +710,26 @@
 "item.source.join" = "、";
 "thread.copies.title" = "各來源帶來的樣子";
 "thread.copies.from" = "來自 %@";
+"blog.title" = "日誌";
+"blog.reading" = "正在讀這篇日誌…";
+"blog.refused" = "%@ 不讓這個 app 讀這篇日誌。";
+"blog.unreadable" = "這個論壇有回應，但上面沒有這個 app 讀得懂的日誌。";
+"blog.unreachable" = "連不上這篇日誌。";
+"blog.page" = "讀它的網頁";
+"refusal.signIn" = "這個論壇只讓登入的人看這篇。";
+"refusal.signIn.action" = "登入 %@";
+"refusal.password" = "作者用密碼鎖住了這篇。";
+"refusal.password.field" = "作者設的密碼";
+"refusal.password.open" = "打開";
+"refusal.password.trying" = "正在試這個密碼…";
+"refusal.password.wrong" = "這個密碼打不開，請再輸入一次。";
+"refusal.password.note" = "密碼只會送往 %@，只用這一次，不會留在這台裝置上。";
+"refusal.private" = "作者只讓好友看，或只給自己看。";
+"refusal.gone" = "來源已刪除。論壇說它已經不在了。";
+"refusal.blogsOff" = "這個論壇關掉了日誌功能。";
+"refusal.standing" = "這個論壇要求的閱讀權限，比這個帳號的高。";
+"refusal.points" = "這個論壇要求的條件，這個帳號還不夠。";
+"refusal.price" = "作者要收費才能看。這個 app 絕不付費。";
+"refusal.asked" = "論壇說：「%@」";
+"refusal.again" = "再試一次";
+"refusal.page.hint" = "打開論壇上的網頁。";

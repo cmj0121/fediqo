@@ -66,6 +66,14 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// because this app never calls anybody a user; the page is headed with a name, not an
     /// account.
     case openAuthor
+    /// `t` — a hashtag of the post the lamp is on, opened (#124): the press a finger makes on the
+    /// pill. `t` for tag, and free, for the reason `p` gives.
+    case openTag
+    /// `o` — the post the post the lamp is on quotes, opened as a post of its own (#214): the
+    /// press a finger makes on the quote. `o` for open, and free, for the reason `p` gives —
+    /// `Return` already opens the post itself, and one key meaning two posts on a quoting post
+    /// would leave the reader guessing which of the two a press is about.
+    case openQuote
     case showShortcuts
     /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
     case search
@@ -121,6 +129,8 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "w": return .answer
         case "d": return .withdraw
         case "p": return .openAuthor
+        case "t": return .openTag
+        case "o": return .openQuote
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
@@ -191,7 +201,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     public static func canEditTimeline(whenOpen open: Set<DummyLayer>) -> Bool {
         switch outermost(of: open) {
         case .selection, nil: true
-        case .viewer, .shortcuts, .person, .thread, .link, .search: false
+        case .viewer, .shortcuts, .person, .tag, .thread, .link, .search: false
         }
     }
 
@@ -261,7 +271,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// `ShellWalk` holds them in one stack and only its innermost step is open. Their order
     /// relative to each other in `allCases` is therefore never asked — which of them is in front
     /// is what the reader walked, not what this list says.
-    public static let walk: Set<DummyLayer> = [.person, .thread, .link]
+    public static let walk: Set<DummyLayer> = [.person, .tag, .thread, .link]
 
     /// Whether the reader may walk one step further out from where they are now.
     ///
@@ -341,6 +351,9 @@ public enum DummyLayer: Hashable, Sendable, CaseIterable {
     /// read out of this one list, is what stands in front of *both* — see
     /// `DummyCommand.canWalk(whenOpen:)`.
     case person
+    /// What this device holds under a hashtag, opened by pressing it (#124). One walk with
+    /// `.person`, and for `.person`'s reason: it is a page of rows opened from a row.
+    case tag
     /// The conversation opened over whatever it was opened from: the stream, a search's results,
     /// another conversation, or somebody's page. One walk with `.person` — see there.
     case thread
@@ -507,6 +520,10 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // The face or the name at the head of the row, pressed (#99) — the press this key was
         // written for (#140). Absent on somebody's own page, where the key does nothing either.
         DummyShortcut(group: .read, keys: ["p"], name: "person", commands: [.openAuthor], touch: .press),
+        // A hashtag's pill in the post's words, pressed (#124).
+        DummyShortcut(group: .read, keys: ["t"], name: "tag", commands: [.openTag], touch: .press),
+        // The quote under the post's words, pressed (#214).
+        DummyShortcut(group: .read, keys: ["o"], name: "quote", commands: [.openQuote], touch: .press),
         DummyShortcut(group: .read, keys: ["/"], name: "search", commands: [.search], touch: .press),
         DummyShortcut(group: .read, keys: ["r"], name: "reload", commands: [.reload], touch: .press),
 

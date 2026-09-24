@@ -48,7 +48,7 @@ struct ForumOpeningStoreTests {
     }
 
     /// The two compatibility lines of the acceptance, asked of the file itself.
-    @Test("No migration is added, and an earlier build's reading of a row still decodes it")
+    @Test("The opening adds no migration of its own, and an earlier build's reading of a row still decodes it")
     func bothWaysRoundTheVersions() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -63,9 +63,10 @@ struct ForumOpeningStoreTests {
                 try String.fetchAll(db, sql: "SELECT facts FROM note ORDER BY id")
             )
         }
-        // No migration id is written, so an earlier build finds nothing it does not know and
-        // opens the store rather than setting it aside as a newer build's.
-        #expect(migrations == ["v1-index", "v2-categories"])
+        // No migration id of its own is written, so a build that knows the rest finds nothing
+        // it does not know and opens the store rather than setting it aside as a newer build's.
+        // `v3-holding` is #175's and `v4-gone` #179's, which do mean an older build to refuse it.
+        #expect(migrations == ["v1-index", "v2-categories", "v3-holding", "v4-gone"])
         #expect(facts[0].contains(#""opening""#))
         #expect(!facts[1].contains(#""opening""#), "a row nobody reached is written as before")
         // What an earlier build decodes a row into: the facts it knew, and nothing else.

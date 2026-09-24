@@ -92,6 +92,7 @@ struct TimelinePane: View {
     private var banner: TimelineToast? {
         TimelineToast.shown(
             running: session.reload.running,
+            waiting: session.reload.onlyWaiting,
             line: session.reload.line,
             stopped: session.reload.stopped,
             note: toast
@@ -137,6 +138,38 @@ struct TimelinePane: View {
                 )
                 // One pane per person, so opening a second face from inside one draws afresh.
                 .id(person.id)
+            case .tag(let tag):
+                TagPane(
+                    tag: tag,
+                    items: session.heldPosts(under: tag, latest: prefs.latestDate),
+                    // What the ask says only where it is this tag's: another tag's, or one left
+                    // behind, is not this page's to say.
+                    asking: session.reload.tagAsk?.tag == tag ? session.reload.tagAsking : [],
+                    failed: session.reload.tagAsk?.tag == tag ? session.reload.tagFailed : [],
+                    reach: session.reload.tagAsk?.tag == tag ? session.reload.tagAsk?.reach.sentence : nil,
+                    catalogues: session.emoji,
+                    catalogueSettled: false,
+                    posts: session.posts,
+                    selectedID: $selectedID,
+                    marks: markBinding,
+                    acting: acting,
+                    decks: $decks,
+                    playback: playback,
+                    onPlayRow: onPlayRow,
+                    onViewRow: onViewRow,
+                    onTurnRow: onTurnRow,
+                    onOpenThread: onOpenThread,
+                    onOpenPerson: onOpenPerson,
+                    // Asked again of the timeline in front, as the press asked it.
+                    onRetry: {
+                        let timeline = session.currentTimeline
+                        Task { await session.reload.tag(tag, timeline: timeline, in: session) }
+                    },
+                    jumpToTop: jumpToTop,
+                    onToast: showToast,
+                    onBack: onBack
+                )
+                .id(HeldUnderTag.folded(tag))
             case .thread(let id):
                 // A root this device no longer holds draws the stream instead, which is the same
                 // answer the pane gave when it looked the root up among the timeline's own rows.
@@ -148,6 +181,16 @@ struct TimelinePane: View {
                         posts: session.posts,
                         conversations: session.conversations,
                         onAskAround: { Task { await session.conversations.again(opened, in: session) } },
+                        onReadFurther: { Task { await session.conversations.press(opened, in: session) } },
+                        onReachFurther: { appeared in
+                            Task { await session.conversations.reached(opened, appeared: appeared, in: session) }
+                        },
+                        // A ranked blog's standing, read here where the session is (#209).
+                        blog: session.blogs.reading(of: opened),
+                        onReadBlog: { Task { await session.blogs.again(opened) } },
+                        // The password is handed on and not kept (#213).
+                        onUnlockBlog: { password in Task { await session.blogs.unlock(opened, password: password) } },
+                        onSignIn: { Task { await session.signIn(host: opened.source.host) } },
                         selectedID: $selectedID,
                         marks: markBinding,
                         // Inside the conversation the answer mark opens the answer (#108).
@@ -166,12 +209,21 @@ struct TimelinePane: View {
                     // One pane per thread, so going back from a nested one draws its parent
                     // afresh.
                     .id(opened.id)
-                    // **The ask is the pane opening** — #90. A microblog thread is one request
-                    // about the post the reader has just pressed Return on, so nothing asks them
-                    // a second time for a thing they have already said they want. It is the
-                    // pane's own `.task`, so closing the thread cancels a read still on the wire,
-                    // and asked once per post per run: reopening draws what is already held.
-                    .task(id: opened.id) { await session.conversations.open(opened, in: session) }
+                    // **The ask is the pane opening** — #90, and since #198 for a forum topic's
+                    // replies too. A thread is what the reader has just pressed Return on, so
+                    // nothing asks them a second time for a thing they have already said they
+                    // want; asked once per post per run, so reopening draws what is already held.
+                    // And from here it is the thread in front, which the wait asks again.
+                    .task(id: opened.id) { await session.reload.opened(opened, in: session) }
+                    // What `r` last said about this thread goes with it (#175): the timeline under
+                    // it does not go on saying a thread nobody is reading could not be reloaded.
+                    // And a page still on its way for it stops (#177): nobody is reading on. Nor
+                    // is it asked again on the wait any more (#198).
+                    .onDisappear {
+                        session.reload.forget(.thread)
+                        session.reload.left(opened)
+                        session.stopReadingFurther(of: opened)
+                    }
                 } else {
                     underneath
                 }
@@ -218,20 +270,30 @@ struct TimelinePane: View {
         .onChange(of: session.timelineID) { left, arrived in
             // Another list, so the row the last one had at the top means nothing here.
             session.scrolledTop = nil
+            // A tag's page stays over the switch, and its lamp and the place under it are
+            // `FediqoRootView.timelineSwitched`'s (#197): only the search's parked post is filed here.
+            let onTag = if case .tag = standing { true } else { false }
             if !searching {
-                selectedID = session.timelinePlaces.switched(
-                    from: left, to: arrived, standingOn: selectedID, among: items.map(\.id)
-                )
+                if !onTag {
+                    selectedID = session.timelinePlaces.switched(
+                        from: left, to: arrived, standingOn: selectedID, among: items.map(\.id)
+                    )
+                }
             } else {
                 let shown = session.timelineItems(latest: prefs.latestDate).map(\.id)
                 search?.switched { parked in
                     session.timelinePlaces.switched(from: left, to: arrived, standingOn: parked, among: shown)
                 }
-                if let selectedID, !items.contains(where: { $0.id == selectedID }) {
+                if !onTag, let selectedID, !items.contains(where: { $0.id == selectedID }) {
                     self.selectedID = nil
                 }
+                // A search sent to the last timeline's sources is sent to this one's (#176).
+                let now = session.currentTimeline
+                let pattern = search?.pattern ?? ""
+                Task { await session.reload.searchSwitched(to: now, pattern: pattern, in: session) }
             }
-            // The walk ends on the same change, where it is held: `FediqoRootView` clears it.
+            // The walk ends on the same change, where it is held: `FediqoRootView` clears it, all
+            // but a tag's page in front, which stays and asks the new timeline (#197).
         }
     }
 
@@ -305,6 +367,17 @@ struct TimelinePane: View {
         await store.settle(host: host)
     }
 
+    /// Whether the row at `index` of `count`, coming into view, asks the timeline in front for its
+    /// next stretch (#87): one of the last `moreAhead`, so the next stretch is on its way before
+    /// the reader reaches the end rather than after. **Never a search's**: a search shows what this
+    /// device holds, and the end of its results is not the end of any source's timeline.
+    static func asksForMore(at index: Int, of count: Int, searching: Bool) -> Bool {
+        !searching && index >= count - moreAhead
+    }
+
+    /// How many rows from the end reading starts asking for more.
+    static let moreAhead = 5
+
     /// Where a list drawn afresh puts the reader (#110).
     enum Landing: Equatable, Sendable {
         /// The lamp's row, in the middle — what coming back from a thread has always done.
@@ -347,6 +420,9 @@ struct TimelinePane: View {
 
     private func list(_ items: [DummyItem]) -> some View {
         let last = items.count - 1
+        // Where the timeline in front is not whole, said at its place (#201). A search's results
+        // are not a timeline, and say nothing of the kind.
+        let gaps = searching ? [:] : session.gapMarks(in: items)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -377,6 +453,8 @@ struct TimelinePane: View {
                             onOpen: { onOpenThread(item.id) },
                             // The face and the name, as a press (#99).
                             onOpenPerson: onOpenPerson,
+                            quoteLifted: decks.isQuoteLifted(of: item),
+                            onToggleQuoteCover: { decks.toggleQuoteCover(of: item) },
                             onToggleCover: { _ = decks.toggleCover(item.id) },
                             onPlay: { onPlayRow(item) },
                             onView: { onViewRow(item) },
@@ -385,6 +463,13 @@ struct TimelinePane: View {
                             onToast: showToast
                         )
                         .id(item.id)
+                        // Reading toward the end asks for the next stretch (#87): a lazy row
+                        // appears as it is scrolled or walked to, and nothing else asks.
+                        .modifier(AsksForMore(
+                            asks: Self.asksForMore(at: index, of: items.count, searching: searching),
+                            timeline: timeline, session: session
+                        ))
+                        .modifier(TimelineGapMarked(marks: gaps[item.id], session: session))
                         if !isLast {
                             Rectangle()
                                 .fill(ShellChrome.hairline(colorScheme))
@@ -398,6 +483,7 @@ struct TimelinePane: View {
             // The end of the list stops short of whatever floats over the page (#112).
             .clearsFloatingCorner()
             .modifier(KeepsTopRow(session: session))
+            .modifier(HoldsPlace(session: session, proxy: proxy))
             .onAppear {
                 // A tick later: a lazy stack just built has not laid out the row to scroll to.
                 switch Self.landing(selected: selectedID, top: session.scrolledTop) {
@@ -696,6 +782,25 @@ struct KeepsTopRow: ViewModifier {
     func body(content: Content) -> some View {
         content.onScrollTargetVisibilityChange(idType: String.self) { visible in
             session.scrolledTop = visible.first
+        }
+    }
+}
+
+/// The row the reader is reading stays where it is when the store renews the list under them
+/// (#175). A landing nobody pressed for puts newer rows above it; the row at the top before is
+/// put back at the top, rather than the stream sliding down under the reader's eyes.
+///
+/// **The top row, not the lamp.** `r` centres the lamp as it ends, because the reader asked and
+/// is looking for what came; a renewal the reader did not ask for leaves the page as it was read.
+/// A modifier of its own for `KeepsTopRow`'s reason.
+struct HoldsPlace: ViewModifier {
+    let session: ShellSession
+    let proxy: ScrollViewProxy
+
+    func body(content: Content) -> some View {
+        content.onChange(of: session.notesRevision) { _, _ in
+            guard let top = session.scrolledTop else { return }
+            proxy.scrollTo(top, anchor: .top)
         }
     }
 }

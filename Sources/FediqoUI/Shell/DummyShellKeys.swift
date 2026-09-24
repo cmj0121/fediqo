@@ -35,7 +35,7 @@ private struct DummyKeyPresses: ViewModifier {
             .onChange(of: home) { _, _ in focused = true }
             .onKeyPress(
                 keys: [
-                    "?", "/", "b", "c", "d", "f", "j", "k", "g", "v", "a", "m", "s", "q", "r", "e", "w", "p", " ",
+                    "?", "/", "b", "c", "d", "f", "j", "k", "g", "v", "a", "m", "s", "q", "r", "e", "w", "p", "t", "o", " ",
                     .escape, .tab, .return, .upArrow, .downArrow,
                 ],
                 phases: .down

@@ -45,6 +45,10 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
     /// **The one list**, read by a timeline's rules and by `hasTrends`, which starts from it: a
     /// second list is how a tab and a rule come to disagree about a server. No `default:`, so a kind
     /// added later has to be answered here rather than inheriting somebody else's answer.
+    /// Whether a post read from a source of this kind says whether it quotes one (#214): a read
+    /// that says nothing of a quote is then a post with none, not a source that never said.
+    public var saysQuotes: Bool { self == .mastodon }
+
     public var hasTimelines: Bool {
         switch self {
         case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
@@ -203,6 +207,31 @@ public enum Category: Hashable, Sendable {
     case board(id: String)
 }
 
+/// How a row came to be held, and so whether a timeline may show it (#175).
+///
+/// **Holding a post is not the same as it arriving.** A post a source handed over as part of a
+/// timeline it serves arrived, and All draws it. A post this device went and fetched for one
+/// place — a search hit, an answer read inside a thread, a post brought under a hashtag — is held
+/// so it can be read where it was found, and All does not grow because a search was made. #90 said
+/// this in passing about a thread's answers; here it is a fact of the store, said once, so the
+/// tasks that need it do not each invent their own.
+///
+/// **It only ever widens.** A row held aside that later arrives through a timeline is a row that
+/// arrived, and nothing takes that back — `Note.categories`' rule, for its reason: what a copy
+/// arrived through is a fact about it, and a later read that did not come through a timeline is
+/// not that fact going away.
+public enum Holding: String, Sendable, Hashable {
+    /// It arrived through a read of a source's timeline. Every timeline may show it.
+    case arrived
+    /// This device holds it, and no timeline shows it.
+    case aside
+
+    /// The wider of the two.
+    func widened(by other: Holding) -> Holding {
+        self == .arrived || other == .arrived ? .arrived : .aside
+    }
+}
+
 public enum Audience: String, Sendable, Hashable, CaseIterable {
     case everyone
     case unlisted
@@ -286,6 +315,16 @@ public struct Counts: Hashable, Sendable {
         self.replies = replies
         self.reblogs = reblogs
         self.favourites = favourites
+    }
+
+    /// These counts, with each one they do not state taken from `other` (#208). A count nobody
+    /// stated is a source that never said, and never a zero.
+    func filled(from other: Counts) -> Counts {
+        Counts(
+            replies: replies ?? other.replies,
+            reblogs: reblogs ?? other.reblogs,
+            favourites: favourites ?? other.favourites
+        )
     }
 }
 
@@ -429,6 +468,10 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// favourite is a note to the author and to oneself, and a list of them this device kept on
     /// its own would be a list no other app agrees with.
     public let favourited: Bool?
+    /// Who the post was written for, as the source said (#208), or nothing where it never said —
+    /// every forum post, and a row kept before 0.5.0 wrote this down until a read says it again.
+    ///
+    /// `boosted`'s shape: kept with the row, and a later read that says nothing leaves it.
     public let audience: Audience?
     public let avatarURL: URL?
     /// What came attached, in the order the server listed it. Empty is a post that brought
@@ -445,7 +488,16 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// The pictures this post is partly written in, one per shortcode.
     public let emojis: [CustomEmoji]
     public let url: URL?
-    public let counts: Counts
+    /// What the source last counted of answers, boosts and favourites, each nothing where it
+    /// never said. Kept with the row (#208): a figure of the moment it was read, and still the
+    /// source's latest word on it until a read says otherwise, which beats drawing none.
+    ///
+    /// **Unlike every other fact here, a later timeline copy's figure wins** — a count is only
+    /// ever the source's latest, and the first copy's would be days stale by the end of the
+    /// keep-for window. A count the later copy does not state keeps the one held. A `var` for
+    /// `holding`'s reason: the store sets it on a row it already holds, and draws the new figure
+    /// without writing the store down for it alone (`ItemStore.ingest`).
+    public var counts: Counts
     /// The id the server this copy came through gives the status, where it is a microblog's —
     /// what reading the post again (#29) asks for. Nothing on a row stored before 0.2.0 learned
     /// it, and on every forum post.
@@ -460,6 +512,38 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// arrives here (`ForumOpening.init?(_:)`). It goes when the row goes — a Remove, or the
     /// reader's keep-for window — and stays when a Clear keeps the row.
     public let opening: ForumOpening?
+    /// Whether a timeline may show this row, or whether this device only holds it (#175).
+    ///
+    /// **A `var`, as `categories` is, and for its reason**: the store widens it where the same
+    /// post arrives a second time through a timeline, and that is the one way it moves.
+    public var holding: Holding
+    /// When a read of this one post heard its source say it no longer has it (#179), or nothing
+    /// while the source has said no such thing.
+    ///
+    /// **Only a read of the post itself sets it.** A post missing from a listing merely did not
+    /// arrive, and a listing is never a statement about any one post — so nothing that reads a
+    /// timeline, a search or a thread's page touches it. What the reader took back themselves
+    /// (#109) is let go, not marked: `ItemStore.forget` is that path, and it never passes here.
+    ///
+    /// A `var` for `holding`'s reason: the store sets it on a row it already holds, and a read
+    /// that finds the post again takes it off.
+    public var goneSince: Date?
+    /// Where a timeline this post arrived through is not whole next to it (#201): newer posts
+    /// that remain above it, or posts that may be missing below it. Empty on nearly every post.
+    ///
+    /// A `var` for `holding`'s reason: the store sets it on a row it already holds, as a read
+    /// lands. Kept with the row, so it goes when the row goes and outlives a relaunch with it.
+    public var gaps: Set<TimelineGap>
+    /// The id each timeline listed this post under when a read of that timeline brought it — a
+    /// boost's own, not the boosted post's (#201). What a timeline is read on from, and the only
+    /// thing that moves where: a post the reader wrote, a search's find or a thread's answer was
+    /// listed by no timeline, and so is never read on from.
+    ///
+    /// A `var` for `holding`'s reason: the store grows it as the same post is listed again.
+    public var listed: [Category: String]
+    /// The post this one quotes, as its source said (#214), or nothing where it quotes none or
+    /// the source has no such idea. Kept with the row, so the quoted post shows offline.
+    public let quote: Quote?
 
     public init(
         id: String,
@@ -485,7 +569,12 @@ public struct Note: Identifiable, Hashable, Sendable {
         url: URL? = nil,
         counts: Counts = Counts(),
         statusID: String? = nil,
-        opening: ForumOpening? = nil
+        opening: ForumOpening? = nil,
+        holding: Holding = .arrived,
+        goneSince: Date? = nil,
+        gaps: Set<TimelineGap> = [],
+        listed: [Category: String] = [:],
+        quote: Quote? = nil
     ) {
         self.id = id
         self.source = source
@@ -511,6 +600,11 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.counts = counts
         self.statusID = statusID
         self.opening = opening
+        self.holding = holding
+        self.goneSince = goneSince
+        self.gaps = gaps
+        self.listed = listed
+        self.quote = quote
     }
 
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
@@ -532,12 +626,65 @@ public struct Note: Identifiable, Hashable, Sendable {
             boostedBy: held.boostedBy, boosterHandle: held.boosterHandle,
             boosted: boosted ?? held.boosted,
             favourited: favourited ?? held.favourited,
-            audience: audience, avatarURL: avatarURL, attachments: attachments,
-            sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url, counts: counts,
+            // Who it was for, whether it is covered and with what, and each count: what this read
+            // left unsaid is what was held (#208), for `boosted`'s reason. A Mastodon source
+            // always sends its cover line, empty where there is none, so a nil spoiler here is a
+            // source that has no such idea — and a cover the author took off reads as "" and wins.
+            audience: audience ?? held.audience, avatarURL: avatarURL, attachments: attachments,
+            sensitive: sensitive ?? held.sensitive, spoiler: spoiler ?? held.spoiler, emojis: emojis,
+            url: url, counts: counts.filled(from: held.counts),
             statusID: statusID ?? held.statusID,
             // A read of the row that says nothing of its opening post — a board listing, which
             // never does — leaves the one this device read where it is (#154).
-            opening: opening ?? held.opening
+            opening: opening ?? held.opening,
+            // Where the row is held does not move on a read again (#175): a post read again is
+            // not a post a timeline brought, so a row held aside stays aside and one in All stays
+            // there. Only `ItemStore.ingest` widens it.
+            holding: held.holding,
+            // **No mark survives a read that found the post** (#179): the source has just handed
+            // it over, which is the one thing a post gone from it cannot be.
+            goneSince: nil,
+            // What a read of this one post says is nothing about where its timeline is whole.
+            gaps: held.gaps,
+            listed: held.listed.later(listed),
+            // The quote as the source says it now (#214) — a quote taken back reads so, and one an
+            // edit took away is gone. Only a source that never says a quote leaves the held one.
+            quote: source.kind.saysQuotes
+                ? quote.flatMap { Quote.later($0, over: held.quote) }
+                : Quote.later(quote, over: held.quote)
+        )
+    }
+
+    /// This held note, with every fact it does not state taken from `other` — a later copy of the
+    /// same post (#208). What it does state stays: the first copy wins, as `ItemStore.ingest`
+    /// says, and a copy that says more only fills in where this one said nothing.
+    ///
+    /// **Only facts about the post, and only where nothing is "never said".** Not the booster,
+    /// which is a fact about one copy and would draw an original as a boost; not `reply`, where
+    /// nothing is an answer ("not a reply"); not attachments or emoji, where empty is an answer
+    /// too; not the opening post, which no listing carries (#154). A title, the post's address
+    /// and its author's picture are not here either: a source that has them sent them with the
+    /// first copy, and one that did not has none to send. Nor the counts, where the later copy
+    /// wins rather than fills (`counts`).
+    ///
+    /// **A quote filled in brings its words with it** (#214). A row held before this device read
+    /// quotes was read with the quote spelled into its words as an `RE:` address; the copy that
+    /// says the quote has its words without it. Keeping the held words would draw the quote twice.
+    func filled(from other: Note) -> Note {
+        let quoteArrives = quote == nil && other.quote != nil
+        return Note(
+            id: id, source: source, author: author, handle: handle,
+            body: quoteArrives ? other.body : body, title: title,
+            board: board ?? other.board, postedAt: postedAt, categories: categories, reply: reply,
+            boostedBy: boostedBy, boosterHandle: boosterHandle,
+            boosted: boosted ?? other.boosted, favourited: favourited ?? other.favourited,
+            audience: audience ?? other.audience, avatarURL: avatarURL, attachments: attachments,
+            sensitive: sensitive ?? other.sensitive, spoiler: spoiler ?? other.spoiler,
+            emojis: emojis, url: url, counts: counts,
+            statusID: statusID ?? other.statusID, opening: opening, holding: holding,
+            goneSince: goneSince, gaps: gaps, listed: listed,
+            // The later copy's quote wins, as its counts do (#214) — see `Quote.later`.
+            quote: Quote.later(other.quote, over: quote)
         )
     }
 
@@ -549,7 +696,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
             favourited: favourited, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
-            url: url, counts: counts, statusID: statusID, opening: opening
+            url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
+            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote
         )
     }
 }
@@ -560,17 +708,40 @@ public struct Note: Identifiable, Hashable, Sendable {
 /// picture the same page carried. Not the floor, the post number or when it was posted — the row
 /// already has its author and its date from the thread table, and a second copy of either would
 /// be a second answer to a question the row has already answered.
+///
+/// **A reply kept from a thread read to its end (#177) is the one exception**, and carries its
+/// floor and its own date too: a reply is not a row, has no thread table to answer either, and
+/// its note's date may be only when it was read (`DiscuzPost.asNote`). Nothing for an opening post.
 public struct ForumOpening: Hashable, Sendable {
     /// The author's own words. Empty where the post has none — a picture, a poll — which is an
     /// answer, and is kept as one so the row is not asked again for words that do not exist.
     public let words: String
     public let quoted: [DiscuzQuotation]
     public let avatarURL: URL?
+    /// A kept reply's floor, where its page numbered it. Never an opening post's.
+    public let floor: Int?
+    /// A kept reply's own date, or a read blog's (#209), where its page gave one a device can
+    /// read. Never a thread's opening post's.
+    public let postedAt: Date?
 
-    public init(words: String, quoted: [DiscuzQuotation] = [], avatarURL: URL? = nil) {
+    public init(
+        words: String, quoted: [DiscuzQuotation] = [], avatarURL: URL? = nil,
+        floor: Int? = nil, postedAt: Date? = nil
+    ) {
         self.words = words
         self.quoted = quoted
         self.avatarURL = avatarURL
+        self.floor = floor
+        self.postedAt = postedAt
+    }
+
+    /// A reply's words kept, with the two things only a reply needs. Withheld or not, which is
+    /// the caller's to decide: `DiscuzPost.asNote` keeps none for a withheld one.
+    public init(reply post: DiscuzPost) {
+        self.init(
+            words: post.body, quoted: post.quoted, avatarURL: post.avatarURL,
+            floor: post.floor, postedAt: post.postedAt
+        )
     }
 
     /// The opening post worth keeping, or nothing where it is not: **a post the forum withheld
