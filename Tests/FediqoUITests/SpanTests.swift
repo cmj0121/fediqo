@@ -37,7 +37,9 @@ struct SpanTests {
         let span = SpanSection.span(from: Self.day(6), to: Self.day(4))
         #expect(span.lowerBound == Self.day(6))
         #expect(span.upperBound == Self.day(3), "the day after the last, not inside")
-        #expect(span.contains(Self.day(4).addingTimeInterval(86_399)), "the last day's last second")
+        let lastSecond = Self.calendar.date(byAdding: .day, value: 1, to: Self.day(4))! - 1
+        #expect(span.contains(lastSecond), "the last day's last second")
+        #expect(!span.contains(Self.day(6) - 1), "one second before the first day is outside")
         let one = SpanSection.span(from: Self.day(4), to: Self.day(4))
         #expect(one.lowerBound == Self.day(4) && one.upperBound == Self.day(3), "one day is one day")
     }
@@ -118,22 +120,22 @@ struct SpanTests {
           arguments: [DummyLanguage.english, .taiwanese])
     func questionNamesCountAndSpan(_ language: DummyLanguage) {
         let from = Self.day(6), to = Self.day(4)
-        let ask = SpanSection.Ask(posts: 3, from: from, to: to, host: nil)
+        let ask = SpanAsk(posts: 3, from: from, to: to, host: nil)
         let question = ShellQuestion.letGo(ask, language: language)
         #expect(question.title == L10n.count("prefs.span.ask", 3, language: language))
         #expect(question.title.contains("3"))
         #expect(question.line.contains(SpanSection.spanLabel(from: from, to: to, language: language)))
-        #expect(question.line.contains(L10n.t("usage.span.every", language: language)))
+        #expect(question.line.contains(L10n.t("usage.span.every.line", language: language)))
         #expect(question.help == L10n.t("prefs.span.ask.detail", language: language))
         #expect(question.choices.map(\.role) == [.destructive] && question.cancel != nil)
 
-        let one = ShellQuestion.letGo(SpanSection.Ask(posts: 1, from: from, to: from, host: "alpha.test"), language: language)
+        let one = ShellQuestion.letGo(SpanAsk(posts: 1, from: from, to: from, host: "alpha.test"), language: language)
         #expect(one.line.contains("alpha.test"))
         #expect(one.line.contains(from.formatted(.dateTime.year().month(.abbreviated).day().locale(L10n.locale(language)))))
         #expect(!one.line.contains(L10n.t("usage.span.between", language: language).prefix(4)), "one day is named once")
 
         for key in ["prefs.span", "usage.span.line", "prefs.span.footer", "usage.span.from", "usage.span.to",
-                    "usage.span.source", "usage.span.every", "usage.span.none", "usage.span.now", "usage.span.now.help"] {
+                    "usage.span.source", "usage.span.every", "usage.span.every.line", "usage.span.none", "usage.span.now", "usage.span.now.help"] {
             #expect(L10n.t(key, language: language) != key, "\(key) in \(language)")
         }
         #expect(SpanSection.countLine(0, language: language) == L10n.t("usage.span.none", language: language))

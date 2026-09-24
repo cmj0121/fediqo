@@ -27,18 +27,11 @@ struct SpanSection: View {
     /// The store's count for the span and host, nil until the first read lands — a "0" drawn
     /// before anything was counted would be a figure about nothing.
     @State private var count: Int?
-    /// The press has counted and is asking first; what it counted is what the question names.
-    @State private var asking: Ask?
+    /// The press has counted again and is asking first; what it counted is what the question
+    /// names, never a figure the screen drew before the store moved under it.
+    @State private var asking: SpanAsk?
     /// What the last press let go, and nothing before a press.
     @State private var went: Int?
-
-    /// What a press is about to let go, as the question says it.
-    struct Ask: Equatable {
-        let posts: Int
-        let from: Date
-        let to: Date
-        let host: String?
-    }
 
     /// What the count is read again for: the span, the host, and the holding moving under them.
     private struct Probe: Equatable {
@@ -56,8 +49,13 @@ struct SpanSection: View {
                 if let count { reading(Self.countLine(count)) }
                 Spacer(minLength: ShellSpace.snug)
                 ShellIconButton("trash", name: "usage.span.now", help: "usage.span.now.help", tone: .alarm) {
-                    guard let count else { return }
-                    asking = Ask(posts: count, from: from, to: to, host: host)
+                    let ask = SpanAsk(from: from, to: to, host: host)
+                    Task {
+                        // Counted at the press, as `GoneSection` counts: nothing to let go is
+                        // said on the row, anything is asked about by its count now.
+                        let counted = await session.spanHeld(ask.span, host: ask.host)
+                        if counted == 0 { count = 0 } else { asking = ask.counting(counted) }
+                    }
                 }
                 .disabled((count ?? 0) == 0)
             }
@@ -66,13 +64,15 @@ struct SpanSection: View {
             ShellSectionHead(title: "prefs.span", line: "usage.span.line", help: "prefs.span.footer")
         }
         .task(id: Probe(span: span, host: host, holdings: session.holdings)) {
+            // Nothing until this read lands, so the press is never made on a stale figure.
+            count = nil
             count = await session.spanHeld(span, host: host)
         }
         .onChange(of: hosts) { _, hosts in
             if let host, !hosts.contains(host) { self.host = nil }
         }
         .shellConfirm($asking, question: { ShellQuestion.letGo($0) }) { ask, _ in
-            Task { went = await session.letGo(span: Self.span(from: ask.from, to: ask.to), host: ask.host) }
+            Task { went = await session.letGo(span: ask.span, host: ask.host) }
         }
     }
 
@@ -114,9 +114,9 @@ struct SpanSection: View {
         return String(format: L10n.t("usage.span.between", language: language), from.formatted(style), to.formatted(style))
     }
 
-    /// Where the posts come from, as the question says it: the host, or every source.
+    /// Where the posts come from, as the question says it mid-sentence: the host, or every source.
     static func whereLabel(_ host: String?, language: DummyLanguage? = nil) -> String {
-        host ?? L10n.t("usage.span.every", language: language)
+        host ?? L10n.t("usage.span.every.line", language: language)
     }
 
     /// The live figure: how many posts the span and source hold, or that they hold none.
@@ -133,6 +133,24 @@ struct SpanSection: View {
         Text(line)
             .shellFont(.reading)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+    }
+}
+
+/// What a press is about to let go (#248): the days and the host the reader picked, and how
+/// many posts the store counted for them at the press — what the question names.
+struct SpanAsk: Equatable {
+    var posts = 0
+    let from: Date
+    let to: Date
+    let host: String?
+
+    var span: Range<Date> { SpanSection.span(from: from, to: to) }
+
+    /// The same ask, with the count the store gave.
+    func counting(_ posts: Int) -> SpanAsk {
+        var counted = self
+        counted.posts = posts
+        return counted
     }
 }
 

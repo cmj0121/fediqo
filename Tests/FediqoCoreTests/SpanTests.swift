@@ -48,12 +48,23 @@ struct SpanTests {
         #expect(await store.snapshot().notes.map(\.id).sorted() == ["a0", "a3"])
     }
 
-    @Test("The span's first moment is inside it and its last is not")
+    @Test("The span's first moment is inside it, the second before it and its last moment are not")
     func edgesAreHalfOpen() async {
         let store = Self.held()
         let start = Self.origin.addingTimeInterval(86_400)
         #expect(await store.count(span: start..<start.addingTimeInterval(1)) == 2, "b1 and a1 sit on the start")
+        #expect(await store.count(span: (start - 1)..<start) == 0, "one second before the start holds nothing of it")
         #expect(await store.count(span: Self.origin..<start) == 1, "a0 only: a1 sits on the end")
+    }
+
+    @Test("A post two hosts carry loses one host's copy and keeps the other's")
+    func oneCopyOfTwoStays() async {
+        let store = ItemStore(sources: [Self.alpha, Self.beta], notes: [
+            Self.note("shared", day: 1, from: Self.alpha), Self.note("shared", day: 1, from: Self.beta),
+        ])
+        #expect(await store.letGo(span: Self.days1to2, host: Self.alpha.host) == 1)
+        let left = await store.all()
+        #expect(left.map(\.id) == ["shared"] && left.map(\.source.host) == [Self.beta.host])
     }
 
     @Test("A span holding nothing changes nothing and says so")

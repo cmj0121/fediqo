@@ -126,7 +126,7 @@ enum ShellQuestion {
     /// Letting go of the posts of a span of days, from one source or every one (#248): the title
     /// counts them, the line names the days and where they come from and that they do not come
     /// back, and the (?) says what stays.
-    static func letGo(_ ask: SpanSection.Ask, language: DummyLanguage? = nil) -> ShellConfirmation {
+    static func letGo(_ ask: SpanAsk, language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellConfirmation(
             symbol: "trash", title: L10n.count("prefs.span.ask", ask.posts, language: language),
             line: String(

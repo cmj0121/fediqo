@@ -912,6 +912,7 @@
 "usage.span.to" = "To";
 "usage.span.source" = "Source";
 "usage.span.every" = "Every source";
+"usage.span.every.line" = "every source";
 "usage.span.between" = "%1$@ – %2$@";
 "usage.span.none" = "No posts on these days";
 "usage.span.now" = "Let these go";

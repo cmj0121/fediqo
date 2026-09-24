@@ -890,6 +890,7 @@
 "usage.span.to" = "到";
 "usage.span.source" = "來源";
 "usage.span.every" = "所有來源";
+"usage.span.every.line" = "所有來源";
 "usage.span.between" = "%1$@ 到 %2$@";
 "usage.span.none" = "這幾天沒有貼文";
 "usage.span.now" = "放下這些貼文";
