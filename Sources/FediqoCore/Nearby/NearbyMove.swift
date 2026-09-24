@@ -329,9 +329,16 @@ public actor NearbyMove {
             }
             do {
                 try await channel.send(.accept)
+            } catch is NearbyDropped {
+                // The link ended under the yes. The sender may have said no first — its word
+                // is read from what arrived before the end, and only then is a drop believed:
+                // a no and a yes given in the same moment must end as the no.
+                await withdraw(offer.id)
+                try await Self.lastWord(channel)
+                await emit(.code(code, sessionID: sessionID))
+                throw NearbyDropped()
             } catch {
                 await withdraw(offer.id)
-                if error is NearbyDropped { await emit(.code(code, sessionID: sessionID)) }
                 throw error
             }
             await self.accepted()
@@ -509,7 +516,12 @@ public actor NearbyMove {
         default: throw NearbyRefusal.malformed
         }
         // The key leaves as bytes only here, sealed, and the receiver holds it from then on.
-        try await channel.send(.key(key.withUnsafeBytes { Data($0) }))
+        do {
+            try await channel.send(.key(key.withUnsafeBytes { Data($0) }))
+        } catch is NearbyDropped {
+            try await Self.lastWord(channel)
+            throw NearbyDropped()
+        }
         guard case .have(let have) = try await channel.next(), have <= offer.fileBytes else { throw NearbyRefusal.malformed }
         await emit(.moving(PackageProgress(done: Int(have), total: Int(offer.fileBytes)), peer: peer))
         let handle = try FileHandle(forReadingFrom: file)
@@ -532,6 +544,12 @@ public actor NearbyMove {
         case .refuse: throw NearbyRefusal.refusedThere
         default: throw NearbyRefusal.malformed
         }
+    }
+
+    /// What the peer said before the link ended, where a send just failed as a drop: a refusal
+    /// is thrown as such, anything else is the drop.
+    private nonisolated static func lastWord(_ channel: NearbyChannel) async throws {
+        if case .refuse? = try? await channel.next() { throw NearbyRefusal.refusedThere }
     }
 
     /// The file's length now, as the file system says it.

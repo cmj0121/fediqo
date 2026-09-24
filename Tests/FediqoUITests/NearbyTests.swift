@@ -113,29 +113,44 @@ struct NearbyTests {
         /// a bound of a few seconds is for a runner that is slow, never a wait a test pays.
         func settle(_ nearby: ShellNearby, until done: (ShellNearby.Step?) -> Bool) async {
             let deadline = ContinuousClock.now + .seconds(8)
-            while !done(nearby.step), ContinuousClock.now < deadline {
-                await Self.stepChanged(of: nearby, within: .milliseconds(500))
+            while ContinuousClock.now < deadline {
+                // Armed before the check, so a step assigned between the two is not missed.
+                let changed = StepSignal()
+                withObservationTracking { _ = nearby.step } onChange: { changed.fire() }
+                if done(nearby.step) { return }
+                await changed.wait(most: .milliseconds(500))
             }
             if !done(nearby.step) { Issue.record("never settled: \(String(describing: nearby.step))") }
         }
 
-        /// Returns once `nearby.step` is assigned, or after `most` where it is not.
-        private static func stepChanged(of nearby: ShellNearby, within most: Duration) async {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                let once = Mutex(false)
-                let resume: @Sendable () -> Void = {
-                    let first = once.withLock { done -> Bool in
-                        defer { done = true }
-                        return !done
-                    }
-                    if first { continuation.resume() }
-                }
-                withObservationTracking { _ = nearby.step } onChange: { resume() }
-                Task {
-                    try? await Task.sleep(for: most)
-                    resume()
-                }
+        /// One wake, fired by the step changing or by a clock, whichever is first.
+        final class StepSignal: Sendable {
+        private let held = Mutex<(fired: Bool, waiter: CheckedContinuation<Void, Never>?)>((false, nil))
+
+        func fire() {
+            let waiter = held.withLock { held -> CheckedContinuation<Void, Never>? in
+                held.fired = true
+                defer { held.waiter = nil }
+                return held.waiter
             }
+            waiter?.resume()
+        }
+
+        func wait(most: Duration) async {
+            let clock = Task { [self] in
+                try? await Task.sleep(for: most)
+                fire()
+            }
+            defer { clock.cancel() }
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let now = held.withLock { held -> Bool in
+                    if held.fired { return true }
+                    held.waiter = continuation
+                    return false
+                }
+                if now { continuation.resume() }
+            }
+        }
         }
 
         func end() {
