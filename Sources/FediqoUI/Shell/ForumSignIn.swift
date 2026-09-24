@@ -366,6 +366,7 @@ public final class ForumSessions {
         if let held = engines[host] { return held }
         let made = ForumWebEngine(host: host, dataStore: dataStore)
         made.work = work
+        made.sweeping = sweeping
         engines[host] = made
         return made
     }

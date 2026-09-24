@@ -139,17 +139,18 @@ struct LeftBehindTests {
         for (name, domain) in [
             ("x7Kq_2132_auth", "bbs.example.org"), ("cf_clearance", ".bbs.example.org"),
             ("_ga", "tracker.example"), ("sid", "removed.example"), ("ad", "ads.bbs.example.org"),
+            ("member_auth", "www.example.com"),
         ] {
             await store.httpCookieStore.setCookie(ForumDeviceStoreTests.cookie(name, domain: domain))
         }
         let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
         _ = forums.dataStore
         await forums.dropCache(within: .seconds(5))
-        #expect(await store.httpCookieStore.allCookies().count == 5, "going to the background keeps every cookie")
-        await forums.leaveNothing(keeping: ["BBS.example.org", "m.example"], within: .seconds(5))
+        #expect(await store.httpCookieStore.allCookies().count == 6, "going to the background keeps every cookie")
+        await forums.leaveNothing(keeping: ["BBS.example.org", "m.example", "example.com"], within: .seconds(5))
         let left = await store.httpCookieStore.allCookies()
-        #expect(Set(left.map(\.name)) == ["x7Kq_2132_auth", "cf_clearance"])
-        for cookie in left { #expect(ForumWebEngine.holds(cookie.domain, for: "bbs.example.org")) }
+        #expect(Set(left.map(\.name)) == ["x7Kq_2132_auth", "cf_clearance", "member_auth"],
+                "a forum added bare keeps its sign-in filed under www.")
     }
 
     @Test("A launch sweeps a store an earlier run left, and a relaunched sign-in waits for it")
@@ -163,6 +164,7 @@ struct LeftBehindTests {
         #expect(untouched.sweeping == nil, "no store on disk, none opened")
         let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
         forums.sweepAtLaunch(keeping: ["bbs.example.org"], onDisk: true)
+        #expect(forums.engine(host: "bbs.example.org").sweeping != nil, "a page waits for the sweep too")
         await forums.sweeping?.value
         #expect(Set(await store.httpCookieStore.allCookies().map(\.name)) == ["x7Kq_2132_auth"])
     }
@@ -175,6 +177,19 @@ struct LeftBehindTests {
             finished.withLock { $0 = true }
         }
         #expect(!finished.withLock { $0 }, "the quit waited for a store that never answered")
+    }
+
+    @Test("Signing out forgets a guest cookie from the jar the live session actually uses")
+    func theLiveJarForgets() throws {
+        let live = try #require(URLSessionClient.memoryOnly.configuration.httpCookieStorage)
+        #expect(live !== HTTPCookieStorage.shared)
+        #expect(SystemJar().cookies === live, "the jar a sign-out clears is the one requests fill")
+        #expect(SystemJar().credentials == nil)
+        let cookie = ForumDeviceStoreTests.cookie("guest", domain: "jar-forgets.example")
+        live.setCookie(cookie)
+        defer { live.deleteCookie(cookie) }
+        SystemJar().forget(host: "jar-forgets.example", keeping: [])
+        #expect(!(live.cookies ?? []).contains { $0.domain.contains("jar-forgets.example") })
     }
 
     @Test("What an older build left in the shared cache and cookie jar is emptied, once")
@@ -232,7 +247,10 @@ struct LeftBehindTests {
         #expect(code.contains("await forums.dropCache(within: StoreSaver.deadline)"))
         // A quit sweeps; a backgrounding drops only the cache, so a sign-in stepped away from
         // survives it; a launch sweeps what an earlier run left, before a sign-in reads it.
-        #expect(code.components(separatedBy: "await Launch.shared.end()").count - 1 == 1)
+        // A Mac's quit, an iPhone's end where the system says so, and its last scene let go.
+        #expect(code.components(separatedBy: "await Launch.shared.end()").count - 1 == 3)
+        #expect(code.contains("func applicationWillTerminate(_ application: UIApplication)"))
+        #expect(code.contains("UIScene.didDisconnectNotification"))
         #expect(code.components(separatedBy: "await Launch.shared.pause()").count - 1 == 1)
         #expect(!code.contains("Launch.shared.saver.flush()"))
         let sweep = try #require(code.range(of: "forums.sweepAtLaunch("))
