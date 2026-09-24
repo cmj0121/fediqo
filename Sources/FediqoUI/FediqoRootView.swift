@@ -105,6 +105,17 @@ public struct FediqoRootView: View {
         self.storeNoticeSeen = storeNoticeSeen
     }
 
+    /// From here on, nothing leaves for a host that is not one of `hosts` — the sources the person
+    /// added — or something one of them pointed to (#220). Said once, at launch, before anything
+    /// is asked. After that `store` alone keeps it current, in the order its sources are added and
+    /// let go — one writer, however many windows are open; a host the person names to add is
+    /// theirs from the moment they name it.
+    public static func onlyToSources(_ hosts: [String], kept store: ItemStore) {
+        let work = SourceWork.shared
+        work.govern(sources: hosts)
+        Task { await store.watchSources { work.sourcesChanged($0) } }
+    }
+
     /// Hands the copies of pictures already on this device to the one picture cache every row
     /// draws from, once, at launch — and first drops the copies of any host not in `hosts`, the
     /// servers the reader still reads. Queued ahead of every picture a row can ask for, so the

@@ -210,7 +210,7 @@ private final class Cache: @unchecked Sendable {
             delegate: trust,
             delegateQueue: nil
         )
-        let inner = URLSessionClient(session: session, sameOriginOnly: true)
+        let inner = URLSessionClient(session: session, sameOriginOnly: true, watchedOnly: false)
         let client = LoopbackClient(inner: inner)
         boxed = client
         return client

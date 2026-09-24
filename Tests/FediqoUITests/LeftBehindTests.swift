@@ -81,8 +81,10 @@ struct LeftBehindTests {
         for name in ["SourceWork.swift", "ActivityPanel.swift"] {
             let text = Self.code(try String(contentsOf: shell.appendingPathComponent(name), encoding: .utf8))
             for keeper in [
-                "UserDefaults", "AppStorage", "SceneStorage", "FileManager", "write(to", "Logger",
-                "NetLog", "ItemStore", "NSUbiquitousKeyValueStore", "print(",
+                // `NetLog` is allowed: a refusal is a failure, and what it writes is pinned by
+                // `theLogNamesOnlyFailures` below.
+                "UserDefaults", "AppStorage", "SceneStorage", "FileManager", "write(to", "Logger(",
+                "ItemStore", "NSUbiquitousKeyValueStore", "print(",
             ] {
                 #expect(!text.contains(keeper), "\(name) reaches for \(keeper)")
             }

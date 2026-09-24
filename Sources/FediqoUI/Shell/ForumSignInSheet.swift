@@ -55,6 +55,8 @@ struct ForumSignInSheet: View {
         // small when they wanted to see what was behind it.
         .frame(minWidth: 380, minHeight: 480)
         .task { await open() }
+        // The check a sign-in shows, and a page followed from it, only while the sheet is up (#220).
+        .onDisappear { [engine] in Task { await engine.signingIn(false) } }
     }
 
     private var header: some View {
@@ -116,7 +118,9 @@ struct ForumSignInSheet: View {
     /// is not a fallback for when the automatic path fails; for a challenged host it is the only
     /// way the automatic path is ever reached at all.
     private func open() async {
-        guard let url = engine.loginURL else { return }
+        guard let url = engine.loginURL, !Task.isCancelled else { return }
+        await engine.signingIn(true)
+        guard !Task.isCancelled else { return }
         _ = try? await engine.page(at: url)
         signedIn = await engine.isSignedIn()
     }

@@ -132,10 +132,16 @@ final class ShellReader {
     /// page's business and a notice about it would be this app narrating a stranger's markup; the
     /// main frame is the page the reader is looking at. What the page pulls in beside it — a
     /// subframe, a picture, a script — is WebKit's, and is neither said nor recorded here.
+    ///
+    /// **And only a page a source the person added pointed to** (#220): a page that belongs to
+    /// nobody the person added is refused like a page this app will not follow.
     func decide(_ url: URL?, mainFrame: Bool) -> Bool {
         if let source = reading?.source, gone?(source.lowercased()) == true { return false }
-        let allowed = url.map(Host.allowsFetch) ?? false
+        var allowed = url.map(Host.allowsFetch) ?? false
         guard mainFrame else { return allowed }
+        if allowed, let url, !work.admits(reached: url.host() ?? "", source: reading?.source) {
+            allowed = false
+        }
         if allowed, let url {
             work.note(host: url.host() ?? "", for: .page, source: reading?.source)
         } else {
@@ -365,7 +371,8 @@ struct LinkReaderSheet: View {
 /// see what came back rather than where it was going — is not implemented at all. The plaintext
 /// case is covered, but by WebKit and not by this: mixed content on an `https` page is blocked
 /// by the engine. So the sentence above is a rule about where the reader is taken, and it is not
-/// a claim about every byte the page pulls in.
+/// a claim about every byte the page pulls in — that is `PageRules`' (#220), which blocks every
+/// load to a site other than the page's own before it leaves.
 private struct LinkWebView {
     let url: URL
     /// Where the page reports back to: the host it landed on, and a move that was stopped.
@@ -388,7 +395,17 @@ private struct LinkWebView {
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = coordinator
         view.uiDelegate = coordinator
-        view.load(URLRequest(url: url))
+        // Loaded once nothing but the page's own site can be loaded beside it (#220). Where the
+        // rules could not be put on, the page is not loaded and the reader is told it was stopped.
+        let reader = reader
+        Task { @MainActor [weak view] in
+            guard let view else { return }
+            if await PageRules.install(on: view.configuration.userContentController, .page) {
+                view.load(URLRequest(url: url))
+            } else {
+                reader.refuse()
+            }
+        }
         return view
     }
 

@@ -32,6 +32,9 @@ public struct URLSessionClient: HTTPClient, Sendable {
     /// token. The sign-in's client sets it: its bodies carry the client secret, the code and the
     /// token itself.
     let sameOriginOnly: Bool
+    /// Whether a request that did not come through the gate is refused (#220): see `Outward`. On
+    /// for every client the app builds; a test that drives this client by itself turns it off.
+    let watchedOnly: Bool
 
     /// The session every client is built on unless one is handed in: **nothing of it is written
     /// to disk** (#219). `URLSession.shared` keeps an on-disk `URLCache` — every response filed
@@ -51,11 +54,13 @@ public struct URLSessionClient: HTTPClient, Sendable {
     public init(
         session: URLSession = URLSessionClient.memoryOnly,
         byteLimit: Int = URLSessionClient.defaultByteLimit,
-        sameOriginOnly: Bool = false
+        sameOriginOnly: Bool = false,
+        watchedOnly: Bool = true
     ) {
         self.session = session
         self.byteLimit = byteLimit
         self.sameOriginOnly = sameOriginOnly
+        self.watchedOnly = watchedOnly
     }
 
     public func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
@@ -69,6 +74,12 @@ public struct URLSessionClient: HTTPClient, Sendable {
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         guard let url = request.url, Host.isFetchable(url) else {
             throw URLError(.unsupportedURL)
+        }
+        guard !watchedOnly || Outward.admitted else {
+            NetLog.network.fault(
+                "\(NetLog.line("unwatched", host: url.host() ?? "", error: OutwardRefusal.unwatched), privacy: .public)"
+            )
+            throw OutwardRefusal.unwatched
         }
         var request = request
         request.setValue(Fediqo.userAgent, forHTTPHeaderField: "User-Agent")

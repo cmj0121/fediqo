@@ -89,6 +89,15 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     /// queue is exactly that machinery.
     private var running = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
+    /// Which of `PageRules`' lists is on this view: put on before its first page, and changed as
+    /// the person's sign-in comes and goes.
+    private(set) var ruledAs: PageRules.Kind?
+    /// Whether the person has this forum's sign-in in front of them (#220): what else the page
+    /// may pull in, and where it may go, is `Allowance`'s `signingIn` entries then.
+    private(set) var signingIn = false
+    /// Where what this browser reaches beyond its forum is written (#218, #220). The app's own; a
+    /// test hands in another.
+    var work: SourceWork = .shared
     /// The launch's sweep of an earlier run's store, while it runs (#219): nothing is loaded
     /// until it is done, so no page is swept out from under.
     var sweeping: Task<Void, Never>?
@@ -134,6 +143,15 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     /// Loads, waits for a navigation to finish, then waits out a browser check if there is one.
     private func settled(_ url: URL) async throws -> ForumPage {
         await sweeping?.value
+        // Nothing but the forum's own site is loaded beside its page (#220). Refused outright
+        // where the rules could not be put on: a page that could reach anybody is not loaded.
+        var tries = 0
+        while ruledAs != (signingIn ? .signIn : .forum) {
+            tries += 1
+            guard tries <= 3, await applyRules() else {
+                throw ForumTransportError.unreachable("PageRules")
+            }
+        }
         let mark = finishes
         failure = nil
         mainResponse = nil
@@ -195,6 +213,72 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     }
 
     // MARK: - Signing in
+
+    /// The person has this forum's sign-in in front of them, or no longer has (#220). While they
+    /// do, the check a sign-in shows may load and a page they follow away from it may open — each
+    /// written to the run's record under this forum; after, neither.
+    ///
+    /// **One browser, both jobs** (see the type): while the sheet is up, a background read of this
+    /// forum goes through this same view and so runs under the sign-in's rules too — the check a
+    /// sign-in shows may load beside it, and it is written like any other act of this browser.
+    func signingIn(_ on: Bool) async {
+        signingIn = on
+        await applyRules()
+    }
+
+    /// Bumped by every change of rules asked for, so one that finishes compiling after a newer
+    /// one was asked puts nothing on: a stale "signing in" cannot land over a later "no longer".
+    private var rulesEpoch = 0
+
+    /// Puts on the list for what this browser is doing now. False only where WebKit would not
+    /// compile it; a request overtaken by a newer one puts nothing on and leaves it to that one.
+    @discardableResult
+    private func applyRules() async -> Bool {
+        rulesEpoch += 1
+        let mine = rulesEpoch
+        let wanted: PageRules.Kind = signingIn ? .signIn : .forum
+        guard let list = await PageRules.list(wanted) else {
+            if mine == rulesEpoch { ruledAs = nil }
+            return false
+        }
+        guard mine == rulesEpoch else { return true }
+        let controller = view.configuration.userContentController
+        controller.removeAllContentRuleLists()
+        controller.add(list)
+        ruledAs = wanted
+        return true
+    }
+
+    /// Whether this browser goes to `url`, and what is written of it (#220).
+    ///
+    /// **The main frame stays on the forum's host**, except while the person signs in: then it
+    /// may go anywhere they follow (`Allowance.ID.signInPage`), and every page it lands on is
+    /// written under this forum. A frame is left to `PageRules`, which blocks every other site's
+    /// but what an entry lets through; a frame an entry lets through is written under this forum.
+    /// Nothing moves for a forum the gate no longer admits.
+    func decide(_ url: URL?, mainFrame: Bool) -> Bool {
+        guard let url else { return false }
+        if url.scheme == "about" { return true }
+        guard Host.allowsFetch(url), let there = url.host()?.lowercased(),
+              work.admits(reached: there, source: host)
+        else { return false }
+        // Its own site is its host or that host's `www.` spelling (`belongs`), and no wider: a
+        // guess at the registrable domain without the public suffix list would take two strangers
+        // under `com.tw` for one site.
+        let own = Self.belongs(url, to: host)
+        let applying = Allowance.applying(signingIn ? .signingIn : .forumPage)
+        if mainFrame {
+            guard signingIn else { return own }
+            let entry = own ? nil : applying.first { $0.reach == .navigation && $0.allows(url) }
+            guard own || entry != nil else { return false }
+            work.note(host: there, for: own ? .signIn : .signInPage, source: host, allowedBy: entry?.id)
+            return true
+        }
+        if !own, let entry = applying.first(where: { $0.reach == .frame && $0.allows(url) }) {
+            work.note(host: there, for: .personCheck, source: host, allowedBy: entry.id)
+        }
+        return true
+    }
 
     /// Whether the settled document shows a signed-in member. Used to notice a session that
     /// lapsed mid-scroll, which a forum reports by quietly serving the guest's page.
@@ -487,7 +571,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         return bare(there) == bare(host)
     }
 
-    static func bare(_ host: String) -> String {
+    nonisolated static func bare(_ host: String) -> String {
         host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
@@ -523,6 +607,20 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     }
 
     // MARK: - WKNavigationDelegate
+
+    nonisolated func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
+    ) {
+        MainActor.assumeIsolated {
+            let allowed = decide(
+                navigationAction.request.url,
+                mainFrame: navigationAction.targetFrame?.isMainFrame ?? true
+            )
+            decisionHandler(allowed ? .allow : .cancel)
+        }
+    }
 
     nonisolated func webView(
         _ webView: WKWebView,
@@ -620,7 +718,10 @@ struct ForumWebTransport: HTTPClient {
         self.engine = engine
     }
 
+    /// Refused where the gate did not let it through, as `URLSessionClient` refuses (#220): a
+    /// forum's browser is a way out like any other.
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        guard Outward.admitted else { throw OutwardRefusal.unwatched }
         let page = try await engine.page(at: url)
         switch page {
         case .wall(let wall):

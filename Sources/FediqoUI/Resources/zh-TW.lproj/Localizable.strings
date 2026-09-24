@@ -373,6 +373,8 @@
 "work.purpose.search" = "搜尋一個來源";
 "work.purpose.page" = "開啟文章連結的網頁";
 "work.purpose.video" = "播放影片";
+"work.purpose.signInPage" = "從論壇登入頁前往的頁面";
+"work.purpose.personCheck" = "論壇登入時顯示的真人驗證";
 "activity.open" = "這次執行送出的所有請求…";
 "activity.open.footer" = "從開啟 app 以來的每一個請求：哪個來源、什麼時候、為了什麼。";
 "activity.title" = "這次執行的請求";
