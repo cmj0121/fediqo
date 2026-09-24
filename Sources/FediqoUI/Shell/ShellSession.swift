@@ -752,6 +752,8 @@ final class ShellSession {
         }
         // Last, once every property is set: a take-away or a read back holds the room limit still (#249).
         carry.holding = { [weak self] held in self?.holdsStill = held }
+        // And a move nearby likewise (#253): from the package's first byte to every way out.
+        nearby.holdStill = { [weak self] held in self?.holdsStill = held }
     }
 
     /// The watch on the person's list, taken off as this goes.

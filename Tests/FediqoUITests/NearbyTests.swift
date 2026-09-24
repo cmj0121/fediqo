@@ -222,6 +222,30 @@ struct NearbyTests {
         nearby.dismiss()
     }
 
+    @Test("On a session, the move holds the room limit still (#249) and lets it go on every way out")
+    func holdsTheSessionStill() async throws {
+        let session = ShellSession(http: FixtureHTTP())
+        let link = PipeNearbyLink()
+        let onto = FakeCarrier(device: "a tablet")
+        let from = FakeCarrier(device: "a laptop")
+        defer { try? FileManager.default.removeItem(at: onto.staging); try? FileManager.default.removeItem(at: from.staging) }
+        let holding = ShellNearby(work: SourceWork())
+        holding.beginHold(with: onto, link: link, device: "a tablet") {}
+        for _ in 0..<200 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        session.nearby.beginOffer(with: from, link: link)
+        for _ in 0..<200 where session.nearby.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(!session.holdsStill)
+        guard case .holding(let code) = holding.step else { Issue.record("no code"); return }
+        session.nearby.picked = session.nearby.peers.first
+        session.nearby.offer(code: code, rides: .withoutPictures, with: from, link: link, device: "a laptop") {}
+        #expect(session.holdsStill, "not held before the first byte moved")
+        for _ in 0..<400 { if case .asking = session.nearby.step { break }; try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(session.holdsStill)
+        session.nearby.answer(false)
+        #expect(!session.holdsStill && session.nearby.step == nil)
+        holding.dismiss()
+    }
+
     // MARK: - What is said
 
     private static let offer = NearbyOffer(
