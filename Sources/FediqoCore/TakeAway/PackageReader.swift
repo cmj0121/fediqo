@@ -53,9 +53,12 @@ public final class PackageReader: @unchecked Sendable {
             try state.handle.seek(toOffset: UInt64(PackageFormat.preludeBytes))
             state.counter = 0
             let aad = prelude.encode() + PackageFormat.Place.header.aad
+            // Only the tag failing is the wrong password; a length no writer of ours makes is
+            // a file that is not as written, whatever the password.
+            let box = try Self.readBox(&state)
             let plaintext: Data
             do {
-                plaintext = try Self.unseal(&state, with: keys.header, aad: aad)
+                plaintext = try Self.unsealBox(box, counter: &state.counter, prefix: state.prefix, with: keys.header, aads: [aad]).0
             } catch PackageRefusal.altered {
                 throw PackageRefusal.wrongPassword
             }

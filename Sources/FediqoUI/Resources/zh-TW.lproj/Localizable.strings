@@ -923,6 +923,8 @@
 "carry.refused.noRoom.line" = "需要 %@，這部裝置只剩 %@ 可用。";
 "carry.refused.empty.title" = "需要密碼";
 "carry.refused.empty.line" = "沒有上鎖的檔案什麼都不是；請設定一個並記住它。";
+"carry.refused.short.title" = "密碼需要更長";
+"carry.refused.short.line" = "至少 %d 個字元，檔案才不會被猜開。";
 "carry.refused.other.title" = "沒能完成";
 "carry.refused.other.line" = "沒有任何半途的改動：%@";
 "carry.done.taken.title" = "已帶走";
@@ -931,7 +933,7 @@
 "carry.done.read.line" = "現在這裡有 %d 則貼文，每個來源都照原樣登入。";
 "carry.password.set.title" = "設定檔案的密碼";
 "carry.password.set.line" = "密碼遺失就無法復原。";
-"carry.password.set.help" = "這個檔案能登入每一個來源，所以它是上鎖的，沒有密碼就什麼都不是。密碼一旦遺失，沒有人——包括這個 app——打得開它。請選一個你會記住的。";
+"carry.password.set.help" = "這個檔案能登入每一個來源，所以它是上鎖的，沒有密碼就什麼都不是。密碼一旦遺失，沒有人——包括這個 app——打得開它。請選一個你會記住、至少八個字元的密碼。";
 "carry.password.open.title" = "檔案的密碼";
 "carry.password.open.line" = "帶走時設定的那一個。";
 "carry.password.open.help" = "只有帶走時上鎖用的密碼打得開它。密碼錯了，這部裝置什麼都不會改變。";

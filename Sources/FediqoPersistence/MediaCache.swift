@@ -23,6 +23,9 @@ public struct MediaCache: MediaCopies {
         try makeExcludedFromBackup(directory)
     }
 
+    /// Where this cache keeps its copies.
+    public var location: URL { directory }
+
     /// The cache this app keeps, under Caches.
     public static func caches() throws -> MediaCache {
         let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]

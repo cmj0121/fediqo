@@ -28,6 +28,13 @@ public enum PackageFormat {
     public static let chunkBytes = 1 << 20
     /// PBKDF2 rounds for a password, written in the prelude so it can rise later.
     public static let rounds: UInt32 = 600_000
+    /// The most rounds a prelude may ask for: a file naming billions would hold the device for
+    /// hours before a password could even fail, and the stretch cannot be cancelled. Past this
+    /// a file is not one this writer made.
+    public static let maxRounds: UInt32 = rounds * 4
+    /// The fewest characters a password may have (#247): the file signs in everywhere, and the
+    /// stretch alone does not make a short one safe.
+    public static let minPasswordCount = 8
     /// The prelude's fixed length, in bytes: `Prelude.encode` writes exactly this many.
     static let preludeBytes = 4 + 2 + 1 + 1 + 16 + 4 + 4 + 8 + 1 + 8
 
@@ -97,7 +104,9 @@ public enum PackageFormat {
             let seconds = Double(bitPattern: cursor.le())
             let withPictures = cursor.byte() != 0
             let bytes: UInt64 = cursor.le()
-            guard rounds > 0, seconds.isFinite, bytes <= UInt64(Int.max) else { throw PackageRefusal.altered }
+            guard rounds > 0, rounds <= PackageFormat.maxRounds, seconds.isFinite, bytes <= UInt64(Int.max) else {
+                throw PackageRefusal.altered
+            }
             return Prelude(
                 keying: keying, salt: salt, rounds: rounds, noncePrefix: prefix,
                 takenAt: Date(timeIntervalSince1970: seconds), withPictures: withPictures, bytes: Int(bytes)

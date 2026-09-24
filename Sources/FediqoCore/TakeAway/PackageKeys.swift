@@ -23,6 +23,7 @@ struct PackageKeys {
         switch key {
         case .password(let password):
             guard !password.isEmpty else { throw PackageFault.emptyPassword }
+            guard prelude.rounds <= PackageFormat.maxRounds else { throw PackageRefusal.altered }
             ikm = try Self.stretch(password, salt: prelude.salt, rounds: prelude.rounds)
         case .direct(let direct):
             ikm = direct
@@ -37,13 +38,18 @@ struct PackageKeys {
         )
     }
 
-    /// PBKDF2-HMAC-SHA256 over the password's UTF-8.
+    /// PBKDF2-HMAC-SHA256 over the password's UTF-8. The password's bytes and the derived key
+    /// are wiped once the key object holds its own copy, so neither lingers in a freed buffer.
     static func stretch(_ password: String, salt: Data, rounds: UInt32) throws -> SymmetricKey {
         var derived = [UInt8](repeating: 0, count: 32)
-        let passwordBytes = Array(password.utf8)
+        var passwordBytes = password.utf8.map { CChar(bitPattern: $0) }
+        defer {
+            _ = memset_s(&derived, derived.count, 0, derived.count)
+            _ = memset_s(&passwordBytes, passwordBytes.count, 0, passwordBytes.count)
+        }
         let status = salt.withUnsafeBytes { saltBytes in
             CCKeyDerivationPBKDF(
-                CCPBKDFAlgorithm(kCCPBKDF2), passwordBytes.map { CChar(bitPattern: $0) }, passwordBytes.count,
+                CCPBKDFAlgorithm(kCCPBKDF2), passwordBytes, passwordBytes.count,
                 saltBytes.bindMemory(to: UInt8.self).baseAddress, salt.count,
                 CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256), rounds, &derived, derived.count
             )
@@ -66,6 +72,8 @@ public enum PackageFault: Error, Sendable, Equatable {
     /// A package locked by nothing is nothing: an empty password is refused before a byte is
     /// written.
     case emptyPassword
+    /// A password shorter than `PackageFormat.minPasswordCount`, refused before a byte is written.
+    case shortPassword
     /// The system's key derivation refused, which no input of ours reaches.
     case keyDerivation
     /// The writer was told one number of entries and given another, or finished twice.

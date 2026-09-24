@@ -49,6 +49,7 @@ final class ShellCarry {
         case package(PackageRefusal)
         case noRoom(needed: Int, free: Int)
         case emptyPassword
+        case shortPassword
         /// Something else refused — a disk, the Keychain — said as itself.
         case other(String)
 
@@ -57,6 +58,7 @@ final class ShellCarry {
             case let refusal as PackageRefusal: self = .package(refusal)
             case PackageFault.noRoom(let needed, let free): self = .noRoom(needed: needed, free: free)
             case PackageFault.emptyPassword: self = .emptyPassword
+            case PackageFault.shortPassword: self = .shortPassword
             default: self = .other(String(describing: error))
             }
         }
@@ -152,6 +154,10 @@ final class ShellCarry {
         guard case .setting(let pictures) = step else { return }
         guard !password.isEmpty else {
             step = .refused(.emptyPassword)
+            return
+        }
+        guard password.count >= PackageFormat.minPasswordCount else {
+            step = .refused(.shortPassword)
             return
         }
         step = .taking(PackageProgress(done: 0, total: 0))

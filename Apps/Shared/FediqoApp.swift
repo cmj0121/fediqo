@@ -34,6 +34,10 @@ final class Launch {
     /// off would leave the store empty while the first frame draws, and every save asked for in
     /// that gap would have to be held back or it would write the empty store over the index.
     private init() {
+        // What a take-away or a read back that was killed midway left on disk goes first (#247):
+        // a plaintext index in scratch is nothing a later run reads.
+        let media = try? MediaCache.caches()
+        StorePackager.sweepLeftovers(directory: StoreFile.applicationSupportDirectory, media: media?.location)
         let opened = StoreFile.openApplicationSupport()
         store = ItemStore(sources: opened.sources, notes: opened.notes, said: opened.said)
         // `nil` when the index could not be read and could not be set aside either: this run
@@ -44,7 +48,7 @@ final class Launch {
         storeIsNewer = opened.storeIsNewer
         carrier = StorePackager(
             directory: StoreFile.applicationSupportDirectory, file: opened.file, store: store,
-            media: try? MediaCache.caches(), tokens: KeychainMastodonTokens(), credentials: KeychainCredentials(),
+            media: media, tokens: KeychainMastodonTokens(), credentials: KeychainCredentials(),
             defaults: .standard, device: Self.deviceName,
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         )
@@ -71,7 +75,7 @@ final class Launch {
         )
         forums.signInAgain(hosts: opened.sources.filter { $0.kind == .discuz }.map(\.host))
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
-        if let media = try? MediaCache.caches() {
+        if let media {
             FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host))
         }
     }

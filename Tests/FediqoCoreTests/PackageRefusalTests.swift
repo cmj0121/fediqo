@@ -53,6 +53,43 @@ struct PackageRefusalTests {
         }
     }
 
+    @Test("A prelude asking for more rounds than any writer of ours sets is refused as altered before a password is stretched")
+    func tooManyRounds() throws {
+        let url = temp()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try write([(.settings, "settings", Data("x".utf8))], to: url)
+        var bytes = try Data(contentsOf: url)
+        // The rounds are the four bytes after the salt: magic 4, version 2, keying 1, pad 1, salt 16.
+        var rounds = (PackageFormat.maxRounds + 1).littleEndian
+        withUnsafeBytes(of: &rounds) { bytes.replaceSubrange(24..<28, with: $0) }
+        try bytes.write(to: url)
+        let started = Date()
+        #expect(throws: PackageRefusal.altered) { try PackageReader(at: url) }
+        #expect(Date().timeIntervalSince(started) < 1, "refused without stretching")
+        // The cap itself is still read.
+        rounds = PackageFormat.maxRounds.littleEndian
+        withUnsafeBytes(of: &rounds) { bytes.replaceSubrange(24..<28, with: $0) }
+        try bytes.write(to: url)
+        #expect(try PackageReader(at: url).prelude.rounds == PackageFormat.maxRounds)
+        let prelude = PackageFormat.Prelude(
+            keying: .password, salt: Data(repeating: 1, count: 16), rounds: PackageFormat.maxRounds + 1,
+            noncePrefix: Data(repeating: 0, count: 4), takenAt: Date(), withPictures: false, bytes: 0
+        )
+        #expect(throws: PackageRefusal.altered) { try PackageKeys(.password("open sesame"), prelude: prelude) }
+    }
+
+    @Test("A header box of a length no writer of ours makes is altered, not the wrong password")
+    func headerLengthIsAltered() throws {
+        let url = temp()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try write([(.settings, "settings", Data("x".utf8))], to: url)
+        var bytes = try Data(contentsOf: url)
+        var length = UInt32(PackageFormat.maxBoxBytes + 1).littleEndian
+        withUnsafeBytes(of: &length) { bytes.replaceSubrange(PackageFormat.preludeBytes..<PackageFormat.preludeBytes + 4, with: $0) }
+        try bytes.write(to: url)
+        #expect(throws: PackageRefusal.altered) { try PackageReader(at: url).open(with: .password("open sesame")) }
+    }
+
     @Test("A package cut short anywhere is refused as cut short, and what was read before it is not trusted")
     func cutShort() async throws {
         let url = temp()

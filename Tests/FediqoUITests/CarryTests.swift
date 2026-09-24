@@ -101,6 +101,12 @@ struct CarryTests {
         #expect(carry.step == .setting(pictures: false))
         carry.set(password: "", with: carrier) {}
         #expect(carry.step == .refused(.emptyPassword))
+        carry.dismiss()
+        carry.beginTakeAway(with: carrier)
+        await settle(carry) { $0 != .weighing }
+        carry.chose(pictures: false)
+        carry.set(password: "seven77", with: carrier) {}
+        #expect(carry.step == .refused(.shortPassword))
         #expect(carrier.taken.isEmpty)
         carry.dismiss()
     }
@@ -112,7 +118,7 @@ struct CarryTests {
         carry.beginTakeAway(with: carrier)
         await settle(carry) { $0 != .weighing }
         carry.chose(pictures: false)
-        carry.set(password: "p", with: carrier) {}
+        carry.set(password: "password", with: carrier) {}
         await settle(carry) { if case .moving = $0 { true } else { false } }
         guard case .moving(let url) = carry.step else { Issue.record("not moving"); return }
         try Data("x".utf8).write(to: url)
@@ -209,7 +215,7 @@ struct CarryTests {
     func refusalsAreEachTheirOwn() {
         let refusals: [ShellCarry.Trouble] = [
             .package(.notOurs), .package(.newer), .package(.wrongPassword), .package(.altered), .package(.cutShort),
-            .noRoom(needed: 2_000_000, free: 1_000), .emptyPassword, .other("the disk said no"),
+            .noRoom(needed: 2_000_000, free: 1_000), .emptyPassword, .shortPassword, .other("the disk said no"),
         ]
         for language in [DummyLanguage.english, .taiwanese] {
             let said = refusals.map { ShellQuestion.carryRefused($0, language: language) }
@@ -233,7 +239,9 @@ struct CarryTests {
         #expect(!CarryPasswordSheet.ready(password: "", again: "", setting: true))
         #expect(!CarryPasswordSheet.ready(password: "a", again: "", setting: true))
         #expect(!CarryPasswordSheet.ready(password: "a", again: "b", setting: true))
-        #expect(CarryPasswordSheet.ready(password: "a", again: "a", setting: true))
+        #expect(!CarryPasswordSheet.ready(password: "a", again: "a", setting: true), "too short to set")
+        #expect(!CarryPasswordSheet.ready(password: "password", again: "passwor", setting: true))
+        #expect(CarryPasswordSheet.ready(password: "password", again: "password", setting: true))
         #expect(CarryPasswordSheet.ready(password: "a", again: "", setting: false))
         #expect(!CarryPasswordSheet.ready(password: "", again: "", setting: false))
     }
@@ -260,7 +268,7 @@ struct CarryTests {
             "carry.password.set.title", "carry.password.set.line", "carry.password.set.help",
             "carry.password.open.title", "carry.password.open.line", "carry.password.open.help",
             "carry.password.field", "carry.password.again", "carry.password.set.go", "carry.password.open.go",
-        ] + ["notOurs", "newer", "wrongPassword", "altered", "cutShort", "noRoom", "empty", "other"]
+        ] + ["notOurs", "newer", "wrongPassword", "altered", "cutShort", "noRoom", "empty", "short", "other"]
             .flatMap { ["carry.refused.\($0).title", "carry.refused.\($0).line"] }
         let resources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -275,6 +283,8 @@ struct CarryTests {
         }
         #expect(SourceWork.Purpose.takeAway.symbol != SourceWork.Purpose.readBack.symbol)
         #expect(L10n.t("carry.password.set.line", language: .english) == "A lost password cannot be recovered.")
+        #expect(L10n.t("carry.password.set.help", language: .english).contains("eight"))
+        #expect(ShellQuestion.carryRefused(.shortPassword, language: .english).line.contains("8"))
     }
 
     @Test("The group is on Preferences' settings tab, its flow is one modifier there, and the root's chain is untouched")

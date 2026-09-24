@@ -172,14 +172,16 @@ Connect's privacy questionnaire -- it carries the privacy *link* and nothing els
 the answer is **Data Not Collected**, ticked once by hand under App Privacy. What the code does is checkable:
 no analytics, no third-party SDK of any kind.
 
-**The encryption answer stays `ITSAppUsesNonExemptEncryption = false`, and 0.7.0 is why it has to be said.**
-Since 0.7.0 the app writes a take-away file locked with AES-GCM under a key stretched from the person's password
-(PBKDF2 and HKDF, all of it CryptoKit and CommonCrypto -- `Sources/FediqoCore/TakeAway/`). That is encryption,
-and the answer is still `false`: what the app uses is the operating system's own implementation of standard,
-published algorithms, which is the exemption App Store Connect means by the question (the same footing as HTTPS).
-The `false` in both `project.yml` targets is the whole of the answer, so no export-compliance document is
-uploaded and no yearly self-classification report is owed for it. A build that ever adds a cipher of its own, or a
-library carrying one, has to revisit this before it is uploaded.
+**The encryption answer stays `ITSAppUsesNonExemptEncryption = false`, and 0.7.0 is why the reasoning has to
+be written down.** Since 0.7.0 the app encrypts the person's own data at rest: a take-away file locked with
+AES-GCM under a key stretched from their password (PBKDF2 and HKDF, all of it CryptoKit and CommonCrypto --
+`Sources/FediqoCore/TakeAway/`). The answer is `false` on this reasoning, and only this: every algorithm is a
+standard, published one, implemented by the operating system rather than by this app, and used to protect the
+user's own data -- which is the category the question exempts from carrying a compliance document. What
+`false` does *not* settle is the annual self-classification report to the US Bureau of Industry and Security,
+which may apply to a distributed app using standard encryption; whoever publishes decides that once, records
+it here, and does not have it decided by a build setting. A build that ever adds a cipher of its own, or a
+library carrying one, has to revisit both before it is uploaded.
 
 The screenshots are next door, and the lane picks them up from `fastlane/screenshots/<platform>/` in the same
 run without being told.

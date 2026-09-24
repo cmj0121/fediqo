@@ -62,6 +62,25 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         self.rounds = rounds
     }
 
+    /// Removes what a run that ended midway left behind: a take-away's scratch folder in the
+    /// temporary directory, a read back's staging under the store's folder, and the copies put
+    /// aside while a package's were moved in. Each holds a plaintext index or the pictures, and
+    /// none is anything a later run reads. Asked at launch, before the first frame.
+    public static func sweepLeftovers(
+        directory: URL, media: URL?, temporary: URL = FileManager.default.temporaryDirectory
+    ) {
+        let manager = FileManager.default
+        func sweep(_ folder: URL, prefix: String) {
+            let names = (try? manager.contentsOfDirectory(atPath: folder.path)) ?? []
+            for name in names where name.hasPrefix(prefix) {
+                try? manager.removeItem(at: folder.appendingPathComponent(name))
+            }
+        }
+        sweep(temporary, prefix: "takeaway-")
+        sweep(directory, prefix: "incoming-")
+        if let media { sweep(media.deletingLastPathComponent(), prefix: "media-aside-") }
+    }
+
     /// What the volume under `url` has free for what matters.
     public static func volumeFree(_ url: URL) -> Int {
         let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
@@ -115,7 +134,10 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     public func takeAway(
         to url: URL, key: PackageKey, pictures: Bool, progress: @escaping @Sendable (PackageProgress) -> Void
     ) async throws {
-        if case .password(let password) = key, password.isEmpty { throw PackageFault.emptyPassword }
+        if case .password(let password) = key {
+            if password.isEmpty { throw PackageFault.emptyPassword }
+            if password.count < PackageFormat.minPasswordCount { throw PackageFault.shortPassword }
+        }
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("takeaway-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)

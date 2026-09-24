@@ -27,7 +27,10 @@ public final class PackageWriter {
     public init(
         to url: URL, key: PackageKey, summary: PackageSummary, rounds: UInt32 = PackageFormat.rounds
     ) throws {
-        if case .password(let password) = key, password.isEmpty { throw PackageFault.emptyPassword }
+        if case .password(let password) = key {
+            if password.isEmpty { throw PackageFault.emptyPassword }
+            if password.count < PackageFormat.minPasswordCount { throw PackageFault.shortPassword }
+        }
         let prelude = PackageFormat.Prelude(
             keying: key.keying, salt: PackageKeys.random(16), rounds: rounds,
             noncePrefix: PackageKeys.random(4), takenAt: summary.takenAt,

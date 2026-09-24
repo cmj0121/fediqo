@@ -946,6 +946,8 @@
 "carry.refused.noRoom.line" = "%@ is needed and %@ is free on this device.";
 "carry.refused.empty.title" = "A password is needed";
 "carry.refused.empty.line" = "A file locked by nothing is nothing; set one, and keep it.";
+"carry.refused.short.title" = "A longer password is needed";
+"carry.refused.short.line" = "At least %d characters, so the file is not guessed open.";
 "carry.refused.other.title" = "It could not be finished";
 "carry.refused.other.line" = "Nothing was left half done: %@";
 "carry.done.taken.title" = "Taken away";
@@ -955,7 +957,7 @@
 "carry.done.read.line.one" = "One post is here now, and every source is signed in as it was.";
 "carry.password.set.title" = "Set the file's password";
 "carry.password.set.line" = "A lost password cannot be recovered.";
-"carry.password.set.help" = "The file can sign in to every source, so it is locked, and it is nothing without its password. Nobody — not this app, not anyone else — can open it if the password is lost. Choose one you will keep.";
+"carry.password.set.help" = "The file can sign in to every source, so it is locked, and it is nothing without its password. Nobody — not this app, not anyone else — can open it if the password is lost. Choose one you will keep, of at least eight characters.";
 "carry.password.open.title" = "The file's password";
 "carry.password.open.line" = "The one it was taken away with.";
 "carry.password.open.help" = "Only the password the file was locked with opens it. A wrong one changes nothing on this device.";

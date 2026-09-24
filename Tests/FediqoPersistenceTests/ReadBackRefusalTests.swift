@@ -34,13 +34,13 @@ struct ReadBackRefusalTests {
         let onto = try await Device(sources: [Source(host: "other.example", kind: .mastodon)], notes: [Self.note("o", source: Source(host: "other.example", kind: .mastodon))])
         let url = package()
         defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
-        try await from.packager().takeAway(to: url, key: .password("p"), pictures: false) { _ in }
+        try await from.packager().takeAway(to: url, key: .password("password"), pictures: false) { _ in }
         let before = try onto.fingerprint()
         await #expect(throws: PackageFault.alreadyHeld) {
-            try await readAll(url, key: .password("p"), onto: onto)
+            try await readAll(url, key: .password("password"), onto: onto)
         }
         #expect(try onto.fingerprint() == before)
-        try await readAll(url, key: .password("p"), onto: onto, replacing: true)
+        try await readAll(url, key: .password("password"), onto: onto, replacing: true)
         #expect(try StoreFile(at: onto.directory).load().sources == [Self.mastodon, Self.forum])
         #expect(await onto.store.sources().map(\.host) == [Self.mastodon.host, Self.forum.host])
     }
@@ -128,7 +128,7 @@ struct ReadBackRefusalTests {
             sources: [], posts: 0, timelines: 0, takenAt: Date(), withPictures: false, bytes: bytes.count,
             hasSecrets: false, device: "later", appVersion: "9.9", entryCount: 3
         )
-        let writer = try PackageWriter(to: url, key: .password("p"), summary: summary, rounds: 1000)
+        let writer = try PackageWriter(to: url, key: .password("password"), summary: summary, rounds: 1000)
         var offset = 0
         try writer.add(.store, name: "index.sqlite", bytes: bytes.count) { most in
             guard offset < bytes.count else { return nil }
@@ -147,7 +147,7 @@ struct ReadBackRefusalTests {
 
         let before = try held.fingerprint()
         await #expect(throws: PackageRefusal.newer) {
-            try await held.packager().readBack(url, key: .password("p"), replacing: true) { _ in }
+            try await held.packager().readBack(url, key: .password("password"), replacing: true) { _ in }
         }
         #expect(try held.fingerprint() == before)
     }
@@ -158,7 +158,7 @@ struct ReadBackRefusalTests {
         let onto = try await Device()
         let url = package()
         defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
-        try await from.packager().takeAway(to: url, key: .password("p"), pictures: false) { _ in }
+        try await from.packager().takeAway(to: url, key: .password("password"), pictures: false) { _ in }
         try onto.tokens.save(MastodonToken(host: "kept.example", accessToken: "k", clientID: "c", clientSecret: "s"))
         let refusing = RefusingTokens(inner: onto.tokens)
         let packager = StorePackager(
@@ -167,7 +167,7 @@ struct ReadBackRefusalTests {
             freeSpace: { _ in .max }, rounds: 1000
         )
         await #expect(throws: ForumCredentialError.keychain(-1)) {
-            try await packager.readBack(url, key: .password("p"), replacing: false) { _ in }
+            try await packager.readBack(url, key: .password("password"), replacing: false) { _ in }
         }
         #expect(try onto.tokens.token(host: "kept.example")?.accessToken == "k", "what was there is put back")
         #expect(try onto.tokens.token(host: Self.mastodon.host) == nil)

@@ -207,6 +207,9 @@ enum ShellQuestion {
         case .emptyPassword:
             key = "carry.refused.empty"
             line = L10n.t(key + ".line", language: language)
+        case .shortPassword:
+            key = "carry.refused.short"
+            line = String(format: L10n.t(key + ".line", language: language), PackageFormat.minPasswordCount)
         case .other(let said):
             key = "carry.refused.other"
             line = String(format: L10n.t(key + ".line", language: language), said)

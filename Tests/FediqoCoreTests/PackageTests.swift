@@ -98,25 +98,29 @@ struct PackageTests {
         }
     }
 
-    @Test("An empty password is refused before a byte is written")
+    @Test("An empty or a short password is refused before a byte is written")
     func emptyPassword() throws {
         let url = temp()
         defer { try? FileManager.default.removeItem(at: url) }
         #expect(throws: PackageFault.emptyPassword) {
             try PackageWriter(to: url, key: .password(""), summary: summary(entries: 0, bytes: 0))
         }
+        #expect(throws: PackageFault.shortPassword) {
+            try PackageWriter(to: url, key: .password("seven77"), summary: summary(entries: 0, bytes: 0))
+        }
+        #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 
     @Test("A writer that adds fewer or more entries than it promised, or fewer bytes, finishes nothing")
     func miscount() throws {
         let url = temp()
         defer { try? FileManager.default.removeItem(at: url) }
-        let short = try PackageWriter(to: url, key: .password("p"), summary: summary(entries: 2, bytes: 1), rounds: 1000)
+        let short = try PackageWriter(to: url, key: .password("password"), summary: summary(entries: 2, bytes: 1), rounds: 1000)
         try short.add(.settings, name: "a", bytes: 1, slices(of: Data("a".utf8)))
         #expect(throws: PackageFault.miscounted) { try short.finish() }
-        let over = try PackageWriter(to: url, key: .password("p"), summary: summary(entries: 0, bytes: 0), rounds: 1000)
+        let over = try PackageWriter(to: url, key: .password("password"), summary: summary(entries: 0, bytes: 0), rounds: 1000)
         #expect(throws: PackageFault.miscounted) { try over.add(.settings, name: "a", bytes: 0) { _ in nil } }
-        let lied = try PackageWriter(to: url, key: .password("p"), summary: summary(entries: 1, bytes: 5), rounds: 1000)
+        let lied = try PackageWriter(to: url, key: .password("password"), summary: summary(entries: 1, bytes: 5), rounds: 1000)
         #expect(throws: PackageFault.miscounted) { try lied.add(.settings, name: "a", bytes: 5, slices(of: Data("a".utf8))) }
     }
 

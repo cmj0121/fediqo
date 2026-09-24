@@ -95,10 +95,10 @@ struct StorePackagerTests {
         let onto = try await Device()
         let url = package()
         defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
-        try await from.packager().takeAway(to: url, key: .password("p"), pictures: false) { _ in }
+        try await from.packager().takeAway(to: url, key: .password("password"), pictures: false) { _ in }
         let reader = try PackageReader(at: url)
         #expect(reader.prelude.bytes > PackageFormat.chunkBytes, "the index alone is more than one chunk")
-        try await readAll(url, key: .password("p"), onto: onto)
+        try await readAll(url, key: .password("password"), onto: onto)
         let reopened = try StoreFile(at: onto.directory).load()
         #expect(reopened.notes.count == 600)
     }
@@ -109,11 +109,11 @@ struct StorePackagerTests {
         let onto = try await Device()
         let url = package()
         defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
-        try await from.packager().takeAway(to: url, key: .password("p"), pictures: true) { _ in }
+        try await from.packager().takeAway(to: url, key: .password("password"), pictures: true) { _ in }
         let needed = try PackageReader(at: url).prelude.bytes
         let before = try onto.fingerprint()
         await #expect(throws: PackageFault.noRoom(needed: needed, free: 10)) {
-            try await onto.packager(free: 10).readBack(url, key: .password("p"), replacing: false) { _ in }
+            try await onto.packager(free: 10).readBack(url, key: .password("password"), replacing: false) { _ in }
         }
         #expect(try onto.fingerprint() == before)
         #expect(try FileManager.default.contentsOfDirectory(atPath: onto.directory.path).allSatisfy { !$0.hasPrefix("incoming-") })
@@ -127,7 +127,32 @@ struct StorePackagerTests {
         await #expect(throws: PackageFault.emptyPassword) {
             try await from.packager().takeAway(to: url, key: .password(""), pictures: false) { _ in }
         }
+        await #expect(throws: PackageFault.shortPassword) {
+            try await from.packager().takeAway(to: url, key: .password("seven77"), pictures: false) { _ in }
+        }
         #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test("What a run killed midway left behind is swept at launch, and nothing else is")
+    func sweep() async throws {
+        let onto = try await Device()
+        defer { onto.remove() }
+        let manager = FileManager.default
+        let tmp = onto.root.appendingPathComponent("tmp", isDirectory: true)
+        let stale = [
+            tmp.appendingPathComponent("takeaway-old"),
+            onto.directory.appendingPathComponent("incoming-old"),
+            onto.root.appendingPathComponent("media-aside-old"),
+        ]
+        let kept = [tmp.appendingPathComponent("other"), onto.directory.appendingPathComponent("index-unreadable-x")]
+        for folder in stale + kept {
+            try manager.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data("secret".utf8).write(to: folder.appendingPathComponent("index.sqlite"))
+        }
+        StorePackager.sweepLeftovers(directory: onto.directory, media: onto.media.location, temporary: tmp)
+        for folder in stale { #expect(!manager.fileExists(atPath: folder.path), "\(folder.lastPathComponent) stays") }
+        for folder in kept { #expect(manager.fileExists(atPath: folder.path), "\(folder.lastPathComponent) went") }
+        #expect(manager.fileExists(atPath: onto.directory.appendingPathComponent("index.sqlite").path))
     }
 
     @Test("A device whose index this run could not open still takes the package's index, by a move")
@@ -136,8 +161,8 @@ struct StorePackagerTests {
         let onto = try await Device(noFile: true)
         let url = package()
         defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
-        try await from.packager().takeAway(to: url, key: .password("p"), pictures: false) { _ in }
-        try await readAll(url, key: .password("p"), onto: onto)
+        try await from.packager().takeAway(to: url, key: .password("password"), pictures: false) { _ in }
+        try await readAll(url, key: .password("password"), onto: onto)
         #expect(try StoreFile(at: onto.directory).load().notes.count == 3)
     }
 }

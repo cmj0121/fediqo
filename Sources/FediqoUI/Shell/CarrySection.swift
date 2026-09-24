@@ -171,12 +171,13 @@ struct CarryPasswordSheet: View {
         if case .set = ask { true } else { false }
     }
 
-    /// Whether what was typed may be handed on: not empty, and where it is being set, the same
-    /// twice.
+    /// Whether what was typed may be handed on: not empty, and where it is being set, long
+    /// enough and the same twice.
     var ready: Bool { Self.ready(password: password, again: again, setting: setting) }
 
     static func ready(password: String, again: String, setting: Bool) -> Bool {
-        !password.isEmpty && (!setting || password == again)
+        guard !password.isEmpty else { return false }
+        return !setting || (password.count >= PackageFormat.minPasswordCount && password == again)
     }
 
     private var glyph: some View {
