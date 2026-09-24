@@ -91,9 +91,7 @@ struct DummyThreadPane: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 Spacer()
                 outward
-                Text(L10n.t("thread.leaveHint"))
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                ShellKeyHint("thread.leaveHint")
             }
             .padding(.horizontal, ShellSpace.pad)
             .padding(.vertical, ShellSpace.snug)

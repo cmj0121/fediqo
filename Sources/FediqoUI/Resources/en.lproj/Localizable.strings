@@ -152,6 +152,7 @@
 "editor.tab.timeline" = "Timeline";
 "timeline.edit.fixed" = "All and Trends can't be edited. To add your own timeline, press + — or Tab to it and press e.";
 "timeline.unreadable" = "Your timelines on this device can't be read here. They are left untouched, and nothing new is saved over them.";
+"timeline.unreadable.line" = "Your timelines here can't be read, and are left untouched.";
 "timeline.name.placeholder" = "Name this timeline";
 "timeline.desc.placeholder" = "A short description, optional";
 "timeline.done" = "Done";
@@ -238,6 +239,7 @@
 "search.reach.notAsked" = "Not asked, as they cannot be searched from here: %@.";
 "search.empty.title" = "Nothing in %@ matches";
 "search.empty.detail" = "Only the posts this timeline shows are searched: what this device holds, and what its sources sent back when asked. Try fewer characters, or * for any run of them.";
+"search.empty.line" = "Try fewer characters, or * for any run of them.";
 "search.indexing.title" = "Searching…";
 "search.indexing.detail" = "Reading the posts this device holds, once, so each key only matches.";
 
@@ -326,6 +328,7 @@
 
 "notices.empty.title" = "No notices";
 "notices.empty.detail" = "Notices are what an account receives. This session reads public timelines and signs in to nothing, so nothing arrives here.";
+"notices.empty.line" = "Nothing arrives here in this session.";
 
 "usage.empty.title" = "Nothing kept yet";
 "usage.empty.detail" = "Add a source on Account.";
@@ -382,6 +385,7 @@
 "work.elapsed.minutes" = "%1$d min %2$d s";
 "work.count" = "%d at once";
 "work.count.one" = "1 at once";
+"work.for" = "for %@";
 "work.purpose.timeline" = "Reading a timeline";
 "work.purpose.conversation" = "Reading a conversation";
 "work.purpose.forumPost" = "Reading a forum post";

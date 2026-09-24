@@ -45,7 +45,7 @@ struct SourceWorkSection: View {
     private func line(_ row: SourceWorkRow, among rows: [SourceWorkRow]) -> some View {
         TimelineView(.periodic(from: row.since, by: 1)) { context in
             SourceLineRow(
-                id: row.id, source: row.host, purpose: row.purpose, what: row.purposeText(),
+                id: row.id, source: row.host, purpose: row.purpose, what: row.brief(),
                 when: SourceWorkRow.elapsed(since: row.since, now: context.date),
                 selection: $lit, onOpen: { onOpen(row.listedUnder) },
                 onStep: { lit = ShellListStep.stepped(rows.map(\.id), from: lit, by: $0) }

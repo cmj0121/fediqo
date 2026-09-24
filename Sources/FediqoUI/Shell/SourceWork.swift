@@ -439,6 +439,14 @@ struct SourceWorkRow: Identifiable, Equatable {
     /// The source the run's record lists this line's acts under.
     var listedUnder: String { source ?? SourceAct.attributed(reached: host, pointedBy: nil) }
 
+    /// What the line says under the host: what for, and — where the host was reached for another
+    /// source, so that two sources pointing at one host do not draw two lines alike — that source.
+    func brief(language: DummyLanguage? = nil) -> String {
+        let what = purposeText(language: language)
+        guard listedUnder != host.lowercased() else { return what }
+        return what + " · " + String(format: L10n.t("work.for", language: language), listedUnder)
+    }
+
     /// How long it has been running, in whole seconds, in the shell's language.
     static func elapsed(since: Date, now: Date, language: DummyLanguage? = nil) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(since)))

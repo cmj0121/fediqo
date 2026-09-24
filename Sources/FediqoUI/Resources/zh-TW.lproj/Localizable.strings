@@ -152,6 +152,7 @@
 "editor.tab.timeline" = "時間軸";
 "timeline.edit.fixed" = "「全部」和「趨勢」不能編輯。要加你自己的時間軸，按 +，或用 Tab 移到 + 再按 e。";
 "timeline.unreadable" = "這台裝置上的時間軸在這裡讀不了。它們原封不動地留著，這裡不會存任何東西蓋過去。";
+"timeline.unreadable.line" = "這台裝置上的時間軸讀不了，原封不動地留著。";
 "timeline.name.placeholder" = "替這條時間軸取名";
 "timeline.desc.placeholder" = "一句簡短說明，可留空";
 "timeline.done" = "完成";
@@ -237,6 +238,7 @@
 "search.reach.notAsked" = "沒有問，因為從這裡無法搜尋：%@。";
 "search.empty.title" = "「%@」裡沒有相符的貼文";
 "search.empty.detail" = "只會搜尋這個時間軸會顯示的貼文：這台裝置上有的，以及問過的來源送回來的。試著少打幾個字，或用 * 代表任意多字。";
+"search.empty.line" = "試著少打幾個字，或用 * 代表任意多字。";
 "search.indexing.title" = "搜尋中…";
 "search.indexing.detail" = "正在讀一次這台裝置上的貼文，之後每打一個字只需比對。";
 
@@ -325,6 +327,7 @@
 
 "notices.empty.title" = "沒有通知";
 "notices.empty.detail" = "通知是帳號才收得到的東西。這次工作階段只讀公開時間軸、不登入任何地方，所以這裡不會有東西進來。";
+"notices.empty.line" = "這次工作階段不會有東西進來。";
 
 "usage.empty.title" = "還沒有留下任何東西";
 "usage.empty.detail" = "先到「帳號」加一個來源。";
@@ -380,6 +383,7 @@
 "work.elapsed.seconds" = "%d 秒";
 "work.elapsed.minutes" = "%1$d 分 %2$d 秒";
 "work.count" = "同時 %d 個";
+"work.for" = "為 %@";
 "work.purpose.timeline" = "讀取時間軸";
 "work.purpose.conversation" = "讀取對話串";
 "work.purpose.forumPost" = "讀取論壇文章";

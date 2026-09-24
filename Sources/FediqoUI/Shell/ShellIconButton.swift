@@ -100,3 +100,17 @@ struct ShellTouchFloor: ViewModifier {
         #endif
     }
 }
+
+extension View {
+    /// A glyph-only control drawn its own way — a pill, a floating disc — named as
+    /// `ShellIconButton` names itself: on hover on a Mac, and to VoiceOver everywhere, from the
+    /// same keys.
+    func shellNamed(_ nameKey: String, help helpKey: String? = nil) -> some View {
+        let name = L10n.t(nameKey)
+        let help = helpKey.map { L10n.t($0) }
+        return self
+            .help(ShellIconButton.hover(name: name, help: help))
+            .accessibilityLabel(name)
+            .accessibilityHint(help ?? "")
+    }
+}

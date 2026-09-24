@@ -35,7 +35,8 @@ struct ShellNotice: View {
 
     init(_ notice: EmptyNotice) {
         self.init(
-            symbol: notice.symbol, title: notice.title, detail: notice.detail, fills: notice.fills
+            symbol: notice.symbol, title: notice.title, detail: notice.detail, fills: notice.fills,
+            help: notice.help
         )
     }
 
@@ -101,6 +102,8 @@ struct EmptyNotice: Equatable, Sendable {
     var title: String
     var detail: String
     var fills: Bool = true
+    /// What the one line leaves out, behind its (?), where there is more.
+    var help: String?
 
     /// The rule that emptied this timeline, where that is why.
     var ruleID: Rule.ID? {
@@ -150,7 +153,8 @@ struct EmptyNotice: Equatable, Sendable {
                 kind: .search,
                 symbol: "magnifyingglass",
                 title: String(format: L10n.t("search.empty.title", language: language), name),
-                detail: L10n.t("search.empty.detail", language: language)
+                detail: L10n.t("search.empty.line", language: language),
+                help: L10n.t("search.empty.detail", language: language)
             )
         }
 

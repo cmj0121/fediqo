@@ -609,10 +609,11 @@ struct TimelinePane: View {
                 reloadMark
             }
             if session.timelinesUnreadable {
-                Text(L10n.t("timeline.unreadable"))
+                Text(L10n.t("timeline.unreadable.line"))
                     .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
+                    .shellHelp("timeline.unreadable", about: L10n.t("timeline.unreadable.line"))
             }
             if let latest = prefs.latestDate {
                 latestMark(latest)
@@ -704,7 +705,7 @@ struct TimelinePane: View {
                 )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(L10n.t("timeline.new.title"))
+        .shellNamed("timeline.new.title")
     }
 
     private var empty: some View {

@@ -139,7 +139,7 @@ struct PreferencesBriefTests {
     @Test("The shell's Escape closes Preferences' detail first, and leaving the page forgets it")
     func theRootHearsEscape() throws {
         let root = try String(contentsOf: Self.shell.appendingPathComponent("FediqoRootView.swift"), encoding: .utf8)
-        #expect(root.contains("if place == .preferences, openLayers.subtracting([.selection]).isEmpty,\n               session.closePreferencesDetail() { return true }"))
+        #expect(root.contains("if place == .preferences, open.subtracting([.selection]).isEmpty,\n               session.closePreferencesDetail() { return true }"))
         #expect(root.contains("session.preferencesOpened = nil"))
         let dismiss = try #require(root.range(of: "case .dismiss:"))
         let closes = try #require(root.range(of: "session.closePreferencesDetail()"))

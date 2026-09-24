@@ -88,13 +88,16 @@ struct AllowanceDetail: View {
 /// Return on the switch that holds the keyboard flips it. **Only the key going down**, so a
 /// held Return is one flip and not a flicker; and only while this switch is focused, so a
 /// Return anywhere else on the window is not heard here.
+///
+/// **Focus bound to the switch itself, never a focus stop wrapped round it.** A `.focusable()`
+/// here made a second stop around the toggle, and Space, the switch's own key, went to the
+/// wrapper and flipped nothing.
 struct ReturnSwitches: ViewModifier {
     @Binding var on: Bool
     @FocusState private var focused: Bool
 
     func body(content: Content) -> some View {
         content
-            .focusable()
             .focused($focused)
             .onAppear { focused = true }
             .onKeyPress(.return, phases: .down) { _ in

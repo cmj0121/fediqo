@@ -582,12 +582,14 @@ public struct FediqoRootView: View {
             // So is a thread's next page on its way (#177), before the thread itself closes.
             if place == .timeline, session.reload.stop() { return true }
             if place == .timeline, session.stopReadingFurther() { return true }
+            // Only what is on screen: a walk left open on the timeline is not unwound from Usage.
+            let open = Self.escapeSees(openLayers, place: place)
             // A source's detail on Usage goes back to its list before anything further out.
-            if place == .usage, openLayers.subtracting([.selection]).isEmpty, session.closeUsageSource() { return true }
+            if place == .usage, open.subtracting([.selection]).isEmpty, session.closeUsageSource() { return true }
             // And a detail on Preferences, to its list (#233).
-            if place == .preferences, openLayers.subtracting([.selection]).isEmpty,
+            if place == .preferences, open.subtracting([.selection]).isEmpty,
                session.closePreferencesDetail() { return true }
-            switch DummyCommand.outermost(of: openLayers) {
+            switch DummyCommand.outermost(of: open) {
             case .viewer: return closeViewer()
             case .shortcuts:
                 showingShortcuts = false
@@ -602,6 +604,14 @@ public struct FediqoRootView: View {
             case nil: return false
             }
         }
+    }
+
+    /// The open layers Escape may take away on `place`: all of them on the timeline, and away
+    /// from it none of the timeline's own — a walk (person, tag, thread, link) and a search are
+    /// drawn only there, so on Usage or Preferences they are open but not on screen, and a press
+    /// that unwound them there would change nothing the reader can see (#239).
+    static func escapeSees(_ open: Set<DummyLayer>, place: ShellPlace) -> Set<DummyLayer> {
+        place == .timeline ? open : open.subtracting([.person, .tag, .thread, .link, .search])
     }
 
     /// What is open, in the order a press to leave takes it away. See `DummyLayer`.
@@ -1587,7 +1597,7 @@ public struct FediqoRootView: View {
                 .foregroundStyle(ShellChrome.page(colorScheme))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(L10n.t("compose.title"))
+        .shellNamed("compose.title")
         .padding(.trailing, ShellSpace.room)
         .padding(.bottom, Compact.clearance)
     }

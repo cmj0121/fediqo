@@ -413,13 +413,16 @@ private struct EditorKeyStrip: View {
     let tab: EditorTab
     @Environment(\.colorScheme) private var colorScheme
 
+    /// Only where there is a keyboard: on a phone without one it names keys nobody can press.
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: ShellSpace.snug) { caps }
-            ScrollView(.horizontal) { HStack(spacing: ShellSpace.snug) { caps } }
-                .scrollIndicators(.never)
+        ShellWithKeyboard {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: ShellSpace.snug) { caps }
+                ScrollView(.horizontal) { HStack(spacing: ShellSpace.snug) { caps } }
+                    .scrollIndicators(.never)
+            }
+            .accessibilityHidden(true)
         }
-        .accessibilityHidden(true)
     }
 
     private var caps: some View {

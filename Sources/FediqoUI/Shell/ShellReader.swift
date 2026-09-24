@@ -283,10 +283,7 @@ struct LinkReaderSheet: View {
                 .truncationMode(.middle)
             Spacer(minLength: ShellSpace.snug)
             if inPlace {
-                Text(L10n.t("link.reader.leaveHint"))
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                    .accessibilityHidden(true)
+                ShellKeyHint("link.reader.leaveHint")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
