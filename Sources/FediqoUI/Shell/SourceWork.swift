@@ -6,10 +6,11 @@ import os
 /// What this device is asking of a source **right now** (#164): which host, what for, and since
 /// when. Preferences draws it; nothing else reads it.
 ///
-/// **Now only.** An entry is made when a piece of work starts reaching a source and dropped when
-/// it ends — on success, on failure and on cancellation alike — and nothing of it is kept after.
-/// There is no history here and there must not be one: the full record of what this app sends is
-/// a later milestone's, and a ledger grown here would be a second one to reconcile with it.
+/// **Now, and this run's record beside it** (#218). An entry is made when a piece of work starts
+/// reaching a source and dropped when it ends — on success, on failure and on cancellation alike.
+/// Every start is also written to `log`, the one record of what this run sent: which source,
+/// when, and what for. That record lives in this object's memory and nowhere else — never a
+/// file, a default or a store — so quitting the app is the whole of forgetting it (#219).
 ///
 /// **Only the host.** An entry holds a host, a purpose from a fixed list, and a start. Never an
 /// address past its host, a body, a header or a token — the same line `NetLog` holds, for the
@@ -57,6 +58,10 @@ final class SourceWork {
         case signOut
         case write
         case search
+        /// A page a post links to, opened in the app's own reader.
+        case page
+        /// A video, played. Fetched by the system's player rather than through an `HTTPClient`.
+        case video
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -110,6 +115,10 @@ final class SourceWork {
     private struct Held: Sendable {
         var running: [Int: Running] = [:]
         var next = 0
+        /// Acts written since the last copy onto the main actor, oldest first. Only these: the
+        /// record itself is the main actor's (`log`), so nothing under this lock grows with the
+        /// run and a request's way out never copies it.
+        var pending: [SourceAct] = []
         /// Whether a copy onto the main actor is already on its way, so a screenful of pictures
         /// starting at once asks for one and not forty.
         var publishing = false
@@ -120,19 +129,59 @@ final class SourceWork {
     /// What the page draws: everything running, as of the last copy onto the main actor.
     private(set) var running: [Int: Running] = [:]
 
+    /// This run's record as the activity page draws it (#218), as of the last copy onto the main
+    /// actor. An object of its own and not a property here, so it grows in place — a value would
+    /// be copied whole on every change — and so what observes it is the page that reads it and
+    /// not Preferences' section, which reads `running`.
+    @ObservationIgnored let log = SourceRecord()
+
     nonisolated init() {}
 
-    nonisolated func begin(host: String, for purpose: Purpose, name: Name? = nil) -> Token {
-        let entry = Running(
-            host: host.lowercased(), purpose: purpose, name: Self.named(name), since: Date()
-        )
+    /// Starts a piece of work on `host` and writes it to the run's record under `source` — the
+    /// source that pointed there, where the host is not that source's own (a picture, an emoji on
+    /// another host). Nil where the host is the source.
+    nonisolated func begin(
+        host: String, for purpose: Purpose, name: Name? = nil, source: String? = nil
+    ) -> Token {
+        let now = Date()
+        let entry = Running(host: host.lowercased(), purpose: purpose, name: Self.named(name), since: now)
         let (token, publish) = held.withLock { held -> (Token, Bool) in
             held.next += 1
             held.running[held.next] = entry
+            Self.write(&held, reached: host, source: source, purpose: purpose, at: now)
             return (Token(id: held.next), Self.claim(&held))
         }
         if publish { schedule() }
         return token
+    }
+
+    /// Writes one act to the run's record that is not a request through an `HTTPClient` — a page
+    /// opened in the reader, a video handed to the player — and so is never on the running list.
+    nonisolated func note(host: String, for purpose: Purpose, source: String? = nil) {
+        let publish = held.withLock { held -> Bool in
+            held.next += 1
+            Self.write(&held, reached: host, source: source, purpose: purpose, at: Date())
+            return Self.claim(&held)
+        }
+        if publish { schedule() }
+    }
+
+    /// This run's record this instant, oldest first: whatever is still on its way is copied over
+    /// first.
+    var record: [SourceAct] {
+        publish()
+        return log.acts
+    }
+
+    /// An act with no host reached nowhere — a `file:` address, a malformed one — and is not
+    /// written.
+    private nonisolated static func write(
+        _ held: inout Held, reached: String, source: String?, purpose: Purpose, at: Date
+    ) {
+        guard !reached.isEmpty else { return }
+        held.pending.append(SourceAct(
+            id: held.next, reached: reached, pointedBy: source, purpose: purpose, at: at
+        ))
     }
 
     nonisolated func end(_ token: Token) {
@@ -152,7 +201,7 @@ final class SourceWork {
     func watching<T>(
         host: String, for purpose: Purpose, name: Name? = nil, _ body: () async throws -> T
     ) async rethrows -> T {
-        let token = begin(host: host, for: purpose, name: name)
+        let token = begin(host: host, for: purpose, name: name, source: nil)
         defer { end(token) }
         return try await body()
     }
@@ -182,11 +231,14 @@ final class SourceWork {
     /// Copies what is running onto the main actor for the page. Assigned only when it differs:
     /// the section redraws on every assignment.
     private func publish() {
-        let now = held.withLock { held -> [Int: Running] in
+        let (now, fresh) = held.withLock { held in
             held.publishing = false
-            return held.running
+            let fresh = held.pending
+            held.pending = []
+            return (held.running, fresh)
         }
         if now != running { running = now }
+        if !fresh.isEmpty { log.append(fresh) }
     }
 }
 
@@ -259,16 +311,21 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
     let purpose: SourceWork.Purpose
     /// What its caller is reading through it, by the name the reader knows; nil for none.
     let name: SourceWork.Name?
+    /// The source whose post pointed at what this client fetches, where that is not the host a
+    /// request goes to: a picture or an emoji kept on another server (#218). Nil where every
+    /// request through it goes to its source's own host.
+    let source: String?
     let work: SourceWork
 
     init(
         _ inner: any HTTPClient, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil,
-        in work: SourceWork
+        source: String? = nil, in work: SourceWork
     ) {
         get = { try await inner.data(from: $0) }
         sender = inner as? any HTTPSender
         self.purpose = purpose
         self.name = name
+        self.source = source
         self.work = work
     }
 
@@ -280,6 +337,7 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
         sender = inner
         self.purpose = purpose
         self.name = name
+        source = nil
         self.work = work
     }
 
@@ -297,8 +355,117 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
         _ url: URL, _ body: @Sendable () async throws -> (Data, HTTPURLResponse)
     ) async throws -> (Data, HTTPURLResponse) {
         // Synchronous both ways, and so never behind the main actor: see `SourceWork`.
-        let token = work.begin(host: url.host() ?? "", for: purpose, name: name)
+        let token = work.begin(host: url.host() ?? "", for: purpose, name: name, source: source)
         defer { work.end(token) }
         return try await body()
+    }
+}
+
+/// One outward act of this run, as the activity page lists it (#218): the source it was for, what
+/// for, and when it left. **Built from a host and a word from a fixed list, never from an
+/// address**, so nothing past a host — no path, no query, no body, no header, no token — can
+/// reach the page through here: the rule `NetLog` holds, for its reason.
+///
+/// **Who it is listed under.** A source's own traffic goes to the source's own host. A picture, an
+/// emoji or a page a source pointed to may be kept somewhere else — a media server, another
+/// instance, the page a post links to — and is listed under the source that pointed to it, which
+/// the caller that knows it says (`pointedBy`). Both hosts are held: `source` is what the page
+/// lists and narrows by, and `reached` is where the request actually went — not drawn, and held
+/// so a later check of where a request may go (#220) can ask who sent it there.
+struct SourceAct: Identifiable, Equatable, Sendable {
+    let id: Int
+    /// The source it is listed under, folded as every host here is.
+    let source: String
+    /// Where it went. The same as `source` except where a source pointed somewhere else.
+    let reached: String
+    let purpose: SourceWork.Purpose
+    let at: Date
+
+    init(id: Int, reached: String, pointedBy: String? = nil, purpose: SourceWork.Purpose, at: Date) {
+        self.id = id
+        self.reached = reached.lowercased()
+        source = Self.attributed(reached: reached, pointedBy: pointedBy)
+        self.purpose = purpose
+        self.at = at
+    }
+
+    /// The source an act is listed under: the one that pointed to it where one did, and
+    /// otherwise the host it went to. An empty pointer is no pointer.
+    static func attributed(reached: String, pointedBy: String?) -> String {
+        let pointer = pointedBy?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return pointer.isEmpty ? reached.lowercased() : pointer
+    }
+
+
+    /// When it left, as a clock reads it, in the shell's language.
+    func time(language: DummyLanguage? = nil) -> String {
+        at.formatted(
+            Date.FormatStyle(date: .omitted, time: .standard).locale(L10n.locale(language))
+        )
+    }
+
+    /// What it was for, in the shell's language.
+    func purposeText(language: DummyLanguage? = nil) -> String {
+        L10n.t(purpose.titleKey, language: language)
+    }
+
+    /// The row as VoiceOver reads it: the source, what for, and when — one sentence, in that
+    /// order.
+    func spoken(language: DummyLanguage? = nil) -> String {
+        String(
+            format: L10n.t("activity.row.spoken", language: language),
+            source, purposeText(language: language), time(language: language)
+        )
+    }
+}
+
+/// This run's record, on the main actor (#218): every act, oldest first, bounded, and indexed by
+/// source as it grows — so what the page draws is read off it and never computed from the whole
+/// record on a redraw.
+///
+/// **Bounded in chunks.** Past `kept` the oldest are let go down to `trimmedTo` in one cut, so the
+/// shift and the reindex are paid once per thousand acts rather than on every one; `dropped`
+/// counts every act let go.
+@MainActor
+@Observable
+final class SourceRecord {
+    /// How many acts are held at most. A bound and not a working size: a long day's reading is
+    /// some thousands of acts, and nothing held here may grow without end.
+    nonisolated static let kept = 10_000
+    /// What a cut past `kept` leaves.
+    nonisolated static let trimmedTo = 9_000
+
+    private(set) var acts: [SourceAct] = []
+    /// How many of the oldest acts were let go.
+    private(set) var dropped = 0
+    /// The sources the record holds acts for, in the order a picker lists them.
+    private(set) var sources: [String] = []
+    /// Observed, and that is load-bearing: a page narrowed to one source reads only this, and has
+    /// to be woken when a line of that source arrives.
+    private var bySource: [String: [SourceAct]] = [:]
+
+    nonisolated init() {}
+
+    func append(_ fresh: [SourceAct]) {
+        acts.append(contentsOf: fresh)
+        for act in fresh {
+            if bySource[act.source] == nil {
+                let at = sources.firstIndex { $0 > act.source } ?? sources.endIndex
+                sources.insert(act.source, at: at)
+            }
+            bySource[act.source, default: []].append(act)
+        }
+        guard acts.count > Self.kept else { return }
+        let cut = acts.count - Self.trimmedTo
+        acts.removeFirst(cut)
+        dropped += cut
+        bySource = Dictionary(grouping: acts, by: \.source)
+        sources = bySource.keys.sorted()
+    }
+
+    /// Newest first, and only `source`'s where one is chosen.
+    func listed(from source: String? = nil) -> ReversedCollection<[SourceAct]> {
+        guard let source else { return acts.reversed() }
+        return (bySource[source.lowercased()] ?? []).reversed()
     }
 }

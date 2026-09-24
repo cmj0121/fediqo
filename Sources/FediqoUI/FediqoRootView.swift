@@ -303,6 +303,7 @@ public struct FediqoRootView: View {
             .modifier(HostQuestion.remove(session))
             .modifier(HostQuestion.clear(session))
             .modifier(EndedSignInNotice(session: session))
+            .modifier(ActivitySheet(session: session))
             .alert(Text(L10n.t("store.newer.title")), isPresented: $storeIsNewer) {
                 Button(L10n.t("store.newer.ok"), role: .cancel) { storeNoticeSeen?() }
             } message: {
@@ -447,8 +448,9 @@ public struct FediqoRootView: View {
         // the flips finish rather than driving the shell underneath. Unmapped chords —
         // ⌘Q, ⌘C — have already returned false, so a quit still quits.
         if playsLanding { return true }
-        // The editor is a sheet and owns its keys; nothing under it moves.
-        if session.editing != nil { return false }
+        // The editor is a sheet and owns its keys; nothing under it moves. Nor under the record
+        // of this run's requests, which is a sheet too.
+        if session.editing != nil || session.activityShown { return false }
         let did = apply(mapped)
         return DummyCommand.consumes(character, did: did)
     }
@@ -706,7 +708,7 @@ public struct FediqoRootView: View {
     private func playRow(_ item: DummyItem) {
         guard viewedItem == nil, !isCovered(item) else { return }
         let file = ShellPlaying.playable(decks.showing(item.attachments, of: item.id))
-        playback.toggle(file, of: item.id, on: .row)
+        playback.toggle(file, of: item.id, on: .row, from: item.source.host)
     }
 
     /// The post the viewer is showing, where there is one to show.
@@ -732,7 +734,7 @@ public struct FediqoRootView: View {
         return onActedItem { item in
             guard !isCovered(item) else { return false }
             let file = ShellPlaying.playable(decks.showing(item.attachments, of: item.id))
-            return playback.toggle(file, of: item.id, on: stage)
+            return playback.toggle(file, of: item.id, on: stage, from: item.source.host)
         }
     }
 

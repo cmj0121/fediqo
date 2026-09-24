@@ -47,6 +47,7 @@ struct PreferencesPane: View {
             case .choices: choices
             case .build: BuildStampSection(stamp: stamp)
             case .work: SourceWorkSection(work: session?.work ?? .shared)
+                if let session { ActivityEntry(session: session) }
             }
         }
         .formStyle(.grouped)

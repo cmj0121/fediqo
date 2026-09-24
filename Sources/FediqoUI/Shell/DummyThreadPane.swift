@@ -877,7 +877,7 @@ struct ForumReplyRow: View {
         .accessibilityActions { outwardAction }
         // **Here rather than inside the words**, for `SpokenLinks`' reason: `.combine` above
         // makes this reply one element, and what its children offered goes with the rest of them.
-        .spokenLinks(in: post.isWithheld ? "" : post.body)
+        .spokenLinks(in: post.isWithheld ? "" : post.body, from: host)
     }
 
     // MARK: - The way out
