@@ -588,6 +588,8 @@ public struct FediqoRootView: View {
             // So is a thread's next page on its way (#177), before the thread itself closes.
             if place == .timeline, session.reload.stop() { return true }
             if place == .timeline, session.stopReadingFurther() { return true }
+            // A source's detail on Usage goes back to its list before anything further out.
+            if place == .usage, openLayers.subtracting([.selection]).isEmpty, session.closeUsageSource() { return true }
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
             case .shortcuts:

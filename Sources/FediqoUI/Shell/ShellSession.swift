@@ -417,7 +417,18 @@ final class ShellSession {
     /// Which purpose Usage is showing. Tab rotates it the way it rotates timeline queries.
     var usagePurpose: UsagePane.Purpose = .source
 
-    /// Tab and ⇧Tab on Usage: Sources, Time, Copies, and round again.
+    /// The source whose detail Usage's Sources tab is showing (#234), by host; nothing is the list.
+    var usageOpened: String?
+
+    /// Escape on Usage: back from a source's detail to the list. Nothing to leave is not a press.
+    @discardableResult
+    func closeUsageSource() -> Bool {
+        guard usageOpened != nil else { return false }
+        usageOpened = nil
+        return true
+    }
+
+    /// Tab and ⇧Tab on Usage: Sources, Time, Keep, Copies, and round again.
     @discardableResult
     func rotateUsageTab(by step: Int) -> Bool {
         usagePurpose = DummyCommand.advanced(Array(UsagePane.Purpose.allCases), from: usagePurpose, by: step)

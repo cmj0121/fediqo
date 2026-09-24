@@ -313,10 +313,18 @@
 "notices.empty.detail" = "Notices are what an account receives. This session reads public timelines and signs in to nothing, so nothing arrives here.";
 
 "usage.empty.title" = "Nothing kept yet";
-"usage.empty.detail" = "Add a source on Account. What it brings back is counted here, and it is the whole of what this device is holding.";
+"usage.empty.detail" = "Add a source on Account.";
 "usage.tab.source" = "Sources";
 "usage.tab.time" = "Time";
 "usage.tab.copies" = "Copies";
+"usage.tab.keep" = "Keep";
+"usage.empty.help" = "What a source brings back is counted here, and it is the whole of what this device is holding.";
+"usage.cache.line" = "Most of this is read again from each server.";
+"usage.drop.line" = "Kept until you choose otherwise; the oldest copies on disk go first.";
+"usage.gone.line" = "Only posts their source says are gone are marked.";
+"usage.source.back" = "Back to sources";
+"usage.source.clear.help" = "Asks first, then lets go of this source's pictures, emoji names, first posts and sign-in. Its posts stay, and it stays added.";
+"usage.drop.copies.help" = "Asks first, then drops every picture copy in memory and on disk.";
 
 "store.newer.title" = "A newer Fediqo wrote this device's index";
 "store.newer.detail" = "This version cannot read it, so it has left it exactly as it was and will save nothing over it. Open Fediqo in the newer version to see what it holds.";
@@ -459,7 +467,7 @@
 "prefs.drop.copies.title" = "Drop every picture copy on this device?";
 "prefs.drop.copies.detail" = "The pictures held in memory and on disk go, from every source. Every post stays and still draws; its pictures are read again from their links as you scroll.";
 "prefs.drop.confirm" = "Drop";
-"prefs.drop.footer" = "Everything is kept forever unless you choose otherwise. Keep posts drops what is older now, and holds everything read later to the same window. Clear, on each source above, drops that source's pictures, emoji names and first posts; its posts stay. Picture copies on disk are capped, and the oldest go first.";
+"prefs.drop.footer" = "Everything is kept forever unless you choose otherwise. Keep posts drops what is older now, and holds everything read later to the same window. Clear, in each source on Sources, drops that source's pictures, emoji names and first posts; its posts stay. Picture copies on disk are capped, and the oldest go first.";
 "prefs.cache.catalogue" = "%d emoji names, read";
 "prefs.cache.catalogue.none" = "No emoji names held";
 "prefs.cache.pictures" = "%d pictures";
@@ -504,8 +512,7 @@
 "forum.unkept.nothing" = "nothing you typed could be read from the forum's page";
 "forum.unforgotten" = "The username and password kept for this forum could not be deleted: %@.";
 "prefs.password.held" = "Password held on this device";
-"prefs.password.forget" = "Forget it";
-"prefs.password.forget.label" = "Forget the password held for %@";
+"prefs.password.forget" = "Forget the password";
 
 /* Unit F4 — choosing boards. */
 "board.choose.title" = "Boards on %@";
