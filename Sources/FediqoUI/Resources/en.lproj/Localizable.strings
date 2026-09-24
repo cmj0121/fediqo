@@ -442,6 +442,7 @@
 "prefs.held.posts.one" = "%d post";
 "prefs.cache.pictures.one" = "%d picture";
 "prefs.held.total" = "All sources";
+"prefs.held.aside" = "Held apart from the timelines";
 "prefs.held.memory" = "%@ in memory";
 "prefs.held.disk" = "%@ on disk";
 "prefs.held.breakdown" = "By week or month";

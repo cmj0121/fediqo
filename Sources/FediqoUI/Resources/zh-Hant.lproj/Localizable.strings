@@ -437,6 +437,7 @@
 "prefs.held.posts" = "%d 則貼文";
 "prefs.held.posts.none" = "未存貼文";
 "prefs.held.total" = "所有來源";
+"prefs.held.aside" = "時間軸之外另存";
 "prefs.held.memory" = "記憶體中 %@";
 "prefs.held.disk" = "磁碟上 %@";
 "prefs.held.breakdown" = "依週或月";

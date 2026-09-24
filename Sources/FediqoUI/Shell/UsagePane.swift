@@ -219,25 +219,29 @@ struct UsagePane: View {
             }
             .pickerStyle(.segmented)
             // All sources first, in the rows' own shape; where it says none, no stretch follows.
+            // Everything held, aside rows included (#194), and what it all weighs on disk.
             stretch(
                 Text(L10n.t("prefs.held.total")).shellFont(.name).foregroundStyle(ShellChrome.ink(colorScheme)),
-                posts: holdings.posts
+                figure: Self.totalLine(holdings.posts, onDisk: session.storeBytes)
             )
+            if holdings.aside > 0 {
+                stretch(reading(Text(L10n.t("prefs.held.aside"))), figure: Self.postsLine(holdings.aside))
+            }
             ForEach(holdings.byPeriod.prefix(Self.stretchesShown), id: \.start) { bucket in
                 stretch(reading(Text(Self.stretchLabel(bucket.start, period: session.heldPeriod))),
-                        posts: bucket.posts)
+                        figure: Self.postsLine(bucket.posts))
             }
         } header: {
             ShellSectionHead(title: "prefs.held.breakdown")
         }
     }
 
-    /// One line of the breakdown: what it counts, and its posts at the trailing edge.
-    private func stretch(_ label: some View, posts: Int) -> some View {
+    /// One line of the breakdown: what it counts, and its figure at the trailing edge.
+    private func stretch(_ label: some View, figure: String) -> some View {
         HStack {
             label
             Spacer()
-            reading(Text(Self.postsLine(posts)))
+            reading(Text(figure))
         }
     }
 
@@ -294,6 +298,19 @@ struct UsagePane: View {
 
     static func postsLine(_ count: Int) -> String {
         count == 0 ? L10n.t("prefs.held.posts.none") : L10n.count("prefs.held.posts", count)
+    }
+
+    /// "12 posts · 1.2 MB on disk", with the disk half left off until the index has been measured
+    /// (#194) — the same rule the pictures line keeps, for the same reason.
+    static func totalLine(_ count: Int, onDisk: Int?) -> String {
+        guard let onDisk else { return postsLine(count) }
+        return postsLine(count) + " · " + String(format: L10n.t("prefs.held.disk"), size(onDisk))
+    }
+
+    /// "3 held apart from the timelines", or nothing where none is (#194): what a source holds
+    /// that no timeline shows, said beside its count.
+    static func asideLine(_ count: Int) -> String? {
+        count == 0 ? nil : L10n.t("prefs.held.aside") + " · " + postsLine(count)
     }
 
     /// A week by the day it starts, a month by its name, both in the shell's language.
@@ -366,9 +383,11 @@ struct UsagePane: View {
         catalogues = next
     }
 
-    /// Reads what each source's copies weigh on disk, off the main actor (#7).
+    /// Reads what each source's copies weigh on disk, and what the index does (#7, #194), off the
+    /// main actor.
     private func readDisk() async {
         guard let session else { return }
         onDisk = await session.pictures.diskBytes(hosts: session.sources.map(\.host))
+        await session.readStoreBytes()
     }
 }
