@@ -160,10 +160,10 @@ struct LeftBehindTests {
             await store.httpCookieStore.setCookie(ForumDeviceStoreTests.cookie(name, domain: domain))
         }
         let untouched = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
-        untouched.sweepAtLaunch(keeping: ["bbs.example.org"], onDisk: false)
+        untouched.sweepAtLaunch(keeping: ["bbs.example.org"], onDisk: false, within: .seconds(5))
         #expect(untouched.sweeping == nil, "no store on disk, none opened")
         let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
-        forums.sweepAtLaunch(keeping: ["bbs.example.org"], onDisk: true)
+        forums.sweepAtLaunch(keeping: ["bbs.example.org"], onDisk: true, within: .seconds(5))
         #expect(forums.engine(host: "bbs.example.org").sweeping != nil, "a page waits for the sweep too")
         await forums.sweeping?.value
         #expect(Set(await store.httpCookieStore.allCookies().map(\.name)) == ["x7Kq_2132_auth"])
@@ -248,7 +248,9 @@ struct LeftBehindTests {
         // A quit sweeps; a backgrounding drops only the cache, so a sign-in stepped away from
         // survives it; a launch sweeps what an earlier run left, before a sign-in reads it.
         // A Mac's quit, an iPhone's end where the system says so, and its last scene let go.
-        #expect(code.components(separatedBy: "await Launch.shared.end()").count - 1 == 3)
+        #expect(code.components(separatedBy: "await Launch.shared.end()").count - 1 == 2)
+        #expect(code.components(separatedBy: "self.endOnce()").count - 1 == 1, "a last scene let go")
+        #expect(code.contains("guard ending == nil else { return }"), "the end runs once")
         #expect(code.contains("func applicationWillTerminate(_ application: UIApplication)"))
         #expect(code.contains("UIScene.didDisconnectNotification"))
         #expect(code.components(separatedBy: "await Launch.shared.pause()").count - 1 == 1)
@@ -256,7 +258,7 @@ struct LeftBehindTests {
         let sweep = try #require(code.range(of: "forums.sweepAtLaunch("))
         let signIn = try #require(code.range(of: "forums.signInAgain("))
         #expect(sweep.lowerBound < signIn.lowerBound)
-        #expect(code.contains("onDisk: ForumWebsiteData.isOnDisk()"))
+        #expect(code.contains("onDisk: ForumWebsiteData.isOnDisk(),\n            within: StoreSaver.deadline"))
         #expect(code.contains("SharedStores.forgetOnce()"))
     }
 

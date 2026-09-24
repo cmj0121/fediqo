@@ -52,7 +52,8 @@ final class Launch {
         // what an earlier run left in the forum browser's store is swept before anything reads it.
         SharedStores.forgetOnce()
         forums.sweepAtLaunch(
-            keeping: opened.sources.map(\.host), onDisk: ForumWebsiteData.isOnDisk()
+            keeping: opened.sources.map(\.host), onDisk: ForumWebsiteData.isOnDisk(),
+            within: StoreSaver.deadline
         )
         forums.signInAgain(hosts: opened.sources.filter { $0.kind == .discuz }.map(\.host))
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
@@ -100,8 +101,17 @@ final class FediqoAppDelegate: NSObject, NSApplicationDelegate {
 /// `end()` runs, bounded by the save's deadline, so the store is swept then and not a launch later.
 @MainActor
 final class FediqoAppDelegate: NSObject, UIApplicationDelegate {
-    private var ended = false
-    private var finishedFlag = false
+    /// The one end of this run, whichever of the two ways in asked first: `end()` runs once.
+    private var ending: Task<Void, Never>?
+    private var finished = false
+
+    private func endOnce() {
+        guard ending == nil else { return }
+        ending = Task { @MainActor in
+            await Launch.shared.end()
+            self.finished = true
+        }
+    }
 
     func application(
         _ application: UIApplication,
@@ -114,23 +124,19 @@ final class FediqoAppDelegate: NSObject, UIApplicationDelegate {
             MainActor.assumeIsolated {
                 let left = UIApplication.shared.connectedScenes.filter { $0 !== gone }
                 guard left.isEmpty else { return }
-                Task { await Launch.shared.end() }
+                self.endOnce()
             }
         }
         return true
     }
 
-    /// Called on the main thread with a few seconds left and nothing awaited after it returns, so
-    /// the run loop is turned here until `end()` is done or its deadline passes.
+    /// **Best effort.** Called on the main thread with a few seconds left and nothing awaited
+    /// after it returns, so the run loop is turned here until `end()` is done or four seconds
+    /// pass; the system may end the process sooner, and then the next launch sweeps.
     func applicationWillTerminate(_ application: UIApplication) {
-        guard !ended else { return }
-        ended = true
-        Task { @MainActor in
-            await Launch.shared.end()
-            self.finishedFlag = true
-        }
+        endOnce()
         let until = Date().addingTimeInterval(4)
-        while !finishedFlag, Date() < until {
+        while !finished, Date() < until {
             RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
         }
     }
