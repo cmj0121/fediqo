@@ -50,7 +50,7 @@ struct AttachmentViewer: View {
     @Environment(\.displayScale) private var displayScale
 
     /// What a finger gets on the mark that turns the deck, whatever the numerals in it measure.
-    /// The same floor and the same scale as `TimelinePane.touch` and `DummyItemRow.touch`.
+    /// The same floor and the same scale as `ShellIconButton.touch` and `DummyItemRow.touch`.
     @ShellMetric(relativeTo: .caption) private var touch: CGFloat = 32
 
     /// How far the reader has magnified the picture, and what a pinch in progress is adding.

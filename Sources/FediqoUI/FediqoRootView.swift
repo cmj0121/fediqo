@@ -227,6 +227,9 @@ public struct FediqoRootView: View {
                 // And the film stops — **including one playing in a row**, which is the half
                 // `closeViewer` cannot do, because with a row playing the viewer was never open.
                 playback.stop()
+                // A source's detail left behind on Usage is not waiting there on the way back.
+                session.usageOpened = nil
+                session.preferencesOpened = nil
             }
             // The rail and the tab bar both draw only the places that can be entered.
             // If that set ever narrows under the reader — a sign-out, a source
@@ -331,11 +334,7 @@ public struct FediqoRootView: View {
             .modifier(HostQuestion.clear(session))
             .modifier(EndedSignInNotice(session: session))
             .modifier(ActivitySheet(session: session))
-            .alert(Text(L10n.t("store.newer.title")), isPresented: $storeIsNewer) {
-                Button(L10n.t("store.newer.ok"), role: .cancel) { storeNoticeSeen?() }
-            } message: {
-                Text(L10n.t("store.newer.detail"))
-            }
+            .modifier(StoreNewerNotice(shown: $storeIsNewer, seen: storeNoticeSeen))
             .overlay {
                 if showingShortcuts {
                     ShortcutGuide(tab: $shortcutTab) { showingShortcuts = false }
@@ -415,20 +414,16 @@ public struct FediqoRootView: View {
             .id(prefs.language)
     }
 
-    /// What the Remove question says goes, which depends on whether there are boards to lose.
+    /// How many boards Remove would take from `host` — what its question's line names where there
+    /// are any, since they are the one part of Remove that does not come back.
     ///
     /// **Two whole sentences and two keys, not one sentence with a clause appended.** "the 3 boards
     /// you picked" must never appear over a microblog, and a second half joined on with `+` is a
     /// half no translator can put first. `ShellSession.clear` argues why the boards are the part
-    /// worth naming: pictures come back by themselves and a pick of eight boards out of forty does
-    /// not, so Remove — the act that takes them — is the act that has to say so before the press.
-    ///
-    /// Static and given the list, so the sentence is a function of its inputs that a test can read
-    /// without standing a view up.
-    static func removeDetail(for host: String, in sources: [Source]) -> String {
-        let boards = sources.first { $0.host == host }?.boards.count ?? 0
-        guard boards > 0 else { return L10n.t("account.remove.detail") }
-        return String(format: L10n.t("account.remove.detail.boards"), boards)
+    /// worth naming: pictures come back by themselves, a pick of eight boards out of forty does
+    /// not. See `ShellQuestion.remove`.
+    static func boards(of host: String, in sources: [Source]) -> Int {
+        sources.first { $0.host == host }?.boards.count ?? 0
     }
 
     /// A forum's own page closed, on the window a Mac opens it in or the sheet elsewhere — **one
@@ -532,7 +527,8 @@ public struct FediqoRootView: View {
             // made the difference invisible: the two halves of one rule, written two ways, one of
             // them free to fall through. A fifth layer added to `DummyLayer` now has to say what
             // `q` does about it.
-            switch DummyCommand.outermost(of: openLayers) {
+            // Only what is on screen, as Escape reads it.
+            switch DummyCommand.outermost(of: Self.escapeSees(openLayers, place: place)) {
             case .viewer: return closeViewer()
             // One step back, whichever kind of step it was. The two lines used to be two
             // methods over two pieces of state; they are one walk now, and unwinding it in the
@@ -588,7 +584,14 @@ public struct FediqoRootView: View {
             // So is a thread's next page on its way (#177), before the thread itself closes.
             if place == .timeline, session.reload.stop() { return true }
             if place == .timeline, session.stopReadingFurther() { return true }
-            switch DummyCommand.outermost(of: openLayers) {
+            // Only what is on screen: a walk left open on the timeline is not unwound from Usage.
+            let open = Self.escapeSees(openLayers, place: place)
+            // A source's detail on Usage goes back to its list before anything further out.
+            if place == .usage, open.subtracting([.selection]).isEmpty, session.closeUsageSource() { return true }
+            // And a detail on Preferences, to its list (#233).
+            if place == .preferences, open.subtracting([.selection]).isEmpty,
+               session.closePreferencesDetail() { return true }
+            switch DummyCommand.outermost(of: open) {
             case .viewer: return closeViewer()
             case .shortcuts:
                 showingShortcuts = false
@@ -603,6 +606,14 @@ public struct FediqoRootView: View {
             case nil: return false
             }
         }
+    }
+
+    /// The open layers Escape may take away on `place`: all of them on the timeline, and away
+    /// from it none of the timeline's own — a walk (person, tag, thread, link) and a search are
+    /// drawn only there, so on Usage or Preferences they are open but not on screen, and a press
+    /// that unwound them there would change nothing the reader can see (#239).
+    static func escapeSees(_ open: Set<DummyLayer>, place: ShellPlace) -> Set<DummyLayer> {
+        place == .timeline ? open : open.subtracting([.person, .tag, .thread, .link, .search])
     }
 
     /// What is open, in the order a press to leave takes it away. See `DummyLayer`.
@@ -1437,13 +1448,14 @@ public struct FediqoRootView: View {
         return walk.walk(to: .link(url), from: lamp) || walk.openedLink == url
     }
 
-    /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage and on
-    /// Preferences. Elsewhere it is the platform's.
+    /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage, on
+    /// Preferences and on Account. Elsewhere it is the platform's.
     private func rotatePlaceTab(by step: Int) -> Bool {
         switch place {
         case .timeline: session.rotateTab(by: step)
         case .usage: session.rotateUsageTab(by: step)
         case .preferences: session.rotatePreferencesTab(by: step)
+        case .account: session.rotateAccountTab(by: step)
         default: false
         }
     }
@@ -1587,7 +1599,7 @@ public struct FediqoRootView: View {
                 .foregroundStyle(ShellChrome.page(colorScheme))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(L10n.t("compose.title"))
+        .shellNamed("compose.title")
         .padding(.trailing, ShellSpace.room)
         .padding(.bottom, Compact.clearance)
     }
@@ -1676,33 +1688,23 @@ public struct FediqoRootView: View {
 private struct WithdrawQuestion: ViewModifier {
     let session: ShellSession
 
+    /// The row asked about, and the copy that goes through — kept together, so the sheet still
+    /// names the same post as it slides away after the session has let go of the question.
+    struct Asked {
+        let item: DummyItem
+        let copy: DummyItem
+    }
+
     func body(content: Content) -> some View {
-        content.confirmationDialog(
-            title,
-            isPresented: asked,
-            titleVisibility: .visible,
-            presenting: session.withdrawing
-        ) { item in
-            Button(L10n.t("withdraw.confirm"), role: .destructive) {
-                Task { await session.withdraw(item) }
-            }
-            Button(L10n.t("compose.cancel"), role: .cancel) { session.cancelWithdraw() }
-        } message: { item in
-            Text(ItemActs.withdrawQuestion(session.withdrawingCopy ?? item).detail)
+        content.shellConfirm(asked, question: { ShellQuestion.withdraw($0.copy) }) { asked, _ in
+            Task { await session.withdraw(asked.item) }
         }
     }
 
-    /// What goes, named — the copy that goes, on a row two sources carried (#136). Empty only
-    /// while nothing is asked, when the dialog is not drawn.
-    private var title: String {
-        guard let item = session.withdrawingCopy ?? session.withdrawing else { return "" }
-        return ItemActs.withdrawQuestion(item).title
-    }
-
-    private var asked: Binding<Bool> {
+    private var asked: Binding<Asked?> {
         Binding(
-            get: { session.withdrawing != nil },
-            set: { shown in if !shown { session.cancelWithdraw() } }
+            get: { session.withdrawing.map { Asked(item: $0, copy: session.withdrawingCopy ?? $0) } },
+            set: { if $0 == nil { session.cancelWithdraw() } }
         )
     }
 }
@@ -1725,11 +1727,15 @@ private struct HostQuestion: ViewModifier {
     let session: ShellSession
     /// The host being asked about, where one is; the question is presented from it.
     let asking: ReferenceWritableKeyPath<ShellSession, String?>
-    let titleKey: String
-    let confirmKey: String
-    let role: ButtonRole?
+    let question: @MainActor (String) -> ShellConfirmation
     let act: @MainActor (String) async -> Void
-    let detail: @MainActor (String) -> String
+
+    /// The host, and the question as it read when asked — so a sheet sliding away after the act
+    /// has begun still says what was asked, not what the act has since changed.
+    struct Asked {
+        let host: String
+        let question: ShellConfirmation
+    }
 
     /// **The Remove question.** Remove is asked from a source row today and will be asked from
     /// the source page's own header the day that grows one.
@@ -1740,10 +1746,10 @@ private struct HostQuestion: ViewModifier {
     static func remove(_ session: ShellSession) -> HostQuestion {
         HostQuestion(
             session: session, asking: \.removing,
-            titleKey: "account.remove.title", confirmKey: "account.remove.confirm",
-            role: .destructive,
-            act: { await session.remove(host: $0) },
-            detail: { FediqoRootView.removeDetail(for: $0, in: session.sources) }
+            question: { host in
+                ShellQuestion.remove(host: host, boards: FediqoRootView.boards(of: host, in: session.sources))
+            },
+            act: { await session.remove(host: $0) }
         )
     }
 
@@ -1755,80 +1761,71 @@ private struct HostQuestion: ViewModifier {
     /// pictures, the emoji names and the first posts, all of which come back — and it calls
     /// `ForumSessions.forget(host:)`, which deletes the saved Keychain password and signs the
     /// reader out of the forum. The Account row says neither of those before the press, so this
-    /// is the one place they are said.
+    /// is the one place they are said: the line names what does not come back, the (?) the rest.
     ///
-    /// **Plain, where Remove's confirm is `.destructive`, and the difference is deliberate.** The
-    /// row's icon says *this takes something away*; the dialog says exactly how much, and the
-    /// weight of the confirm matches the weight of the act. A destructive Clear would be the
-    /// confirmation repeating the row's overstatement, which is the one thing decision 29 asks
-    /// not to happen.
-    ///
-    /// **The detail is the one seam of this dialog a test cannot reach** (risk 12).
-    /// `clearDetailKey` is pure and is driven across all four combinations; what nothing verifies
-    /// is that *this* closure asks it with `hasPassword` and `reachedSignIn` for the host being
-    /// confirmed, because a `message:` builder only runs inside a presented dialog. Named here
-    /// rather than left to be discovered.
+    /// **The detail is the one seam a test cannot reach** (risk 12). `clearDetailKey` and
+    /// `ShellQuestion.clear` are pure and driven across every combination; what nothing verifies
+    /// is that *this* closure asks with `hasPassword` and `reachedSignIn` for the host being
+    /// confirmed, because it runs only inside a presented sheet. Named here rather than left to
+    /// be discovered.
     static func clear(_ session: ShellSession) -> HostQuestion {
         HostQuestion(
             session: session, asking: \.clearing,
-            titleKey: "account.clear.title", confirmKey: "account.clear.confirm",
-            role: nil,
-            act: { await session.clear(host: $0) },
-            detail: { host in
-                L10n.t(SourceRow.clearDetailKey(
+            question: { host in
+                ShellQuestion.clear(host: host, detailKey: SourceRow.clearDetailKey(
                     hasPassword: session.forums.hasPassword(host: host),
                     reachedSignIn: session.isSignedIn(host: host)
                 ))
-            }
+            },
+            act: { await session.clear(host: $0) }
         )
     }
 
     func body(content: Content) -> some View {
-        content
-            .confirmationDialog(
-                Text(session[keyPath: asking].map { String(format: L10n.t(titleKey), $0) } ?? ""),
-                isPresented: Binding(
-                    get: { session[keyPath: asking] != nil },
-                    set: { if !$0 { session[keyPath: asking] = nil } }
-                ),
-                // Explicit, because macOS draws no title at all on `.automatic` — and the title is
-                // the only line that names which server this is about.
-                titleVisibility: .visible,
-                presenting: session[keyPath: asking]
-            ) { host in
-                Button(L10n.t(confirmKey), role: role) {
-                    Task { await act(host) }
-                }
-                // **Cancel stays the default action.** No `.keyboardShortcut(.defaultAction)` on
-                // the confirm: Return dismisses this question, it never answers it.
-                Button(L10n.t("board.choose.cancel"), role: .cancel) { session[keyPath: asking] = nil }
-            } message: { host in
-                Text(detail(host))
-            }
+        content.shellConfirm(asked, question: \.question) { asked, _ in
+            Task { await act(asked.host) }
+        }
+    }
+
+    private var asked: Binding<Asked?> {
+        Binding(
+            get: { session[keyPath: asking].map { Asked(host: $0, question: question($0)) } },
+            set: { if $0 == nil { session[keyPath: asking] = nil } }
+        )
     }
 }
 
 /// A server ended a sign-in on its own side, said — out of the chain for `HostQuestion`'s reason.
+/// The row already reads signed out, and this says why rather than leaving a timeline to go quiet.
 private struct EndedSignInNotice: ViewModifier {
     let session: ShellSession
 
     func body(content: Content) -> some View {
-        content
-            // A server ended a sign-in on its own side: the row already reads signed out, and this
-            // says why rather than leaving a timeline to go quiet.
-            .alert(
-                Text(L10n.t("account.mastodon.ended.title")),
-                isPresented: Binding(
-                    get: { !session.mastodon.ended.isEmpty },
-                    set: { if !$0 { session.mastodon.endedSeen() } }
-                )
-            ) {
-                Button(L10n.t("store.newer.ok"), role: .cancel) { session.mastodon.endedSeen() }
-            } message: {
-                Text(String(
-                    format: L10n.t("account.mastodon.ended.detail"),
-                    session.mastodon.ended.joined(separator: ", ")
-                ))
-            }
+        content.shellConfirm(ended, question: { ShellQuestion.signedOut(hosts: $0) }) { _, _ in }
+    }
+
+    private var ended: Binding<[String]?> {
+        Binding(
+            get: { session.mastodon.ended.isEmpty ? nil : session.mastodon.ended },
+            set: { if $0 == nil { session.mastodon.endedSeen() } }
+        )
+    }
+}
+
+/// The store was written by a newer build: said once, and seen by whatever route it is put
+/// down — the press, Escape, a swipe.
+private struct StoreNewerNotice: ViewModifier {
+    @Binding var shown: Bool
+    let seen: (@MainActor () -> Void)?
+
+    func body(content: Content) -> some View {
+        content.shellConfirm(asked, question: { _ in ShellQuestion.storeNewer() }) { _, _ in }
+    }
+
+    private var asked: Binding<Bool?> {
+        Binding(
+            get: { shown ? true : nil },
+            set: { if $0 == nil { shown = false; seen?() } }
+        )
     }
 }

@@ -182,9 +182,7 @@ struct TagPane: View {
         HStack(spacing: ShellSpace.snug) {
             ShellBackButton("person.back", action: onBack)
             Spacer()
-            Text(L10n.t("person.leaveHint"))
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            ShellKeyHint("person.leaveHint")
         }
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.snug)

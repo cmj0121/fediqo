@@ -277,7 +277,7 @@ struct InventoryTests {
             "prefs.keep", "prefs.keep.forever", "prefs.keep.months", "prefs.keep.shorten.title",
             "prefs.keep.shorten.detail", "prefs.drop.copies", "prefs.drop.copies.title",
             "prefs.drop.copies.detail", "prefs.drop.confirm", "prefs.drop.footer",
-            "usage.tab.source", "usage.tab.time", "usage.tab.copies",
+            "usage.tab.source", "usage.tab.time", "usage.tab.keep", "usage.tab.copies",
         ]
         for key in keys {
             for language in [DummyLanguage.english, .taiwanese] {
@@ -288,7 +288,9 @@ struct InventoryTests {
 
     @Test("Usage is grouped by purpose, one tab each")
     func purposesAreTabs() {
-        #expect(UsagePane.Purpose.allCases == [.source, .time, .copies])
+        #expect(UsagePane.Purpose.allCases == [.source, .time, .keep, .copies])
+        #expect(L10n.t("usage.tab.keep", language: .english) == "Keep")
+        #expect(L10n.t("usage.tab.keep", language: .taiwanese) == "保留")
         #expect(L10n.t("usage.tab.source", language: .english) == "Sources")
         #expect(L10n.t("usage.tab.time", language: .english) == "Time")
         #expect(L10n.t("usage.tab.copies", language: .english) == "Copies")
@@ -297,16 +299,16 @@ struct InventoryTests {
         #expect(L10n.t("usage.tab.copies", language: .taiwanese) == "副本")
     }
 
-    @Test("Tab goes Sources, Time, Copies, and round again")
+    @Test("Tab goes Sources, Time, Keep, Copies, and round again")
     func usageTabOrder() {
         let session = ShellSession(http: FixtureHTTP())
         #expect(session.usagePurpose == .source)
         var visited: [UsagePane.Purpose] = []
-        for _ in 0..<4 {
+        for _ in 0..<5 {
             #expect(session.rotateUsageTab(by: 1))
             visited.append(session.usagePurpose)
         }
-        #expect(visited == [.time, .copies, .source, .time])
+        #expect(visited == [.time, .keep, .copies, .source, .time])
         session.rotateUsageTab(by: -1)
         #expect(session.usagePurpose == .source)
     }
@@ -328,13 +330,13 @@ struct InventoryTests {
     /// figure and every Clear is on Usage, and Preferences draws none of them.
     @Test("The storage this device uses is on Usage, and Preferences no longer shows it")
     func theFiguresLiveOnUsage() throws {
-        let usage = try Self.source("UsagePane")
+        let usage = try ["UsagePane", "UsageSources"].map(Self.source).joined()
         let preferences = try Self.source("PreferencesPane")
         for key in [
             "prefs.cache", "prefs.cache.footer", "prefs.held.total", "prefs.held.disk",
             "prefs.held.breakdown", "prefs.cache.clear", "prefs.password.forget",
             "prefs.keep", "prefs.drop.copies",
-            "usage.tab.source", "usage.tab.time", "usage.tab.copies",
+            "usage.tab.source", "usage.tab.time", "usage.tab.keep", "usage.tab.copies",
         ] {
             #expect(usage.contains("\"\(key)\""), "Usage does not draw \(key)")
         }

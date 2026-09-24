@@ -387,20 +387,19 @@ struct RemoveTests {
         )
         let sources = [microblog, forum]
 
-        #expect(
-            FediqoRootView.removeDetail(for: alpha, in: sources)
-                == L10n.t("account.remove.detail", language: .english)
-        )
-        #expect(
-            FediqoRootView.removeDetail(for: beta, in: sources)
-                == String(format: L10n.t("account.remove.detail.boards", language: .english), 2)
-        )
-        // A host with no row left — the list moved under the dialog — still gets a true sentence
+        func asked(_ host: String) -> ShellConfirmation {
+            ShellQuestion.remove(
+                host: host, boards: FediqoRootView.boards(of: host, in: sources), language: .english
+            )
+        }
+        #expect(asked(alpha).line == L10n.t("account.remove.detail", language: .english))
+        #expect(asked(alpha).help == nil)
+        #expect(asked(beta).help == String(format: L10n.t("account.remove.detail.boards", language: .english), 2))
+        #expect(asked(beta).line == String(format: L10n.t("account.remove.line.boards", language: .english), 2))
+        #expect(asked(beta).line.contains("2 boards"))
+        // A host with no row left — the list moved under the question — still gets a true sentence
         // rather than a claim about boards nobody can count.
-        #expect(
-            FediqoRootView.removeDetail(for: "gone.test", in: sources)
-                == L10n.t("account.remove.detail", language: .english)
-        )
+        #expect(asked("gone.test").help == nil)
         #expect(L10n.t("account.remove.title", language: .english).contains("%@"))
         #expect(!L10n.t("account.remove.confirm", language: .english).isEmpty)
     }

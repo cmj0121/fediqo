@@ -124,7 +124,7 @@ struct ForumTransportTests {
             "account.refuse.signin", "account.refuse.signin.label",
             "forum.signin.title", "forum.signin.web.label", "forum.signin.save",
             "forum.signin.cancel", "forum.signin.done",
-            "prefs.password.held", "prefs.password.forget", "prefs.password.forget.label",
+            "prefs.password.held", "prefs.password.forget",
             "prefs.held.posts", "prefs.held.posts.none",
         ]
         for key in keys {

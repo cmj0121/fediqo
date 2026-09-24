@@ -205,23 +205,6 @@ struct Allowance: Identifiable, Equatable, Sendable {
             ? L10n.t("allow.hosts.anywhere", language: language)
             : hosts.map(\.text).joined(separator: ", ")
     }
-
-    /// The entry as VoiceOver reads it: what it is, whose, and each of what the list shows.
-    /// Whether it is on is the switch's own to say.
-    func spoken(language: DummyLanguage? = nil) -> String {
-        var parts = [title(language: language)]
-        if source != nil { parts.append(L10n.t("allow.own.mark", language: language)) }
-        parts += [what(language: language), whenText(language: language), why(language: language),
-                  hostsText(language: language)]
-        // Each part a sentence of its own, stopped once.
-        let stops: Set<Character> = [".", "。"]
-        return parts.map { part in
-            var part = part
-            while let last = part.last, stops.contains(last) { part.removeLast() }
-            return part
-        }
-        .joined(separator: L10n.t("allow.spoken.joiner", language: language))
-    }
 }
 
 /// What the person decided about what reaches beyond a source (#226): which of the entries the

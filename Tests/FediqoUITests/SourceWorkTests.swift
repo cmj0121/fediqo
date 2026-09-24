@@ -404,19 +404,20 @@ struct SourceWorkTests {
     }
 
     /// No view inspector, so what VoiceOver reads is pinned by what the section draws: the host,
-    /// then `purposeText` — which carries the board — then the time, as one combined element.
+    /// then `brief` — `purposeText`, which carries the board, and the source it is for — then the
+    /// time, as one combined element.
     @Test("VoiceOver reads the board with the line, after what for")
     func theBoardIsSpoken() throws {
         let file = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/FediqoUI/Shell/SourceWorkSection.swift")
         let page = try String(contentsOf: file, encoding: .utf8)
-        let host = try #require(page.range(of: "Text(row.host)"))
-        let purpose = try #require(page.range(of: "Text(row.purposeText())"))
+        let host = try #require(page.range(of: "source: row.host"))
+        let purpose = try #require(page.range(of: "what: row.brief()"))
         let time = try #require(page.range(of: "SourceWorkRow.elapsed("))
         #expect(host.lowerBound < purpose.lowerBound && purpose.lowerBound < time.lowerBound)
-        #expect(page.contains(".accessibilityElement(children: .combine)"))
-        #expect(!page.contains("row.name"), "the board is drawn only through purposeText")
+        #expect(page.contains("SourceLineRow("), "the record's row, which VoiceOver hears as one element")
+        #expect(!page.contains("row.name"), "the board is drawn only through brief")
     }
 
     @Test("Lines are longest-running first; pictures gather per host; the rest are one each")
@@ -467,7 +468,7 @@ struct SourceWorkTests {
 
         for language in [DummyLanguage.english, .taiwanese] {
             for key in SourceWork.Purpose.allCases.map(\.titleKey)
-                + ["prefs.tab.work", "work.title", "work.none", "work.footer", "work.count"] {
+                + ["prefs.tab.work", "work.title", "work.none", "work.footer", "work.brief", "work.count"] {
                 #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
             }
         }
@@ -486,7 +487,7 @@ struct SourceWorkTests {
             #expect(!page.contains(reach), "the page reaches for \(reach)")
         }
         let work = SourceWork()
-        _ = SourceWorkSection(work: work)
+        _ = SourceWorkSection(work: work) { _ in }
         #expect(work.now.isEmpty)
     }
 }
