@@ -145,7 +145,8 @@ struct StoreSaverTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let store = ItemStore(sources: [alpha, beta], notes: [note("1", from: alpha), note("2", from: beta)])
         let saver = StoreSaver(store: store, file: StoreFile.open(at: dir).file)
-        #expect(await saver.flush() == .saved)
+        // The round trip, not the quit's deadline: a shared runner stretches this write past 3 s (#203).
+        #expect(await saver.flush(deadline: .seconds(60)) == .saved)
 
         let before = await store.snapshot()
         let opened = StoreFile.open(at: dir)
