@@ -107,6 +107,7 @@ struct PreferencesPane: View {
         .scrollIndicators(.never)
         .clearsFloatingCorner()
         .padding(ShellSpace.snug)
+        .modifier(CarryFlow(session: session))
     }
 
     /// The tab the page is on, whole.
@@ -163,6 +164,7 @@ struct PreferencesPane: View {
         } header: {
             ShellSectionHead(title: "prefs.latest.head", line: "prefs.latest.brief", help: "prefs.latest.footer")
         }
+        if let session { CarrySection(session: session) }
     }
 
     /// How long this device waits before asking the sources it holds again (#95).

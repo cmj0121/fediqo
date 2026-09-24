@@ -277,6 +277,20 @@ final class AllowanceBook {
     init(defaults: UserDefaults, work: SourceWork) {
         self.defaults = defaults
         self.work = work
+        load()
+        work.allow(effective)
+    }
+
+    /// The list read again off the preferences — after a take-away was read back (#247), which
+    /// replaced them under this object. What the gate lets through changes with it.
+    func reread() {
+        off = []
+        own = []
+        load()
+        work.allow(effective)
+    }
+
+    private func load() {
         if let data = defaults.data(forKey: Self.key),
            let kept = try? JSONDecoder().decode(Kept.self, from: data)
         {
@@ -292,7 +306,6 @@ final class AllowanceBook {
                 own.append(entry)
             }
         }
-        work.allow(effective)
     }
 
     /// Every entry the list shows: the app's own, then the person's.

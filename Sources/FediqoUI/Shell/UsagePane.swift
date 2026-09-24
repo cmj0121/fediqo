@@ -332,8 +332,8 @@ struct UsagePane: View {
         )
     }
 
-    static func size(_ bytes: Int) -> String {
-        Int64(bytes).formatted(.byteCount(style: .file).locale(L10n.locale()))
+    static func size(_ bytes: Int, language: DummyLanguage? = nil) -> String {
+        Int64(bytes).formatted(.byteCount(style: .file).locale(L10n.locale(language)))
     }
 
     private func reading(_ text: Text) -> some View {

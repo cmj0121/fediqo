@@ -93,13 +93,15 @@ public struct FediqoRootView: View {
         mastodon: MastodonSessions = MastodonSessions(),
         persist: (@MainActor () async -> Void)? = nil,
         storeIsNewer: Bool = false,
-        storeNoticeSeen: (@MainActor () -> Void)? = nil
+        storeNoticeSeen: (@MainActor () -> Void)? = nil,
+        carrier: (any StoreCarrier)? = nil
     ) {
         let session = ShellSession(
             http: http, store: store, forums: forums, mastodon: mastodon,
             timelines: WrittenTimelineStore(defaults: .standard)
         )
         session.persist = persist
+        session.carrier = carrier
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)
         self.storeNoticeSeen = storeNoticeSeen

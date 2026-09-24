@@ -141,6 +141,13 @@ scripts/metadata.py --resolve           # ⋯⋯以及那些連結會不會回�
 *連結*，僅此而已。Fediqo 不蒐集任何東西，所以答案是 **Data Not Collected**，在 App Privacy 底下手動勾一
 次。程式碼做了什麼是可查的：沒有分析、沒有任何第三方 SDK。
 
+**加密的答案維持 `ITSAppUsesNonExemptEncryption = false`，而 0.7.0 是它必須被說出口的原因。**
+從 0.7.0 起，app 會寫出一個以 AES-GCM 上鎖的帶走檔案，金鑰由使用者的密碼延展而來（PBKDF2 與 HKDF，
+全部是 CryptoKit 與 CommonCrypto —— `Sources/FediqoCore/TakeAway/`）。這是加密，而答案仍然是 `false`：
+app 用的是作業系統自帶、公開的標準演算法實作，這正是 App Store Connect 那個問題所指的豁免（與 HTTPS
+同一立足點）。`project.yml` 兩個 target 裡的 `false` 就是完整的答案，所以不用上傳出口合規文件，也不因此
+欠一份年度自我分類報告。哪一個 build 若加入了自己的加密演算法、或帶著一個的函式庫，上傳前得先回頭重看這一段。
+
 截圖就在隔壁，這條 lane 不必被告知就會從 `fastlane/screenshots/<platform>/` 把它們在同一趟裡一起上傳。
 
 ## 那些圖

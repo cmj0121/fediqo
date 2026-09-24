@@ -21,6 +21,9 @@ final class Launch {
     let forums: ForumSessions
     let mastodon: MastodonSessions
     let saver: StoreSaver
+    /// What takes the store away as one locked file and reads one back (#247). Built on what
+    /// this launch opened, so it writes the index this run writes and replaces it in place.
+    let carrier: StorePackager
     /// The index was written by a newer build and left alone; the root view says so. Cleared when
     /// the reader dismisses that, so it is said once a launch rather than once a window.
     var storeIsNewer: Bool
@@ -36,6 +39,12 @@ final class Launch {
         // It is also `nil` when the index was written by a newer build, which is left as found.
         saver = StoreSaver(store: store, file: opened.file)
         storeIsNewer = opened.storeIsNewer
+        carrier = StorePackager(
+            directory: StoreFile.applicationSupportDirectory, file: opened.file, store: store,
+            media: try? MediaCache.caches(), tokens: KeychainMastodonTokens(), credentials: KeychainCredentials(),
+            defaults: .standard, device: Self.deviceName,
+            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        )
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).
         FediqoRootView.onlyToSources(
@@ -62,6 +71,16 @@ final class Launch {
         if let media = try? MediaCache.caches() {
             FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host))
         }
+    }
+
+    /// What this device calls itself, written into a take-away's header so the device it came
+    /// from can be named when it is read back.
+    private static var deviceName: String {
+        #if os(macOS)
+        Host.current().localizedName ?? "Mac"
+        #else
+        UIDevice.current.name
+        #endif
     }
 
     /// As a run ends: the save, and then nothing of where this run went left behind (#219) — the
@@ -161,7 +180,8 @@ struct FediqoApp: App {
                 store: Launch.shared.store, forums: Launch.shared.forums,
                 mastodon: Launch.shared.mastodon, persist: save,
                 storeIsNewer: Launch.shared.storeIsNewer,
-                storeNoticeSeen: { Launch.shared.storeIsNewer = false }
+                storeNoticeSeen: { Launch.shared.storeIsNewer = false },
+                carrier: Launch.shared.carrier
             )
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background {
