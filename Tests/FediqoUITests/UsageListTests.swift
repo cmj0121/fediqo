@@ -24,8 +24,56 @@ struct UsageListTests {
         #expect(session.usageOpened == nil)
         #expect(!session.closeUsageSource(), "nothing open is not a press Escape spends")
         session.usageOpened = Self.forum.host
+        #expect(session.usageDetailShown)
         #expect(session.closeUsageSource())
         #expect(session.usageOpened == nil)
+        #expect(session.usageReturning == Self.forum.host, "the list lights the row that was opened")
+    }
+
+    @Test("A detail not on screen is not shown, and Escape is not spent on it")
+    func hiddenDetailIsNotShown() {
+        let session = makeSession()
+        session.usageOpened = "gone.example"
+        #expect(!session.usageDetailShown, "a host no longer joined")
+        #expect(!session.closeUsageSource())
+
+        session.usageOpened = Self.mastodon.host
+        session.usagePurpose = .time
+        #expect(!session.usageDetailShown, "the Time tab draws no detail")
+        #expect(!session.closeUsageSource())
+    }
+
+    @Test("Moving to another tab leaves the detail behind")
+    func rotationClosesTheDetail() {
+        let session = makeSession()
+        session.usageOpened = Self.mastodon.host
+        session.rotateUsageTab(by: 1)
+        #expect(session.usageOpened == nil)
+        session.rotateUsageTab(by: -1)
+        #expect(session.usagePurpose == .source)
+        #expect(!session.usageDetailShown)
+    }
+
+    @Test("Removing a source leaves its detail, so adding it again opens on the list")
+    func removalClosesTheDetail() async {
+        let session = makeSession()
+        session.usageOpened = Self.forum.host
+        await session.remove(host: "Forum.Example")
+        #expect(session.usageOpened == nil)
+        session.sources = [Self.mastodon, Self.forum]
+        #expect(!session.usageDetailShown)
+    }
+
+    @Test("Leaving Usage for another place leaves the detail behind")
+    func placeChangeClosesTheDetail() throws {
+        let root = try String(
+            contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Sources/FediqoUI/FediqoRootView.swift"),
+            encoding: .utf8
+        )
+        let change = try #require(root.range(of: ".onChange(of: place) {"))
+        let next = try #require(root.range(of: ".onChange(of: availability)", range: change.upperBound..<root.endIndex))
+        #expect(root[change.upperBound..<next.lowerBound].contains("session.usageOpened = nil"))
     }
 
     @Test("Every short line is one line, in both languages, with its long explanation behind it")
@@ -45,7 +93,7 @@ struct UsageListTests {
                 #expect(long.count > short.count, "\(help) says less than \(line)")
             }
         }
-        for key in ["usage.source.back", "usage.source.clear.help", "usage.drop.copies.help", "usage.tab.keep"] {
+        for key in ["usage.gone.now.help", "usage.source.back", "usage.source.clear.help", "usage.drop.copies.help", "usage.tab.keep"] {
             for language in [DummyLanguage.english, .taiwanese] {
                 #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
             }
@@ -98,7 +146,7 @@ struct UsageListTests {
     func draws(_ scheme: ColorScheme) throws {
         let session = makeSession()
         let views: [AnyView] = [
-            AnyView(UsageSourceList(session: session, onDisk: nil)),
+            AnyView(UsageSourceList(session: session, onDisk: nil, returning: Self.forum.host)),
             AnyView(UsageSourceDetail(
                 session: session, source: Self.forum, catalogue: nil, cataloguesRead: true, onDisk: [:]
             )),

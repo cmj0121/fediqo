@@ -44,9 +44,9 @@ struct GoneSection: View {
                 reading(line)
             }
             HStack(spacing: ShellSpace.snug) {
-                reading(went.map { Self.wentLine($0.posts, places: $0.places) } ?? L10n.t("prefs.gone.now"))
+                if let went { reading(Self.wentLine(went.posts, places: went.places)) }
                 Spacer(minLength: ShellSpace.snug)
-                ShellIconButton("trash", name: "prefs.gone.now", tone: .alarm) {
+                ShellIconButton("trash", name: "prefs.gone.now", help: "usage.gone.now.help", tone: .alarm) {
                     Task {
                         // Nothing to let go is said at once; anything is asked about first.
                         counted = await session.goneHeld()

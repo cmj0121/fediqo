@@ -325,6 +325,7 @@
 "usage.source.back" = "Back to sources";
 "usage.source.clear.help" = "Asks first, then lets go of this source's pictures, emoji names, first posts and sign-in. Its posts stay, and it stays added.";
 "usage.drop.copies.help" = "Asks first, then drops every picture copy in memory and on disk.";
+"usage.gone.now.help" = "Asks first, then lets go now of every post and place deleted at its source, whatever the wait.";
 
 "store.newer.title" = "A newer Fediqo wrote this device's index";
 "store.newer.detail" = "This version cannot read it, so it has left it exactly as it was and will save nothing over it. Open Fediqo in the newer version to see what it holds.";

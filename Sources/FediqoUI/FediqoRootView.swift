@@ -227,6 +227,8 @@ public struct FediqoRootView: View {
                 // And the film stops — **including one playing in a row**, which is the half
                 // `closeViewer` cannot do, because with a row playing the viewer was never open.
                 playback.stop()
+                // A source's detail left behind on Usage is not waiting there on the way back.
+                session.usageOpened = nil
             }
             // The rail and the tab bar both draw only the places that can be entered.
             // If that set ever narrows under the reader — a sign-out, a source

@@ -13,6 +13,8 @@ struct UsageSourceList: View {
 
     /// The row the lamp is on. Opening is the session's (`usageOpened`), so Escape can close it.
     @State private var lit: String?
+    /// The host last opened, handed back by the detail so the lamp is where the reader left.
+    let returning: String?
 
     var body: some View {
         Section {
@@ -29,6 +31,7 @@ struct UsageSourceList: View {
                 }
                 .listRowInsets(EdgeInsets())
             }
+            .onAppear { if let returning { lit = returning } }
         } header: {
             Text(L10n.t("prefs.cache"))
         } footer: {

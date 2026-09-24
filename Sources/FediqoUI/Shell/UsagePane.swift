@@ -180,7 +180,10 @@ struct UsagePane: View {
     /// The page's tabs (`ShellTabs`). Tab rotates them (`ShellSession.rotateUsageTab`); they sit
     /// in the Form so the grouped chrome is the page's own, not a second colour.
     private var tabs: some View {
-        ShellTabs(Purpose.allCases, selected: session?.usagePurpose ?? .source) { session?.usagePurpose = $0 }
+        ShellTabs(Purpose.allCases, selected: session?.usagePurpose ?? .source) {
+            session?.usagePurpose = $0
+            session?.usageOpened = nil
+        }
     }
 
     @ViewBuilder
@@ -209,13 +212,14 @@ struct UsagePane: View {
     /// open leaves the list in its place.
     @ViewBuilder
     private func sources(_ session: ShellSession) -> some View {
-        if let host = session.usageOpened, let source = session.sources.first(where: { $0.host == host }) {
+        if session.usageDetailShown, let host = session.usageOpened,
+           let source = session.sources.first(where: { $0.host == host }) {
             UsageSourceDetail(
                 session: session, source: source, catalogue: catalogues?[host],
                 cataloguesRead: catalogues != nil, onDisk: onDisk
             )
         } else {
-            UsageSourceList(session: session, onDisk: onDisk)
+            UsageSourceList(session: session, onDisk: onDisk, returning: session.usageReturning)
         }
     }
 

@@ -418,12 +418,25 @@ final class ShellSession {
     var usagePurpose: UsagePane.Purpose = .source
 
     /// The source whose detail Usage's Sources tab is showing (#234), by host; nothing is the list.
-    var usageOpened: String?
+    var usageOpened: String? {
+        didSet { if let oldValue, usageOpened == nil { usageReturning = oldValue } }
+    }
 
-    /// Escape on Usage: back from a source's detail to the list. Nothing to leave is not a press.
+    /// The source whose detail was last closed, so the list lights its row again and a keyboard
+    /// reader keeps their place.
+    private(set) var usageReturning: String?
+
+    /// Whether a source's detail is what Usage is drawing: the Sources tab, and a host still
+    /// joined. A host left over from another tab or a removed source is not shown.
+    var usageDetailShown: Bool {
+        usagePurpose == .source && usageOpened.map { host in sources.contains { $0.host == host } } == true
+    }
+
+    /// Escape on Usage: back from a source's detail to the list. Only a detail on screen is closed,
+    /// so Escape is never spent on one nobody can see.
     @discardableResult
     func closeUsageSource() -> Bool {
-        guard usageOpened != nil else { return false }
+        guard usageDetailShown else { return false }
         usageOpened = nil
         return true
     }
@@ -432,6 +445,7 @@ final class ShellSession {
     @discardableResult
     func rotateUsageTab(by step: Int) -> Bool {
         usagePurpose = DummyCommand.advanced(Array(UsagePane.Purpose.allCases), from: usagePurpose, by: step)
+        usageOpened = nil
         return true
     }
 
@@ -2596,6 +2610,7 @@ final class ShellSession {
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about.
         removing = nil
+        if usageOpened?.lowercased() == host { usageOpened = nil }
         stopReadingAsYou(host: host)
         // Every read of it a reload has on its way ends here, signed in or not, and an open thread
         // from it is not renewed again: nothing this app does on its own reaches it after (#221).

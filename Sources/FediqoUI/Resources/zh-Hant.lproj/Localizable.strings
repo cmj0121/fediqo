@@ -324,6 +324,7 @@
 "usage.source.back" = "回到來源";
 "usage.source.clear.help" = "會先詢問，再清除這台裝置存的這個來源的圖片、表情符號名稱、主文與登入資料。貼文會留下，來源也仍保持加入。";
 "usage.drop.copies.help" = "會先詢問，再捨棄記憶體與磁碟上所有的圖片副本。";
+"usage.gone.now.help" = "會先詢問，再立即放下所有來源已刪除的貼文與標記，不論等待多久。";
 
 "store.newer.title" = "這台裝置的索引是較新版的 Fediqo 寫的";
 "store.newer.detail" = "這個版本讀不了它，所以原封不動地留著，也不會在上面存任何東西。用較新版的 Fediqo 開啟，就能看到裡面的內容。";
