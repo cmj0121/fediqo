@@ -38,6 +38,9 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
     let title: String
     let brief: String?
     let figure: String?
+    /// What VoiceOver says for the row where its parts read together would not say it whole — a
+    /// rule's kind, which the row shows only as its mark. Nothing reads the parts.
+    let spoken: String?
     @Binding var selection: ID?
     let onOpen: () -> Void
     /// ↑ is −1 and ↓ is +1. Nothing where the list walks itself.
@@ -50,7 +53,7 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
     @Environment(\.colorScheme) private var colorScheme
 
     init(
-        id: ID, title: String, brief: String? = nil, figure: String? = nil,
+        id: ID, title: String, brief: String? = nil, figure: String? = nil, spoken: String? = nil,
         selection: Binding<ID?>, onOpen: @escaping () -> Void, onStep: ((Int) -> Void)? = nil,
         @ViewBuilder mark: () -> Mark, @ViewBuilder control: () -> Control
     ) {
@@ -58,6 +61,7 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
         self.title = title
         self.brief = brief
         self.figure = figure
+        self.spoken = spoken
         _selection = selection
         self.onOpen = onOpen
         self.onStep = onStep
@@ -96,6 +100,7 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
                 step(up: key.key == .upArrow) ? .handled : .ignored
             }
             .accessibilityElement(children: .combine)
+            .modifier(ShellSpokenLabel(spoken: spoken))
             .accessibilityAddTraits(traits)
             .accessibilityHint(L10n.t("list.open.hint"))
             .accessibilityAction { onOpen() }
@@ -150,15 +155,28 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
     }
 }
 
+/// A row's own spoken label, where it has one; otherwise its parts are read as they are.
+private struct ShellSpokenLabel: ViewModifier {
+    let spoken: String?
+
+    func body(content: Content) -> some View {
+        if let spoken {
+            content.accessibilityLabel(spoken)
+        } else {
+            content
+        }
+    }
+}
+
 extension ShellListRow where Control == EmptyView {
     /// A row with nothing of its own after the chevron.
     init(
-        id: ID, title: String, brief: String? = nil, figure: String? = nil,
+        id: ID, title: String, brief: String? = nil, figure: String? = nil, spoken: String? = nil,
         selection: Binding<ID?>, onOpen: @escaping () -> Void, onStep: ((Int) -> Void)? = nil,
         @ViewBuilder mark: () -> Mark
     ) {
         self.init(
-            id: id, title: title, brief: brief, figure: figure, selection: selection,
+            id: id, title: title, brief: brief, figure: figure, spoken: spoken, selection: selection,
             onOpen: onOpen, onStep: onStep, mark: mark, control: { EmptyView() }
         )
     }
