@@ -350,7 +350,7 @@
 "prefs.tab.build" = "這個 Fediqo";
 "prefs.tab.work" = "連線中";
 "work.title" = "正在向來源讀取的東西";
-"work.none" = "目前沒有任何工作。這台裝置此刻沒有向任何來源要求任何東西。";
+"work.none" = "此刻沒有任何工作。";
 "work.footer" = "只列出此刻正在進行的工作，結束後就會離開清單。在這裡查看不會送出或停止任何東西，也只顯示請求要去的主機名稱，不顯示其他內容。";
 "work.elapsed.seconds" = "%d 秒";
 "work.elapsed.minutes" = "%1$d 分 %2$d 秒";
@@ -375,8 +375,6 @@
 "work.purpose.video" = "播放影片";
 "work.purpose.signInPage" = "從論壇登入頁前往的頁面";
 "work.purpose.personCheck" = "論壇登入時顯示的真人驗證";
-"activity.open" = "這次執行送出的所有請求…";
-"activity.open.footer" = "從開啟 app 以來的每一個請求：哪個來源、什麼時候、為了什麼。";
 "activity.title" = "這次執行的請求";
 "activity.close" = "完成";
 "activity.filter" = "來源";
@@ -762,7 +760,6 @@
 "allow.own.host" = "主機，例如 img.example.com";
 "allow.own.add" = "加入";
 "allow.own.remove" = "移除 %@";
-"allow.own.mark" = "你加的";
 "allow.own.name" = "%@（你加的）";
 "allow.own.what" = "%1$@ 的頁面從這個主機載入的內容，以及 %1$@ 指向這裡的東西";
 "allow.own.why" = "你加入的。";
@@ -775,7 +772,6 @@
 "allow.when.signingIn" = "只在論壇的登入畫面開著時";
 "allow.when.own" = "在 %@ 的頁面上，以及它指向的東西";
 "allow.hosts.anywhere" = "頁面前往的任何主機";
-"allow.spoken.joiner" = "。";
 "allow.directory.title" = "來源目錄";
 "allow.directory.what" = "可以加入的來源清單";
 "allow.directory.why" = "讓你不必知道名稱也能挑選來源。用名稱加入來源永遠不需要它。";
@@ -796,3 +792,28 @@
 /* The shared pieces every screen is built from (#232). */
 "help.about" = "關於「%@」的說明";
 "list.open.hint" = "打開詳細內容";
+
+/* Preferences says the least first (#233). */
+"prefs.tab.hosts" = "自訂主機";
+"prefs.askEvery.brief" = "這台裝置等多久再問一次。";
+"prefs.latest.brief" = "時間軸只顯示到這一天結束為止。";
+"about.brief" = "這個版本建置時留下的紀錄。";
+"work.brief" = "只列出此刻正在進行的。";
+"activity.open.brief" = "從開啟 app 以來的每一個請求";
+"allow.builtIn.brief" = "只有這些能連到你的來源之外。";
+"allow.own.brief" = "每一個都只服務你的一個來源。";
+"allow.row.on" = "開啟";
+"allow.row.off" = "關閉";
+"allow.detail.on" = "放行";
+"allow.detail.on.hint" = "關閉後，它放行的東西會立刻被拒絕。";
+"allow.detail.what" = "放行什麼";
+"allow.detail.when" = "什麼時候";
+"allow.detail.why" = "為什麼";
+"allow.detail.hosts" = "主機";
+"allow.detail.state" = "目前";
+"allow.own.for" = "服務 %@";
+"allow.own.gone.brief" = "它的來源不在這台裝置上";
+"allow.own.adding" = "加入主機";
+"allow.own.adding.brief" = "給你的一個來源使用";
+"allow.own.removeIt" = "移除";
+"detail.back" = "回到清單";

@@ -19,6 +19,13 @@ struct ActivityPanel: View {
 
     /// The one source the list is narrowed to; nil for every source.
     @State private var chosen: String?
+
+    /// Narrowed to `source` from the start, where the record holds a line for it.
+    init(log: SourceRecord, from source: String? = nil, onClose: @escaping () -> Void) {
+        self.log = log
+        self.onClose = onClose
+        _chosen = State(initialValue: Self.stillChosen(source, among: log.sources))
+    }
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -129,17 +136,28 @@ struct ActivityLine: View {
     }
 }
 
-/// The way to the record from Preferences' in-flight tab, under what is running now.
+/// The way to the record from Preferences' in-flight tab, under what is running now: a row of
+/// its own, entered as any row is.
 struct ActivityEntry: View {
     let session: ShellSession
 
+    @State private var lit: Bool?
+
     var body: some View {
         Section {
-            Button(L10n.t("activity.open")) { session.activityShown = true }
-        } footer: {
-            Text(L10n.t("activity.open.footer"))
-                .shellFont(.meta)
+            ShellListRow(
+                id: true, title: L10n.t("activity.title"), brief: L10n.t("activity.open.brief"),
+                selection: $lit, onOpen: { Self.open(session) }
+            ) {
+                Image(systemName: "clock.arrow.circlepath")
+            }
         }
+    }
+
+    /// The record, narrowed to `source` where one is given and the record holds a line for it.
+    static func open(_ session: ShellSession, from source: String? = nil) {
+        session.activityFrom = source
+        session.activityShown = true
     }
 }
 
@@ -151,7 +169,7 @@ struct ActivitySheet: ViewModifier {
 
     func body(content: Content) -> some View {
         content.sheet(isPresented: shown) {
-            ActivityPanel(log: session.work.log) { session.activityShown = false }
+            ActivityPanel(log: session.work.log, from: session.activityFrom) { session.activityShown = false }
         }
     }
 

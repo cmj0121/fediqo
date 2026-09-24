@@ -429,6 +429,9 @@ final class ShellSession {
 
     /// Whether the record of everything this run has asked of the sources is open (#218).
     var activityShown = false
+    /// The source the record opens narrowed to — a line of work in flight entered (#233); nil
+    /// for every source.
+    var activityFrom: String?
 
     /// Tab and ⇧Tab on Preferences, the way they rotate Usage: Settings, This Fediqo, In flight,
     /// and round again.

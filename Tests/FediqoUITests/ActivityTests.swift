@@ -241,7 +241,7 @@ struct ActivityTests {
     @Test("Every word the record says is there in every language the app has")
     func theWords() throws {
         let keys = SourceWork.Purpose.allCases.map(\.titleKey) + [
-            "activity.open", "activity.open.footer", "activity.title", "activity.close",
+            "activity.open.brief", "activity.title", "activity.close",
             "activity.filter", "activity.filter.all", "activity.none", "activity.footer",
             "activity.dropped", "activity.row.spoken",
         ]
@@ -310,6 +310,10 @@ struct ActivityTests {
             encoding: .utf8
         )
         #expect(panel.contains("session.activityShown = true"))
+        ActivityEntry.open(session, from: "one.example")
+        #expect(session.activityShown && session.activityFrom == "one.example")
+        ActivityEntry.open(session)
+        #expect(session.activityFrom == nil, "the record's own row opens every source")
         let root = try String(
             contentsOf: file.deletingLastPathComponent().deletingLastPathComponent()
                 .appendingPathComponent("FediqoRootView.swift"),

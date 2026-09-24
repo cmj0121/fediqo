@@ -50,9 +50,8 @@ struct AllowanceListTests {
                     #expect(!line.hasPrefix("allow."), "\(entry.id.rawValue) says a key in \(language): \(line)")
                     #expect(!line.isEmpty)
                 }
-                let spoken = entry.spoken(language: language)
-                for line in said {
-                    #expect(spoken.contains(line.trimmingCharacters(in: CharacterSet(charactersIn: ".。"))))
+                for on in [true, false] {
+                    #expect(!AllowanceSection.figure(on: on, language: language).hasPrefix("allow."))
                 }
             }
         }
@@ -66,7 +65,7 @@ struct AllowanceListTests {
         }
     }
 
-    @Test("A host the person added is marked as theirs, and says which source it serves")
+    @Test("A host the person added is marked as theirs, and its row says which source it serves")
     func anOwnEntrySaysSo() async {
         let shelf = Shelf()
         let (book, work, defaults) = (shelf.book, shelf.work, shelf.defaults)
@@ -76,9 +75,10 @@ struct AllowanceListTests {
             let entry = book.own[0]
             #expect(entry.id.isOwn && entry.id.ownHost == Self.cdn)
             #expect(entry.title() == Self.cdn)
-            let spoken = entry.spoken(language: .english)
-            #expect(spoken.hasPrefix("\(Self.cdn). Yours. "))
-            #expect(spoken.contains(Self.forum))
+            #expect(OwnHostsSection.brief(entry, gone: false, language: .english) == "For \(Self.forum)")
+            #expect(OwnHostsSection.brief(entry, gone: true, language: .english)
+                == L10n.t("allow.own.gone.brief", language: .english))
+            #expect(entry.what(language: .english).contains(Self.forum))
             #expect(entry.id.name(language: .english) == "\(Self.cdn) (yours)")
             #expect(!Allowance.standing.contains { $0.id.isOwn })
         }
@@ -123,7 +123,7 @@ struct AllowanceListTests {
         #expect(AllowanceBook.host("http://IMG-1.cdn.example/") == .success("img-1.cdn.example"))
         for refusal in [AllowanceBook.Refusal.notAHost, .wildcard, .address, .port, .path, .itsOwnHost, .alreadyThere] {
             for language in [DummyLanguage.english, .taiwanese] {
-                #expect(!AllowanceSection.sentence(refusal, language: language).hasPrefix("allow."), "\(refusal) \(language)")
+                #expect(!OwnHostAdding.sentence(refusal, language: language).hasPrefix("allow."), "\(refusal) \(language)")
             }
         }
     }
@@ -371,12 +371,16 @@ struct AllowanceListTests {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/FediqoUI/Resources")
         var keys = ["prefs.tab.reach", "account.catalog.off", "activity.row.allowed", "activity.row.spoken.allowed",
-                    "allow.builtIn", "allow.builtIn.footer", "allow.own", "allow.own.none", "allow.own.footer",
-                    "allow.own.noSource", "allow.own.source", "allow.own.host", "allow.own.add", "allow.own.remove",
-                    "allow.own.mark", "allow.own.name", "allow.own.what", "allow.own.why", "allow.own.gone",
+                    "allow.builtIn", "allow.builtIn.footer", "allow.builtIn.brief", "allow.own", "allow.own.none",
+                    "allow.own.footer", "allow.own.brief", "allow.own.noSource", "allow.own.source", "allow.own.host",
+                    "allow.own.add", "allow.own.remove", "allow.own.removeIt", "allow.own.adding",
+                    "allow.own.adding.brief", "allow.own.for", "allow.own.gone.brief", "allow.row.on", "allow.row.off",
+                    "allow.detail.on", "allow.detail.on.hint", "allow.detail.what", "allow.detail.when",
+                    "allow.detail.why", "allow.detail.hosts", "allow.detail.state", "prefs.tab.hosts", "detail.back",
+                    "allow.own.name", "allow.own.what", "allow.own.why", "allow.own.gone",
                     "allow.own.refused.notAHost", "allow.own.refused.itsOwnHost", "allow.own.refused.alreadyThere",
                     "allow.when.adding", "allow.when.forumPage", "allow.when.signingIn", "allow.when.own",
-                    "allow.hosts.anywhere", "allow.spoken.joiner", "work.purpose.pagePart"]
+                    "allow.hosts.anywhere", "work.purpose.pagePart"]
         for id in Allowance.ID.builtIn {
             keys += ["title", "what", "why"].map { "allow.\(id.rawValue).\($0)" }
         }
@@ -390,24 +394,28 @@ struct AllowanceListTests {
         }
     }
 
-    /// No view inspector, so what VoiceOver reads is pinned by what the section draws: each of the
-    /// app's entries a switch labelled with everything it says — the switch speaks its own state —
-    /// and each of the person's one element labelled the same, with its remove button named.
-    @Test("VoiceOver speaks every entry, and its state")
+    /// No view inspector, so what VoiceOver reads is pinned by what the sections draw (#233): each
+    /// entry a list row — one element, its title, when, and on or off — whose detail holds the
+    /// switch, named, and each of the person's a row whose detail holds its named Remove.
+    @Test("VoiceOver hears each entry as a row, and its switch and Remove in its detail")
     func itIsSpoken() throws {
-        let file = URL(fileURLWithPath: #filePath)
+        let shell = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/FediqoUI/Shell/AllowanceSection.swift")
-        let section = try String(contentsOf: file, encoding: .utf8)
-        #expect(section.contains("Toggle(isOn: on(entry.id)) { EntryText(entry: entry) }\n                    .accessibilityLabel(Text(entry.spoken()))"))
-        #expect(section.contains(".accessibilityLabel(String(format: L10n.t(\"allow.own.remove\"), entry.title()))"))
-        #expect(section.contains(".accessibilityLabel(Text(entry.spoken()"))
+            .appendingPathComponent("Sources/FediqoUI/Shell")
+        let builtIn = try String(contentsOf: shell.appendingPathComponent("AllowanceSection.swift"), encoding: .utf8)
+        let own = try String(contentsOf: shell.appendingPathComponent("OwnHostsSection.swift"), encoding: .utf8)
+        #expect(builtIn.contains("ShellListRow("))
+        #expect(builtIn.contains("figure: Self.figure(on: book.isOn(entry.id))"))
+        #expect(builtIn.contains("Toggle(L10n.t(\"allow.detail.on\"), isOn: $on)"))
+        #expect(own.contains("ShellListRow("))
+        #expect(own.contains(".accessibilityLabel(String(format: L10n.t(\"allow.own.remove\"), entry.title()))"))
         for reach in ["http", "begin(", "note(", "URLSession"] {
-            #expect(!section.contains(reach), "the list reaches for \(reach)")
+            #expect(!builtIn.contains(reach), "the list reaches for \(reach)")
+            #expect(!own.contains(reach), "the hosts reach for \(reach)")
         }
     }
 
-    @Test("The list draws in light and in dark, with an entry of the person's", arguments: [ColorScheme.light, .dark])
+    @Test("The lists, a detail of each and adding draw in light and dark, at the largest type in dark", arguments: [ColorScheme.light, .dark])
     func drawsInBothSchemes(_ scheme: ColorScheme) async throws {
         let shelf = Shelf()
         let (book, work, defaults) = (shelf.book, shelf.work, shelf.defaults)
@@ -416,8 +424,13 @@ struct AllowanceListTests {
             book.add(Self.cdn, for: Self.forum)
             let renderer = ImageRenderer(
                 content: VStack(alignment: .leading) {
-                    AllowanceSection(book: book, sources: [Self.forum])
+                    AllowanceSection(book: book)
+                    AllowanceDetail(entry: Allowance.standing[2], on: .constant(false)) {}
+                    OwnHostsSection(book: book, sources: [Self.forum])
+                    OwnHostDetail(entry: book.own[0], gone: true, onRemove: {}, onBack: {})
+                    OwnHostAdding(book: book, sources: [Self.forum], onTyping: { _ in }, onBack: {}) { _ in }
                 }
+                .dynamicTypeSize(scheme == .dark ? .accessibility5 : .large)
                 .environment(\.colorScheme, scheme)
                 .frame(width: 360)
                 .padding()

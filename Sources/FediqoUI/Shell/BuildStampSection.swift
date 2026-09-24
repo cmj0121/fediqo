@@ -37,8 +37,9 @@ struct BuildStampSection: View {
         } header: {
             Text(L10n.t("about.title"))
         } footer: {
-            Text(L10n.t("about.footer"))
+            Text(L10n.t("about.brief"))
                 .shellFont(.meta)
+                .shellHelp("about.footer", about: L10n.t("about.title"))
         }
     }
 
