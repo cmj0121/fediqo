@@ -1,6 +1,7 @@
 import AVFoundation
 import FediqoCore
 import Foundation
+import Observation
 import SwiftUI
 import Testing
 @testable import FediqoUI
@@ -123,6 +124,22 @@ struct ActivityTests {
         #expect(log.listed(from: "TWO.example").map(\.id) == [3])
         #expect(log.listed(from: "cdn.example").isEmpty, "a pointed-to host is not a source")
         #expect(log.sources == ["one.example", "two.example"])
+    }
+
+    @Test("A page narrowed to one source is woken when a line of that source arrives")
+    func narrowedFollows() {
+        let log = SourceRecord()
+        let start = Date(timeIntervalSince1970: 0)
+        log.append([SourceAct(id: 1, reached: "one.example", purpose: .timeline, at: start)])
+        let woken = Woken()
+        withObservationTracking {
+            _ = log.listed(from: "one.example")
+        } onChange: {
+            woken.flag()
+        }
+        log.append([SourceAct(id: 2, reached: "one.example", purpose: .search, at: start)])
+        #expect(woken.was, "the narrowed page never heard of the new line")
+        #expect(log.listed(from: "one.example").map(\.id) == [2, 1])
     }
 
     @Test("A chosen source the record no longer holds is let go of")
@@ -306,4 +323,10 @@ private struct RefusingSender: HTTPSender {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         (Data(), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: "HTTP/1.1", headerFields: nil)!)
     }
+}
+
+/// Whether an observation fired.
+private final class Woken: @unchecked Sendable {
+    private(set) var was = false
+    func flag() { was = true }
 }

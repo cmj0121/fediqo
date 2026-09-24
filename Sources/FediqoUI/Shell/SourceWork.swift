@@ -440,7 +440,9 @@ final class SourceRecord {
     private(set) var dropped = 0
     /// The sources the record holds acts for, in the order a picker lists them.
     private(set) var sources: [String] = []
-    @ObservationIgnored private var bySource: [String: [SourceAct]] = [:]
+    /// Observed, and that is load-bearing: a page narrowed to one source reads only this, and has
+    /// to be woken when a line of that source arrives.
+    private var bySource: [String: [SourceAct]] = [:]
 
     nonisolated init() {}
 
