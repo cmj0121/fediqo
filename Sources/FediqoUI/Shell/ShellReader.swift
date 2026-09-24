@@ -89,6 +89,10 @@ final class ShellReader {
     /// test hands in another.
     @ObservationIgnored var work: SourceWork = .shared
 
+    /// Whether a source has been removed (#221). A page opened from one of its posts goes nowhere
+    /// more once it has — no redirect, no refresh, no link — and nothing more is recorded under it.
+    @ObservationIgnored var gone: (@MainActor (String) -> Bool)?
+
     /// Opens an address inside the app, and answers whether it did.
     ///
     /// **Decision 9 read again, at the door of a web view.** A `PostLink` is already a checked
@@ -132,6 +136,7 @@ final class ShellReader {
     /// **And only a page a source the person added pointed to** (#220): a page that belongs to
     /// nobody the person added is refused like a page this app will not follow.
     func decide(_ url: URL?, mainFrame: Bool) -> Bool {
+        if let source = reading?.source, gone?(source.lowercased()) == true { return false }
         var allowed = url.map(Host.allowsFetch) ?? false
         guard mainFrame else { return allowed }
         if allowed, let url, !work.admits(reached: url.host() ?? "", source: reading?.source) {

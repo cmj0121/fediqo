@@ -160,12 +160,17 @@ store, it is not copied to iCloud, and it does not follow your Apple account to 
 device. It survives a relaunch.
 
 Sign out on the row, Clear, and Remove each delete the secret from this device. What Home and
-your lists brought in stays until you drop it. The sign-in page shares its session with
-Safari, so a server you are already signed in to there takes one tap, and signing out in
-Fediqo leaves you signed in to that server in Safari. A server that ends the sign-in shows
-the source as signed out and says so; it does not pretend to still work.
+your lists brought in stays until you drop it. The sign-in page keeps no session of its own
+and shares none with Safari, so each sign-in asks for your password on the server's page, and
+signing out leaves nothing on this device that could sign in as you there. A server that ends
+the sign-in shows the source as signed out and says so; it does not pretend to still work.
 
-A forum sign-in works as before: its cookies stay on this device, and Clear takes them.
+A forum sign-in keeps its cookies on this device until you sign out, Clear, or Remove, and each
+of those takes them, with any password you saved for it.
+
+Removing a source also stops everything Fediqo would ask of it by itself: the wait, a reload
+already on its way, its pictures and emoji still queued, and an open thread from it. Nothing
+reaches it again until you add it again.
 
 ### Reading
 

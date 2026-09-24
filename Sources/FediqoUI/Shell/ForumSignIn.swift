@@ -1,5 +1,6 @@
 import FediqoCore
 import Foundation
+import os
 import Observation
 import Security
 import WebKit
@@ -189,6 +190,9 @@ public enum ForumKeeping: Equatable, Sendable {
 public enum ForumSignInOutcome: Equatable, Sendable {
     case signedIn
     case handOver(ForumSignInStop)
+    /// The forum was signed out of, cleared or removed while this ran (#221). Nothing is to be
+    /// said or shown about it: the reader has already let the sign-in go.
+    case forgotten
 }
 
 /// What the sheet is open for.
@@ -218,6 +222,8 @@ public final class ForumSessions {
     @ObservationIgnored private var engines: [String: ForumWebEngine] = [:]
     @ObservationIgnored private let makeStore: () -> WKWebsiteDataStore
     @ObservationIgnored private var madeStore: WKWebsiteDataStore?
+    /// The launch's sweep of a store an earlier run left, while it runs (`sweepAtLaunch`).
+    @ObservationIgnored private(set) var sweeping: Task<Void, Never>?
     @ObservationIgnored private var watcher: CookieWatcher?
     /// The forums among the reader's sources: the hosts `reachedHosts` is asked about.
     @ObservationIgnored private var forumHosts: Set<String> = []
@@ -276,6 +282,14 @@ public final class ForumSessions {
 
     /// Each forum's sign-in at launch, while it is still running. See `signInAgain(hosts:)`.
     @ObservationIgnored private var relaunching: [String: Task<Void, Never>] = [:]
+    /// Which of them is the current one per host, so one ended by a forget does not take the
+    /// entry of another begun after it.
+    @ObservationIgnored private var relaunchIDs: [String: UUID] = [:]
+
+    /// How many times each host has been forgotten — a sign-out, a Clear, a Remove. A sign-in
+    /// that started before one does not finish after it (#221): it posts no password and records
+    /// no sign-in, so the forget leaves nothing it took away to be put back.
+    @ObservationIgnored private var forgets: [String: Int] = [:]
 
     /// How many sign-ins this run has seen land on each host. Read by a post fetch to notice
     /// that the answer it is carrying was asked for as a guest — see `ForumPosts`.
@@ -419,6 +433,7 @@ public final class ForumSessions {
     /// something a stored password does not contain.
     func signIn(host: String) async -> ForumSignInOutcome {
         let host = host.lowercased()
+        let asked = forgets[host, default: 0]
         let kept: ForumCredential?
         do {
             kept = try credentials.credential(host: host)
@@ -437,9 +452,12 @@ public final class ForumSessions {
         do {
             page = try await engine.page(at: url)
         } catch let error as ForumTransportError {
+            // A forget stops the page it lands on, and that is not the forum being unreachable.
+            if await wasForgotten(host, since: asked) { return .forgotten }
             if case .wall(let wall) = error { return .handOver(.wall(wall)) }
             return .handOver(.unreachable)
         } catch {
+            if await wasForgotten(host, since: asked) { return .forgotten }
             return .handOver(.unreachable)
         }
 
@@ -451,18 +469,25 @@ public final class ForumSessions {
         // "signed in" here rather than posting the form is what stops a refresh from spending a
         // sign-in attempt, which is how a forum's lockout counter gets reached by an app nobody
         // touched.
-        if ForumMember.isSignedIn(html) { return .signedIn }
+        if ForumMember.isSignedIn(html) {
+            return await wasForgotten(host, since: asked) ? .forgotten : .signedIn
+        }
 
         guard let form = ForumLoginForm.read(html) else { return .handOver(.unreadable) }
         if form.asksCaptcha { return .handOver(.captcha) }
         guard form.canFillItself else { return .handOver(.unreadable) }
+        // Signed out, cleared or removed while the page was read: the password is not sent.
+        if await wasForgotten(host, since: asked) { return .forgotten }
 
         let verdict: ForumLoginVerdict
         do {
             verdict = try await engine.submitLogin(credential)
         } catch {
+            if await wasForgotten(host, since: asked) { return .forgotten }
             return .handOver(.unreachable)
         }
+        // Forgotten while the form was on its way: whatever session it earned goes too.
+        if await wasForgotten(host, since: asked) { return .forgotten }
 
         switch verdict {
         case .signedIn: return .signedIn
@@ -617,30 +642,58 @@ public final class ForumSessions {
             // On `SourceWork` for the whole of it (#164): the forum's browser is not an
             // `HTTPClient` a request could be watched through, so the work is registered itself.
             let token = work.begin(host: host, for: .signIn)
+            let id = UUID()
+            relaunchIDs[host] = id
+            // Read now, not as the task starts: a forget landing before it runs must still count.
+            let asked = forgets[host, default: 0]
+            let sweeping = sweeping
             relaunching[host] = Task { [weak self, work] in
                 defer { work.end(token) }
-                await self?.relaunch(host: host, sessions: held, attempt: attempt)
-                self?.relaunching[host] = nil
+                // Not until the launch's sweep of an earlier run's store is done (#219).
+                await sweeping?.value
+                await self?.relaunch(host: host, asked: asked, sessions: held, attempt: attempt)
+                // Only while it is still this one: a forget may have ended it and another begun.
+                if let self, self.relaunchIDs[host] == id {
+                    self.relaunching[host] = nil
+                    self.relaunchIDs[host] = nil
+                }
             }
         }
     }
 
+    /// Whether `host` has been forgotten since `asked` was read. Where it has, anything the page
+    /// just read or posted left in the store for it is dropped again, so a forget that landed
+    /// mid-sign-in leaves no session behind it (#221).
+    private func wasForgotten(_ host: String, since asked: Int) async -> Bool {
+        guard forgets[host, default: 0] != asked else { return false }
+        if let madeStore {
+            await ForumWebEngine.forget(host: host, in: madeStore, keeping: forumHosts)
+        }
+        return true
+    }
+
     private func relaunch(
-        host: String, sessions: Task<[String], Never>,
+        host: String, asked: Int, sessions: Task<[String], Never>,
         attempt: (@MainActor (String) async -> ForumSignInOutcome)?
     ) async {
+        guard forgets[host, default: 0] == asked else { return }
         guard !(await holdsSession(host: host, sessions: sessions)) else { return }
+        guard forgets[host, default: 0] == asked else { return }
         let outcome: ForumSignInOutcome
         if let attempt {
             outcome = await attempt(host)
         } else {
             outcome = await signIn(host: host)
         }
+        // Forgotten while it ran: nothing it found is kept, and the row says nothing about it.
+        guard forgets[host, default: 0] == asked else { return }
         switch outcome {
         case .signedIn:
             recordSignIn(host: host)
         case .handOver(let stop):
             notices[host] = .lapsed(stop)
+        case .forgotten:
+            break
         }
     }
 
@@ -695,11 +748,17 @@ public final class ForumSessions {
     /// screen is what makes that fair: the row says a password is held before the button is
     /// pressed, and there is a Forget of its own for the reader who wants only that.
     func forget(host: String) async {
+        forgets[host.lowercased(), default: 0] += 1
+        // A launch's sign-in still running for it ends here rather than signing back in (#221).
+        relaunching.removeValue(forKey: host.lowercased())?.cancel()
+        relaunchIDs[host.lowercased()] = nil
         engines.removeValue(forKey: host.lowercased())?.stopAndBlank()
         // No engine this run is no evidence of no cookies: the store persists, and a host signed
         // in to last launch holds its session before anything asks for its page. A store never
         // built this run holds nothing this run could have put there, and is left unopened.
-        if let madeStore { await ForumWebEngine.forget(host: host, in: madeStore) }
+        if let madeStore {
+            await ForumWebEngine.forget(host: host, in: madeStore, keeping: forumHosts)
+        }
         typed[host.lowercased()] = nil
         notices[host.lowercased()] = nil
         forgetPassword(host: host)
@@ -711,11 +770,55 @@ public final class ForumSessions {
     }
 
     /// Leaves in the store only the sign-ins of `hosts`, the reader's sources (#219): see
-    /// `ForumWebEngine.sweep`. Asked as a run ends. A store never opened this run holds nothing
-    /// this run put there, and is left unopened.
-    public func leaveNothing(keeping hosts: some Sequence<String>) async {
+    /// `ForumWebEngine.sweep`. Asked as a run ends, and answered by `limit` whatever WebKit is
+    /// doing, so a store that stops answering cannot hold a quit up. A store never opened this run
+    /// holds nothing this run put there, and is left unopened.
+    public func leaveNothing(keeping hosts: [String], within limit: Duration) async {
         guard let madeStore else { return }
-        await ForumWebEngine.sweep(madeStore, keeping: hosts)
+        await Self.bounded(limit) { await ForumWebEngine.sweep(madeStore, keeping: hosts) }
+    }
+
+    /// Drops only what WebKit copied of what it fetched (`ForumWebEngine.cache`), as the app goes
+    /// to the background: a sign-in or a browser check the reader stepped away from — to a
+    /// password manager, a code on another app — is still there when they come back.
+    public func dropCache(within limit: Duration) async {
+        guard let madeStore else { return }
+        await Self.bounded(limit) {
+            await madeStore.removeData(ofTypes: ForumWebEngine.cache, modifiedSince: .distantPast)
+        }
+    }
+
+    /// The whole sweep, at launch, of a store an earlier run left on this device (#219) — a run
+    /// that crashed, or that only ever went to the background, left all of it. Relaunched
+    /// sign-ins wait for it, so nothing is swept out from under one.
+    public func sweepAtLaunch(keeping hosts: [String], onDisk: Bool) {
+        guard onDisk else { return }
+        let store = dataStore
+        sweeping = Task { await ForumWebEngine.sweep(store, keeping: hosts) }
+    }
+
+    /// Waits for `work`, or for `limit`, whichever is first. Past it the work is left running.
+    static func bounded(
+        _ limit: Duration, _ work: @escaping @MainActor @Sendable () async -> Void
+    ) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let once = OSAllocatedUnfairLock<CheckedContinuation<Void, Never>?>(initialState: continuation)
+            let finish: @Sendable () -> Void = {
+                once.withLock { held -> CheckedContinuation<Void, Never>? in
+                    defer { held = nil }
+                    return held
+                }?.resume()
+            }
+            let timer = Task.detached {
+                try? await Task.sleep(for: limit)
+                finish()
+            }
+            Task { @MainActor in
+                await work()
+                timer.cancel()
+                finish()
+            }
+        }
     }
 
     func refreshSavedHosts() {

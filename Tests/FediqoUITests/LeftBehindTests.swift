@@ -1,8 +1,10 @@
 import Foundation
+import os
 import Testing
 import WebKit
 
 @testable import FediqoCore
+@testable import FediqoPersistence
 @testable import FediqoUI
 
 /// Quitting leaves nothing of where you went (#219).
@@ -113,7 +115,7 @@ struct LeftBehindTests {
 
     @Test("Nothing in the app reaches for a session, cache or browser store that is kept on disk")
     func noSharedStores() throws {
-        for (path, text) in try Self.sources() {
+        for (path, text) in try Self.sources() where path != "Sources/FediqoPersistence/SharedStores.swift" {
             let code = Self.code(text)
             for kept in [
                 "URLSession.shared", "URLSession = .shared", "session: .shared", "URLCache.shared", "HTTPCookieStorage.shared",
@@ -136,16 +138,74 @@ struct LeftBehindTests {
         let store = WKWebsiteDataStore.nonPersistent()
         for (name, domain) in [
             ("x7Kq_2132_auth", "bbs.example.org"), ("cf_clearance", ".bbs.example.org"),
-            ("_ga", "tracker.example"), ("sid", "removed.example"),
+            ("_ga", "tracker.example"), ("sid", "removed.example"), ("ad", "ads.bbs.example.org"),
         ] {
             await store.httpCookieStore.setCookie(ForumDeviceStoreTests.cookie(name, domain: domain))
         }
         let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
         _ = forums.dataStore
-        await forums.leaveNothing(keeping: ["BBS.example.org", "m.example"])
+        await forums.dropCache(within: .seconds(5))
+        #expect(await store.httpCookieStore.allCookies().count == 5, "going to the background keeps every cookie")
+        await forums.leaveNothing(keeping: ["BBS.example.org", "m.example"], within: .seconds(5))
         let left = await store.httpCookieStore.allCookies()
         #expect(Set(left.map(\.name)) == ["x7Kq_2132_auth", "cf_clearance"])
         for cookie in left { #expect(ForumWebEngine.holds(cookie.domain, for: "bbs.example.org")) }
+    }
+
+    @Test("A launch sweeps a store an earlier run left, and a relaunched sign-in waits for it")
+    func theLaunchSweeps() async {
+        let store = WKWebsiteDataStore.nonPersistent()
+        for (name, domain) in [("x7Kq_2132_auth", "bbs.example.org"), ("_ga", "tracker.example")] {
+            await store.httpCookieStore.setCookie(ForumDeviceStoreTests.cookie(name, domain: domain))
+        }
+        let untouched = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
+        untouched.sweepAtLaunch(keeping: ["bbs.example.org"], onDisk: false)
+        #expect(untouched.sweeping == nil, "no store on disk, none opened")
+        let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
+        forums.sweepAtLaunch(keeping: ["bbs.example.org"], onDisk: true)
+        await forums.sweeping?.value
+        #expect(Set(await store.httpCookieStore.allCookies().map(\.name)) == ["x7Kq_2132_auth"])
+    }
+
+    @Test("A sweep that does not answer is left behind at its limit", .timeLimit(.minutes(1)))
+    func theSweepIsBounded() async {
+        let finished = OSAllocatedUnfairLock(initialState: false)
+        await ForumSessions.bounded(.milliseconds(50)) {
+            try? await Task.sleep(for: .seconds(30))
+            finished.withLock { $0 = true }
+        }
+        #expect(!finished.withLock { $0 }, "the quit waited for a store that never answered")
+    }
+
+    @Test("What an older build left in the shared cache and cookie jar is emptied, once")
+    func theSharedStoresAreEmptiedOnce() throws {
+        let suite = "fediqo.leftBehind.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cache = URLCache(memoryCapacity: 1 << 20, diskCapacity: 1 << 20, directory: folder)
+        let url = URL(string: "https://one.example/api/v1/timelines/home")!
+        let request = URLRequest(url: url)
+        cache.storeCachedResponse(
+            CachedURLResponse(
+                response: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                data: Data("[]".utf8)
+            ),
+            for: request
+        )
+        #expect(cache.cachedResponse(for: request) != nil)
+        let jar = HTTPCookieStorage.shared
+        let cookie = ForumDeviceStoreTests.cookie("left", domain: "left-behind.example")
+        jar.setCookie(cookie)
+        defer { jar.deleteCookie(cookie) }
+        SharedStores.forgetOnce(defaults: defaults, cache: cache, jar: jar)
+        #expect(cache.cachedResponse(for: request) == nil)
+        #expect(!(jar.cookies ?? []).contains { $0.domain.contains("left-behind.example") })
+        // Once: a second launch asks nothing of either.
+        jar.setCookie(cookie)
+        SharedStores.forgetOnce(defaults: defaults, cache: cache, jar: jar)
+        #expect((jar.cookies ?? []).contains { $0.domain.contains("left-behind.example") })
     }
 
     @Test("What is dropped for a source's own site is everything WebKit keeps but its cookies")
@@ -168,10 +228,18 @@ struct LeftBehindTests {
             contentsOf: Self.root.appendingPathComponent("Apps/Shared/FediqoApp.swift"), encoding: .utf8
         )
         let code = Self.code(app)
-        #expect(code.contains("await forums.leaveNothing(keeping:"))
-        // Both ends of a run go through the one door that saves and sweeps.
-        #expect(code.components(separatedBy: "await Launch.shared.end()").count - 1 == 2)
+        #expect(code.contains("await forums.leaveNothing(keeping: hosts, within: StoreSaver.deadline)"))
+        #expect(code.contains("await forums.dropCache(within: StoreSaver.deadline)"))
+        // A quit sweeps; a backgrounding drops only the cache, so a sign-in stepped away from
+        // survives it; a launch sweeps what an earlier run left, before a sign-in reads it.
+        #expect(code.components(separatedBy: "await Launch.shared.end()").count - 1 == 1)
+        #expect(code.components(separatedBy: "await Launch.shared.pause()").count - 1 == 1)
         #expect(!code.contains("Launch.shared.saver.flush()"))
+        let sweep = try #require(code.range(of: "forums.sweepAtLaunch("))
+        let signIn = try #require(code.range(of: "forums.signInAgain("))
+        #expect(sweep.lowerBound < signIn.lowerBound)
+        #expect(code.contains("onDisk: ForumWebsiteData.isOnDisk()"))
+        #expect(code.contains("SharedStores.forgetOnce()"))
     }
 
     // MARK: - The system's log
