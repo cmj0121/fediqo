@@ -1,3 +1,4 @@
+import FediqoCore
 import SwiftUI
 
 /// Every question the app asks before something that cannot be undone, and the two notices that
@@ -166,6 +167,107 @@ enum ShellQuestion {
             help: L10n.t("store.newer.detail", language: language),
             choices: [], cancel: L10n.t("store.newer.ok", language: language)
         )
+    }
+
+    // MARK: - Taking away and reading back (#247, #252)
+
+    static let withPictures = "with"
+    static let withoutPictures = "without"
+
+    /// Whether the picture copies ride, with what each would come to on the line. Neither is a
+    /// loss; without is the one a key answers, being the smaller.
+    static func takeAway(_ weight: PackageWeight, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "square.and.arrow.up", title: L10n.t("carry.take.ask.title", language: language),
+            line: String(
+                format: L10n.t("carry.take.ask.line", language: language),
+                UsagePane.size(weight.withPictures, language: language),
+                UsagePane.size(weight.withoutPictures, language: language)
+            ),
+            help: L10n.t("carry.take.ask.help", language: language),
+            choices: [
+                .init(withoutPictures, L10n.t("carry.take.without", language: language), role: .keyed),
+                .init(withPictures, L10n.t("carry.take.with", language: language), role: .plain),
+            ],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// #252's question: how many posts, from which sources, taken away when — and, where this
+    /// device holds a store, that a yes replaces it, which is a loss and is drawn as one.
+    static func readBack(_ summary: PackageSummary, held: Bool, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let sources = summary.sources.map(\.host).joined(separator: ", ")
+        let day = summary.takenAt.formatted(
+            Date.FormatStyle(date: .abbreviated, time: .omitted).locale(L10n.locale(language))
+        )
+        var help = String(
+            format: L10n.t("carry.read.ask.help", language: language), sources, day, summary.device, summary.appVersion
+        )
+        if held { help = String(format: L10n.t("carry.read.ask.help.held", language: language), help) }
+        return ShellConfirmation(
+            symbol: "square.and.arrow.down",
+            title: L10n.count("carry.read.ask.title", summary.posts, language: language),
+            line: String(format: L10n.t("carry.read.ask.line", language: language), sources, day),
+            help: help,
+            choices: [held
+                ? .init(yes, L10n.t("carry.read.replace", language: language), role: .destructive)
+                : .init(yes, L10n.t("carry.read.go", language: language), role: .primary)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Why a take-away or a read back stopped, each its own sentence, and nothing to choose.
+    static func carryRefused(_ trouble: ShellCarry.Trouble, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let (key, line): (String, String)
+        switch trouble {
+        case .package(let refusal):
+            key = "carry.refused.\(refusal)"
+            line = L10n.t(key + ".line", language: language)
+        case .noRoom(let needed, let free):
+            key = "carry.refused.noRoom"
+            line = String(
+                format: L10n.t(key + ".line", language: language),
+                UsagePane.size(needed, language: language), UsagePane.size(free, language: language)
+            )
+        case .emptyPassword:
+            key = "carry.refused.empty"
+            line = L10n.t(key + ".line", language: language)
+        case .shortPassword:
+            key = "carry.refused.short"
+            line = String(format: L10n.t(key + ".line", language: language), PackageFormat.minPasswordCount)
+        case .indexIsNewer:
+            key = "carry.refused.indexNewer"
+            line = L10n.t(key + ".line", language: language)
+        case .unwound(let steps):
+            key = "carry.refused.unwound"
+            let named = steps.map { L10n.t("carry.step.\($0)", language: language) }.joined(separator: ", ")
+            line = String(format: L10n.t(key + ".line", language: language), named)
+        case .other(let said):
+            key = "carry.refused.other"
+            line = String(format: L10n.t(key + ".line", language: language), said)
+        }
+        return ShellConfirmation(
+            symbol: "exclamationmark.triangle", title: L10n.t(key + ".title", language: language),
+            line: line, help: nil, choices: [], cancel: L10n.t("store.newer.ok", language: language)
+        )
+    }
+
+    /// It is done: taken away, or read back with the count.
+    static func carryDone(_ done: ShellCarry.Done, language: DummyLanguage? = nil) -> ShellConfirmation {
+        switch done {
+        case .taken:
+            ShellConfirmation(
+                symbol: "checkmark.circle", title: L10n.t("carry.done.taken.title", language: language),
+                line: L10n.t("carry.done.taken.line", language: language), help: nil, choices: [],
+                cancel: L10n.t("store.newer.ok", language: language)
+            )
+        case .readBack(let summary):
+            ShellConfirmation(
+                symbol: "checkmark.circle", title: L10n.t("carry.done.read.title", language: language),
+                line: L10n.count("carry.done.read.line", summary.posts, language: language), help: nil, choices: [],
+                cancel: L10n.t("store.newer.ok", language: language)
+            )
+        }
     }
 
     /// Sources that ended a sign-in on their own side.

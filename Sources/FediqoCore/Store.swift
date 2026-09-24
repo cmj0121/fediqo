@@ -123,6 +123,34 @@ public actor ItemStore {
         }
     }
 
+    /// Everything here replaced by `sources` and `notes` in one hop — what a read back leaves
+    /// (#247): the snapshot read off the package's store, adopted exactly as a relaunch would
+    /// adopt it, with the same rules `init(sources:notes:)` keeps. The keep window stays the
+    /// reader's and is applied to what comes in; every screen is told, and the watcher of the
+    /// sources hears the new list.
+    public func replace(sources: [Source], notes incoming: [Note], said: [SourceProfile] = []) {
+        sourceList = []
+        for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
+            sourceList.append(source)
+        }
+        let hosts = Set(sourceList.map(\.host))
+        saidByHost = [:]
+        for profile in said where Self.isWord(profile) && hosts.contains(profile.host) {
+            saidByHost[profile.host] = profile
+        }
+        notes = Dictionary(
+            incoming.filter(withinRetention).map { ($0.key, $0) }, uniquingKeysWith: { _, new in new }
+        )
+        arrival = [:]
+        arrivals = 0
+        for note in incoming where notes[note.key] != nil && arrival[note.key] == nil {
+            arrival[note.key] = arrivals
+            arrivals += 1
+        }
+        sourcesWatcher?(sourceList.map(\.host))
+        changed(shown: true, aside: true)
+    }
+
     /// Whether `note` is inside the reader's keep window.
     private func withinRetention(_ note: Note) -> Bool {
         retention.map { note.postedAt >= $0 } ?? true

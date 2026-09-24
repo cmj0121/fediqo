@@ -4,6 +4,74 @@ import Synchronization
 import Testing
 @testable import FediqoPersistence
 
+@Suite("A read back inside the saver's queue") struct SaverExclusiveTests {
+    @Test("What runs exclusively runs after every save before it and before every save after")
+    func exclusively() async throws {
+        let store = ItemStore()
+        let order = Order()
+        let gate = Gate()
+        let saver = StoreSaver(store: store, write: { _, _, _ in
+            order.add("save")
+            await gate.passOnce()
+        })
+        await store.add(Source(host: "a.example", kind: .mastodon))
+        // The first save is under way — its write has begun and is held — when the commit is asked.
+        let first = Task { try await saver.save() }
+        await gate.entered()
+        let commit = Task { try await saver.exclusively { order.add("commit"); return 7 } }
+        await Task.yield()
+        #expect(order.all == ["save"], "the commit waits for the save under way")
+        gate.open()
+        let result = try await commit.value
+        try await first.value
+        await store.add(Source(host: "b.example", kind: .mastodon))
+        try await saver.save()
+        #expect(result == 7)
+        #expect(order.all == ["save", "commit", "save"])
+    }
+}
+
+/// A door the first write waits at, and the test opens.
+private actor Gate {
+    private var passed = false
+    private var opened = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var watchers: [CheckedContinuation<Void, Never>] = []
+
+    /// The first caller waits until `open`; every later one passes.
+    func passOnce() async {
+        guard !passed else { return }
+        passed = true
+        for watcher in watchers { watcher.resume() }
+        watchers = []
+        guard !opened else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    /// Returns once the first caller is waiting.
+    func entered() async {
+        guard !passed else { return }
+        await withCheckedContinuation { watchers.append($0) }
+    }
+
+    nonisolated func open() {
+        Task { await self.release() }
+    }
+
+    private func release() {
+        opened = true
+        for waiter in waiters { waiter.resume() }
+        waiters = []
+    }
+}
+
+private final class Order: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+    func add(_ line: String) { lock.withLock { lines.append(line) } }
+    var all: [String] { lock.withLock { lines } }
+}
+
 @Suite("The one save")
 struct StoreSaverTests {
     private let origin = Date(timeIntervalSince1970: 1_700_000_000)

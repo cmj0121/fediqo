@@ -70,6 +70,11 @@ final class SourceWork {
         /// What a forum's page pulled in from a host the person added for that forum (#226),
         /// listed under that forum.
         case pagePart
+        /// What this device holds, written to a file the person chose (#247). Reaches nowhere:
+        /// listed under `thisDevice`, so the record shows a line that left for no host.
+        case takeAway
+        /// A take-away read back onto this device (#247), listed under `thisDevice` likewise.
+        case readBack
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -119,6 +124,11 @@ final class SourceWork {
             self.since = since
         }
     }
+
+    /// The one key an act that reaches no host is written under (#247): a take-away and a read
+    /// back happen on this device and nowhere else, and the record shows them so — a line for
+    /// "this device", where every other line is a host. A space, so no host can ever be it.
+    nonisolated static let thisDevice = "this device"
 
     /// What `begin` hands back and `end` takes. Ending one twice, or one already gone, is nothing.
     struct Token: Hashable, Sendable {
@@ -574,6 +584,12 @@ struct SourceAct: Identifiable, Equatable, Sendable {
         self.purpose = purpose
         self.at = at
         self.allowedBy = allowedBy
+    }
+
+    /// A source as the record draws it: a host as itself, and the one key that is no host —
+    /// `SourceWork.thisDevice` — in the shell's words.
+    static func shown(_ source: String, language: DummyLanguage? = nil) -> String {
+        source == SourceWork.thisDevice ? L10n.t("work.thisDevice", language: language) : source
     }
 
     /// The source an act is listed under: the one that pointed to it where one did, and

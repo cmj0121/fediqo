@@ -94,13 +94,15 @@ public struct FediqoRootView: View {
         persist: (@MainActor () async -> Void)? = nil,
         measureStore: (@Sendable () async -> Int)? = nil,
         storeIsNewer: Bool = false,
-        storeNoticeSeen: (@MainActor () -> Void)? = nil
+        storeNoticeSeen: (@MainActor () -> Void)? = nil,
+        carrier: (any StoreCarrier)? = nil
     ) {
         let session = ShellSession(
             http: http, store: store, forums: forums, mastodon: mastodon,
             timelines: WrittenTimelineStore(defaults: .standard)
         )
         session.persist = persist
+        session.carrier = carrier
         session.measureStore = measureStore
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)

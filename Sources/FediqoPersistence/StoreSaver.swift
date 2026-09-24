@@ -72,6 +72,26 @@ public actor StoreSaver {
         self.init(store: store, write: write)
     }
 
+    /// Runs `body` where a save would run: after every save asked for before it, and before any
+    /// asked for after — so a read back that writes the index and replaces the store inside it
+    /// (#247) is never raced by a save writing the old snapshot over the new index.
+    public func exclusively<T: Sendable>(_ body: @escaping @Sendable () async throws -> T) async throws -> T {
+        let previous = tail
+        let task = Task<T, any Error> {
+            _ = await previous?.result
+            return try await body()
+        }
+        tail = Task { _ = try await task.value }
+        return try await task.value
+    }
+
+    /// What a launch's sweep found of a read back killed between moving the old index aside
+    /// and finishing (#247): said here, where the index's log is, and only as a count.
+    public static func reportHalfCommits(_ count: Int) {
+        guard count > 0 else { return }
+        log.notice("Found \(count, privacy: .public) read back(s) that did not finish; the old index is kept aside")
+    }
+
     /// Writes what the store holds now, after every save asked for before this one.
     public func save() async throws {
         if let waiting { return try await waiting.task.value }

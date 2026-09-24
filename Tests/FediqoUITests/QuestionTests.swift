@@ -31,8 +31,24 @@ struct QuestionTests {
             ShellQuestion.removeTimeline(named: "Art", language: language),
             ShellQuestion.storeNewer(language: language),
             ShellQuestion.signedOut(hosts: ["a.example", "b.example"], language: language),
+            ShellQuestion.takeAway(
+                PackageWeight(withoutPictures: 40_000_000, withPictures: 1_300_000_000, free: 0, holdsStore: true),
+                language: language
+            ),
+            ShellQuestion.readBack(carried, held: false, language: language),
+            ShellQuestion.readBack(carried, held: true, language: language),
+            ShellQuestion.carryRefused(.package(.altered), language: language),
+            ShellQuestion.carryRefused(.noRoom(needed: 2_000_000, free: 1_000), language: language),
+            ShellQuestion.carryDone(.readBack(carried), language: language),
         ] + clearKeys.map { ShellQuestion.clear(host: "a.example", detailKey: $0, language: language) }
     }
+
+    /// What a take-away says it holds, as #252's question is asked from it.
+    private static let carried = PackageSummary(
+        sources: [.init(host: "a.example", kind: .mastodon), .init(host: "b.example", kind: .discuz)],
+        posts: 12, timelines: 2, takenAt: Date(timeIntervalSince1970: 1_800_000_000), withPictures: true,
+        bytes: 3_000, hasSecrets: true, device: "a laptop", appVersion: "0.7.0", entryCount: 5
+    )
 
     private static let clearKeys = [
         SourceRow.clearDetailKey(hasPassword: false, reachedSignIn: false),

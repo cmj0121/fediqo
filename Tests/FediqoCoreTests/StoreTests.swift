@@ -24,6 +24,42 @@ struct StoreTests {
         #expect(await store.setRetention(months: 3, from: now) == 0, "nothing left to drop")
     }
 
+    @Test("Replaced whole, a store keeps its window, counts arrivals afresh, and tells its watcher")
+    func replaceWhole() async {
+        let store = ItemStore()
+        await store.add(other)
+        await store.ingest([note(id: "before", postedAt: origin, categories: [.public], from: other)])
+        let now = origin.addingTimeInterval(210 * 86_400)
+        await store.setRetention(months: 3, from: now)
+        let heard = Heard()
+        await store.watchSources { hosts in heard.add(hosts) }
+        let changes = await store.changes()
+        let revision = await store.revision
+        let recent = origin.addingTimeInterval(200 * 86_400)
+        await store.replace(
+            sources: [source, source],
+            notes: [
+                note(id: "b", postedAt: recent, categories: [.public]),
+                note(id: "a", postedAt: recent, categories: [.public]),
+                note(id: "old", postedAt: origin, categories: [.public]),
+                note(id: "b", postedAt: recent, categories: [.trends]),
+            ]
+        )
+        #expect(await store.sources() == [source], "one source per host, the first winning")
+        #expect(await store.all().map(\.id).sorted() == ["a", "b"], "the window still holds")
+        #expect(await store.note(NoteKey(host: source.host, id: "b"))?.categories == [.trends], "the later copy wins")
+        let snapshot = await store.snapshot()
+        #expect(snapshot.notes.map(\.id) == ["b", "a"], "arrival is the order handed in")
+        #expect(snapshot.revision > revision)
+        #expect(heard.all == [["second.example"], ["first.example"]])
+        var told = false
+        for await _ in changes {
+            told = true
+            break
+        }
+        #expect(told, "every screen is told")
+    }
+
     @Test("Inside a window, a note older than it is refused by ingest")
     func retentionRefusesOldNotes() async {
         let store = ItemStore()
@@ -521,4 +557,12 @@ struct StoreTests {
             counts: Counts(replies: 1, reblogs: 2, favourites: 3)
         )
     }
+}
+
+/// What a sources watcher was told, in order.
+private final class Heard: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lists: [[String]] = []
+    func add(_ hosts: [String]) { lock.withLock { lists.append(hosts) } }
+    var all: [[String]] { lock.withLock { lists } }
 }

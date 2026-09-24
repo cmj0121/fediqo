@@ -133,6 +133,14 @@ final class ShellSession {
     /// different things two panes apart. `UsagePane` sets this too.
     var clearing: String?
 
+    /// What takes this device's store away and reads one back (#247), or nothing where the app
+    /// handed none in — a preview, a test — and then Preferences offers neither.
+    @ObservationIgnored var carrier: (any StoreCarrier)?
+    /// The take-away and read-back flow, its steps and its questions.
+    let carry: ShellCarry
+    /// The file picker for a read back is up.
+    var carryPicking = false
+
     /// The Mastodon whose sign-in has been pressed and whose scope question has not been answered
     /// yet, or nothing (#69).
     ///
@@ -642,6 +650,7 @@ final class ShellSession {
     ) {
         self.http = http
         timelineStore = timelines
+        carry = ShellCarry(work: work)
         self.store = store
         self.pictures = pictures
         self.emojis = emojis
@@ -2165,6 +2174,30 @@ final class ShellSession {
     /// Reload the session from the store after a snapshot is loaded.
     func reloadFromStore() async {
         await adopt()
+    }
+
+    /// What a read back replaced, adopted without a relaunch (#247): the store, the person's
+    /// timelines and choices read again off the preferences, who is signed in read again off
+    /// the Keychain, and the picture copies measured again.
+    func adoptReadBack(prefs: DummyPrefs) async {
+        switch timelineStore?.load() {
+        case .timelines(let kept)?:
+            written = kept
+            timelinesUnreadable = false
+        case .unreadable?:
+            timelinesUnreadable = true
+        case nil:
+            break
+        }
+        prefs.reread()
+        if work === SourceWork.shared { AllowanceBook.shared.reread() }
+        mastodon.refresh()
+        pictures.forgetAll()
+        emojis.clear()
+        pictures.disk?.trim()
+        cleared += 1
+        await store.setRetention(months: prefs.keepMonths)
+        await reloadFromStore()
     }
 
     /// The store, followed: each time it says it changed, what it holds is adopted again — so a

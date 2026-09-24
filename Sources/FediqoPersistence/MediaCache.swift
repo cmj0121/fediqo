@@ -23,6 +23,9 @@ public struct MediaCache: MediaCopies {
         try makeExcludedFromBackup(directory)
     }
 
+    /// Where this cache keeps its copies.
+    public var location: URL { directory }
+
     /// The cache this app keeps, under Caches.
     public static func caches() throws -> MediaCache {
         let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -87,6 +90,55 @@ public struct MediaCache: MediaCopies {
             try? FileManager.default.removeItem(at: folder)
         }
         return total
+    }
+
+    /// Every copy on disk, as a take-away lists them (#247): the host folder's name and the
+    /// file's, both digests, and what each weighs. In a stated order, so two walks agree.
+    func copies() -> [(folder: String, name: String, url: URL, size: Int)] {
+        hostFolders().sorted { $0.lastPathComponent < $1.lastPathComponent }.flatMap { folder in
+            Self.files(in: folder).sorted { $0.url.lastPathComponent < $1.url.lastPathComponent }.map {
+                (folder.lastPathComponent, $0.url.lastPathComponent, $0.url, $0.size)
+            }
+        }
+    }
+
+    /// What every copy weighs together.
+    func totalBytes() -> Int {
+        hostFolders().flatMap(Self.files(in:)).reduce(0) { $0 + $1.size }
+    }
+
+    /// Every copy replaced by what is under `staged`, a directory in this cache's own shape, by
+    /// two renames: what was here goes aside first, and is handed back so the caller can put it
+    /// back (`restore`) if a later step refuses, or let it go (`settle`) once every step held.
+    /// Nothing between leaves a mix. The parent is made first: Caches may have been purged.
+    func adopt(_ staged: URL) throws -> URL? {
+        let manager = FileManager.default
+        try manager.createDirectory(at: directory.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let aside = directory.deletingLastPathComponent()
+            .appendingPathComponent("media-aside-\(UUID().uuidString)", isDirectory: true)
+        let had = manager.fileExists(atPath: directory.path)
+        if had { try manager.moveItem(at: directory, to: aside) }
+        do {
+            try manager.moveItem(at: staged, to: directory)
+        } catch {
+            if had { try? manager.moveItem(at: aside, to: directory) }
+            throw error
+        }
+        try makeExcludedFromBackup(directory)
+        return had ? aside : nil
+    }
+
+    /// What `adopt` put aside, back in place of what it moved in — or a throw where it could not be.
+    func restore(_ aside: URL?) throws {
+        guard let aside else { return }
+        try? FileManager.default.removeItem(at: directory)
+        try FileManager.default.moveItem(at: aside, to: directory)
+    }
+
+    /// What `adopt` put aside, let go.
+    func settle(_ aside: URL?) {
+        guard let aside else { return }
+        try? FileManager.default.removeItem(at: aside)
     }
 
     /// Every host's folder under `directory`.
