@@ -87,6 +87,10 @@ struct DummyItemRow: View {
     /// pass nothing, and what the reader gets is a face that is a picture rather than a control
     /// they can press and be refused. Decision 4's rule — absent, not disabled.
     var onOpenPerson: ((DummyPerson) -> Void)?
+    /// Whether the reader has lifted the quoted post's cover — its own row's, so the quote and the
+    /// post it opens are lifted together.
+    var quoteLifted: Bool = false
+    var onToggleQuoteCover: () -> Void = {}
     var onToggleCover: () -> Void = {}
     /// Starts or stops what is on top of the deck — the mark on the card's own way to the key `a`.
     var onPlay: () -> Void = {}
@@ -98,6 +102,8 @@ struct DummyItemRow: View {
     var onEnded: () -> Void = {}
     var onToast: (String) -> Void
 
+    /// Where a press on the quote goes (#214). See `ShellQuotes`.
+    @Environment(\.shellQuotes) private var quotes
     @State private var hovering = false
     @State private var resolved = Written()
     @Environment(\.colorScheme) private var colorScheme
@@ -322,8 +328,11 @@ struct DummyItemRow: View {
     private var reading: Bool { selected || hovering }
 
     private func content(_ written: Written) -> some View {
-        VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            decorator
+        // Asked once a pass (#214): where the quote leads is a look through what is held, and
+        // three places on the row draw its answer.
+        let openQuote = onOpenQuote
+        return VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            decorator(openQuote)
             // The row itself is an accessibility container, and a container is not an
             // element — a trait put on it is announced to nobody. The headline is the
             // row's identity, so it is the element that carries the selection.
@@ -338,8 +347,10 @@ struct DummyItemRow: View {
                     outwardAction
                     openAction
                     personAction
+                    quoteAction(openQuote)
                 }
             mainBox(written)
+            quoteBand(openQuote)
             actions
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -349,11 +360,15 @@ struct DummyItemRow: View {
     /// somebody passed it on. Drawn only when there is something to say: an empty
     /// line held open on every row costs the list a line per post to say nothing.
     @ViewBuilder
-    private var decorator: some View {
-        if item.answering != .nothing || item.boostedBy != nil {
+    private func decorator(_ openQuote: (() -> Void)?) -> some View {
+        if item.answering != .nothing || item.boostedBy != nil || item.quote != nil {
             HStack(spacing: ShellSpace.snug) {
                 if item.answering != .nothing { answered }
                 if let who = item.boostedBy { boosted(by: who) }
+                // Beside the booster, on the same one line (#214): a boost of a quote is one line.
+                if let quote = item.quote {
+                    QuoteMark(quote: quote, lifted: quoteLifted, covered: covered, onOpen: openQuote)
+                }
             }
             .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
@@ -671,9 +686,13 @@ struct DummyItemRow: View {
         } else if inFull {
             // The two columns, and neither of them pinned. Top-aligned rather than height-locked,
             // so the words run to their own length beside a slot that keeps its square.
+            //
+            // **No empty slot over a quoted post's card** (#214). An empty square beside two lines
+            // of words held the card a slot's height away from the words it belongs to; a post
+            // that carries nothing and quotes nothing keeps the slot, and the height it measured.
             HStack(alignment: .top, spacing: ShellSpace.step) {
                 coveredWords(written)
-                coveredThumb
+                if item.hasThumb || !drawsQuoteCard { coveredThumb }
             }
         } else {
             HStack(alignment: .top, spacing: ShellSpace.step) {
@@ -1171,6 +1190,46 @@ struct DummyItemRow: View {
     private var openAction: some View {
         if let onOpen {
             Button(L10n.t("shortcut.expand"), action: onOpen)
+        }
+    }
+
+    /// Opening the post this one quotes as a post of its own (#214) — `o`'s touch path, and the
+    /// action a listener is offered. Nothing where there is nothing to open: a quote that may not
+    /// be shown, or one this device holds nothing of — absent, not disabled.
+    private var onOpenQuote: (() -> Void)? {
+        guard let quotes, quotes.leads(from: item) else { return nil }
+        let item = item
+        return { quotes.open(item) }
+    }
+
+    @ViewBuilder
+    private func quoteAction(_ openQuote: (() -> Void)?) -> some View {
+        if let openQuote {
+            Button(L10n.t("quote.open"), action: openQuote)
+        }
+    }
+
+    /// Whether the pane draws the quoted post's card under the words: a quote that may be shown,
+    /// and **not while this post is covered** — the quoted post is part of what the cover is over.
+    private var drawsQuoteCard: Bool {
+        inFull && !covered && item.quote?.shows == true
+    }
+
+    /// The post this one quotes (#214), whole under the words — **in the pane only.** A list row
+    /// says it in its decorator (`QuoteMark`), for `inFull`'s reason: the quoted post is a second
+    /// post's height that a stranger's server would be choosing for the row.
+    ///
+    /// Close under the words: the stack's `snug` step taken back to `tight`, so the card reads as
+    /// this post's own quote rather than the next thing down the pane, and its border never
+    /// touches the last line of the words.
+    @ViewBuilder
+    private func quoteBand(_ openQuote: (() -> Void)?) -> some View {
+        if drawsQuoteCard, let quote = item.quote {
+            QuoteBand(
+                quote: quote, host: host, lifted: quoteLifted,
+                onOpen: openQuote, onToggleCover: onToggleQuoteCover
+            )
+            .padding(.top, ShellSpace.tight - ShellSpace.snug)
         }
     }
 

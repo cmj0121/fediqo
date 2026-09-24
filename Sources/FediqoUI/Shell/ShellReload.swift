@@ -122,6 +122,9 @@ final class ShellReload {
     @ObservationIgnored var inFront: DummyItem?
     /// The thread whose renewal is on the wire, so the pane leaving ends its own and no other.
     @ObservationIgnored var renewing: String?
+    /// The rows a thread opening has read again for their quote this run (#214), so one whose
+    /// read still brought none is not read again on every open.
+    @ObservationIgnored private var readForQuote: Set<String> = []
 
     /// Each running reload's work, and its waiter — resumed when the work ends or is stopped.
     @ObservationIgnored private var runs: [Ask: Run] = [:]
@@ -806,6 +809,30 @@ final class ShellReload {
         } onCancel: {
             task.cancel()
         }
+    }
+
+    /// A post held from before this device read quotes, read again as its thread opens (#214).
+    ///
+    /// **Why the open, and only for these.** A row kept by an earlier build was read with its
+    /// quote spelled into its words as an `RE:` address, and nothing reads it again by itself:
+    /// a timeline reads on only from the newest post it holds (#201), and opening the thread
+    /// reads the posts around it, not the post (#90). So a reader who opens it would see the
+    /// address and no quote until they pressed `r`. The post read here is `r`'s own read of it,
+    /// once, quietly: what it says lands in the store, and a failure changes nothing drawn.
+    ///
+    /// Once a run per row, and not beside `r` or a renewal of the same thread already on the wire.
+    func readQuoteIfHeldBefore(_ item: DummyItem, in session: ShellSession) async {
+        guard !readForQuote.contains(item.id), !asking.contains(.thread), renewing != item.id,
+              let held = session.heldNote(item.id), Self.heldBeforeQuotes(held)
+        else { return }
+        readForQuote.insert(item.id)
+        _ = await again(held, in: session)
+    }
+
+    /// Whether `note` looks like a quote post kept before quotes were read: a microblog post with
+    /// no quote whose words open with the `RE:` address a quoting server writes.
+    static func heldBeforeQuotes(_ note: Note) -> Bool {
+        note.quote == nil && note.source.kind == .mastodon && note.body.hasPrefix("RE: http")
     }
 
     private enum Again: Sendable {

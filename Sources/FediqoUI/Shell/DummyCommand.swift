@@ -69,6 +69,11 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// `t` — a hashtag of the post the lamp is on, opened (#124): the press a finger makes on the
     /// pill. `t` for tag, and free, for the reason `p` gives.
     case openTag
+    /// `o` — the post the post the lamp is on quotes, opened as a post of its own (#214): the
+    /// press a finger makes on the quote. `o` for open, and free, for the reason `p` gives —
+    /// `Return` already opens the post itself, and one key meaning two posts on a quoting post
+    /// would leave the reader guessing which of the two a press is about.
+    case openQuote
     case showShortcuts
     /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
     case search
@@ -125,6 +130,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "d": return .withdraw
         case "p": return .openAuthor
         case "t": return .openTag
+        case "o": return .openQuote
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
@@ -516,6 +522,8 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .read, keys: ["p"], name: "person", commands: [.openAuthor], touch: .press),
         // A hashtag's pill in the post's words, pressed (#124).
         DummyShortcut(group: .read, keys: ["t"], name: "tag", commands: [.openTag], touch: .press),
+        // The quote under the post's words, pressed (#214).
+        DummyShortcut(group: .read, keys: ["o"], name: "quote", commands: [.openQuote], touch: .press),
         DummyShortcut(group: .read, keys: ["/"], name: "search", commands: [.search], touch: .press),
         DummyShortcut(group: .read, keys: ["r"], name: "reload", commands: [.reload], touch: .press),
 

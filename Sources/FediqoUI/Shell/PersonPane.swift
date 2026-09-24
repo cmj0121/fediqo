@@ -228,6 +228,8 @@ struct PersonPane: View {
             // Lit and opened in one, for the reader who activates a row once.
             onOpen: { onOpenThread(item.id) },
             onOpenPerson: nil,
+            quoteLifted: decks.isQuoteLifted(of: item),
+            onToggleQuoteCover: { decks.toggleQuoteCover(of: item) },
             onToggleCover: { _ = decks.toggleCover(item.id) },
             onPlay: { onPlayRow(item) },
             onView: { onViewRow(item) },
