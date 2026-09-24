@@ -29,7 +29,6 @@
 "account.catalog.loading" = "Loading the directory…";
 "account.catalog.failed" = "The directory could not be reached. Type a hostname.";
 "account.catalog.empty" = "The directory listed none. Type a hostname.";
-"account.catalog.refused" = "Fediqo asks no directory: it reaches only the sources you add. Type a hostname.";
 "account.catalog.added" = "Added";
 "account.catalog.weekly" = "%@ active this week";
 "account.catalog.people" = "%@ people";
@@ -376,6 +375,8 @@
 "work.purpose.search" = "Searching a server";
 "work.purpose.page" = "Opening a page a post links to";
 "work.purpose.video" = "Playing a video";
+"work.purpose.signInPage" = "A page followed from a forum's sign-in";
+"work.purpose.personCheck" = "The check a forum's sign-in shows";
 "activity.open" = "Everything this run has asked…";
 "activity.open.footer" = "Every request since the app opened: which source, when, and what for.";
 "activity.title" = "This run's requests";

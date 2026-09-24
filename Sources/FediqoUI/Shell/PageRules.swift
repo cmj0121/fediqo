@@ -19,34 +19,52 @@ import WebKit
 /// that serves them from another company's CDN reads without them, and the reader's browser
 /// button is where the whole page is.
 ///
-/// **One exception, and only in a forum's own browser: Cloudflare's challenge.** A forum behind
-/// Cloudflare is served by Cloudflare — every request to the forum's own host already goes to it —
-/// and when it checks a browser, the check is a frame from `challenges.cloudflare.com`. Without
-/// it a challenged forum can never be cleared, and so can never be read at all. It is the forum's
-/// own front door, chosen by the forum; nothing else is let through, and a page opened out of a
-/// post gets no exception.
+/// **What else a page may pull in is `Allowance`'s, and nothing here names a host.** A forum's
+/// own browser lets through the entries that apply on its pages — Cloudflare's check in front of
+/// it — and, while the person has its sign-in in front of them, the entries that apply there: the
+/// check a sign-in shows to prove a person is there. A page opened out of a post gets none.
 @MainActor
 enum PageRules {
-    /// The one host a forum's own browser may reach beyond the forum's site.
-    static let challengeHost = "challenges.cloudflare.com"
+    /// Which page the rules are for.
+    enum Kind: Hashable, Sendable {
+        /// A page a post links to, in the app's reader.
+        case page
+        /// A page in a forum's own browser.
+        case forum
+        /// A forum's sign-in, with the person in front of it.
+        case signIn
 
-    /// The rules, as WebKit reads them. A `forum` page also lets Cloudflare's challenge through.
-    static func rules(forum: Bool) -> String {
+        /// The entries of `Allowance` whose frames it lets through.
+        func allowances(_ list: [Allowance]) -> [Allowance] {
+            let applying: [Allowance] = switch self {
+            case .page: []
+            case .forum: Allowance.applying(.forumPage, in: list)
+            case .signIn: Allowance.applying(.signingIn, in: list)
+            }
+            return applying.filter { $0.reach == .frame }
+        }
+    }
+
+    /// The rules, as WebKit reads them: every other site's load blocked, and then each host an
+    /// entry lets through for this kind of page let through again.
+    static func rules(_ kind: Kind, allowing list: [Allowance] = Allowance.standing) -> String {
         var rules = [#"{"trigger":{"url-filter":".*","load-type":["third-party"]},"action":{"type":"block"}}"#]
-        if forum {
-            let host = challengeHost.replacingOccurrences(of: ".", with: "\\\\.")
-            rules.append(
-                #"{"trigger":{"url-filter":"^https://"# + host
-                    + #"/","load-type":["third-party"]},"action":{"type":"ignore-previous-rules"}}"#
-            )
+        for entry in kind.allowances(list) {
+            for pattern in entry.hosts {
+                let filter = pattern.urlFilter.replacingOccurrences(of: "\\", with: "\\\\")
+                rules.append(
+                    #"{"trigger":{"url-filter":""# + filter
+                        + #"","load-type":["third-party"]},"action":{"type":"ignore-previous-rules"}}"#
+                )
+            }
         }
         return "[" + rules.joined(separator: ",") + "]"
     }
 
-    static var compiled: [Bool: Task<WKContentRuleList?, Never>] = [:]
+    static var compiled: [Kind: Task<WKContentRuleList?, Never>] = [:]
 
     /// How a list is compiled. WebKit's own; a test hands in one that fails.
-    static var compile: @MainActor (Bool) async -> WKContentRuleList? = { forum in
+    static var compile: @MainActor (Kind) async -> WKContentRuleList? = { kind in
         // A store of its own in the temporary directory: what it keeps is these fixed rules and
         // nothing that names a page, and it is rebuilt in a moment where it is gone.
         let folder = FileManager.default.temporaryDirectory
@@ -54,7 +72,7 @@ enum PageRules {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         guard let store = WKContentRuleListStore(url: folder) else { return nil }
         return try? await store.compileContentRuleList(
-            forIdentifier: forum ? "forum" : "page", encodedContentRuleList: rules(forum: forum)
+            forIdentifier: "\(kind)", encodedContentRuleList: rules(kind)
         )
     }
 
@@ -62,20 +80,20 @@ enum PageRules {
     /// page is then not loaded at all: a page that would reach anybody it liked is not shown.
     /// **A failure is not kept**: the next page asks WebKit again, so one bad moment — a full
     /// disk, a temporary directory swept from under it — does not stop every page for the run.
-    static func list(forum: Bool) async -> WKContentRuleList? {
-        if let held = compiled[forum] { return await held.value }
+    static func list(_ kind: Kind) async -> WKContentRuleList? {
+        if let held = compiled[kind] { return await held.value }
         let compile = compile
-        let task = Task { @MainActor () -> WKContentRuleList? in await compile(forum) }
-        compiled[forum] = task
+        let task = Task { @MainActor () -> WKContentRuleList? in await compile(kind) }
+        compiled[kind] = task
         let list = await task.value
-        if list == nil, compiled[forum] == task { compiled[forum] = nil }
+        if list == nil, compiled[kind] == task { compiled[kind] = nil }
         return list
     }
 
-    /// Puts the list on `controller` once, and answers whether it is on.
-    static func install(on controller: WKUserContentController, forum: Bool) async -> Bool {
-        guard let list = await list(forum: forum) else { return false }
-        controller.remove(list)
+    /// Puts `kind`'s list on `controller` in place of any other, and answers whether it is on.
+    static func install(on controller: WKUserContentController, _ kind: Kind) async -> Bool {
+        guard let list = await list(kind) else { return false }
+        controller.removeAllContentRuleLists()
         controller.add(list)
         return true
     }

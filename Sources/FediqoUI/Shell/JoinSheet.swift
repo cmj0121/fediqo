@@ -862,8 +862,6 @@ struct JoinSheet: View {
                 note { ForumWaiting(line: L10n.t("account.catalog.loading")) }
             case .failed:
                 note { Text(L10n.t("account.catalog.failed")) }
-            case .refused:
-                note { Text(L10n.t("account.catalog.refused")) }
             case .empty:
                 note { Text(L10n.t("account.catalog.empty")) }
             case .ready(let servers):

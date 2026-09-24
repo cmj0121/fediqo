@@ -400,7 +400,7 @@ private struct LinkWebView {
         let reader = reader
         Task { @MainActor [weak view] in
             guard let view else { return }
-            if await PageRules.install(on: view.configuration.userContentController, forum: false) {
+            if await PageRules.install(on: view.configuration.userContentController, .page) {
                 view.load(URLRequest(url: url))
             } else {
                 reader.refuse()

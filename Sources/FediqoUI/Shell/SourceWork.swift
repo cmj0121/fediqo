@@ -62,6 +62,11 @@ final class SourceWork {
         case page
         /// A video, played. Fetched by the system's player rather than through an `HTTPClient`.
         case video
+        /// A page the person followed inside a forum's sign-in, listed under that forum (#220).
+        case signInPage
+        /// The check a forum's sign-in shows to prove a person is there — a frame of another
+        /// site's, let in only while the person signs in, and listed under that forum (#220).
+        case personCheck
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -147,14 +152,15 @@ final class SourceWork {
     /// source that pointed there, where the host is not that source's own (a picture, an emoji on
     /// another host). Nil where the host is the source.
     nonisolated func begin(
-        host: String, for purpose: Purpose, name: Name? = nil, source: String? = nil
+        host: String, for purpose: Purpose, name: Name? = nil, source: String? = nil,
+        allowedBy: Allowance.ID? = nil
     ) -> Token {
         let now = Date()
         let entry = Running(host: host.lowercased(), purpose: purpose, name: Self.named(name), since: now)
         let (token, publish) = held.withLock { held -> (Token, Bool) in
             held.next += 1
             held.running[held.next] = entry
-            Self.write(&held, reached: host, source: source, purpose: purpose, at: now)
+            Self.write(&held, reached: host, source: source, purpose: purpose, at: now, allowedBy: allowedBy)
             return (Token(id: held.next), Self.claim(&held))
         }
         if publish { schedule() }
@@ -163,10 +169,14 @@ final class SourceWork {
 
     /// Writes one act to the run's record that is not a request through an `HTTPClient` — a page
     /// opened in the reader, a video handed to the player — and so is never on the running list.
-    nonisolated func note(host: String, for purpose: Purpose, source: String? = nil) {
+    nonisolated func note(
+        host: String, for purpose: Purpose, source: String? = nil, allowedBy: Allowance.ID? = nil
+    ) {
         let publish = held.withLock { held -> Bool in
             held.next += 1
-            Self.write(&held, reached: host, source: source, purpose: purpose, at: Date())
+            Self.write(
+                &held, reached: host, source: source, purpose: purpose, at: Date(), allowedBy: allowedBy
+            )
             return Self.claim(&held)
         }
         if publish { schedule() }
@@ -203,12 +213,41 @@ final class SourceWork {
     /// Whether an act that reaches `reached`, pointed there by `source`, belongs to a source the
     /// person added or named — the source that pointed to it where one did, and otherwise the
     /// host itself (`SourceAct.attributed`). Always, where nothing governs.
-    nonisolated func admits(reached: String, source: String?) -> Bool {
+    ///
+    /// **One act reaches past every source, and only as itself** (#220): the directory of servers,
+    /// read `for: .directory` while a source is being added. It is its own host and its own row,
+    /// and no other purpose reaches it.
+    nonisolated func admits(
+        reached: String, source: String?, for purpose: Purpose? = nil
+    ) -> Bool {
+        admission(reached: reached, source: source, for: purpose) != nil
+    }
+
+    /// Why an act may leave: it is a source's, or an entry of `Allowance` lets it through — and
+    /// which, so the record can say. Nil where neither.
+    enum Admission: Equatable, Sendable {
+        case source
+        case allowed(Allowance.ID)
+
+        var allowedBy: Allowance.ID? {
+            if case .allowed(let id) = self { id } else { nil }
+        }
+    }
+
+    nonisolated func admission(
+        reached: String, source: String?, for purpose: Purpose? = nil,
+        allowing list: [Allowance] = Allowance.standing
+    ) -> Admission? {
         let owner = Self.fold(SourceAct.attributed(reached: reached, pointedBy: source))
-        return held.withLock { held in
+        let ours = held.withLock { held -> Bool in
             guard let added = held.added else { return true }
             return !owner.isEmpty && (added.contains(owner) || held.named.contains(owner))
         }
+        if ours { return .source }
+        // A request an entry names by its purpose, to one of its hosts, asked of nobody's pointing.
+        guard let purpose, source == nil, let url = URL(string: "https://\(owner)/") else { return nil }
+        let entry = list.first { $0.reach == .request(purpose) && $0.allows(url) }
+        return entry.map { .allowed($0.id) }
     }
 
     /// A host as the gate compares it: lower case, no port, and `www.` the same site as without.
@@ -233,11 +272,13 @@ final class SourceWork {
     /// An act with no host reached nowhere — a `file:` address, a malformed one — and is not
     /// written.
     private nonisolated static func write(
-        _ held: inout Held, reached: String, source: String?, purpose: Purpose, at: Date
+        _ held: inout Held, reached: String, source: String?, purpose: Purpose, at: Date,
+        allowedBy: Allowance.ID?
     ) {
         guard !reached.isEmpty else { return }
         held.pending.append(SourceAct(
-            id: held.next, reached: reached, pointedBy: source, purpose: purpose, at: at
+            id: held.next, reached: reached, pointedBy: source, purpose: purpose, at: at,
+            allowedBy: allowedBy
         ))
     }
 
@@ -414,14 +455,16 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
         let host = url.host() ?? ""
         // **The gate** (#220): an act that belongs to no source the person added never leaves,
         // and is not written to the record as though it had.
-        guard work.admits(reached: host, source: source) else {
+        guard let admission = work.admission(reached: host, source: source, for: purpose) else {
             NetLog.network.notice(
                 "\(NetLog.line("refused", host: host, error: OutwardRefusal.noSource), privacy: .public)"
             )
             throw OutwardRefusal.noSource
         }
         // Synchronous both ways, and so never behind the main actor: see `SourceWork`.
-        let token = work.begin(host: host, for: purpose, name: name, source: source)
+        let token = work.begin(
+            host: host, for: purpose, name: name, source: source, allowedBy: admission.allowedBy
+        )
         defer { work.end(token) }
         return try await Outward.$admitted.withValue(true) { try await body() }
     }
@@ -446,13 +489,19 @@ struct SourceAct: Identifiable, Equatable, Sendable {
     let reached: String
     let purpose: SourceWork.Purpose
     let at: Date
+    /// The entry of `Allowance` that let it through, where it was not a source's own (#220).
+    let allowedBy: Allowance.ID?
 
-    init(id: Int, reached: String, pointedBy: String? = nil, purpose: SourceWork.Purpose, at: Date) {
+    init(
+        id: Int, reached: String, pointedBy: String? = nil, purpose: SourceWork.Purpose, at: Date,
+        allowedBy: Allowance.ID? = nil
+    ) {
         self.id = id
         self.reached = reached.lowercased()
         source = Self.attributed(reached: reached, pointedBy: pointedBy)
         self.purpose = purpose
         self.at = at
+        self.allowedBy = allowedBy
     }
 
     /// The source an act is listed under: the one that pointed to it where one did, and

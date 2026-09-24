@@ -186,24 +186,142 @@ struct OnlyAddedTests {
         #expect(session.contains("work.named(parsed)"))
     }
 
-    /// The directory of servers the browser used to list is a third party: nobody the person
-    /// added. It is not asked, and the sheet says why rather than that it could not be reached.
-    @Test("The directory of servers is nobody the person added, and is not asked", .timeLimit(.minutes(1)))
-    func theDirectory() async {
-        let http = FixtureHTTP()
+    /// The directory of servers is a third party let through by one entry, for one purpose: it is
+    /// asked while a source is being added, listed as itself, and reached by nothing else.
+    @Test("The directory is asked while a source is added, listed as itself, and reached by nothing else", .timeLimit(.minutes(1)))
+    func theDirectory() async throws {
+        let http = FixtureHTTP(["/servers": .text("[]")])
         let session = ShellSession(
             http: http, store: ItemStore(),
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: SilentSender())
         )
-        session.work = Self.governed()
+        let work = Self.governed()
+        session.work = work
+        session.browse()
+        session.chooseProtocol(.mastodon)
         await session.loadCatalog()
-        #expect(session.catalog == .refused)
-        #expect(await http.requested.isEmpty)
-        for language in [DummyLanguage.english, .taiwanese] {
-            let said = L10n.t("account.catalog.refused", language: language)
-            #expect(said != "account.catalog.refused")
-            #expect(said != L10n.t("account.catalog.failed", language: language))
+        #expect(session.catalog == .empty)
+        #expect(await http.requested.map(\.host) == [ServerDirectory.host])
+        let row = try #require(work.record.first)
+        #expect(row.source == ServerDirectory.host && row.purpose == .directory && row.allowedBy == .directory)
+        // Any other purpose, or any other host for this one, is nobody's.
+        await #expect(throws: OutwardRefusal.noSource) {
+            try await WatchedHTTP(http, for: .timeline, in: work)
+                .data(from: URL(string: "https://\(ServerDirectory.host)/servers")!)
         }
+        await #expect(throws: OutwardRefusal.noSource) {
+            try await WatchedHTTP(http, for: .directory, in: work)
+                .data(from: URL(string: "https://\(Self.stranger)/servers")!)
+        }
+        #expect(await http.requested.count == 1)
+        #expect(work.record.count == 1)
+    }
+
+    @Test("Only the add sheet's browse step reads the directory")
+    func theDirectoryHasOneDoor() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        var doors: [String] = []
+        var calls: [String] = []
+        let walker = FileManager.default.enumerator(at: root.appendingPathComponent("Sources"), includingPropertiesForKeys: nil)
+        while let url = walker?.nextObject() as? URL {
+            guard url.pathExtension == "swift" else { continue }
+            let text = try String(contentsOf: url, encoding: .utf8)
+            for line in text.split(separator: "\n") where !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
+                if line.contains("for: .directory") { doors.append(url.lastPathComponent) }
+                if line.contains("loadCatalog()"), !line.contains("func loadCatalog") { calls.append(String(line)) }
+            }
+        }
+        #expect(doors == ["ShellSession.swift"])
+        #expect(calls.count == 1 && calls[0].contains("Task { await loadCatalog() }"))
+        let session = try String(
+            contentsOf: root.appendingPathComponent("Sources/FediqoUI/Shell/ShellSession.swift"), encoding: .utf8
+        )
+        let choose = try #require(session.range(of: "func chooseProtocol("))
+        let call = try #require(session.range(of: "Task { await loadCatalog() }"))
+        #expect(choose.lowerBound < call.lowerBound, "asked from the browse step")
+    }
+
+    // MARK: - What reaches past a source
+
+    @Test("What reaches past a source is one list, and each entry says when it applies")
+    func theAllowances() {
+        let list = Allowance.standing
+        #expect(Set(list.map(\.id)) == Set(Allowance.ID.allCases))
+        #expect(list.first { $0.id == .directory }?.when == .adding)
+        #expect(list.first { $0.id == .personCheck }?.when == .signingIn)
+        #expect(list.first { $0.id == .signInPage }?.when == .signingIn)
+        let check = list.first { $0.id == .personCheck }!
+        for address in [
+            "https://www.google.com/recaptcha/api2/anchor", "https://www.gstatic.com/recaptcha/releases/x.js",
+            "https://www.recaptcha.net/recaptcha/api.js", "https://newassets.hcaptcha.com/c/x",
+            "https://static.geetest.com/v4/gt4.js", "https://turing.captcha.qq.com/TCaptcha.js",
+            "https://captcha.gtimg.com/1/x.js",
+        ] {
+            #expect(check.allows(URL(string: address)!), "\(address)")
+        }
+        for address in [
+            "https://www.google.com/search?q=x", "https://www.google-analytics.com/collect",
+            "https://www.gstatic.com/fonts/x", "http://hcaptcha.com/x", "https://notgeetest.com/x",
+        ] {
+            #expect(!check.allows(URL(string: address)!), "\(address)")
+        }
+        #expect(Allowance.applying(.forumPage).map(\.id) == [.forumChallenge])
+        #expect(Set(Allowance.applying(.signingIn).map(\.id)) == [.forumChallenge, .personCheck, .signInPage])
+    }
+
+    @Test("A forum's browser stays on its site, but for the check and the pages its sign-in shows")
+    func theForumBrowser() async {
+        let forum = "bbs.one.example"
+        let work = Self.governed([forum])
+        let engine = ForumWebEngine(host: forum, dataStore: .nonPersistent())
+        engine.work = work
+        let captcha = URL(string: "https://www.google.com/recaptcha/api2/anchor")!
+        let elsewhere = URL(string: "https://id.provider.example/login")!
+        // Reading: its own site, a sibling included, and nothing else; no check but Cloudflare's.
+        #expect(engine.decide(URL(string: "https://www.bbs.one.example/forum.php")!, mainFrame: true))
+        #expect(engine.decide(URL(string: "https://static.one.example/x")!, mainFrame: true))
+        #expect(!engine.decide(elsewhere, mainFrame: true))
+        #expect(!engine.decide(URL(string: "http://bbs.one.example/")!, mainFrame: true))
+        #expect(engine.decide(URL(string: "about:blank")!, mainFrame: true))
+        _ = engine.decide(captcha, mainFrame: false)
+        _ = engine.decide(URL(string: "https://challenges.cloudflare.com/turnstile/x")!, mainFrame: false)
+        #expect(work.record.map(\.allowedBy) == [.forumChallenge], "a frame the reading lets through is listed")
+        // Signing in: the check and a page followed away, each under the forum.
+        await engine.signingIn(true)
+        #expect(engine.decide(elsewhere, mainFrame: true))
+        _ = engine.decide(captcha, mainFrame: false)
+        _ = engine.decide(URL(string: "https://tracker.example/pixel")!, mainFrame: false)
+        let rows = work.record.suffix(2)
+        #expect(rows.map(\.source) == [forum, forum])
+        #expect(rows.map(\.reached) == ["id.provider.example", "www.google.com"])
+        #expect(rows.map(\.purpose) == [.signInPage, .personCheck])
+        #expect(rows.map(\.allowedBy) == [.signInPage, .personCheck])
+        await engine.signingIn(false)
+        #expect(!engine.decide(elsewhere, mainFrame: true), "and only while the sheet is up")
+        // A forum the gate no longer admits goes nowhere.
+        work.sourcesChanged([])
+        #expect(!engine.decide(URL(string: "https://bbs.one.example/")!, mainFrame: true))
+    }
+
+    @Test("Two hosts are one site under one parent, and not under a bare top-level name")
+    func sameSite() {
+        #expect(ForumWebEngine.sameSite("bbs.example.org", "m.example.org"))
+        #expect(ForumWebEngine.sameSite("www.example.org", "example.org"))
+        #expect(ForumWebEngine.sameSite("a.b.example.org", "example.org"))
+        #expect(!ForumWebEngine.sameSite("example.org", "example.com"))
+        #expect(!ForumWebEngine.sameSite("a.com", "b.com"))
+    }
+
+    @Test("The sheet turns the sign-in's allowances on as it opens and off as it goes")
+    func theSheetSaysSo() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let sheet = try String(
+            contentsOf: root.appendingPathComponent("Sources/FediqoUI/Shell/ForumSignInSheet.swift"), encoding: .utf8
+        )
+        #expect(sheet.contains("await engine.signingIn(true)"))
+        #expect(sheet.contains(".onDisappear { [engine] in Task { await engine.signingIn(false) } }"))
     }
 
     // MARK: - Pages and films
@@ -242,24 +360,29 @@ struct OnlyAddedTests {
 @MainActor
 @Suite("A page shown in the app reaches no third party", .serialized)
 struct PageRulesTests {
-    @Test("The rules block every other site's load, and a forum's let Cloudflare's challenge alone through")
+    @Test("The rules are built from the list: a link page lets nothing through, a forum Cloudflare, a sign-in its checks")
     func theRules() throws {
-        for forum in [false, true] {
-            let data = Data(PageRules.rules(forum: forum).utf8)
+        for kind in [PageRules.Kind.page, .forum, .signIn] {
+            let data = Data(PageRules.rules(kind).utf8)
             let rules = try #require(try JSONSerialization.jsonObject(with: data) as? [[String: Any]])
             let first = try #require(rules.first)
             #expect((first["trigger"] as? [String: Any])?["load-type"] as? [String] == ["third-party"])
             #expect((first["action"] as? [String: String])?["type"] == "block")
-            #expect(rules.count == (forum ? 2 : 1))
+            let frames = kind.allowances(Allowance.standing).flatMap(\.hosts).count
+            #expect(rules.count == 1 + frames)
         }
-        let exception = PageRules.rules(forum: true)
-        #expect(exception.contains(#"^https://challenges\\.cloudflare\\.com/"#))
+        #expect(PageRules.rules(.page) == #"[{"trigger":{"url-filter":".*","load-type":["third-party"]},"action":{"type":"block"}}]"#)
+        #expect(PageRules.rules(.forum).contains(#"^https://challenges\\.cloudflare\\.com/"#))
+        #expect(!PageRules.rules(.forum).contains("recaptcha"))
+        #expect(PageRules.rules(.signIn).contains(#"^https://www\\.google\\.com/recaptcha/"#))
+        #expect(PageRules.rules(.signIn).contains(#"^https://([^/]*\\.)?hcaptcha\\.com/"#))
     }
 
-    @Test("Both lists compile")
+    @Test("Every list compiles")
     func compiles() async {
-        #expect(await PageRules.list(forum: false) != nil)
-        #expect(await PageRules.list(forum: true) != nil)
+        for kind in [PageRules.Kind.page, .forum, .signIn] {
+            #expect(await PageRules.list(kind) != nil, "\(kind)")
+        }
     }
 
     @Test("A compile that failed is asked again, not remembered for the run")
@@ -272,9 +395,39 @@ struct PageRulesTests {
         }
         PageRules.compiled = [:]
         PageRules.compile = { _ in nil }
-        #expect(await PageRules.list(forum: false) == nil)
+        #expect(await PageRules.list(.page) == nil)
         PageRules.compile = real
-        #expect(await PageRules.list(forum: false) != nil, "the next page is not refused for the run")
+        #expect(await PageRules.list(.page) != nil, "the next page is not refused for the run")
+    }
+
+    /// The same page as below, with an entry of the list letting one outside host through: loaded
+    /// under the sign-in's rules, that host is reached and the others are not.
+    @Test("An entry the list holds lets its host through, and no other", .timeLimit(.minutes(1)))
+    func anEntryLetsItsHostThrough() async throws {
+        let served = Served()
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.setURLSchemeHandler(served, forURLScheme: Served.scheme)
+        let list = [Allowance(
+            id: .personCheck, when: .signingIn, reach: .frame,
+            hosts: [Allowance.Pattern(host: "cdn.example", scheme: Served.scheme)]
+        )]
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("FediqoPageRulesTest")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let store = try #require(WKContentRuleListStore(url: folder))
+        let rules = try #require(try await store.compileContentRuleList(
+            forIdentifier: "entry", encodedContentRuleList: PageRules.rules(.signIn, allowing: list)
+        ))
+        configuration.userContentController.add(rules)
+        let view = WKWebView(frame: .init(x: 0, y: 0, width: 400, height: 400), configuration: configuration)
+        view.load(URLRequest(url: URL(string: "\(Served.scheme)://bbs.forum.example/thread")!))
+        for _ in 0..<400 where !served.hosts.contains("cdn.example") {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(served.hosts.contains("cdn.example"), "the entry's host is let through")
+        #expect(!served.hosts.contains("tracker.example"), "and nothing else is")
+        _ = view
     }
 
     @Test(
@@ -287,7 +440,7 @@ struct PageRulesTests {
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(served, forURLScheme: Served.scheme)
         if ruled {
-            #expect(await PageRules.install(on: configuration.userContentController, forum: true))
+            #expect(await PageRules.install(on: configuration.userContentController, .forum))
         }
         let view = WKWebView(frame: .init(x: 0, y: 0, width: 400, height: 400), configuration: configuration)
         view.load(URLRequest(url: URL(string: "\(Served.scheme)://bbs.forum.example/thread")!))

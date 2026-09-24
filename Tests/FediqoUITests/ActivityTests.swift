@@ -49,9 +49,10 @@ struct ActivityTests {
                 #expect(!said.contains(leak), "\(leak) reached a line in \(language)")
             }
         }
-        // What an act holds is a host, a host, a word and a time: no field could carry more.
+        // What an act holds is a host, a host, a word, a time and which fixed entry let it
+        // through (#220): no field could carry more.
         let held = Mirror(reflecting: act).children.map { "\($0.label ?? "")" }
-        #expect(held == ["id", "source", "reached", "purpose", "at"])
+        #expect(held == ["id", "source", "reached", "purpose", "at", "allowedBy"])
     }
 
     @Test("A request that fails, or is sent rather than fetched, is recorded all the same")
