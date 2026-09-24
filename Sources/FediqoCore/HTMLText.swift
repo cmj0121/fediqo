@@ -28,6 +28,18 @@ public enum HTMLText {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// `html` without the `RE:` line a quoting server writes for readers that draw no quote
+    /// (#214): Mastodon puts `<p class="quote-inline">RE: <a …>…</a></p>` ahead of a quoting
+    /// post's words, and a reader that draws the quote itself would draw the quoted post twice —
+    /// once as the quote, once as its address. Only ever asked of a post that carries a quote.
+    public static func withoutQuoteLine(_ html: String) -> String {
+        html.replacingOccurrences(
+            of: #"<p[^>]*\bclass="[^"]*\bquote-inline\b[^"]*"[^>]*>.*?</p>"#,
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+    }
+
     private static func decodeNumericEntities(_ input: String) -> String {
         guard input.contains("&#") else { return input }
         guard let pattern = try? NSRegularExpression(pattern: "&#(x?)([0-9a-fA-F]+);") else {

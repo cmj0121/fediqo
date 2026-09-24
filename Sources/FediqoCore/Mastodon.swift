@@ -359,6 +359,48 @@ struct StatusDTO: Decodable, Sendable {
     /// The pictures the words are partly written in. Absent on the odd server, which is a post
     /// written in letters alone rather than a status worth failing.
     let emojis: [Emoji]?
+    /// The post this one quotes (#214), on a server that has quotes (Mastodon 4.4 on). Absent on
+    /// one that has none, and `null` on a status that quotes nothing: both are no quote.
+    ///
+    /// **Read leniently** (`Lenient`): a `quote` of a shape this build cannot read — a fork's own
+    /// idea, a string — is no quote, and never costs the reader the status or the page it is on.
+    let quote: Lenient<QuoteDTO>?
+
+    /// A value read where it can be and nothing where it cannot, rather than a failed decode.
+    struct Lenient<Wrapped: Decodable & Sendable>: Decodable, Sendable {
+        let value: Wrapped?
+
+        init(from decoder: any Decoder) throws {
+            value = try? Wrapped(from: decoder)
+        }
+    }
+
+    /// The quote this status states, or nothing — including a `quote` that names no state, which
+    /// is no quote this app can say anything about (and whose `RE:` line is then kept).
+    func quote(source: Source) -> Quote? {
+        quote?.value?.asQuote(source: source)
+    }
+
+    /// Mastodon's `Quote`, or its `ShallowQuote` a level down: a state, and the quoted status in
+    /// full or by its id alone.
+    struct QuoteDTO: Decodable, Sendable {
+        let state: String?
+        let quotedStatus: Box<StatusDTO>?
+        let quotedStatusId: String?
+
+        /// What a note keeps of it. The quoted status is read the way any status is, through
+        /// the same source, and cut to what a row draws of it (`QuotedPost`). Nothing where no
+        /// state was said.
+        func asQuote(source: Source) -> Quote? {
+            guard state != nil else { return nil }
+            let quoted = quotedStatus?.value
+            return Quote(
+                state: Quote.State(wire: state),
+                post: quoted.map { QuotedPost($0.asNote(source: source, categories: [])) },
+                statusID: quoted?.id ?? quotedStatusId
+            )
+        }
+    }
 
     struct Account: Decodable, Sendable {
         let displayName: String
@@ -463,6 +505,7 @@ struct StatusDTO: Decodable, Sendable {
 
     func asNote(source: Source, categories: Set<Category>) -> Note {
         let subject = reblog?.value ?? self
+        let quote = subject.quote(source: source)
         // Named once, so the name the row draws and the pictures that name is written in
         // cannot come to disagree about whether there is a booster at all.
         let booster = reblog == nil ? nil : account
@@ -477,7 +520,11 @@ struct StatusDTO: Decodable, Sendable {
             source: source,
             author: subject.account.name,
             handle: Self.handle(subject.account.acct, host: host),
-            body: HTMLText.plain(subject.content),
+            // A quoting post's `RE:` line is the quote spelled as an address for readers that draw
+            // none (#214); this one draws the quote. A post with no quote keeps every word.
+            body: HTMLText.plain(
+                quote == nil ? subject.content : HTMLText.withoutQuoteLine(subject.content)
+            ),
             postedAt: subject.createdAt,
             categories: categories,
             reply: Self.reply(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),
@@ -511,7 +558,9 @@ struct StatusDTO: Decodable, Sendable {
                 favourites: subject.favouritesCount
             ),
             // The post's own id on this server, the boosted one's on a boost: what the row is.
-            statusID: subject.id
+            statusID: subject.id,
+            // The boosted post's quote on a boost, as every other fact here (#214).
+            quote: quote
         )
     }
 
