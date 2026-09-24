@@ -238,6 +238,10 @@ enum ShellQuestion {
         case .indexIsNewer:
             key = "carry.refused.indexNewer"
             line = L10n.t(key + ".line", language: language)
+        case .unwound(let steps):
+            key = "carry.refused.unwound"
+            let named = steps.map { L10n.t("carry.step.\($0)", language: language) }.joined(separator: ", ")
+            line = String(format: L10n.t(key + ".line", language: language), named)
         case .other(let said):
             key = "carry.refused.other"
             line = String(format: L10n.t(key + ".line", language: language), said)

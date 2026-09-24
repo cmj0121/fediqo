@@ -87,4 +87,8 @@ public enum PackageFault: Error, Sendable, Equatable {
     case indexIsNewer
     /// The package's store could not be read back as a store, though every tag held.
     case unreadableStore
+    /// A step of the commit refused, and putting an earlier step back refused too: the device
+    /// is neither as it was nor as the package says, and `steps` names what could not be put
+    /// back. Said as itself, never as "nothing changed".
+    case unwound(steps: [String])
 }

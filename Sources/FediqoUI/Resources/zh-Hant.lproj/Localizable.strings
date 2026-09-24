@@ -942,6 +942,12 @@
 "carry.refused.short.line" = "至少 %d 個字元，檔案才不會被猜開。";
 "carry.refused.indexNewer.title" = "這部裝置的索引由較新的 Fediqo 寫入";
 "carry.refused.indexNewer.line" = "讀回會覆寫它；請先用較新的 Fediqo 開啟。什麼都沒有改變。";
+"carry.refused.unwound.title" = "中途停止，而且沒有全部復原";
+"carry.refused.unwound.line" = "無法復原成原本的樣子：%@。請檢查「帳號」與「用量」。";
+"carry.step.secrets" = "登入憑證";
+"carry.step.index" = "貼文";
+"carry.step.pictures" = "圖片副本";
+"carry.step.settings" = "設定";
 "carry.refused.other.title" = "沒能完成";
 "carry.refused.other.line" = "沒有任何半途的改動：%@";
 "carry.done.taken.title" = "已帶走";

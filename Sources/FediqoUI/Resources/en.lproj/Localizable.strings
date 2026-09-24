@@ -965,6 +965,12 @@
 "carry.refused.short.line" = "At least %d characters, so the file is not guessed open.";
 "carry.refused.indexNewer.title" = "A newer Fediqo wrote this device's index";
 "carry.refused.indexNewer.line" = "Reading back would write over it; open the newer Fediqo first. Nothing changed.";
+"carry.refused.unwound.title" = "It stopped partway, and not everything went back";
+"carry.refused.unwound.line" = "Could not be put back as it was: %@. Check Account and Usage.";
+"carry.step.secrets" = "the sign-ins";
+"carry.step.index" = "the posts";
+"carry.step.pictures" = "the picture copies";
+"carry.step.settings" = "the settings";
 "carry.refused.other.title" = "It could not be finished";
 "carry.refused.other.line" = "Nothing was left half done: %@";
 "carry.done.taken.title" = "Taken away";

@@ -51,6 +51,9 @@ final class ShellCarry {
         case emptyPassword
         case shortPassword
         case indexIsNewer
+        /// A step refused and an earlier one could not be put back: neither as it was nor as
+        /// the package says, and which.
+        case unwound([String])
         /// Something else refused — a disk, the Keychain — said as itself.
         case other(String)
 
@@ -61,6 +64,7 @@ final class ShellCarry {
             case PackageFault.emptyPassword: self = .emptyPassword
             case PackageFault.shortPassword: self = .shortPassword
             case PackageFault.indexIsNewer: self = .indexIsNewer
+            case PackageFault.unwound(let steps): self = .unwound(steps)
             default: self = .other(error.localizedDescription)
             }
         }

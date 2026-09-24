@@ -128,11 +128,11 @@ public struct MediaCache: MediaCopies {
         return had ? aside : nil
     }
 
-    /// What `adopt` put aside, back in place of what it moved in.
-    func restore(_ aside: URL?) {
+    /// What `adopt` put aside, back in place of what it moved in — or a throw where it could not be.
+    func restore(_ aside: URL?) throws {
         guard let aside else { return }
         try? FileManager.default.removeItem(at: directory)
-        try? FileManager.default.moveItem(at: aside, to: directory)
+        try FileManager.default.moveItem(at: aside, to: directory)
     }
 
     /// What `adopt` put aside, let go.

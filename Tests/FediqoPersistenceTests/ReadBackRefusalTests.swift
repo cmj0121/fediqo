@@ -205,6 +205,56 @@ struct ReadBackRefusalTests {
         #expect(!manager.fileExists(atPath: onto.directory.appendingPathComponent("index.sqlite").path))
     }
 
+    @Test("A step refusing and an earlier one not going back is said as such, naming what did not")
+    func unwoundIsSaid() async throws {
+        let from = try await Self.populated()
+        let onto = try await Device(noFile: true)
+        let url = package()
+        let manager = FileManager.default
+        defer {
+            try? manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: onto.directory.path)
+            from.remove(); onto.remove(); try? manager.removeItem(at: url)
+        }
+        try await from.packager().takeAway(to: url, key: .password("password"), pictures: false) { _ in }
+        try onto.tokens.save(MastodonToken(host: "kept.example", accessToken: "k", clientID: "c", clientSecret: "s"))
+        // The Keychain accepts the package's sign-in, the folder then refuses the index, and
+        // the Keychain refuses to put the old sign-in back.
+        let path = onto.directory.path
+        let tokens = SealingTokens(inner: onto.tokens) {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: path)
+        }
+        let packager = StorePackager(
+            directory: onto.directory, file: nil, store: onto.store, media: onto.media, tokens: tokens,
+            credentials: onto.credentials, defaults: onto.defaults, device: "a test", appVersion: "0.7.0",
+            freeSpace: { _ in .max }, rounds: 1000
+        )
+        await #expect(throws: PackageFault.unwound(steps: ["secrets"])) {
+            try await packager.readBack(url, key: .password("password"), replacing: false) { _ in }
+        }
+    }
+
+    @Test("A commit killed between moving the old index aside and finishing is kept by the sweep, and one that finished is not")
+    func halfCommitIsKept() async throws {
+        let from = try await Self.populated()
+        let onto = try await Device(noFile: true)
+        let url = package()
+        let manager = FileManager.default
+        defer { from.remove(); onto.remove(); try? manager.removeItem(at: url) }
+        try await from.packager().takeAway(to: url, key: .password("password"), pictures: false) { _ in }
+        try await readAll(url, key: .password("password"), onto: onto)
+        let left = try manager.contentsOfDirectory(atPath: onto.directory.path).filter { $0.hasPrefix("incoming-") }
+        #expect(left.isEmpty, "a finished commit leaves nothing aside")
+        let half = onto.directory.appendingPathComponent("incoming-aside-half")
+        try manager.createDirectory(at: half, withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: half.appendingPathComponent("index.sqlite"))
+        try Data().write(to: half.appendingPathComponent(StorePackager.committingMarker))
+        let done = onto.directory.appendingPathComponent("incoming-aside-done")
+        try manager.createDirectory(at: done, withIntermediateDirectories: true)
+        StorePackager.sweepLeftovers(directory: onto.directory, media: onto.media.location, temporary: onto.root)
+        #expect(manager.fileExists(atPath: half.appendingPathComponent("index.sqlite").path), "the old index is kept")
+        #expect(!manager.fileExists(atPath: done.path))
+    }
+
     @Test("An index this run left alone as a newer build's is not written over, and says so")
     func indexIsNewer() async throws {
         let from = try await Self.populated()
@@ -246,6 +296,32 @@ private struct GatedPackager {
         )
         try await packager.readBack(url, key: key, replacing: false) { _ in }
     }
+}
+
+/// A Keychain that runs `onSave` once the package's registration — the last thing filed — is
+/// in, and refuses everything after.
+private final class SealingTokens: MastodonTokenStore, @unchecked Sendable {
+    let inner: MemoryMastodonTokens
+    let onSave: @Sendable () -> Void
+    private var sealed = false
+    init(inner: MemoryMastodonTokens, onSave: @escaping @Sendable () -> Void) {
+        self.inner = inner
+        self.onSave = onSave
+    }
+    private func open() throws { if sealed { throw ForumCredentialError.keychain(-1) } }
+    func token(host: String) throws -> MastodonToken? { try inner.token(host: host) }
+    func save(_ token: MastodonToken) throws { try open(); try inner.save(token) }
+    func forget(host: String) throws { try open(); try inner.forget(host: host) }
+    func forget(_ token: MastodonToken) throws -> Bool { try open(); return try inner.forget(token) }
+    func grants() throws -> [String: MastodonGrant] { try inner.grants() }
+    func app(host: String) throws -> MastodonApp? { try inner.app(host: host) }
+    func save(_ app: MastodonApp) throws {
+        try open()
+        try inner.save(app)
+        sealed = true
+        onSave()
+    }
+    func forgetApp(host: String) throws { try open(); try inner.forgetApp(host: host) }
 }
 
 /// A Keychain that runs `onSave` the first time the package's token is filed.

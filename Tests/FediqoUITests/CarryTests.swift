@@ -259,7 +259,8 @@ struct CarryTests {
     func refusalsAreEachTheirOwn() {
         let refusals: [ShellCarry.Trouble] = [
             .package(.notOurs), .package(.newer), .package(.wrongPassword), .package(.altered), .package(.cutShort),
-            .noRoom(needed: 2_000_000, free: 1_000), .emptyPassword, .shortPassword, .indexIsNewer, .other("the disk said no"),
+            .noRoom(needed: 2_000_000, free: 1_000), .emptyPassword, .shortPassword, .indexIsNewer,
+            .unwound(["secrets", "index"]), .other("the disk said no"),
         ]
         for language in [DummyLanguage.english, .taiwanese] {
             let said = refusals.map { ShellQuestion.carryRefused($0, language: language) }
@@ -312,8 +313,12 @@ struct CarryTests {
             "carry.password.set.title", "carry.password.set.line", "carry.password.set.help",
             "carry.password.open.title", "carry.password.open.line", "carry.password.open.help",
             "carry.password.field", "carry.password.again", "carry.password.set.go", "carry.password.open.go",
-        ] + ["notOurs", "newer", "wrongPassword", "altered", "cutShort", "noRoom", "empty", "short", "indexNewer", "other"]
+        ] + ["notOurs", "newer", "wrongPassword", "altered", "cutShort", "noRoom", "empty", "short", "indexNewer", "unwound", "other"]
             .flatMap { ["carry.refused.\($0).title", "carry.refused.\($0).line"] }
+            + ["secrets", "index", "pictures", "settings"].map { "carry.step.\($0)" }
+
+        let unwound = ShellQuestion.carryRefused(.unwound(["secrets", "index"]), language: .english)
+        #expect(unwound.line.contains("the sign-ins, the posts") && !unwound.line.contains("Nothing changed"))
         let resources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/FediqoUI/Resources")

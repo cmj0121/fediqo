@@ -51,7 +51,7 @@ final class Launch {
             media: media, tokens: KeychainMastodonTokens(), credentials: KeychainCredentials(),
             defaults: .standard, device: Self.deviceName,
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
-            storeIsNewer: opened.storeIsNewer
+            storeIsNewer: opened.storeIsNewer, saver: saver
         )
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).

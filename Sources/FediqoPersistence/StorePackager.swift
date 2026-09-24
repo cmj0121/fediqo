@@ -40,6 +40,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     private let appVersion: String
     private let freeSpace: @Sendable (URL) -> Int
     private let rounds: UInt32
+    /// The one writer of the index this run, where there is one: the commit runs inside its
+    /// queue, so no save writes the old snapshot over the new index.
+    private let saver: StoreSaver?
     /// The index on disk was written by a newer build and this run left it alone: a read back
     /// must not write over it.
     private let storeIsNewer: Bool
@@ -51,11 +54,13 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         directory: URL, file: StoreFile?, store: ItemStore, media: MediaCache?,
         tokens: any MastodonTokenStore, credentials: any ForumCredentialStore,
         defaults: UserDefaults, device: String, appVersion: String, storeIsNewer: Bool = false,
+        saver: StoreSaver? = nil,
         freeSpace: @escaping @Sendable (URL) -> Int = StorePackager.volumeFree,
         rounds: UInt32 = PackageFormat.rounds
     ) {
         self.directory = directory
         self.file = file
+        self.saver = saver
         self.storeIsNewer = storeIsNewer
         self.store = store
         self.media = media
@@ -83,9 +88,25 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             }
         }
         sweep(temporary, prefix: "takeaway-")
-        sweep(directory, prefix: "incoming-")
+        // What a commit put aside is the old index until the commit finished. Its marker is
+        // written before the move and taken away only once every step held, so an aside with
+        // the marker still there is a read back killed midway: kept, and said.
+        var halfCommits = 0
+        let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
+        for name in names where name.hasPrefix("incoming-") {
+            let folder = directory.appendingPathComponent(name)
+            if manager.fileExists(atPath: folder.appendingPathComponent(committingMarker).path) {
+                halfCommits += 1
+                continue
+            }
+            try? manager.removeItem(at: folder)
+        }
+        StoreSaver.reportHalfCommits(halfCommits)
         if let media { sweep(media.deletingLastPathComponent(), prefix: "media-aside-") }
     }
+
+    /// The file in an `incoming-aside-*` folder that says its commit has not finished.
+    static let committingMarker = ".committing"
 
     /// What the volume under `url` has free for what matters.
     public static func volumeFree(_ url: URL) -> Int {
@@ -319,10 +340,11 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         return previous
     }
 
-    /// `fresh` taken out and `previous` put back: the Keychain as it was before `refile`.
-    private func unfile(_ fresh: Secrets, previous: Secrets) {
-        try? clearSecrets(fresh)
-        try? fileSecrets(previous)
+    /// `fresh` taken out and `previous` put back: the Keychain as it was before `refile`, or a
+    /// throw where it could not be.
+    private func unfile(_ fresh: Secrets, previous: Secrets) throws {
+        try clearSecrets(fresh)
+        try fileSecrets(previous)
     }
 
     private func clearSecrets(_ secrets: Secrets) throws {
@@ -397,7 +419,8 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     }
 
     /// What a read back staged, before the commit.
-    private struct Staged {
+    /// `@unchecked` for the settings plist, whose values are Foundation value types.
+    private struct Staged: @unchecked Sendable {
         var index: URL?
         var settings: [String: Any]?
         var secrets: Secrets?
@@ -499,39 +522,52 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     private func commit(
         _ staged: Staged, contents: (sources: [Source], notes: [Note], said: [SourceProfile])?, summary: PackageSummary
     ) async throws {
-        var undo: [() async -> Void] = []
-        func unwind() async {
-            for step in undo.reversed() { await step() }
-        }
+        guard let saver else { return try await commitNow(staged, contents: contents) }
+        try await saver.exclusively { try await commitNow(staged, contents: contents) }
+    }
+
+    /// One step of the commit that can be put back: its name, for the sentence that says it
+    /// could not be, and the putting back, which says so by throwing.
+    private struct Undo {
+        let name: String
+        let run: () async throws -> Void
+    }
+
+    private func commitNow(
+        _ staged: Staged, contents: (sources: [Source], notes: [Note], said: [SourceProfile])?
+    ) async throws {
+        var undo: [Undo] = []
+        var settle: [() -> Void] = []
         do {
             if let secrets = staged.secrets {
                 let previous = try refile(secrets, onlyTheirs: contents == nil)
-                undo.append { unfile(secrets, previous: previous) }
+                undo.append(Undo(name: "secrets") { try unfile(secrets, previous: previous) })
             }
             guard let contents else { return }
-            undo.append(try await commitIndex(contents, staged: staged))
+            let index = try await commitIndex(contents, staged: staged)
+            undo.append(Undo(name: "index", run: index.undo))
+            settle.append(index.settle)
             if let media {
                 // The copies kept here were for posts that are no longer here: replaced by the
                 // package's where it carried any, and dropped where it did not.
-                if let fresh = staged.media {
-                    let aside = try media.adopt(fresh)
-                    undo.append { media.restore(aside) }
-                    defer { media.settle(aside) }
-                    try await commitDefaults(staged, into: &undo)
-                } else {
-                    let aside = try media.adopt(Self.emptyFolder(beside: directory))
-                    undo.append { media.restore(aside) }
-                    defer { media.settle(aside) }
-                    try await commitDefaults(staged, into: &undo)
-                }
-            } else {
-                try await commitDefaults(staged, into: &undo)
+                let aside = try media.adopt(staged.media ?? Self.emptyFolder(beside: directory))
+                undo.append(Undo(name: "pictures") { try media.restore(aside) })
+                settle.append { media.settle(aside) }
             }
+            try await commitDefaults(staged, into: &undo)
             await store.replace(sources: contents.sources, notes: contents.notes, said: contents.said)
         } catch {
-            await unwind()
-            throw error
+            // Newest first, every one tried, and the ones that refused named: the device is
+            // then neither as it was nor as the package says, and the sentence must say so.
+            var refused: [String] = []
+            for step in undo.reversed() {
+                do { try await step.run() } catch { refused.append(step.name) }
+            }
+            if refused.isEmpty { throw error }
+            throw PackageFault.unwound(steps: refused)
         }
+        // Every step held: what was put aside for putting back goes, explicitly and last.
+        for step in settle { step() }
     }
 
     /// The index replaced, and how to put it back: through the open file where this run has one,
@@ -539,17 +575,20 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// index and what SQLite keeps beside it — put aside first.
     private func commitIndex(
         _ contents: (sources: [Source], notes: [Note], said: [SourceProfile]), staged: Staged
-    ) async throws -> () async -> Void {
+    ) async throws -> (undo: () async throws -> Void, settle: () -> Void) {
         if let file {
             let previous = try file.load()
             try await file.save(sources: contents.sources, notes: contents.notes, said: contents.said)
-            return { try? await file.save(sources: previous.sources, notes: previous.notes, said: previous.said) }
+            return ({ try await file.save(sources: previous.sources, notes: previous.notes, said: previous.said) }, {})
         }
-        guard let index = staged.index else { return {} }
+        guard let index = staged.index else { return ({}, {}) }
         let manager = FileManager.default
         let target = directory.appendingPathComponent(Self.indexName)
         let aside = directory.appendingPathComponent("incoming-aside-\(UUID().uuidString)", isDirectory: true)
         try manager.createDirectory(at: aside, withIntermediateDirectories: true)
+        // The marker first: while it is there, what is in this folder is the old index and the
+        // launch sweep keeps it. It goes only once every step of the commit held.
+        try Data().write(to: aside.appendingPathComponent(Self.committingMarker))
         var moved: [(from: URL, to: URL)] = []
         for suffix in [""] + StoreFile.sidecars {
             let file = directory.appendingPathComponent(Self.indexName + suffix)
@@ -562,17 +601,23 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             try manager.moveItem(at: index, to: target)
         } catch {
             for (kept, file) in moved { try? manager.moveItem(at: kept, to: file) }
+            try? manager.removeItem(at: aside)
             throw error
         }
-        return {
+        let undo: () async throws -> Void = {
             try? manager.removeItem(at: target)
-            for (kept, file) in moved { try? manager.moveItem(at: kept, to: file) }
+            for (kept, file) in moved { try manager.moveItem(at: kept, to: file) }
             try? manager.removeItem(at: aside)
         }
+        let settle: () -> Void = {
+            try? manager.removeItem(at: aside.appendingPathComponent(Self.committingMarker))
+            try? manager.removeItem(at: aside)
+        }
+        return (undo, settle)
     }
 
     /// The defaults replaced, with what they held read first and how to set it back.
-    private func commitDefaults(_ staged: Staged, into undo: inout [() async -> Void]) async throws {
+    private func commitDefaults(_ staged: Staged, into undo: inout [Undo]) async throws {
         guard let settings = staged.settings else { return }
         let previous = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix(Self.defaultsPrefix) }
         func set(_ values: [String: Any]) {
@@ -582,7 +627,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             for (key, value) in values { defaults.set(value, forKey: key) }
         }
         set(settings)
-        undo.append { set(previous) }
+        undo.append(Undo(name: "settings") { set(previous) })
     }
 
     /// An empty folder to adopt as the copies where the package carried none.
