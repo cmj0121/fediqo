@@ -15,13 +15,16 @@ enum ForumBlogReading: Equatable, Sendable {
     case read
     /// Read, and there were no words on it — a blog that is a picture. `ForumReading.silent`.
     case silent
-    /// It could not be read, and why — `ForumPosts.Absence`'s four, for the reasons it gives.
+    /// It could not be read, and why — `ForumPosts.Absence`'s, the forum's own reason among them
+    /// (#213).
     case absent(ForumPosts.Absence)
+    /// Behind its author's password, and where the reader's typing of it stands (#213).
+    case locked(ForumLock)
 
     /// Whether the forum's own page is what is left to offer: a blog this device holds no words
-    /// of and could not read.
+    /// of and could not read, where its page could show it — `ForumRefusalView.actions(for:)`.
     var offersPage: Bool {
-        if case .absent = self { return true }
+        if case .absent(let absence) = self { return ForumRefusalView.actions(for: absence).contains(.page) }
         return false
     }
 }
@@ -43,6 +46,14 @@ enum ForumBlogReading: Equatable, Sendable {
 ///
 /// **Through the forum's sign-in, where it has one**, for `ForumPosts.client`'s reason: a blog a
 /// signed-in reader may read comes back as the forum's notice if it is read around their cookies.
+///
+/// **A refusal a sign-in could change is read again when one lands** (#213) — `ForumPosts`' rule
+/// (#153) — so a blog that said "sign in" reads once the reader has.
+///
+/// **A password is used once and kept nowhere** (#213). `unlock` hands it to the forum's
+/// signed-in browser (`unlocking`), reads the blog again, and lets go of the cookie the forum
+/// answered a right one with (`forgetting`); it is a parameter and never a property, so nothing
+/// this holds, lands or logs has it in it.
 @MainActor
 @Observable
 final class ForumBlogs {
@@ -65,6 +76,28 @@ final class ForumBlogs {
     /// another.
     @ObservationIgnored var work: SourceWork = .shared
 
+    /// Where each password blog's typing stands, by row, while the reader is at it (#213).
+    private(set) var locks: [NoteKey: ForumLock] = [:]
+
+    /// Where a password goes: the forum's signed-in browser, which types it into the blog page's
+    /// own form (`ForumSessions.sendBlogPassword`). Set from the forum's sessions; a test hands in
+    /// another. Throws `NotSignedIn` where the forum has no sign-in to send it through.
+    @ObservationIgnored var unlocking: (@MainActor (_ host: String, _ page: URL, _ password: String) async throws -> Void)?
+
+    /// Where what a right password left behind is let go of once the blog is read.
+    @ObservationIgnored var forgetting: (@MainActor (_ host: String, _ blog: Int) async -> Void)?
+
+    /// A password asked to be sent to a forum with no sign-in to send it through.
+    struct NotSignedIn: Error {}
+
+    /// How many passwords have been sent for each row. A read carries the count it began under,
+    /// and a failure from before the last password is not that password's answer, and is dropped.
+    @ObservationIgnored private var epochs: [NoteKey: Int] = [:]
+
+    /// The rows whose last read came to a refusal a sign-in could change, kept so the read can be
+    /// asked again when one lands.
+    @ObservationIgnored private var refusedAsGuest: [NoteKey: DummyItem] = [:]
+
     @ObservationIgnored private let http: any HTTPClient
     @ObservationIgnored private let forums: ForumSessions?
     /// Blogs whose forum was cleared while their page was on the wire. See `forget(host:)`.
@@ -74,18 +107,99 @@ final class ForumBlogs {
     init(http: any HTTPClient = ForumPosts.live, through forums: ForumSessions? = nil) {
         self.http = http
         self.forums = forums
+        guard let forums else { return }
+        // Weak: `forums` outlives this and holds the listener, and this holds `forums`.
+        forums.whenSignedIn { [weak self] host in self?.signedIn(host: host) }
+        unlocking = { [weak forums] host, page, password in
+            guard let forums else { throw NotSignedIn() }
+            try await forums.sendBlogPassword(password, host: host, page: page)
+        }
+        forgetting = { [weak forums] host, blog in await forums?.forgetBlogPassword(host: host, blog: blog) }
     }
 
     /// What the opened blog's pane says where its words go. Nothing for a row that is not a blog.
     func reading(of item: DummyItem) -> ForumBlogReading? {
         guard DiscuzBlogRow.isBlog(item.noteID) else { return nil }
         let key = Self.key(of: item)
+        // A password on its way is said as the lock's, so the form stays where the reader is.
+        if locks[key] == .trying { return .locked(.trying) }
         // A read on the wire is said first, so `r` over kept words shows that it took.
         if inFlight[key] != nil { return .coming }
         // What the row carries, or what landed for it where the row drawn is older than that.
         if let kept = item.opening ?? landed[key] { return kept.words.isEmpty ? .silent : .read }
+        if missing[key] == .refusal(.password) { return .locked(locks[key] ?? .asking) }
         if let absence = missing[key] { return .absent(absence) }
         return .coming
+    }
+
+    /// The author's password, typed by the reader, sent to that forum once and the blog read
+    /// again (#213). **Nothing of it is kept**: it goes to `unlocking` and nowhere else, the cookie
+    /// a right one earns is let go of once the blog is read, and what lands is the blog, kept as
+    /// any read blog is.
+    ///
+    /// A forum with no sign-in to send it through is told to sign in first; a wrong password
+    /// leaves the form up, saying so. Returns whether the blog read.
+    @discardableResult
+    func unlock(_ item: DummyItem, password: String) async -> Bool {
+        let key = Self.key(of: item)
+        guard locks[key] != .trying, !password.isEmpty,
+              let address = DiscuzBlogRow.address(noteID: item.noteID, url: item.url),
+              let page = DiscuzBlogRow.page(host: key.host, uid: address.uid, id: address.id)
+        else { return false }
+        guard let unlocking else {
+            missing[key] = .refusal(.signIn)
+            refusedAsGuest[key] = item
+            return false
+        }
+        locks[key] = .trying
+        var failure: (any Error)?
+        do {
+            try await unlocking(key.host, page, password)
+        } catch {
+            failure = error
+        }
+        if failure == nil {
+            // **Only a read begun after the password counts.** One already on the wire was asked
+            // before it, and its form is not this password's answer: it is waited out, and what
+            // it failed with is dropped (`epochs`).
+            epochs[key, default: 0] += 1
+            if let stale = inFlight[key] { await stale.value }
+            await read(item)
+        }
+        // **Once a password was sent, what it may have left is let go of, whatever came back** —
+        // a right one, a wrong one, a throw or a cancel. A forum can set the cookie and still be
+        // answered as a failure here: a redirect, a timeout after the headers.
+        await forgetting?(key.host, address.id)
+        if let failure {
+            locks[key] = nil
+            if failure is NotSignedIn {
+                missing[key] = .refusal(.signIn)
+                refusedAsGuest[key] = item
+            } else {
+                missing[key] = ForumPosts.absence(for: failure)
+            }
+            return false
+        }
+        if missing[key] == .refusal(.password) {
+            locks[key] = .wrong
+            return false
+        }
+        locks[key] = nil
+        return missing[key] == nil
+    }
+
+    /// A sign-in landed on this forum: every blog whose last read came to a refusal a sign-in
+    /// could change is read again, as the member the reader now is.
+    func signedIn(host raw: String) {
+        let host = raw.lowercased()
+        // A password on its way is left to finish: cleared under it, a second could be sent whose
+        // cookie the first's clean-up then lets go of, and a right password would read as wrong.
+        for (key, item) in refusedAsGuest where key.host == host && locks[key] != .trying {
+            refusedAsGuest.removeValue(forKey: key)
+            missing.removeValue(forKey: key)
+            locks.removeValue(forKey: key)
+            Task { await self.read(item) }
+        }
     }
 
     /// The blog's pane opening: its page read, **unless this device already holds what it said**
@@ -113,6 +227,10 @@ final class ForumBlogs {
         for key in Array(inFlight.keys) where key.host == host { cleared.insert(key) }
         for key in Array(missing.keys) where key.host == host { missing.removeValue(forKey: key) }
         for key in Array(landed.keys) where key.host == host { landed.removeValue(forKey: key) }
+        for key in Array(locks.keys) where key.host == host && locks[key] != .trying {
+            locks.removeValue(forKey: key)
+        }
+        for key in Array(refusedAsGuest.keys) where key.host == host { refusedAsGuest.removeValue(forKey: key) }
     }
 
     private func read(_ item: DummyItem) async {
@@ -126,6 +244,7 @@ final class ForumBlogs {
             missing[key] = .unreadable
             return
         }
+        let epoch = epochs[key, default: 0]
         let task = Task { @MainActor in
             defer {
                 self.inFlight[key] = nil
@@ -152,8 +271,11 @@ final class ForumBlogs {
                 guard !self.cleared.contains(key) else { return }
                 self.landed[key] = blog.opening
                 self.missing.removeValue(forKey: key)
+                self.refusedAsGuest.removeValue(forKey: key)
             case .failure(let absence):
+                guard epoch == self.epochs[key, default: 0] else { return }
                 self.missing[key] = absence
+                if absence.signInMayChange { self.refusedAsGuest[key] = item } else { self.refusedAsGuest.removeValue(forKey: key) }
             }
         }
         inFlight[key] = task

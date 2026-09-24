@@ -188,6 +188,9 @@ struct TimelinePane: View {
                         // A ranked blog's standing, read here where the session is (#209).
                         blog: session.blogs.reading(of: opened),
                         onReadBlog: { Task { await session.blogs.again(opened) } },
+                        // The password is handed on and not kept (#213).
+                        onUnlockBlog: { password in Task { await session.blogs.unlock(opened, password: password) } },
+                        onSignIn: { Task { await session.signIn(host: opened.source.host) } },
                         selectedID: $selectedID,
                         marks: markBinding,
                         // Inside the conversation the answer mark opens the answer (#108).

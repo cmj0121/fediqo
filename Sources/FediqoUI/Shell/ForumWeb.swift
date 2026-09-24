@@ -234,6 +234,48 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         return ForumLoginVerdict.read(html)
     }
 
+    /// Types a blog's password into the form the blog's page answers with, and posts it (#213).
+    ///
+    /// **This forum's page, over `https`, and nothing past it.** The page is loaded under the
+    /// same rules a fetch is — `https`, this host — and read only where it settled there; the post
+    /// is `DiscuzBlogPasswordScript`'s, which goes to that page's own origin and follows no
+    /// redirect. The password is a bound argument in a content world the page's own scripts
+    /// cannot reach: nothing here writes it into the page, returns it, prints it, or puts it in an
+    /// error. Whether it opened the blog is for the next read of the blog to say.
+    func sendBlogPassword(_ password: String, on page: URL) async throws {
+        guard Host.allowsFetch(page) else { throw ForumTransportError.unfetchable }
+        guard belongsHere(page) else { throw ForumTransportError.wrongHost }
+        await acquire()
+        defer { release() }
+        if case .wall(let wall) = try await settled(page) { throw ForumTransportError.wall(wall) }
+        // The origin is pinned from where the page settled — this forum, `www.` or not — and
+        // checked again inside the script, so a page that moves between this look and the run
+        // is refused there.
+        guard let origin = Self.passwordOrigin(settledAt: view.url, host: host) else {
+            throw ForumTransportError.wrongHost
+        }
+        let answer: Any?
+        do {
+            answer = try await view.callAsyncJavaScript(
+                DiscuzBlogPasswordScript.send,
+                arguments: ["password": password, "origin": origin],
+                contentWorld: .defaultClient
+            )
+        } catch {
+            throw Self.translate(error)
+        }
+        guard (answer as? String) == "sent" else { throw ForumTransportError.unreadable }
+    }
+
+    /// The origin a blog's password may go to: where the blog page settled, where that is `https`
+    /// and this forum — its `www.` spelling included, as `belongs` allows — and nothing otherwise.
+    static func passwordOrigin(settledAt there: URL?, host: String) -> String? {
+        guard let there, Host.allowsFetch(there), belongs(there, to: host),
+              let settled = there.host()?.lowercased()
+        else { return nil }
+        return "https://" + settled + (there.port.map { ":\($0)" } ?? "")
+    }
+
     /// What the reader typed into the forum's own form.
     ///
     /// **Called from one place, only after the reader opted in.** This is the line where the

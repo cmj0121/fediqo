@@ -31,6 +31,12 @@ struct DummyThreadPane: View {
     /// The blog's page read again, after a read that did not arrive — the pane above's to ask,
     /// for `onAskAround`'s reason.
     var onReadBlog: () -> Void = {}
+    /// The blog's author's password, typed here (#213) — the pane above's to send, which holds
+    /// the session. Handed on and not kept.
+    var onUnlockBlog: (String) -> Void = { _ in }
+    /// Signing in to this forum, where a blog or a thread is shown only to readers who are
+    /// (#213). The read after it is the sign-in's.
+    var onSignIn: () -> Void = {}
     @Binding var selectedID: String?
     var marks: (DummyItem) -> Binding<DummyMarks>
     /// Each row's share of #54's acts, asked of the pane above rather than worked out here: the
@@ -57,8 +63,6 @@ struct DummyThreadPane: View {
     var onBack: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
-    /// The app's own reader, where a blog that could not be read offers its page (#209).
-    @Environment(\.shellReader) private var reader
     /// The post at the top of the view, kept there as the thread renews under it (#198): an answer
     /// laid in above it moves what is below the reader, never the post they are reading.
     @State private var topID: String?
@@ -354,13 +358,41 @@ struct DummyThreadPane: View {
                         reach: { appeared in Task { await posts.reached(thread, appeared: appeared) } }
                     )
                 }
+            case .absent(.refusal):
+                // Said once, under the opening post, by `refused(_:)` below — the page the
+                // replies are on is the page that refused.
+                EmptyView()
             case .absent(let absence):
                 quiet(ForumPostBand.sentence(for: absence))
                 if standing.wantsPressing { way(in: thread) }
             }
+            refused(thread, standing: standing)
         }
         .padding(.top, ShellSpace.snug)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Why the forum will not show this thread, where it said (#213) — **the same view a blog's
+    /// refusal is drawn with**: the opening post's reason where it has one (a price is its
+    /// opening post, locked), and otherwise the replies'.
+    @ViewBuilder
+    private func refused(_ thread: ForumThreadRef, standing: ForumRepliesStanding) -> some View {
+        if let refusal = Self.refusal(opening: posts.reading(thread, opened: true), replies: standing) {
+            ForumRefusalView(
+                absence: .refusal(refusal),
+                host: thread.host,
+                sentence: ForumRefusalView.sentence(for: refusal),
+                page: root.page,
+                onSignIn: onSignIn
+            )
+        }
+    }
+
+    /// Which refusal an opened thread says, if any: its opening post's, then its replies'.
+    static func refusal(opening: ForumReading, replies: ForumRepliesStanding) -> DiscuzRefusal? {
+        if case .absent(.refusal(let refusal)) = opening { return refusal }
+        if case .absent(.refusal(let refusal)) = replies { return refusal }
+        return nil
     }
 
     // MARK: - A forum's ranked blog — #209
@@ -384,40 +416,26 @@ struct DummyThreadPane: View {
             quiet(L10n.t("item.forum.silent"))
                 .padding(.top, ShellSpace.snug)
         case .absent(let absence):
-            VStack(alignment: .leading, spacing: ShellSpace.snug) {
-                quiet(Self.sentence(forBlog: absence, host: root.source.host))
-                HStack(spacing: ShellSpace.step) {
-                    if absence.asksAgain {
-                        Button(action: onReadBlog) {
-                            Label(L10n.t("blog.again"), systemImage: "arrow.clockwise")
-                                .shellFont(.meta, weight: .medium)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(ShellChrome.selectInk(colorScheme))
-                    }
-                    blogPage
-                }
-            }
-            .padding(.top, ShellSpace.snug)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    /// The forum's own page for the blog, in the app's own reader — what opening a ranked blog
-    /// did before it was read in the app, kept for where it cannot be. Nothing where the row names
-    /// no page this device will open, decision 4's rule.
-    @ViewBuilder
-    private var blogPage: some View {
-        if let page = root.page {
-            Button {
-                _ = reader?.open(page)
-            } label: {
-                Label(L10n.t("blog.page"), systemImage: "doc.richtext")
-                    .shellFont(.meta, weight: .medium)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(ShellChrome.selectInk(colorScheme))
-            .accessibilityHint(Text(L10n.t("blog.page.hint")))
+            // **The forum's own page offered only where it could help** (#213): the refusal view
+            // offers what each reason allows, and nothing a press could not change. The page is
+            // in the app's reader, and nothing where the row names none, decision 4's rule.
+            ForumRefusalView(
+                absence: absence,
+                host: root.source.host,
+                sentence: Self.sentence(forBlog: absence, host: root.source.host),
+                page: root.page,
+                onAgain: onReadBlog,
+                onSignIn: onSignIn
+            )
+        case .locked(let lock):
+            ForumRefusalView(
+                absence: .refusal(.password),
+                host: root.source.host,
+                sentence: ForumRefusalView.sentence(for: .password),
+                page: root.page,
+                lock: lock,
+                onUnlock: onUnlockBlog
+            )
         }
     }
 
@@ -429,6 +447,7 @@ struct DummyThreadPane: View {
         case .unreadable: L10n.t("blog.unreadable")
         case .unreachable: L10n.t("blog.unreachable")
         case .crowded: L10n.t("item.forum.crowded")
+        case .refusal(let refusal): ForumRefusalView.sentence(for: refusal)
         }
     }
 
@@ -786,6 +805,7 @@ struct ThreadFoot: View {
         case .refused: String(format: L10n.t("thread.more.refused"), host)
         case .unreadable: L10n.t("thread.more.unreadable")
         case .crowded: L10n.t("item.forum.crowded")
+        case .refusal(let refusal): ForumRefusalView.sentence(for: refusal)
         }
     }
 
