@@ -177,7 +177,7 @@ struct OnlyAddedTests {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let app = try String(contentsOf: root.appendingPathComponent("Apps/Shared/FediqoApp.swift"), encoding: .utf8)
-        let governs = try #require(app.range(of: "FediqoRootView.onlyToSources(opened.sources.map(\\.host), kept: store)"))
+        let governs = try #require(app.range(of: "read: opened.file != nil && opened.setAside == nil"))
         let asks = try #require(app.range(of: "mastodon.verifyAll()"))
         #expect(governs.lowerBound < asks.lowerBound, "governed before the first ask")
         let session = try String(
@@ -287,7 +287,7 @@ struct OnlyAddedTests {
     @Test("What reaches past a source is one list, and each entry says when it applies")
     func theAllowances() {
         let list = Allowance.standing
-        #expect(Set(list.map(\.id)) == Set(Allowance.ID.allCases))
+        #expect(Set(list.map(\.id)) == Set(Allowance.ID.builtIn))
         #expect(list.first { $0.id == .directory }?.when == .adding)
         #expect(list.first { $0.id == .personCheck }?.when == .signingIn)
         #expect(list.first { $0.id == .signInPage }?.when == .signingIn)
@@ -437,19 +437,19 @@ struct PageRulesTests {
         }
     }
 
+    /// Fails only a list of its own, so no page another test is loading meanwhile is refused.
     @Test("A compile that failed is asked again, not remembered for the run")
     func aFailureIsNotKept() async {
         let real = PageRules.compile
-        let held = PageRules.compiled
-        defer {
-            PageRules.compile = real
-            PageRules.compiled = held
-        }
-        PageRules.compiled = [:]
-        PageRules.compile = { _ in nil }
-        #expect(await PageRules.list(.page) == nil)
+        defer { PageRules.compile = real }
+        let marker = "notkept" + String(UInt64.random(in: 0...UInt64.max), radix: 16)
+        let rules = PageRules.rules(
+            .forum, of: "failure.example", allowing: [Allowance.own(host: marker + ".example", for: "failure.example")]
+        )
+        PageRules.compile = { text in text.contains(marker) ? nil : await real(text) }
+        #expect(await PageRules.compiled(rules) == nil)
         PageRules.compile = real
-        #expect(await PageRules.list(.page) != nil, "the next page is not refused for the run")
+        #expect(await PageRules.compiled(rules) != nil, "the next page is not refused for the run")
     }
 
     /// The same page as below, with an entry of the list letting one outside host through: loaded

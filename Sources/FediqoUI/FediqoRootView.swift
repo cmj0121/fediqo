@@ -110,10 +110,26 @@ public struct FediqoRootView: View {
     /// is asked. After that `store` alone keeps it current, in the order its sources are added and
     /// let go — one writer, however many windows are open; a host the person names to add is
     /// theirs from the moment they name it.
-    public static func onlyToSources(_ hosts: [String], kept store: ItemStore) {
+    ///
+    /// What may be reached beyond a source is the person's list (#226), read from their
+    /// preferences here. Where the store was `read` whole, a host they added for a source that is
+    /// not in it goes; from then on one goes with its source, **in the order the store lets its
+    /// sources go** — one stream, read on the main actor.
+    public static func onlyToSources(_ hosts: [String], kept store: ItemStore, read: Bool = true) {
         let work = SourceWork.shared
         work.govern(sources: hosts)
-        Task { await store.watchSources { work.sourcesChanged($0) } }
+        let book = AllowanceBook.shared
+        book.launched(with: hosts, read: read)
+        let (changes, feed) = AsyncStream<[String]>.makeStream()
+        Task { @MainActor in
+            for await hosts in changes { book.sourcesChanged(hosts) }
+        }
+        Task {
+            await store.watchSources { hosts in
+                work.sourcesChanged(hosts)
+                feed.yield(hosts)
+            }
+        }
     }
 
     /// Hands the copies of pictures already on this device to the one picture cache every row
