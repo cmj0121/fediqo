@@ -429,10 +429,13 @@ struct NearbyMoveTests {
         var waiting: Bool { held.withLock { $0.waiter != nil } }
     }
 
-    /// Ends one period of `ticker` once the hold is waiting on it, and lets the hold look.
-    private func endPeriod(_ ticker: Ticker) async {
+    /// Ends one period of `ticker` once something is waiting on it — and, where `again`, waits
+    /// for it to be waited on again, which is the hold having looked and gone on. A clock that
+    /// is waited on once, or a hold that ends at this tick, is not waited for.
+    private func endPeriod(_ ticker: Ticker, again: Bool = true) async {
         for _ in 0..<500 where !ticker.waiting { try? await Task.sleep(for: .milliseconds(2)) }
         ticker.tick()
+        guard again else { return }
         for _ in 0..<500 where !ticker.waiting { try? await Task.sleep(for: .milliseconds(2)) }
     }
 
@@ -486,7 +489,41 @@ struct NearbyMoveTests {
         link.cut()
         await sender.stop()
         await held.until("back to the code", { _ in held.events.filter { if case .code = $0 { true } else { false } }.count == 2 })
-        await endPeriod(ticker)
+        await endPeriod(ticker, again: false)
+        #expect(await held.until("timed out", Self.isRefused) == .refused(.timedOut))
+    }
+
+    @Test("A device that proves the code and never offers is let go at the offer's deadline, and the hold times out again")
+    func silentVisitor() async throws {
+        let onto = try await Device()
+        defer { onto.remove() }
+        let link = PipeNearbyLink()
+        let holdTicks = Ticker()
+        let offerTicks = Ticker()
+        let receiver = NearbyMove(
+            link: link, carrier: onto.packager(), device: "a tablet", holdClock: holdTicks.period, offerClock: offerTicks.period
+        )
+        let held = Watch(await receiver.hold())
+        guard case .code(let code, _)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else { return }
+        for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        let peer = link.peers[0]
+        let psk = NearbyCode.psk(code: code, sessionID: peer.sessionID)
+        // A visitor with the code joins, proves it, and then says nothing.
+        let connection = try await link.connect(to: peer, psk: psk)
+        defer { connection.close() }
+        _ = try await NearbyChannel.open(
+            over: connection, inbox: PlainInbox(connection), role: .sender, psk: psk, sessionID: peer.sessionID
+        )
+        await held.until("joined", { $0 == .joined })
+        // While it is joined, a period of the hold's timeout does not count.
+        await endPeriod(holdTicks)
+        #expect(!held.events.contains(where: Self.isRefused), "a joined visitor timed out before its deadline: \(held.events)")
+        // The offer's deadline passes: it is let go as a drop, and the listen comes back.
+        await endPeriod(offerTicks, again: false)
+        for _ in 0..<500 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(2)) }
+        #expect(!link.peers.isEmpty, "the hold listens again")
+        // Now nobody is there: the next period closes the hold.
+        await endPeriod(holdTicks, again: false)
         #expect(await held.until("timed out", Self.isRefused) == .refused(.timedOut))
     }
 

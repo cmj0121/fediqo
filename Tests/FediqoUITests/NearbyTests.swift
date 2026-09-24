@@ -117,8 +117,12 @@ struct NearbyTests {
         /// seconds — which a slow runner does — no step can arrive and none of that is the
         /// move's delay; such a stall is one turn, not the whole budget.
         func settle(_ nearby: ShellNearby, until done: (ShellNearby.Step?) -> Bool) async {
+            // Bounded both ways: sixteen idle turns, and — for a step that changes without end
+            // and never to the one named — two thousand changes or two minutes of the wall.
             var turns = 16
-            while turns > 0 {
+            var changes = 2000
+            let ceiling = ContinuousClock.now + .seconds(120)
+            while turns > 0, changes > 0, ContinuousClock.now < ceiling {
                 // Armed before the check, so a step assigned between the two is not missed.
                 let changed = StepSignal()
                 withObservationTracking { _ = nearby.step } onChange: { changed.fire() }
@@ -127,6 +131,8 @@ struct NearbyTests {
                     turns -= 1
                     // Whatever was queued on the main actor behind this wake runs before it is judged.
                     await Task.yield()
+                } else {
+                    changes -= 1
                 }
             }
             if !done(nearby.step) { Issue.record("never settled: \(String(describing: nearby.step))") }
