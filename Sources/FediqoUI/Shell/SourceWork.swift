@@ -122,6 +122,12 @@ final class SourceWork {
         /// Whether a copy onto the main actor is already on its way, so a screenful of pictures
         /// starting at once asks for one and not forty.
         var publishing = false
+        /// The sources the person added, folded (#220). Nil until the app says which they are —
+        /// see `govern(sources:)`.
+        var added: Set<String>?
+        /// The hosts the person named to add this run, folded: a look at one, its preview, its
+        /// boards and its sign-in are asked before it is a source.
+        var named: Set<String> = []
     }
 
     @ObservationIgnored private nonisolated let held = OSAllocatedUnfairLock(initialState: Held())
@@ -164,6 +170,52 @@ final class SourceWork {
             return Self.claim(&held)
         }
         if publish { schedule() }
+    }
+
+    // MARK: - Whose it is (#220)
+
+    /// From now on, an act that belongs to none of `hosts` — or to a host the person names to add
+    /// later — is refused (`admits`). The app says this once, at launch, before anything is
+    /// asked; a `SourceWork` never told governs nothing, which is what a test that is not about
+    /// the gate builds.
+    nonisolated func govern(sources hosts: some Sequence<String>) {
+        let folded = Set(hosts.map(Self.fold))
+        held.withLock { $0.added = folded }
+    }
+
+    /// The sources the person has now. A source let go takes back what naming it let through.
+    /// Nothing, where nobody said `govern`.
+    nonisolated func sourcesChanged(_ hosts: some Sequence<String>) {
+        let folded = Set(hosts.map(Self.fold))
+        held.withLock { held in
+            guard let added = held.added else { return }
+            held.named.subtract(added.subtracting(folded))
+            held.added = folded
+        }
+    }
+
+    /// The person named `host` to add: what is asked of it before it is a source is theirs.
+    nonisolated func named(_ host: String) {
+        let folded = Self.fold(host)
+        held.withLock { _ = $0.named.insert(folded) }
+    }
+
+    /// Whether an act that reaches `reached`, pointed there by `source`, belongs to a source the
+    /// person added or named — the source that pointed to it where one did, and otherwise the
+    /// host itself (`SourceAct.attributed`). Always, where nothing governs.
+    nonisolated func admits(reached: String, source: String?) -> Bool {
+        let owner = Self.fold(SourceAct.attributed(reached: reached, pointedBy: source))
+        return held.withLock { held in
+            guard let added = held.added else { return true }
+            return !owner.isEmpty && (added.contains(owner) || held.named.contains(owner))
+        }
+    }
+
+    /// A host as the gate compares it: lower case, no port, and `www.` the same site as without.
+    nonisolated static func fold(_ host: String) -> String {
+        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let bare = URLComponents(string: "https://" + trimmed)?.host ?? trimmed
+        return ForumWebEngine.bare(bare)
     }
 
     /// This run's record this instant, oldest first: whatever is still on its way is copied over
@@ -354,10 +406,19 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
     private func watched(
         _ url: URL, _ body: @Sendable () async throws -> (Data, HTTPURLResponse)
     ) async throws -> (Data, HTTPURLResponse) {
+        let host = url.host() ?? ""
+        // **The gate** (#220): an act that belongs to no source the person added never leaves,
+        // and is not written to the record as though it had.
+        guard work.admits(reached: host, source: source) else {
+            NetLog.network.notice(
+                "\(NetLog.line("refused", host: host, error: OutwardRefusal.noSource), privacy: .public)"
+            )
+            throw OutwardRefusal.noSource
+        }
         // Synchronous both ways, and so never behind the main actor: see `SourceWork`.
-        let token = work.begin(host: url.host() ?? "", for: purpose, name: name, source: source)
+        let token = work.begin(host: host, for: purpose, name: name, source: source)
         defer { work.end(token) }
-        return try await body()
+        return try await Outward.$admitted.withValue(true) { try await body() }
     }
 }
 

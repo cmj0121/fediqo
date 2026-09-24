@@ -13,6 +13,8 @@ final class ShellSession {
         case failed
         case empty
         case ready([CatalogServer])
+        /// The directory is nobody the person added, and the gate would not ask it (#220).
+        case refused
     }
 
     let http: any HTTPClient
@@ -277,6 +279,7 @@ final class ShellSession {
     /// are forums a sign-in can be held for.
     var sources: [Source] = [] {
         didSet {
+            work.sourcesChanged(sources.map(\.host))
             let discuz = sources.filter { $0.kind == .discuz }
             forums.watch(forums: discuz.map(\.host))
             // The boards each forum is read for, which is what decides whether reaching a ranked
@@ -918,6 +921,7 @@ final class ShellSession {
     func loadCatalog() async {
         if case .ready = catalog { return }
         if case .empty = catalog { return }
+        if case .refused = catalog { return }
         guard !fetchingCatalog else { return }
         fetchingCatalog = true
         defer { fetchingCatalog = false }
@@ -934,6 +938,10 @@ final class ShellSession {
         // was answering perfectly well, and on the strength of them closing it.
         catch let error where Cancellation.happened(error) {
             return
+        } catch OutwardRefusal.noSource {
+            // Said as what it is: not a directory that did not answer, but one this app does not
+            // ask, because it is not a source the person added.
+            catalog = .refused
         } catch {
             catalog = .failed
         }
@@ -1055,6 +1063,8 @@ final class ShellSession {
             refuse = L10n.t("account.refuse.duplicate")
             return nil
         }
+        // The person named it: what is asked of it before it is a source is theirs (#220).
+        work.named(parsed)
         errand += 1
         let mine = errand
         // **The page owns a look, even beside an open block.** The reader typed into the field, so

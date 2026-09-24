@@ -29,6 +29,7 @@
 "account.catalog.loading" = "正在載入目錄…";
 "account.catalog.failed" = "連不上目錄。請改輸入主機名稱。";
 "account.catalog.empty" = "目錄沒有列出任何主機。請改輸入主機名稱。";
+"account.catalog.refused" = "Fediqo 不向目錄詢問：它只連到你加入的來源。請改輸入主機名稱。";
 "account.catalog.added" = "已新增";
 "account.catalog.weekly" = "本週活躍 %@";
 "account.catalog.people" = "%@ 人";

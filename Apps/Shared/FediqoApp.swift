@@ -36,6 +36,9 @@ final class Launch {
         // It is also `nil` when the index was written by a newer build, which is left as found.
         saver = StoreSaver(store: store, file: opened.file)
         storeIsNewer = opened.storeIsNewer
+        // Before anything is asked: every act from here on belongs to one of these, or to a host
+        // the person names to add (#220).
+        FediqoRootView.onlyToSources(opened.sources.map(\.host))
         // Built on first use only: a reader with no forum never opens the WebKit store.
         forums = ForumSessions(dataStore: ForumWebsiteData.onDevice())
         // Signed in is what the Keychain holds; each server is asked once a launch whether it

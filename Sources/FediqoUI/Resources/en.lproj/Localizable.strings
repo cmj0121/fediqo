@@ -29,6 +29,7 @@
 "account.catalog.loading" = "Loading the directory…";
 "account.catalog.failed" = "The directory could not be reached. Type a hostname.";
 "account.catalog.empty" = "The directory listed none. Type a hostname.";
+"account.catalog.refused" = "Fediqo asks no directory: it reaches only the sources you add. Type a hostname.";
 "account.catalog.added" = "Added";
 "account.catalog.weekly" = "%@ active this week";
 "account.catalog.people" = "%@ people";

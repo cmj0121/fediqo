@@ -89,6 +89,8 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     /// queue is exactly that machinery.
     private var running = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
+    /// Whether `PageRules` is on this view: put on before its first page, and every page after.
+    private var ruled = false
 
     init(host: String, dataStore: WKWebsiteDataStore) {
         self.host = host.lowercased()
@@ -130,6 +132,14 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
 
     /// Loads, waits for a navigation to finish, then waits out a browser check if there is one.
     private func settled(_ url: URL) async throws -> ForumPage {
+        // Nothing but the forum's own site is loaded beside its page (#220). Refused outright
+        // where the rules could not be put on: a page that could reach anybody is not loaded.
+        if !ruled {
+            guard await PageRules.install(on: view.configuration.userContentController, forum: true) else {
+                throw ForumTransportError.unreachable("PageRules")
+            }
+            ruled = true
+        }
         let mark = finishes
         failure = nil
         mainResponse = nil
@@ -423,7 +433,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         return bare(there) == bare(host)
     }
 
-    static func bare(_ host: String) -> String {
+    nonisolated static func bare(_ host: String) -> String {
         host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
@@ -556,7 +566,10 @@ struct ForumWebTransport: HTTPClient {
         self.engine = engine
     }
 
+    /// Refused where the gate did not let it through, as `URLSessionClient` refuses (#220): a
+    /// forum's browser is a way out like any other.
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        guard Outward.admitted else { throw OutwardRefusal.unwatched }
         let page = try await engine.page(at: url)
         switch page {
         case .wall(let wall):

@@ -111,7 +111,9 @@ final class ShellPlayback {
         player?.replaceCurrentItem(with: nil)
         player = nil
         guard let url = playing.url else { return }
-        // The player fetches it itself, past every `HTTPClient`, so the act is written here.
+        // The player fetches it itself, past every `HTTPClient`, so the gate is asked and the act
+        // written here (#218, #220): a film no source the person added pointed to is not played.
+        guard work.admits(reached: url.host() ?? "", source: source) else { return }
         work.note(host: url.host() ?? "", for: .video, source: source)
         let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration =
