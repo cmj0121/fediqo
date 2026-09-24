@@ -109,11 +109,33 @@ struct NearbyTests {
             await settle(holding) { if case .asking = $0 { true } else { false } }
         }
 
+        /// Waits for the step `done` names, woken by the step changing rather than by a clock:
+        /// a bound of a few seconds is for a runner that is slow, never a wait a test pays.
         func settle(_ nearby: ShellNearby, until done: (ShellNearby.Step?) -> Bool) async {
-            for _ in 0..<1000 where !done(nearby.step) {
-                try? await Task.sleep(for: .milliseconds(10))
+            let deadline = ContinuousClock.now + .seconds(8)
+            while !done(nearby.step), ContinuousClock.now < deadline {
+                await Self.stepChanged(of: nearby, within: .milliseconds(500))
             }
             if !done(nearby.step) { Issue.record("never settled: \(String(describing: nearby.step))") }
+        }
+
+        /// Returns once `nearby.step` is assigned, or after `most` where it is not.
+        private static func stepChanged(of nearby: ShellNearby, within most: Duration) async {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let once = Mutex(false)
+                let resume: @Sendable () -> Void = {
+                    let first = once.withLock { done -> Bool in
+                        defer { done = true }
+                        return !done
+                    }
+                    if first { continuation.resume() }
+                }
+                withObservationTracking { _ = nearby.step } onChange: { resume() }
+                Task {
+                    try? await Task.sleep(for: most)
+                    resume()
+                }
+            }
         }
 
         func end() {

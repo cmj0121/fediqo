@@ -310,11 +310,16 @@ public actor NearbyMove {
                 let (answer, heard) = try await mailbox.waitAnswer(of: self, for: offer.id, sealed: channel)
                 guard heard == nil else { throw NearbyRefusal.malformed }
                 yes = answer
-            } catch {
+            } catch is NearbyDropped {
                 // The link went before the answer reached it: the question comes down, and a
                 // late answer is nothing — the next offer is asked afresh.
                 await withdraw(offer.id)
                 await emit(.code(code, sessionID: sessionID))
+                throw NearbyDropped()
+            } catch {
+                // The sender said no, or something out of turn: the question comes down with
+                // the refusal that follows, and never with the code in between.
+                await withdraw(offer.id)
                 throw error
             }
             guard yes else {
@@ -326,7 +331,7 @@ public actor NearbyMove {
                 try await channel.send(.accept)
             } catch {
                 await withdraw(offer.id)
-                await emit(.code(code, sessionID: sessionID))
+                if error is NearbyDropped { await emit(.code(code, sessionID: sessionID)) }
                 throw error
             }
             await self.accepted()
