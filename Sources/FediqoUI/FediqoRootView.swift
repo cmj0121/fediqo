@@ -227,6 +227,8 @@ public struct FediqoRootView: View {
                 // And the film stops — **including one playing in a row**, which is the half
                 // `closeViewer` cannot do, because with a row playing the viewer was never open.
                 playback.stop()
+                // A source's detail left behind on Usage is not waiting there on the way back.
+                session.usageOpened = nil
             }
             // The rail and the tab bar both draw only the places that can be entered.
             // If that set ever narrows under the reader — a sign-out, a source
@@ -588,6 +590,8 @@ public struct FediqoRootView: View {
             // So is a thread's next page on its way (#177), before the thread itself closes.
             if place == .timeline, session.reload.stop() { return true }
             if place == .timeline, session.stopReadingFurther() { return true }
+            // A source's detail on Usage goes back to its list before anything further out.
+            if place == .usage, openLayers.subtracting([.selection]).isEmpty, session.closeUsageSource() { return true }
             switch DummyCommand.outermost(of: openLayers) {
             case .viewer: return closeViewer()
             case .shortcuts:
@@ -1437,13 +1441,14 @@ public struct FediqoRootView: View {
         return walk.walk(to: .link(url), from: lamp) || walk.openedLink == url
     }
 
-    /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage and on
-    /// Preferences. Elsewhere it is the platform's.
+    /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage, on
+    /// Preferences and on Account. Elsewhere it is the platform's.
     private func rotatePlaceTab(by step: Int) -> Bool {
         switch place {
         case .timeline: session.rotateTab(by: step)
         case .usage: session.rotateUsageTab(by: step)
         case .preferences: session.rotatePreferencesTab(by: step)
+        case .account: session.rotateAccountTab(by: step)
         default: false
         }
     }

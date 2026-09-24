@@ -44,23 +44,20 @@ struct GoneSection: View {
                 reading(line)
             }
             HStack(spacing: ShellSpace.snug) {
-                Button(L10n.t("prefs.gone.now")) {
+                if let went { reading(Self.wentLine(went.posts, places: went.places)) }
+                Spacer(minLength: ShellSpace.snug)
+                ShellIconButton("trash", name: "prefs.gone.now", help: "usage.gone.now.help", tone: .alarm) {
                     Task {
                         // Nothing to let go is said at once; anything is asked about first.
                         counted = await session.goneHeld()
                         if counted.isNone { went = counted } else { confirming = true }
                     }
                 }
-                if let went {
-                    reading(Self.wentLine(went.posts, places: went.places))
-                }
             }
         } header: {
             Text(L10n.t("prefs.gone"))
         } footer: {
-            Text(L10n.t("prefs.gone.footer"))
-                .shellFont(.mark)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            UsageFooter(line: "usage.gone.line", help: "prefs.gone.footer", about: L10n.t("prefs.gone"))
         }
         .confirmationDialog(
             Text(Self.askLine(counted.posts, places: counted.places)), isPresented: $confirming,

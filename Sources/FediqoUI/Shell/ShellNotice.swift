@@ -13,6 +13,8 @@ struct ShellNotice: View {
     let detail: String
     /// A whole empty page fills the pane; a thread with nothing under it does not.
     var fills = true
+    /// The longer explanation behind a (?) under the detail, where the detail is kept short.
+    var help: String?
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -23,11 +25,12 @@ struct ShellNotice: View {
         static let saying: CGFloat = 560
     }
 
-    init(symbol: String, title: String, detail: String, fills: Bool = true) {
+    init(symbol: String, title: String, detail: String, fills: Bool = true, help: String? = nil) {
         self.symbol = symbol
         self.title = title
         self.detail = detail
         self.fills = fills
+        self.help = help
     }
 
     init(_ notice: EmptyNotice) {
@@ -37,6 +40,17 @@ struct ShellNotice: View {
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            words
+            if let help { ShellHelp(verbatim: help, about: title) }
+        }
+        .frame(maxWidth: Metrics.saying, alignment: .leading)
+        .padding(ShellSpace.pad)
+        .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .topLeading)
+    }
+
+    /// One element to VoiceOver; the (?) after it is spoken as itself.
+    private var words: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             Image(systemName: symbol)
                 .font(.system(size: glyph, weight: .regular))
@@ -50,9 +64,6 @@ struct ShellNotice: View {
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: Metrics.saying, alignment: .leading)
-        .padding(ShellSpace.pad)
-        .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .topLeading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(EmptyNotice.spoken(title: title, detail: detail)))
     }

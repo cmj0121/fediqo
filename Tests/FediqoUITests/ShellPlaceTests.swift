@@ -191,7 +191,10 @@ struct EmptySessionTests {
         #expect(L10n.t("account.add.title", language: .english) == "Add a source")
         #expect(
             L10n.t("account.add.detail", language: .english)
-                == "Pick a Mastodon host from the list, or type its hostname. This session only."
+                == """
+                Type a hostname and press Return to see what it is, or browse the sources Fediqo \
+                suggests. Nothing is added until you subscribe.
+                """
         )
         #expect(L10n.t("shell.timeline.disabled", language: .english) == "Add a source on Account first")
         #expect(L10n.t("shell.notices.disabled", language: .english) == "Notices need a signed-in source")

@@ -15,8 +15,10 @@
 "account.rail.empty" = "新增來源";
 "account.add.title" = "新增來源";
 "account.hero.promise" = "你的時間軸。你的規則。";
-"account.hero.detail" = "加一台 Mastodon 主機來讀。你加的東西、還有它帶回來的東西，都留在這台裝置上。";
-"account.add.detail" = "從清單挑選 Mastodon 主機，或自行輸入主機名稱。只留在這次工作階段。";
+"account.hero.detail" = "你加的東西、還有它帶回來的東西，都留在這台裝置上。";
+"account.hero.line" = "新增一個來源，就能開始讀。";
+"account.add.detail" = "輸入主機名稱後按 Return，先看看它是什麼；或瀏覽 Fediqo 建議的來源。按下「訂閱」之前，什麼都不會加入。";
+"account.add.line" = "輸入主機名稱，或瀏覽。";
 "account.add" = "新增";
 "account.add.host" = "主機名稱";
 "account.search" = "搜尋";
@@ -312,10 +314,19 @@
 "notices.empty.detail" = "通知是帳號才收得到的東西。這次工作階段只讀公開時間軸、不登入任何地方，所以這裡不會有東西進來。";
 
 "usage.empty.title" = "還沒有留下任何東西";
-"usage.empty.detail" = "先到「帳號」加一個來源。它帶回來的東西會算在這裡，而這也是這台裝置留著的全部。";
+"usage.empty.detail" = "先到「帳號」加一個來源。";
 "usage.tab.source" = "來源";
 "usage.tab.time" = "時間";
 "usage.tab.copies" = "副本";
+"usage.tab.keep" = "保留";
+"usage.empty.help" = "來源帶回來的東西會算在這裡，而這也是這台裝置留著的全部。";
+"usage.cache.line" = "這些大多會向各來源重新讀取。";
+"usage.drop.line" = "除非你另作選擇都會保留；磁碟上最舊的副本會先移除。";
+"usage.gone.line" = "只有來源表示已不在的貼文才會被標記。";
+"usage.source.back" = "回到來源";
+"usage.source.clear.help" = "會先詢問，再清除這台裝置存的這個來源的圖片、表情符號名稱、主文與登入資料。貼文會留下，來源也仍保持加入。";
+"usage.drop.copies.help" = "會先詢問，再捨棄記憶體與磁碟上所有的圖片副本。";
+"usage.gone.now.help" = "會先詢問，再立即放下所有來源已刪除的貼文與標記，不論等待多久。";
 
 "store.newer.title" = "這台裝置的索引是較新版的 Fediqo 寫的";
 "store.newer.detail" = "這個版本讀不了它，所以原封不動地留著，也不會在上面存任何東西。用較新版的 Fediqo 開啟，就能看到裡面的內容。";
@@ -441,7 +452,7 @@
 "prefs.drop.copies.title" = "捨棄這台裝置上所有的圖片副本？";
 "prefs.drop.copies.detail" = "所有來源存在記憶體與磁碟上的圖片都會移除。每則貼文都會留下並照常顯示；捲動時會從連結重新讀取圖片。";
 "prefs.drop.confirm" = "捨棄";
-"prefs.drop.footer" = "除非你另作選擇，所有內容都會永久保留。「保留貼文」會立即捨棄較舊的貼文，之後讀到的貼文也照同樣的期間保留。上方各來源的「清除」會捨棄該來源的圖片、表情符號名稱與首篇貼文，貼文本身會留下。磁碟上的圖片副本有容量上限，最舊的會先移除。";
+"prefs.drop.footer" = "除非你另作選擇，所有內容都會永久保留。「保留貼文」會立即捨棄較舊的貼文，之後讀到的貼文也照同樣的期間保留。「來源」中各來源的「清除」會捨棄該來源的圖片、表情符號名稱與首篇貼文，貼文本身會留下。磁碟上的圖片副本有容量上限，最舊的會先移除。";
 "prefs.cache.catalogue" = "%d 個表情符號名稱 ·";
 "prefs.cache.catalogue.none" = "未存表情符號名稱";
 "prefs.cache.pictures" = "%d 張圖片";
@@ -457,10 +468,13 @@
 "forum.signin.save" = "把我的帳號與密碼存在這台裝置上";
 "forum.signin.save.off" = "這個程式看不到你的密碼。你是在這個論壇自己的頁面上輸入，這裡不會去讀你打了什麼。";
 "forum.signin.save.on" = "這個程式會看到你的密碼，因為要自己幫你登入就得握著它。密碼會存進這台裝置的鑰匙圈，只會送往這個論壇，也絕不會複製到 iCloud。清除這個來源、或在「用量」按「忘掉」，都會把它刪掉。";
+"forum.signin.save.line.off" = "這個程式看不到你的密碼。";
+"forum.signin.save.line.on" = "存在這台裝置的鑰匙圈，只送往這個論壇。";
 "forum.signin.cancel" = "取消";
 "forum.signin.done" = "完成";
 "forum.stop.first" = "第一次登入是你自己來。請在下面這個論壇自己的頁面上輸入。";
 "forum.stop.wall" = "這個論壇前面有東西要檢查瀏覽器。通常會自己通過；如果它問你什麼，請在下面回答。";
+"forum.stop.wall.line" = "這個論壇要先檢查瀏覽器。";
 "forum.stop.captcha" = "這個論壇要求驗證碼，存起來的密碼答不了。請在下面完成登入。";
 "forum.stop.question" = "這個帳號設了安全提問，存起來的密碼答不了。請在下面完成登入。";
 "forum.stop.refused" = "這個論壇不接受存起來的帳號與密碼。";
@@ -486,12 +500,12 @@
 "forum.unkept.nothing" = "從論壇的頁面上讀不到你輸入的內容";
 "forum.unforgotten" = "為這個論壇存起來的帳號與密碼刪不掉：%@。";
 "prefs.password.held" = "這台裝置存著密碼";
-"prefs.password.forget" = "忘掉";
-"prefs.password.forget.label" = "忘掉這台裝置為 %@ 存的密碼";
+"prefs.password.forget" = "忘掉密碼";
 
 /* Unit F4 — choosing boards. */
 "board.choose.title" = "%@ 的版塊";
 "board.choose.detail" = "挑你想看的版塊。沒挑之前不會加進來。";
+"board.choose.line" = "沒挑之前，什麼都不會加進來。";
 "board.choose.count" = "已挑 %1$d／%2$d 個";
 "board.choose.cancel" = "取消";
 "board.choose.subscribe" = "訂閱";
@@ -566,7 +580,6 @@
 "join.browse.servers.title" = "%@ 來源";
 "join.browse.detail" = "挑一台看看它是什麼。你沒開口之前不會加入任何東西。";
 "join.browse.none" = "還沒有 %@ 的建議。請改在欄位輸入主機名稱。";
-"account.browse" = "瀏覽";
 "account.browse.label" = "瀏覽可以讀的來源";
 
 "source.shape.microblog" = "微網誌";
@@ -586,6 +599,7 @@
 
 "join.preview.silent" = "%@ 不對外公布任何關於自己的事。這個 app 沒有問過它，也沒有什麼好等的。";
 "join.preview.unread" = "這個 app 請 %@ 自我介紹，但讀不懂它的回答。這跟它能不能讀無關——很多來源給得出文章，卻沒有說明。";
+"join.preview.unread.line" = "Fediqo 讀不懂 %@ 的自我介紹。";
 "join.preview.unread.network" = "那台主機沒有回應。";
 "join.preview.unread.refused" = "那台主機拒絕了這個請求（HTTP %d）。";
 "join.preview.unread.unreadable" = "那個回答不是這個 app 讀得懂的形狀。";
@@ -598,21 +612,25 @@
 "join.preview.closed" = "要讀這個論壇得先有帳號，所以訂閱多半會被拒絕。";
 "join.preview.closed.hint" = "訂閱這個來源多半會被拒絕。";
 "join.preview.turnedAway" = "這個來源前面有東西把 Fediqo 擋掉了，所以訂閱多半會被拒絕。登入通常就能解決。";
+"join.preview.turnedAway.line" = "Fediqo 被擋掉了，所以訂閱多半會被拒絕。";
 
 /* Unit 5 — one row per server, and what it is. */
 "account.sources.title"          = "來源";
+"account.sources.line" = "這個裝置讀的全部。";
 "account.sources.detail"         = "這個裝置讀的全部。按一列，看那個來源怎麼說它自己——它的名字、它的規模、它的版塊。移除其中一個，它的版塊和它的文章都會跟著走。";
 "account.sources.held"           = "每一個在這個裝置上還留著什麼，在「用量」裡。";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
 "account.sources.marks"          = "一列只帶它自己那個來源有的標記：登入、換版塊或列表、清除它留在這裡的東西、移除它。";
 /* #69 — what may be done on a source, said on its row and explained once for the list. */
 "account.sources.writing"        = "每一列也會說那個來源上可以做什麼：讀、讀與寫，或者唯讀——那個協定在 Fediqo 裡根本沒有「寫」這件事。寫入被拒是說有一次寫入被擋了下來；再登入那個來源一次。";
+"account.sources.writing.line" = "每一列都標出在那裡可以做什麼。";
 "account.source.writing.never"   = "唯讀";
 "account.source.writing.read"    = "讀";
 "account.source.writing.write"   = "讀與寫";
 "account.source.writing.refused" = "寫入被拒";
 /* Said in the open, for as long as it is true, to a reader who agreed to something narrower. */
 "account.sources.writing.again"  = "Fediqo 現在登入時會連「寫」一起要求。%@ 是在那之前登入的：在那裡讀到的和以前完全一樣，Fediqo 什麼也不寫。不用先登出，在下面選就好。";
+"account.sources.writing.again.line" = "%@ 在 Fediqo 開始要求「寫」之前就登入了。";
 "account.sources.writing.again.choose" = "選擇 %@ 可以做什麼";
 /* The choice itself, put before the server's own page opens. */
 "account.signin.ask.title"       = "登入 %@？";
@@ -630,6 +648,7 @@
 "account.source.boards.progress"  = "正在讀 %@ 的版塊…";
 "account.source.boards.unread"    = "現在讀不到 %@ 的版塊。";
 "board.choose.detail.change"      = "挑你想看的版塊。挑好的會取代你現在讀的。";
+"board.choose.line.change" = "挑好的會取代你現在讀的。";
 
 
 /* Decision 29: Clear asks first, and says what actually goes. */
@@ -674,6 +693,7 @@
 "account.source.lists.unread"         = "現在讀不到你在 %@ 的列表。";
 "list.choose.title"                   = "你在 %@ 的列表";
 "list.choose.detail"                  = "挑這個裝置要讀的列表。首頁一定會讀。你挑的會取代你現在讀的。";
+"list.choose.line" = "你挑的會取代你現在讀的。";
 "list.choose.none"                    = "你在這個來源上沒有列表。";
 "list.choose.done"                    = "完成";
 "list.choose.hint.on"                 = "讀這個列表";
@@ -735,6 +755,7 @@
 "refusal.password.trying" = "正在試這個密碼…";
 "refusal.password.wrong" = "這個密碼打不開，請再輸入一次。";
 "refusal.password.note" = "密碼只會送往 %@，只用這一次，不會留在這台裝置上。";
+"refusal.password.line" = "只送往 %@，不會留下。";
 "refusal.private" = "作者只讓好友看，或只給自己看。";
 "refusal.gone" = "來源已刪除。論壇說它已經不在了。";
 "refusal.blogsOff" = "這個論壇關掉了日誌功能。";

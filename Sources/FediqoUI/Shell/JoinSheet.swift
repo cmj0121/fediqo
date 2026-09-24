@@ -470,11 +470,11 @@ struct JoinSheet: View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             switch session.stage {
             case .browsing:
-                titled(L10n.t("join.browse.title"), L10n.t("join.browse.protocols.detail"))
+                titled(L10n.t("join.browse.title"), line: L10n.t("join.browse.protocols.detail"))
             case .browsingServers(let kind):
                 titled(
                     String(format: L10n.t("join.browse.servers.title"), kind.displayName),
-                    L10n.t("join.browse.detail")
+                    line: L10n.t("join.browse.detail")
                 )
             // **The one block this sheet shares with the page, in the sheet's own header slot.**
             // It stays pinned above the hairline here and scrolls with the block there, which is
@@ -485,12 +485,14 @@ struct JoinSheet: View {
             case .choosingBoards(let offer, let origin):
                 titled(
                     String(format: L10n.t("board.choose.title"), offer.host),
-                    L10n.t(Self.detailKey(for: origin))
+                    line: L10n.t(Self.lineKey(for: origin)),
+                    more: L10n.t(Self.detailKey(for: origin))
                 )
             case .choosingLists(let choice):
                 titled(
                     String(format: L10n.t("list.choose.title"), choice.host),
-                    L10n.t("list.choose.detail")
+                    line: L10n.t("list.choose.line"),
+                    more: L10n.t("list.choose.detail")
                 )
             case nil:
                 EmptyView()
@@ -500,19 +502,41 @@ struct JoinSheet: View {
         .padding(ShellSpace.pad)
     }
 
-    private func titled(_ title: String, _ detail: String) -> some View {
+    /// A step's title and one short line under it — what the press will cost, where it costs
+    /// something — with the rest of the step behind the line's (?) where there is more (#235).
+    private func titled(_ title: String, line: String, more: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             Text(title)
                 .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityFocused($headerFocused)
-            Text(detail)
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
+            stepLine(line, more: more, about: title)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func stepLine(_ line: String, more: String?, about title: String) -> some View {
+        let text = Text(line)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+        if let more {
+            text.shellHelp(verbatim: more, about: title)
+        } else {
+            text
+        }
+    }
+
+    /// The boards step's one visible line: the consequence of the press, which is not the same on
+    /// both entrances — nothing is added yet on a join, and a restate replaces what is read now.
+    /// `detailKey(for:)` is the whole sentence behind its (?). **No `default:`.**
+    static func lineKey(for origin: BoardsOrigin) -> String {
+        switch origin {
+        case .preview: "board.choose.line"
+        case .joined: "board.choose.line.change"
+        }
     }
 
     /// The sentence under the boards title, which is not the same sentence on both entrances.
@@ -876,7 +900,7 @@ struct JoinSheet: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(servers) { server in
-                            catalogRow(server, added: added.contains(server.domain.lowercased()))
+                            catalogRow(server, of: kind, added: added.contains(server.domain.lowercased()))
                             ShellRule()
                         }
                     }
@@ -910,7 +934,10 @@ struct JoinSheet: View {
     /// waiting line of its own. It carried one, for the one row of forty the reader had pressed,
     /// because the press used to preview inside this sheet; the press goes to the page now and
     /// answers there.
-    private func catalogRow(_ server: CatalogServer, added: Bool) -> some View {
+    ///
+    /// **Led by its protocol's mark (#235)**, the one the protocol's own row in step one carries,
+    /// so the list reads icon first like every other; a server already added leads with a tick.
+    private func catalogRow(_ server: CatalogServer, of kind: ProtocolKind, added: Bool) -> some View {
         // **Built once and handed to both readers.** `rowFoot` draws these three and the spoken
         // value says the same three, and each one costs a locale lookup, two bundle lookups and
         // two compact-number formats — so asking twice doubled that for every visible row on every
@@ -919,15 +946,18 @@ struct JoinSheet: View {
         return Button {
             Task { await session.pick(server) }
         } label: {
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                Text(server.domain)
-                    .shellFont(.name)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                Text(added ? L10n.t("account.catalog.added") : server.summary)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(2)
-                if !added { rowFoot(readings) }
+            HStack(alignment: .top, spacing: ShellSpace.step) {
+                catalogMark(kind, added: added)
+                VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                    Text(server.domain)
+                        .shellFont(.name)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                    Text(added ? L10n.t("account.catalog.added") : server.summary)
+                        .shellFont(.meta)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                        .lineLimit(2)
+                    if !added { rowFoot(readings) }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, ShellSpace.pad)
@@ -947,6 +977,25 @@ struct JoinSheet: View {
                 ? L10n.t("account.catalog.added")
                 : "\(server.summary), \(readings.joined(separator: ", "))"
         )
+    }
+
+    /// A server row's lead: its protocol's mark, or a tick where it is already a source. Unspoken
+    /// — the row's label and value say both.
+    @ViewBuilder
+    private func catalogMark(_ kind: ProtocolKind, added: Bool) -> some View {
+        Group {
+            if added {
+                Image(systemName: "checkmark.circle")
+                    .resizable()
+                    .scaledToFit()
+                    .padding(Metrics.mark / 8)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            } else {
+                mark(kind).foregroundStyle(markInk(kind))
+            }
+        }
+        .frame(width: Metrics.mark, height: Metrics.mark)
+        .accessibilityHidden(true)
     }
 
     /// The row's own readings.
