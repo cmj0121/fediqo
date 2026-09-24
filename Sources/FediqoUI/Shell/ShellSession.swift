@@ -166,6 +166,7 @@ final class ShellSession {
     /// reachable from here.
     deinit {
         work.adding(false, by: ObjectIdentifier(self))
+        if let allowanceWatch { NotificationCenter.default.removeObserver(allowanceWatch) }
     }
 
     var stage: JoinStage? {
@@ -524,7 +525,17 @@ final class ShellSession {
         case .unreadable?: timelinesUnreadable = true
         case nil: break
         }
+        // The person's list changing while the servers are listed is answered on the spot (#226).
+        allowanceWatch = NotificationCenter.default.addObserver(
+            forName: SourceWork.allowancesChanged, object: nil, queue: .main
+        ) { [weak self] note in
+            let from = (note.object as AnyObject?).map(ObjectIdentifier.init)
+            MainActor.assumeIsolated { self?.allowancesChanged(by: from) }
+        }
     }
+
+    /// The watch on the person's list, taken off as this goes.
+    @ObservationIgnored private nonisolated(unsafe) var allowanceWatch: (any NSObjectProtocol)?
 
     /// The unsent text, kept when the composer closes without sending (#56). In-session only.
     var composeDraft = ""
@@ -1312,10 +1323,29 @@ final class ShellSession {
             // the module that would change if its coverage ever did. A protocol it does not cover
             // reaches nobody, and the second step says so in a whole sentence.
             guard ServerDirectory.covers(kind) else { return }
-            Task { await loadCatalog() }
+            askDirectory()
         // None of these offers a protocol to press: the server list is a step further in, a
         // preview and a board list are about one server, and a detail is about one the reader has.
         case .browsingServers, .previewing, .choosingBoards, .choosingLists, nil:
+            return
+        }
+    }
+
+    /// The one place the directory is asked for: the browse step, a protocol it covers chosen.
+    private func askDirectory() {
+        Task { await loadCatalog() }
+    }
+
+    /// The person's list changed (#226). While the servers are listed, the directory's entry is
+    /// read again at once: switched off, the list says so and nothing more is asked; switched on,
+    /// it is asked.
+    private func allowancesChanged(by from: ObjectIdentifier?) {
+        guard from == ObjectIdentifier(work) else { return }
+        switch stage {
+        case .browsingServers(let kind):
+            guard ServerDirectory.covers(kind) else { return }
+            askDirectory()
+        case .browsing, .previewing, .choosingBoards, .choosingLists, nil:
             return
         }
     }

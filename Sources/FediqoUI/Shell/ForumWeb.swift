@@ -91,6 +91,8 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     private var waiting: [CheckedContinuation<Void, Never>] = []
     /// Which of `PageRules`' lists is on this view: put on before its first page, and changed as
     /// the person's sign-in comes and goes.
+    /// `.page`'s — every other site blocked — where the list for what it is doing would not
+    /// compile (`strictest`).
     private(set) var ruledAs: PageRules.Kind?
     /// The rules that list holds: what the person's list said when it was put on (#226).
     private(set) var ruledWith: String?
@@ -134,7 +136,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     }
 
     @objc private func allowancesChanged(_ note: Notification) {
-        guard note.object as AnyObject? === work, ruledWith != nil else { return }
+        guard note.object as AnyObject? === work, ruledAs != nil else { return }
         Task { await applyRules() }
     }
 
@@ -259,16 +261,44 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         let wanted: PageRules.Kind = signingIn ? .signIn : .forum
         let rules = wantedRules
         guard let list = await PageRules.compiled(rules) else {
-            if mine == rulesEpoch { ruledAs = nil; ruledWith = nil }
+            guard mine == rulesEpoch else { return false }
+            ruledAs = nil
+            ruledWith = nil
+            await strictest(mine)
             return false
         }
         guard mine == rulesEpoch else { return true }
-        let controller = view.configuration.userContentController
-        controller.removeAllContentRuleLists()
-        controller.add(list)
+        put(list)
         ruledAs = wanted
         ruledWith = rules
         return true
+    }
+
+    /// Where the list the person's entries make would not compile, **what was on is not left
+    /// on**: it may let through what they just switched off. Every other site's load is blocked
+    /// instead, and where even that will not compile the page is stopped and blanked. A page is
+    /// not loaded again until its own list is on (`settled`).
+    private func strictest(_ mine: Int) async {
+        let strict = await PageRules.list(.page)
+        guard mine == rulesEpoch else { return }
+        if let strict {
+            put(strict)
+            ruledAs = .page
+        } else {
+            put(nil)
+            stopAndBlank()
+        }
+    }
+
+    /// The list on this view now, as put on here: WebKit does not say.
+    private(set) var ruledBy: WKContentRuleList?
+
+    /// Puts `list` on this view in place of any other.
+    private func put(_ list: WKContentRuleList?) {
+        let controller = view.configuration.userContentController
+        controller.removeAllContentRuleLists()
+        if let list { controller.add(list) }
+        ruledBy = list
     }
 
     /// Whether this browser goes to `url`, and what is written of it (#220).
@@ -311,13 +341,19 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
 
     /// What a page of this forum pulled in beside itself, as it loads — its pictures, scripts and
     /// styles, which never pass `decide` — said by the page's own resource timing, read in a world
-    /// the page's scripts cannot reach. Only what came from another site is said.
+    /// the page's scripts cannot reach. Only what came from another site is said, **each host
+    /// once a page**, and never a frame, which `decide` has already written.
     static let pulledIn = """
         (() => {
           const own = location.host;
+          const said = new Set();
           const say = (entries) => {
-            const names = entries.map((e) => e.name).filter((n) => {
-              try { return new URL(n).host !== own; } catch (_) { return false; }
+            const names = entries.filter((e) => e.initiatorType !== "iframe").map((e) => e.name).filter((n) => {
+              let host = "";
+              try { host = new URL(n).host; } catch (_) { return false; }
+              if (host === own || said.has(host)) { return false; }
+              said.add(host);
+              return true;
             });
             if (names.length) { window.webkit.messageHandlers.\(pulledInMessage).postMessage(names); }
           };

@@ -97,10 +97,15 @@ struct Allowance: Identifiable, Equatable, Sendable {
         }
 
         /// As WebKit's content rules read an address: no alternation, so one rule per pattern.
+        /// Every character a regular expression reads as more than itself is escaped, so a host
+        /// or a path can only ever match itself.
         var urlFilter: String {
-            let escaped = host.replacingOccurrences(of: ".", with: "\\.")
-            let path = path.replacingOccurrences(of: ".", with: "\\.")
-            return "^" + scheme + "://" + (subdomains ? "([^/]*\\.)?" : "") + escaped + path
+            "^" + scheme + "://" + (subdomains ? "([^/]*\\.)?" : "") + Self.escaped(host) + Self.escaped(path)
+        }
+
+        static func escaped(_ text: String) -> String {
+            let special: Set<Character> = ["\\", "^", "$", ".", "*", "+", "?", "(", ")", "[", "]", "{", "}", "|"]
+            return String(text.flatMap { special.contains($0) ? ["\\", $0] : [$0] })
         }
     }
 
@@ -246,15 +251,25 @@ final class AllowanceBook {
 
     /// What an added host could not be.
     enum Refusal: Error, Equatable {
-        /// Not a host: empty, spaced, or with no dot.
+        /// Not a host: empty, spaced, one label, or a label that is not letters, digits and
+        /// inner hyphens.
         case notAHost
+        /// A pattern with `*`: one host is added at a time.
+        case wildcard
+        /// An address by number, or in brackets: a source's pictures are named by host.
+        case address
+        /// A port: an entry lets a host through on the web's own ports.
+        case port
+        /// A path, a query or a fragment: an entry is for a whole host.
+        case path
         /// The source's own host, which needs no entry.
         case itsOwnHost
         /// Already on the list for that source.
         case alreadyThere
     }
 
-    /// As it is kept: the decisions, and nothing else.
+    /// As it is kept: the decisions, and nothing else. **A key that is missing is empty**, and
+    /// the other still read: a list with no hosts keeps the switches it had.
     private struct Kept: Codable {
         var off: [String] = []
         var own: [Own] = []
@@ -262,6 +277,17 @@ final class AllowanceBook {
         struct Own: Codable {
             let host: String
             let source: String
+        }
+
+        init(off: [String], own: [Own]) {
+            self.off = off
+            self.own = own
+        }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            off = (try? container.decodeIfPresent([String].self, forKey: .off)) ?? []
+            own = (try? container.decodeIfPresent([Own].self, forKey: .own)) ?? []
         }
     }
 
@@ -272,7 +298,16 @@ final class AllowanceBook {
            let kept = try? JSONDecoder().decode(Kept.self, from: data)
         {
             off = Set(kept.off.map(Allowance.ID.init(rawValue:)).filter(Allowance.ID.builtIn.contains))
-            own = kept.own.map { Allowance.own(host: $0.host, for: $0.source) }
+            // Read as though typed again: what would be refused now is not let through, and a
+            // host kept twice is one entry.
+            for kept in kept.own {
+                guard case .success(let host) = Self.host(kept.host) else { continue }
+                let source = SourceWork.fold(kept.source)
+                let entry = Allowance.own(host: host, for: source)
+                guard !source.isEmpty, SourceWork.fold(host) != source, !own.contains(where: { $0.id == entry.id })
+                else { continue }
+                own.append(entry)
+            }
         }
         work.allow(effective)
     }
@@ -296,7 +331,11 @@ final class AllowanceBook {
     /// Adds `typed` — a host, or an address whose host is taken — for `source`.
     @discardableResult
     func add(_ typed: String, for source: String) -> Refusal? {
-        guard let host = Self.host(typed) else { return .notAHost }
+        let host: String
+        switch Self.host(typed) {
+        case .success(let read): host = read
+        case .failure(let refusal): return refusal
+        }
         let source = SourceWork.fold(source)
         guard SourceWork.fold(host) != source else { return .itsOwnHost }
         let entry = Allowance.own(host: host, for: source)
@@ -315,11 +354,24 @@ final class AllowanceBook {
     /// The sources the person had when last told; nil until the first time.
     @ObservationIgnored private var seen: Set<String>?
 
+    /// The sources the app opened with. Where the store was `read` whole, a host added for a
+    /// source not among them goes — removed while the app was not running to see it. Where it
+    /// was not — set aside as unreadable, or written by a newer build — nothing is taken as
+    /// removed, and such a host stays on the list, reaching nothing, until its source is back or
+    /// it is removed by hand.
+    func launched(with hosts: [String], read: Bool) {
+        let now = Set(hosts.map(SourceWork.fold))
+        seen = now
+        guard read else { return }
+        let left = own.filter { now.contains($0.source ?? "") }
+        guard left.count != own.count else { return }
+        own = left
+        changed()
+    }
+
     /// The sources the person has now. **A source let go takes the hosts added for it**: they
-    /// are removed from the list, and from what is kept. The first time only says which sources
-    /// there are: a source missing then — a store that could not be read, say — is not taken as
-    /// removed, and its hosts stay on the list, reaching nothing, until it is back or they are
-    /// removed by hand.
+    /// are removed from the list, and from what is kept. The first time, where `launched` was not
+    /// told, only says which sources there are.
     func sourcesChanged(_ hosts: some Sequence<String>) {
         let now = Set(hosts.map(SourceWork.fold))
         defer { seen = now }
@@ -331,15 +383,36 @@ final class AllowanceBook {
         changed()
     }
 
-    /// A host as typed: its host where it is an address, lower case, in its ASCII spelling.
-    static func host(_ typed: String) -> String? {
-        let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty, !trimmed.contains(where: \.isWhitespace) else { return nil }
-        let address = trimmed.contains("://") ? trimmed : "https://" + trimmed
-        guard let url = URL(string: address), let host = url.host(percentEncoded: false)?.lowercased(),
-              host.contains("."), !host.hasPrefix("."), !host.hasSuffix(".")
-        else { return nil }
-        return host
+    /// A host as typed, lower case and in its ASCII spelling, or why it is not one. An `http`
+    /// or `https` in front of it, and one `/` after it, are read past; anything else that is not
+    /// a host is refused, and the refusal says which.
+    ///
+    /// **Only letters, digits and hyphens, label by label**, after a name in another script is
+    /// spelled in ASCII: this is what goes into the rules a page loads under, and nothing in it
+    /// may be read as more than itself.
+    static func host(_ typed: String) -> Result<String, Refusal> {
+        var text = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !text.isEmpty, !text.contains(where: \.isWhitespace) else { return .failure(.notAHost) }
+        for scheme in ["https://", "http://"] where text.hasPrefix(scheme) {
+            text.removeFirst(scheme.count)
+        }
+        if text.hasSuffix("/") { text.removeLast() }
+        if text.contains("*") { return .failure(.wildcard) }
+        if text.contains("[") || text.contains("]") { return .failure(.address) }
+        if text.contains("://") || text.contains("@") || text.contains("\\") { return .failure(.notAHost) }
+        if text.contains(where: { "/?#".contains($0) }) { return .failure(.path) }
+        if text.contains(":") { return .failure(.port) }
+        guard let ascii = URL(string: "https://" + text)?.host(percentEncoded: false)?.lowercased(),
+              ascii.count <= 253
+        else { return .failure(.notAHost) }
+        let labels = ascii.split(separator: ".", omittingEmptySubsequences: false)
+        let letters = Set("abcdefghijklmnopqrstuvwxyz0123456789-")
+        guard labels.count >= 2, labels.allSatisfy({ label in
+            !label.isEmpty && label.count <= 63 && label.allSatisfy(letters.contains)
+                && label.first != "-" && label.last != "-"
+        }) else { return .failure(.notAHost) }
+        if labels.last!.allSatisfy(\.isNumber) { return .failure(.address) }
+        return .success(ascii)
     }
 
     private func changed() {

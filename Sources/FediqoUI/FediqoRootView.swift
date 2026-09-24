@@ -112,16 +112,22 @@ public struct FediqoRootView: View {
     /// theirs from the moment they name it.
     ///
     /// What may be reached beyond a source is the person's list (#226), read from their
-    /// preferences here; a host they added for a source that is gone goes with it.
-    public static func onlyToSources(_ hosts: [String], kept store: ItemStore) {
+    /// preferences here. Where the store was `read` whole, a host they added for a source that is
+    /// not in it goes; from then on one goes with its source, **in the order the store lets its
+    /// sources go** — one stream, read on the main actor.
+    public static func onlyToSources(_ hosts: [String], kept store: ItemStore, read: Bool = true) {
         let work = SourceWork.shared
         work.govern(sources: hosts)
         let book = AllowanceBook.shared
-        book.sourcesChanged(hosts)
+        book.launched(with: hosts, read: read)
+        let (changes, feed) = AsyncStream<[String]>.makeStream()
+        Task { @MainActor in
+            for await hosts in changes { book.sourcesChanged(hosts) }
+        }
         Task {
             await store.watchSources { hosts in
                 work.sourcesChanged(hosts)
-                Task { @MainActor in book.sourcesChanged(hosts) }
+                feed.yield(hosts)
             }
         }
     }

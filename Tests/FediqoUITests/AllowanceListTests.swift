@@ -59,7 +59,11 @@ struct AllowanceListTests {
         let check = Allowance.standing.first { $0.id == .personCheck }!
         #expect(check.hostsText().contains("www.google.com/recaptcha/"))
         #expect(check.hostsText().contains("*.hcaptcha.com"))
-        #expect(!Allowance.standing[3].hostsText(language: .english).isEmpty, "a page followed says it goes anywhere")
+        let followed = Allowance.standing.first { $0.id == .signInPage }!
+        for language in [DummyLanguage.english, .taiwanese] {
+            #expect(followed.hostsText(language: language) == L10n.t("allow.hosts.anywhere", language: language),
+                    "a page followed says it goes anywhere")
+        }
     }
 
     @Test("A host the person added is marked as theirs, and says which source it serves")
@@ -89,13 +93,51 @@ struct AllowanceListTests {
             #expect(book.add("", for: Self.forum) == .notAHost)
             #expect(book.add("not a host", for: Self.forum) == .notAHost)
             #expect(book.add("localhost", for: Self.forum) == .notAHost)
-            #expect(book.add("https://BBS.one.example/x", for: Self.forum) == .itsOwnHost)
-            #expect(book.add("https://IMG.cdn.example/a/b.png?x=1", for: Self.forum) == nil)
+            #expect(book.add("https://BBS.one.example/", for: Self.forum) == .itsOwnHost)
+            #expect(book.add("https://IMG.cdn.example/a/b.png?x=1", for: Self.forum) == .path)
+            #expect(book.add("https://IMG.cdn.example/", for: Self.forum) == nil)
             #expect(book.own.map { $0.hosts[0].host } == [Self.cdn], "only the host is kept")
             #expect(book.add(Self.cdn, for: Self.forum) == .alreadyThere)
             #expect(book.add(Self.cdn, for: Self.other) == nil, "one host may serve two sources")
             #expect(book.own.count == 2)
         }
+    }
+
+    /// What is typed goes into the rules a page loads under: nothing a regular expression reads as
+    /// more than itself gets that far, and each refusal says why.
+    @Test("A host is letters, digits and hyphens, label by label; a pattern, an address, a port or a path is refused, saying why")
+    func onlyAHost() {
+        let refused: [(String, AllowanceBook.Refusal)] = [
+            ("a(b.com", .notAHost), ("a|b.com", .notAHost), ("a+b.com", .notAHost), ("a^b.com", .notAHost),
+            ("a$b.com", .notAHost), ("a{1}.com", .notAHost), ("a\\b.com", .notAHost), ("-a.com", .notAHost),
+            ("a-.com", .notAHost), ("a..com", .notAHost), (".a.com", .notAHost), ("a.com.", .notAHost),
+            ("user@a.com", .notAHost), ("ftp://a.com", .notAHost), ("under_score.com", .notAHost),
+            ("*.cdn.example", .wildcard), ("cdn.*", .wildcard),
+            ("1.2.3.4", .address), ("[::1]", .address), ("https://[2001:db8::1]/", .address),
+            ("cdn.example:8080", .port), ("cdn.example/x", .path), ("cdn.example?x=1", .path), ("cdn.example#top", .path),
+        ]
+        for (typed, refusal) in refused {
+            #expect(AllowanceBook.host(typed) == .failure(refusal), "\(typed)")
+        }
+        #expect(AllowanceBook.host("bücher.example") == .success("xn--bcher-kva.example"))
+        #expect(AllowanceBook.host("http://IMG-1.cdn.example/") == .success("img-1.cdn.example"))
+        for refusal in [AllowanceBook.Refusal.notAHost, .wildcard, .address, .port, .path, .itsOwnHost, .alreadyThere] {
+            for language in [DummyLanguage.english, .taiwanese] {
+                #expect(!AllowanceSection.sentence(refusal, language: language).hasPrefix("allow."), "\(refusal) \(language)")
+            }
+        }
+    }
+
+    @Test("Every character a regular expression reads is escaped in a rule, so a host matches only itself")
+    func theFilterIsEscaped() async throws {
+        let pattern = Allowance.Pattern(host: "a(b|c).com", path: "/x+y?/[z]{2}$^\\")
+        #expect(pattern.urlFilter == #"^https://a\(b\|c\)\.com/x\+y\?/\[z\]\{2\}\$\^\\"#)
+        let odd = Allowance.own(host: "a(b.com", for: Self.forum)
+        let rules = PageRules.rules(.forum, of: Self.forum, allowing: Allowance.standing + [odd])
+        let parsed = try JSONSerialization.jsonObject(with: Data(rules.utf8))
+        #expect((parsed as? [Any])?.count == 3)
+        #expect(await PageRules.list(.forum, of: Self.forum, allowing: Allowance.standing + [odd]) != nil,
+                "a host that slipped past the field still compiles")
     }
 
     // MARK: - Switching one off
@@ -148,10 +190,10 @@ struct AllowanceListTests {
             #expect(!engine.decide(elsewhere, mainFrame: true), "switched off, a page followed away is refused")
             book.set(.personCheck, on: false)
             #expect(!PageRules.rules(.signIn, of: Self.forum, allowing: work.allowances).contains("recaptcha"))
-            #expect(await spun { engine.ruledWith?.contains("recaptcha") == false },
+            #expect(await waited { engine.ruledWith?.contains("recaptcha") == false },
                     "the page in front of the person is ruled again at once")
             book.set(.personCheck, on: true)
-            #expect(await spun { engine.ruledWith?.contains("recaptcha") == true })
+            #expect(await waited { engine.ruledWith?.contains("recaptcha") == true })
             await engine.signingIn(false)
         }
     }
@@ -241,11 +283,65 @@ struct AllowanceListTests {
             #expect(!work.allowances.contains { $0.source == Self.forum })
             let kept = String(decoding: defaults.data(forKey: AllowanceBook.key) ?? Data(), as: UTF8.self)
             #expect(!kept.contains(Self.forum), "a removed source is still named")
-            // A launch whose store names fewer sources takes that as what there is, not a removal.
-            let again = AllowanceBook(defaults: defaults, work: SourceWork())
-            again.sourcesChanged([])
-            #expect(again.own.count == 1)
+            // A launch whose store could not be read takes what it names as what there is, not a
+            // removal; one whose store was read drops a host whose source is not in it.
+            let unread = AllowanceBook(defaults: defaults, work: SourceWork())
+            unread.launched(with: [], read: false)
+            unread.sourcesChanged([])
+            #expect(unread.own.count == 1)
+            let read = AllowanceBook(defaults: defaults, work: SourceWork())
+            read.launched(with: [Self.forum], read: true)
+            #expect(read.own.isEmpty)
+            #expect(!read.work.allowances.contains { $0.source != nil })
+            // Once launched, a change is a removal.
+            let later = AllowanceBook(defaults: defaults, work: SourceWork())
+            later.add("pics.example", for: Self.forum)
+            later.launched(with: [Self.forum], read: true)
+            later.sourcesChanged([Self.forum])
+            #expect(later.own.count == 1)
+            later.sourcesChanged([])
+            #expect(later.own.isEmpty)
         }
+    }
+
+    @Test("What is kept is read as though typed again: a missing key is empty, and a bad or repeated host is dropped")
+    func whatIsKeptIsReadCarefully() throws {
+        let shelf = Shelf()
+        let defaults = shelf.defaults
+        defaults.set(Data(#"{"off":["directory","nonsense"]}"#.utf8), forKey: AllowanceBook.key)
+        let onlyOff = AllowanceBook(defaults: defaults, work: SourceWork())
+        #expect(onlyOff.off == [.directory], "a list with no hosts kept its switches")
+        #expect(onlyOff.own.isEmpty)
+        defaults.set(Data(#"{"own":[{"host":"IMG.cdn.example","source":"BBS.One.Example"},{"host":"img.cdn.example","source":"bbs.one.example"},{"host":"a(b.com","source":"bbs.one.example"},{"host":"bbs.one.example","source":"bbs.one.example"},{"host":"x.example","source":""}]}"#.utf8), forKey: AllowanceBook.key)
+        let onlyOwn = AllowanceBook(defaults: defaults, work: SourceWork())
+        #expect(onlyOwn.off.isEmpty)
+        #expect(onlyOwn.own.map(\.id) == [.own(host: Self.cdn, source: Self.forum)])
+        defaults.set(Data("not json".utf8), forKey: AllowanceBook.key)
+        let broken = AllowanceBook(defaults: defaults, work: SourceWork())
+        #expect(broken.off.isEmpty && broken.own.isEmpty)
+    }
+
+    @Test("Switching the directory while its servers are listed is answered on the spot", .timeLimit(.minutes(1)))
+    func theDirectorySwitchedWhileBrowsing() async {
+        let shelf = Shelf()
+        let http = FixtureHTTP(["/servers": .text("[]")])
+        let session = ShellSession(
+            http: http, store: ItemStore(),
+            mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: RefusedSender())
+        )
+        session.work = shelf.work
+        session.browse()
+        session.chooseProtocol(.mastodon)
+        #expect(await spun { session.catalog == .empty })
+        shelf.book.set(.directory, on: false)
+        #expect(await spun { session.catalog == .off }, "the list still showed the directory")
+        shelf.book.set(.directory, on: true)
+        #expect(await spun { session.catalog == .empty })
+        #expect(await http.requested.count == 2)
+        // Another gate's list is not this session's.
+        SourceWork().allow([])
+        #expect(await http.requested.count == 2)
+        #expect(session.catalog == .empty)
     }
 
     // MARK: - Where it is drawn and said
@@ -367,6 +463,54 @@ struct AllowanceOnAPageTests {
         _ = view
     }
 
+    /// A list the person's entries make that would not compile does not leave the looser one on:
+    /// every other site's load is blocked instead, and no page loads until the list is right.
+    @Test("A list that will not compile falls back to blocking every other site, not to the list before")
+    func aFailedCompileIsStrict() async throws {
+        let compiler = Compiler(failing: "failsmarker")
+        defer { compiler.putBack() }
+        let forum = "bbs.forum.example"
+        let work = SourceWork()
+        work.govern(sources: [forum])
+        let engine = ForumWebEngine(host: forum, dataStore: .nonPersistent())
+        engine.work = work
+        await engine.signingIn(true)
+        #expect(engine.ruledAs == .signIn && engine.ruledWith?.contains("recaptcha") == true)
+        work.allow(Allowance.standing + [Allowance.own(host: "failsmarker.example", for: forum)])
+        #expect(await waited { engine.ruledAs == .page }, "the sign-in's list was left on")
+        #expect(engine.ruledWith == nil)
+        let strict = await PageRules.list(.page)
+        #expect(strict != nil && engine.ruledBy === strict, "what is on is not the strictest list")
+        await #expect(throws: ForumTransportError.unreachable("PageRules")) {
+            _ = try await engine.page(at: URL(string: "https://\(forum)/")!)
+        }
+        work.allow(Allowance.standing)
+        #expect(await waited { engine.ruledAs == .signIn }, "the list put right is put on")
+        await engine.signingIn(false)
+    }
+
+    @Test("Only a handful of lists are held, and one let go leaves WebKit's store")
+    func listsAreBounded() async throws {
+        let compiler = Compiler(failing: "nevermatchesmarker")
+        defer { compiler.putBack() }
+        let forum = "bbs.bounded.example"
+        var made: [String] = []
+        var names: [String] = []
+        for index in 0...PageRules.kept {
+            let list = Allowance.standing + [Allowance.own(host: "cdn\(index).example", for: forum)]
+            let compiled = await PageRules.list(.forum, of: forum, allowing: list)
+            #expect(compiled != nil)
+            names.append(compiled?.identifier ?? "")
+            made.append(PageRules.rules(.forum, of: forum, allowing: list))
+        }
+        #expect(PageRules.compiled.count <= PageRules.kept)
+        #expect(PageRules.compiled[made[0]] == nil, "the oldest is still held")
+        #expect(PageRules.compiled[made.last!] != nil)
+        #expect(await waited { compiler.discarded.contains(names[0]) }, "the oldest was not taken out of the store")
+        #expect(!compiler.discarded.contains(names.last!))
+        #expect(Set(names).count == names.count, "each compile has a name of its own")
+    }
+
     /// What a page pulls in never passes the browser's navigation policy, so the page says it,
     /// from a world its own scripts cannot reach. Served on loopback, since a page's resource
     /// timing is kept for `http` and not for a scheme of a test's own: the page is `localhost`,
@@ -394,14 +538,46 @@ struct AllowanceOnAPageTests {
         )
         let view = WKWebView(frame: .init(x: 0, y: 0, width: 400, height: 400), configuration: configuration)
         view.load(URLRequest(url: URL(string: "http://localhost:\(port)/thread")!))
-        #expect(await spun(2_000_000) { work.record.contains { $0.reached == "127.0.0.1" } },
+        #expect(await waited { work.record.contains { $0.reached == "127.0.0.1" } },
                 "what the page pulled in was not listed: \(server.asked)")
         try await Task.sleep(for: .milliseconds(200))
         #expect(server.asked.contains { $0.hasPrefix("127.0.0.1") }, "the premise: the page did pull it in")
         let rows = work.record
-        #expect(rows.count == 1, "its own picture is the forum's, not an entry's: \(rows)")
+        #expect(server.asked.filter { $0.hasPrefix("127.0.0.1") }.count == 2, "the premise: two pictures of it")
+        #expect(rows.count == 1, "one line for the host a page pulled in twice, and none for its own: \(rows)")
         #expect(rows.first?.source == forum && rows.first?.allowedBy == entry.id && rows.first?.purpose == .pagePart)
         _ = view
+    }
+}
+
+/// Waits, sleeping, for what WebKit does in its own time — a list compiled, a page loaded — for
+/// up to ten seconds: a count of yields runs out in a moment on a machine running the whole suite.
+@MainActor
+private func waited(_ condition: @MainActor () -> Bool) async -> Bool {
+    for _ in 0..<500 {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    return condition()
+}
+
+/// What is compiled and let go, for a test: the real compiler, failing where the rules name
+/// `failing`, and every list let go counted. Put back as the test ends.
+@MainActor
+private final class Compiler {
+    let real = PageRules.compile
+    let realDiscard = PageRules.discard
+    var discarded: [String] = []
+
+    init(failing marker: String) {
+        let real = real
+        PageRules.compile = { rules in rules.contains(marker) ? nil : await real(rules) }
+        PageRules.discard = { [weak self] rules in self?.discarded.append(rules) }
+    }
+
+    func putBack() {
+        PageRules.compile = real
+        PageRules.discard = realDiscard
     }
 }
 
@@ -450,7 +626,7 @@ private final class LoopServer: @unchecked Sendable {
             let isPage = first.contains("/thread")
             let port = host.split(separator: ":").last.map(String.init) ?? ""
             let body = isPage
-                ? "<html><body><img src=\"http://127.0.0.1:\(port)/p.png\"><img src=\"/own.png\"></body></html>"
+                ? "<html><body><img src=\"http://127.0.0.1:\(port)/p.png\"><img src=\"http://127.0.0.1:\(port)/q.png\"><img src=\"/own.png\"></body></html>"
                 : "x"
             let head = "HTTP/1.1 200 OK\r\nContent-Type: \(isPage ? "text/html" : "image/png")\r\n"
                 + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n"

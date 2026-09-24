@@ -116,6 +116,10 @@ struct AllowanceSection: View {
         case .notAHost: L10n.t("allow.own.refused.notAHost", language: language)
         case .itsOwnHost: L10n.t("allow.own.refused.itsOwnHost", language: language)
         case .alreadyThere: L10n.t("allow.own.refused.alreadyThere", language: language)
+        case .wildcard: L10n.t("allow.own.refused.wildcard", language: language)
+        case .address: L10n.t("allow.own.refused.address", language: language)
+        case .port: L10n.t("allow.own.refused.port", language: language)
+        case .path: L10n.t("allow.own.refused.path", language: language)
         }
     }
 }

@@ -810,3 +810,7 @@
 "allow.signInPage.title" = "A page followed from a sign-in";
 "allow.signInPage.what" = "A page you follow away from a forum's sign-in, listed under that forum";
 "allow.signInPage.why" = "Some forums sign you in through another site.";
+"allow.own.refused.wildcard" = "Add one host at a time, without *. A host covers only itself.";
+"allow.own.refused.address" = "Add a host by its name, not a numbered address: a source's pictures are named by host.";
+"allow.own.refused.port" = "Leave the port off: a host you add is reached on the web's own ports.";
+"allow.own.refused.path" = "Type only the host, with no path or query after it: an entry is for the whole host.";

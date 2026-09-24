@@ -68,21 +68,59 @@ enum PageRules {
         return "[" + rules.joined(separator: ",") + "]"
     }
 
-    /// Every list compiled this run, by the rules it holds.
+    /// The lists compiled this run, by the rules they hold, the one used last at the end.
+    /// **Bounded** (`kept`): a list is made of the hosts on the person's list, so one left behind
+    /// names a host they removed, or one added for a source they removed (#221) — a list let go
+    /// here is taken out of WebKit's store too. One in use on a page stays in use: WebKit holds
+    /// what it compiled for as long as a page has it on.
     static var compiled: [String: Task<WKContentRuleList?, Never>] = [:]
+    private static var used: [String] = []
+    /// How many lists are held at once: a handful of forums, reading and signing in, around a
+    /// change of the list.
+    static let kept = 8
 
     /// How a list of rules is compiled. WebKit's own; a test hands in one that fails.
+    ///
+    /// **Each compile under a name of its own** — the rules' and this run's count — so a list let
+    /// go and asked for again at once is never compiled over, or taken out from under, a compile
+    /// of the same name still running.
     static var compile: @MainActor (String) async -> WKContentRuleList? = { rules in
-        // A store of its own in the temporary directory: what it keeps is these rules — the
-        // list's hosts, never a page — under a name made of them, and it is rebuilt in a moment
-        // where it is gone.
+        guard let store = await store() else { return nil }
+        compiles += 1
+        return try? await store.compileContentRuleList(
+            forIdentifier: identifier(rules) + "-\(compiles)", encodedContentRuleList: rules
+        )
+    }
+
+    private static var compiles = 0
+
+    /// How a list let go leaves WebKit's store, by the name it was compiled under. WebKit's own; a
+    /// test hands in one that counts.
+    static var discard: @MainActor (String) async -> Void = { name in
+        guard let store = await store() else { return }
+        try? await store.removeContentRuleList(forIdentifier: name)
+    }
+
+    /// This run's emptying of what an earlier run left, which every use of the store waits for.
+    private static var sweep: Task<Void, Never>?
+
+    /// A store of its own in the temporary directory: what it keeps is lists of the person's
+    /// hosts, never a page. **Emptied once a run, before it is first used**, so no list an earlier
+    /// run left — naming a host since removed — outlives the run that made it by more than the
+    /// next launch.
+    private static func store() async -> WKContentRuleListStore? {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("FediqoPageRules", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         guard let store = WKContentRuleListStore(url: folder) else { return nil }
-        return try? await store.compileContentRuleList(
-            forIdentifier: identifier(rules), encodedContentRuleList: rules
-        )
+        let sweeping = sweep ?? Task { @MainActor in
+            for name in await store.availableIdentifiers() ?? [] {
+                try? await store.removeContentRuleList(forIdentifier: name)
+            }
+        }
+        sweep = sweeping
+        await sweeping.value
+        return store
     }
 
     /// A name for a list, the same for the same rules on every run: FNV-1a of its text.
@@ -108,6 +146,7 @@ enum PageRules {
 
     /// The compiled list for `rules`.
     static func compiled(_ rules: String) async -> WKContentRuleList? {
+        touch(rules)
         if let held = compiled[rules] { return await held.value }
         let compile = compile
         let task = Task { @MainActor () -> WKContentRuleList? in await compile(rules) }
@@ -115,6 +154,20 @@ enum PageRules {
         let list = await task.value
         if list == nil, compiled[rules] == task { compiled[rules] = nil }
         return list
+    }
+
+    /// `rules` used now; the one used longest ago let go past `kept`.
+    private static func touch(_ rules: String) {
+        used.removeAll { $0 == rules }
+        used.append(rules)
+        while used.count > kept {
+            let old = used.removeFirst()
+            guard let held = compiled.removeValue(forKey: old) else { continue }
+            let discard = discard
+            Task { @MainActor in
+                if let list = await held.value { await discard(list.identifier) }
+            }
+        }
     }
 
     /// Puts `kind`'s list on `controller` in place of any other, and answers whether it is on.

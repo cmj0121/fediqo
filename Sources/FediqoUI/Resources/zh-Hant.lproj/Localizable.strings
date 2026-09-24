@@ -788,3 +788,7 @@
 "allow.signInPage.title" = "從登入頁前往的頁面";
 "allow.signInPage.what" = "你從論壇登入頁前往的頁面，列在那個論壇底下";
 "allow.signInPage.why" = "有些論壇透過其他網站讓你登入。";
+"allow.own.refused.wildcard" = "一次加入一個主機，不要用 *。一個主機只涵蓋它自己。";
+"allow.own.refused.address" = "請用主機名稱，不要用數字位址：來源的圖片是以主機名稱指向的。";
+"allow.own.refused.port" = "請拿掉連接埠：你加入的主機只經由網頁的標準連接埠連線。";
+"allow.own.refused.path" = "只輸入主機名稱，後面不要有路徑或查詢：一個項目涵蓋的是整個主機。";
