@@ -327,7 +327,7 @@ final class ShellSession {
     }
     var notes: [Note] = [] {
         didSet {
-            holdings = Holdings(notes: notes, per: heldPeriod)
+            recount()
             textIndexIsCurrent = false
             notesRevision += 1
             heldRevision += 1
@@ -346,6 +346,13 @@ final class ShellSession {
     }
     /// Bumped as `notes` or `aside` is assigned: what a search's answer is kept against.
     private(set) var heldRevision = 0
+
+    /// Every post held aside, **a forum topic's replies included** — what `aside` leaves out for
+    /// the search's sake (#177), counted here all the same (#194): the device holds them, and what
+    /// the device says it holds is measured against them. Read by the count alone.
+    private(set) var heldAside: [Note] = [] {
+        didSet { recount() }
+    }
 
     /// Everything a search reads: what the timelines draw, and what is held aside.
     var searchable: [Note] { aside.isEmpty ? notes : notes + aside }
@@ -413,13 +420,55 @@ final class ShellSession {
         heldNote(rowID) ?? conversations.note(rowID)
     }
 
-    /// What `notes` holds, counted (#7) — rebuilt where `notes` is assigned or the breakdown
-    /// switches between week and month, never on a redraw.
+    /// Everything this device holds, counted (#7): `notes` and `heldAside` together (#194), so the
+    /// figure is the store's and not a timeline's. Rebuilt where either is assigned or the
+    /// breakdown switches between week and month, never on a redraw.
     private(set) var holdings = Holdings(notes: [], per: .month)
 
     /// Whether the breakdown is by week or by month.
     var heldPeriod: HeldPeriod = .month {
-        didSet { holdings = Holdings(notes: notes, per: heldPeriod) }
+        didSet { recount() }
+    }
+
+    /// Set while `notes` and `heldAside` are assigned together, so one adopt counts once.
+    @ObservationIgnored private var recountHeld = false
+
+    private func recount() {
+        guard !recountHeld else { return }
+        holdings = Holdings(notes: notes + heldAside, per: heldPeriod)
+    }
+
+    /// Both halves of what is held assigned in one breath, nil where one did not move, and the
+    /// count rebuilt once for the pair rather than once an assignment. No await inside, so
+    /// nothing else on this actor sees the count held back.
+    private func adoptHeld(notes drawn: [Note]?, aside held: [Note]?) {
+        guard drawn != nil || held != nil else { return }
+        recountHeld = true
+        if let drawn { notes = drawn }
+        if let held {
+            heldAside = held
+            aside = held.filter { DiscuzPost(held: $0) == nil }
+        }
+        recountHeld = false
+        recount()
+    }
+
+    /// What the index weighs on disk, as last measured — nil until it has been. **The one figure
+    /// of the store's size** (#194): read through `measureStore`, which the app sets to the
+    /// index file's own measure, so what Usage shows is what a limit on the store will be held
+    /// to. Measured after a drop by time lands, and whenever Usage asks.
+    private(set) var storeBytes: Int?
+
+    /// Measures the index on disk. Set by the app beside `persist`; nil where this run has no
+    /// index, and then nothing is shown for it.
+    @ObservationIgnored var measureStore: (@Sendable () async -> Int)?
+
+    /// Reads `storeBytes` again, off the main actor — after every drop that is written, and
+    /// whenever Usage asks. **The one call a limit on the store makes too**, so what it is held
+    /// to is what is shown.
+    func readStoreBytes() async {
+        guard let measureStore else { return }
+        storeBytes = await measureStore()
     }
 
     /// Which purpose Usage is showing. Tab rotates it the way it rotates timeline queries.
@@ -673,27 +722,49 @@ final class ShellSession {
         composeHost = offered.first?.host
     }
 
+    /// How long a post on `host` may be: what the source says about itself — kept from the last
+    /// run and replaced by this run's ask as it lands (#188) — then what the composer's own ask
+    /// was told this run, then Mastodon's 500.
+    ///
+    /// **The profile before the composer's answer**, because the profile is the later word: the
+    /// composer asks once a run and remembers, while the profile is written again by every ask
+    /// that reads the instance, so a ceiling the server changed reaches the composer through it.
     func postLimit(of host: String) -> Int {
-        if let held = postLimits[host] { return held }
         if case .stated(let profile) = profiles[host] {
             return MastodonWrite.limit(advertised: profile.statusLimit)
         }
+        if let held = postLimits[host] { return held }
         return MastodonWrite.defaultLimit
     }
 
     /// Asks the instance where this run has not already been told, and remembers the answer.
     /// The composer's chosen source where no host is named; an answer names its own (#108).
+    ///
+    /// **Nothing is asked where this run has the source's own word** (#188): one its look read
+    /// this run, or one the reload's ask has just written down. A word kept from an earlier run
+    /// is drawn meanwhile — the composer knows the ceiling before this asks — and is still
+    /// asked behind, so a run whose reload was dark does not go on speaking last week's ceiling
+    /// once the network is back (#222).
     func refreshPostLimit(of named: String? = nil) async {
         guard let host = named ?? composeHost else { return }
         if postLimits[host] != nil { return }
-        if case .stated(let profile) = profiles[host] {
-            postLimits[host] = MastodonWrite.limit(advertised: profile.statusLimit)
+        if case .stated(let profile) = profiles[host],
+           profile.asOf == nil || flavours.flavour(of: host) == .said(profile.kind) {
             return
         }
         do {
-            postLimits[host] = try await MastodonClient(
+            // The same document the reload reads, and what it says goes to the store too (#188):
+            // a source this device kept no word of yet has one from here on.
+            let (_, profile) = try await MastodonClient(
                 http: WatchedHTTP(http, for: .serverCheck, in: work), host: host
-            ).statusLimit()
+            ).introduction()
+            postLimits[host] = MastodonWrite.limit(advertised: profile?.statusLimit)
+            if let profile {
+                await store.said(profile)
+                // Landed here as well as followed from the store, so the composer that asked
+                // reads the new ceiling now rather than after the next adopt.
+                if let kept = await store.said(host: host) { profiles[host] = .stated(kept) }
+            }
         } catch where DarkNetwork.caused(error) {
             // Not remembered: the next open asks again once the network is back (#222), and
             // `postLimit(of:)` says Mastodon's own 500 meanwhile.
@@ -2163,20 +2234,18 @@ final class ShellSession {
         await adoptSources()
         let asideRevision = await store.asideRevision
         let drawn = await store.drawn
-        if adopted?.store != drawn || adopted?.notes != notesRevision {
-            notes = await store.all()
-            adopted = (store: drawn, notes: notesRevision)
-        }
+        let all = adopted?.store != drawn || adopted?.notes != notesRevision ? await store.all() : nil
         // What is held aside has a count of its own, as what is drawn has, so a landing only
         // the timelines see neither reads it again nor redraws a search (#176).
         //
-        // **A forum topic's kept replies are not among them** (#177): each is a post of a thread,
-        // not a thread, and a search drawing one would draw it as a row that opens nowhere. A
-        // microblog answer is a post in its own right, and stays.
-        if adoptedAside != asideRevision {
-            aside = await store.aside().filter { DiscuzPost(held: $0) == nil }
-            adoptedAside = asideRevision
-        }
+        // **A forum topic's kept replies are not among the search's** (#177): each is a post of a
+        // thread, not a thread, and a search drawing one would draw it as a row that opens
+        // nowhere. A microblog answer is a post in its own right, and stays. All of them are
+        // counted (#194): `adoptHeld` hands the count every row and the search the rest.
+        let held = adoptedAside != asideRevision ? await store.aside() : nil
+        adoptHeld(notes: all, aside: held)
+        if all != nil { adopted = (store: drawn, notes: notesRevision) }
+        if held != nil { adoptedAside = asideRevision }
         if heldRevision != renewedConversations {
             renewConversation()
             renewedConversations = heldRevision
@@ -2209,11 +2278,20 @@ final class ShellSession {
     @ObservationIgnored private var adopted: (store: Int, notes: Int)?
 
     private func adoptSources() async {
+        // **What each source last said about itself, as this device kept it** (#188): drawn by
+        // the rows and read by the composer before anything asks, and replaced whole when an
+        // ask lands — the store is the one writer, and this is the one reader. A host with no
+        // kept word keeps whatever this run's look put in `profiles`, which is the answer for a
+        // host not yet joined.
+        let said = await store.saidAll()
+        for (host, profile) in said where profiles[host] != .stated(profile) {
+            profiles[host] = .stated(profile)
+        }
         // **Projected through what each server says it is** — #86. One place, so the row, the
         // tabs, a rule and a read all speak to a host under the name its own server gave rather
-        // than the one written down when it was joined. Identity where nothing has been said,
-        // which is every host until a read asks one.
-        let spoken = await store.sources().map(flavours.spoken)
+        // than the one written down when it was joined. What it last said, where this device
+        // kept that, until this run asks; identity behind both.
+        let spoken = await store.sources().map { flavours.spoken($0, keptAs: said[$0.host]?.kind) }
         if spoken != sources { sources = spoken }
         // A source the store holds again, and not one on its way out, is asked as before (#221).
         reload.readmit(spoken.map(\.host).filter { !removals.contains($0) })
@@ -2375,8 +2453,11 @@ final class ShellSession {
         // copy of that server's words too.
         conversations.forget(host: host)
         // And nine: what the server last said it was is that server's word, not this device's
-        // note. Dropped with the rest, so the next read asks it again.
+        // note. Dropped with the rest, so the next read asks it again — and what it said about
+        // itself with it (#188), from this run and from the store, for the same reason.
         flavours.forget(host: host)
+        profiles[host] = nil
+        await store.forgetSaid(host: host)
         // Eleven: what this run read about the forum's sub-boards is its word too (#161).
         subBoards[host] = nil
         lookedUnder[host] = nil
@@ -2421,8 +2502,13 @@ final class ShellSession {
     func keep(months: Int?, from now: Date = Date()) async -> Int {
         let dropped = await store.setRetention(months: months, from: now)
         guard dropped > 0 else { return 0 }
-        notes = await store.all()
+        // The window cuts what is held aside too, and the count says so at once (#194).
+        let all = await store.all()
+        let held = await store.aside()
+        adoptHeld(notes: all, aside: held)
+        adoptedAside = await store.asideRevision
         await persist?()
+        await readStoreBytes()
         return dropped
     }
 

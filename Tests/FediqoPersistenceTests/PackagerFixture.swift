@@ -94,10 +94,18 @@ enum PackagerFixture {
         try device.tokens.save(MastodonToken(host: mastodon.host, accessToken: "t", clientID: "c", clientSecret: "s", scopes: "read"))
         try device.tokens.save(MastodonApp(host: mastodon.host, clientID: "c", clientSecret: "s", scopes: "read"))
         try device.credentials.save(ForumCredential(host: forum.host, username: "ada", password: "hunter2"))
+        await device.store.said(said, at: origin)
         try device.media.store(Data(repeating: 7, count: 3000), host: mastodon.host, url: URL(string: "https://cdn.example/1.jpg")!)
         try device.media.store(Data(repeating: 9, count: 100), host: forum.host, url: URL(string: "https://forum.example/2.jpg")!)
         return device
     }
+
+    /// What the microblog said about itself, as the populated device keeps it.
+    static let said = SourceProfile(
+        host: mastodon.host, kind: .mastodon, title: "One", summary: "A small place", thumbnail: nil,
+        activeMonth: 12, statusLimit: 500, people: nil, posts: nil, registration: .open,
+        readsWithoutAccount: true, rules: ["be kind"], asOf: nil
+    )
 
     static func package() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("fediqo-\(UUID().uuidString).fdq")

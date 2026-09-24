@@ -24,6 +24,8 @@ final class Launch {
     /// What takes the store away as one locked file and reads one back (#247). Built on what
     /// this launch opened, so it writes the index this run writes and replaces it in place.
     let carrier: StorePackager
+    /// The index on disk, measured for Usage (#194); nil where this run has none.
+    let file: StoreFile?
     /// The index was written by a newer build and left alone; the root view says so. Cleared when
     /// the reader dismisses that, so it is said once a launch rather than once a window.
     var storeIsNewer: Bool
@@ -33,11 +35,12 @@ final class Launch {
     /// that gap would have to be held back or it would write the empty store over the index.
     private init() {
         let opened = StoreFile.openApplicationSupport()
-        store = ItemStore(sources: opened.sources, notes: opened.notes)
+        store = ItemStore(sources: opened.sources, notes: opened.notes, said: opened.said)
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
         saver = StoreSaver(store: store, file: opened.file)
+        file = opened.file
         storeIsNewer = opened.storeIsNewer
         carrier = StorePackager(
             directory: StoreFile.applicationSupportDirectory, file: opened.file, store: store,
@@ -174,11 +177,18 @@ struct FediqoApp: App {
     #endif
     @Environment(\.scenePhase) private var scenePhase
 
+    /// The index's one measure on disk (#194), or nothing where this run has no index.
+    private var measureStore: (@Sendable () async -> Int)? {
+        guard let file = Launch.shared.file else { return nil }
+        return { file.bytesOnDisk() }
+    }
+
     var body: some Scene {
         WindowGroup {
             FediqoRootView(
                 store: Launch.shared.store, forums: Launch.shared.forums,
                 mastodon: Launch.shared.mastodon, persist: save,
+                measureStore: measureStore,
                 storeIsNewer: Launch.shared.storeIsNewer,
                 storeNoticeSeen: { Launch.shared.storeIsNewer = false },
                 carrier: Launch.shared.carrier

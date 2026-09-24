@@ -71,8 +71,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     // MARK: - Weighing
 
     public func weigh() async throws -> PackageWeight {
-        let index = (try? directory.appendingPathComponent(Self.indexName)
-            .resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        // The figure Usage shows (#194), where this run has the index open; the file's size where
+        // it does not.
+        let index = file?.bytesOnDisk() ?? StoreFile.bytesOnDisk(indexAt: directory.appendingPathComponent(Self.indexName).path)
         let settings = (try? settingsPlist().count) ?? 0
         let pictures = media?.totalBytes() ?? 0
         let held = await !store.sources().isEmpty
@@ -121,10 +122,10 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         defer { try? FileManager.default.removeItem(at: scratch) }
         let snapshot = await store.snapshot()
         let staged = try StoreFile(at: scratch)
-        try await staged.save(sources: snapshot.sources, notes: snapshot.notes)
+        try await staged.save(sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said)
         let pieces = try pieces(
             index: scratch.appendingPathComponent(Self.indexName), sources: snapshot.sources.map(\.host),
-            pictures: pictures
+            said: snapshot.said, pictures: pictures
         )
         let total = pieces.reduce(0) { $0 + $1.bytes }
         let summary = PackageSummary(
@@ -162,13 +163,18 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     }
 
     /// Every entry of a take-away, in the order they ride. **Adding a kind is one line here.**
-    private func pieces(index: URL, sources: [String], pictures: Bool) throws -> [Piece] {
+    private func pieces(index: URL, sources: [String], said: [SourceProfile], pictures: Bool) throws -> [Piece] {
         let indexBytes = try index.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         var pieces: [Piece] = [
             Piece(.store, name: Self.indexName, file: index, bytes: indexBytes),
             Piece(.settings, name: "settings", data: try settingsPlist()),
             Piece(.secrets, name: "secrets", data: try secretsJSON(sources: sources)),
         ]
+        // What each source last said about itself (#188), one entry a host, so a build that
+        // keeps them elsewhere than the index still finds them.
+        pieces += try said.sorted { $0.host < $1.host }.map {
+            Piece(.profile, name: $0.host, data: try JSONEncoder().encode(ProfileWire($0)))
+        }
         if pictures, let media {
             pieces += media.copies().map { Piece(.picture, name: "\($0.folder)/\($0.name)", file: $0.url, bytes: $0.size) }
         }
@@ -292,6 +298,48 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         }
     }
 
+    /// `SourceProfile` as a profile entry carries it (#188): every field the page draws, and
+    /// when it was said. A kind this build cannot name reads as no word, as the index reads it.
+    struct ProfileWire: Codable {
+        var kind: String
+        var title: String?
+        var summary: String?
+        var thumbnail: URL?
+        var activeMonth: Int?
+        var statusLimit: Int?
+        var people: Int?
+        var posts: Int?
+        var registration: String?
+        var readsWithoutAccount: Bool?
+        var rules: [String]
+        var asOf: Date?
+
+        init(_ profile: SourceProfile) {
+            kind = profile.kind.rawValue
+            title = profile.title
+            summary = profile.summary
+            thumbnail = profile.thumbnail
+            activeMonth = profile.activeMonth
+            statusLimit = profile.statusLimit
+            people = profile.people
+            posts = profile.posts
+            registration = profile.registration?.rawValue
+            readsWithoutAccount = profile.readsWithoutAccount
+            rules = profile.rules
+            asOf = profile.asOf
+        }
+
+        func profile(host: String) -> SourceProfile? {
+            guard let kind = ProtocolKind(rawValue: kind), kind != .unknown, let asOf else { return nil }
+            return SourceProfile(
+                host: host, kind: kind, title: title, summary: summary, thumbnail: thumbnail,
+                activeMonth: activeMonth, statusLimit: statusLimit, people: people, posts: posts,
+                registration: registration.flatMap(SourceProfile.Registration.init(rawValue:)),
+                readsWithoutAccount: readsWithoutAccount, rules: rules, asOf: asOf
+            )
+        }
+    }
+
     // MARK: - Reading back
 
     public func preview(_ url: URL, key: PackageKey) async throws -> PackageSummary {
@@ -305,6 +353,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         var secrets: Secrets?
         var media: URL?
         var pictures = 0
+        var said: [SourceProfile] = []
     }
 
     public func readBack(
@@ -349,10 +398,12 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                     staged.secrets = secrets
                 }
             case .profile:
-                // Carried and checked like every entry; what a profile is on this device is
-                // #188's, and until it lands the entry is read and let go.
                 guard Self.isHostName(entry.name) else { throw PackageRefusal.altered }
-                _ = try await Self.whole(entry)
+                let data = try await Self.whole(entry)
+                guard let wire = try? JSONDecoder().decode(ProfileWire.self, from: data),
+                      let profile = wire.profile(host: entry.name)
+                else { throw PackageRefusal.altered }
+                staged.said.append(profile)
             case .picture:
                 let parts = entry.name.split(separator: "/", omittingEmptySubsequences: false)
                 guard parts.count == 2, parts.allSatisfy(Self.isDigest) else { throw PackageRefusal.altered }
@@ -368,11 +419,14 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         }
         // Every tag has held and the footer was seen. Now: is the staged store one this build
         // can read? Opened before a byte here changes.
-        let contents: (sources: [Source], notes: [Note])?
+        var contents: (sources: [Source], notes: [Note], said: [SourceProfile])?
         if summary.contents == .whole {
             guard staged.index != nil, staged.settings != nil, staged.secrets != nil else { throw PackageRefusal.altered }
             do {
                 contents = try StoreFile(at: incoming).load()
+                // The profile entries are the words as taken away; the index's rows are the same
+                // words, and where a package carried entries they are what is read back.
+                if !staged.said.isEmpty { contents?.said = staged.said }
             } catch is StoreFile.Newer {
                 throw PackageRefusal.newer
             } catch {
@@ -387,10 +441,12 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
 
     /// The commit, in the order that leaves the least behind if a step refuses: the index, the
     /// picture copies, the defaults, the Keychain, and then the store in memory.
-    private func commit(_ staged: Staged, contents: (sources: [Source], notes: [Note])?, summary: PackageSummary) async throws {
+    private func commit(
+        _ staged: Staged, contents: (sources: [Source], notes: [Note], said: [SourceProfile])?, summary: PackageSummary
+    ) async throws {
         if let contents {
             if let file {
-                try await file.save(sources: contents.sources, notes: contents.notes)
+                try await file.save(sources: contents.sources, notes: contents.notes, said: contents.said)
             } else if let index = staged.index {
                 let target = directory.appendingPathComponent(Self.indexName)
                 try? FileManager.default.removeItem(at: target)
@@ -410,7 +466,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         }
         if let secrets = staged.secrets { try refile(secrets) }
         if let contents {
-            await store.replace(sources: contents.sources, notes: contents.notes)
+            await store.replace(sources: contents.sources, notes: contents.notes, said: contents.said)
         }
     }
 

@@ -436,6 +436,7 @@
 "prefs.held.posts.one" = "%d post";
 "prefs.cache.pictures.one" = "%d picture";
 "prefs.held.total" = "All sources";
+"prefs.held.aside" = "Held apart from the timelines";
 "prefs.held.memory" = "%@ in memory";
 "prefs.held.disk" = "%@ on disk";
 "prefs.held.breakdown" = "By week or month";
@@ -636,6 +637,7 @@
 "join.preview.thumbnail" = "%@'s own picture of itself";
 "join.preview.activeMonth" = "%@ active this month";
 "join.preview.posts" = "%@ posts";
+"source.said.asOf" = "As %1$@ said it, %2$@.";
 "join.preview.reg.open" = "Anyone can sign up";
 "join.preview.reg.approval" = "Sign-ups need approval";
 "join.preview.reg.closed" = "Sign-ups are closed";

@@ -45,7 +45,7 @@ struct StorePackagerTests {
         try await from.packager().takeAway(to: url, key: .password("open sesame"), pictures: pictures) { progress.add($0) }
         seen = progress.all
         #expect(seen.last?.fraction == 1)
-        #expect(seen.count == (pictures ? 5 : 3))
+        #expect(seen.count == (pictures ? 6 : 4), "store, settings, secrets, one profile, and the pictures")
 
         let summary = try await onto.packager().preview(url, key: .password("open sesame"))
         #expect(summary.posts == 3)
@@ -54,6 +54,7 @@ struct StorePackagerTests {
         #expect(summary.withPictures == pictures)
         #expect(summary.hasSecrets)
         #expect(summary.device == "a test")
+        #expect(summary.entryCount == (pictures ? 6 : 4))
 
         #expect(try await onto.packager().weigh().holdsStore == false)
         try await readAll(url, key: .password("open sesame"), onto: onto)
@@ -66,6 +67,10 @@ struct StorePackagerTests {
         let reopened = try StoreFile(at: onto.directory).load()
         #expect(reopened.sources == [Self.mastodon, Self.forum])
         #expect(reopened.notes.map(\.id) == ["1", "2", "3"])
+        // What each source said about itself, as of when (#188), in memory and on disk.
+        let word = PackagerFixture.said.said(at: PackagerFixture.origin)
+        #expect(await onto.store.said(host: Self.mastodon.host) == word)
+        #expect(reopened.said == [word])
         // The person's settings.
         #expect(onto.defaults.data(forKey: "fediqo.timelines") == from.defaults.data(forKey: "fediqo.timelines"))
         #expect(onto.defaults.string(forKey: "fediqo.dummy.language") == "zh-TW")

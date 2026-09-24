@@ -92,6 +92,7 @@ public struct FediqoRootView: View {
         forums: ForumSessions = ForumSessions(),
         mastodon: MastodonSessions = MastodonSessions(),
         persist: (@MainActor () async -> Void)? = nil,
+        measureStore: (@Sendable () async -> Int)? = nil,
         storeIsNewer: Bool = false,
         storeNoticeSeen: (@MainActor () -> Void)? = nil,
         carrier: (any StoreCarrier)? = nil
@@ -102,6 +103,7 @@ public struct FediqoRootView: View {
         )
         session.persist = persist
         session.carrier = carrier
+        session.measureStore = measureStore
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)
         self.storeNoticeSeen = storeNoticeSeen

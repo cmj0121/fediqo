@@ -47,6 +47,8 @@ public struct StoreFile: Sendable {
         public let file: StoreFile?
         public let sources: [Source]
         public let notes: [Note]
+        /// What each source last said about itself, as of when (#188).
+        public let said: [SourceProfile]
         /// Where an unreadable index was moved, when one was. It is left there for a person, or a
         /// later version of this code, to look at; nothing in the app reads it again.
         public let setAside: URL?
@@ -55,12 +57,13 @@ public struct StoreFile: Sendable {
         public let storeIsNewer: Bool
 
         init(
-            file: StoreFile?, sources: [Source] = [], notes: [Note] = [], setAside: URL? = nil,
-            storeIsNewer: Bool = false
+            file: StoreFile?, sources: [Source] = [], notes: [Note] = [], said: [SourceProfile] = [],
+            setAside: URL? = nil, storeIsNewer: Bool = false
         ) {
             self.file = file
             self.sources = sources
             self.notes = notes
+            self.said = said
             self.setAside = setAside
             self.storeIsNewer = storeIsNewer
         }
@@ -85,7 +88,7 @@ public struct StoreFile: Sendable {
         do {
             let file = try StoreFile(at: directory)
             let snapshot = try file.load()
-            return Opened(file: file, sources: snapshot.sources, notes: snapshot.notes)
+            return Opened(file: file, sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said)
         } catch is Newer {
             return Opened(file: nil, storeIsNewer: true)
         } catch {
@@ -123,7 +126,7 @@ public struct StoreFile: Sendable {
         let base = "index-unreadable-\(formatter.string(from: now))-\(random)"
         let aside = directory.appendingPathComponent(base + ".sqlite")
         try manager.moveItem(at: index, to: aside)
-        for suffix in ["-journal", "-wal", "-shm"] {
+        for suffix in sidecars {
             let sidecar = directory.appendingPathComponent(indexName + suffix)
             if manager.fileExists(atPath: sidecar.path) {
                 try manager.moveItem(at: sidecar, to: directory.appendingPathComponent(base + ".sqlite" + suffix))
@@ -133,10 +136,31 @@ public struct StoreFile: Sendable {
     }
 
     private static let indexName = "index.sqlite"
+    /// What SQLite may leave beside the index: moved with it, and weighed with it.
+    private static let sidecars = ["-journal", "-wal", "-shm"]
 
-    public func load() throws -> (sources: [Source], notes: [Note]) {
+    /// What the index weighs on disk right now: the file and any journal SQLite left beside it
+    /// (#194). **The one measure of the store's size**: Usage's figure is this, and a limit on
+    /// the store is held to the same call, so the two cannot disagree. Zero where there is no
+    /// file, or for a store not on disk at all.
+    public func bytesOnDisk() -> Int {
+        Self.bytesOnDisk(indexAt: db.path)
+    }
+
+    /// `bytesOnDisk()` for the index at `path`, and what SQLite keeps beside it.
+    static func bytesOnDisk(indexAt path: String) -> Int {
+        guard path != ":memory:", !path.isEmpty else { return 0 }
+        return ([""] + sidecars).reduce(0) { sum, suffix in
+            let values = try? URL(fileURLWithPath: path + suffix).resourceValues(forKeys: [.fileSizeKey])
+            return sum + (values?.fileSize ?? 0)
+        }
+    }
+
+    public func load() throws -> (sources: [Source], notes: [Note], said: [SourceProfile]) {
         try db.read { db in
-            let sources = try SourceRecord.fetchAll(db).map(\.source)
+            let records = try SourceRecord.fetchAll(db)
+            let sources = records.map(\.source)
+            let said = records.compactMap(\.saidProfile)
             let byHost = Dictionary(uniqueKeysWithValues: sources.map { ($0.host, $0) })
             // In the order they were written, which `ItemStore.snapshot` made the order they
             // arrived in: the copy of a post a merged row is drawn as is the one that came
@@ -145,18 +169,21 @@ public struct StoreFile: Sendable {
             let notes = try NoteRecord.order(Column.rowID).fetchAll(db).compactMap { record in
                 byHost[record.host].map(record.note(from:))
             }
-            return (sources, notes)
+            return (sources, notes, said)
         }
     }
 
     /// Empties both tables and writes `sources` and `notes` in their place, in one transaction,
-    /// on GRDB's queue rather than the caller's. The app saves through `StoreSaver`.
-    public func save(sources: [Source], notes: [Note]) async throws {
+    /// on GRDB's queue rather than the caller's. `said` is what each source last said about
+    /// itself (#188), written on its source's row; one of a host not in `sources` goes nowhere.
+    /// The app saves through `StoreSaver`.
+    public func save(sources: [Source], notes: [Note], said: [SourceProfile] = []) async throws {
+        let saidByHost = Dictionary(said.map { ($0.host, $0) }, uniquingKeysWith: { a, _ in a })
         try await db.write { db in
             try NoteRecord.deleteAll(db)
             try SourceRecord.deleteAll(db)
             for source in sources {
-                try SourceRecord(source).insert(db)
+                try SourceRecord(source, said: saidByHost[source.host]).insert(db)
             }
             for note in notes {
                 try NoteRecord(note).insert(db)
@@ -245,6 +272,21 @@ private var migrator: DatabaseMigrator {
     migrator.registerMigration("v4-gone") { db in
         try db.alter(table: "note") { t in
             t.add(column: "gone_at", .datetime)
+        }
+    }
+    // What a source last said about itself, and when (#188), or NULL. Every source already stored
+    // is one whose word this device kept nowhere, so the NULL each row takes is the truth, and
+    // the first ask after this build opens the store writes one in.
+    //
+    // **A migration id for `v3-holding`'s reason.** An older build ignores columns it does not
+    // read, so it would open this store without complaint and then, at its first save, write the
+    // source table back without them — a relaunch under this build finding every word gone. The
+    // id makes it refuse the store instead.
+    migrator.registerMigration("v5-said") { db in
+        try db.alter(table: "source") { t in
+            // A JSON `SaidRow`: what a row draws and nothing reads by, so one column.
+            t.add(column: "said", .text)
+            t.add(column: "said_at", .datetime)
         }
     }
     return migrator
@@ -340,11 +382,27 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
     /// A board list that is not JSON throws when the row is fetched, so a damaged row fails the
     /// load — and the load fails closed — rather than coming back as a source with no boards.
     var boards: [SubscriptionRow]
+    /// What this source last said about itself (#188), or nothing where it has not been heard.
+    /// A column behind its own migration id, for `holding`'s reason: an older build must refuse
+    /// this store rather than save it back without every word.
+    var said: SaidRow?
+    /// When `said` was said. Nothing where `said` is nothing.
+    var said_at: Date?
 
-    init(_ source: Source) {
+    init(_ source: Source, said profile: SourceProfile?) {
         host = source.host
         kind = source.kind.rawValue
         boards = source.boards.map(SubscriptionRow.init) + source.lists.map(SubscriptionRow.init)
+        said = profile.map(SaidRow.init)
+        said_at = profile?.asOf
+    }
+
+    /// The word this row keeps, marked as of when — or nothing where either half is missing, or
+    /// the kind is one this build cannot name: a word with no moment is one nothing could draw as
+    /// said then.
+    var saidProfile: SourceProfile? {
+        guard let said, let said_at else { return nil }
+        return said.profile(host: host, asOf: said_at)
     }
 
     var source: Source {
@@ -357,6 +415,56 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
             lists: boards.compactMap { row in
                 row.list.map { ListSubscription(id: $0, name: row.name) }
             }
+        )
+    }
+}
+
+/// `SourceProfile` as `source.said` writes it (#188): every field the page draws, and none of
+/// the host or the moment, which are the row's own columns. Core's `SourceProfile` stays free of
+/// a storage format; this is the storage format.
+///
+/// **Every field optional, so a word written before a field existed still reads.** A registration
+/// this build does not know reads as nothing said, never as a guess; a kind it does not know is
+/// no word at all (`profile(host:asOf:)`), because a kept `.unknown` would silence the ask that
+/// could correct it.
+private struct SaidRow: Codable {
+    var kind: String?
+    var title: String?
+    var summary: String?
+    var thumbnail: URL?
+    var activeMonth: Int?
+    var statusLimit: Int?
+    var people: Int?
+    var posts: Int?
+    var registration: String?
+    var readsWithoutAccount: Bool?
+    var rules: [String]?
+
+    init(_ profile: SourceProfile) {
+        kind = profile.kind.rawValue
+        title = profile.title
+        summary = profile.summary
+        thumbnail = profile.thumbnail
+        activeMonth = profile.activeMonth
+        statusLimit = profile.statusLimit
+        people = profile.people
+        posts = profile.posts
+        registration = profile.registration?.rawValue
+        readsWithoutAccount = profile.readsWithoutAccount
+        rules = profile.rules.isEmpty ? nil : profile.rules
+    }
+
+    func profile(host: String, asOf: Date) -> SourceProfile? {
+        guard let kind = kind.flatMap(ProtocolKind.init(rawValue:)), kind != .unknown else { return nil }
+        return SourceProfile(
+            host: host, kind: kind, title: title,
+            summary: summary,
+            // Admitted through `Host.fetchableURL` before it was written, as every address in
+            // `NoteFacts` was; read back as the rows' pictures are.
+            thumbnail: thumbnail,
+            activeMonth: activeMonth, statusLimit: statusLimit, people: people, posts: posts,
+            registration: registration.flatMap(SourceProfile.Registration.init(rawValue:)),
+            readsWithoutAccount: readsWithoutAccount, rules: rules ?? [], asOf: asOf
         )
     }
 }

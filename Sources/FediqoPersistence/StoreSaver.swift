@@ -24,7 +24,9 @@ import Synchronization
 /// may still drop the error, because it is already in the log.
 public actor StoreSaver {
     /// Writes one snapshot to the index.
-    public typealias Write = @Sendable (_ sources: [Source], _ notes: [Note]) async throws -> Void
+    public typealias Write = @Sendable (
+        _ sources: [Source], _ notes: [Note], _ said: [SourceProfile]
+    ) async throws -> Void
 
     /// How a `flush(deadline:)` ended.
     public enum Outcome: Equatable, Sendable {
@@ -63,7 +65,9 @@ public actor StoreSaver {
     public init(store: ItemStore, file: StoreFile?) {
         var write: Write?
         if let file {
-            write = { sources, notes in try await file.save(sources: sources, notes: notes) }
+            write = { sources, notes, said in
+                try await file.save(sources: sources, notes: notes, said: said)
+            }
         }
         self.init(store: store, write: write)
     }
@@ -121,7 +125,7 @@ public actor StoreSaver {
         let snapshot = await store.snapshot()
         guard snapshot.revision != written else { return }
         do {
-            try await write(snapshot.sources, snapshot.notes)
+            try await write(snapshot.sources, snapshot.notes, snapshot.said)
             written = snapshot.revision
         } catch {
             Self.log.error("Saving the index failed: \(String(describing: error), privacy: .public)")
