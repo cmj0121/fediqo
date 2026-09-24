@@ -98,8 +98,13 @@ public struct StoreFile: Sendable {
 
     /// `open(at:now:)` on the index this app keeps in Application Support.
     public static func openApplicationSupport() -> Opened {
-        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return open(at: root.appendingPathComponent("Fediqo", isDirectory: true))
+        open(at: applicationSupportDirectory)
+    }
+
+    /// Where the index this app keeps lives.
+    public static var applicationSupportDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Fediqo", isDirectory: true)
     }
 
     /// Moves `index.sqlite` and any journal SQLite left beside it to

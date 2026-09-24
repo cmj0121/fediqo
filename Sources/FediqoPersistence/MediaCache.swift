@@ -89,6 +89,40 @@ public struct MediaCache: MediaCopies {
         return total
     }
 
+    /// Every copy on disk, as a take-away lists them (#247): the host folder's name and the
+    /// file's, both digests, and what each weighs. In a stated order, so two walks agree.
+    func copies() -> [(folder: String, name: String, url: URL, size: Int)] {
+        hostFolders().sorted { $0.lastPathComponent < $1.lastPathComponent }.flatMap { folder in
+            Self.files(in: folder).sorted { $0.url.lastPathComponent < $1.url.lastPathComponent }.map {
+                (folder.lastPathComponent, $0.url.lastPathComponent, $0.url, $0.size)
+            }
+        }
+    }
+
+    /// What every copy weighs together.
+    func totalBytes() -> Int {
+        hostFolders().flatMap(Self.files(in:)).reduce(0) { $0 + $1.size }
+    }
+
+    /// Every copy replaced by what is under `staged`, a directory in this cache's own shape, by
+    /// two renames: what was here goes aside first and is removed once the new is in place, so a
+    /// failure between leaves either the old copies or the new, never a mix.
+    func adopt(_ staged: URL) throws {
+        let manager = FileManager.default
+        let aside = directory.deletingLastPathComponent()
+            .appendingPathComponent("media-aside-\(UUID().uuidString)", isDirectory: true)
+        let had = manager.fileExists(atPath: directory.path)
+        if had { try manager.moveItem(at: directory, to: aside) }
+        do {
+            try manager.moveItem(at: staged, to: directory)
+        } catch {
+            if had { try? manager.moveItem(at: aside, to: directory) }
+            throw error
+        }
+        try makeExcludedFromBackup(directory)
+        if had { try? manager.removeItem(at: aside) }
+    }
+
     /// Every host's folder under `directory`.
     private func hostFolders() -> [URL] {
         (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
