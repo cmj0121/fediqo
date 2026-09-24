@@ -449,9 +449,12 @@ public final class ForumSessions {
         do {
             page = try await engine.page(at: url)
         } catch let error as ForumTransportError {
+            // A forget stops the page it lands on, and that is not the forum being unreachable.
+            if await wasForgotten(host, since: asked) { return .forgotten }
             if case .wall(let wall) = error { return .handOver(.wall(wall)) }
             return .handOver(.unreachable)
         } catch {
+            if await wasForgotten(host, since: asked) { return .forgotten }
             return .handOver(.unreachable)
         }
 
@@ -477,6 +480,7 @@ public final class ForumSessions {
         do {
             verdict = try await engine.submitLogin(credential)
         } catch {
+            if await wasForgotten(host, since: asked) { return .forgotten }
             return .handOver(.unreachable)
         }
         // Forgotten while the form was on its way: whatever session it earned goes too.
@@ -656,7 +660,9 @@ public final class ForumSessions {
     /// mid-sign-in leaves no session behind it (#221).
     private func wasForgotten(_ host: String, since asked: Int) async -> Bool {
         guard forgets[host, default: 0] != asked else { return false }
-        if let madeStore { await ForumWebEngine.forget(host: host, in: madeStore) }
+        if let madeStore {
+            await ForumWebEngine.forget(host: host, in: madeStore, keeping: forumHosts)
+        }
         return true
     }
 
@@ -744,7 +750,9 @@ public final class ForumSessions {
         // No engine this run is no evidence of no cookies: the store persists, and a host signed
         // in to last launch holds its session before anything asks for its page. A store never
         // built this run holds nothing this run could have put there, and is left unopened.
-        if let madeStore { await ForumWebEngine.forget(host: host, in: madeStore) }
+        if let madeStore {
+            await ForumWebEngine.forget(host: host, in: madeStore, keeping: forumHosts)
+        }
         typed[host.lowercased()] = nil
         notices[host.lowercased()] = nil
         forgetPassword(host: host)

@@ -2,6 +2,7 @@ import FediqoCore
 import Foundation
 import SwiftUI
 import Testing
+import WebKit
 @testable import FediqoUI
 
 /// #221: signing out of a source, or removing it, leaves nothing that can reach it.
@@ -406,15 +407,39 @@ struct LeavesNothingTests {
         let work = SourceWork()
         let reader = ShellReader()
         reader.work = work
-        var gone: Set<String> = []
-        reader.gone = { gone.contains($0) }
+        final class Gone { var hosts: Set<String> = [] }
+        let gone = Gone()
+        reader.gone = { gone.hosts.contains($0) }
         reader.open(URL(string: "https://page.example/a")!, from: Self.gone)
         #expect(reader.decide(URL(string: "https://page.example/b"), mainFrame: true))
 
-        gone.insert(Self.gone)
+        gone.hosts.insert(Self.gone)
         #expect(!reader.decide(URL(string: "https://page.example/c"), mainFrame: true))
         #expect(!reader.decide(URL(string: "https://page.example/d"), mainFrame: false))
         #expect(Self.acts(work, for: Self.gone).count == 1)
+    }
+
+    @Test("Signing out of one forum keeps what its browser store holds for a neighbour still added")
+    func theForumBrowsersNeighbour() async throws {
+        let store = WKWebsiteDataStore.nonPersistent()
+        let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
+        forums.watch(forums: ["forum.shared.example", "blog.shared.example"])
+        for domain in ["forum.shared.example", ".shared.example", "blog.shared.example"] {
+            await store.httpCookieStore.setCookie(try #require(HTTPCookie(properties: [
+                .name: "x7Kq_2132_auth", .value: "v", .domain: domain, .path: "/",
+                .expires: Date().addingTimeInterval(3600),
+            ])))
+        }
+        #expect(await store.httpCookieStore.allCookies().count == 3, "the premise: all three are held")
+
+        await forums.forget(host: "forum.shared.example")
+        #expect(Set(await store.httpCookieStore.allCookies().map(\.domain)) == [".shared.example", "blog.shared.example"],
+                "the neighbour's cookie went, or this forum's own stayed")
+
+        // A forum alone under its domain loses the whole record, as before.
+        forums.watch(forums: ["blog.shared.example"])
+        await forums.forget(host: "blog.shared.example")
+        #expect(await store.httpCookieStore.allCookies().isEmpty)
     }
 
     // MARK: - Helpers

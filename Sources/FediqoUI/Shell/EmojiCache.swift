@@ -583,7 +583,7 @@ final class EmojiCache {
 
     private func download(_ url: URL, for source: String, asked: Int) -> Task<Data?, Never> {
         let source = source.lowercased()
-        if askers[url]?[source] == nil { askers[url, default: [:]][source] = asked }
+        askers[url, default: [:]][source] = asked
         if let running = downloads[url] { return running }
         let http = http
         let work = work

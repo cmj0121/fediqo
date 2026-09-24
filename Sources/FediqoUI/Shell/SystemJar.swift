@@ -26,7 +26,7 @@ struct SystemJar {
         let others = others.map { $0.lowercased() }.filter { $0 != host }
         for cookie in cookies.cookies ?? []
         where ForumWebEngine.holds(cookie.domain, for: host)
-            && !others.contains(where: { Self.sent(cookie.domain, to: $0) }) {
+            && !others.contains(where: { ForumWebEngine.sent(cookie.domain, to: $0) }) {
             cookies.deleteCookie(cookie)
         }
         for (space, kept) in credentials.allCredentials where space.host.lowercased() == host {
@@ -37,15 +37,5 @@ struct SystemJar {
                 )
             }
         }
-    }
-
-    /// Whether a cookie filed under `domain` goes out with a request to `host`: the host is that
-    /// domain, or under it. Narrower than `ForumWebEngine.holds` on purpose — what is kept for
-    /// another source is only what that source is actually sent.
-    static func sent(_ domain: String, to host: String) -> Bool {
-        var name = domain.lowercased()
-        if name.hasPrefix(".") { name.removeFirst() }
-        let host = host.lowercased()
-        return !name.isEmpty && (host == name || host.hasSuffix("." + name))
     }
 }
