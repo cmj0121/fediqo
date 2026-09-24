@@ -64,6 +64,13 @@ To check it from outside the app, watch Fediqo while it runs — with the iPhone
 Report, or any network monitor on the Mac. Every host it reaches is a source you added,
 something a source pointed to, or an entry in Allowed.
 
+The store is yours to take away and yours to let go. It leaves as one password-locked file in
+your own hands, or moves to another of your devices nearby when both agree, and it passes
+through nowhere of ours and not through the Apple account. Part of it goes when you say so —
+by a span of dates, by a source — or when a limit you set is reached, and what a limit let go
+says which limit did. Nothing goes that neither you nor your own limit chose. How each works
+is under What this device holds, below.
+
 Several sources go in and one timeline comes out, so the same post from two of them is one
 row rather than two. Nothing is scored or re-ordered on the way: the only thing between what
 arrived and what you see is a rule you wrote.
@@ -187,7 +194,10 @@ so on its row and keeps saying it until you sign in to it again.
 
 The secret is kept in this device's Keychain. It is not in the
 store, it is not copied to iCloud, and it does not follow your Apple account to another
-device. It survives a relaunch.
+device. It survives a relaunch. The only way it reaches another device is one you start:
+Take away carries it inside the locked file, and Move nearby sends it to another of your
+devices — with the store, or the sign-ins alone — when both sides agree. Both are below,
+under What this device holds.
 
 Sign out on the row, Clear, and Remove each delete the secret from this device. What Home and
 your lists brought in stays until you drop it. The sign-in page keeps no session of its own
@@ -200,7 +210,8 @@ of those takes them, with any password you saved for it.
 
 Removing a source also stops everything Fediqo would ask of it by itself: the wait, a reload
 already on its way, its pictures and emoji still queued, and an open thread from it. Nothing
-reaches it again until you add it again.
+reaches it again until you add it again. What becomes of its posts is a choice you made once,
+on Preferences, and the question before removing says which it will do.
 
 ### Reading
 
@@ -246,12 +257,94 @@ opened from is centred and still selected.
 
 ### What this device holds
 
-The Usage page is tabbed by purpose: by source, by time, and picture copies. Tab rotates
-them. Sources holds the totals, each source's figures and its Clear. Time holds the week or
-month breakdown and how long posts are kept. Copies holds the pictures this device is
-keeping, and the drop that takes them. Clear takes a server's cached copies and its sign-in,
-and keeps its posts. Preferences keeps what you choose: language, theme, type, and the
-latest date.
+The Usage page is tabbed by purpose: Sources, Time, Keep, and Copies. Tab rotates them.
+Sources holds the totals, each source's figures and its Clear; posts held without arriving
+through a timeline — a search's finds, a conversation's answers, a topic's replies — are
+counted, and said to be held apart from the timelines. Time holds the week or month
+breakdown. Keep holds the two limits, Let go by dates, and What the limits let go. Copies
+holds the pictures this device is keeping, and the drop that takes them. Clear takes a
+server's cached copies and its sign-in, and keeps its posts. Preferences keeps what you
+choose: language, theme, type, the latest date, what becomes of a removed source's posts,
+and the two ways the whole store leaves — Take away and Move nearby.
+
+What a source says about itself — its name, its figures, how long a post may be — stays on
+this device with the source. After a relaunch, with or without a network, its page shows what
+it last said and when, and asks again behind it. Something new replaces what was kept.
+
+#### The two limits
+
+Keep posts holds only the latest months; Room is what this device gives the index and its
+picture copies together. Side by side, and whichever is reached first acts. Past the room,
+picture copies go first, oldest first — they come back when read again — and only then the
+oldest posts, from every source. A limit never set lets nothing go, and every source stays
+joined.
+
+A post a limit let go is no longer here, so nothing on it can name the limit. What the limits
+let go, under Keep, keeps that account instead: one line each time a limit acted — which
+limit, when, how many posts or picture copies, and from which sources — and never a post.
+The lines survive a relaunch. What you let go yourself is not written there. Clearing the
+account lets nothing else go.
+
+#### Let go by dates
+
+Under Keep. Pick a first and a last day, both included, in this device's time zone, and one
+source or every one. Before anything goes, a question says how many posts, from where, and
+that they do not come back; nothing goes without a yes. Afterwards they are in no timeline,
+no search, and no count. Nothing outside those days, and nothing from another source, is
+touched. Every source stays joined.
+
+#### When a source is removed
+
+Preferences holds one choice: a removed source's posts go with it, or they stay. Remove
+honours it without asking again, and its question says which. Posts that stay are marked
+Source removed, are still read in All and found by search, and go like any other post — by
+dates, or by a limit. Its sign-in, its pictures and the boards you picked go either way, and
+nothing reaches it again.
+
+#### Take away
+
+In Preferences. Take away writes the whole of what this device holds — posts, timelines,
+rules, what was read, sources, and what signs in to them — to one file locked by a password
+you set, and puts it where you choose: never anywhere of ours, never through the Apple
+account. It first weighs what is here and asks whether the picture copies ride, showing how
+much the file would be with them and without. With them, the file shows everything this
+device shows with no network; without, it is far smaller, and pictures come back as each
+post is read again. The password is at least eight characters, and a lost one is not
+recovered: the file can sign in to every source, so it is nothing without its password, and
+nobody — not this app, not anyone else — can open it otherwise. The app says so before the
+password is set.
+
+Read back opens such a file, asks its password, and shows what it holds — how many posts,
+from which sources, and when it was taken away — before anything changes. On a clean install
+or a new device it gives the same store, every source signed in as it was. On a device that
+already holds a store it replaces that store: nothing is merged, and the question says so.
+It is proven whole first: a file that is not a Fediqo take-away, one cut short or altered,
+one written by a newer Fediqo, or the wrong password is refused with its own reason, and the
+store is untouched. A read back that fails midway leaves the store as it was.
+
+Nothing leaves this device either way. Both are listed under This device in the run's
+requests.
+
+#### Move nearby
+
+In Preferences, below Take away. Another of your devices — a phone, a tablet, a Mac, in any
+pairing — can hold this store, with no account between them. Hold from nearby shows a
+six-digit code and this device's name, and waits. Move to nearby, on the other device, lists
+your devices that are waiting, asks for the code the one you chose shows, then shows a
+four-character mark; the holding device shows the same mark beside its code, and you say
+whether the two screens agree before anything joins. The code is the key the two devices
+join under, new each time, and a wrong one gets one try: it connects nothing, and the holder
+shows a new code. Too many wrong codes close the hold.
+
+What moves is what Take away writes — everything with pictures, everything without, or the
+sign-ins only — sealed, straight to the other device over Wi-Fi or the direct link between
+the two, and through nothing else: not our servers, not the Apple account, not a device that
+only shares one. Both devices ask before anything moves, either can refuse, and the receiving
+device proves the whole of it before anything there changes; a store already there is
+replaced, as Read back says. A move that fails midway leaves it as it was. Each side lists
+the move under the other device's name in the run's requests. The first time, the system
+asks whether Fediqo may look for devices on the local network; it looks only while a move or
+a hold is under way.
 
 The store survives a relaunch. The first 0.2.0 launch carries an older store forward in
 place, with nothing fetched and nothing for you to do: every source, post, board, sign-in,
@@ -262,7 +355,7 @@ recorded one and carries none; a source rule still reaches it.
 A build older than the store it finds does not open it. It says a newer Fediqo wrote it, and
 leaves it exactly as it was: it does not read it, write over it, or set it aside.
 
-This checkout has no release tag yet. It is building toward 0.2.0.
+This checkout has no release tag yet. It is building toward 0.7.0.
 
 ## The mark
 
