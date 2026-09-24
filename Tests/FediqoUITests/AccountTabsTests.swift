@@ -170,7 +170,7 @@ struct AccountTabsTests {
     func linesAreShort() {
         let keys = [
             "account.hero.line", "account.add.line", "account.sources.line",
-            "account.sources.writing.line", "account.sources.writing.again.line",
+            "account.sources.writing.again.line",
             "join.preview.unread.line", "join.preview.turnedAway.line", "forum.stop.wall.line",
             "forum.signin.save.line.on", "forum.signin.save.line.off", "refusal.password.line",
         ]

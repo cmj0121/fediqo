@@ -587,13 +587,32 @@ struct JoinSheet: View {
             // **The `ScrollView` is the sheet's and not the shared view's.** `AccountPane` is
             // already one scroller and nesting a second inside it is the failure that pane's own
             // comment records: the list squeezed to a sliver at 320pt with nothing to scroll.
-            ScrollView { SourcePreviewView(preview: preview, surface: .sheet, origin: origin) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if case .joined(let source) = origin { standing(source.host) }
+                    SourcePreviewView(preview: preview, surface: .sheet, origin: origin)
+                }
+            }
         case .choosingBoards(let offer, _):
             BoardPickerList(offer: offer, picked: picked)
         case .choosingLists(let choice):
             ListPickerList(offered: choice.offered, picked: pickedLists)
         case nil:
             EmptyView()
+        }
+    }
+
+    /// What the source's row had to cut to its one line, whole (#244): the errand running, a
+    /// refusal of the last press and the forum's own notice — each of them, not only the first.
+    @ViewBuilder
+    private func standing(_ host: String) -> some View {
+        let lines = SourceRow.statusLines(
+            waiting: SourceRow.waitingLine(session.progress, drawnAs: nil, host: host),
+            refusal: session.rowRefusal, notice: session.forums.notice(host: host)?.sentence(), host: host
+        )
+        if !lines.isEmpty {
+            SourceStanding(lines: lines)
+                .padding(ShellSpace.pad)
         }
     }
 

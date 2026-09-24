@@ -44,6 +44,9 @@ struct OneHeightTests {
         let largest = Set(Self.faces().map { Self.height($0, size: .accessibility5) })
         #expect(largest.count == 1, "one height at the largest size, got \(largest.sorted())")
         #expect((largest.first ?? 0) > (standard.first ?? 0))
+        // A phone's width at the largest size: still one height, and still the same one.
+        let narrow = Set(Self.faces().map { Self.height($0, size: .accessibility5, width: 320) })
+        #expect(narrow == largest, "at 320 wide and the largest size, got \(narrow.sorted())")
     }
 
     @Test("A row's control does not make it taller than its neighbours")
@@ -154,14 +157,15 @@ struct OneHeightTests {
         }
     }
 
-    @Test("A source row's brief line says one sentence: a refusal first, then the forum's notice")
+    @Test("A source row's sentences: the errand, then a refusal, then the notice — none hidden by another")
     func statusLine() {
         let refused = (host: "a.example", key: "account.source.boards.unread")
-        #expect(SourceRow.statusLine(refusal: nil, notice: nil, host: "a.example") == nil)
-        #expect(SourceRow.statusLine(refusal: nil, notice: "n", host: "a.example") == "n")
-        #expect(SourceRow.statusLine(refusal: refused, notice: "n", host: "b.example") == "n")
-        #expect(SourceRow.statusLine(refusal: refused, notice: "n", host: "a.example")
-            == String(format: L10n.t("account.source.boards.unread"), "a.example"))
+        #expect(SourceRow.statusLines(waiting: nil, refusal: nil, notice: nil, host: "a.example").isEmpty)
+        #expect(SourceRow.statusLines(waiting: "w", refusal: nil, notice: "n", host: "a.example") == ["w", "n"])
+        #expect(SourceRow.statusLines(waiting: nil, refusal: refused, notice: "n", host: "b.example") == ["n"])
+        #expect(SourceRow.statusLines(waiting: nil, refusal: refused, notice: "n", host: "a.example")
+            == [String(format: L10n.t("account.source.boards.unread"), "a.example"), "n"],
+            "a refusal does not hide the notice: both are said")
     }
 
     @Test("Every new heading is in all three languages")
@@ -179,22 +183,25 @@ struct OneHeightTests {
     }
 
     #if os(macOS)
-    @Test("A source row on Account is one height at rest, waiting, refused or with a notice")
-    func sourceRowIsOneHeight() {
+    @Test("A source row on Account is one height at rest, waiting, refused or with a notice",
+          arguments: [(DynamicTypeSize.large, CGFloat(900)), (.accessibility5, 900), (.large, 340), (.accessibility5, 340)])
+    func sourceRowIsOneHeight(_ size: DynamicTypeSize, _ width: CGFloat) {
         let source = Source(host: "forum.example", kind: .discuz)
         let row = SourceRow(source: source, profile: .unasked(host: "forum.example", kind: .discuz))
         func drawn(waiting: String? = nil, refusal: (host: String, key: String)? = nil, notice: String? = nil) -> some View {
             SourceRowView(
-                row: row, signedIn: false, width: 900, widest: SourceRow.controls(of: source),
+                row: row, signedIn: false, width: width, widest: SourceRow.controls(of: source),
                 actsLive: true, waiting: waiting, refusal: refusal, notice: notice,
                 signIn: {}, clear: {}, remove: {}, changeBoards: {}, open: {}
             )
         }
         let heights = Set([
-            Self.height(drawn(), size: .large, width: 900),
-            Self.height(drawn(waiting: "Signing in to forum.example…"), size: .large, width: 900),
-            Self.height(drawn(refusal: (host: "forum.example", key: "account.source.boards.unread")), size: .large, width: 900),
-            Self.height(drawn(notice: Self.long), size: .large, width: 900),
+            Self.height(drawn(), size: size, width: width),
+            Self.height(drawn(waiting: "Signing in to forum.example…"), size: size, width: width),
+            Self.height(drawn(refusal: (host: "forum.example", key: "account.source.boards.unread")), size: size, width: width),
+            Self.height(drawn(notice: Self.long), size: size, width: width),
+            Self.height(drawn(waiting: Self.long, refusal: (host: "forum.example", key: "account.source.boards.unread"),
+                              notice: Self.long), size: size, width: width),
         ])
         #expect(heights.count == 1, "one height, got \(heights.sorted())")
     }
@@ -285,6 +292,24 @@ struct OneHeightTests {
         #expect(place(Self.note(body: "", attachments: pictures, sensitive: true, spoiler: "Weather")) == .slot)
         #expect(place(Self.note(body: "", attachments: pictures), inFull: true) == .slot, "the thread keeps its layout")
         #expect(place(Self.note(body: "")) == nil)
+    }
+
+    @Test("A board's or a list's name is one line, and two held open at the accessibility sizes")
+    func pickNameLines() {
+        #expect(PickName.lines(at: .xxxLarge) == 1)
+        #expect(PickName.lines(at: .accessibility1) == 2)
+    }
+
+    @Test("A source's detail says every sentence its row cut, light and dark", arguments: [ColorScheme.light, .dark])
+    func standingDraws(_ scheme: ColorScheme) throws {
+        let standing = SourceStanding(lines: ["Signing in…", Self.long, "Its password was not forgotten."])
+        for size in [DynamicTypeSize.large, .accessibility5] {
+            let renderer = ImageRenderer(
+                content: standing.environment(\.colorScheme, scheme).dynamicTypeSize(size).frame(width: 360)
+            )
+            let image = try #require(renderer.cgImage)
+            #expect(image.height > 0)
+        }
     }
 
     @Test("A spread draws the one on top first and the rest in turning order")

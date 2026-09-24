@@ -668,7 +668,6 @@
 "account.sources.marks"          = "A row carries only the marks its own server has: sign in, change boards or lists, clear what it left here, and remove it.";
 /* #69 — what may be done on a source, said on its row and explained once for the list. */
 "account.sources.writing"        = "A row also says what may be done on that source: read, read and write, or read only where the protocol has no writing in Fediqo at all. Write refused means a write was turned away; sign in to that source again.";
-"account.sources.writing.line" = "Each row says what may be done on it.";
 "account.source.writing.never"   = "read only";
 "account.source.writing.read"    = "read";
 "account.source.writing.write"   = "read and write";
