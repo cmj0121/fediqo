@@ -56,6 +56,9 @@ final class ShellPlayback {
     /// The source whose post the playing file belongs to, which it is listed under.
     @ObservationIgnored private var source: String?
 
+    /// Builds the player for a file. The system's own; a test hands in one that reaches nothing.
+    @ObservationIgnored var makePlayer: @MainActor (AVPlayerItem) -> AVPlayer = { AVPlayer(playerItem: $0) }
+
     /// The player for this card, where this card is the thing that is playing.
     ///
     /// The whole question in one call, because a view has no other use for either half: a player
@@ -113,7 +116,7 @@ final class ShellPlayback {
         let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration =
             playing.stage == .viewer ? Self.viewerBuffer : Self.rowBuffer
-        let made = AVPlayer(playerItem: item)
+        let made = makePlayer(item)
         // A film in a list starts quiet. Nobody reading a page of posts asked for sound out of
         // one of them, and a 96pt square has nowhere to put the control that turns it down.
         made.isMuted = playing.stage == .row

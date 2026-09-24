@@ -1,3 +1,4 @@
+import AVFoundation
 import FediqoCore
 import Foundation
 import SwiftUI
@@ -34,7 +35,7 @@ struct ActivityTests {
     @Test("A request is recorded by its host and a word, and nothing past the host reaches a line")
     func onlyTheHost() async throws {
         let work = SourceWork()
-        let address = "https://one.example/api/v1/timelines/list/42?max_id=9&access_token=s3cret"
+        let address = "https://one.example/api/v1/timelines/list/987654?max_id=9&access_token=s3cret"
         let client = WatchedHTTP(FixtureHTTP([address: .text("[]")]), for: .timeline, in: work)
         _ = try await client.data(from: URL(string: address)!)
         let act = try #require(work.record.first)
@@ -43,7 +44,7 @@ struct ActivityTests {
         for language in [DummyLanguage.english, .taiwanese] {
             let said = [act.source, act.purposeText(language: language), act.time(language: language),
                         act.spoken(language: language)].joined(separator: " ")
-            for leak in ["/api", "timelines", "42", "max_id", "s3cret", "https"] {
+            for leak in ["/api", "timelines", "987654", "max_id", "s3cret", "https"] {
                 #expect(!said.contains(leak), "\(leak) reached a line in \(language)")
             }
         }
@@ -68,23 +69,39 @@ struct ActivityTests {
     func thePageFollows() async {
         let work = SourceWork()
         work.note(host: Self.source, for: .page)
-        #expect(await spun { work.acts.map(\.source) == [Self.source] }, "the page never saw it")
+        #expect(await spun { work.log.acts.map(\.source) == [Self.source] }, "the page never saw it")
         work.note(host: "two.example", for: .page)
-        #expect(await spun { work.acts.count == 2 })
+        #expect(await spun { work.log.acts.count == 2 })
     }
 
-    @Test("The record is bounded, drops the oldest first, and says how many went")
-    func bounded() async {
-        let work = SourceWork()
-        for index in 0..<(SourceWork.kept + 3) {
-            work.note(host: "h\(index).example", for: .picture)
+    @Test("The record is bounded, cut in one chunk past its bound, and counts what went")
+    func bounded() {
+        let log = SourceRecord()
+        let start = Date(timeIntervalSince1970: 0)
+        func acts(_ range: Range<Int>) -> [SourceAct] {
+            range.map { SourceAct(id: $0, reached: "h\($0 % 3).example", purpose: .picture, at: start) }
         }
-        let record = work.record
-        #expect(record.count == SourceWork.kept)
-        #expect(record.first?.source == "h3.example")
-        #expect(record.last?.source == "h\(SourceWork.kept + 2).example")
-        #expect(await spun { work.dropped == 3 })
+        log.append(acts(0..<SourceRecord.kept))
+        #expect(log.acts.count == SourceRecord.kept, "nothing goes up to the bound")
+        #expect(log.dropped == 0)
+        log.append(acts(SourceRecord.kept..<(SourceRecord.kept + 3)))
+        #expect(log.acts.count == SourceRecord.trimmedTo)
+        #expect(log.dropped == SourceRecord.kept + 3 - SourceRecord.trimmedTo)
+        #expect(log.acts.first?.id == SourceRecord.kept + 3 - SourceRecord.trimmedTo, "the oldest went first")
+        #expect(log.acts.last?.id == SourceRecord.kept + 2)
+        #expect(log.listed(from: "h0.example").allSatisfy { $0.source == "h0.example" })
+        #expect(log.listed(from: "h0.example").count + log.listed(from: "h1.example").count
+            + log.listed(from: "h2.example").count == SourceRecord.trimmedTo, "the index was cut with it")
         #expect(L10n.count("activity.dropped", 3, language: .english).contains("3"))
+    }
+
+    @Test("An act with no host reached nowhere, and is not written")
+    func noHost() {
+        let work = SourceWork()
+        work.note(host: "", for: .video, source: Self.source)
+        let token = work.begin(host: "", for: .timeline)
+        work.end(token)
+        #expect(work.record.isEmpty)
     }
 
     // MARK: - Newest first, and one source
@@ -92,17 +109,27 @@ struct ActivityTests {
     @Test("Lines are newest first, and narrowing to one source shows its lines and no other")
     func narrowing() {
         let start = Date(timeIntervalSince1970: 1_000)
-        let acts = [
+        let log = SourceRecord()
+        log.append([
             SourceAct(id: 1, reached: "one.example", purpose: .timeline, at: start),
             SourceAct(id: 2, reached: "cdn.example", pointedBy: "One.Example", purpose: .picture, at: start),
+        ])
+        log.append([
             SourceAct(id: 3, reached: "two.example", purpose: .conversation, at: start.addingTimeInterval(1)),
             SourceAct(id: 4, reached: "one.example", purpose: .search, at: start.addingTimeInterval(2)),
-        ]
-        #expect(SourceAct.listed(acts).map(\.id) == [4, 3, 2, 1])
-        #expect(SourceAct.listed(acts, from: "one.example").map(\.id) == [4, 2, 1])
-        #expect(SourceAct.listed(acts, from: "TWO.example").map(\.id) == [3])
-        #expect(SourceAct.listed(acts, from: "cdn.example").isEmpty, "a pointed-to host is not a source")
-        #expect(SourceAct.sources(in: acts) == ["one.example", "two.example"])
+        ])
+        #expect(log.listed().map(\.id) == [4, 3, 2, 1])
+        #expect(log.listed(from: "one.example").map(\.id) == [4, 2, 1])
+        #expect(log.listed(from: "TWO.example").map(\.id) == [3])
+        #expect(log.listed(from: "cdn.example").isEmpty, "a pointed-to host is not a source")
+        #expect(log.sources == ["one.example", "two.example"])
+    }
+
+    @Test("A chosen source the record no longer holds is let go of")
+    func aChoiceThatWent() {
+        #expect(ActivityPanel.stillChosen("one.example", among: ["one.example", "two.example"]) == "one.example")
+        #expect(ActivityPanel.stillChosen("gone.example", among: ["one.example"]) == nil)
+        #expect(ActivityPanel.stillChosen(nil, among: ["one.example"]) == nil)
     }
 
     // MARK: - Who it is listed under
@@ -144,11 +171,31 @@ struct ActivityTests {
         let reader = ShellReader()
         reader.work = work
         #expect(reader.open(URL(string: "https://blog.example/2026/09/a-post?ref=x")!, from: Self.source))
-        reader.leaving(for: URL(string: "https://blog.example/2026/09/a-post?ref=x")!)
-        reader.leaving(for: URL(string: "https://elsewhere.example/moved")!)
+        // What the web view asks as it loads: the page, a frame inside it, a refused move, a
+        // redirect onward.
+        #expect(reader.decide(URL(string: "https://blog.example/2026/09/a-post?ref=x")!, mainFrame: true))
+        #expect(reader.decide(URL(string: "https://ads.example/frame")!, mainFrame: false))
+        #expect(!reader.decide(URL(string: "http://plain.example/")!, mainFrame: true))
+        #expect(reader.reading?.refused == true, "a refused move of the page is said")
+        #expect(reader.decide(URL(string: "https://elsewhere.example/moved")!, mainFrame: true))
         #expect(Self.record(work) == [
             "one.example blog.example page", "one.example elsewhere.example page",
-        ])
+        ], "a frame inside the page, and a refused move, are not the page")
+    }
+
+    @Test("A video handed to the player is listed under the source of its post")
+    func aVideo() {
+        let work = SourceWork()
+        let playback = ShellPlayback()
+        playback.work = work
+        // A player that is never given the file, so nothing is fetched.
+        playback.makePlayer = { _ in AVPlayer() }
+        #expect(playback.toggle(
+            URL(string: "https://media.invalid/v/1.mp4?token=x"), of: "post", on: .row, from: "One.Example"
+        ))
+        #expect(Self.record(work) == ["one.example media.invalid video"])
+        playback.stop()
+        #expect(Self.record(work).count == 1, "stopping is not an act")
     }
 
     @Test("Reading a timeline is recorded under its source", .timeLimit(.minutes(1)))

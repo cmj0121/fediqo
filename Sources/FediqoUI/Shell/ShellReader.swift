@@ -120,11 +120,23 @@ final class ShellReader {
         return true
     }
 
-    /// The main frame is about to load `url`, as the reader was allowed to: written to the run's
-    /// record under the source the reading was opened from (#218). What the page itself pulls in
-    /// beside it is WebKit's, and is not seen here.
-    func leaving(for url: URL) {
-        work.note(host: url.host() ?? "", for: .page, source: reading?.source)
+    /// Whether the web view may go to `url`, and what that means for the reader: a main-frame
+    /// move that is refused is said, and one that is allowed is written to the run's record under
+    /// the source the reading was opened from (#218).
+    ///
+    /// **Told, where the refusal is the reader's own press.** A subframe going somewhere is the
+    /// page's business and a notice about it would be this app narrating a stranger's markup; the
+    /// main frame is the page the reader is looking at. What the page pulls in beside it — a
+    /// subframe, a picture, a script — is WebKit's, and is neither said nor recorded here.
+    func decide(_ url: URL?, mainFrame: Bool) -> Bool {
+        let allowed = url.map(Host.allowsFetch) ?? false
+        guard mainFrame else { return allowed }
+        if allowed, let url {
+            work.note(host: url.host() ?? "", for: .page, source: reading?.source)
+        } else {
+            refuse()
+        }
+        return allowed
     }
 
     /// The page moved, and the chrome follows it. See `ShellReading.host`.
@@ -388,16 +400,13 @@ private struct LinkWebView {
             decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
         ) {
             MainActor.assumeIsolated {
-                let allowed = navigationAction.request.url.map(Host.allowsFetch) ?? false
-                // **Told, where the refusal is the reader's own press.** A subframe going
-                // somewhere is the page's business and a notice about it would be this app
-                // narrating a stranger's markup; the main frame is the page the reader is
-                // looking at, and a `nil` target frame is a new window — the same press with a
-                // different attribute on it, and the one `createWebViewWith` below folds back
-                // into this view.
-                let main = navigationAction.targetFrame?.isMainFrame ?? true
-                if !allowed, main { reader.refuse() }
-                if allowed, main, let url = navigationAction.request.url { reader.leaving(for: url) }
+                // A `nil` target frame is a new window — the same press with a different
+                // attribute on it, and the one `createWebViewWith` below folds back into this
+                // view — so it is the main frame.
+                let allowed = reader.decide(
+                    navigationAction.request.url,
+                    mainFrame: navigationAction.targetFrame?.isMainFrame ?? true
+                )
                 decisionHandler(allowed ? .allow : .cancel)
             }
         }

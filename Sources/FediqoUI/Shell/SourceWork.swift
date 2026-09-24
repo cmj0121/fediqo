@@ -8,7 +8,7 @@ import os
 ///
 /// **Now, and this run's record beside it** (#218). An entry is made when a piece of work starts
 /// reaching a source and dropped when it ends — on success, on failure and on cancellation alike.
-/// Every start is also written to `acts`, the one record of what this run sent: which source,
+/// Every start is also written to `log`, the one record of what this run sent: which source,
 /// when, and what for. That record lives in this object's memory and nowhere else — never a
 /// file, a default or a store — so quitting the app is the whole of forgetting it (#219).
 ///
@@ -115,10 +115,10 @@ final class SourceWork {
     private struct Held: Sendable {
         var running: [Int: Running] = [:]
         var next = 0
-        /// This run's record, oldest first, and how many older ones were let go to keep it
-        /// bounded.
-        var acts: [SourceAct] = []
-        var dropped = 0
+        /// Acts written since the last copy onto the main actor, oldest first. Only these: the
+        /// record itself is the main actor's (`log`), so nothing under this lock grows with the
+        /// run and a request's way out never copies it.
+        var pending: [SourceAct] = []
         /// Whether a copy onto the main actor is already on its way, so a screenful of pictures
         /// starting at once asks for one and not forty.
         var publishing = false
@@ -129,17 +129,11 @@ final class SourceWork {
     /// What the page draws: everything running, as of the last copy onto the main actor.
     private(set) var running: [Int: Running] = [:]
 
-    /// This run's record as the activity page draws it (#218), oldest first, as of the last copy
-    /// onto the main actor. Kept apart from `running`, so a picture starting wakes the page that
-    /// reads the one it reads and not the other.
-    private(set) var acts: [SourceAct] = []
-    /// How many of the oldest acts were let go to hold `acts` to `kept`.
-    private(set) var dropped = 0
-
-    /// How many acts the record holds at most. Every one of a run's acts is kept up to here; past
-    /// it the oldest go first, and the page says how many went. A bound and not a working size: a
-    /// long day's reading is some thousands of acts, and nothing kept here may grow without end.
-    nonisolated static let kept = 10_000
+    /// This run's record as the activity page draws it (#218), as of the last copy onto the main
+    /// actor. An object of its own and not a property here, so it grows in place — a value would
+    /// be copied whole on every change — and so what observes it is the page that reads it and
+    /// not Preferences' section, which reads `running`.
+    @ObservationIgnored let log = SourceRecord()
 
     nonisolated init() {}
 
@@ -154,7 +148,7 @@ final class SourceWork {
         let (token, publish) = held.withLock { held -> (Token, Bool) in
             held.next += 1
             held.running[held.next] = entry
-            Self.record(&held, reached: host, source: source, purpose: purpose, at: now)
+            Self.write(&held, reached: host, source: source, purpose: purpose, at: now)
             return (Token(id: held.next), Self.claim(&held))
         }
         if publish { schedule() }
@@ -166,28 +160,28 @@ final class SourceWork {
     nonisolated func note(host: String, for purpose: Purpose, source: String? = nil) {
         let publish = held.withLock { held -> Bool in
             held.next += 1
-            Self.record(&held, reached: host, source: source, purpose: purpose, at: Date())
+            Self.write(&held, reached: host, source: source, purpose: purpose, at: Date())
             return Self.claim(&held)
         }
         if publish { schedule() }
     }
 
-    /// This run's record this instant, oldest first, read under the lock.
-    nonisolated var record: [SourceAct] {
-        held.withLock { $0.acts }
+    /// This run's record this instant, oldest first: whatever is still on its way is copied over
+    /// first.
+    var record: [SourceAct] {
+        publish()
+        return log.acts
     }
 
-    private nonisolated static func record(
+    /// An act with no host reached nowhere — a `file:` address, a malformed one — and is not
+    /// written.
+    private nonisolated static func write(
         _ held: inout Held, reached: String, source: String?, purpose: Purpose, at: Date
     ) {
-        held.acts.append(SourceAct(
+        guard !reached.isEmpty else { return }
+        held.pending.append(SourceAct(
             id: held.next, reached: reached, pointedBy: source, purpose: purpose, at: at
         ))
-        let over = held.acts.count - kept
-        if over > 0 {
-            held.acts.removeFirst(over)
-            held.dropped += over
-        }
     }
 
     nonisolated func end(_ token: Token) {
@@ -237,14 +231,14 @@ final class SourceWork {
     /// Copies what is running onto the main actor for the page. Assigned only when it differs:
     /// the section redraws on every assignment.
     private func publish() {
-        let (now, record, dropped) = held.withLock { held in
+        let (now, fresh) = held.withLock { held in
             held.publishing = false
-            return (held.running, held.acts, held.dropped)
+            let fresh = held.pending
+            held.pending = []
+            return (held.running, fresh)
         }
         if now != running { running = now }
-        // Compared by its ends: the record only grows at one and is cut at the other.
-        if record.last?.id != acts.last?.id || record.count != acts.count { acts = record }
-        if dropped != self.dropped { self.dropped = dropped }
+        if !fresh.isEmpty { log.append(fresh) }
     }
 }
 
@@ -402,17 +396,6 @@ struct SourceAct: Identifiable, Equatable, Sendable {
         return pointer.isEmpty ? reached.lowercased() : pointer
     }
 
-    /// Newest first, and only `source`'s where one is chosen. Ties in time keep the order they
-    /// were written in, newest first.
-    static func listed(_ acts: [SourceAct], from source: String? = nil) -> [SourceAct] {
-        let chosen = source.map { $0.lowercased() }
-        return acts.reversed().filter { chosen == nil || $0.source == chosen }
-    }
-
-    /// The sources the record holds acts for, in the order a picker lists them.
-    static func sources(in acts: [SourceAct]) -> [String] {
-        Set(acts.map(\.source)).sorted()
-    }
 
     /// When it left, as a clock reads it, in the shell's language.
     func time(language: DummyLanguage? = nil) -> String {
@@ -433,5 +416,54 @@ struct SourceAct: Identifiable, Equatable, Sendable {
             format: L10n.t("activity.row.spoken", language: language),
             source, purposeText(language: language), time(language: language)
         )
+    }
+}
+
+/// This run's record, on the main actor (#218): every act, oldest first, bounded, and indexed by
+/// source as it grows — so what the page draws is read off it and never computed from the whole
+/// record on a redraw.
+///
+/// **Bounded in chunks.** Past `kept` the oldest are let go down to `trimmedTo` in one cut, so the
+/// shift and the reindex are paid once per thousand acts rather than on every one; `dropped`
+/// counts every act let go.
+@MainActor
+@Observable
+final class SourceRecord {
+    /// How many acts are held at most. A bound and not a working size: a long day's reading is
+    /// some thousands of acts, and nothing held here may grow without end.
+    nonisolated static let kept = 10_000
+    /// What a cut past `kept` leaves.
+    nonisolated static let trimmedTo = 9_000
+
+    private(set) var acts: [SourceAct] = []
+    /// How many of the oldest acts were let go.
+    private(set) var dropped = 0
+    /// The sources the record holds acts for, in the order a picker lists them.
+    private(set) var sources: [String] = []
+    @ObservationIgnored private var bySource: [String: [SourceAct]] = [:]
+
+    nonisolated init() {}
+
+    func append(_ fresh: [SourceAct]) {
+        acts.append(contentsOf: fresh)
+        for act in fresh {
+            if bySource[act.source] == nil {
+                let at = sources.firstIndex { $0 > act.source } ?? sources.endIndex
+                sources.insert(act.source, at: at)
+            }
+            bySource[act.source, default: []].append(act)
+        }
+        guard acts.count > Self.kept else { return }
+        let cut = acts.count - Self.trimmedTo
+        acts.removeFirst(cut)
+        dropped += cut
+        bySource = Dictionary(grouping: acts, by: \.source)
+        sources = bySource.keys.sorted()
+    }
+
+    /// Newest first, and only `source`'s where one is chosen.
+    func listed(from source: String? = nil) -> ReversedCollection<[SourceAct]> {
+        guard let source else { return acts.reversed() }
+        return (bySource[source.lowercased()] ?? []).reversed()
     }
 }
