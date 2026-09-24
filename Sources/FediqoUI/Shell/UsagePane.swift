@@ -181,6 +181,7 @@ struct UsagePane: View {
                 breakdown(session)
             case .keep:
                 keep
+                SpanSection(session: session)
                 GoneSection(session: session)
             case .copies:
                 copies(session)
@@ -189,7 +190,8 @@ struct UsagePane: View {
     }
 
     /// The list of sources, or the one the reader entered. A source removed while its detail is
-    /// open leaves the list in its place.
+    /// open leaves the list in its place — unless its posts stayed (#250), when its detail is
+    /// what a removed source holds.
     @ViewBuilder
     private func sources(_ session: ShellSession) -> some View {
         if session.usageDetailShown, let host = session.usageOpened,
@@ -198,6 +200,9 @@ struct UsagePane: View {
                 session: session, source: source, catalogue: catalogues?[host],
                 cataloguesRead: catalogues != nil, onDisk: onDisk
             )
+        } else if session.usageDetailShown, let host = session.usageOpened,
+                  let source = UsageSourceList.removed(session).first(where: { $0.host == host }) {
+            UsageRemovedSourceDetail(session: session, source: source)
         } else {
             UsageSourceList(session: session, onDisk: onDisk, returning: session.usageReturning)
         }

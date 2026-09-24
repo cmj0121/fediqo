@@ -105,6 +105,13 @@ final class DummyPrefs {
         didSet { write("goneDays", goneDays.map(String.init) ?? "") }
     }
 
+    /// Whether a removed source's posts stay on this device (#250); false, the default, lets
+    /// them go with it, as they always did. Removing honours this without asking again, and the
+    /// question before it says which will happen.
+    var removedPostsStay: Bool {
+        didSet { write("removedPostsStay", removedPostsStay ? "1" : "") }
+    }
+
     /// The last day every timeline shows (#22); nil, the default, shows up to now.
     var latestDate: LatestDate? {
         didSet { write("latestDate", latestDate?.text ?? "") }
@@ -123,7 +130,7 @@ final class DummyPrefs {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        (keepMonths, goneDays, latestDate, askMinutes, language, theme, fontSize) = Self.read(defaults)
+        (keepMonths, goneDays, removedPostsStay, latestDate, askMinutes, language, theme, fontSize) = Self.read(defaults)
         L10n.language = language
     }
 
@@ -133,6 +140,7 @@ final class DummyPrefs {
         let read = Self.read(defaults)
         if keepMonths != read.keepMonths { keepMonths = read.keepMonths }
         if goneDays != read.goneDays { goneDays = read.goneDays }
+        if removedPostsStay != read.removedPostsStay { removedPostsStay = read.removedPostsStay }
         if latestDate != read.latestDate { latestDate = read.latestDate }
         if askMinutes != read.askMinutes { askMinutes = read.askMinutes }
         if language != read.language { language = read.language }
@@ -141,18 +149,19 @@ final class DummyPrefs {
     }
 
     private static func read(_ defaults: UserDefaults) -> (
-        keepMonths: Int?, goneDays: Int?, latestDate: LatestDate?, askMinutes: Int,
+        keepMonths: Int?, goneDays: Int?, removedPostsStay: Bool, latestDate: LatestDate?, askMinutes: Int,
         language: DummyLanguage, theme: DummyTheme, fontSize: DummyFontSize
     ) {
         func read(_ name: String) -> String? { defaults.string(forKey: Self.prefix + name) }
         let keepMonths = Int(read("keepMonths") ?? "").flatMap { $0 > 0 ? $0 : nil }
         let goneDays = Int(read("goneDays") ?? "").flatMap { $0 > 0 ? $0 : nil }
+        let removedPostsStay = read("removedPostsStay") == "1"
         let latestDate = LatestDate(read("latestDate") ?? "")
         let askMinutes = Int(read("askMinutes") ?? "").flatMap { Self.waits.contains($0) ? $0 : nil } ?? 1
         let language = DummyLanguage(rawValue: read("language") ?? "") ?? .system
         let theme = DummyTheme(rawValue: read("theme") ?? "") ?? .system
         let fontSize = DummyFontSize(rawValue: read("fontSize") ?? "") ?? .standard
-        return (keepMonths, goneDays, latestDate, askMinutes, language, theme, fontSize)
+        return (keepMonths, goneDays, removedPostsStay, latestDate, askMinutes, language, theme, fontSize)
     }
 
     private static let prefix = "fediqo.dummy."

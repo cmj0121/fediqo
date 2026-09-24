@@ -334,7 +334,7 @@ public struct FediqoRootView: View {
             }
             // Remove's question, Clear's, and the notice that a server ended a sign-in: each a
             // modifier of its own rather than spelled here. See `HostQuestion` for why.
-            .modifier(HostQuestion.remove(session))
+            .modifier(HostQuestion.remove(session, prefs: prefs))
             .modifier(HostQuestion.clear(session))
             .modifier(EndedSignInNotice(session: session))
             .modifier(ActivitySheet(session: session))
@@ -412,6 +412,9 @@ public struct FediqoRootView: View {
             .environment(\.shellReader, linkReader)
             .environment(\.shellTags, tags)
             .environment(\.shellQuotes, quotes)
+            // The hosts still here, handed down once for the same reason: a row from a source
+            // since removed says so wherever it is drawn (#250), and only the root knows which.
+            .environment(\.shellSourcesHere, Set(session.sources.map(\.host)))
             .environment(\.locale, prefs.language.locale)
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
@@ -1747,13 +1750,20 @@ private struct HostQuestion: ViewModifier {
     /// It is asked at all because Remove takes the board picks the reader made, and
     /// `ShellSession.clear`'s comment is the argument: pictures come back by themselves, a pick
     /// of eight boards out of forty does not.
-    static func remove(_ session: ShellSession) -> HostQuestion {
+    ///
+    /// **What happens to its posts is `prefs`' standing choice** (#250), read when the question
+    /// is asked and again when it is answered, so the line and the act agree: the reader is not
+    /// asked twice, and the one line says which of the two it will be.
+    static func remove(_ session: ShellSession, prefs: DummyPrefs) -> HostQuestion {
         HostQuestion(
             session: session, asking: \.removing,
             question: { host in
-                ShellQuestion.remove(host: host, boards: FediqoRootView.boards(of: host, in: session.sources))
+                ShellQuestion.remove(
+                    host: host, boards: FediqoRootView.boards(of: host, in: session.sources),
+                    postsStay: prefs.removedPostsStay
+                )
             },
-            act: { await session.remove(host: $0) }
+            act: { await session.remove(host: $0, keepingPosts: prefs.removedPostsStay) }
         )
     }
 
