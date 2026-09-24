@@ -95,7 +95,9 @@ public struct FediqoRootView: View {
         measureStore: (@Sendable () async -> Int)? = nil,
         storeIsNewer: Bool = false,
         storeNoticeSeen: (@MainActor () -> Void)? = nil,
-        carrier: (any StoreCarrier)? = nil
+        carrier: (any StoreCarrier)? = nil,
+        nearby: (any NearbyLink)? = nil,
+        deviceName: String = ""
     ) {
         let session = ShellSession(
             http: http, store: store, forums: forums, mastodon: mastodon,
@@ -103,6 +105,8 @@ public struct FediqoRootView: View {
         )
         session.persist = persist
         session.carrier = carrier
+        session.nearbyLink = nearby
+        session.deviceName = deviceName
         session.measureStore = measureStore
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)

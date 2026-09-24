@@ -140,6 +140,13 @@ final class ShellSession {
     let carry: ShellCarry
     /// The file picker for a read back is up.
     var carryPicking = false
+    /// The radios a move nearby goes over (#253), or nothing where the app handed none in — a
+    /// preview, a test — and then Preferences offers neither press.
+    @ObservationIgnored var nearbyLink: (any NearbyLink)?
+    /// What this device calls itself, advertised nearby and written into a package's header.
+    @ObservationIgnored var deviceName = ""
+    /// The move-nearby flow, its steps and its questions.
+    let nearby: ShellNearby
 
     /// The Mastodon whose sign-in has been pressed and whose scope question has not been answered
     /// yet, or nothing (#69).
@@ -651,6 +658,7 @@ final class ShellSession {
         self.http = http
         timelineStore = timelines
         carry = ShellCarry(work: work)
+        nearby = ShellNearby(work: work)
         self.store = store
         self.pictures = pictures
         self.emojis = emojis

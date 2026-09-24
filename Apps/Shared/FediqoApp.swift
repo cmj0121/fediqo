@@ -83,7 +83,7 @@ final class Launch {
 
     /// What this device calls itself, written into a take-away's header so the device it came
     /// from can be named when it is read back.
-    private static var deviceName: String {
+    static var deviceName: String {
         #if os(macOS)
         Host.current().localizedName ?? "Mac"
         #else
@@ -196,7 +196,8 @@ struct FediqoApp: App {
                 measureStore: measureStore,
                 storeIsNewer: Launch.shared.storeIsNewer,
                 storeNoticeSeen: { Launch.shared.storeIsNewer = false },
-                carrier: Launch.shared.carrier
+                carrier: Launch.shared.carrier,
+                nearby: NWNearbyLink(), deviceName: Launch.deviceName
             )
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background {

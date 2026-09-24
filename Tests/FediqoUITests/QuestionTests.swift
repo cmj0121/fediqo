@@ -40,6 +40,12 @@ struct QuestionTests {
             ShellQuestion.carryRefused(.package(.altered), language: language),
             ShellQuestion.carryRefused(.noRoom(needed: 2_000_000, free: 1_000), language: language),
             ShellQuestion.carryDone(.readBack(carried), language: language),
+            ShellQuestion.nearbyAsk(.init(offer: nearby, peer: "a tablet", held: false, receiving: true), language: language),
+            ShellQuestion.nearbyAsk(.init(offer: nearby, peer: "a tablet", held: true, receiving: true), language: language),
+            ShellQuestion.nearbyAsk(.init(offer: nearby, peer: "a tablet", held: false, receiving: false), language: language),
+            ShellQuestion.nearbyRefused(.notAllowed, language: language),
+            ShellQuestion.nearbyRefused(.wrongCode, language: language),
+            ShellQuestion.nearbyDone(carried, peer: "a tablet", language: language),
         ] + clearKeys.map { ShellQuestion.clear(host: "a.example", detailKey: $0, language: language) }
     }
 
@@ -49,6 +55,9 @@ struct QuestionTests {
         posts: 12, timelines: 2, takenAt: Date(timeIntervalSince1970: 1_800_000_000), withPictures: true,
         bytes: 3_000, hasSecrets: true, device: "a laptop", appVersion: "0.7.0", entryCount: 5
     )
+
+    /// What a device nearby offers, as both screens' question is asked from it.
+    private static let nearby = NearbyOffer(id: "o", summary: carried, fileBytes: 3_100)
 
     private static let clearKeys = [
         SourceRow.clearDetailKey(hasPassword: false, reachedSignIn: false),

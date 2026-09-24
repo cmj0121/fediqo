@@ -75,6 +75,9 @@ final class SourceWork {
         case takeAway
         /// A take-away read back onto this device (#247), listed under `thisDevice` likewise.
         case readBack
+        /// What this device holds, moved to or from a device nearby (#253, #6): listed under the
+        /// name that device gave itself, which is the one place it went or came from.
+        case nearbyMove
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -206,6 +209,13 @@ final class SourceWork {
             return Self.claim(&held)
         }
         if publish { schedule() }
+    }
+
+    /// A move to or from the device nearby named `peer` (#253): an admission of its own, listed
+    /// under that device's name, so the record shows exactly one line and where it went. Ended
+    /// with `end` on every way out.
+    nonisolated func beginNearby(peer: String) -> Token {
+        begin(host: peer, for: .nearbyMove)
     }
 
     // MARK: - Whose it is (#220)
