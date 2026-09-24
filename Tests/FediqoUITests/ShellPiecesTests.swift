@@ -223,7 +223,7 @@ struct ShellPiecesTests {
         #expect(opened.value == ["two", "one"])
     }
 
-    @Test("At the accessibility sizes a row's figure goes under its title")
+    @Test("At the accessibility sizes a row's figure leaves the title's side for the line under it")
     func figureStacks() {
         #expect(!ShellListRowFace<Image>.stacks(at: .xxxLarge))
         #expect(ShellListRowFace<Image>.stacks(at: .accessibility1))

@@ -18,7 +18,7 @@ enum ShellListEntry {
 /// and a way in to the rest. The rest is the row's detail, and entering the row opens it.
 ///
 ///     [mark]  title                              figure  ›  [control]
-///             a brief line, two at most
+///             one brief line, cut at its end
 ///
 /// **Entering, three ways, one outcome.** A press lights the row and a second press opens it
 /// (`ShellListEntry.pressed`). Return opens the lit row, and ↑ and ↓ hand the list a step where
@@ -185,8 +185,15 @@ extension ShellListRow where Control == EmptyView {
 /// What a row shows, apart from how it is entered: small enough for a type checker, and drawn by
 /// a test without a list round it.
 ///
-/// **At the accessibility sizes the figure goes under the title**, where it has the row's width,
-/// rather than taking the width the title needs beside it.
+/// **One height, whatever it holds** (#243, rule 6 of #242). A row is its title on one line and
+/// one brief line under it, both cut where they run long — the whole of either is in the row's
+/// detail. A row with no brief keeps the brief's line open, empty, so it stands as tall as its
+/// neighbours; the only thing that makes a row taller is the reader's type size, and it makes
+/// every row taller alike.
+///
+/// **At the accessibility sizes the figure leads the brief line** rather than standing beside the
+/// title, where it would take the width the title needs — so the row is still two lines, only
+/// larger ones, and the figure is never the part that is cut.
 struct ShellListRowFace<Mark: View>: View {
     let title: String
     let brief: String?
@@ -198,7 +205,7 @@ struct ShellListRowFace<Mark: View>: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @ShellMetric(relativeTo: .callout) private var side: CGFloat = 28
 
-    /// Whether the figure is stacked under the title rather than set beside it.
+    /// Whether the figure leads the brief line rather than standing beside the title.
     static func stacks(at size: DynamicTypeSize) -> Bool {
         size.isAccessibilitySize
     }
@@ -247,14 +254,36 @@ struct ShellListRowFace<Mark: View>: View {
             Text(title)
                 .shellFont(.name)
                 .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme))
-                .lineLimit(2)
-            if let brief {
-                Text(brief)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(2)
-            }
-            if stacked { figureText }
+                .lineLimit(1)
+            briefLine(stacked: stacked)
+        }
+    }
+
+    /// The one brief line: the figure first at the accessibility sizes, then the brief, cut at its
+    /// end. Held open, empty and unspoken, where there is nothing to put on it.
+    @ViewBuilder
+    private func briefLine(stacked: Bool) -> some View {
+        if let line = Self.brief(brief, figure: stacked ? figure : nil, figureFont: ShellType.reading.font(at: typeSize)) {
+            line
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .lineLimit(1)
+        } else {
+            Text(verbatim: " ")
+                .shellFont(.meta)
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// What the brief line reads: the figure in its own reading face, then the brief, or either
+    /// alone — and nothing where the row has neither.
+    static func brief(_ brief: String?, figure: String?, figureFont: Font) -> Text? {
+        let figured = figure.map { Text(verbatim: $0).font(figureFont) }
+        switch (figured, brief) {
+        case let (figured?, brief?): return figured + Text(verbatim: " \u{00B7} ") + Text(verbatim: brief)
+        case let (figured?, nil): return figured
+        case let (nil, brief?): return Text(verbatim: brief)
+        case (nil, nil): return nil
         }
     }
 }
