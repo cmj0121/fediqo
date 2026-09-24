@@ -70,6 +70,7 @@ extension ShellSession {
         guard !went.isNone else { return went }
         await reloadFromStore()
         await persist?()
+        await readStoreBytes()
         return went
     }
 }

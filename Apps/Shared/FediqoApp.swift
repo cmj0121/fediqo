@@ -158,12 +158,18 @@ struct FediqoApp: App {
     #endif
     @Environment(\.scenePhase) private var scenePhase
 
+    /// The index's one measure on disk (#194), or nothing where this run has no index.
+    private var measureStore: (@Sendable () async -> Int)? {
+        guard let file = Launch.shared.file else { return nil }
+        return { file.bytesOnDisk() }
+    }
+
     var body: some Scene {
         WindowGroup {
             FediqoRootView(
                 store: Launch.shared.store, forums: Launch.shared.forums,
                 mastodon: Launch.shared.mastodon, persist: save,
-                measureStore: Launch.shared.file.map { file in { file.bytesOnDisk() } },
+                measureStore: measureStore,
                 storeIsNewer: Launch.shared.storeIsNewer,
                 storeNoticeSeen: { Launch.shared.storeIsNewer = false }
             )

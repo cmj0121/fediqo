@@ -118,7 +118,7 @@ public struct StoreFile: Sendable {
         let base = "index-unreadable-\(formatter.string(from: now))-\(random)"
         let aside = directory.appendingPathComponent(base + ".sqlite")
         try manager.moveItem(at: index, to: aside)
-        for suffix in ["-journal", "-wal", "-shm"] {
+        for suffix in sidecars {
             let sidecar = directory.appendingPathComponent(indexName + suffix)
             if manager.fileExists(atPath: sidecar.path) {
                 try manager.moveItem(at: sidecar, to: directory.appendingPathComponent(base + ".sqlite" + suffix))
@@ -128,6 +128,8 @@ public struct StoreFile: Sendable {
     }
 
     private static let indexName = "index.sqlite"
+    /// What SQLite may leave beside the index: moved with it, and weighed with it.
+    private static let sidecars = ["-journal", "-wal", "-shm"]
 
     /// What the index weighs on disk right now: the file and any journal SQLite left beside it
     /// (#194). **The one measure of the store's size**: Usage's figure is this, and a limit on
@@ -140,7 +142,7 @@ public struct StoreFile: Sendable {
     /// `bytesOnDisk()` for the index at `path`, and what SQLite keeps beside it.
     static func bytesOnDisk(indexAt path: String) -> Int {
         guard path != ":memory:", !path.isEmpty else { return 0 }
-        return ([""] + ["-journal", "-wal", "-shm"]).reduce(0) { sum, suffix in
+        return ([""] + sidecars).reduce(0) { sum, suffix in
             let values = try? URL(fileURLWithPath: path + suffix).resourceValues(forKeys: [.fileSizeKey])
             return sum + (values?.fileSize ?? 0)
         }
