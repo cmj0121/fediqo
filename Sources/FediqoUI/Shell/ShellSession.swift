@@ -464,7 +464,7 @@ final class ShellSession {
     /// of the store's size** (#194): read through `measureStore`, which the app sets to the
     /// index file's own measure, so what Usage shows is what a limit on the store will be held
     /// to. Measured after a drop by time lands, and whenever Usage asks.
-    private(set) var storeBytes: Int?
+    var storeBytes: Int?
 
     /// Measures the index on disk. Set by the app beside `persist`; nil where this run has no
     /// index, and then nothing is shown for it.
@@ -477,6 +477,58 @@ final class ShellSession {
         guard let measureStore else { return }
         storeBytes = await measureStore()
     }
+
+    /// Gives the index back the room that rows let go of left in it, so `measureStore` sees them
+    /// go (#249). Set by the app beside `measureStore`; nil where this run has no index. Throws
+    /// where the rebuild did not happen — a full disk, a run cancelled — and then the file keeps
+    /// its size until it is asked again.
+    @ObservationIgnored var compactStore: (@Sendable () async throws -> Void)?
+
+    /// What the rows held weigh, whatever the file does (`StoreFile.bytesHeld`): what the room
+    /// check judges each round by, since `measureStore` only moves once `compactStore` has run.
+    /// nil where this run has no index.
+    @ObservationIgnored var weighStore: (@Sendable () async -> Int)?
+
+    /// The room this device gives the store and the picture copies together (#249), in bytes,
+    /// or nil for no limit — the default. `KeepingWithinRoom` hands it in from the preferences;
+    /// the store is judged by it at launch, when it changes, and after each landing.
+    var roomBytes: Int?
+
+    /// Set while an export or an import of the store runs (#247): the room limit does nothing
+    /// meanwhile, so nothing goes out from under a copy being taken or put back. Cleared, the
+    /// check runs again. **The contract**: set it before the first byte moves, clear it after
+    /// the last, and clear it on every way out, a failure included — `ShellCarry` keeps it. A
+    /// move this session makes itself — a remove, a clear, a drop, a span let go — holds through
+    /// `holdingStill(_:)` instead, which nests. **Only the room limit honours it**: the months
+    /// limit, a remove, a span let go and every press of the person's own go ahead regardless,
+    /// because each is the person's act and not a check running by itself.
+    var holdsStill = false {
+        didSet { if !holdsStill, oldValue { roomMayBeReached() } }
+    }
+
+    /// How many of this session's own moves are running (`holdingStill(_:)`).
+    @ObservationIgnored var holding = 0
+
+    /// The check the last landing asked for, waiting out `roomDebounce`; nil where none waits.
+    @ObservationIgnored var roomCheck: Task<Void, Never>?
+
+    /// The room check is on its way: a landing meanwhile asks for the next, never a second.
+    @ObservationIgnored var roomChecking = false
+
+    /// A check was asked for while one ran; the one running asks again as it ends.
+    @ObservationIgnored var roomAskedAgain = false
+
+    /// The account has been read from `limitStore` this run; until it has, a line recorded is
+    /// written after the read rather than over it.
+    @ObservationIgnored var limitAccountLoaded = false
+
+    /// The limits' account (#251), newest first: each time a limit acted, which, when, how many
+    /// posts and picture copies went, and from which sources. Read from `limitStore` at launch.
+    var limitAccount: [LimitAct] = []
+
+    /// Where the account outlives a relaunch. Set by the app beside `persist`; nil in a run with
+    /// no index, and then the lines live for the run.
+    @ObservationIgnored var limitStore: (any LimitAccountStore)?
 
     /// Which purpose Usage is showing. Tab rotates it the way it rotates timeline queries.
     var usagePurpose: UsagePane.Purpose = .source
@@ -698,6 +750,8 @@ final class ShellSession {
             let from = (note.object as AnyObject?).map(ObjectIdentifier.init)
             MainActor.assumeIsolated { self?.allowancesChanged(by: from) }
         }
+        // Last, once every property is set: a take-away or a read back holds the room limit still (#249).
+        carry.holding = { [weak self] held in self?.holdsStill = held }
     }
 
     /// The watch on the person's list, taken off as this goes.
@@ -2204,7 +2258,11 @@ final class ShellSession {
         emojis.clear()
         pictures.disk?.trim()
         cleared += 1
-        await store.setRetention(months: prefs.keepMonths)
+        // The package's account rides with its store (#251): this device's lines give way to
+        // it, then the months limit has its turn on what was read back and writes its line as
+        // at a launch.
+        await replaceLimitAccount()
+        await keep(months: prefs.keepMonths)
         await reloadFromStore()
     }
 
@@ -2221,6 +2279,8 @@ final class ShellSession {
         await adopt()
         for await _ in changes {
             await adopt()
+            // A landing may have taken the store past its room (#249): asked, not measured, here.
+            roomMayBeReached()
         }
     }
 
@@ -2439,6 +2499,10 @@ final class ShellSession {
     /// staying on screen, so the pictures go without the generation bump that would make every
     /// one of them ask a host nothing may ask.
     func clear(host: String, keepingRows: Bool = false) async {
+        await holdingStill { await clearNow(host: host, keepingRows: keepingRows) }
+    }
+
+    private func clearNow(host: String, keepingRows: Bool) async {
         let host = host.lowercased()
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about. `remove`'s own line, for
@@ -2501,9 +2565,12 @@ final class ShellSession {
     /// the queue reaches it, so it stays dropped after a relaunch without a save. Bumps `cleared`
     /// for the emoji lines, as a Clear does.
     func dropCopies() {
+        holding += 1
         pictures.forgetAll()
         emojis.clear()
         cleared += 1
+        holding -= 1
+        roomMayBeReached()
     }
 
     /// Keeps only the latest `months` months, or everything where nil — the drop by time (#7).
@@ -2512,18 +2579,23 @@ final class ShellSession {
     /// something, the rows are read again and the store is written, so the drop holds after a
     /// relaunch; where it dropped nothing — forever, a wider window, a launch with nothing old —
     /// neither happens. Returns how many notes went.
+    ///
+    /// **What went is written into the limits' account** (#251): the months limit acted, when,
+    /// how many posts and from which sources — the one thing that can still be said of them.
     @discardableResult
     func keep(months: Int?, from now: Date = Date()) async -> Int {
-        let dropped = await store.setRetention(months: months, from: now)
-        guard dropped > 0 else { return 0 }
+        let went = await store.letGoBeyond(months: months, from: now)
+        guard went.posts > 0 else { return 0 }
         // The window cuts what is held aside too, and the count says so at once (#194).
         let all = await store.all()
         let held = await store.aside()
         adoptHeld(notes: all, aside: held)
         adoptedAside = await store.asideRevision
         await persist?()
+        try? await compactStore?()
         await readStoreBytes()
-        return dropped
+        await record(LimitAct(limit: .months, at: now, posts: went.posts, sources: went.sources))
+        return went.posts
     }
 
     /// An opening post just read, kept with its row in the store and saved (#154).
@@ -2823,6 +2895,10 @@ final class ShellSession {
     /// stay drawn from the store as they were, marked by the row as from a host no longer in
     /// `sources`.
     func remove(host raw: String, keepingPosts: Bool = false) async {
+        await holdingStill { await removeNow(host: raw, keepingPosts: keepingPosts) }
+    }
+
+    private func removeNow(host raw: String, keepingPosts: Bool) async {
         let host = raw.lowercased()
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about.

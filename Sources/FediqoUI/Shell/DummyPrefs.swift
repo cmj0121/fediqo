@@ -98,6 +98,12 @@ final class DummyPrefs {
         didSet { write("keepMonths", keepMonths.map(String.init) ?? "") }
     }
 
+    /// How much room this device gives the store and the picture copies together (#249), in
+    /// bytes; nil, the default, sets no limit. Past it the copies go first, then the oldest posts.
+    var roomBytes: Int? {
+        didSet { write("roomBytes", roomBytes.map(String.init) ?? "") }
+    }
+
     /// How many days a post its source deleted stays, marked, before it is let go (#179); nil, the
     /// default, keeps it until the reader says. The keep-for window above still wins where it is
     /// the shorter (`GoneWait`).
@@ -130,7 +136,7 @@ final class DummyPrefs {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        (keepMonths, goneDays, removedPostsStay, latestDate, askMinutes, language, theme, fontSize) = Self.read(defaults)
+        (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, language, theme, fontSize) = Self.read(defaults)
         L10n.language = language
     }
 
@@ -149,19 +155,20 @@ final class DummyPrefs {
     }
 
     private static func read(_ defaults: UserDefaults) -> (
-        keepMonths: Int?, goneDays: Int?, removedPostsStay: Bool, latestDate: LatestDate?, askMinutes: Int,
+        keepMonths: Int?, goneDays: Int?, roomBytes: Int?, removedPostsStay: Bool, latestDate: LatestDate?, askMinutes: Int,
         language: DummyLanguage, theme: DummyTheme, fontSize: DummyFontSize
     ) {
         func read(_ name: String) -> String? { defaults.string(forKey: Self.prefix + name) }
         let keepMonths = Int(read("keepMonths") ?? "").flatMap { $0 > 0 ? $0 : nil }
         let goneDays = Int(read("goneDays") ?? "").flatMap { $0 > 0 ? $0 : nil }
+        let roomBytes = Int(read("roomBytes") ?? "").flatMap { $0 > 0 ? $0 : nil }
         let removedPostsStay = read("removedPostsStay") == "1"
         let latestDate = LatestDate(read("latestDate") ?? "")
         let askMinutes = Int(read("askMinutes") ?? "").flatMap { Self.waits.contains($0) ? $0 : nil } ?? 1
         let language = DummyLanguage(rawValue: read("language") ?? "") ?? .system
         let theme = DummyTheme(rawValue: read("theme") ?? "") ?? .system
         let fontSize = DummyFontSize(rawValue: read("fontSize") ?? "") ?? .standard
-        return (keepMonths, goneDays, removedPostsStay, latestDate, askMinutes, language, theme, fontSize)
+        return (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, language, theme, fontSize)
     }
 
     private static let prefix = "fediqo.dummy."

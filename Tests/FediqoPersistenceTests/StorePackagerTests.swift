@@ -28,6 +28,30 @@ struct StorePackagerTests {
         try await device.packager().readBack(url, key: key, replacing: replacing) { _ in }
     }
 
+    @Test("The limits' account rides with the store and is read back beside it; a device that had none reads back an empty one")
+    func limitsRide() async throws {
+        let from = try await Self.populated()
+        let onto = try await Device()
+        let url = package()
+        defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
+        let line = LimitAct(limit: .room, at: Date(timeIntervalSince1970: 1_700_000_000), posts: 2, copies: 1, sources: [Self.mastodon.host])
+        try LimitAccountFile(directory: from.directory).write([line])
+        try LimitAccountFile(directory: onto.directory).write([LimitAct(limit: .months, at: Date(), posts: 9, sources: [])])
+
+        try await from.packager().takeAway(to: url, key: .password("open sesame"), pictures: false) { _ in }
+        try await readAll(url, key: .password("open sesame"), onto: onto, replacing: true)
+        #expect(try LimitAccountFile(directory: onto.directory).read() == [line], "the package's account did not replace this device's")
+
+        let bare = try await Self.populated()
+        let again = try await Device()
+        let second = package()
+        defer { bare.remove(); again.remove(); try? FileManager.default.removeItem(at: second) }
+        try await bare.packager().takeAway(to: second, key: .password("open sesame"), pictures: false) { _ in }
+        try await readAll(second, key: .password("open sesame"), onto: again)
+        #expect(FileManager.default.fileExists(atPath: again.directory.appendingPathComponent(LimitAccountFile.name).path))
+        #expect(try LimitAccountFile(directory: again.directory).read().isEmpty)
+    }
+
     @Test("Taken away with pictures and read back on a clean device, the store is the same, and so is what signs in", arguments: [true, false])
     func roundTrip(pictures: Bool) async throws {
         let from = try await Self.populated()
@@ -45,7 +69,7 @@ struct StorePackagerTests {
         try await from.packager().takeAway(to: url, key: .password("open sesame"), pictures: pictures) { progress.add($0) }
         seen = progress.all
         #expect(seen.last?.fraction == 1)
-        #expect(seen.count == (pictures ? 6 : 4), "store, settings, secrets, one profile, and the pictures")
+        #expect(seen.count == (pictures ? 7 : 5), "store, settings, secrets, the limits' account, one profile, and the pictures")
 
         let summary = try await onto.packager().preview(url, key: .password("open sesame"))
         #expect(summary.posts == 3)
@@ -54,7 +78,7 @@ struct StorePackagerTests {
         #expect(summary.withPictures == pictures)
         #expect(summary.hasSecrets)
         #expect(summary.device == "a test")
-        #expect(summary.entryCount == (pictures ? 6 : 4))
+        #expect(summary.entryCount == (pictures ? 7 : 5))
 
         #expect(try await onto.packager().weigh().holdsStore == false)
         try await readAll(url, key: .password("open sesame"), onto: onto)

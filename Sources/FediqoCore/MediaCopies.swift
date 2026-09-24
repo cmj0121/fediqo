@@ -20,6 +20,8 @@ public protocol MediaCopies: Sendable {
     func removeAll()
     /// What the copies kept under `host` weigh on disk, in bytes.
     func bytes(host: String) -> Int
+    /// How many copies are kept, every host together — what a limit says it let go of (#251).
+    func count() -> Int
     /// Drops copies, oldest written first, until what is kept weighs no more than `cap` bytes,
     /// and returns what is kept then — the one full measure of the copies.
     @discardableResult

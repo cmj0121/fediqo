@@ -126,6 +126,11 @@ final class ShellCarry {
     @ObservationIgnored private var scoped: URL?
     @ObservationIgnored let work: SourceWork
 
+    /// Told while the store is being taken away or read back, and once it is not: what holds
+    /// the room limit still (`ShellSession.holdsStill`, #249), set before the first byte moves
+    /// and cleared on every way out, a refusal and a dismissal included.
+    @ObservationIgnored var holding: (@MainActor (Bool) -> Void)?
+
     init(work: SourceWork = .shared) {
         self.work = work
     }
@@ -246,7 +251,10 @@ final class ShellCarry {
         let password = self.password
         step = .reading(PackageProgress(done: 0, total: preview.summary.bytes))
         work.note(host: SourceWork.thisDevice, for: .readBack)
+        holding?(true)
+        let release = holding
         task = Task { @MainActor [weak self] in
+            defer { release?(false) }
             await pictures?.hold()
             let outcome: Result<Void, any Error>
             do {
@@ -274,8 +282,12 @@ final class ShellCarry {
     /// Except a read back under way, which runs to its end — see `confirmReadBack`.
     func dismiss() {
         if case .reading = step { return }
+        // A task still running releases the hold itself as it ends (`run`); only where none is
+        // running is there nobody else to.
+        let running = task != nil
         task?.cancel()
         task = nil
+        if !running { holding?(false) }
         password = ""
         if let scoped {
             scoped.stopAccessingSecurityScopedResource()
@@ -297,7 +309,10 @@ final class ShellCarry {
     }
 
     private func run(save: (@MainActor () async -> Void)? = nil, _ body: @escaping @Sendable () async throws -> Step) {
+        holding?(true)
+        let release = holding
         task = Task { @MainActor [weak self] in
+            defer { release?(false) }
             await save?()
             do {
                 let next = try await body()
