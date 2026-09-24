@@ -307,7 +307,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// view neither case can be asserted. Both lists that draw a row read this one function, so
     /// the stream and an open thread cannot come to answer a press differently.
     public static func tapped(_ id: String, selected: String?) -> DummyRowTap {
-        selected == id ? .open : .select
+        ShellListEntry.pressed(id, selected: selected)
     }
 
     /// Which post a list centres on when it is drawn afresh.
@@ -456,6 +456,16 @@ public enum DummyShortcutGroup: String, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
     var titleKey: String { "shortcut.group.\(rawValue)" }
+
+    /// The glyph its tab leads with in the guide.
+    var symbol: String {
+        switch self {
+        case .move: "arrow.up.arrow.down.circle"
+        case .read: "text.book.closed"
+        case .act: "hand.tap"
+        case .app: "macwindow"
+        }
+    }
 
     /// Tab under the guide rotates these, wrapping, the same ring `DummyCommand.advanced`
     /// uses for All/Trends. A second list here would be the order written down twice.

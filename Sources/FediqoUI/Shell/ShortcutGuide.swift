@@ -79,38 +79,9 @@ struct ShortcutGuide: View {
             )
         }
 
-        /// The same pills the timeline uses for All and Trends: one selected, the rest a well.
+        /// The guide's tabs (`ShellTabs`). Tab rotates them (`DummyShortcutGroup.rotated`).
         private var tabs: some View {
-            HStack(spacing: ShellSpace.tight) {
-                ForEach(DummyShortcutGroup.allCases) { group in
-                    let selected = group == tab
-                    Button {
-                        tab = group
-                    } label: {
-                        Text(L10n.t(group.titleKey))
-                            .lineLimit(1)
-                            .fixedSize()
-                            .shellFont(.meta, weight: selected ? .semibold : .regular)
-                            .foregroundStyle(
-                                selected
-                                    ? ShellChrome.selectInk(colorScheme)
-                                    : ShellChrome.inkDim(colorScheme)
-                            )
-                            .padding(.horizontal, ShellSpace.snug)
-                            .padding(.vertical, ShellSpace.tight)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(
-                                        selected
-                                            ? ShellChrome.selectFill(colorScheme)
-                                            : ShellChrome.well(colorScheme)
-                                    )
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                }
-            }
+            ShellTabs(DummyShortcutGroup.allCases, selected: tab) { tab = $0 }
         }
 
         /// Every tab is laid out, and only the current one is drawn. The plate then keeps the

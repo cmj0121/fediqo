@@ -157,11 +157,11 @@ struct EmojiText: View {
         // would otherwise be read an address and given no way to follow it. `DummyItemRow`'s way
         // out already keeps this rule for the same reason.
         .accessibilityActions {
-            LinkWays(links: links, reader: reader, browser: openURL)
+            LinkWays(links: links, reader: reader, browser: openURL, source: host)
             TagWays(tags: tagged, pressing: tags, row: row)
         }
         .modifier(ProseLinks(
-            links: links, reader: reader, browser: openURL,
+            links: links, reader: reader, browser: openURL, source: host,
             tags: tags == nil ? [] : tagged, pressing: tags, row: row
         ))
         .task(id: request) {
@@ -464,13 +464,15 @@ struct LinkWays: View {
     let links: [PostLink]
     let reader: ShellReader?
     let browser: OpenURLAction
+    /// The source the words were read through (#218).
+    let source: String
 
     var body: some View {
         ForEach(links, id: \.self) { link in
             Button(String(format: L10n.t("link.open.here"), link.host)) {
                 // Told no — or asked outside the shell — the address goes to the browser rather
                 // than nowhere. The same fallback the press makes, in the same order.
-                if reader?.open(link.url) != true { browser(link.url) }
+                if reader?.open(link.url, from: source) != true { browser(link.url) }
             }
             Button(String(format: L10n.t("link.open.browser"), link.host)) {
                 browser(link.url)
@@ -488,6 +490,8 @@ struct LinkWays: View {
 /// the addresses are found from the same text and offered on the element the reader lands on.
 struct SpokenLinks: ViewModifier {
     let text: String
+    /// The source the words were read through, which a page opened from them is listed under.
+    let source: String
 
     @Environment(\.shellReader) private var reader
     @Environment(\.openURL) private var openURL
@@ -500,13 +504,15 @@ struct SpokenLinks: ViewModifier {
         // again on every pass of every reply.
         let links = EmojiText.links(in: EmojiCache.shared.proseRuns(in: text, from: []))
         return content.accessibilityActions {
-            LinkWays(links: links, reader: reader, browser: openURL)
+            LinkWays(links: links, reader: reader, browser: openURL, source: source)
         }
     }
 }
 
 extension View {
-    func spokenLinks(in text: String) -> some View { modifier(SpokenLinks(text: text)) }
+    func spokenLinks(in text: String, from source: String) -> some View {
+        modifier(SpokenLinks(text: text, source: source))
+    }
 }
 
 /// The two ways a link in a post's words can be followed.
@@ -543,6 +549,8 @@ private struct ProseLinks: ViewModifier {
     let reader: ShellReader?
     /// The way out of the app, taken from above this view — see `EmojiText.openURL`.
     let browser: OpenURLAction
+    /// The source the words were read through, which a page opened from them is listed under.
+    let source: String
     /// The line's hashtags, where a press on one opens something (#124), where it goes, and the
     /// row the line stands on.
     var tags: [PostTag] = []
@@ -585,7 +593,7 @@ private struct ProseLinks: ViewModifier {
             // what this refuses is anything that reaches this action by another route.
             guard Host.allowsFetch(url) else { return .discarded }
             guard let reader else { return .systemAction }
-            return reader.open(url) ? .handled : .discarded
+            return reader.open(url, from: source) ? .handled : .discarded
         }
     }
 }

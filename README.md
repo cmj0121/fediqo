@@ -32,7 +32,37 @@ There is no Fediqo server.
 ```
 
 Everything in that path happens on your device. There is no Fediqo server for any of it to
-pass through, which is the whole of the privacy claim — no more, and no less.
+pass through, and you do not have to take our word for it.
+
+Fediqo reaches the sources you added, and nothing else: no telemetry, no crash report, no
+update check, no third party. What a source sends back may point elsewhere — a picture, an
+avatar, an emoji kept on another server — and that is fetched only because the source pointed
+to it. A forum page shown in the app loads nothing from another site but by an entry below.
+Those few named entries are all that reach past a source, each only while you are doing what
+it is for:
+
+| Entry                          | When                                                    |
+| ------------------------------ | ------------------------------------------------------- |
+| Directory of servers           | only while you are adding a source and browsing for one |
+| A forum's browser check        | on a forum's pages                                      |
+| The check a sign-in shows      | only while a forum's sign-in is in front of you         |
+| A page followed from a sign-in | only while a forum's sign-in is in front of you         |
+
+Preferences' Allowed tab lists them, says why each is there, and lets you switch any of them
+off, or add a host of your own for one source — a forum whose pictures live elsewhere, say.
+Switching one off refuses what it let through from that moment. The list keeps only what you
+decided, never what was reached.
+
+Every request this run makes can be watched: Preferences, In flight, then Everything this run
+has asked. Each line names the source it was for, when it left, and what it was for — never
+an address, a query, or anything that could sign in as you. What a source pointed to is listed
+under that source, and what an entry let through names the entry. The list can be narrowed to
+one source. It is this run only: quitting leaves nothing of where you went. Posts and their
+pictures are the store, and they stay.
+
+To check it from outside the app, watch Fediqo while it runs — with the iPhone's App Privacy
+Report, or any network monitor on the Mac. Every host it reaches is a source you added,
+something a source pointed to, or an entry in Allowed.
 
 Several sources go in and one timeline comes out, so the same post from two of them is one
 row rather than two. Nothing is scored or re-ordered on the way: the only thing between what
@@ -160,12 +190,17 @@ store, it is not copied to iCloud, and it does not follow your Apple account to 
 device. It survives a relaunch.
 
 Sign out on the row, Clear, and Remove each delete the secret from this device. What Home and
-your lists brought in stays until you drop it. The sign-in page shares its session with
-Safari, so a server you are already signed in to there takes one tap, and signing out in
-Fediqo leaves you signed in to that server in Safari. A server that ends the sign-in shows
-the source as signed out and says so; it does not pretend to still work.
+your lists brought in stays until you drop it. The sign-in page keeps no session of its own
+and shares none with Safari, so each sign-in asks for your password on the server's page, and
+signing out leaves nothing on this device that could sign in as you there. A server that ends
+the sign-in shows the source as signed out and says so; it does not pretend to still work.
 
-A forum sign-in works as before: its cookies stay on this device, and Clear takes them.
+A forum sign-in keeps its cookies on this device until you sign out, Clear, or Remove, and each
+of those takes them, with any password you saved for it.
+
+Removing a source also stops everything Fediqo would ask of it by itself: the wait, a reload
+already on its way, its pictures and emoji still queued, and an open thread from it. Nothing
+reaches it again until you add it again.
 
 ### Reading
 
@@ -196,6 +231,12 @@ Preferences can set a latest date. Every timeline — All, Trends, yours, and a 
 shows nothing posted after 23:59:59 of that day, in this device's time zone, and the timeline
 says so. Newer posts stay on this device; turning the date off shows them again without a
 fetch. The date survives a relaunch.
+
+With no network, everything this device holds still reads: timelines, threads already read,
+and pictures already brought. Rules are written and applied, and a search finds what is held.
+What needs a network — asking a source, signing in, posting — says it could not reach the
+source, rather than hanging. When the network returns, what was left unasked is asked again,
+with no relaunch.
 
 A covered post carries a Covered mark, apart from its words. Where the author wrote a warning,
 it reads as their warning, set apart from the body. Where they wrote none, Fediqo puts no

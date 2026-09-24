@@ -117,7 +117,7 @@ struct BuildStampTests {
         let keys = [
             "about.title", "about.version", "about.build", "about.source", "about.source.none",
             "about.changes", "about.changes.none", "about.changes.uncommitted", "about.missing",
-            "about.line", "about.copy", "about.copied", "about.copy.hint", "about.footer",
+            "about.line", "about.copy", "about.copied", "about.copy.hint", "about.footer", "about.brief",
         ]
         for key in keys {
             for language in [DummyLanguage.english, .taiwanese] {
@@ -126,9 +126,13 @@ struct BuildStampTests {
         }
     }
 
-    @Test("Preferences has three tabs, what a person chooses, this build and what is in flight, in both languages")
+    @Test("Preferences has five tabs: choices, this build, in flight, allowed and the hosts added, in both languages")
     func preferencesTabs() {
-        #expect(PreferencesPane.Purpose.allCases == [.choices, .build, .work])
+        #expect(PreferencesPane.Purpose.allCases == [.choices, .build, .work, .reach, .hosts])
+        #expect(L10n.t("prefs.tab.hosts", language: .english) == "Your hosts")
+        #expect(L10n.t("prefs.tab.hosts", language: .taiwanese) == "自訂主機")
+        #expect(L10n.t("prefs.tab.reach", language: .english) == "Allowed")
+        #expect(L10n.t("prefs.tab.reach", language: .taiwanese) == "放行清單")
         #expect(L10n.t("prefs.tab.work", language: .english) == "In flight")
         #expect(L10n.t("prefs.tab.work", language: .taiwanese) == "連線中")
         #expect(L10n.t("prefs.tab.choices", language: .english) == "Settings")
@@ -137,16 +141,16 @@ struct BuildStampTests {
         #expect(L10n.t("prefs.tab.build", language: .taiwanese) == "這個 Fediqo")
     }
 
-    @Test("Tab on Preferences goes Settings, This Fediqo, In flight, and round again, as it does on Usage")
+    @Test("Tab on Preferences goes Settings, This Fediqo, In flight, Allowed, Your hosts, and round again, as on Usage")
     func preferencesTabOrder() {
         let session = ShellSession(http: FixtureHTTP())
         #expect(session.preferencesPurpose == .choices)
         var visited: [PreferencesPane.Purpose] = []
-        for _ in 0..<4 {
+        for _ in 0..<6 {
             #expect(session.rotatePreferencesTab(by: 1))
             visited.append(session.preferencesPurpose)
         }
-        #expect(visited == [.build, .work, .choices, .build])
+        #expect(visited == [.build, .work, .reach, .hosts, .choices, .build])
         session.rotatePreferencesTab(by: -1)
         #expect(session.preferencesPurpose == .choices)
         #expect(session.usagePurpose == .source, "Preferences' tabs are its own, not Usage's")
@@ -164,7 +168,9 @@ struct BuildStampTests {
         let root = try String(contentsOf: shell.appendingPathComponent("FediqoRootView.swift"), encoding: .utf8)
         #expect(pane.contains("case .build: BuildStampSection(stamp: stamp)"))
         #expect(pane.contains("case .choices: choices"))
-        #expect(pane.contains("case .work: SourceWorkSection(work: session?.work ?? .shared)"))
+        #expect(pane.contains("case .work: SourceWorkSection(work: session?.work ?? .shared, onOpen: openRecord)"))
+        #expect(pane.contains("case .reach: AllowanceSection(book: .shared, opened: opened, returning: session?.preferencesReturning)"))
+        #expect(pane.contains("case .hosts: OwnHostsSection(\n                book: .shared, sources: session?.sources.map(\\.host) ?? [], opened: opened,"))
         #expect(root.contains("case .preferences: session.rotatePreferencesTab(by: step)"))
     }
 

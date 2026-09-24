@@ -73,7 +73,7 @@ struct ForumRefusalView: View {
                         button(L10n.t("refusal.again"), "arrow.clockwise", onAgain)
                     }
                     if buttons.contains(.page), let page {
-                        button(L10n.t("blog.page"), "doc.richtext") { _ = reader?.open(page) }
+                        button(L10n.t("blog.page"), "doc.richtext") { _ = reader?.open(page, from: host) }
                             .accessibilityHint(Text(L10n.t("refusal.page.hint")))
                     }
                 }
@@ -129,9 +129,12 @@ struct ForumRefusalView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text(L10n.t("refusal.password.wrong")))
             }
-            Text(String(format: L10n.t("refusal.password.note"), host))
+            // One line; where the password goes and for how long is behind its (?) (#235).
+            let note = String(format: L10n.t("refusal.password.line"), host)
+            Text(note)
                 .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .shellHelp(verbatim: String(format: L10n.t("refusal.password.note"), host), about: note)
         }
     }
 

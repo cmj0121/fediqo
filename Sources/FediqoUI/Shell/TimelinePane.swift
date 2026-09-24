@@ -69,9 +69,6 @@ struct TimelinePane: View {
     @State private var settledHosts: Set<String> = []
     @State private var toast: String?
     @State private var toastTick = 0
-    /// What a finger gets on the header's marks, whatever the glyph inside measures. The row's
-    /// own marks are held open the same way — see `DummyItemRow.touch`.
-    @ShellMetric(relativeTo: .caption) private var touch: CGFloat = 32
     @Environment(\.colorScheme) private var colorScheme
     @Environment(DummyPrefs.self) private var prefs
 
@@ -458,6 +455,10 @@ struct TimelinePane: View {
                             onToggleCover: { _ = decks.toggleCover(item.id) },
                             onPlay: { onPlayRow(item) },
                             onView: { onViewRow(item) },
+                            onViewAt: { at in
+                                decks.show(item.id, at: at, of: item.attachments.count)
+                                onViewRow(item)
+                            },
                             onTurn: { onTurnRow(item) },
                             onEnded: { playback.stop() },
                             onToast: showToast
@@ -612,10 +613,11 @@ struct TimelinePane: View {
                 reloadMark
             }
             if session.timelinesUnreadable {
-                Text(L10n.t("timeline.unreadable"))
+                Text(L10n.t("timeline.unreadable.line"))
                     .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
+                    .shellHelp("timeline.unreadable", about: L10n.t("timeline.unreadable.line"))
             }
             if let latest = prefs.latestDate {
                 latestMark(latest)
@@ -635,41 +637,25 @@ struct TimelinePane: View {
             .accessibilityLabel(String(format: L10n.t("timeline.latest.label"), day))
     }
 
+    /// One of the timeline's tabs: a `ShellTabPill` named by the reader, marked where one of its
+    /// rules has lost its source, and pressed twice or held to be edited.
     private func queryPill(_ query: TimelineQuery) -> some View {
-        let selected = query == session.timelineID
         let missing = session.hasMissingRule(query)
-        return Button {
+        return ShellTabPill(
+            session.name(of: query),
+            symbol: query.symbol,
+            selected: query == session.timelineID,
+            accessory: missing ? "circle.dashed" : nil,
+            hint: missing ? L10n.t("timeline.pill.missing.hint") : nil
+        ) {
             session.timelineID = query
-        } label: {
-            // One line at its own width; the row it sits in scrolls rather than squeezing it.
-            HStack(spacing: ShellSpace.tight) {
-                Text(session.name(of: query))
-                    .lineLimit(1)
-                    .fixedSize()
-                if missing {
-                    Image(systemName: "circle.dashed")
-                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                        .accessibilityHidden(true)
-                }
-            }
-            .shellFont(.meta, weight: selected ? .semibold : .regular)
-            .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
-            .padding(.horizontal, ShellSpace.snug)
-            .padding(.vertical, ShellSpace.tight)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(selected ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
-            )
         }
-        .buttonStyle(.plain)
         .simultaneousGesture(
             TapGesture(count: 2).onEnded { session.editTimeline(query) }
         )
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.45).onEnded { _ in session.editTimeline(query) }
         )
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityHint(missing ? L10n.t("timeline.pill.missing.hint") : "")
         .accessibilityAction(named: Text(L10n.t("shortcut.edit"))) {
             session.editTimeline(query)
         }
@@ -693,7 +679,7 @@ struct TimelinePane: View {
     @ViewBuilder
     private var searchMark: some View {
         if ways.canSearch {
-            headerMark("magnifyingglass", says: "shortcut.search", action: ways.onSearch)
+            ShellIconButton("magnifyingglass", name: "shortcut.search", action: ways.onSearch)
         }
     }
 
@@ -703,22 +689,8 @@ struct TimelinePane: View {
     @ViewBuilder
     private var reloadMark: some View {
         if ways.canReload {
-            headerMark("arrow.clockwise", says: "shortcut.reload", action: ways.onReload)
+            ShellIconButton("arrow.clockwise", name: "shortcut.reload", action: ways.onReload)
         }
-    }
-
-    /// One glyph, quiet, with a finger's worth of room round it whatever size the glyph is drawn.
-    private func headerMark(_ symbol: String, says key: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .shellFont(.meta, weight: .medium)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .frame(minWidth: touch, minHeight: touch)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(L10n.t(key))
-        .accessibilityLabel(L10n.t(key))
     }
 
     /// `[+]`: a new timeline. A press, not a selected tab.
@@ -737,7 +709,7 @@ struct TimelinePane: View {
                 )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(L10n.t("timeline.new.title"))
+        .shellNamed("timeline.new.title")
     }
 
     private var empty: some View {

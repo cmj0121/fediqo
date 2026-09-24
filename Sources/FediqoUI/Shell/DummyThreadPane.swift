@@ -91,9 +91,7 @@ struct DummyThreadPane: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 Spacer()
                 outward
-                Text(L10n.t("thread.leaveHint"))
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                ShellKeyHint("thread.leaveHint")
             }
             .padding(.horizontal, ShellSpace.pad)
             .padding(.vertical, ShellSpace.snug)
@@ -257,6 +255,10 @@ struct DummyThreadPane: View {
             onToggleCover: { _ = decks.toggleCover(item.id) },
             onPlay: { onPlayRow(item) },
             onView: { onViewRow(item) },
+            onViewAt: { at in
+                decks.show(item.id, at: at, of: item.attachments.count)
+                onViewRow(item)
+            },
             onTurn: { onTurnRow(item) },
             onEnded: { playback.stop() },
             onToast: onToast
@@ -877,7 +879,7 @@ struct ForumReplyRow: View {
         .accessibilityActions { outwardAction }
         // **Here rather than inside the words**, for `SpokenLinks`' reason: `.combine` above
         // makes this reply one element, and what its children offered goes with the rest of them.
-        .spokenLinks(in: post.isWithheld ? "" : post.body)
+        .spokenLinks(in: post.isWithheld ? "" : post.body, from: host)
     }
 
     // MARK: - The way out

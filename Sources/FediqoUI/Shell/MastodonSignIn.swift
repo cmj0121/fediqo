@@ -52,6 +52,11 @@ public final class MastodonSessions {
     /// then nothing there is offered for taking back — the safe side of not knowing.
     private(set) var handles: [String: String] = [:]
 
+    /// Hosts whose account check found the network dark (#222) — a launch with no network, most
+    /// often — and so are asked again as soon as a read gets through to them, rather than going
+    /// unknown until a relaunch. `learnWhoAgain(among:)` is that second ask.
+    @ObservationIgnored private var unlearned: Set<String> = []
+
     public init(
         tokens: any MastodonTokenStore = KeychainMastodonTokens(),
         sender: any HTTPSender = URLSessionClient.signedIn()
@@ -179,15 +184,31 @@ public final class MastodonSessions {
     /// Asks the source who the reader is on it (#109). Silent on any failure: not knowing offers
     /// nothing for taking back, which is the one safe answer, and a 401 is told as `verifyAll`
     /// tells it.
-    func learnWho(host raw: String) async {
+    func learnWho(host raw: String, within limit: Duration? = nil) async {
         let host = raw.lowercased()
-        guard let door = authorized(host: host, for: .signInCheck) else { return }
+        unlearned.remove(host)
+        guard let door = authorized(host: host, within: limit, for: .signInCheck) else { return }
         do {
             let handle = try await door.handle()
             if isSignedIn(host: host) { handles[host] = handle }
         } catch MastodonAuthError.signedOut {
             endedByServer(host: host)
+        } catch where DarkNetwork.caused(error) {
+            if isSignedIn(host: host) { unlearned.insert(host) }
         } catch {}
+    }
+
+    /// Asks who the reader is again on each of `hosts` whose last account check the network was
+    /// dark for (#222). A reload calls it with the hosts it just read, so the network coming back
+    /// is noticed by the first read that gets through; a host asked and answered is not asked
+    /// again, and one never dark is never asked here at all.
+    func learnWhoAgain(among hosts: Set<String>, within limit: Duration) async {
+        let due = unlearned.intersection(hosts.map { $0.lowercased() })
+        // Claimed before the first await, so two reloads landing together ask each host once.
+        unlearned.subtract(due)
+        for host in due.sorted() {
+            await learnWho(host: host, within: limit)
+        }
     }
 
     /// A write this source turned away (#69). The row says so and keeps saying it until the source
@@ -212,12 +233,15 @@ public final class MastodonSessions {
     /// The token leaves this device first; then the server is asked to forget it, and whatever it
     /// answers changes nothing here.
     ///
-    /// **This signs the app out, not the browser.** The sign-in page ran in the shared Safari
-    /// session (decision 9), so the reader stays signed in to the server's website in Safari, and
-    /// the next sign-in here can be one tap. Signing out of the website is Safari's business.
+    /// **Nothing is left that could sign in as the reader there** (#221). The sign-in page runs
+    /// in a session of its own that keeps nothing (`WebAuthBrowser`), so no website session of
+    /// this sign-in outlives it either.
     ///
     /// `forgettingApp` drops the app registration too — Clear and Remove, after which nothing of
-    /// this source's sign-in is left on the device. A plain sign-out keeps it for next time.
+    /// this source's sign-in is left on the device. A plain sign-out keeps it for next time: it names
+    /// this app to the server and signs nobody in without the reader on the server's own page
+    /// (#221), and one made afresh at every sign-in would pile up on a server that has no way to
+    /// drop one.
     func signOut(host raw: String, forgettingApp: Bool = false) async {
         let host = raw.lowercased()
         signOuts[host, default: 0] += 1
@@ -278,7 +302,8 @@ public final class MastodonSessions {
     }
 
     /// At launch: asks each server whether it still honours its token. Only a 401 signs out; a
-    /// server that cannot be reached leaves the sign-in as it was.
+    /// server that cannot be reached leaves the sign-in as it was, and is asked again by the first
+    /// read that reaches it (`learnWhoAgain`).
     ///
     /// **The same answer says who the reader is there** (#109), so asking it is not a second
     /// request: `learnWho` reads the account check's own body.
@@ -306,12 +331,14 @@ public final class MastodonSessions {
     }
 }
 
-/// The system's web authentication sheet, in the shared Safari session (decision 9): a reader
-/// already signed in to their server in Safari is one tap from done.
+/// The system's web authentication sheet, **in a session of its own that keeps nothing** (#221).
 ///
-/// **The cost of that, accepted in decision 9:** the server's web session outlives an app
-/// sign-out. Signing out here forgets the token and revokes it; the reader is still signed in to
-/// the website in Safari, and a second account on the same server means signing out there first.
+/// It used to share Safari's session (decision 9), so a reader already signed in there was one
+/// tap from done — and the server's web session this sign-in made outlived a sign-out here: the
+/// token was gone and revoked, and the device could still sign in as the reader, one tap away.
+/// Signing out now leaves nothing that can. The cost, said out loud: each sign-in asks for the
+/// reader's password on the server's page (a password manager can still fill it), and a
+/// session the reader already has in Safari is neither used nor touched.
 struct WebAuthBrowser: OAuthBrowser {
     let session: WebAuthenticationSession
 
@@ -320,7 +347,7 @@ struct WebAuthBrowser: OAuthBrowser {
             return try await session.authenticate(
                 using: url,
                 callback: .customScheme(callbackScheme),
-                preferredBrowserSession: .shared,
+                preferredBrowserSession: .ephemeral,
                 additionalHeaderFields: [:]
             )
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {

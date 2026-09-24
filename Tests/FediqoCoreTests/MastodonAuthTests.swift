@@ -599,7 +599,7 @@ extension HTTPTests {
         StubURLProtocol.prepare(status: 200, body: Data("home".utf8), http: true, redirect: target)
         defer { StubURLProtocol.reset() }
 
-        let client = URLSessionClient(session: StubURLProtocol.session())
+        let client = URLSessionClient(session: StubURLProtocol.session(), watchedOnly: false)
         do {
             _ = try await client.send(authorized("/api/v1/timelines/home"))
             Issue.record("followed a redirect to \(target) with the token")
@@ -618,7 +618,7 @@ extension HTTPTests {
         StubURLProtocol.prepare(status: 200, body: Data("[]".utf8), http: true)
         defer { StubURLProtocol.reset() }
 
-        let client = URLSessionClient(session: StubURLProtocol.session())
+        let client = URLSessionClient(session: StubURLProtocol.session(), watchedOnly: false)
         _ = try await client.data(from: URL(string: "https://urlprotocol.test/api/v1/timelines/public")!)
         #expect(StubURLProtocol.lastRequest()?.value(forHTTPHeaderField: "Authorization") == nil)
     }
@@ -631,7 +631,7 @@ extension HTTPTests {
         )
         defer { StubURLProtocol.reset() }
 
-        let client = URLSessionClient(session: StubURLProtocol.session())
+        let client = URLSessionClient(session: StubURLProtocol.session(), watchedOnly: false)
         let (data, response) = try await client.send(authorized("/api/v1/timelines/home"))
         #expect(String(data: data, encoding: .utf8) == "home")
         #expect(response.url?.path == "/moved")
@@ -669,7 +669,7 @@ extension HTTPTests {
         defer { StubURLProtocol.reset() }
 
         #expect(URLSessionClient.signedIn().sameOriginOnly)
-        let client = URLSessionClient(session: StubURLProtocol.session(), sameOriginOnly: true)
+        let client = URLSessionClient(session: StubURLProtocol.session(), sameOriginOnly: true, watchedOnly: false)
         let form = MastodonOAuth.form(
             host: "urlprotocol.test", path: "/oauth/token", [("client_secret", "csecret")]
         )!

@@ -61,6 +61,15 @@ struct ShellDecks: Equatable, Sendable {
         return true
     }
 
+    /// Brings the one at `index` to the top — a picture pressed in a spread, before it opens.
+    mutating func show(_ id: String, at index: Int, of count: Int) {
+        guard count > 0 else { return }
+        turned[id] = AttachmentDeck.folded(index, of: count)
+        while turned.count > Self.remembered, let spare = turned.keys.first(where: { $0 != id }) {
+            turned.removeValue(forKey: spare)
+        }
+    }
+
     func isLifted(_ id: String) -> Bool { lifted.contains(id) }
 
     /// Takes one row's cover off, or puts it back.

@@ -433,8 +433,11 @@ struct JoinSheet: View {
         VStack(spacing: 0) {
             header
             ShellRule()
-            body(for: session.stage)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            VStack(alignment: .leading, spacing: 0) {
+                groupHead(for: session.stage)
+                body(for: session.stage)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             ShellRule()
             footer
         }
@@ -470,28 +473,19 @@ struct JoinSheet: View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             switch session.stage {
             case .browsing:
-                titled(L10n.t("join.browse.title"), L10n.t("join.browse.protocols.detail"))
+                titled(L10n.t("join.browse.title"))
             case .browsingServers(let kind):
-                titled(
-                    String(format: L10n.t("join.browse.servers.title"), kind.displayName),
-                    L10n.t("join.browse.detail")
-                )
+                titled(String(format: L10n.t("join.browse.servers.title"), kind.displayName))
             // **The one block this sheet shares with the page, in the sheet's own header slot.**
             // It stays pinned above the hairline here and scrolls with the block there, which is
             // why it is placed by each surface rather than carried inside the shared body.
             case .previewing(let preview, let origin, _):
                 SourcePreviewView.Header(preview: preview, surface: .sheet, origin: origin)
                     .accessibilityFocused($headerFocused)
-            case .choosingBoards(let offer, let origin):
-                titled(
-                    String(format: L10n.t("board.choose.title"), offer.host),
-                    L10n.t(Self.detailKey(for: origin))
-                )
+            case .choosingBoards(let offer, _):
+                titled(String(format: L10n.t("board.choose.title"), offer.host))
             case .choosingLists(let choice):
-                titled(
-                    String(format: L10n.t("list.choose.title"), choice.host),
-                    L10n.t("list.choose.detail")
-                )
+                titled(String(format: L10n.t("list.choose.title"), choice.host))
             case nil:
                 EmptyView()
             }
@@ -500,19 +494,59 @@ struct JoinSheet: View {
         .padding(ShellSpace.pad)
     }
 
-    private func titled(_ title: String, _ detail: String) -> some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            Text(title)
-                .shellFont(.pane)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityFocused($headerFocused)
-            Text(detail)
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
+    /// A step's title, and nothing more: the page's name (#244). What the step's list is for is
+    /// said on the list's own heading, `groupHead(for:)`.
+    private func titled(_ title: String) -> some View {
+        Text(title)
+            .shellFont(.pane)
+            .foregroundStyle(ShellChrome.ink(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityFocused($headerFocused)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The heading of the list a step shows (#244): what the list is, one short line of what a
+    /// press on it does, and the rest of the step behind that line's (?) where there is more
+    /// (#235). Nothing on a preview, whose block heads itself.
+    @ViewBuilder
+    private func groupHead(for stage: JoinStage?) -> some View {
+        if let head = Self.head(for: stage) {
+            ShellSectionHead(head.title, line: head.line, help: head.help)
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.vertical, ShellSpace.snug)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// What a step's list heading says, or nothing where the step has no list.
+    static func head(for stage: JoinStage?, language: DummyLanguage? = nil)
+        -> (title: String, line: String, help: String?)?
+    {
+        switch stage {
+        case .browsing:
+            (L10n.t("join.browse.protocols", language: language),
+             L10n.t("join.browse.protocols.detail", language: language), nil)
+        case .browsingServers:
+            (L10n.t("join.browse.servers", language: language),
+             L10n.t("join.browse.detail", language: language), nil)
+        case .choosingBoards(_, let origin):
+            (L10n.t("board.choose.boards", language: language),
+             L10n.t(lineKey(for: origin), language: language), L10n.t(detailKey(for: origin), language: language))
+        case .choosingLists:
+            (L10n.t("list.choose.lists", language: language),
+             L10n.t("list.choose.line", language: language), L10n.t("list.choose.detail", language: language))
+        case .previewing, nil:
+            nil
+        }
+    }
+
+    /// The boards step's one visible line: the consequence of the press, which is not the same on
+    /// both entrances — nothing is added yet on a join, and a restate replaces what is read now.
+    /// `detailKey(for:)` is the whole sentence behind its (?). **No `default:`.**
+    static func lineKey(for origin: BoardsOrigin) -> String {
+        switch origin {
+        case .preview: "board.choose.line"
+        case .joined: "board.choose.line.change"
+        }
     }
 
     /// The sentence under the boards title, which is not the same sentence on both entrances.
@@ -553,13 +587,32 @@ struct JoinSheet: View {
             // **The `ScrollView` is the sheet's and not the shared view's.** `AccountPane` is
             // already one scroller and nesting a second inside it is the failure that pane's own
             // comment records: the list squeezed to a sliver at 320pt with nothing to scroll.
-            ScrollView { SourcePreviewView(preview: preview, surface: .sheet, origin: origin) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if case .joined(let source) = origin { standing(source.host) }
+                    SourcePreviewView(preview: preview, surface: .sheet, origin: origin)
+                }
+            }
         case .choosingBoards(let offer, _):
             BoardPickerList(offer: offer, picked: picked)
         case .choosingLists(let choice):
             ListPickerList(offered: choice.offered, picked: pickedLists)
         case nil:
             EmptyView()
+        }
+    }
+
+    /// What the source's row had to cut to its one line, whole (#244): the errand running, a
+    /// refusal of the last press and the forum's own notice — each of them, not only the first.
+    @ViewBuilder
+    private func standing(_ host: String) -> some View {
+        let lines = SourceRow.statusLines(
+            waiting: SourceRow.waitingLine(session.progress, drawnAs: nil, host: host),
+            refusal: session.rowRefusal, notice: session.forums.notice(host: host)?.sentence(), host: host
+        )
+        if !lines.isEmpty {
+            SourceStanding(lines: lines)
+                .padding(ShellSpace.pad)
         }
     }
 
@@ -864,6 +917,8 @@ struct JoinSheet: View {
                 note { Text(L10n.t("account.catalog.failed")) }
             case .empty:
                 note { Text(L10n.t("account.catalog.empty")) }
+            case .off:
+                note { Text(L10n.t("account.catalog.off")) }
             case .ready(let servers):
                 // **Folded once for the list, not once per row.** `session.isAdded` lowercases and
                 // scans `sources` linearly, so asked inside the `ForEach` it is O(rows x sources)
@@ -874,7 +929,7 @@ struct JoinSheet: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(servers) { server in
-                            catalogRow(server, added: added.contains(server.domain.lowercased()))
+                            catalogRow(server, of: kind, added: added.contains(server.domain.lowercased()))
                             ShellRule()
                         }
                     }
@@ -908,7 +963,10 @@ struct JoinSheet: View {
     /// waiting line of its own. It carried one, for the one row of forty the reader had pressed,
     /// because the press used to preview inside this sheet; the press goes to the page now and
     /// answers there.
-    private func catalogRow(_ server: CatalogServer, added: Bool) -> some View {
+    ///
+    /// **Led by its protocol's mark (#235)**, the one the protocol's own row in step one carries,
+    /// so the list reads icon first like every other; a server already added leads with a tick.
+    private func catalogRow(_ server: CatalogServer, of kind: ProtocolKind, added: Bool) -> some View {
         // **Built once and handed to both readers.** `rowFoot` draws these three and the spoken
         // value says the same three, and each one costs a locale lookup, two bundle lookups and
         // two compact-number formats — so asking twice doubled that for every visible row on every
@@ -917,15 +975,21 @@ struct JoinSheet: View {
         return Button {
             Task { await session.pick(server) }
         } label: {
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                Text(server.domain)
-                    .shellFont(.name)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                Text(added ? L10n.t("account.catalog.added") : server.summary)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(2)
-                if !added { rowFoot(readings) }
+            HStack(alignment: .top, spacing: ShellSpace.step) {
+                catalogMark(kind, added: added)
+                VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                    // Three lines, one each and cut at the end, on every server (#244): an added
+                    // one keeps its readings' line open, empty, so it is as tall as the rest.
+                    Text(server.domain)
+                        .shellFont(.name)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                        .lineLimit(1)
+                    Text(added ? L10n.t("account.catalog.added") : server.summary)
+                        .shellFont(.meta)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                        .lineLimit(1)
+                    rowFoot(added ? [] : readings)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, ShellSpace.pad)
@@ -947,6 +1011,25 @@ struct JoinSheet: View {
         )
     }
 
+    /// A server row's lead: its protocol's mark, or a tick where it is already a source. Unspoken
+    /// — the row's label and value say both.
+    @ViewBuilder
+    private func catalogMark(_ kind: ProtocolKind, added: Bool) -> some View {
+        Group {
+            if added {
+                Image(systemName: "checkmark.circle")
+                    .resizable()
+                    .scaledToFit()
+                    .padding(Metrics.mark / 8)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            } else {
+                mark(kind).foregroundStyle(markInk(kind))
+            }
+        }
+        .frame(width: Metrics.mark, height: Metrics.mark)
+        .accessibilityHidden(true)
+    }
+
     /// The row's own readings.
     ///
     /// Three readings, each one a labelled sentence about the server. They used to be a single
@@ -955,14 +1038,20 @@ struct JoinSheet: View {
     /// the reason a dot-joined line is not the tidier version of it. (`metaLine` *does* dot-join,
     /// and may: it is spoken, where both halves say what they are.)
     private func rowFoot(_ readings: [String]) -> some View {
-        HStack(spacing: ShellSpace.pad) {
-            ForEach(readings, id: \.self) { reading in
-                Text(reading)
+        // The line's height is a space's, held whether or not there is anything to read on it.
+        Text(verbatim: " ")
+            .hidden()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .leading) {
+                HStack(spacing: ShellSpace.pad) {
+                    ForEach(readings, id: \.self) { reading in
+                        Text(reading)
+                    }
+                }
             }
-        }
-        .shellFont(.mark)
-        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-        .lineLimit(1)
+            .shellFont(.mark)
+            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            .lineLimit(1)
     }
 
     private func readings(_ server: CatalogServer) -> [String] {

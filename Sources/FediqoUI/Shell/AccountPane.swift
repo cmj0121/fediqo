@@ -4,6 +4,11 @@ import SwiftUI
 
 /// The sources this device reads. Empty, it is the first thing anyone sees, so it says
 /// what the app is for before it asks for anything. Joined, it gets out of the way.
+///
+/// **Two tabs once anything is joined (#235)**: the list of sources, and adding one — a list and
+/// a form are two styles, and a page holds one (#231's fourth rule). Tab and ⇧Tab rotate them
+/// (`ShellSession.rotateAccountTab`), as on Usage and Preferences. With nothing joined there is no
+/// list to be a tab of, and the page is the hero and the field alone.
 struct AccountPane: View {
     @Bindable var session: ShellSession
     @FocusState private var searchFocused: Bool
@@ -18,6 +23,33 @@ struct AccountPane: View {
     @Environment(\.colorScheme) private var colorScheme
     /// The system's sign-in sheet, which a Mastodon row's Sign in opens on the server's own page.
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+
+    /// What this page is for, one tab each (#235).
+    enum Purpose: String, CaseIterable, Identifiable, ShellTab {
+        case sources
+        case add
+
+        var id: Self { self }
+
+        var titleKey: String {
+            switch self {
+            case .sources: "account.sources.title"
+            case .add: "account.add.title"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .sources: "square.stack.3d.up"
+            case .add: "plus"
+            }
+        }
+    }
+
+    /// Whether the page is tabs: only where there is a list to be one of them.
+    static func tabbed(sources: Int) -> Bool {
+        sources > 0
+    }
 
     private enum Metrics {
         /// The mark, at the size the mark is drawn rather than the size of an icon.
@@ -44,25 +76,8 @@ struct AccountPane: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: ShellSpace.room) {
-                masthead
-                adding
-                // A hostname the reader typed, previewed where they typed it. From the directory
-                // it stays in the sheet the directory is in, which is `inlinePreview`'s answer
-                // rather than this view's.
-                if let preview = session.stage?.inlinePreview {
-                    inlinePreview(preview)
-                        .id(Self.previewAnchor)
-                }
-                // **Nothing at all where nothing is joined** — not a hairline, not a header,
-                // not an empty state. The hero above already says what the app is for and names
-                // the next act, and Browse is beside the field; a second invitation under a rule
-                // would be two of them on one screen, with the mascot arguing against the other.
-                // `UsagePane` draws its empty state and is right to, because it has no
-                // hero to be contradicted by.
-                if !session.sources.isEmpty {
-                    ShellRule()
-                    sources
-                }
+                    masthead
+                    page
                 }
                 .padding(ShellSpace.pad)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -91,36 +106,16 @@ struct AccountPane: View {
             .onChange(of: searchFocused) { _, on in
                 session.searchFocused = on
             }
-            .onDisappear { session.searchFocused = false }
-            .confirmationDialog(
-                Text(session.signInChoice.map {
-                    String(format: L10n.t("account.signin.ask.title"), $0)
-                } ?? ""),
-                isPresented: Binding(
-                    get: { session.signInChoice != nil },
-                    set: { if !$0 { session.signInChoice = nil } }
-                ),
-                titleVisibility: .visible,
-                presenting: session.signInChoice
-            ) { host in
-                // **Reading first and the wider answer second**, which is `previewActions`' rule
-                // on this page: the narrower act is never the one a reader reaches by reflex.
-                // Neither is `.destructive`; refusing to write is not a loss and agreeing to it is
-                // not a danger, it is a thing to be told about — which the message does.
-                Button(L10n.t("account.signin.ask.read")) {
-                    Task { await chose(host: host, writing: false) }
-                }
-                Button(L10n.t("account.signin.ask.write")) {
-                    Task { await chose(host: host, writing: true) }
-                }
-                Button(L10n.t("board.choose.cancel"), role: .cancel) { session.signInChoice = nil }
-            // **The two halves are named here and not on the buttons**, because a dialog's buttons
-            // are two or three words each and what each half actually buys is a sentence. A
-            // VoiceOver reader is read this message before the buttons, so the choice arrives with
-            // its meaning rather than as two verbs.
-            } message: { _ in
-                Text(L10n.t("account.signin.ask.detail"))
+            .onChange(of: session.accountPurpose) { _, now in
+                arrived(at: now)
             }
+            .onDisappear { session.searchFocused = false }
+            // **Reading first and the wider answer second**, which is `previewActions`' rule on
+            // this page: the narrower act is never the one a reader reaches by reflex. Neither is
+            // a loss; what each half buys is a sentence, behind the question's (?).
+            .modifier(SignInChoiceQuestion(session: session) { host, writing in
+                Task { await chose(host: host, writing: writing) }
+            })
         }
     }
 
@@ -218,8 +213,53 @@ struct AccountPane: View {
         if session.sources.isEmpty { hero } else { standing }
     }
 
-    /// Nothing has been joined yet. The octopus, the promise, and what it costs — and
-    /// then the one control that does anything about it.
+    /// **No tabs and no list where nothing is joined** — not a hairline, not a header, not an
+    /// empty state. The hero already says what the app is for and names the next act; a second
+    /// invitation would argue with the mascot.
+    @ViewBuilder
+    private var page: some View {
+        if Self.tabbed(sources: session.sources.count) {
+            ShellTabs(Purpose.allCases, selected: session.accountPurpose) {
+                session.accountPurpose = $0
+            }
+            switch session.accountPurpose {
+            case .sources: sources
+            case .add: addPage
+            }
+        } else {
+            addPage
+        }
+    }
+
+    /// The page moved to a tab, by a press or by Tab. **Arriving on Add puts the keyboard in the
+    /// field**, which is the one thing that tab is for; leaving it takes the keyboard out, so the
+    /// shell's keys are not held off by a field no longer on screen.
+    ///
+    /// Asked after the tab's views are in the page, since a field is focused only once it is there.
+    func arrived(at purpose: Purpose) {
+        guard purpose == .add else {
+            searchFocused = false
+            session.searchFocused = false
+            return
+        }
+        Task { @MainActor in searchFocused = true }
+    }
+
+    /// Adding a source: the field and Browse, what the last look said, and the preview of a
+    /// hostname the reader typed — previewed where they typed it. From the directory it stays in
+    /// the sheet the directory is in, which is `inlinePreview`'s answer rather than this view's.
+    private var addPage: some View {
+        VStack(alignment: .leading, spacing: ShellSpace.room) {
+            adding
+            if let preview = session.stage?.inlinePreview {
+                inlinePreview(preview)
+                    .id(Self.previewAnchor)
+            }
+        }
+    }
+
+    /// Nothing has been joined yet. The octopus and the promise — and then the one control that
+    /// does anything about it, whose own heading says what to do (#244).
     private var hero: some View {
         HStack(alignment: .top, spacing: ShellSpace.pad) {
             Image("Mascot", bundle: .module)
@@ -231,10 +271,6 @@ struct AccountPane: View {
                 Text(L10n.t("account.hero.promise"))
                     .shellFont(.display)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(L10n.t("account.hero.detail"))
-                    .shellFont(.body)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: Metrics.saying, alignment: .leading)
@@ -278,29 +314,31 @@ struct AccountPane: View {
 
     private var adding: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            if !session.sources.isEmpty {
-                Text(L10n.t("account.add.detail"))
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            }
+            // The field's own heading, with what it is for and the rest behind its (?) (#244):
+            // before any source, the first thing to do; after, how to add another.
+            let keys = Self.addingKeys(tabbed: Self.tabbed(sources: session.sources.count))
+            ShellSectionHead(title: "account.add.title", line: keys.line, help: keys.help)
             fieldRow
             if statusVisible { status }
         }
     }
 
+    /// What the adding field's heading says: the first thing to do on a page with no source yet,
+    /// and how to add another on the tab beside the list.
+    static func addingKeys(tabbed: Bool) -> (line: String, help: String) {
+        tabbed ? ("account.add.line", "account.add.detail") : ("account.hero.line", "account.hero.detail")
+    }
+
     /// The field, and the way in for a reader who does not have a hostname to type.
     ///
-    /// **`layoutPriority` on the field, and the button allowed to wrap.** At 320pt with a long
-    /// translation the right failure is a Browse that takes two lines, not a field that collapses.
+    /// **`layoutPriority` on the field**, so a narrow page shortens the field and never Browse,
+    /// which is one glyph that names itself (#235).
     private var fieldRow: some View {
         HStack(alignment: .center, spacing: ShellSpace.snug) {
             searchField
                 .layoutPriority(1)
-            Button(L10n.t("account.browse")) { browse() }
-                .shellFont(.body)
+            ShellIconButton("books.vertical", name: "account.browse.label") { browse() }
                 .disabled(busy)
-                .help(L10n.t("account.browse.label"))
-                .accessibilityLabel(L10n.t("account.browse.label"))
         }
     }
 
@@ -522,8 +560,7 @@ struct AccountPane: View {
     /// decision 31. Protocol, shape, figures, evidence and the whole board list are drawn by
     /// `SourcePreviewView` under `PreviewOrigin.joined`, and this unit adds no drawing there. Two
     /// facts that are about **the list** rather than about any one server stay on the page in
-    /// words: the header paragraph says that a row opens, and the footer legend says what the
-    /// marks mean. A per-server fact cannot go in a header — a section header cannot say
+    /// words behind the list's (?): that a row opens, and what the marks mean. A per-server fact cannot go in a header — a section header cannot say
     /// "mastodon.social has 1.2M active people" — which is the line that decides what moved where.
     ///
     /// **Named cost, for the record:** a server's size was readable while scanning six rows and is
@@ -531,17 +568,12 @@ struct AccountPane: View {
     /// largest single loss and it is not recoverable inside decision 34.
     private var sources: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            // `name` and not `pane`: `pane` is documented as a page's own title, one per page, and
-            // this page's is "Account".
-            Text(L10n.t("account.sources.title"))
-                .shellFont(.name)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-            // The sentence that says which question this list answers and what Remove costs,
-            // before the reader meets a Remove button.
-            Text(L10n.t("account.sources.detail"))
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
+            // The list's heading (#244): one short line, and behind its (?) which question this
+            // list answers, what Remove costs, what the marks and the word on a row mean, and
+            // where what a source left is counted — the lines that stood under the list.
+            ShellSectionHead(
+                L10n.t("account.sources.title"), line: L10n.t("account.sources.line"), help: Self.sourcesHelp()
+            )
             askedAgain
             // **A plain stack, because the page is the thing that scrolls.** A `ScrollView` here
             // would be the inner one the page comment above is about.
@@ -616,32 +648,6 @@ struct AccountPane: View {
             // fires when the macOS rail is expanded or collapsed — which moves the page by about
             // 150pt and should flip the regime.
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
-            // **What the marks mean, said once for the list rather than four times per row.**
-            // Decision 34 deleted the words from the row and decision 33 makes *absence*
-            // meaningful, so a reader looking at a two-mark Mastodon above a four-mark Discuz! has
-            // no other way to learn that the short row is short on purpose. `.help()` is a no-op
-            // on iOS, so without this line a phone reader has nothing anywhere naming these marks.
-            //
-            // **Its verbs are the controls' own verbs** — sign in, change boards, clear, remove —
-            // matching `account.refuse.signin.label`, `account.source.boards.change`,
-            // `prefs.cache.clear.label` and `account.source.remove.label`, so an act keeps its
-            // name through the whole surface.
-            Text(L10n.t("account.sources.marks"))
-                .shellFont(.mark)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-            // **The word each row carries, and the one reason a row cannot say for itself.** That
-            // a forum reads only because nothing here can write to a forum is the same sentence on
-            // every forum row for ever, so it is said once for the list — the same argument the
-            // line above it is drawn on.
-            Text(L10n.t("account.sources.writing"))
-                .shellFont(.mark)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-            Text(L10n.t("account.sources.held"))
-                .shellFont(.mark)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -669,12 +675,16 @@ struct AccountPane: View {
         let hosts = Self.askedAgain(session.sources, in: session.mastodon)
         if !hosts.isEmpty {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                Text(String(
-                    format: L10n.t("account.sources.writing.again"), hosts.joined(separator: ", ")
-                ))
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
+                let named = hosts.joined(separator: ", ")
+                let line = String(format: L10n.t("account.sources.writing.again.line"), named)
+                Text(line)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .shellHelp(
+                        verbatim: String(format: L10n.t("account.sources.writing.again"), named),
+                        about: line
+                    )
                 // One per source and not one for the list: the question is about one server's
                 // sign-in, and a single control would have to ask which — which is the dialog
                 // asked twice.
@@ -687,6 +697,17 @@ struct AccountPane: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// What the sources list's (?) says: which question the list answers and what Remove costs,
+    /// what the marks on a row mean, what the word beside a host says, and where what each source
+    /// left is counted — four keys, one bubble.
+    static func sourcesHelp(language: DummyLanguage? = nil) -> String {
+        [
+            "account.sources.detail", "account.sources.marks", "account.sources.writing", "account.sources.held",
+        ]
+        .map { L10n.t($0, language: language) }
+        .joined(separator: "\n\n")
     }
 
     /// The sources on this page whose sign-in predates the question (#69).
@@ -825,7 +846,7 @@ struct AccountPane: View {
         )
     }
 
-    /// A row's Clear. **Empties nothing** — it raises the question, and only the dialog's confirm
+    /// A row's Clear. **Empties nothing** — it raises the question, and only the question's yes
     /// reaches `clear(host:)`. Decision 29, and `askRemove`'s shape for its reason.
     ///
     /// The same act, and the same key, as the one on Usage — which now asks the same
@@ -847,7 +868,7 @@ struct AccountPane: View {
         await session.changeLists(host: row.source.host)
     }
 
-    /// A row's Remove. **Destroys nothing** — it raises the question, and only the dialog's
+    /// A row's Remove. **Destroys nothing** — it raises the question, and only the question's
     /// confirm reaches `remove(host:)`.
     func askRemove(_ row: SourceRow) {
         session.removing = row.source.host
@@ -883,5 +904,22 @@ struct AccountPane: View {
         SourceMarkRow.Mark(
             id: row.source.host, kind: row.source.kind, shape: row.shape, signedIn: signedIn
         )
+    }
+}
+
+/// Reading, or reading and writing, asked of a source being signed in to — a modifier, so the
+/// page's chain gains one plain call and no presenter closure of its own.
+private struct SignInChoiceQuestion: ViewModifier {
+    let session: ShellSession
+    let chose: @MainActor (String, Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content.shellConfirm(asked, question: { ShellQuestion.signIn(host: $0) }) { host, id in
+            chose(host, id == ShellQuestion.signInWrite)
+        }
+    }
+
+    private var asked: Binding<String?> {
+        Binding(get: { session.signInChoice }, set: { if $0 == nil { session.signInChoice = nil } })
     }
 }

@@ -163,8 +163,8 @@ struct MastodonWriteTests {
         #expect(try tokens.signedInHosts() == [host])
     }
 
-    @Test("An advertised ceiling is used; missing or zero is 500")
-    func theLimitIsAdvertisedOrFiveHundred() async {
+    @Test("An advertised ceiling is used; missing or zero is 500; no answer is no answer")
+    func theLimitIsAdvertisedOrFiveHundred() async throws {
         #expect(MastodonWrite.limit(advertised: 2000) == 2000)
         #expect(MastodonWrite.limit(advertised: 500) == 500)
         #expect(MastodonWrite.limit(advertised: nil) == 500)
@@ -175,12 +175,14 @@ struct MastodonWriteTests {
         let advertised = FixtureHTTP([
             "/api/v2/instance": .text(#"{"configuration":{"statuses":{"max_characters":2000}}}"#),
         ])
-        #expect(await MastodonClient(http: advertised, host: host).statusLimit() == 2000)
+        #expect(try await MastodonClient(http: advertised, host: host).statusLimit() == 2000)
 
         let silent = FixtureHTTP(["/api/v2/instance": .text("{}")])
-        #expect(await MastodonClient(http: silent, host: host).statusLimit() == 500)
+        #expect(try await MastodonClient(http: silent, host: host).statusLimit() == 500)
 
         let down = FixtureHTTP(["/api/v2/instance": .fail])
-        #expect(await MastodonClient(http: down, host: host).statusLimit() == 500)
+        await #expect(throws: (any Error).self) {
+            try await MastodonClient(http: down, host: host).statusLimit()
+        }
     }
 }

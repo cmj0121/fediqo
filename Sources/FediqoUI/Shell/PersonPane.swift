@@ -80,9 +80,7 @@ struct PersonPane: View {
         HStack(spacing: ShellSpace.snug) {
             ShellBackButton("person.back", action: onBack)
             Spacer()
-            Text(L10n.t("person.leaveHint"))
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            ShellKeyHint("person.leaveHint")
         }
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.snug)
@@ -233,6 +231,10 @@ struct PersonPane: View {
             onToggleCover: { _ = decks.toggleCover(item.id) },
             onPlay: { onPlayRow(item) },
             onView: { onViewRow(item) },
+            onViewAt: { at in
+                decks.show(item.id, at: at, of: item.attachments.count)
+                onViewRow(item)
+            },
             onTurn: { onTurnRow(item) },
             onEnded: { playback.stop() },
             onToast: onToast

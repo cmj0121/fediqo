@@ -5,7 +5,8 @@ struct NoticesPane: View {
         ShellNotice(
             symbol: "bell",
             title: L10n.t("notices.empty.title"),
-            detail: L10n.t("notices.empty.detail")
+            detail: L10n.t("notices.empty.line"),
+            help: L10n.t("notices.empty.detail")
         )
     }
 }

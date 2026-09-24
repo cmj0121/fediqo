@@ -10,7 +10,7 @@ struct HTTPTests {
         StubURLProtocol.prepare(status: 200, body: Data("ok".utf8), http: true)
         defer { StubURLProtocol.reset() }
 
-        let client = URLSessionClient(session: StubURLProtocol.session())
+        let client = URLSessionClient(session: StubURLProtocol.session(), watchedOnly: false)
         let url = URL(string: "https://urlprotocol.test/hello")!
         let (data, response) = try await client.data(from: url)
         #expect(String(data: data, encoding: .utf8) == "ok")
@@ -35,7 +35,7 @@ struct HTTPTests {
     func urlSessionClientHTTPSOnly() async {
         _ = URLSessionClient()
         StubURLProtocol.reset()
-        let client = URLSessionClient(session: StubURLProtocol.session())
+        let client = URLSessionClient(session: StubURLProtocol.session(), watchedOnly: false)
         await #expect(throws: URLError.self) {
             try await client.data(from: URL(string: "http://example.test/")!)
         }
@@ -47,7 +47,7 @@ struct HTTPTests {
         StubURLProtocol.prepare(status: 200, body: Data(), http: false)
         defer { StubURLProtocol.reset() }
 
-        let client = URLSessionClient(session: StubURLProtocol.session())
+        let client = URLSessionClient(session: StubURLProtocol.session(), watchedOnly: false)
         await #expect(throws: URLError.self) {
             try await client.data(from: URL(string: "https://urlprotocol.test/")!)
         }
@@ -59,7 +59,7 @@ struct HTTPTests {
         StubURLProtocol.prepare(status: 200, body: body, http: true, declaredLength: body.count)
         defer { StubURLProtocol.reset() }
 
-        let client = URLSessionClient(session: StubURLProtocol.session(), byteLimit: body.count)
+        let client = URLSessionClient(session: StubURLProtocol.session(), byteLimit: body.count, watchedOnly: false)
         let (data, _) = try await client.data(from: URL(string: "https://urlprotocol.test/fits")!)
         #expect(data == body)
     }
@@ -77,7 +77,7 @@ struct HTTPTests {
         )
         defer { StubURLProtocol.reset() }
 
-        let client = URLSessionClient(session: StubURLProtocol.session(), byteLimit: 1 << 20)
+        let client = URLSessionClient(session: StubURLProtocol.session(), byteLimit: 1 << 20, watchedOnly: false)
         await #expect(throws: URLError(.dataLengthExceedsMaximum)) {
             try await client.data(from: URL(string: "https://urlprotocol.test/huge")!)
         }
@@ -89,7 +89,7 @@ struct HTTPTests {
         StubURLProtocol.prepare(status: 200, body: body, http: true, chunk: 32 << 10)
         defer { StubURLProtocol.reset() }
 
-        let client = URLSessionClient(session: StubURLProtocol.session(), byteLimit: 64 << 10)
+        let client = URLSessionClient(session: StubURLProtocol.session(), byteLimit: 64 << 10, watchedOnly: false)
         await #expect(throws: URLError(.dataLengthExceedsMaximum)) {
             try await client.data(from: URL(string: "https://urlprotocol.test/chunked")!)
         }
@@ -102,7 +102,7 @@ struct HTTPTests {
         StubURLProtocol.prepare(status: 200, body: body, http: true, chunk: 32 << 10)
         defer { StubURLProtocol.reset() }
 
-        let client = URLSessionClient(session: StubURLProtocol.session())
+        let client = URLSessionClient(session: StubURLProtocol.session(), watchedOnly: false)
         let fetch = Task {
             try await client.data(from: URL(string: "https://urlprotocol.test/slow")!)
         }
@@ -130,7 +130,7 @@ struct HTTPTests {
         )
         defer { StubURLProtocol.reset() }
 
-        let client = URLSessionClient(session: StubURLProtocol.session())
+        let client = URLSessionClient(session: StubURLProtocol.session(), watchedOnly: false)
         do {
             let (data, response) = try await client.data(from: URL(string: "https://urlprotocol.test/go")!)
             Issue.record("followed the downgrade: \(data.count) bytes from \(response.url as Any)")
@@ -148,7 +148,7 @@ struct HTTPTests {
         )
         defer { StubURLProtocol.reset() }
 
-        let client = URLSessionClient(session: StubURLProtocol.session())
+        let client = URLSessionClient(session: StubURLProtocol.session(), watchedOnly: false)
         let (data, response) = try await client.data(from: URL(string: "https://urlprotocol.test/go")!)
         #expect(String(data: data, encoding: .utf8) == "moved")
         #expect(response.url?.path == "/there")
@@ -164,7 +164,7 @@ struct HTTPTests {
         )
         defer { StubURLProtocol.reset() }
 
-        let client = URLSessionClient(session: StubURLProtocol.session())
+        let client = URLSessionClient(session: StubURLProtocol.session(), watchedOnly: false)
         let fetch = Task {
             try await client.data(from: URL(string: "https://urlprotocol.test/never")!)
         }

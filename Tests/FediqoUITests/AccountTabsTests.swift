@@ -1,0 +1,186 @@
+import Foundation
+import Testing
+@testable import FediqoCore
+@testable import FediqoUI
+
+/// #235: the account page and adding a source say the least first — the list of sources and
+/// adding one are two tabs, and every explanation is a short line with its (?).
+@MainActor
+@Suite("The account page says the least first")
+struct AccountTabsTests {
+    private static let alpha = Source(host: "alpha.test", kind: .mastodon)
+
+    @Test("Tabs are drawn only where something is joined")
+    func tabsNeedAList() {
+        #expect(!AccountPane.tabbed(sources: 0))
+        #expect(AccountPane.tabbed(sources: 1))
+        #expect(AccountPane.Purpose.allCases == [.sources, .add])
+        for purpose in AccountPane.Purpose.allCases {
+            #expect(!purpose.symbol.isEmpty)
+            #expect(L10n.t(purpose.titleKey, language: .taiwanese) != purpose.titleKey)
+        }
+    }
+
+    @Test("Tab rotates Account's two tabs, and is the platform's while nothing is joined")
+    func tabRotates() {
+        let session = ShellSession(http: FixtureHTTP())
+        #expect(session.accountPurpose == .sources)
+        #expect(!session.rotateAccountTab(by: 1), "a page with no tabs took the Tab key")
+        #expect(session.accountPurpose == .sources)
+
+        session.sources = [Self.alpha]
+        #expect(session.rotateAccountTab(by: 1))
+        #expect(session.accountPurpose == .add)
+        #expect(session.rotateAccountTab(by: 1))
+        #expect(session.accountPurpose == .sources)
+        #expect(session.rotateAccountTab(by: -1))
+        #expect(session.accountPurpose == .add)
+        #expect(session.usagePurpose == .source, "Account's tabs are its own, not Usage's")
+    }
+
+    @Test("A preview in the page holds Account on Add, and a choice made then is refused")
+    func previewHoldsAdd() {
+        let session = ShellSession(http: FixtureHTTP())
+        session.sources = [Self.alpha]
+        let host = "beta.test"
+        session.stage = .previewing(
+            SourcePreview(host: host, kind: .mastodon, profile: .silent(host: host, kind: .mastodon)),
+            from: .field, ticked: []
+        )
+        #expect(session.accountPurpose == .add, "the rows are inert and the page showed them")
+        session.accountPurpose = .sources
+        #expect(session.accountPurpose == .add)
+        #expect(!session.rotateAccountTab(by: 1))
+        session.stage = nil
+        #expect(session.accountPurpose == .sources, "the reader's own choice came back with the page")
+    }
+
+    @Test("The page's own errand holds Add; a row's own does not")
+    func errandsHoldAdd() {
+        let look = ProgressReport(owner: .page, key: "account.detect.progress")
+        let block = ProgressReport(owner: .block, key: "account.detect.progress")
+        let row = ProgressReport(owner: .row(host: "alpha.test"), key: "account.source.boards.progress")
+        #expect(ShellSession.addHolds(stage: nil, progress: look))
+        #expect(ShellSession.addHolds(stage: nil, progress: block))
+        #expect(!ShellSession.addHolds(stage: nil, progress: row))
+        #expect(!ShellSession.addHolds(stage: nil, progress: nil))
+    }
+
+    @Test("A join that goes through lands on the list; one that is refused stays on Add")
+    func joinLandsOnSources() async {
+        let session = ShellSession(http: FixtureHTTP([
+            "/": .text(#"""
+            <html><head><meta name="application-name" content="Mastodon"></head>
+            <body><div id="mastodon"></div></body></html>
+            """#),
+            "/api/v2/instance": .text(#"{"domain": "first.example", "title": "First", "version": "4.3.0"}"#),
+            "/api/v1/timelines/public": .text("[]"),
+            "/api/v1/trends/statuses": .text("[]"),
+        ]))
+        session.sources = [Self.alpha]
+        session.accountPurpose = .add
+        session.hostname = "first.example"
+        await session.add()
+        #expect(session.accountPurpose == .add)
+        await session.confirm()
+        #expect(session.sources.map(\.host).contains("first.example"))
+        #expect(session.accountPurpose == .sources, "a join left the reader on the empty field")
+
+        let refused = ShellSession(http: FixtureHTTP(["/": .text(#"""
+        <html><head><meta name="generator" content="Pleroma"></head><body></body></html>
+        """#)]))
+        refused.sources = [Self.alpha]
+        refused.accountPurpose = .add
+        refused.hostname = "pleroma.example"
+        await refused.add()
+        #expect(refused.refuse != nil)
+        #expect(refused.accountPurpose == .add, "the refusal is said on Add and the page left it")
+    }
+
+    @Test("Each step of adding keeps one line, and the boards line says what the press costs")
+    func stepLines() {
+        #expect(JoinSheet.lineKey(for: .preview(
+            SourcePreview(host: "f.test", kind: .discuz, profile: .silent(host: "f.test", kind: .discuz)),
+            ticked: []
+        )) == "board.choose.line")
+        #expect(L10n.t("board.choose.line", language: .english) == "Nothing is added until you do.")
+        #expect(L10n.t("board.choose.line.change", language: .english) == "What you pick replaces what you read now.")
+        #expect(L10n.t("list.choose.line", language: .english) == "What you pick replaces what you read now.")
+        for key in ["board.choose.line", "board.choose.line.change", "list.choose.line"] {
+            #expect(L10n.t(key, language: .taiwanese) != key)
+        }
+    }
+
+    /// No view inspector, so the page is pinned by what its files say: the shell's Tab reaches
+    /// Account, the page draws the shared tabs, and no explanation is drawn as a line of its own.
+    @Test("The page is wired to the shared pieces, and draws no explanation by default")
+    func wired() throws {
+        let ui = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/FediqoUI")
+        let root = try String(contentsOf: ui.appendingPathComponent("FediqoRootView.swift"), encoding: .utf8)
+        let pane = try String(contentsOf: ui.appendingPathComponent("Shell/AccountPane.swift"), encoding: .utf8)
+        #expect(root.contains("case .account: session.rotateAccountTab(by: step)"))
+        #expect(pane.contains("ShellTabs(Purpose.allCases, selected: session.accountPurpose)"))
+        #expect(pane.contains("ShellIconButton(\"books.vertical\", name: \"account.browse.label\")"))
+        for key in ["account.hero.detail", "account.add.detail", "account.sources.detail",
+                    "account.sources.marks", "account.sources.writing"] {
+            #expect(!pane.contains("Text(L10n.t(\"\(key)\"))"), "\(key) is drawn as a line again")
+        }
+    }
+
+    @Test("The list's (?) says what the list is and what its marks mean")
+    func sourcesHelp() {
+        for language in [DummyLanguage.english, .taiwanese] {
+            let help = AccountPane.sourcesHelp(language: language)
+            #expect(help.contains(L10n.t("account.sources.detail", language: language)))
+            #expect(help.contains(L10n.t("account.sources.marks", language: language)))
+        }
+    }
+
+    @Test("A turned-away caution is one line before a press, and whole on a detail")
+    func cautionLine() {
+        let joined = PreviewOrigin.joined(Self.alpha)
+        #expect(SourcePreviewView.cautionLineKey(.turnedAway, for: .field) == "join.preview.turnedAway.line")
+        #expect(SourcePreviewView.cautionLineKey(.turnedAway, for: joined) == nil)
+        #expect(SourcePreviewView.cautionLineKey(.needsAccount, for: .field) == nil)
+        #expect(SourcePreviewView.cautionLineKey(.needsAccount, for: joined) == nil)
+    }
+
+    @Test("The browser check is one line, with the rest behind its (?)")
+    func wallLine() {
+        for stop in ForumSignInStop.allKinds {
+            if case .wall = stop {
+                #expect(stop.explanationKey == "forum.stop.wall.line")
+                #expect(stop.moreKey == "forum.stop.wall")
+            } else {
+                #expect(stop.moreKey == nil, "\(stop) grew a (?) nobody wrote")
+            }
+        }
+    }
+
+    @Test("Saving the password says what it does in one line, and the whole promise behind (?)")
+    func saveLine() {
+        #expect(ForumSignInSheet.saveKeys(saving: true) == ("forum.signin.save.line.on", "forum.signin.save.on"))
+        #expect(ForumSignInSheet.saveKeys(saving: false) == ("forum.signin.save.line.off", "forum.signin.save.off"))
+    }
+
+    /// Every short line this task put on a screen: translated, and a line rather than a paragraph.
+    @Test("Every short line is in every language, and short")
+    func linesAreShort() {
+        let keys = [
+            "account.hero.line", "account.add.line", "account.sources.line",
+            "account.sources.writing.again.line",
+            "join.preview.unread.line", "join.preview.turnedAway.line", "forum.stop.wall.line",
+            "forum.signin.save.line.on", "forum.signin.save.line.off", "refusal.password.line",
+        ]
+        for key in keys {
+            for language in [DummyLanguage.english, .taiwanese] {
+                let said = L10n.t(key, language: language)
+                #expect(said != key && !said.isEmpty, "\(key) is missing in \(language)")
+                #expect(said.count <= 72, "\(key) is longer than a line in \(language): \(said)")
+            }
+        }
+        #expect(L10n.t("account.browse", language: .english) == "account.browse", "Browse's caption is still shipped")
+    }
+}

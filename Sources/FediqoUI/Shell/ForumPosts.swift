@@ -532,6 +532,12 @@ final class ForumPosts {
         await fetch(ref, part: .opening)
     }
 
+    /// Whether a fetch of this thread's opening post has begun, queued or on the wire. Asked by
+    /// tests only.
+    func isFetching(_ ref: ForumThreadRef) -> Bool {
+        inFlight[Key(ref, .opening)] != nil
+    }
+
     /// Fetches the rest of the topic — the reader pressed for it.
     func fetchReplies(_ ref: ForumThreadRef) async {
         await fetch(ref, part: .replies)
@@ -903,6 +909,14 @@ final class ForumPosts {
             let asked = self.forums?.signIns(host: key.host) ?? 0
             let client = self.client(for: key.host, part: part, within: limit)
             await self.enter()
+            // **Cleared or removed while it waited for a slot** (#221): nothing is asked of the
+            // forum, rather than asked and the answer dropped.
+            guard !self.cleared.contains(key) else {
+                self.leave()
+                self.inFlight[key] = nil
+                self.cleared.remove(key)
+                return
+            }
             let answer: Result<[DiscuzPost], Absence>
             // Whether the replies' first page points at a second (#177).
             var continues = false
@@ -1561,7 +1575,7 @@ struct ForumPostBand: View {
         // `SpokenLinks`. Nothing to offer in the four states that have no words — and nothing
         // under a cover either, for `linked`'s reason: an action is a control, and a reader using
         // VoiceOver is not an exception to "the cover draws none".
-        .spokenLinks(in: linked ? Self.words(of: reading) : "")
+        .spokenLinks(in: linked ? Self.words(of: reading) : "", from: thread.host)
     }
 
     /// The waiting state: two plates, the longer one over the shorter, the way a paragraph sits.

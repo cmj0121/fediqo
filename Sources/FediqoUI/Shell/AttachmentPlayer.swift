@@ -49,6 +49,16 @@ final class ShellPlayback {
     /// holding whatever it buffered.
     private(set) var player: AVPlayer?
 
+    /// Where each file handed to a player is written to the run's record (#218). The app's own; a
+    /// test hands in another.
+    @ObservationIgnored var work: SourceWork = .shared
+
+    /// The source whose post the playing file belongs to, which it is listed under.
+    @ObservationIgnored private var source: String?
+
+    /// Builds the player for a file. The system's own; a test hands in one that reaches nothing.
+    @ObservationIgnored var makePlayer: @MainActor (AVPlayerItem) -> AVPlayer = { AVPlayer(playerItem: $0) }
+
     /// The player for this card, where this card is the thing that is playing.
     ///
     /// The whole question in one call, because a view has no other use for either half: a player
@@ -69,11 +79,16 @@ final class ShellPlayback {
         )
     }
 
+    /// `source` is the source the post was read through: what the file is listed under in the
+    /// run's record, wherever it is kept (#218).
     @discardableResult
-    func toggle(_ url: URL?, of post: String, on stage: ShellPlaying.Stage) -> Bool {
+    func toggle(
+        _ url: URL?, of post: String, on stage: ShellPlaying.Stage, from source: String? = nil
+    ) -> Bool {
         var next = playing
         guard next.toggle(url, of: post, on: stage) else { return false }
         playing = next
+        self.source = source
         rebuild()
         return true
     }
@@ -96,10 +111,14 @@ final class ShellPlayback {
         player?.replaceCurrentItem(with: nil)
         player = nil
         guard let url = playing.url else { return }
+        // The player fetches it itself, past every `HTTPClient`, so the gate is asked and the act
+        // written here (#218, #220): a film no source the person added pointed to is not played.
+        guard work.admits(reached: url.host() ?? "", source: source) else { return }
+        work.note(host: url.host() ?? "", for: .video, source: source)
         let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration =
             playing.stage == .viewer ? Self.viewerBuffer : Self.rowBuffer
-        let made = AVPlayer(playerItem: item)
+        let made = makePlayer(item)
         // A film in a list starts quiet. Nobody reading a page of posts asked for sound out of
         // one of them, and a 96pt square has nowhere to put the control that turns it down.
         made.isMuted = playing.stage == .row

@@ -24,13 +24,17 @@ struct ShellReading: Identifiable, Hashable, Sendable {
     /// Whether the page's last attempt to move was one this app would not follow. Set where the
     /// gate says no, and cleared by the next move that lands — see `arrived(at:)`.
     var refused: Bool = false
+    /// The source whose post the link was pressed on, which every page this reading loads is
+    /// listed under in the run's record (#218). Nil where the press came from no source.
+    let source: String?
 
     var id: String { url.absoluteString }
 
-    init(url: URL, host: String) {
+    init(url: URL, host: String, source: String? = nil) {
         self.url = url
         showing = url
         self.host = host
+        self.source = source
     }
 
     /// The main frame landed somewhere. **An address with no host moves nothing**, because the
@@ -81,6 +85,14 @@ final class ShellReader {
     /// for a frame first. Nothing here, as on iPad and iPhone, is a sheet.
     @ObservationIgnored var placing: (@MainActor (URL) -> Bool)?
 
+    /// Where each page this reader loads is written to the run's record (#218). The app's own; a
+    /// test hands in another.
+    @ObservationIgnored var work: SourceWork = .shared
+
+    /// Whether a source has been removed (#221). A page opened from one of its posts goes nowhere
+    /// more once it has — no redirect, no refresh, no link — and nothing more is recorded under it.
+    @ObservationIgnored var gone: (@MainActor (String) -> Bool)?
+
     /// Opens an address inside the app, and answers whether it did.
     ///
     /// **Decision 9 read again, at the door of a web view.** A `PostLink` is already a checked
@@ -100,13 +112,42 @@ final class ShellReader {
     /// make; here it is somebody else's JavaScript, pointed at the reader's own device or the
     /// network it is on, one press away in a stranger's post. It is not a regression and the
     /// press is the reader's, but nothing in this file should be read as saying otherwise.
+    ///
+    /// `source` is the source whose post the link stands in: what the page is listed under in the
+    /// run's record, wherever it is kept (#218).
     @discardableResult
-    func open(_ url: URL) -> Bool {
+    func open(_ url: URL, from source: String? = nil) -> Bool {
         guard Host.allowsFetch(url), let host = url.host(), !host.isEmpty else { return false }
         let placed = placing?(url) ?? false
-        reading = ShellReading(url: url, host: host)
+        reading = ShellReading(url: url, host: host, source: source)
         inPlace = placed
         return true
+    }
+
+    /// Whether the web view may go to `url`, and what that means for the reader: a main-frame
+    /// move that is refused is said, and one that is allowed is written to the run's record under
+    /// the source the reading was opened from (#218).
+    ///
+    /// **Told, where the refusal is the reader's own press.** A subframe going somewhere is the
+    /// page's business and a notice about it would be this app narrating a stranger's markup; the
+    /// main frame is the page the reader is looking at. What the page pulls in beside it — a
+    /// subframe, a picture, a script — is WebKit's, and is neither said nor recorded here.
+    ///
+    /// **And only a page a source the person added pointed to** (#220): a page that belongs to
+    /// nobody the person added is refused like a page this app will not follow.
+    func decide(_ url: URL?, mainFrame: Bool) -> Bool {
+        if let source = reading?.source, gone?(source.lowercased()) == true { return false }
+        var allowed = url.map(Host.allowsFetch) ?? false
+        guard mainFrame else { return allowed }
+        if allowed, let url, !work.admits(reached: url.host() ?? "", source: reading?.source) {
+            allowed = false
+        }
+        if allowed, let url {
+            work.note(host: url.host() ?? "", for: .page, source: reading?.source)
+        } else {
+            refuse()
+        }
+        return allowed
     }
 
     /// The page moved, and the chrome follows it. See `ShellReading.host`.
@@ -242,10 +283,7 @@ struct LinkReaderSheet: View {
                 .truncationMode(.middle)
             Spacer(minLength: ShellSpace.snug)
             if inPlace {
-                Text(L10n.t("link.reader.leaveHint"))
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                    .accessibilityHidden(true)
+                ShellKeyHint("link.reader.leaveHint")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -330,7 +368,8 @@ struct LinkReaderSheet: View {
 /// see what came back rather than where it was going — is not implemented at all. The plaintext
 /// case is covered, but by WebKit and not by this: mixed content on an `https` page is blocked
 /// by the engine. So the sentence above is a rule about where the reader is taken, and it is not
-/// a claim about every byte the page pulls in.
+/// a claim about every byte the page pulls in — that is `PageRules`' (#220), which blocks every
+/// load to a site other than the page's own before it leaves.
 private struct LinkWebView {
     let url: URL
     /// Where the page reports back to: the host it landed on, and a move that was stopped.
@@ -353,7 +392,17 @@ private struct LinkWebView {
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = coordinator
         view.uiDelegate = coordinator
-        view.load(URLRequest(url: url))
+        // Loaded once nothing but the page's own site can be loaded beside it (#220). Where the
+        // rules could not be put on, the page is not loaded and the reader is told it was stopped.
+        let reader = reader
+        Task { @MainActor [weak view] in
+            guard let view else { return }
+            if await PageRules.install(on: view.configuration.userContentController, .page) {
+                view.load(URLRequest(url: url))
+            } else {
+                reader.refuse()
+            }
+        }
         return view
     }
 
@@ -370,14 +419,13 @@ private struct LinkWebView {
             decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
         ) {
             MainActor.assumeIsolated {
-                let allowed = navigationAction.request.url.map(Host.allowsFetch) ?? false
-                // **Told, where the refusal is the reader's own press.** A subframe going
-                // somewhere is the page's business and a notice about it would be this app
-                // narrating a stranger's markup; the main frame is the page the reader is
-                // looking at, and a `nil` target frame is a new window — the same press with a
-                // different attribute on it, and the one `createWebViewWith` below folds back
-                // into this view.
-                if !allowed, navigationAction.targetFrame?.isMainFrame ?? true { reader.refuse() }
+                // A `nil` target frame is a new window — the same press with a different
+                // attribute on it, and the one `createWebViewWith` below folds back into this
+                // view — so it is the main frame.
+                let allowed = reader.decide(
+                    navigationAction.request.url,
+                    mainFrame: navigationAction.targetFrame?.isMainFrame ?? true
+                )
                 decisionHandler(allowed ? .allow : .cancel)
             }
         }

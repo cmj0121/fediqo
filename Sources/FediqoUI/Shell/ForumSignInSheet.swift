@@ -55,6 +55,8 @@ struct ForumSignInSheet: View {
         // small when they wanted to see what was behind it.
         .frame(minWidth: 380, minHeight: 480)
         .task { await open() }
+        // The check a sign-in shows, and a page followed from it, only while the sheet is up (#220).
+        .onDisappear { [engine] in Task { await engine.signingIn(false) } }
     }
 
     private var header: some View {
@@ -62,9 +64,7 @@ struct ForumSignInSheet: View {
             Text(String(format: L10n.t("forum.signin.title"), request.host))
                 .shellFont(.pane)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
-            Text(request.stop.explanation())
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            explanation
             // The forum's own words, on their own line. Not this app talking, and never
             // rephrased into this app's voice — a stranger's server saying "wrong password" is
             // information, and putting it in our own sentence would make us the ones claiming it.
@@ -79,15 +79,35 @@ struct ForumSignInSheet: View {
         .padding(ShellSpace.pad)
     }
 
+    /// The heading of the forum's page below (#244): what it is, why it is up in one line, and
+    /// the rest behind that line's (?) where there is more — on the page's own heading, not
+    /// under the sheet's title.
+    private var explanation: some View {
+        ShellSectionHead(
+            L10n.t("forum.signin.page"), line: request.stop.explanation(),
+            help: request.stop.moreKey.map { L10n.t($0) }
+        )
+        .padding(.top, ShellSpace.snug)
+    }
+
+    /// What ticking the box does, in one line; the whole promise is behind its (?) (#235).
+    static func saveKeys(saving: Bool) -> (line: String, more: String) {
+        saving
+            ? ("forum.signin.save.line.on", "forum.signin.save.on")
+            : ("forum.signin.save.line.off", "forum.signin.save.off")
+    }
+
     private var footer: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             Toggle(L10n.t("forum.signin.save"), isOn: $saving)
                 .shellFont(.body)
                 .modifier(WatchingTyped(host: request.host, sessions: sessions, on: saving))
-            Text(L10n.t(saving ? "forum.signin.save.on" : "forum.signin.save.off"))
+            let keys = Self.saveKeys(saving: saving)
+            Text(L10n.t(keys.line))
                 .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
+                .shellHelp(keys.more, about: L10n.t(keys.line))
             if let unkept {
                 Text(unkept.sentence())
                     .shellFont(.mark)
@@ -116,7 +136,9 @@ struct ForumSignInSheet: View {
     /// is not a fallback for when the automatic path fails; for a challenged host it is the only
     /// way the automatic path is ever reached at all.
     private func open() async {
-        guard let url = engine.loginURL else { return }
+        guard let url = engine.loginURL, !Task.isCancelled else { return }
+        await engine.signingIn(true)
+        guard !Task.isCancelled else { return }
         _ = try? await engine.page(at: url)
         signedIn = await engine.isSignedIn()
     }

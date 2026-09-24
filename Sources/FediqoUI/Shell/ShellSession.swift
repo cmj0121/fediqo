@@ -12,6 +12,9 @@ final class ShellSession {
         case loading
         case failed
         case empty
+        /// The directory's entry is switched off in Preferences (#226): nothing is asked, and a
+        /// source is added by its name.
+        case off
         case ready([CatalogServer])
     }
 
@@ -82,6 +85,15 @@ final class ShellSession {
     /// reads, joins and writes this session starts are put on it while they run; the caches and
     /// sign-ins it holds carry their own, the same one in the app. A test hands in another.
     @ObservationIgnored var work: SourceWork = .shared
+    /// What the system's shared stores keep of a source, dropped as it is signed out of or
+    /// removed (#221). The system's own; a test hands in its own jar.
+    @ObservationIgnored var jar = SystemJar()
+    /// Hosts a Remove is taking away right now, so an adopt landing in its awaits does not count
+    /// them as added again (#221).
+    @ObservationIgnored private var removals: Set<String> = []
+    /// How many times each host has been removed, so a join still reading it when it is removed
+    /// asks nothing more of it (#221). A join begun after the Remove reads it afresh.
+    @ObservationIgnored private var removes: [String: Int] = [:]
 
     /// The sheet the reader is being shown the forum's own page in, or nothing.
     var signingIn: ForumSignInRequest?
@@ -149,7 +161,24 @@ final class ShellSession {
     /// in `AccountPane`; everything else is the sheet on `FediqoRootView`. Which one is a function
     /// of the stage — `JoinStage.surface` — and not a second flag beside it, so there is no
     /// arrangement of this object in which both are true or neither is.
-    var stage: JoinStage?
+    /// A window closed with its add sheet still on the browse step lets the directory go with it
+    /// (#220): `SourceWork.adding` is nonisolated and `work` a main-actor class, so both are
+    /// reachable from here.
+    deinit {
+        work.adding(false, by: ObjectIdentifier(self))
+        if let allowanceWatch { NotificationCenter.default.removeObserver(allowanceWatch) }
+    }
+
+    var stage: JoinStage? {
+        didSet {
+            // The browse step is the one moment the directory of servers may be asked (#220).
+            let browsing = switch stage {
+            case .browsing, .browsingServers: true
+            default: false
+            }
+            work.adding(browsing, by: ObjectIdentifier(self))
+        }
+    }
 
     /// D28's pause, read off the stage.
     ///
@@ -388,24 +417,125 @@ final class ShellSession {
     /// Which purpose Usage is showing. Tab rotates it the way it rotates timeline queries.
     var usagePurpose: UsagePane.Purpose = .source
 
-    /// Tab and ⇧Tab on Usage: Sources, Time, Copies, and round again.
+    /// The source whose detail Usage's Sources tab is showing (#234), by host; nothing is the list.
+    var usageOpened: String? {
+        didSet { if let oldValue, usageOpened == nil { usageReturning = oldValue } }
+    }
+
+    /// The source whose detail was last closed, so the list lights its row again and a keyboard
+    /// reader keeps their place.
+    private(set) var usageReturning: String?
+
+    /// Whether a source's detail is what Usage is drawing: the Sources tab, and a host still
+    /// joined. A host left over from another tab or a removed source is not shown.
+    var usageDetailShown: Bool {
+        usagePurpose == .source && usageOpened.map { host in sources.contains { $0.host == host } } == true
+    }
+
+    /// Escape on Usage: back from a source's detail to the list. Only a detail on screen is closed,
+    /// so Escape is never spent on one nobody can see.
     @discardableResult
-    func rotateUsageTab(by step: Int) -> Bool {
-        usagePurpose = DummyCommand.advanced(Array(UsagePane.Purpose.allCases), from: usagePurpose, by: step)
+    func closeUsageSource() -> Bool {
+        guard usageDetailShown else { return false }
+        usageOpened = nil
         return true
     }
 
-    /// Which tab Preferences is showing (#143): what a person chooses, or which Fediqo this is.
-    var preferencesPurpose: PreferencesPane.Purpose = .choices
+    /// Tab and ⇧Tab on Usage: Sources, Time, Keep, Copies, and round again.
+    @discardableResult
+    func rotateUsageTab(by step: Int) -> Bool {
+        usagePurpose = DummyCommand.advanced(Array(UsagePane.Purpose.allCases), from: usagePurpose, by: step)
+        usageOpened = nil
+        return true
+    }
+
+    /// Which tab Preferences is showing (#143). A detail opened on one tab is not waiting on the
+    /// next.
+    var preferencesPurpose: PreferencesPane.Purpose = .choices {
+        didSet { if preferencesPurpose != oldValue { preferencesOpened = nil } }
+    }
+
+    /// The detail Preferences is showing in place of a tab's list (#233): an allowed entry, or
+    /// adding a host; nothing is the list. Here rather than in the tab's own state so Escape — which
+    /// the shell hears before any view — closes it before anything further out.
+    var preferencesOpened: PreferencesPane.Detail? {
+        didSet { if let oldValue, preferencesOpened == nil { preferencesReturning = oldValue } }
+    }
+
+    /// The detail last closed, so the list lights its row again and a keyboard reader keeps their
+    /// place.
+    private(set) var preferencesReturning: PreferencesPane.Detail?
+
+    /// Escape on Preferences: back from a detail to its list. Only a detail on screen is closed,
+    /// so Escape is never spent on one nobody can see.
+    @discardableResult
+    func closePreferencesDetail(own: @autoclosure () -> [Allowance.ID] = AllowanceBook.shared.own.map(\.id)) -> Bool {
+        guard let opened = preferencesOpened, opened.shown(on: preferencesPurpose, own: own()) else { return false }
+        preferencesOpened = nil
+        return true
+    }
+
+    /// Whether the record of everything this run has asked of the sources is open (#218).
+    var activityShown = false
+    /// The source the record opens narrowed to — a line of work in flight entered (#233); nil
+    /// for every source.
+    var activityFrom: String?
 
     /// Tab and ⇧Tab on Preferences, the way they rotate Usage: Settings, This Fediqo, In flight,
-    /// and round again.
+    /// Allowed, Your hosts, and round again — closing a detail left open, as a pill does.
     @discardableResult
     func rotatePreferencesTab(by step: Int) -> Bool {
         preferencesPurpose = DummyCommand.advanced(
             Array(PreferencesPane.Purpose.allCases), from: preferencesPurpose, by: step
         )
         return true
+    }
+
+    /// The tab the reader chose on Account.
+    private var accountTab: AccountPane.Purpose = .sources
+
+    /// Which tab Account is showing (#235): the sources this device reads, or adding one.
+    ///
+    /// **Adding holds the page while it is under way.** With a preview drawn in the page or the
+    /// page's own errand on the wire, every row is dimmed and inert (`rowActsLive`), and a list
+    /// shown then would be a page of refused controls with nothing on it saying why — the why is
+    /// on the add tab. So the page reads `.add` for as long as that lasts, and a choice made then
+    /// is refused rather than kept for later.
+    var accountPurpose: AccountPane.Purpose {
+        get { addHoldsAccount ? .add : accountTab }
+        set { if !addHoldsAccount { accountTab = newValue } }
+    }
+
+    /// Whether adding a source holds Account: a preview drawn in the page, or a look or a join the
+    /// page or its block reports. **Not a row's own errand**, which is reported on its row.
+    var addHoldsAccount: Bool {
+        Self.addHolds(stage: stage, progress: progress)
+    }
+
+    /// `addHoldsAccount`'s rule, given what it reads, so a test asks it of every errand.
+    static func addHolds(stage: JoinStage?, progress: ProgressReport?) -> Bool {
+        if stage?.inlinePreview != nil { return true }
+        switch reporting(progress, drawnAs: stage) {
+        case .page, .block: return true
+        case .row, nil: return false
+        }
+    }
+
+    /// Tab and ⇧Tab on Account, the way they rotate Usage. **Only where the tabs are drawn and
+    /// free**: with nothing joined the page is the hero and the field alone, and while adding holds
+    /// the page there is nothing to rotate to — Tab is the platform's either way.
+    @discardableResult
+    func rotateAccountTab(by step: Int) -> Bool {
+        guard AccountPane.tabbed(sources: sources.count), !addHoldsAccount else { return false }
+        accountTab = DummyCommand.advanced(Array(AccountPane.Purpose.allCases), from: accountTab, by: step)
+        return true
+    }
+
+    /// A join went through: the page shows the list it is now on. **Not where some boards could
+    /// not be read** — that sentence is said on the add tab, and leaving it would hide it.
+    private func showJoined() {
+        guard unread.isEmpty else { return }
+        accountTab = .sources
     }
 
     /// How many times the reader has cleared a server — decision 14's press, counted.
@@ -493,7 +623,17 @@ final class ShellSession {
         case .unreadable?: timelinesUnreadable = true
         case nil: break
         }
+        // The person's list changing while the servers are listed is answered on the spot (#226).
+        allowanceWatch = NotificationCenter.default.addObserver(
+            forName: SourceWork.allowancesChanged, object: nil, queue: .main
+        ) { [weak self] note in
+            let from = (note.object as AnyObject?).map(ObjectIdentifier.init)
+            MainActor.assumeIsolated { self?.allowancesChanged(by: from) }
+        }
     }
+
+    /// The watch on the person's list, taken off as this goes.
+    @ObservationIgnored private nonisolated(unsafe) var allowanceWatch: (any NSObjectProtocol)?
 
     /// The unsent text, kept when the composer closes without sending (#56). In-session only.
     var composeDraft = ""
@@ -541,9 +681,16 @@ final class ShellSession {
             postLimits[host] = MastodonWrite.limit(advertised: profile.statusLimit)
             return
         }
-        postLimits[host] = await MastodonClient(
-            http: WatchedHTTP(http, for: .serverCheck, in: work), host: host
-        ).statusLimit()
+        do {
+            postLimits[host] = try await MastodonClient(
+                http: WatchedHTTP(http, for: .serverCheck, in: work), host: host
+            ).statusLimit()
+        } catch where DarkNetwork.caused(error) {
+            // Not remembered: the next open asks again once the network is back (#222), and
+            // `postLimit(of:)` says Mastodon's own 500 meanwhile.
+        } catch {
+            postLimits[host] = MastodonWrite.defaultLimit
+        }
     }
 
     var canPost: Bool {
@@ -906,6 +1053,10 @@ final class ShellSession {
     @ObservationIgnored private var fetchingCatalog = false
 
     func loadCatalog() async {
+        guard work.allows(.directory) else {
+            catalog = .off
+            return
+        }
         if case .ready = catalog { return }
         if case .empty = catalog { return }
         guard !fetchingCatalog else { return }
@@ -914,6 +1065,11 @@ final class ShellSession {
         catalog = .loading
         do {
             let servers = try await ServerDirectory(http: WatchedHTTP(http, for: .directory, in: work)).servers()
+            // Switched off while it was asked: what came back is not shown (#226).
+            guard work.allows(.directory) else {
+                catalog = .off
+                return
+            }
             catalog = servers.isEmpty ? .empty : .ready(servers)
         }
         // **The one site in this file a raw `URLError(.cancelled)` still reaches.** Everything
@@ -1045,6 +1201,8 @@ final class ShellSession {
             refuse = L10n.t("account.refuse.duplicate")
             return nil
         }
+        // The person named it: what is asked of it before it is a source is theirs (#220).
+        work.named(parsed)
         errand += 1
         let mine = errand
         // **The page owns a look, even beside an open block.** The reader typed into the field, so
@@ -1172,6 +1330,7 @@ final class ShellSession {
                 // else happened to refresh it. What the token protects is only the sheet.
                 closeIfStillMine(mine)
                 await adopt()
+                showJoined()
             case .chooseBoards(let offer):
                 // D28's pause, and the third stage. **Nothing has been added**, so a reader who
                 // left takes the whole errand with them — which is why this one *is* entirely
@@ -1268,10 +1427,29 @@ final class ShellSession {
             // the module that would change if its coverage ever did. A protocol it does not cover
             // reaches nobody, and the second step says so in a whole sentence.
             guard ServerDirectory.covers(kind) else { return }
-            Task { await loadCatalog() }
+            askDirectory()
         // None of these offers a protocol to press: the server list is a step further in, a
         // preview and a board list are about one server, and a detail is about one the reader has.
         case .browsingServers, .previewing, .choosingBoards, .choosingLists, nil:
+            return
+        }
+    }
+
+    /// The one place the directory is asked for: the browse step, a protocol it covers chosen.
+    private func askDirectory() {
+        Task { await loadCatalog() }
+    }
+
+    /// The person's list changed (#226). While the servers are listed, the directory's entry is
+    /// read again at once: switched off, the list says so and nothing more is asked; switched on,
+    /// it is asked.
+    private func allowancesChanged(by from: ObjectIdentifier?) {
+        guard from == ObjectIdentifier(work) else { return }
+        switch stage {
+        case .browsingServers(let kind):
+            guard ServerDirectory.covers(kind) else { return }
+            askDirectory()
+        case .browsing, .previewing, .choosingBoards, .choosingLists, nil:
             return
         }
     }
@@ -1415,6 +1593,7 @@ final class ShellSession {
                 await store.remove(host: offer.host)
             }
             await adopt()
+            if mine == errand, !origin.isRestate { showJoined() }
             // Where a board that failed was the only thing the reader was after, the rail is
             // still worth landing them on the one that worked — `adopt` does that — but the
             // sentence about the rest is `unread`, and it is read on Account.
@@ -2003,6 +2182,8 @@ final class ShellSession {
         // which is every host until a read asks one.
         let spoken = await store.sources().map(flavours.spoken)
         if spoken != sources { sources = spoken }
+        // A source the store holds again, and not one on its way out, is asked as before (#221).
+        reload.readmit(spoken.map(\.host).filter { !removals.contains($0) })
     }
 
     /// The tabs, rebuilt from what is actually joined.
@@ -2068,7 +2249,12 @@ final class ShellSession {
         for host: String, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil
     ) -> SourceJoin {
         let client = forums.readTransport(host: host, else: http)
-        return SourceJoin(http: WatchedHTTP(client, for: purpose, name: name, in: work), store: store, catalogues: emoji)
+        let folded = host.lowercased()
+        let asked = removes[folded, default: 0]
+        let unremoved = RemovedStops(WatchedHTTP(client, for: purpose, name: name, in: work)) { [weak self] in
+            self?.removes[folded, default: 0] != asked
+        }
+        return SourceJoin(http: unremoved, store: store, catalogues: emoji)
     }
 
     private func report(_ error: JoinError, raw: String, host: String) {
@@ -2171,6 +2357,7 @@ final class ShellSession {
         // drops nothing that Home or a list brought in.
         // The app registration goes with it, so nothing of the sign-in is left.
         await mastodon.signOut(host: host, forgettingApp: true)
+        jar.forget(host: host, keeping: sources.map(\.host))
         // **The rows stay (#7).** Clear drops this source's copies — pictures in memory and on
         // disk, emoji, first posts, the sign-in — and not its place in the index: every row still
         // draws, reading its pictures from their hyperlinks again. Nothing in this app reads a
@@ -2322,6 +2509,8 @@ final class ShellSession {
         } else {
             await forums.forget(host: host.lowercased())
         }
+        // Whatever kind it is, no session of any sort is left for it in the system's stores (#221).
+        jar.forget(host: host, keeping: sources.map(\.host))
     }
 
     /// Whether this device holds a sign-in for that source, whichever protocol it is.
@@ -2496,7 +2685,14 @@ final class ShellSession {
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about.
         removing = nil
+        if usageOpened?.lowercased() == host { usageOpened = nil }
         stopReadingAsYou(host: host)
+        // Every read of it a reload has on its way ends here, signed in or not, and an open thread
+        // from it is not renewed again: nothing this app does on its own reaches it after (#221).
+        reload.letGo(host: host)
+        removes[host, default: 0] += 1
+        removals.insert(host)
+        defer { removals.remove(host) }
         if progressHost.lowercased() == host {
             // **The errand in flight is about the server that just went, so it ends here.** This
             // is the same token `add`, `take` and `subscribe` compare before they write, bumped by
@@ -2564,6 +2760,9 @@ final class ShellSession {
             offerSignIn = nil
         case .handOver(let stop):
             signingIn = ForumSignInRequest(host: host, stop: stop)
+        case .forgotten:
+            // Signed out of, cleared or removed while it ran: nothing to show (#221).
+            break
         }
     }
 
@@ -2720,4 +2919,21 @@ struct ProgressReport: Equatable {
     /// detection one is how the longest wait in the app came to be labelled "Checking %@…" over a
     /// phase that detects nothing.
     let key: String
+}
+
+/// A join's way out that closes once its source is removed (#221): its next board, page or look
+/// is not asked for, and nothing is recorded against the source that went.
+private struct RemovedStops: HTTPClient {
+    let inner: any HTTPClient
+    let removed: @MainActor @Sendable () -> Bool
+
+    init(_ inner: any HTTPClient, removed: @escaping @MainActor @Sendable () -> Bool) {
+        self.inner = inner
+        self.removed = removed
+    }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        if await removed() { throw CancellationError() }
+        return try await inner.data(from: url)
+    }
 }

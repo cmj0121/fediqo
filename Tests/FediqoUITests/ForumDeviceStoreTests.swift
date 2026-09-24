@@ -101,8 +101,8 @@ struct ForumDeviceStoreTests {
         #expect(relaunched.reachedHosts == ["two.example"])
     }
 
-    @Test("Clearing one forum signs out a sibling whose records sit under the same domain")
-    func clearReachesASibling() async {
+    @Test("Clearing one forum leaves a sibling whose records sit under the same domain signed in")
+    func clearLeavesASibling() async {
         let store = await store(holding: [
             Self.cookie("a_auth", domain: "one.example.org"),
             Self.cookie("b_auth", domain: "two.example.org"),
@@ -115,9 +115,11 @@ struct ForumDeviceStoreTests {
 
         await session.clear(host: "one.example.org")
 
-        // WebKit files both under example.org, so the Clear took both sessions. The row that
-        // still said Sign out would be offering to end a session that is gone.
-        #expect(forums.reachedHosts.isEmpty)
+        // WebKit files both under example.org, and the Clear used to take both sessions. Only the
+        // cleared forum's own cookie goes now; the sibling is still added and still signed in
+        // (#221).
+        #expect(forums.reachedHosts == ["two.example.org"])
+        #expect(await store.httpCookieStore.allCookies().map(\.domain) == ["two.example.org"])
     }
 
     @Test("A forum added after launch is read off the store as it arrives")

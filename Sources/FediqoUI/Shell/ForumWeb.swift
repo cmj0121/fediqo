@@ -89,6 +89,22 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     /// queue is exactly that machinery.
     private var running = false
     private var waiting: [CheckedContinuation<Void, Never>] = []
+    /// Which of `PageRules`' lists is on this view: put on before its first page, and changed as
+    /// the person's sign-in comes and goes.
+    /// `.page`'s — every other site blocked — where the list for what it is doing would not
+    /// compile (`strictest`).
+    private(set) var ruledAs: PageRules.Kind?
+    /// The rules that list holds: what the person's list said when it was put on (#226).
+    private(set) var ruledWith: String?
+    /// Whether the person has this forum's sign-in in front of them (#220): what else the page
+    /// may pull in, and where it may go, is `Allowance`'s `signingIn` entries then.
+    private(set) var signingIn = false
+    /// Where what this browser reaches beyond its forum is written (#218, #220). The app's own; a
+    /// test hands in another.
+    var work: SourceWork = .shared
+    /// The launch's sweep of an earlier run's store, while it runs (#219): nothing is loaded
+    /// until it is done, so no page is swept out from under.
+    var sweeping: Task<Void, Never>?
 
     init(host: String, dataStore: WKWebsiteDataStore) {
         self.host = host.lowercased()
@@ -104,11 +120,29 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         configuration.applicationNameForUserAgent = Fediqo.name
         // The forum's own "remember me", ticked on every login form this browser shows — #153.
         // Without it a sign-in made by hand is answered with a cookie that ends when the app does.
-        configuration.userContentController.addUserScript(Self.remembering)
+        for script in Self.userScripts { configuration.userContentController.addUserScript(script) }
         view = WKWebView(frame: .init(x: 0, y: 0, width: 1024, height: 768),
                          configuration: configuration)
         super.init()
         view.navigationDelegate = self
+        configuration.userContentController.add(
+            PulledInHandler(self), contentWorld: .defaultClient, name: Self.pulledInMessage
+        )
+        // The person's list changing puts the rules it makes on at once, on the page in front of
+        // them too (#226). Taken off by the centre itself when this goes.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(allowancesChanged(_:)), name: SourceWork.allowancesChanged, object: nil
+        )
+    }
+
+    @objc private func allowancesChanged(_ note: Notification) {
+        guard note.object as AnyObject? === work, ruledAs != nil else { return }
+        Task { await applyRules() }
+    }
+
+    /// The rules for what this browser is doing now, under the person's list as it is now.
+    private var wantedRules: String {
+        PageRules.rules(signingIn ? .signIn : .forum, of: host, allowing: work.allowances)
     }
 
     // MARK: - Fetching
@@ -130,6 +164,16 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
 
     /// Loads, waits for a navigation to finish, then waits out a browser check if there is one.
     private func settled(_ url: URL) async throws -> ForumPage {
+        await sweeping?.value
+        // Nothing but the forum's own site is loaded beside its page (#220). Refused outright
+        // where the rules could not be put on: a page that could reach anybody is not loaded.
+        var tries = 0
+        while ruledWith != wantedRules {
+            tries += 1
+            guard tries <= 3, await applyRules() else {
+                throw ForumTransportError.unreachable("PageRules")
+            }
+        }
         let mark = finishes
         failure = nil
         mainResponse = nil
@@ -191,6 +235,163 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     }
 
     // MARK: - Signing in
+
+    /// The person has this forum's sign-in in front of them, or no longer has (#220). While they
+    /// do, the check a sign-in shows may load and a page they follow away from it may open — each
+    /// written to the run's record under this forum; after, neither.
+    ///
+    /// **One browser, both jobs** (see the type): while the sheet is up, a background read of this
+    /// forum goes through this same view and so runs under the sign-in's rules too — the check a
+    /// sign-in shows may load beside it, and it is written like any other act of this browser.
+    func signingIn(_ on: Bool) async {
+        signingIn = on
+        await applyRules()
+    }
+
+    /// Bumped by every change of rules asked for, so one that finishes compiling after a newer
+    /// one was asked puts nothing on: a stale "signing in" cannot land over a later "no longer".
+    private var rulesEpoch = 0
+
+    /// Puts on the list for what this browser is doing now. False only where WebKit would not
+    /// compile it; a request overtaken by a newer one puts nothing on and leaves it to that one.
+    @discardableResult
+    private func applyRules() async -> Bool {
+        rulesEpoch += 1
+        let mine = rulesEpoch
+        let wanted: PageRules.Kind = signingIn ? .signIn : .forum
+        let rules = wantedRules
+        guard let list = await PageRules.compiled(rules) else {
+            guard mine == rulesEpoch else { return false }
+            ruledAs = nil
+            ruledWith = nil
+            await strictest(mine)
+            return false
+        }
+        guard mine == rulesEpoch else { return true }
+        put(list, rules: rules)
+        ruledAs = wanted
+        ruledWith = rules
+        return true
+    }
+
+    /// Where the list the person's entries make would not compile, **what was on is not left
+    /// on**: it may let through what they just switched off. Every other site's load is blocked
+    /// instead; where even that will not compile, the list that was on stays on — taking it off
+    /// would leave the page no rules at all — and the page is stopped and blanked. A page is not
+    /// loaded again until its own list is on (`settled`).
+    private func strictest(_ mine: Int) async {
+        let rules = PageRules.rules(.page)
+        let strict = await PageRules.compiled(rules)
+        guard mine == rulesEpoch else { return }
+        if let strict {
+            put(strict, rules: rules)
+            ruledAs = .page
+        } else {
+            stopAndBlank()
+        }
+    }
+
+    /// The list on this view now, as put on here: WebKit does not say.
+    private(set) var ruledBy: WKContentRuleList?
+    /// The rules of that list, held against `PageRules` letting it go while it is on.
+    private var holding: String?
+
+    /// Puts `list` — compiled from `rules` — on this view in place of any other.
+    private func put(_ list: WKContentRuleList, rules: String) {
+        let controller = view.configuration.userContentController
+        controller.removeAllContentRuleLists()
+        controller.add(list)
+        ruledBy = list
+        PageRules.hold(rules)
+        if let holding { PageRules.release(holding) }
+        holding = rules
+    }
+
+    /// A browser that goes lets go of the list it had on.
+    deinit {
+        if let holding {
+            Task { @MainActor in PageRules.release(holding) }
+        }
+    }
+
+    /// Whether this browser goes to `url`, and what is written of it (#220).
+    ///
+    /// **The main frame stays on the forum's host**, except while the person signs in: then it
+    /// may go anywhere they follow (`Allowance.ID.signInPage`), and every page it lands on is
+    /// written under this forum. A frame is left to `PageRules`, which blocks every other site's
+    /// but what an entry lets through; a frame an entry lets through is written under this forum.
+    /// Nothing moves for a forum the gate no longer admits.
+    ///
+    /// **The list is the person's as it is this instant** (#226): an entry switched off lets
+    /// nothing through, and a host they added for this forum lets its frames in, each written
+    /// under this forum naming that entry.
+    func decide(_ url: URL?, mainFrame: Bool) -> Bool {
+        guard let url else { return false }
+        if url.scheme == "about" { return true }
+        guard Host.allowsFetch(url), let there = url.host()?.lowercased(),
+              work.admits(reached: there, source: host)
+        else { return false }
+        // Its own site is its host or that host's `www.` spelling (`belongs`), and no wider: a
+        // guess at the registrable domain without the public suffix list would take two strangers
+        // under `com.tw` for one site.
+        let own = Self.belongs(url, to: host)
+        let applying = Allowance.applying(signingIn ? .signingIn : .forumPage, in: work.allowances, of: host)
+        if mainFrame {
+            guard signingIn else { return own }
+            let entry = own ? nil : applying.first { $0.reach == .navigation && $0.allows(url) }
+            guard own || entry != nil else { return false }
+            work.note(host: there, for: own ? .signIn : .signInPage, source: host, allowedBy: entry?.id)
+            return true
+        }
+        if !own, let entry = applying.first(where: { $0.reach == .frame && $0.allows(url) }) {
+            work.note(host: there, for: entry.source == nil ? .personCheck : .pagePart, source: host, allowedBy: entry.id)
+        }
+        return true
+    }
+
+    /// Where the page says what it pulled in (`pulledIn`).
+    static let pulledInMessage = "fediqoPulledIn"
+
+    /// What a page of this forum pulled in beside itself, as it loads — its pictures, scripts and
+    /// styles, which never pass `decide` — said by the page's own resource timing, read in a world
+    /// the page's scripts cannot reach. Only what came from another site is said, **each host
+    /// once a page**, and never a frame, which `decide` has already written.
+    static let pulledIn = """
+        (() => {
+          const own = location.host;
+          const said = new Set();
+          const say = (entries) => {
+            const names = entries.filter((e) => e.initiatorType !== "iframe").map((e) => e.name).filter((n) => {
+              let host = "";
+              try { host = new URL(n).host; } catch (_) { return false; }
+              if (host === own || said.has(host)) { return false; }
+              said.add(host);
+              return true;
+            });
+            if (names.length) { window.webkit.messageHandlers.\(pulledInMessage).postMessage(names); }
+          };
+          try {
+            new PerformanceObserver((list) => say(list.getEntries())).observe({ type: "resource", buffered: true });
+          } catch (_) {}
+        })();
+        """
+
+    /// What the page pulled in from a host the person added for this forum is written under this
+    /// forum, naming the entry (#226). Anything else it names is left: its own site is the
+    /// forum's, and what the rules let through for the app is written by `decide`. **Only a host
+    /// is written**, never the address the page said.
+    func pulledIn(_ addresses: [String]) {
+        let own = Allowance.applying(signingIn ? .signingIn : .forumPage, in: work.allowances, of: host)
+            .filter { $0.source != nil }
+        guard !own.isEmpty else { return }
+        for address in addresses {
+            guard let url = URL(string: address), let there = url.host()?.lowercased(),
+                  !Self.belongs(url, to: host),
+                  let entry = own.first(where: { $0.allows(url) })
+            else { continue }
+            work.note(host: there, for: .pagePart, source: host, allowedBy: entry.id)
+        }
+    }
 
     /// Whether the settled document shows a signed-in member. Used to notice a session that
     /// lapsed mid-scroll, which a forum reports by quietly serving the guest's page.
@@ -306,7 +507,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         let content = view.configuration.userContentController
         content.removeScriptMessageHandler(forName: ForumLoginScript.typedMessage, contentWorld: .defaultClient)
         content.removeAllUserScripts()
-        content.addUserScript(Self.remembering)
+        for script in Self.userScripts { content.addUserScript(script) }
         guard on else { return }
         let host = host
         content.add(
@@ -321,6 +522,15 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
             forMainFrameOnly: true, in: .defaultClient
         ))
         view.evaluateJavaScript(ForumLoginScript.watchTyped, in: nil, in: .defaultClient) { _ in }
+    }
+
+    /// Every script this browser's pages always run: the forum's "remember me" ticked, and what
+    /// they pulled in said (#226).
+    static var userScripts: [WKUserScript] {
+        [
+            remembering,
+            WKUserScript(source: pulledIn, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .defaultClient),
+        ]
     }
 
     static var remembering: WKUserScript {
@@ -352,16 +562,109 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     ///
     /// WebKit files its records under a site's registrable domain, not the host a reader typed,
     /// so a record belongs here when either name is the other or ends in it. That is coarser
-    /// than a host: two forums under one registrable domain share their records, and clearing
-    /// one clears both. The alternative — keeping records a Clear should have dropped — is the
-    /// worse error.
-    static func forget(host: String, in store: WKWebsiteDataStore) async {
+    /// than a host: two forums under one registrable domain share their records.
+    ///
+    /// **Every cookie a request to this host would carry goes, whoever else it is sent to.** A
+    /// parent-domain cookie two forums share is one session for both, and forgetting one ends it
+    /// for both: keeping a session a sign-out should have dropped is the worse error.
+    ///
+    /// **What is not sent to this host is all that is kept** (#221), and only where another forum
+    /// still added shares the record (`keeping`): a neighbour's own host-only cookie, or the
+    /// sub-domain cookie of a forum under this one. Where none shares it, the record goes whole.
+    /// What else a shared record holds — local storage, IndexedDB, cache — stays with it, since
+    /// it cannot be told apart per host.
+    static func forget(host: String, in store: WKWebsiteDataStore, keeping: Set<String> = []) async {
+        let host = host.lowercased()
+        let others = keeping.map { $0.lowercased() }.filter { $0 != host }
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
         let records = await store.dataRecords(ofTypes: types)
         let mine = records.filter { holds($0.displayName, for: host) }
-        guard !mine.isEmpty else { return }
-        await store.removeData(ofTypes: types, for: mine)
+        let shared = mine.filter { record in others.contains { holds(record.displayName, for: $0) } }
+        let whole = mine.filter { record in !shared.contains { $0.displayName == record.displayName } }
+        if !whole.isEmpty { await store.removeData(ofTypes: types, for: whole) }
+        guard !shared.isEmpty else { return }
+        let jar = store.httpCookieStore
+        for cookie in await jar.allCookies()
+        where goes(cookie.domain, forgetting: host, keeping: others) {
+            await jar.deleteCookie(cookie)
+        }
     }
+
+    /// Whether a cookie filed under `domain` goes as `host` is forgotten: it is sent to that host,
+    /// or it belongs to it and no forum still added is sent it.
+    static func goes(_ domain: String, forgetting host: String, keeping others: [String]) -> Bool {
+        sent(domain, to: host)
+            || (holds(domain, for: host) && !others.contains(where: { sent(domain, to: $0) }))
+    }
+
+    /// Whether a cookie filed under `domain` goes out with a request to `host`: the host is that
+    /// domain, or under it. Narrower than `holds` on purpose.
+    static func sent(_ domain: String, to host: String) -> Bool {
+        var name = domain.lowercased()
+        if name.hasPrefix(".") { name.removeFirst() }
+        let host = host.lowercased()
+        return !name.isEmpty && (host == name || host.hasSuffix("." + name))
+    }
+
+    /// Drops from `store` everything that is not a sign-in to one of `hosts` (#219).
+    ///
+    /// **The store is kept between runs for one thing: a forum's session cookie**, so a sign-in
+    /// outlives a relaunch (#5, #153). Everything else WebKit files there beside it — its disk
+    /// cache of every page and picture it fetched, local and session storage, service workers,
+    /// its own tracking-prevention statistics — is a record of which page of which forum was
+    /// read, and when. That goes. So do the cookies of any site that is not one of `hosts`: they
+    /// name somewhere this device went and are nobody's sign-in here.
+    static func sweep(_ store: WKWebsiteDataStore, keeping hosts: some Sequence<String>) async {
+        let hosts = Array(hosts)
+        let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
+        var kept: [WKWebsiteDataRecord] = []
+        var dropped: [WKWebsiteDataRecord] = []
+        for record in records {
+            if hosts.contains(where: { holds(record.displayName, for: $0) }) {
+                kept.append(record)
+            } else {
+                dropped.append(record)
+            }
+        }
+        if !dropped.isEmpty {
+            await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: dropped)
+        }
+        if !kept.isEmpty {
+            await store.removeData(ofTypes: leftBehind, for: kept)
+        }
+        // A record is filed by site, coarser than a host (see `forget`): of the cookies left in
+        // one, only those a request to a source would carry are a sign-in (#221's `sent`).
+        let jar = store.httpCookieStore
+        for cookie in await jar.allCookies() where !hosts.contains(where: { sentToSite(cookie.domain, $0) }) {
+            await jar.deleteCookie(cookie)
+        }
+    }
+
+    /// Whether a cookie filed under `domain` goes out with a request to `host` in either of its
+    /// spellings — bare or `www.` — the two a forum routinely moves between (`belongs`). A forum
+    /// added as `example.com` whose sign-in is a host-only cookie on `www.example.com` keeps it.
+    static func sentToSite(_ domain: String, _ host: String) -> Bool {
+        let bare = bare(host.lowercased())
+        return sent(domain, to: bare) || sent(domain, to: "www." + bare)
+    }
+
+    /// What `sweep` drops even for a source's own site: everything but its cookies.
+    ///
+    /// **That includes the forum's own local storage and IndexedDB**, which a forum's scripts may
+    /// use to remember a draft, a dismissed banner or a theme. They are dropped all the same: what
+    /// a page stores there is its own record of this device's visits, and nothing a sign-in rests
+    /// on — Discuz! and Cloudflare's clearance both live in cookies. The cost is a forum that
+    /// forgets such a nicety between runs.
+    static var leftBehind: Set<String> {
+        WKWebsiteDataStore.allWebsiteDataTypes().subtracting([WKWebsiteDataTypeCookies])
+    }
+
+    /// What a run dropped as it goes to the background (#219): the copies WebKit keeps of what it
+    /// fetched, and nothing a sign-in or a browser check in progress rests on — no cookie, no
+    /// storage. The rest waits for the quit, or for the next launch.
+    static let cache: Set<String> = [
+        WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache, WKWebsiteDataTypeFetchCache,
+    ]
 
     /// Whether a record or cookie filed under `name` belongs to `host`. A cookie's domain may
     /// carry a leading dot, which says "and every subdomain" and is not part of the name.
@@ -390,7 +693,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
         return bare(there) == bare(host)
     }
 
-    static func bare(_ host: String) -> String {
+    nonisolated static func bare(_ host: String) -> String {
         host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
@@ -426,6 +729,20 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     }
 
     // MARK: - WKNavigationDelegate
+
+    nonisolated func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
+    ) {
+        MainActor.assumeIsolated {
+            let allowed = decide(
+                navigationAction.request.url,
+                mainFrame: navigationAction.targetFrame?.isMainFrame ?? true
+            )
+            decisionHandler(allowed ? .allow : .cancel)
+        }
+    }
 
     nonisolated func webView(
         _ webView: WKWebView,
@@ -487,6 +804,25 @@ private final class TypedHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
+/// Where a forum's page says what it pulled in (`ForumWebEngine.pulledIn`). Holds its browser
+/// weakly — the page's controller holds this — and hands on only a list of strings.
+final class PulledInHandler: NSObject, WKScriptMessageHandler {
+    weak var engine: ForumWebEngine?
+
+    init(_ engine: ForumWebEngine) {
+        self.engine = engine
+    }
+
+    func userContentController(
+        _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
+    ) {
+        MainActor.assumeIsolated {
+            guard let names = message.body as? [String] else { return }
+            engine?.pulledIn(names)
+        }
+    }
+}
+
 /// The seam back to everything that already reads a server.
 ///
 /// **The hard part of this unit, written down.** `WKWebView` is main-actor and `HTTPClient` is
@@ -523,7 +859,10 @@ struct ForumWebTransport: HTTPClient {
         self.engine = engine
     }
 
+    /// Refused where the gate did not let it through, as `URLSessionClient` refuses (#220): a
+    /// forum's browser is a way out like any other.
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        guard Outward.admitted else { throw OutwardRefusal.unwatched }
         let page = try await engine.page(at: url)
         switch page {
         case .wall(let wall):

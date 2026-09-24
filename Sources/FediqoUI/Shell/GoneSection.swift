@@ -24,9 +24,8 @@ struct GoneSection: View {
     /// to a question nobody asked yet.
     @State private var went: WentGone?
     /// The press has counted what it would let go and is asking first, as every other drop on
-    /// this page does; `counted` is what the question names.
-    @State private var confirming = false
-    @State private var counted = WentGone()
+    /// this page does; what it counted is what the question names.
+    @State private var asking: WentGone?
 
     /// The waits offered, in days. Never, the default, is offered beside them.
     static let dayChoices = [1, 7, 30, 90]
@@ -44,34 +43,21 @@ struct GoneSection: View {
                 reading(line)
             }
             HStack(spacing: ShellSpace.snug) {
-                Button(L10n.t("prefs.gone.now")) {
+                if let went { reading(Self.wentLine(went.posts, places: went.places)) }
+                Spacer(minLength: ShellSpace.snug)
+                ShellIconButton("trash", name: "prefs.gone.now", help: "usage.gone.now.help", tone: .alarm) {
                     Task {
                         // Nothing to let go is said at once; anything is asked about first.
-                        counted = await session.goneHeld()
-                        if counted.isNone { went = counted } else { confirming = true }
+                        let counted = await session.goneHeld()
+                        if counted.isNone { went = counted } else { asking = counted }
                     }
-                }
-                if let went {
-                    reading(Self.wentLine(went.posts, places: went.places))
                 }
             }
         } header: {
-            Text(L10n.t("prefs.gone"))
-        } footer: {
-            Text(L10n.t("prefs.gone.footer"))
-                .shellFont(.mark)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            ShellSectionHead(title: "prefs.gone", line: "usage.gone.line", help: "prefs.gone.footer")
         }
-        .confirmationDialog(
-            Text(Self.askLine(counted.posts, places: counted.places)), isPresented: $confirming,
-            titleVisibility: .visible
-        ) {
-            Button(L10n.t("prefs.gone.confirm"), role: .destructive) {
-                Task { went = await session.letAllGoneGo() }
-            }
-            Button(L10n.t("board.choose.cancel"), role: .cancel) {}
-        } message: {
-            Text(Self.askDetail(posts: counted.posts, places: counted.places))
+        .shellConfirm($asking, question: { ShellQuestion.letGo(posts: $0.posts, places: $0.places) }) { _, _ in
+            Task { went = await session.letAllGoneGo() }
         }
     }
 

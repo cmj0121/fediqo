@@ -39,6 +39,10 @@ public struct CatalogServer: Hashable, Sendable, Identifiable {
 
 /// The joinmastodon catalog. Picks still go through join; this list does not fetch thumbnails.
 public struct ServerDirectory: Sendable {
+    /// The one host the directory is read from: a third party, asked only while a source is being
+    /// added (#220).
+    public static let host = "api.joinmastodon.org"
+
     private let http: any HTTPClient
 
     public init(http: any HTTPClient) {
@@ -73,7 +77,7 @@ public struct ServerDirectory: Sendable {
     }
 
     public func servers() async throws -> [CatalogServer] {
-        guard let url = Host.httpsURL(host: "api.joinmastodon.org", path: "/servers") else {
+        guard let url = Host.httpsURL(host: Self.host, path: "/servers") else {
             throw URLError(.badURL)
         }
         let (data, response) = try await http.data(from: url)
