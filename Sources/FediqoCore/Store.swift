@@ -606,8 +606,14 @@ public actor ItemStore {
     /// untouched: a source with nothing left inside the window stays joined.
     @discardableResult
     public func setRetention(months: Int?, from now: Date = Date(), calendar: Calendar = .current) -> Int {
+        letGoBeyond(months: months, from: now, calendar: calendar).posts
+    }
+
+    /// `setRetention`, saying which sources the posts went from as well as how many (#251) — what
+    /// the months limit writes into its account.
+    public func letGoBeyond(months: Int?, from now: Date = Date(), calendar: Calendar = .current) -> WentByLimit {
         retention = KeepPolicy.cutoff(keepingMonths: months, from: now, calendar: calendar)
-        guard let retention else { return 0 }
+        guard let retention else { return .none }
         let before = notes.count
         let asideBefore = Set(notes.filter { $0.value.holding == .aside }.keys)
         // A quoted post a kept post quotes stays, as `ingest` keeps it (#214) — held aside from
@@ -616,6 +622,7 @@ public actor ItemStore {
         let quoted = Set(notes.values.filter { $0.postedAt >= retention }.compactMap(\.quotedKey))
         var demoted = false
         var kept: [NoteKey: Note] = [:]
+        var gone: Set<String> = []
         for (key, note) in notes {
             if note.postedAt >= retention {
                 kept[key] = note
@@ -626,6 +633,8 @@ public actor ItemStore {
                     demoted = true
                 }
                 kept[key] = aside
+            } else {
+                gone.insert(key.host)
             }
         }
         notes = kept
@@ -635,7 +644,36 @@ public actor ItemStore {
             // count where it was while the rows themselves changed.
             changed(shown: true, aside: Set(notes.filter { $0.value.holding == .aside }.keys) != asideBefore)
         }
-        return before - notes.count
+        return WentByLimit(posts: before - notes.count, sources: gone.sorted())
+    }
+
+    /// Lets go of the `count` oldest posts held — the room limit's step past the picture copies
+    /// (#249). Returns how many went and from which sources.
+    ///
+    /// **Oldest by when they were posted, across every source, rows held aside included**: the
+    /// room is this device's and not one source's, and a search's find held aside weighs what a
+    /// timeline's post does. Two posted in the same second go in the order they arrived. A post
+    /// another held post quotes stays whatever its age, as the keep window keeps it (#214): it
+    /// goes once the post quoting it has.
+    public func letGoOldest(count: Int) -> WentByLimit {
+        guard count > 0, !notes.isEmpty else { return .none }
+        let quoted = Set(notes.values.compactMap(\.quotedKey))
+        let arrival = self.arrival
+        let going = notes.values
+            .filter { !quoted.contains($0.key) }
+            .sorted {
+                $0.postedAt != $1.postedAt
+                    ? $0.postedAt < $1.postedAt
+                    : (arrival[$0.key] ?? 0) < (arrival[$1.key] ?? 0)
+            }
+            .prefix(count)
+        guard !going.isEmpty else { return .none }
+        for note in going {
+            notes[note.key] = nil
+            self.arrival[note.key] = nil
+        }
+        changed(shown: going.contains { $0.holding == .arrived }, aside: going.contains { $0.holding == .aside })
+        return WentByLimit(posts: going.count, sources: Set(going.map(\.key.host)).sorted())
     }
 
     /// How many rows were posted inside `span` and, where `host` is given, came through that host

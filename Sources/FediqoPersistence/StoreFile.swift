@@ -104,10 +104,33 @@ public struct StoreFile: Sendable {
         open(at: applicationSupportDirectory)
     }
 
-    /// Where the index this app keeps lives.
+    /// Where the index this app keeps lives, and what sits beside it (the limits' account, #251).
     public static var applicationSupportDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Fediqo", isDirectory: true)
+    }
+
+    /// What the rows held weigh, whatever the file does (#249): the pages in use, without the
+    /// free ones a deleted row leaves behind until `compact()`. **What a limit judges each round
+    /// by**: `bytesOnDisk()` does not move until the file is rebuilt, and a rebuild that failed —
+    /// a full disk, a run cancelled — would otherwise read as rows that never went. Zero where it
+    /// cannot be asked.
+    public func bytesHeld() -> Int {
+        (try? db.read { db in
+            let pages = try Int.fetchOne(db, sql: "PRAGMA page_count") ?? 0
+            let free = try Int.fetchOne(db, sql: "PRAGMA freelist_count") ?? 0
+            let size = try Int.fetchOne(db, sql: "PRAGMA page_size") ?? 0
+            return max(0, pages - free) * size
+        }) ?? 0
+    }
+
+    /// Gives back the room that rows let go of left in the file (#249). SQLite keeps a deleted
+    /// row's pages for the next insert, so a save with fewer rows weighs what the last one did
+    /// until the file is rebuilt — and a limit judged by `bytesOnDisk()` would never see the
+    /// posts it let go of. Asked only after a limit acted, never on the ordinary save: it
+    /// rewrites the whole index.
+    public func compact() async throws {
+        try await db.writeWithoutTransaction { db in try db.execute(sql: "VACUUM") }
     }
 
     /// Moves `index.sqlite` and any journal SQLite left beside it to
@@ -131,6 +154,12 @@ public struct StoreFile: Sendable {
             if manager.fileExists(atPath: sidecar.path) {
                 try manager.moveItem(at: sidecar, to: directory.appendingPathComponent(base + ".sqlite" + suffix))
             }
+        }
+        // The limits' account (#251) is about this index and goes aside with it: lines naming
+        // what was let go of a store that is no longer there would be lines about nothing.
+        let account = directory.appendingPathComponent(LimitAccountFile.name)
+        if manager.fileExists(atPath: account.path) {
+            try? manager.moveItem(at: account, to: directory.appendingPathComponent(base + "-" + LimitAccountFile.name))
         }
         return aside
     }

@@ -129,6 +129,9 @@ public enum PackageFormat {
             case profile
             /// One picture copy, named `<host digest>/<url digest>`.
             case picture
+            /// The limits' account (#251), as JSON, named `limits`: what the limits let go of the
+            /// store this package carries. Empty where nothing was ever let go.
+            case limits
         }
 
         public let kind: Kind

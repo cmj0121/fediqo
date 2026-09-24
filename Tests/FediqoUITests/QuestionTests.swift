@@ -29,6 +29,8 @@ struct QuestionTests {
             ShellQuestion.letGo(SpanAsk(posts: 3, from: Date(), to: Date(), host: nil), language: language),
             ShellQuestion.letGo(SpanAsk(posts: 1, from: Date(), to: Date(), host: "a.example"), language: language),
             ShellQuestion.removeTimeline(named: "Art", language: language),
+            ShellQuestion.tighten(room: 250_000_000, language: language),
+            ShellQuestion.clearAccount(language: language),
             ShellQuestion.storeNewer(language: language),
             ShellQuestion.signedOut(hosts: ["a.example", "b.example"], language: language),
             ShellQuestion.takeAway(

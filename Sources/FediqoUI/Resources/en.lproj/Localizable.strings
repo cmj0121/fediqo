@@ -920,6 +920,36 @@
 "list.choose.lists" = "Lists";
 "forum.signin.page" = "The forum's own page";
 
+/* Two limits on the store, and the account of what they let go (#249, #251) */
+"prefs.keep.line" = "Two limits, side by side; whichever is reached first acts.";
+"prefs.keep.help" = "Keep posts holds only the latest months: older posts go now, and any read later are not kept. Room is what this device gives the index and its picture copies together, measured as Time and Copies measure them. Past the room, picture copies go first, oldest first — they come back when read again — and only then the oldest posts, from every source. A limit never set lets nothing go, and every source stays joined.";
+"prefs.room" = "Room";
+"prefs.room.none" = "No limit";
+"prefs.room.figure" = "%1$@ index · %2$@ picture copies";
+"prefs.room.within" = "%1$@ of %2$@ used";
+"prefs.room.tighten.title" = "Give the store %@ of room?";
+"prefs.room.tighten.line" = "Past it, picture copies go first, then the oldest posts.";
+"prefs.room.tighten.detail" = "What this device holds is measured now and held to that room from here on. Picture copies on disk go first, oldest first, and come back when read again; only if that is not enough do the oldest posts go, from every source. Every source stays joined. A larger room, or no limit, lets nothing go.";
+"prefs.limits" = "What the limits let go";
+"prefs.limits.line" = "One line each time a limit acted; never a post.";
+"prefs.limits.help" = "A post a limit let go is no longer on this device, so nothing on it can say which limit did. This account says it instead: the limit, when, how many posts or picture copies went, and from which sources — and nothing else, not a post, not where it was read. What you let go yourself is not written here. Clearing the account lets nothing else go.";
+"prefs.limits.none" = "No limit has acted yet.";
+"prefs.limits.copies" = "%d picture copies";
+"prefs.limits.copies.one" = "%d picture copy";
+"prefs.limits.both" = "%1$@ and %2$@";
+"prefs.limits.brief.from" = "%1$@ · from %2$@";
+"prefs.limits.clear" = "Clear the account";
+"prefs.limits.clear.help" = "Asks first, then clears these lines. Nothing else goes.";
+"prefs.limits.clear.title" = "Clear the account?";
+"prefs.limits.clear.line" = "Only these lines go; every post and copy stays.";
+"prefs.limits.clear.detail" = "The lines say what the limits let go of, and nothing of that comes back by clearing them. Nothing held on this device changes, and no limit does.";
+"prefs.limits.clear.confirm" = "Clear";
+"prefs.limits.detail.time" = "When";
+"prefs.limits.detail.posts" = "Posts";
+"prefs.limits.detail.copies" = "Picture copies";
+"prefs.limits.detail.sources" = "Sources";
+"prefs.limits.detail.sources.none" = "None named";
+
 /* Taking what this device holds away, and reading it back (#247, #252) */
 "work.purpose.takeAway" = "Taking what this device holds away";
 "work.purpose.readBack" = "Reading a take-away back";

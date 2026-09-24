@@ -225,6 +225,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             Piece(.store, name: Self.indexName, file: index, bytes: indexBytes),
             Piece(.settings, name: "settings", data: try settingsPlist()),
             Piece(.secrets, name: "secrets", data: try secretsJSON(sources: sources)),
+            Piece(.limits, name: Self.limitsName, data: limitsJSON()),
         ]
         // What each source last said about itself (#188), one entry a host, so a build that
         // keeps them elsewhere than the index still finds them.
@@ -427,6 +428,28 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         var media: URL?
         var pictures = 0
         var said: [SourceProfile] = []
+        var limits: Data?
+    }
+
+    static let limitsName = "limits"
+
+    /// The limits' account beside the index (#251) as it is, or an empty account where there is
+    /// none: it rides with the store it is about, so the lines still say what went from it.
+    private func limitsJSON() -> Data {
+        (try? Data(contentsOf: directory.appendingPathComponent(LimitAccountFile.name))) ?? Data("[]".utf8)
+    }
+
+    /// The account replaced by the package's, with what was there read first and put back on
+    /// a refusal. Only where the package carried the store: a package of secrets alone says
+    /// nothing about what this device's limits let go.
+    private func commitLimits(_ staged: Staged, into undo: inout [Undo]) throws {
+        guard let data = staged.limits else { return }
+        let target = directory.appendingPathComponent(LimitAccountFile.name)
+        let previous = try? Data(contentsOf: target)
+        try data.write(to: target, options: .atomic)
+        undo.append(Undo(name: "limits") {
+            if let previous { try previous.write(to: target, options: .atomic) } else { try? FileManager.default.removeItem(at: target) }
+        })
     }
 
     public func readBack(
@@ -481,6 +504,11 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                       let profile = wire.profile(host: entry.name)
                 else { throw PackageRefusal.altered }
                 staged.said.append(profile)
+            case .limits:
+                guard entry.name == Self.limitsName, staged.limits == nil else { throw PackageRefusal.altered }
+                // Leniently: a line this build cannot read is left out, and the account is never
+                // a reason to refuse the store it rides with.
+                staged.limits = try LimitAccount.data(LimitAccount.lines(from: try await Self.whole(entry)))
             case .picture:
                 let parts = entry.name.split(separator: "/", omittingEmptySubsequences: false)
                 guard parts.count == 2, parts.allSatisfy(Self.isDigest) else { throw PackageRefusal.altered }
@@ -555,6 +583,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 settle.append { media.settle(aside) }
             }
             try await commitDefaults(staged, into: &undo)
+            try commitLimits(staged, into: &undo)
             await store.replace(sources: contents.sources, notes: contents.notes, said: contents.said)
         } catch {
             // Newest first, every one tried, and the ones that refused named: the device is

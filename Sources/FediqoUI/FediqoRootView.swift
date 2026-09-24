@@ -93,6 +93,9 @@ public struct FediqoRootView: View {
         mastodon: MastodonSessions = MastodonSessions(),
         persist: (@MainActor () async -> Void)? = nil,
         measureStore: (@Sendable () async -> Int)? = nil,
+        compactStore: (@Sendable () async throws -> Void)? = nil,
+        weighStore: (@Sendable () async -> Int)? = nil,
+        limits: (any LimitAccountStore)? = nil,
         storeIsNewer: Bool = false,
         storeNoticeSeen: (@MainActor () -> Void)? = nil,
         carrier: (any StoreCarrier)? = nil
@@ -104,6 +107,9 @@ public struct FediqoRootView: View {
         session.persist = persist
         session.carrier = carrier
         session.measureStore = measureStore
+        session.compactStore = compactStore
+        session.weighStore = weighStore
+        session.limitStore = limits
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)
         self.storeNoticeSeen = storeNoticeSeen
@@ -203,8 +209,13 @@ public struct FediqoRootView: View {
                 placeLinksInPage()
                 tags.placing = { tag, row in openTag(tag, from: row) }
                 placeQuotes()
+                await session.loadLimitAccount()
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
+                // Then the room (#249), judged once what is held is known and the months limit
+                // has had its turn — the one order in which each limit acts once at a launch.
+                session.roomBytes = prefs.roomBytes
+                await session.keepWithinRoom()
                 // The store has now said what is held, which is the first moment this launch can
                 // be asked where it lands (#101). Asked here and nowhere else, so it is asked
                 // once.
@@ -220,6 +231,8 @@ public struct FediqoRootView: View {
             }
             // Posts their source deleted go on this device's wait (#179).
             .modifier(LettingGoneGo(session: session))
+            // And the store is held within the room the person gave it (#249).
+            .modifier(KeepingWithinRoom(session: session))
             .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)

@@ -167,11 +167,13 @@ extension ShellSession {
     /// moves. Returns how many went.
     @discardableResult
     func letGo(span: Range<Date>, host: String?) async -> Int {
-        let went = await store.letGo(span: span, host: host)
-        guard went > 0 else { return 0 }
-        await reloadFromStore()
-        await persist?()
-        await readStoreBytes()
-        return went
+        await holdingStill {
+            let went = await store.letGo(span: span, host: host)
+            guard went > 0 else { return 0 }
+            await reloadFromStore()
+            await persist?()
+            await readStoreBytes()
+            return went
+        }
     }
 }
