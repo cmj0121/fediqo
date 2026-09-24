@@ -392,9 +392,22 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
     }
 
     /// What `sweep` drops even for a source's own site: everything but its cookies.
+    ///
+    /// **That includes the forum's own local storage and IndexedDB**, which a forum's scripts may
+    /// use to remember a draft, a dismissed banner or a theme. They are dropped all the same: what
+    /// a page stores there is its own record of this device's visits, and nothing a sign-in rests
+    /// on — Discuz! and Cloudflare's clearance both live in cookies. The cost is a forum that
+    /// forgets such a nicety between runs.
     static var leftBehind: Set<String> {
         WKWebsiteDataStore.allWebsiteDataTypes().subtracting([WKWebsiteDataTypeCookies])
     }
+
+    /// What a run dropped as it goes to the background (#219): the copies WebKit keeps of what it
+    /// fetched, and nothing a sign-in or a browser check in progress rests on — no cookie, no
+    /// storage. The rest waits for the quit, or for the next launch.
+    static let cache: Set<String> = [
+        WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache, WKWebsiteDataTypeFetchCache,
+    ]
 
     /// Whether a record or cookie filed under `name` belongs to `host`. A cookie's domain may
     /// carry a leading dot, which says "and every subdomain" and is not part of the name.

@@ -45,6 +45,12 @@ final class Launch {
         // And each forum whose sign-in did not outlive the last run, and whose username and
         // password the reader kept, signs in again by itself (#153) — registered here, before the
         // first frame, so a post read a moment later waits for it rather than asking as a guest.
+        // What an older build left in the system's shared network stores goes, once (#219); and
+        // what an earlier run left in the forum browser's store is swept before anything reads it.
+        SharedStores.forgetOnce()
+        forums.sweepAtLaunch(
+            keeping: opened.sources.map(\.host), onDisk: ForumWebsiteData.isOnDisk()
+        )
         forums.signInAgain(hosts: opened.sources.filter { $0.kind == .discuz }.map(\.host))
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
         if let media = try? MediaCache.caches() {
@@ -53,10 +59,20 @@ final class Launch {
     }
 
     /// As a run ends: the save, and then nothing of where this run went left behind (#219) — the
-    /// forum browser's store keeps its sources' sign-ins and nothing else.
+    /// forum browser's store keeps its sources' sign-ins and nothing else. Bounded like the save,
+    /// so a WebKit that stops answering cannot hold a quit up.
     func end() async {
         _ = await saver.flush()
-        await forums.leaveNothing(keeping: await store.sources().map(\.host))
+        let hosts = await store.sources().map(\.host)
+        await forums.leaveNothing(keeping: hosts, within: StoreSaver.deadline)
+    }
+
+    /// As the app goes to the background, which may be a moment away to a password manager in the
+    /// middle of a sign-in: the save, and only the forum browser's copies of what it fetched. The
+    /// rest waits for the quit, or for the next launch's sweep.
+    func pause() async {
+        _ = await saver.flush()
+        await forums.dropCache(within: StoreSaver.deadline)
     }
 }
 
@@ -116,7 +132,7 @@ struct FediqoApp: App {
         let grant = BackgroundGrant()
         #endif
         Task {
-            await Launch.shared.end()
+            await Launch.shared.pause()
             #if os(iOS)
             grant.end()
             #endif

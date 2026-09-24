@@ -24,6 +24,14 @@ public enum ForumWebsiteData {
         return WKWebsiteDataStore(forIdentifier: identifier)
     }
 
+    /// Whether the store is on this device — made by some earlier run — without opening it: a
+    /// launch sweeps it only then (#219), and a reader who never had a forum opens no WebKit.
+    public static func isOnDisk() -> Bool {
+        let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+        let store = directories(library: library, sandboxed: isSandboxed, bundleID: bundleID).store
+        return FileManager.default.fileExists(atPath: store.path)
+    }
+
     /// Makes and marks both directories. The app's own WebKit root is marked as well as the
     /// store: everything WebKit keeps there is a cache or a session, and all of it comes back
     /// from the web rather than from a restore.
