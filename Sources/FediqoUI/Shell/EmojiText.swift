@@ -55,6 +55,9 @@ struct EmojiText: View {
     /// the shell, where a tag stays the label #123 drew.
     @Environment(\.shellTags) private var tags
     @Environment(\.shellRow) private var row
+    /// The hosts still on this device (#250): a line read through one that has gone asks for no
+    /// pictures, and draws its names as written. See `RemoteImage.isHere`.
+    @Environment(\.shellSourcesHere) private var sourcesHere
 
     /// Not `@State`: the cache is one object for the whole app, and this view owns none of it.
     /// What it watches is `arrived` — its own state, filled by its own task — so one emoji
@@ -165,6 +168,7 @@ struct EmojiText: View {
             tags: tags == nil ? [] : tagged, pressing: tags, row: row
         ))
         .task(id: request) {
+            guard RemoteImage.isHere(host, among: sourcesHere) else { return }
             await cache.fetch(request)
             arrived = Arrived(request: request, frames: cache.held(request))
         }

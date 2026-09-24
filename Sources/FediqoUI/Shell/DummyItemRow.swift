@@ -616,10 +616,14 @@ struct DummyItemRow: View {
         }
     }
 
-    /// Whether the source `item` is drawn as is no longer among `here` (#250). Nothing known of
-    /// what is here — a preview, a test — is every host here, so no row is marked by mistake.
+    /// Whether **every** source `item` came through is no longer among `here` (#250) — the gone
+    /// mark's rule (`goneEverywhere`): a post another source still carries is still there to read
+    /// and act on through that source, and the row is drawn as that copy
+    /// (`DummyItem.init(merging:here:)`). Nothing known of what is here — a preview, a test — is
+    /// every host here, so no row is marked by mistake.
     static func sourceLeft(_ item: DummyItem, here: Set<String>?) -> Bool {
-        here.map { !$0.contains(item.source.host) } ?? false
+        guard let here else { return false }
+        return item.sources.allSatisfy { !here.contains($0.host) }
     }
 
     /// What the left mark reads, in the shell's language — named for `goneWord`'s reason.

@@ -462,6 +462,8 @@
 "item.gone.detail" = "Its source says it no longer has this post. It stays here, marked, until you let it go, and nothing can be sent to it.";
 "item.left" = "Source removed";
 "item.left.detail" = "You removed the source this post was read through and kept its posts. It stays here, marked, until you let it go, and nothing reaches its source again.";
+"thread.source.left" = "Its source is no longer on this device, so nothing more is read under it.";
+"usage.removed.line" = "Kept as you chose; they go by the keep window, like any other post.";
 "prefs.gone" = "Posts deleted at their source";
 "prefs.gone.wait" = "Let them go after";
 "prefs.gone.never" = "Never";

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import FediqoCore
 @testable import FediqoUI
@@ -24,14 +25,22 @@ struct RemovedPostsTests {
         )
     }
 
-    /// The store filled and the session brought level with it, as `RemoveTests.seed` does.
-    private static func shell(_ notes: [Note]) async -> ShellSession {
-        let session = ShellSession(http: FixtureHTTP(), pictures: ShellPictures(http: FixtureHTTP()))
+    /// A session holding `notes` on both sources, read back from its store as a launch reads
+    /// one; `http` answers whatever a read asks, and `pictures` is the session's own cache.
+    private static func shell(
+        _ notes: [Note], http: FixtureHTTP = FixtureHTTP(), pictures: ShellPictures? = nil
+    ) async -> ShellSession {
+        let session = ShellSession(http: http, pictures: pictures ?? ShellPictures(http: FixtureHTTP()))
         await session.store.add(alpha)
         await session.store.add(beta)
         await session.store.ingest(notes)
         await session.reloadFromStore()
         return session
+    }
+
+    private static func address(_ name: String) -> URL { URL(string: "https://cdn.example/\(name)")! }
+    private static func key(_ name: String) -> ShellPictures.Key {
+        ShellPictures.Key(url: address(name), scale: 2, tier: .deck)
     }
 
     @Test("The choice is off by default, and holds after a relaunch")
@@ -80,6 +89,105 @@ struct RemovedPostsTests {
         #expect(!DummyItemRow.sourceLeft(item, here: nil))
     }
 
+    /// A post two sources carried, the removed one's copy having arrived first.
+    private static func shared() -> [Note] {
+        let uri = "https://origin.example/users/ada/statuses/1"
+        return [Self.note(uri, from: Self.beta), Self.note(uri, from: Self.alpha)]
+    }
+
+    @Test("A post another source still carries is drawn as that copy, and is not marked")
+    func mergedRowLeadsWithASourceHere() {
+        let here: Set<String> = [Self.alpha.host]
+        let row = DummyItem.merged(Self.shared(), here: here)
+        #expect(row.count == 1)
+        #expect(row.first?.source.host == Self.alpha.host, "drawn as the copy whose source is here")
+        #expect(row.first?.sources.map(\.host) == [Self.alpha.host, Self.beta.host])
+        #expect(!DummyItemRow.sourceLeft(row[0], here: here))
+        // Both gone, or nothing said: the order the copies arrived in, as before.
+        #expect(DummyItem.merged(Self.shared(), here: []).first?.source.host == Self.beta.host)
+        #expect(DummyItem.merged(Self.shared()).first?.source.host == Self.beta.host)
+        #expect(DummyItemRow.sourceLeft(DummyItem.merged(Self.shared(), here: [])[0], here: []))
+    }
+
+    @Test("The stream draws a shared post as the copy still here once the other source is removed")
+    func streamRedrawsAfterRemoval() async {
+        let session = await Self.shell(Self.shared())
+        #expect(session.timelineItems(latest: nil).first?.source.host == Self.beta.host)
+        await session.remove(host: Self.beta.host, keepingPosts: true)
+        #expect(session.timelineItems(latest: nil).first?.source.host == Self.alpha.host)
+        #expect(session.timelineItems(latest: nil).first?.sources.count == 2, "the kept copy is still under it")
+    }
+
+    @Test("Told to keep, Remove lets the pictures go without telling a row to ask again, and nothing is asked")
+    func keptRowsAskForNoPictures() async {
+        let pictures = ShellPictures(http: FixtureHTTP())
+        let work = SourceWork()
+        pictures.work = work
+        let session = await Self.shell([Self.note("1", from: Self.beta)], pictures: pictures)
+        session.work = work
+        pictures.keep(Image(systemName: "photo"), cost: 4096, for: Self.key("a.png"), startedAt: 0, hosts: [Self.beta.host])
+        pictures.note(.refused, for: Self.key("b.png"), hosts: [Self.beta.host])
+        let generation = pictures.generation
+
+        await session.remove(host: Self.beta.host, keepingPosts: true)
+
+        #expect(pictures.holding(host: Self.beta.host).count == 0)
+        #expect(!pictures.isMissing(Self.address("b.png"), scale: 2, tier: .deck), "a refusal outlived its source")
+        #expect(pictures.missingSources.values.allSatisfy { !$0.contains(Self.beta.host) })
+        #expect(pictures.generation == generation, "the rows were told to ask a host nothing may ask")
+        #expect(work.record.allSatisfy { $0.source != Self.beta.host }, "Remove itself reached the host")
+        // What a kept row draws where its picture was: nothing — no wait, no failure, no retry.
+        #expect(RemoteImage.fill(have: false, url: Self.address("a.png"), missing: false, here: false) == .absent)
+        #expect(RemoteImage.fill(have: false, url: Self.address("b.png"), missing: true, here: false) == .absent)
+        #expect(RemoteImage.fill(have: true, url: Self.address("a.png"), missing: false, here: false) == .held)
+        #expect(!RemoteImage.isHere("Beta.Test", among: [Self.alpha.host]))
+        #expect(RemoteImage.isHere(Self.beta.host, among: nil))
+    }
+
+    @Test("A kept forum row draws what it read and nothing where it did not, and asks the forum nothing")
+    func keptForumRowIsSettled() {
+        #expect(ForumPostBand.settled(.coming, here: false) == .silent)
+        #expect(ForumPostBand.settled(.absent(.unreachable), here: false) == .silent)
+        #expect(ForumPostBand.settled(.words("said"), here: false) == .words("said"))
+        #expect(ForumPostBand.settled(.withheld, here: false) == .withheld)
+        #expect(ForumPostBand.settled(.coming, here: true) == .coming)
+    }
+
+    @Test("A kept post's thread is settled as nobody under it, and its source is never asked")
+    func keptThreadAsksNothing() async {
+        let http = FixtureHTTP([:])
+        let kept = Note(
+            id: "https://beta.test/users/ada/statuses/9", source: Source(host: Self.beta.host, kind: .mastodon),
+            author: "Ada", handle: "@ada@beta.test", body: "hello", postedAt: Self.posted,
+            categories: [.public], statusID: "9"
+        )
+        let session = await Self.shell([kept], http: http)
+        let item = DummyItem(kept)
+        await session.remove(host: Self.beta.host, keepingPosts: true)
+
+        await session.conversations.open(item, in: session)
+        #expect(session.conversations.standing(of: item.id) == ShellConversationStanding.none)
+        await session.conversations.renew(item, in: session)
+        await session.conversations.again(item, in: session)
+        #expect(await http.paths.isEmpty, "the removed source was asked")
+    }
+
+    @Test("Usage lists a removed source that still has posts here, after the sources, with its count")
+    func usageListsRemovedSources() async {
+        let session = await Self.shell([Self.note("1", from: Self.beta), Self.note("2", from: Self.beta), Self.note("3", from: Self.alpha)])
+        #expect(UsageSourceList.removed(session).isEmpty)
+        await session.remove(host: Self.beta.host, keepingPosts: true)
+        #expect(UsageSourceList.removed(session) == [Source(host: Self.beta.host, kind: .discuz)])
+        #expect(session.holdings.posts(host: Self.beta.host) == 2)
+        #expect(session.holdings.posts == 3, "the rows no longer sum to the total")
+        #expect(UsageSourceList.source(Self.beta.host, in: session)?.kind == .discuz)
+        session.usagePurpose = .source
+        session.usageOpened = Self.beta.host
+        #expect(session.usageDetailShown, "the removed source's detail cannot be opened")
+        session.usageOpened = "nowhere.test"
+        #expect(!session.usageDetailShown)
+    }
+
     @Test("The question's line says which will happen, in both languages")
     func questionSaysWhich() {
         for language in [DummyLanguage.english, .taiwanese] {
@@ -100,7 +208,7 @@ struct RemovedPostsTests {
     func stringsInEveryLanguage() throws {
         let keys = [
             "item.left", "item.left.detail", "prefs.removed.head", "prefs.removed.brief", "prefs.removed.footer",
-            "prefs.removed", "prefs.removed.go", "prefs.removed.stay",
+            "prefs.removed", "prefs.removed.go", "prefs.removed.stay", "thread.source.left", "usage.removed.line",
         ]
         for key in keys {
             #expect(L10n.t(key, language: .english) != L10n.t(key, language: .taiwanese), "\(key)")

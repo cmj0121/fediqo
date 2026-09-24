@@ -117,6 +117,20 @@ struct StoreTests {
         #expect(await store.all().isEmpty)
     }
 
+    @Test("A source added again after its posts were kept has them as they were: one row each, still arrived")
+    func readdingAfterKeepingPosts() async {
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 3, name: "x")])
+        let kept = note(id: "kept", postedAt: origin, categories: [.trends], from: forum)
+        let store = ItemStore(sources: [source, forum], notes: [kept])
+        await store.remove(host: forum.host, keepingPosts: true)
+        await store.add(Source(host: forum.host, kind: .discuz))
+        await store.ingest([kept], ifSourceHere: forum.host)
+        #expect(await store.sources().map(\.host) == [source.host, forum.host])
+        #expect(await store.all().map(\.id) == ["kept"], "a row was doubled")
+        #expect(await store.all().first?.holding == .arrived)
+        #expect(await store.aside().isEmpty)
+    }
+
     @Test("Removing a source without keeping its posts takes them, as it always did")
     func removeTakesPostsByDefault() async {
         let forum = Source(host: "forum.example", kind: .discuz)

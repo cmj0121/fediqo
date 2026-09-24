@@ -34,12 +34,14 @@ enum ShellQuestion {
         host: String, boards: Int, postsStay: Bool = false, language: DummyLanguage? = nil
     ) -> ShellConfirmation {
         let stay = postsStay ? ".stay" : ""
-        let counted = boards > 0 ? ".boards" : ""
-        let line = postsStay || boards > 0
-            ? String(format: L10n.t("account.remove.line\(stay)\(counted)", language: language), boards)
-            : L10n.t("account.remove.detail", language: language)
-        let help = postsStay || boards > 0
-            ? String(format: L10n.t("account.remove.detail\(stay)\(counted)", language: language), boards) : nil
+        // Only the boards keys carry a count to format; the rest are said as written.
+        func said(_ key: String) -> String {
+            boards > 0
+                ? String(format: L10n.t("\(key)\(stay).boards", language: language), boards)
+                : L10n.t("\(key)\(stay)", language: language)
+        }
+        let line = postsStay || boards > 0 ? said("account.remove.line") : L10n.t("account.remove.detail", language: language)
+        let help = postsStay || boards > 0 ? said("account.remove.detail") : nil
         return ShellConfirmation(
             symbol: "trash", title: String(format: L10n.t("account.remove.title", language: language), host),
             line: line, help: help,

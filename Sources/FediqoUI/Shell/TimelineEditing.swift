@@ -92,6 +92,8 @@ struct DrawnTimeline {
         let definition: TimelineDefinition
         let notesRevision: Int
         let latest: LatestDate?
+        /// The hosts still here (#250): which copy a merged row is drawn as follows them.
+        let hosts: Set<String>
     }
 
     let key: Key
@@ -139,13 +141,16 @@ extension ShellSession {
     /// stopped at the reader's latest date (#22).
     ///
     /// Kept until the definition in front, the notes or the latest date change, because one
-    /// redraw reads it several times. Sources are no key: the stream compiles without them.
+    /// redraw reads it several times. The stream compiles without the sources; their hosts are a
+    /// key all the same, for which copy a merged row is drawn as (#250).
     func timelineItems(latest: LatestDate?) -> [DummyItem] {
         let definition = definition(of: currentTimeline)
-        let key = DrawnTimeline.Key(definition: definition, notesRevision: notesRevision, latest: latest)
+        let hosts = Set(sources.map(\.host))
+        let key = DrawnTimeline.Key(definition: definition, notesRevision: notesRevision, latest: latest, hosts: hosts)
         if let drawnTimeline, drawnTimeline.key == key { return drawnTimeline.items }
         let items = currentTimeline.items(
-            from: notes, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: latest
+            from: notes, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: latest,
+            here: hosts
         )
         drawnTimeline = DrawnTimeline(key: key, items: items)
         timelineEvaluations += 1
@@ -162,14 +167,15 @@ extension ShellSession {
         let definition = definition(of: currentTimeline)
         let name = HeldUnderTag.folded(tag)
         let sent = reload.sentUnderTag[name] ?? []
+        let hosts = Set(sources.map(\.host))
         let key = HeldTag.Key(
-            tag: name, heldRevision: heldRevision, definition: definition, sent: sent, latest: latest
+            tag: name, heldRevision: heldRevision, definition: definition, sent: sent, latest: latest, hosts: hosts
         )
         if let drawnTag, drawnTag.key == key { return drawnTag.items }
         let shown = CompiledTimeline(definition, sources: [])
             .shown(searchable, definition.readsText ? searchTextIndex : TextIndex([]))
         let found = HeldUnderTag.held(under: tag, in: shown, sent: sent)
-        let items = DummyItem.merged(latest?.shown(found) ?? found)
+        let items = DummyItem.merged(latest?.shown(found) ?? found, here: hosts)
         drawnTag = HeldTag(key: key, items: items)
         return items
     }

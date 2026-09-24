@@ -427,9 +427,11 @@ final class ShellSession {
     private(set) var usageReturning: String?
 
     /// Whether a source's detail is what Usage is drawing: the Sources tab, and a host still
-    /// joined. A host left over from another tab or a removed source is not shown.
+    /// joined or one removed whose posts stayed (#250). A host left over from another tab, or a
+    /// removed source nothing is held from, is not shown.
     var usageDetailShown: Bool {
-        usagePurpose == .source && usageOpened.map { host in sources.contains { $0.host == host } } == true
+        guard usagePurpose == .source, let host = usageOpened else { return false }
+        return sources.contains { $0.host == host } || holdings.posts(host: host) > 0
     }
 
     /// Escape on Usage: back from a source's detail to the list. Only a detail on screen is closed,
@@ -2313,7 +2315,11 @@ final class ShellSession {
     /// reader subscribed to *because* they were signed in is a board they will have to sign in
     /// for again the next time it is read. The subscription outliving the session that reached it
     /// is the right way round — the alternative is a reader losing their picks to a cookie.
-    func clear(host: String) async {
+    ///
+    /// `keepingRows` is `remove(host:keepingPosts:)`'s case (#250): the rows of this host are
+    /// staying on screen, so the pictures go without the generation bump that would make every
+    /// one of them ask a host nothing may ask.
+    func clear(host: String, keepingRows: Bool = false) async {
         let host = host.lowercased()
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about. `remove`'s own line, for
@@ -2325,7 +2331,7 @@ final class ShellSession {
         stopReadingAsYou(host: host)
         await emoji.forget(host: host)
         emojis.forget(host: host)
-        pictures.forget(host: host)
+        if keepingRows { pictures.letGo(host: host) } else { pictures.forget(host: host) }
         // Six kinds became seven. A forum's opening posts were this device's copy of that
         // server's words, held for exactly the reason the pictures are — until #154 kept them
         // with their rows, which a Clear keeps (#7). So the ones this run read are handed to
@@ -2672,7 +2678,10 @@ final class ShellSession {
     /// emoji requests aimed at the host the reader has just deleted. `adopt()` in between is what
     /// takes those rows out of the list before the bump lands, so the re-fetch has nothing to
     /// re-fetch. Nothing in the code says this; it is why the two awaits are in this order and not
-    /// the other.
+    /// the other. **Where the rows stay** (`keepingPosts`, #250) `adopt()` takes nothing out, so
+    /// `clear` is told to let the host's pictures go *without* the bump (`ShellPictures.letGo`):
+    /// the rows on screen are then not told to ask again, and what they draw where a picture was
+    /// is nothing, not a refusal with a retry.
     ///
     /// **Before either, what is left over of the reader's last errand**, where that errand was
     /// about this host — ended ahead of the first await, so no errand can land in the gaps between
@@ -2725,7 +2734,7 @@ final class ShellSession {
         }
         await store.remove(host: host, keepingPosts: keepingPosts)
         await adopt()
-        await clear(host: host)
+        await clear(host: host, keepingRows: keepingPosts)
 
         // Folded on both sides rather than on one. `Host.parse` lowercases everything it returns,
         // so all three of these are already folded today — and that is a guarantee three files
