@@ -110,6 +110,8 @@ struct DummyItemRow: View {
 
     /// Where a press on the quote goes (#214). See `ShellQuotes`.
     @Environment(\.shellQuotes) private var quotes
+    /// The hosts still on this device (#250); nothing — a preview, a test — means every host is.
+    @Environment(\.shellSourcesHere) private var sourcesHere
     @State private var hovering = false
     @State private var resolved = Written()
     @Environment(\.colorScheme) private var colorScheme
@@ -463,6 +465,7 @@ struct DummyItemRow: View {
         HStack(spacing: ShellSpace.snug) {
             sourcePill
                 .layoutPriority(0)
+            leftMark
             goneMark
             visibility
             postedAgo
@@ -585,6 +588,47 @@ struct DummyItemRow: View {
     /// What the gone mark reads, in the shell's language — named for `spokenAudience`'s reason.
     static func goneWord(language: DummyLanguage? = nil) -> String {
         L10n.t("item.gone", language: language)
+    }
+
+    /// The source it was read through is no longer on this device, and the reader kept its posts
+    /// (#250): the row stays, and says so, right after the pill that names the host.
+    ///
+    /// **The gone mark's shape, word for word**: a glyph out of the accessibility tree and a word
+    /// that keeps its size, because it is the same kind of fact — the one thing on the meta line
+    /// nothing else on the row tells, and the reason nothing under it reaches the source. The
+    /// glyph is a quiet minus in a ring, not the bin: nobody deleted the post; the reader let the
+    /// server go. Ink dimmed like the pill's, so the mark reads as a note about the pill and not
+    /// as a second headline, in light and dark alike.
+    @ViewBuilder
+    private var leftMark: some View {
+        if Self.sourceLeft(item, here: sourcesHere) {
+            HStack(spacing: ShellSpace.tight) {
+                Image(systemName: "minus.circle")
+                    .accessibilityHidden(true)
+                Text(Self.leftWord())
+            }
+            .shellFont(.mark)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
+            .help(L10n.t("item.left.detail"))
+        }
+    }
+
+    /// Whether **every** source `item` came through is no longer among `here` (#250) — the gone
+    /// mark's rule (`goneEverywhere`): a post another source still carries is still there to read
+    /// and act on through that source, and the row is drawn as that copy
+    /// (`DummyItem.init(merging:here:)`). Nothing known of what is here — a preview, a test — is
+    /// every host here, so no row is marked by mistake.
+    static func sourceLeft(_ item: DummyItem, here: Set<String>?) -> Bool {
+        guard let here else { return false }
+        return item.sources.allSatisfy { !here.contains($0.host) }
+    }
+
+    /// What the left mark reads, in the shell's language — named for `goneWord`'s reason.
+    static func leftWord(language: DummyLanguage? = nil) -> String {
+        L10n.t("item.left", language: language)
     }
 
     /// What the audience mark is called, in the shell's own language.
@@ -1539,4 +1583,12 @@ private struct DummyMarkButton: View {
         if on { return ShellChrome.filament(colorScheme) }
         return quiet ? ShellChrome.inkFaint(colorScheme) : ShellChrome.inkDim(colorScheme)
     }
+}
+
+extension EnvironmentValues {
+    /// The hosts of every source on this device, handed down once from the root (#250), so a row
+    /// drawn anywhere — a timeline, a thread, a search, a person's page — can say its source is no
+    /// longer here. Nothing means nobody said: every host is taken as here. See
+    /// `DummyItemRow.sourceLeft`.
+    @Entry var shellSourcesHere: Set<String>?
 }

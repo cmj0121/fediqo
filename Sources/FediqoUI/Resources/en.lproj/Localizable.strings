@@ -374,6 +374,12 @@
 "prefs.askEvery.one" = "Every minute";
 "prefs.askEvery.many" = "Every %d minutes";
 "prefs.askEvery.footer" = "While Fediqo is open, every source on this device is asked again after this wait, and the timeline in front renews itself. r still reloads at once.";
+"prefs.removed.head" = "When a source is removed";
+"prefs.removed.brief" = "What happens to its posts.";
+"prefs.removed.footer" = "Removing a source takes everything this device holds for it: its sign-in, its pictures, the boards you picked. Its posts go with it, or stay — marked as from a source no longer here, still read in All and found by search, and let go like any other post. The question before removing says which.";
+"prefs.removed" = "Its posts";
+"prefs.removed.go" = "Go with it";
+"prefs.removed.stay" = "Stay";
 
 "prefs.tab.choices" = "Settings";
 "prefs.tab.build" = "This Fediqo";
@@ -455,6 +461,11 @@
 "prefs.keep.months.one" = "Latest %d month";
 "item.gone" = "Deleted at source";
 "item.gone.detail" = "Its source says it no longer has this post. It stays here, marked, until you let it go, and nothing can be sent to it.";
+"item.left" = "Source removed";
+"item.left.detail" = "You removed the source this post was read through and kept its posts. It stays here, marked, until you let it go, and nothing reaches its source again.";
+"thread.source.left" = "Its source is no longer on this device, so nothing more is read under it.";
+"usage.removed.line" = "Kept as you chose; they go by the keep window, like any other post.";
+"usage.removed.help" = "You removed this source and kept its posts. They are still read in All and found by search, marked as from a source no longer here, and go by the keep window like any other post. Nothing else is held for it, and nothing reaches it again; adding it again reads it afresh.";
 "prefs.gone" = "Posts deleted at their source";
 "prefs.gone.wait" = "Let them go after";
 "prefs.gone.never" = "Never";
@@ -616,6 +627,10 @@
 "account.remove.detail.boards" = "Its posts, everything this device holds for it, and the %d boards you picked go with it. The boards do not come back.";
 "account.remove.line.boards" = "Its posts go, and the %d boards you picked do not come back.";
 "account.remove.confirm" = "Remove";
+"account.remove.line.stay" = "Its posts stay, marked as from a source no longer here.";
+"account.remove.line.stay.boards" = "Its posts stay; the %d boards you picked do not come back.";
+"account.remove.detail.stay" = "Its posts stay on this device, marked as from a source no longer here, until you let them go. Everything else this device holds for it goes with it.";
+"account.remove.detail.stay.boards" = "Its posts stay on this device, marked as from a source no longer here, until you let them go. Everything else this device holds for it, and the %d boards you picked, go with it. The boards do not come back.";
 
 /* Unit 4 — the join sheet, and what a server says before you take it. */
 "join.close" = "Close";
@@ -934,3 +949,23 @@
 "prefs.limits.detail.copies" = "Picture copies";
 "prefs.limits.detail.sources" = "Sources";
 "prefs.limits.detail.sources.none" = "None named";
+
+/* Let go by dates (#248) */
+"prefs.span" = "Let go by dates";
+"usage.span.line" = "Posts from these days go from this device.";
+"prefs.span.footer" = "Pick a first and a last day, both included, in this device's time zone, and one source or every one. Before anything goes, a question says how many posts, from where, and that they do not come back: they are in no timeline, no search and no count afterwards. Nothing outside those days, and nothing from another source, is touched. Every source stays joined, and posts left by a source you removed can go here too.";
+"usage.span.from" = "From";
+"usage.span.to" = "To";
+"usage.span.source" = "Source";
+"usage.span.every" = "Every source";
+"usage.span.every.line" = "every source";
+"usage.span.between" = "%1$@ – %2$@";
+"usage.span.none" = "No posts on these days";
+"usage.span.now" = "Let these go";
+"usage.span.now.help" = "Asks first, then lets go of every post from these days and the source chosen.";
+"prefs.span.ask" = "Let go of %d posts?";
+"prefs.span.ask.one" = "Let go of %d post?";
+"prefs.span.ask.line" = "Posted %1$@, from %2$@. They do not come back.";
+"prefs.span.ask.detail" = "Every post from those days and that source goes from this device now, from every screen and every count. Nothing outside those days, and nothing from another source, is touched. Every source stays joined.";
+"prefs.span.went" = "%d posts let go.";
+"prefs.span.went.one" = "%d post let go.";

@@ -111,6 +111,13 @@ final class DummyPrefs {
         didSet { write("goneDays", goneDays.map(String.init) ?? "") }
     }
 
+    /// Whether a removed source's posts stay on this device (#250); false, the default, lets
+    /// them go with it, as they always did. Removing honours this without asking again, and the
+    /// question before it says which will happen.
+    var removedPostsStay: Bool {
+        didSet { write("removedPostsStay", removedPostsStay ? "1" : "") }
+    }
+
     /// The last day every timeline shows (#22); nil, the default, shows up to now.
     var latestDate: LatestDate? {
         didSet { write("latestDate", latestDate?.text ?? "") }
@@ -133,6 +140,7 @@ final class DummyPrefs {
         keepMonths = Int(read("keepMonths") ?? "").flatMap { $0 > 0 ? $0 : nil }
         goneDays = Int(read("goneDays") ?? "").flatMap { $0 > 0 ? $0 : nil }
         roomBytes = Int(read("roomBytes") ?? "").flatMap { $0 > 0 ? $0 : nil }
+        removedPostsStay = read("removedPostsStay") == "1"
         latestDate = LatestDate(read("latestDate") ?? "")
         askMinutes = Int(read("askMinutes") ?? "").flatMap { Self.waits.contains($0) ? $0 : nil } ?? 1
         language = DummyLanguage(rawValue: read("language") ?? "") ?? .system

@@ -176,7 +176,7 @@ public struct StoreFile: Sendable {
             // first (#114), and a table read in no stated order is read in whatever order
             // SQLite likes. Stated, so that it is a guarantee rather than a habit.
             let notes = try NoteRecord.order(Column.rowID).fetchAll(db).compactMap { record in
-                byHost[record.host].map(record.note(from:))
+                (byHost[record.host] ?? record.formerSource).map(record.note(from:))
             }
             return (sources, notes, said)
         }
@@ -539,6 +539,12 @@ private struct NoteFacts: Codable {
     /// the network off. Additive and optional for `boosted`'s reasons: a row written before reads
     /// as one that quotes nothing until a read says otherwise, and an older build ignores the key.
     var quote: QuoteRow?
+    /// `Note.source.kind` (#250), so a note kept after its source was removed still knows what
+    /// kind of server it was read through: `load()` has no source row to take that from. Written
+    /// on every row and read only where the host has no source row. Additive and optional for
+    /// `boosted`'s reasons: a row written before reads as none, and such a row always has a
+    /// source row, since nothing before this kept a note past its source.
+    var kind: String?
 }
 
 /// `Quote` as `NoteFacts` writes it: the state in the source's spelling, and the quoted post.
@@ -805,13 +811,24 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
                 .sorted { $0.category < $1.category },
             audience: note.audience?.rawValue,
             counts: CountsRow(note.counts),
-            quote: note.quote.map(QuoteRow.init)
+            quote: note.quote.map(QuoteRow.init),
+            kind: note.source.kind.rawValue
         )
     }
 
-    /// The note this row holds, stamped with `source` — the row `load()` read for this host.
-    /// The note table keeps no copy of a source; `load()` drops a note whose host has no source
-    /// row, since a note from a server nobody follows is one nothing should draw.
+    /// The source a note kept past its source's removal is stamped with (#250): the host, and
+    /// the kind `facts` wrote down. Its boards and lists are gone with the source row, which is
+    /// right — a row draws by host and kind, and a category is the note's own. Nothing where the
+    /// row wrote no kind, which is a row from before this and a host nobody follows: nothing
+    /// should draw it, as before.
+    var formerSource: Source? {
+        facts.kind.flatMap(ProtocolKind.init(rawValue:)).map { Source(host: host, kind: $0) }
+    }
+
+    /// The note this row holds, stamped with `source` — the row `load()` read for this host, or
+    /// `formerSource` where that row has gone and the reader kept the posts (#250). The note
+    /// table keeps no copy of a source's boards; `load()` drops a note whose host has neither,
+    /// since a note from a server nobody follows is one nothing should draw.
     ///
     /// Categories come back as they went in, an empty set included: what a note arrived through
     /// is a fact about it, and filling in `.public` for none would put it somewhere it was never
