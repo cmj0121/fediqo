@@ -62,6 +62,8 @@ public struct FediqoRootView: View {
     /// Where a hashtag pressed in a post's words goes (#124): this view's walk, handed down as the
     /// link reader is.
     @State private var tags = ShellTags()
+    /// Where a press on a quote goes (#214): this view's walk, handed down as the tags are.
+    @State private var quotes = ShellQuotes()
     /// Up once at launch when the index on disk was written by a newer build and this run left it
     /// alone: without it the reader sees an empty app and nothing to say why.
     @State private var storeIsNewer: Bool
@@ -169,6 +171,7 @@ public struct FediqoRootView: View {
                 // a Mac (#169), and the reader asks the walk here where it may be.
                 placeLinksInPage()
                 tags.placing = { tag, row in openTag(tag, from: row) }
+                placeQuotes()
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
                 // The store has now said what is held, which is the first moment this launch can
@@ -377,6 +380,7 @@ public struct FediqoRootView: View {
             // line on the screen with it. See `ShellReader`.
             .environment(\.shellReader, linkReader)
             .environment(\.shellTags, tags)
+            .environment(\.shellQuotes, quotes)
             .environment(\.locale, prefs.language.locale)
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
@@ -533,6 +537,8 @@ public struct FediqoRootView: View {
             return openAuthor()
         case .openTag:
             return openTagFocused()
+        case .openQuote:
+            return onFocusedItem { openQuote(of: $0) }
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -1224,6 +1230,36 @@ public struct FediqoRootView: View {
         return PostTag.found(in: item.body).first { tag in
             standing.map { !HeldUnderTag.same($0, tag) } ?? true
         }
+    }
+
+    // MARK: - A quoted post — #214
+
+    /// The quote's press and `o`, answered by the walk: set once, before anything can be pressed.
+    private func placeQuotes() {
+        quotes.opening = { item in openQuote(of: item) }
+        quotes.target = { item in session.quotedRow(of: item) }
+    }
+
+    /// The post `item` quotes, opened as a post of its own over whatever it was quoted on.
+    ///
+    /// **The quoting post is the lamp the step remembers**, so leaving the quoted post gives back
+    /// the post that quoted it — on the timeline, in its thread, or wherever it was pressed. Refused
+    /// before anything moves, as `openThread` is: a quote that may not be shown, or one this device
+    /// holds nothing of, opens nothing and leaves the lamp where it was.
+    private func openQuote(of item: DummyItem) -> Bool {
+        guard Self.canWalk(place: place, open: openLayers),
+              let lamp = Self.walkToQuote(from: item, quoted: session.quotedRow(of: item), on: &walk)
+        else { return false }
+        selectedItemID = lamp
+        return true
+    }
+
+    /// The step onto the quoted post, remembering the quoting post as the lamp to give back: the
+    /// row the lamp goes to now, or nothing where there is no step to take. Static, so a test can
+    /// walk it without a window.
+    static func walkToQuote(from item: DummyItem, quoted: String?, on walk: inout ShellWalk) -> String? {
+        guard let quoted, walk.walk(to: .thread(quoted), from: item.id) else { return nil }
+        return quoted
     }
 
     // MARK: - Whoever wrote it — #99

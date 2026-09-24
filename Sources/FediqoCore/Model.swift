@@ -45,6 +45,10 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
     /// **The one list**, read by a timeline's rules and by `hasTrends`, which starts from it: a
     /// second list is how a tab and a rule come to disagree about a server. No `default:`, so a kind
     /// added later has to be answered here rather than inheriting somebody else's answer.
+    /// Whether a post read from a source of this kind says whether it quotes one (#214): a read
+    /// that says nothing of a quote is then a post with none, not a source that never said.
+    public var saysQuotes: Bool { self == .mastodon }
+
     public var hasTimelines: Bool {
         switch self {
         case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
@@ -537,6 +541,9 @@ public struct Note: Identifiable, Hashable, Sendable {
     ///
     /// A `var` for `holding`'s reason: the store grows it as the same post is listed again.
     public var listed: [Category: String]
+    /// The post this one quotes, as its source said (#214), or nothing where it quotes none or
+    /// the source has no such idea. Kept with the row, so the quoted post shows offline.
+    public let quote: Quote?
 
     public init(
         id: String,
@@ -566,7 +573,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         holding: Holding = .arrived,
         goneSince: Date? = nil,
         gaps: Set<TimelineGap> = [],
-        listed: [Category: String] = [:]
+        listed: [Category: String] = [:],
+        quote: Quote? = nil
     ) {
         self.id = id
         self.source = source
@@ -596,6 +604,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.goneSince = goneSince
         self.gaps = gaps
         self.listed = listed
+        self.quote = quote
     }
 
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
@@ -637,7 +646,12 @@ public struct Note: Identifiable, Hashable, Sendable {
             goneSince: nil,
             // What a read of this one post says is nothing about where its timeline is whole.
             gaps: held.gaps,
-            listed: held.listed.later(listed)
+            listed: held.listed.later(listed),
+            // The quote as the source says it now (#214) — a quote taken back reads so, and one an
+            // edit took away is gone. Only a source that never says a quote leaves the held one.
+            quote: source.kind.saysQuotes
+                ? quote.flatMap { Quote.later($0, over: held.quote) }
+                : Quote.later(quote, over: held.quote)
         )
     }
 
@@ -652,9 +666,15 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// and its author's picture are not here either: a source that has them sent them with the
     /// first copy, and one that did not has none to send. Nor the counts, where the later copy
     /// wins rather than fills (`counts`).
+    ///
+    /// **A quote filled in brings its words with it** (#214). A row held before this device read
+    /// quotes was read with the quote spelled into its words as an `RE:` address; the copy that
+    /// says the quote has its words without it. Keeping the held words would draw the quote twice.
     func filled(from other: Note) -> Note {
-        Note(
-            id: id, source: source, author: author, handle: handle, body: body, title: title,
+        let quoteArrives = quote == nil && other.quote != nil
+        return Note(
+            id: id, source: source, author: author, handle: handle,
+            body: quoteArrives ? other.body : body, title: title,
             board: board ?? other.board, postedAt: postedAt, categories: categories, reply: reply,
             boostedBy: boostedBy, boosterHandle: boosterHandle,
             boosted: boosted ?? other.boosted, favourited: favourited ?? other.favourited,
@@ -662,7 +682,9 @@ public struct Note: Identifiable, Hashable, Sendable {
             sensitive: sensitive ?? other.sensitive, spoiler: spoiler ?? other.spoiler,
             emojis: emojis, url: url, counts: counts,
             statusID: statusID ?? other.statusID, opening: opening, holding: holding,
-            goneSince: goneSince, gaps: gaps, listed: listed
+            goneSince: goneSince, gaps: gaps, listed: listed,
+            // The later copy's quote wins, as its counts do (#214) — see `Quote.later`.
+            quote: Quote.later(other.quote, over: quote)
         )
     }
 
@@ -675,7 +697,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             favourited: favourited, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
-            goneSince: goneSince, gaps: gaps, listed: listed
+            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote
         )
     }
 }

@@ -487,7 +487,9 @@ struct ThreadReadingTests {
         // `e` is the timeline editor's (#27, Decision 18).
         #expect(DummyCommand.from("e") == .editTimeline)
         #expect(DummyCommand.from("r") == .reload)
-        for free in ["l", "o", "h"] {
+        // `o` opens a quoted post since #214.
+        #expect(DummyCommand.from("o") == .openQuote)
+        for free in ["l", "h"] {
             #expect(DummyCommand.from(Character(free)) == nil, "\(free) is no longer free")
         }
     }

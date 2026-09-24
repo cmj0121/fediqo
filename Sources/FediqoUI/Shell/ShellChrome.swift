@@ -43,6 +43,20 @@ enum ShellChrome {
         scheme == .dark ? rgb(0.11, 0.16, 0.19) : rgb(0.988, 0.992, 0.995)
     }
 
+    /// A plate standing a little proud of the pane: a quoted post inside the post that quotes it
+    /// (#214). Lighter than the page in dark and a shade darker and cooler in light, so it reads as
+    /// a surface of its own in both — and apart from `well`, the recess a cover's plate sits in,
+    /// so a covered quote's hatch still reads on it.
+    static func raised(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? rgb(0.098, 0.125, 0.145) : rgb(0.922, 0.937, 0.949)
+    }
+
+    /// The soft shadow under `raised`. Low in light, where it is what lifts the plate; fainter
+    /// still in dark, where a shadow on a dark page turns to a halo and the lighter fill lifts it.
+    static func lift(_ scheme: ColorScheme) -> Color {
+        Color.black.opacity(scheme == .dark ? 0.22 : 0.10)
+    }
+
     static func dim(_ scheme: ColorScheme) -> Color {
         rgb(0.08, 0.12, 0.14).opacity(scheme == .dark ? 0.55 : 0.42)
     }

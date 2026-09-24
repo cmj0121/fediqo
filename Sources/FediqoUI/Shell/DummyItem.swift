@@ -167,6 +167,12 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let emojis: [CustomEmoji]
     public let counts: DummyCounts
     public let marks: DummyMarks
+    /// The post this one quotes (#214) — `Note.quote`, carried so every place a row is drawn
+    /// draws the quote the same way. Nothing on a post that quotes none, which is most.
+    public var quote: Quote?
+    /// The row the quoted post is, where the quote came with the post in full: what opening the
+    /// quote walks to. Nothing where it may not be shown, or came as an id alone.
+    public var quotedRowID: String?
     /// Every other copy of this post this device holds, from the other sources that carried it,
     /// in the order they arrived (#114). Empty for a post held from one source, which is most.
     ///
@@ -379,6 +385,8 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
             favourites: note.counts.favourites
         )
         marks = DummyMarks()
+        quote = note.quote
+        quotedRowID = note.quotedKey?.rowID
     }
 
     /// Which shape of row a protocol gets. **The protocol stays behind; the timeline sees a

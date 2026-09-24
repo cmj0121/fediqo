@@ -110,6 +110,11 @@ public actor ItemStore {
         }
     }
 
+    /// Whether `note` is inside the reader's keep window.
+    private func withinRetention(_ note: Note) -> Bool {
+        retention.map { note.postedAt >= $0 } ?? true
+    }
+
     public func add(_ source: Source) {
         if sourceList.contains(where: { $0.host == source.host }) { return }
         sourceList.append(source)
@@ -201,13 +206,29 @@ public actor ItemStore {
     /// a revision moved for that page would write the whole store to disk and redraw every screen
     /// reading it, every minute, for nothing. `refresh`, `keep` and `setRetention` already only
     /// speak when something really moved; this is the fourth.
+    ///
+    /// **A post that quotes another brings the quoted post with it, held aside** (#214): opening
+    /// the quote finds it here with the network off, and no timeline draws it for having been
+    /// quoted. One place, so every way a post gets in — a timeline, a search, a thread — does it.
+    ///
+    /// **A quoted post is kept whatever its age** while a post kept here quotes it: the reader chose
+    /// how long to keep what their timelines bring, and a quote they can see but not open would be
+    /// a press that goes nowhere.
     public func ingest(_ incoming: [Note]) {
+        admit(incoming, exempt: false)
+    }
+
+    /// `ingest(_:)`'s landing. `exempt` takes `incoming` in whatever its age: the posts a post
+    /// read again quotes (#214), which the keep window does not cut while it quotes them.
+    private func admit(_ incoming: [Note], exempt: Bool) {
         guard !incoming.isEmpty else { return }
+        let admitted = exempt ? incoming : incoming.filter(withinRetention)
+        let incoming = admitted + admitted.compactMap(\.quotedNote)
         var moved = false
         var recounted = false
         var shown = false
         var aside = false
-        for note in incoming where retention.map({ note.postedAt >= $0 }) ?? true {
+        for note in incoming {
             let key = note.key
             if let existing = notes[key] {
                 let categories = existing.categories.union(note.categories)
@@ -266,8 +287,10 @@ public actor ItemStore {
         var moved = false
         var shown = false
         var aside = false
+        var held: [Note] = []
         for note in incoming where note.source.host == host {
             guard let existing = notes[note.key] else { continue }
+            held.append(note)
             // The same words read again are not a change (#175): a thread re-read with nothing
             // edited in it neither writes the store down again nor renews a screen.
             let refreshed = note.refreshed(over: existing)
@@ -278,7 +301,12 @@ public actor ItemStore {
             aside = aside || refreshed.holding == .aside
         }
         if moved { changed(shown: shown, aside: aside) }
-        return moved
+        // The posts these quote, held aside as `ingest` holds them (#214): a quote read again may
+        // name one this device has not held yet.
+        let quoted = held.compactMap(\.quotedNote)
+        let before = revision
+        if !quoted.isEmpty { admit(quoted, exempt: true) }
+        return moved || revision != before
     }
 
     /// Keeps a forum row's opening post as just read, with the row (#154). Only for rows held,
@@ -468,11 +496,31 @@ public actor ItemStore {
         retention = KeepPolicy.cutoff(keepingMonths: months, from: now, calendar: calendar)
         guard let retention else { return 0 }
         let before = notes.count
-        let asideBefore = notes.values.filter { $0.holding == .aside }.count
-        notes = notes.filter { $0.value.postedAt >= retention }
-        if notes.count != before {
+        let asideBefore = Set(notes.filter { $0.value.holding == .aside }.keys)
+        // A quoted post a kept post quotes stays, as `ingest` keeps it (#214) — held aside from
+        // here, where a timeline had brought it: the timeline's reach has passed it, the quote's
+        // has not.
+        let quoted = Set(notes.values.filter { $0.postedAt >= retention }.compactMap(\.quotedKey))
+        var demoted = false
+        var kept: [NoteKey: Note] = [:]
+        for (key, note) in notes {
+            if note.postedAt >= retention {
+                kept[key] = note
+            } else if quoted.contains(key) {
+                var aside = note
+                if aside.holding != .aside {
+                    aside.holding = .aside
+                    demoted = true
+                }
+                kept[key] = aside
+            }
+        }
+        notes = kept
+        if notes.count != before || demoted {
             arrival = arrival.filter { notes[$0.key] != nil }
-            changed(shown: true, aside: notes.values.filter { $0.holding == .aside }.count != asideBefore)
+            // Which rows are aside, not how many: a cut and a demotion in one pass can leave the
+            // count where it was while the rows themselves changed.
+            changed(shown: true, aside: Set(notes.filter { $0.value.holding == .aside }.keys) != asideBefore)
         }
         return before - notes.count
     }

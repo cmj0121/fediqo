@@ -252,6 +252,8 @@ struct DummyThreadPane: View {
             // **On every row here, the root included.** Opening this post again is refused;
             // opening whoever wrote it is not the same act and is not refused.
             onOpenPerson: onOpenPerson,
+            quoteLifted: decks.isQuoteLifted(of: item),
+            onToggleQuoteCover: { decks.toggleQuoteCover(of: item) },
             onToggleCover: { _ = decks.toggleCover(item.id) },
             onPlay: { onPlayRow(item) },
             onView: { onViewRow(item) },

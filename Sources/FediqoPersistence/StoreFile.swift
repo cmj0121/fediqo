@@ -413,6 +413,78 @@ private struct NoteFacts: Codable {
     /// `Note.counts` (#208), or nothing where the source counted nothing. Additive and optional
     /// for `boosted`'s reasons: a row written before reads as counted by nobody.
     var counts: CountsRow?
+    /// `Note.quote` (#214): the post this row quotes, what a row draws of it, so it shows with
+    /// the network off. Additive and optional for `boosted`'s reasons: a row written before reads
+    /// as one that quotes nothing until a read says otherwise, and an older build ignores the key.
+    var quote: QuoteRow?
+}
+
+/// `Quote` as `NoteFacts` writes it: the state in the source's spelling, and the quoted post.
+private struct QuoteRow: Codable {
+    var state: String
+    var statusID: String?
+    var post: QuotedRow?
+
+    init(_ quote: Quote) {
+        state = quote.state.rawValue
+        statusID = quote.statusID
+        post = quote.post.map(QuotedRow.init)
+    }
+
+    var quote: Quote {
+        Quote(state: Quote.State(wire: state), post: post?.post, statusID: statusID)
+    }
+}
+
+/// `QuotedPost` as `NoteFacts` writes it: every fact a row draws, and its own quote as a state
+/// and an id — one level, as it was read.
+private struct QuotedRow: Codable {
+    var id: String
+    var statusID: String?
+    var author: String
+    var handle: String
+    var body: String
+    var postedAt: Date
+    var avatarURL: URL?
+    var attachments: [AttachmentRow]
+    var sensitive: Bool?
+    var spoiler: String?
+    var emojis: [EmojiRow]
+    var url: URL?
+    var audience: String?
+    var reply: ReplyRow?
+    var quotingState: String?
+    var quotingStatusID: String?
+
+    init(_ post: QuotedPost) {
+        id = post.id
+        statusID = post.statusID
+        author = post.author
+        handle = post.handle
+        body = post.body
+        postedAt = post.postedAt
+        avatarURL = post.avatarURL
+        attachments = post.attachments.map(AttachmentRow.init)
+        sensitive = post.sensitive
+        spoiler = post.spoiler
+        emojis = post.emojis.map(EmojiRow.init)
+        url = post.url
+        audience = post.audience?.rawValue
+        reply = post.reply.map { ReplyRow(handle: $0.handle, inReplyToId: $0.inReplyToId) }
+        quotingState = post.quoting?.state.rawValue
+        quotingStatusID = post.quoting?.statusID
+    }
+
+    var post: QuotedPost {
+        QuotedPost(
+            id: id, statusID: statusID, author: author, handle: handle, body: body,
+            postedAt: postedAt, avatarURL: avatarURL, attachments: attachments.map(\.attachment),
+            sensitive: sensitive, spoiler: spoiler, emojis: emojis.map(\.emoji), url: url,
+            audience: audience.flatMap(Audience.init(rawValue:)),
+            reply: reply.map { Reply(handle: $0.handle, inReplyToId: $0.inReplyToId) },
+            quoting: quotingState.map { NestedQuote(state: Quote.State(wire: $0), statusID: quotingStatusID) }
+        )
+    }
 }
 
 /// `Counts` as `NoteFacts` writes it.
@@ -610,7 +682,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
                 .map { ListedRow(category: CategoryRow($0.key), id: $0.value) }
                 .sorted { $0.category < $1.category },
             audience: note.audience?.rawValue,
-            counts: CountsRow(note.counts)
+            counts: CountsRow(note.counts),
+            quote: note.quote.map(QuoteRow.init)
         )
     }
 
@@ -656,7 +729,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             listed: Dictionary(
                 (facts.listed ?? []).compactMap { row in row.category.category.map { ($0, row.id) } },
                 uniquingKeysWith: { a, _ in a }
-            )
+            ),
+            quote: facts.quote?.quote
         )
     }
 }
