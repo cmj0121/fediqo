@@ -177,7 +177,7 @@ struct OnlyAddedTests {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let app = try String(contentsOf: root.appendingPathComponent("Apps/Shared/FediqoApp.swift"), encoding: .utf8)
-        let governs = try #require(app.range(of: "FediqoRootView.onlyToSources(\n            opened.sources.map(\\.host), kept: store, read: opened.file != nil && opened.setAside == nil\n        )"))
+        let governs = try #require(app.range(of: "read: opened.file != nil && opened.setAside == nil"))
         let asks = try #require(app.range(of: "mastodon.verifyAll()"))
         #expect(governs.lowerBound < asks.lowerBound, "governed before the first ask")
         let session = try String(

@@ -328,7 +328,8 @@ final class AllowanceBook {
         changed()
     }
 
-    /// Adds `typed` — a host, or an address whose host is taken — for `source`.
+    /// Adds `typed` for `source`: a host, perhaps with `http(s)://` in front and one `/` after it,
+    /// and nothing more (`host`). Answers why not where it is refused.
     @discardableResult
     func add(_ typed: String, for source: String) -> Refusal? {
         let host: String

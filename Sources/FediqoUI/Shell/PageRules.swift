@@ -75,9 +75,20 @@ enum PageRules {
     /// what it compiled for as long as a page has it on.
     static var compiled: [String: Task<WKContentRuleList?, Never>] = [:]
     private static var used: [String] = []
-    /// How many lists are held at once: a handful of forums, reading and signing in, around a
-    /// change of the list.
-    static let kept = 8
+    /// How many lists are held at once, besides any on a page: a handful of forums, reading and
+    /// signing in, around a change of the list.
+    static let kept = 16
+    /// How many browsers have each list on (`hold`): a list on a page is never let go.
+    private static var holders: [String: Int] = [:]
+
+    /// A browser put the list for `rules` on.
+    static func hold(_ rules: String) { holders[rules, default: 0] += 1 }
+
+    /// A browser took the list for `rules` off, or went.
+    static func release(_ rules: String) {
+        guard let held = holders[rules] else { return }
+        holders[rules] = held > 1 ? held - 1 : nil
+    }
 
     /// How a list of rules is compiled. WebKit's own; a test hands in one that fails.
     ///
@@ -156,12 +167,14 @@ enum PageRules {
         return list
     }
 
-    /// `rules` used now; the one used longest ago let go past `kept`.
+    /// `rules` used now; the one used longest ago that no page has on let go past `kept`.
     private static func touch(_ rules: String) {
         used.removeAll { $0 == rules }
         used.append(rules)
-        while used.count > kept {
-            let old = used.removeFirst()
+        while used.count - used.filter({ holders[$0] != nil }).count > kept,
+              let index = used.firstIndex(where: { holders[$0] == nil })
+        {
+            let old = used.remove(at: index)
             guard let held = compiled.removeValue(forKey: old) else { continue }
             let discard = discard
             Task { @MainActor in

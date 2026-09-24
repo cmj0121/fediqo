@@ -268,7 +268,7 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
             return false
         }
         guard mine == rulesEpoch else { return true }
-        put(list)
+        put(list, rules: rules)
         ruledAs = wanted
         ruledWith = rules
         return true
@@ -276,29 +276,42 @@ final class ForumWebEngine: NSObject, WKNavigationDelegate {
 
     /// Where the list the person's entries make would not compile, **what was on is not left
     /// on**: it may let through what they just switched off. Every other site's load is blocked
-    /// instead, and where even that will not compile the page is stopped and blanked. A page is
-    /// not loaded again until its own list is on (`settled`).
+    /// instead; where even that will not compile, the list that was on stays on — taking it off
+    /// would leave the page no rules at all — and the page is stopped and blanked. A page is not
+    /// loaded again until its own list is on (`settled`).
     private func strictest(_ mine: Int) async {
-        let strict = await PageRules.list(.page)
+        let rules = PageRules.rules(.page)
+        let strict = await PageRules.compiled(rules)
         guard mine == rulesEpoch else { return }
         if let strict {
-            put(strict)
+            put(strict, rules: rules)
             ruledAs = .page
         } else {
-            put(nil)
             stopAndBlank()
         }
     }
 
     /// The list on this view now, as put on here: WebKit does not say.
     private(set) var ruledBy: WKContentRuleList?
+    /// The rules of that list, held against `PageRules` letting it go while it is on.
+    private var holding: String?
 
-    /// Puts `list` on this view in place of any other.
-    private func put(_ list: WKContentRuleList?) {
+    /// Puts `list` — compiled from `rules` — on this view in place of any other.
+    private func put(_ list: WKContentRuleList, rules: String) {
         let controller = view.configuration.userContentController
         controller.removeAllContentRuleLists()
-        if let list { controller.add(list) }
+        controller.add(list)
         ruledBy = list
+        PageRules.hold(rules)
+        if let holding { PageRules.release(holding) }
+        holding = rules
+    }
+
+    /// A browser that goes lets go of the list it had on.
+    deinit {
+        if let holding {
+            Task { @MainActor in PageRules.release(holding) }
+        }
     }
 
     /// Whether this browser goes to `url`, and what is written of it (#220).

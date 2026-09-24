@@ -503,12 +503,54 @@ struct AllowanceOnAPageTests {
             names.append(compiled?.identifier ?? "")
             made.append(PageRules.rules(.forum, of: forum, allowing: list))
         }
-        #expect(PageRules.compiled.count <= PageRules.kept)
+        #expect(made.filter { PageRules.compiled[$0] != nil }.count <= PageRules.kept)
         #expect(PageRules.compiled[made[0]] == nil, "the oldest is still held")
         #expect(PageRules.compiled[made.last!] != nil)
         #expect(await waited { compiler.discarded.contains(names[0]) }, "the oldest was not taken out of the store")
         #expect(!compiler.discarded.contains(names.last!))
         #expect(Set(names).count == names.count, "each compile has a name of its own")
+    }
+
+    @Test("A list on a page is not let go, however many are compiled after it")
+    func aListOnAPageIsKept() async throws {
+        let compiler = Compiler(failing: "nevermatchesmarker")
+        defer { compiler.putBack() }
+        let forum = "bbs.holding.example"
+        let work = SourceWork()
+        work.govern(sources: [forum])
+        let first = Allowance.standing + [Allowance.own(host: "held.example", for: forum)]
+        work.allow(first)
+        let engine = ForumWebEngine(host: forum, dataStore: .nonPersistent())
+        engine.work = work
+        await engine.signingIn(false)
+        let on = PageRules.rules(.forum, of: forum, allowing: first)
+        #expect(engine.ruledWith == on)
+        for index in 0...PageRules.kept {
+            let list = Allowance.standing + [Allowance.own(host: "later\(index).example", for: forum)]
+            _ = await PageRules.list(.forum, of: forum, allowing: list)
+        }
+        #expect(PageRules.compiled[on] != nil, "the list on the page was let go")
+        #expect(!compiler.discarded.contains(engine.ruledBy?.identifier ?? "-"))
+    }
+
+    @Test("The directory switched off while it is being asked does not show what came back", .timeLimit(.minutes(1)))
+    func theDirectoryOffMidFetch() async {
+        let work = SourceWork()
+        work.govern(sources: [])
+        let http = GatedHTTP(["/servers": .text("[]")], holding: "/servers")
+        let session = ShellSession(
+            http: http, store: ItemStore(),
+            mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: RefusedSender())
+        )
+        session.work = work
+        session.browse()
+        session.stage = .browsingServers(.mastodon)
+        let fetch = Task { await session.loadCatalog() }
+        #expect(await spun { await http.reached })
+        work.allow(Allowance.standing.filter { $0.id != .directory })
+        await http.gate.open()
+        await fetch.value
+        #expect(session.catalog == .off)
     }
 
     /// What a page pulls in never passes the browser's navigation policy, so the page says it,

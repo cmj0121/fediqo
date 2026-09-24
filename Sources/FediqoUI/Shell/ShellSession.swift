@@ -967,6 +967,11 @@ final class ShellSession {
         catalog = .loading
         do {
             let servers = try await ServerDirectory(http: WatchedHTTP(http, for: .directory, in: work)).servers()
+            // Switched off while it was asked: what came back is not shown (#226).
+            guard work.allows(.directory) else {
+                catalog = .off
+                return
+            }
             catalog = servers.isEmpty ? .empty : .ready(servers)
         }
         // **The one site in this file a raw `URLError(.cancelled)` still reaches.** Everything
