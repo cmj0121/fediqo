@@ -181,6 +181,7 @@ struct UsagePane: View {
                 breakdown(session)
             case .keep:
                 keep
+                SpanSection(session: session)
                 GoneSection(session: session)
             case .copies:
                 copies(session)

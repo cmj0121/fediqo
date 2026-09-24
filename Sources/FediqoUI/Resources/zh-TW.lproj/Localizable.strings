@@ -897,3 +897,21 @@
 "board.choose.boards" = "版塊";
 "list.choose.lists" = "列表";
 "forum.signin.page" = "論壇自己的頁面";
+
+/* Let go by dates (#248) */
+"prefs.span" = "依日期放下";
+"usage.span.line" = "這幾天的貼文會從這台裝置移除。";
+"prefs.span.footer" = "選一段日期——從某一天到某一天，含首尾兩天，依這台裝置的時區——並選一個來源或所有來源。放下前會先問一次，說明有幾則貼文、來自哪裡，以及它們不會回來：放下後不會出現在任何時間軸、搜尋或計數裡。這段日期以外的貼文、其他來源的貼文都不受影響。每個來源仍保持加入；你移除的來源留下的貼文也可以在這裡放下。";
+"usage.span.from" = "從";
+"usage.span.to" = "到";
+"usage.span.source" = "來源";
+"usage.span.every" = "所有來源";
+"usage.span.every.line" = "所有來源";
+"usage.span.between" = "%1$@ 到 %2$@";
+"usage.span.none" = "這幾天沒有貼文";
+"usage.span.now" = "放下這些貼文";
+"usage.span.now.help" = "會先詢問，再放下這幾天內、所選來源的每一則貼文。";
+"prefs.span.ask" = "要放下 %d 則貼文嗎？";
+"prefs.span.ask.line" = "發佈於 %1$@，來源：%2$@。放下後不會回來。";
+"prefs.span.ask.detail" = "這幾天發佈、來自所選來源的每一則貼文都會立即從這台裝置移除，不再出現在任何畫面或計數裡。這段日期以外的貼文、其他來源的貼文都不受影響，每個來源仍保持加入。";
+"prefs.span.went" = "已放下 %d 則貼文。";

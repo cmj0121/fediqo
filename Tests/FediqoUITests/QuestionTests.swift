@@ -26,6 +26,8 @@ struct QuestionTests {
             ShellQuestion.letGo(posts: 4, places: 0, language: language),
             ShellQuestion.letGo(posts: 4, places: 2, language: language),
             ShellQuestion.letGo(posts: 0, places: 2, language: language),
+            ShellQuestion.letGo(SpanAsk(posts: 3, from: Date(), to: Date(), host: nil), language: language),
+            ShellQuestion.letGo(SpanAsk(posts: 1, from: Date(), to: Date(), host: "a.example"), language: language),
             ShellQuestion.removeTimeline(named: "Art", language: language),
             ShellQuestion.storeNewer(language: language),
             ShellQuestion.signedOut(hosts: ["a.example", "b.example"], language: language),
@@ -134,7 +136,7 @@ struct QuestionTests {
             .appendingPathComponent("Sources/FediqoUI/Resources")
         let keys = [
             "withdraw.line", "store.newer.line", "account.signin.ask.line", "account.mastodon.ended.line",
-            "prefs.drop.copies.line", "prefs.keep.shorten.line", "prefs.gone.ask.line",
+            "prefs.drop.copies.line", "prefs.keep.shorten.line", "prefs.gone.ask.line", "prefs.span.ask.line",
             "prefs.gone.ask.line.places", "prefs.gone.ask.line.placesonly", "account.remove.line.boards",
             "account.remove.line.stay", "account.remove.line.stay.boards", "confirm.destructive.hint",
         ] + Self.clearKeys.map(ShellQuestion.clearLineKey)
