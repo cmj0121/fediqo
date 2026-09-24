@@ -43,7 +43,8 @@ struct UsageSourceList: View {
     }
 }
 
-/// Everything this device holds from one source, and the Clear that lets it go (#234).
+/// Everything this device holds from one source, and the Clear that lets it go (#234). Its posts
+/// are everything the store holds from it, and the ones no timeline shows are said apart (#194).
 ///
 /// **Clear asks, rather than fires** (decision 29): it sets `session.clearing`, the one presenter
 /// on `FediqoRootView`, so a Clear here and on Account are one question. The password line is
@@ -66,6 +67,9 @@ struct UsageSourceDetail: View {
         Section {
             if cataloguesRead { catalogueLine }
             reading(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
+            if let apart = UsagePane.asideLine(session.holdings.aside(host: source.host)) {
+                reading(Text(apart))
+            }
             reading(Text(UsagePane.picturesLine(source, in: session, onDisk: onDisk)))
             postLine
             passwordLine

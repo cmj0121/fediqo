@@ -129,6 +129,23 @@ public struct StoreFile: Sendable {
 
     private static let indexName = "index.sqlite"
 
+    /// What the index weighs on disk right now: the file and any journal SQLite left beside it
+    /// (#194). **The one measure of the store's size**: Usage's figure is this, and a limit on
+    /// the store is held to the same call, so the two cannot disagree. Zero where there is no
+    /// file, or for a store not on disk at all.
+    public func bytesOnDisk() -> Int {
+        Self.bytesOnDisk(indexAt: db.path)
+    }
+
+    /// `bytesOnDisk()` for the index at `path`, and what SQLite keeps beside it.
+    static func bytesOnDisk(indexAt path: String) -> Int {
+        guard path != ":memory:", !path.isEmpty else { return 0 }
+        return ([""] + ["-journal", "-wal", "-shm"]).reduce(0) { sum, suffix in
+            let values = try? URL(fileURLWithPath: path + suffix).resourceValues(forKeys: [.fileSizeKey])
+            return sum + (values?.fileSize ?? 0)
+        }
+    }
+
     public func load() throws -> (sources: [Source], notes: [Note]) {
         try db.read { db in
             let sources = try SourceRecord.fetchAll(db).map(\.source)

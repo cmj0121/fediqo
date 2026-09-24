@@ -21,6 +21,8 @@ final class Launch {
     let forums: ForumSessions
     let mastodon: MastodonSessions
     let saver: StoreSaver
+    /// The index on disk, measured for Usage (#194); nil where this run has none.
+    let file: StoreFile?
     /// The index was written by a newer build and left alone; the root view says so. Cleared when
     /// the reader dismisses that, so it is said once a launch rather than once a window.
     var storeIsNewer: Bool
@@ -35,6 +37,7 @@ final class Launch {
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
         saver = StoreSaver(store: store, file: opened.file)
+        file = opened.file
         storeIsNewer = opened.storeIsNewer
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).
@@ -160,6 +163,7 @@ struct FediqoApp: App {
             FediqoRootView(
                 store: Launch.shared.store, forums: Launch.shared.forums,
                 mastodon: Launch.shared.mastodon, persist: save,
+                measureStore: Launch.shared.file.map { file in { file.bytesOnDisk() } },
                 storeIsNewer: Launch.shared.storeIsNewer,
                 storeNoticeSeen: { Launch.shared.storeIsNewer = false }
             )
