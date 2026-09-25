@@ -160,11 +160,17 @@ struct NearbyFlow: ViewModifier {
             }
     }
 
-    private var asking: Binding<ShellNearby.Step?> {
+    /// Put away unanswered — Escape, Cancel, a swipe — is "not the same" for the mark question
+    /// (back to the list, not out) and out for the rest; judged a turn later, as a yes clears
+    /// this too (`ShellConfirmAnswer.putAway`). Judged on the question up, not the step: a
+    /// clearing written back with no question up — the sheet let down after a yes moved the
+    /// step on — puts nothing away, and never stops the move the yes began.
+    var asking: Binding<ShellNearby.Step?> {
         Binding(get: { session?.nearby.asking }, set: {
-            guard $0 == nil else { return }
-            // The mark question put away is "not the same": back to the list, not out.
-            if case .checkingMark = session?.nearby.step { session?.nearby.markMismatched() } else { session?.nearby.dismiss() }
+            guard $0 == nil, let nearby = session?.nearby else { return }
+            ShellConfirmAnswer.putAway(nearby.asking, now: { nearby.asking }) { asked in
+                if case .checkingMark = asked { nearby.markMismatched() } else { nearby.dismiss() }
+            }
         })
     }
 
@@ -182,7 +188,7 @@ struct NearbyFlow: ViewModifier {
         }
     }
 
-    private func answer(_ step: ShellNearby.Step, _ id: String) {
+    func answer(_ step: ShellNearby.Step, _ id: String) {
         guard let session else { return }
         switch step {
         case .checkingMark:

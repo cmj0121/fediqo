@@ -600,7 +600,7 @@ final class ShellSession {
     var activityFrom: String?
 
     /// Tab and ⇧Tab on Preferences, the way they rotate Usage: Settings, This Fediqo, In flight,
-    /// Allowed, Your hosts, and round again — closing a detail left open, as a pill does.
+    /// Allowed, Your hosts, Move, and round again — closing a detail left open, as a pill does.
     @discardableResult
     func rotatePreferencesTab(by step: Int) -> Bool {
         preferencesPurpose = DummyCommand.advanced(

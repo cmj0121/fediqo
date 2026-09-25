@@ -115,6 +115,36 @@ struct CarryTests {
         carry.dismiss()
     }
 
+    @Test("The pictures question answered on the card takes its step, a refusal it asks stays up, and put away it closes")
+    func answeredThroughTheCard() async {
+        let session = ShellSession(http: FixtureHTTP())
+        let carrier = FakeCarrier()
+        carrier.weight = PackageWeight(withoutPictures: 100, withPictures: 300, free: 200, holdsStore: false)
+        session.carrier = carrier
+        let flow = CarryFlow(session: session)
+        let carry = session.carry
+        func press(_ answer: ShellConfirmAnswer) async {
+            await settle(carry) { $0 != .weighing }
+            guard let asked = carry.asking else { Issue.record("nothing asked"); return }
+            ShellConfirmAnswer.settle(answer, asked: asked, item: flow.asking, onChoice: flow.answer)
+            for _ in 0..<4 {
+                await Task.yield()
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        carry.beginTakeAway(with: carrier)
+        await press(.choice(ShellQuestion.withoutPictures))
+        #expect(carry.step == .setting(pictures: false), "the choice was not taken as put away")
+        carry.dismiss()
+        carry.beginTakeAway(with: carrier)
+        await press(.choice(ShellQuestion.withPictures))
+        #expect(carry.step == .refused(.noRoom(needed: 300, free: 200)), "the refusal the answer asked is left up")
+        carry.dismiss()
+        carry.beginTakeAway(with: carrier)
+        await press(.cancel)
+        #expect(carry.step == nil, "put away, it closes")
+    }
+
     @Test("Moving cancelled or failed takes the scratch file with it")
     func moveCancelled() async throws {
         let carrier = FakeCarrier()
@@ -339,7 +369,7 @@ struct CarryTests {
         #expect(ShellQuestion.carryRefused(.shortPassword, language: .english).line.contains("8"))
     }
 
-    @Test("The group is on Preferences' settings tab, its flow is one modifier there, and the root's chain is untouched")
+    @Test("The group is on Preferences' Move tab, its flow is one modifier on the pane, and the root's chain is untouched")
     func wherItLives() throws {
         let shell = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -347,6 +377,10 @@ struct CarryTests {
         let prefs = try String(contentsOf: shell.appendingPathComponent("Shell/PreferencesPane.swift"), encoding: .utf8)
         #expect(prefs.contains("CarrySection(session: session)"))
         #expect(prefs.contains(".modifier(CarryFlow(session: session))"))
+        let move = try #require(prefs.range(of: "private var move: some View {"))
+        #expect(prefs.range(of: "CarrySection(session: session)")!.lowerBound > move.upperBound, "on the Move tab")
+        let flow = try #require(prefs.range(of: ".modifier(CarryFlow(session: session))"))
+        #expect(flow.upperBound < prefs.range(of: "private var page: some View {")!.lowerBound, "on the pane, not the tab")
         let root = try String(contentsOf: shell.appendingPathComponent("FediqoRootView.swift"), encoding: .utf8)
         #expect(!root.contains("Carry"), "the root's chain grows by nothing")
         let section = try String(contentsOf: shell.appendingPathComponent("Shell/CarrySection.swift"), encoding: .utf8)

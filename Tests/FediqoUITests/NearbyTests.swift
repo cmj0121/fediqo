@@ -1,5 +1,6 @@
 import CryptoKit
 import FediqoCore
+import FediqoPersistence
 import Foundation
 import Synchronization
 import Testing
@@ -318,6 +319,154 @@ struct NearbyTests {
         holding.dismiss()
     }
 
+    /// A few turns of the main actor: long enough for a put-away judged a turn later to act.
+    static func turns() async {
+        for _ in 0..<4 {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    /// A sender's session over `two`'s pipe, its question up, answered the way the card answers:
+    /// through `settle`, which takes the question down before it hands over the answer.
+    private static func sender(_ two: Two) async -> (ShellSession, NearbyFlow)? {
+        let session = ShellSession(http: FixtureHTTP())
+        session.carrier = two.from
+        session.nearbyLink = two.link
+        session.deviceName = "a laptop"
+        two.holding.beginHold(with: two.onto, link: two.link, device: "a tablet") {}
+        await two.settle(two.holding) { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
+        session.nearby.beginOffer(with: two.from, link: two.link)
+        await two.settle(session.nearby) { if case .browsing(let peers) = $0 { !peers.isEmpty } else { false } }
+        guard case .holding(let code) = two.holding.step else { Issue.record("no code"); return nil }
+        session.nearby.picked = session.nearby.peers.first
+        session.nearby.offer(code: code, rides: .withoutPictures)
+        guard case .checkingMark = session.nearby.step else { Issue.record("no mark asked"); return nil }
+        return (session, NearbyFlow(session: session))
+    }
+
+    private static func press(_ answer: ShellConfirmAnswer, on flow: NearbyFlow, _ nearby: ShellNearby) {
+        guard let asked = nearby.asking else { Issue.record("nothing asked"); return }
+        ShellConfirmAnswer.settle(answer, asked: asked, item: flow.asking, onChoice: flow.answer)
+    }
+
+    @Test("\"The same\" and a yes, pressed on the card, move the step on: the question going down first does not undo them")
+    func yesThroughTheCard() async throws {
+        let two = Two()
+        defer { two.end() }
+        guard let (session, flow) = await Self.sender(two) else { return }
+        defer { session.nearby.dismiss() }
+        Self.press(.choice(ShellQuestion.yes), on: flow, session.nearby)
+        await Self.turns()
+        #expect(session.nearby.sheet != .pick, "\"The same\" was not taken as put away")
+        switch session.nearby.step {
+        case .packing, .connecting, .asking: break
+        default: Issue.record("the mark's yes did nothing: \(String(describing: session.nearby.step))")
+        }
+        await two.settle(session.nearby) { if case .asking = $0 { true } else { false } }
+        await two.settle(two.holding) { if case .asking = $0 { true } else { false } }
+        Self.press(.choice(ShellQuestion.yes), on: flow, session.nearby)
+        await Self.turns()
+        #expect(session.nearby.step == .waiting(peer: "a tablet"), "the ask's yes waits for the other screen")
+        // The sheet let down after the yes writes the clearing back once more, with no question up.
+        flow.asking.wrappedValue = nil
+        await Self.turns()
+        #expect(session.nearby.step == .waiting(peer: "a tablet"), "a clearing with no question up stops nothing")
+    }
+
+    @Test("Put away on the card, the mark question goes back to the list and the ask closes")
+    func cancelThroughTheCard() async throws {
+        let two = Two()
+        defer { two.end() }
+        guard let (session, flow) = await Self.sender(two) else { return }
+        defer { session.nearby.dismiss() }
+        Self.press(.cancel, on: flow, session.nearby)
+        await Self.turns()
+        #expect(session.nearby.sheet == .pick, "not the same: back to the list")
+        if case .browsing = session.nearby.step {} else { Issue.record("not back to the list: \(String(describing: session.nearby.step))") }
+
+        guard case .holding(let code) = two.holding.step else { Issue.record("no code"); return }
+        session.nearby.offer(code: code, rides: .withoutPictures)
+        Self.press(.choice(ShellQuestion.yes), on: flow, session.nearby)
+        await two.settle(session.nearby) { if case .asking = $0 { true } else { false } }
+        Self.press(.cancel, on: flow, session.nearby)
+        await Self.turns()
+        #expect(session.nearby.step == nil, "the ask put away closes the move")
+    }
+
+    @Test("A hold put away before its yes gives back no copies it never took")
+    func cancelledHoldLeavesTheCopiesRunning() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("fediqo-nearby-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cache = try MediaCache(directory: folder)
+        let disk = DiskCopies(cache)
+        let link = PipeNearbyLink()
+        let onto = FakeCarrier(device: "a tablet")
+        defer { try? FileManager.default.removeItem(at: onto.staging) }
+        // Put away with the code up: the copies were never held, so nothing is resumed (a resume
+        // of a queue not suspended traps the process — this test would not come back).
+        let nearby = ShellNearby(work: SourceWork())
+        nearby.beginHold(with: onto, link: link, device: "a tablet", pictures: disk) {}
+        nearby.dismiss()
+        nearby.beginHold(with: onto, link: link, device: "a tablet", pictures: disk) {}
+        nearby.dismiss()
+        disk.store(Data("x".utf8), host: "a.example", url: URL(string: "https://a.example/one.jpg")!)
+        await disk.settled()
+        #expect(cache.bytes(host: "a.example") == 1, "the copies still run after a hold put away twice")
+    }
+
+    /// The receiver's question up over `two`'s pipe, with `disk` as the copies a yes holds.
+    private static func asked(_ two: Two, pictures disk: DiskCopies) async -> Bool {
+        two.holding.beginHold(with: two.onto, link: two.link, device: "a tablet", pictures: disk) {}
+        await two.settle(two.holding) { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
+        two.offering.beginOffer(with: two.from, link: two.link)
+        await two.settle(two.offering) { if case .browsing(let peers) = $0 { !peers.isEmpty } else { false } }
+        await two.offer()
+        guard case .asking = two.holding.step else { Issue.record("no question on the receiver"); return false }
+        return true
+    }
+
+    /// Whether the copies run: a write and a read of it come back within a couple of seconds.
+    /// A queue left suspended never answers, so this asks off to the side and stops looking.
+    private static func running(_ disk: DiskCopies, _ cache: MediaCache, _ name: String) async -> Bool {
+        let done = Mutex(false)
+        Task.detached {
+            disk.store(Data("x".utf8), host: "a.example", url: URL(string: "https://a.example/\(name).jpg")!)
+            await disk.settled()
+            done.withLock { $0 = true }
+        }
+        for _ in 0..<200 where !done.withLock({ $0 }) { try? await Task.sleep(for: .milliseconds(10)) }
+        return done.withLock { $0 }
+    }
+
+    @Test("A yes put away before its hold of the copies returns, or after, leaves them running; at most one hold is ever out")
+    func yesThenPutAwayLeavesTheCopiesRunning() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("fediqo-nearby-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cache = try MediaCache(directory: folder)
+        let disk = DiskCopies(cache)
+        let two = Two()
+        defer { two.end() }
+
+        // Before: the test holds the copies first, so the yes's hold is left pending behind it.
+        guard await Self.asked(two, pictures: disk) else { return }
+        await disk.hold()
+        two.holding.answer(true)
+        await Self.turns()
+        two.holding.dismiss()
+        disk.release()
+        #expect(await Self.running(disk, cache, "one"), "a pending hold that returns after its move is given straight back")
+        two.offering.dismiss()
+
+        // After: the yes's hold has returned, and the put-away releases it, once.
+        guard await Self.asked(two, pictures: disk) else { return }
+        two.holding.answer(true)
+        await Self.turns()
+        two.holding.dismiss()
+        #expect(await Self.running(disk, cache, "two"), "a returned hold is released on the way out")
+        #expect(cache.bytes(host: "a.example") == 2)
+    }
+
     // MARK: - What is said
 
     private static let offer = NearbyOffer(
@@ -440,14 +589,25 @@ struct NearbyTests {
         #expect(L10n.t("work.purpose.nearbyMove", language: .taiwanese).contains("鄰近"))
     }
 
-    @Test("The group is on Preferences beside Take away, its flow is one modifier there, the root's chain is untouched, and the plists ask what the system asks")
+    @Test("The group is on Preferences' Move tab under Take away, its flow is one modifier on the pane whatever tab is in front, the root's chain is untouched, and the plists ask what the system asks")
     func whereItLives() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let shell = root.appendingPathComponent("Sources/FediqoUI")
         let prefs = try String(contentsOf: shell.appendingPathComponent("Shell/PreferencesPane.swift"), encoding: .utf8)
-        #expect(prefs.contains("NearbySection(session: session)"))
-        #expect(prefs.contains(".modifier(NearbyFlow(session: session))"))
+        let move = try #require(prefs.range(of: "private var move: some View {"))
+        let next = try #require(prefs.range(of: "\n    }\n", range: move.upperBound..<prefs.endIndex))
+        let tab = prefs[move.upperBound..<next.lowerBound]
+        #expect(tab.contains("CarrySection(session: session)\n            NearbySection(session: session)"), "beside Take away, under it")
+        let choices = try #require(prefs.range(of: "private var choices: some View {"))
+        let choicesEnd = try #require(prefs.range(of: "\n    }\n", range: choices.upperBound..<prefs.endIndex))
+        #expect(!prefs[choices.upperBound..<choicesEnd.lowerBound].contains("Section(session: session)"), "off the first tab")
+        #expect(prefs.contains("case .move: move"))
+        // On the pane, after the page's switch: a tab changed mid-move tears nothing down.
+        let flow = try #require(prefs.range(of: ".modifier(NearbyFlow(session: session))"))
+        let form = try #require(prefs.range(of: "var body: some View {\n        Form {"))
+        let page = try #require(prefs.range(of: "private var page: some View {"))
+        #expect(form.upperBound < flow.lowerBound && flow.upperBound < page.lowerBound)
         let rootView = try String(contentsOf: shell.appendingPathComponent("FediqoRootView.swift"), encoding: .utf8)
         #expect(!rootView.contains("Nearby") || !rootView.contains("NearbyFlow"), "the root's chain grows by nothing")
         let section = try String(contentsOf: shell.appendingPathComponent("Shell/NearbySection.swift"), encoding: .utf8)

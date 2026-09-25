@@ -105,6 +105,13 @@ final class ShellNearby {
     @ObservationIgnored private var browsing: Task<Void, Never>?
     @ObservationIgnored private var token: SourceWork.Token?
     @ObservationIgnored private var pictures: DiskCopies?
+    /// The copies actually held — set once `hold()` has returned, and released once, by `end`.
+    /// A hold put away before its yes never took them, and must never give them back: resuming
+    /// a queue that was not suspended is a crash.
+    @ObservationIgnored private var heldPictures: DiskCopies?
+    /// Moves on at every `end`, so a hold of the copies that returns after its move ended gives
+    /// them straight back instead of keeping them for a move that is gone.
+    @ObservationIgnored private var round = 0
     @ObservationIgnored private var adopt: (@MainActor () async -> Void)?
     @ObservationIgnored private var holding = false
     /// The devices last listed, for the list to come back to.
@@ -267,8 +274,16 @@ final class ShellNearby {
         step = .waiting(peer: ask.peer)
         hold(true)
         let pictures = ask.receiving ? self.pictures : nil
-        Task { @MainActor in
-            await pictures?.hold()
+        let round = self.round
+        Task { @MainActor [weak self] in
+            if let pictures {
+                await pictures.hold()
+                guard let self, self.round == round else {
+                    pictures.release()
+                    return
+                }
+                self.heldPictures = pictures
+            }
             await move.answer(true)
         }
     }
@@ -303,9 +318,19 @@ final class ShellNearby {
             work.end(token)
             self.token = nil
         }
-        hold(false)
-        pictures?.release()
+        letGo()
         pictures = nil
+    }
+
+    /// What a yes took is given back: the store let go, the screen let sleep, and the copies
+    /// released. **At most one hold of the copies is ever outstanding**: one returned is in
+    /// `heldPictures` and released here, once; one still pending sees `round` moved on and
+    /// gives them straight back. Called on every way back to the code and every way out.
+    private func letGo() {
+        hold(false)
+        round += 1
+        heldPictures?.release()
+        heldPictures = nil
         Self.keepAwake(false)
     }
 
@@ -341,6 +366,9 @@ final class ShellNearby {
     private func took(_ event: NearbyMove.Event) {
         switch event {
         case .code(let code, let sessionID):
+            // Back to the code — a first code, or a new one after a drop — nothing is being
+            // moved in: whatever a yes held is let go, so the next yes holds afresh.
+            letGo()
             self.code = code
             mark = NearbyCode.mark(code: code, sessionID: sessionID)
             step = .holding(code: code)
