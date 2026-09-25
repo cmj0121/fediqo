@@ -218,7 +218,7 @@ struct MoveProgressTests {
         return host.fittingSize
     }
 
-    @Test("Every nearby and carry question sits its presses in one row at the card's natural width on a Mac; a phone stacks them only at the largest type")
+    @Test("Every nearby and carry question sits its presses in one row — on a Mac, on a phone, at every type size")
     func oneRow() {
         let questions = [
             ShellQuestion.nearbyMark("AB12", peer: "a tablet", language: .english),
@@ -244,17 +244,19 @@ struct MoveProgressTests {
         for labels in [["Cancel", "Move"], ["Cancel", "Set password"]] {
             #expect(ShellPressRow.inOneRow(labels.map { Self.press($0) }, width: 360 - 2 * ShellSpace.room))
         }
-        // A phone's width: the take-away's three fit at the usual size, and stack at the largest.
+        // A phone's width: the take-away's three sit in one row at the usual size — and at the
+        // largest too, where each press gives up its share rather than dropping below the others.
         let three = ["Cancel", "Without pictures", "With pictures"]
         let phone: CGFloat = 393 - 2 * ShellSpace.room
         #expect(ShellPressRow.inOneRow(three.map { Self.press($0) }, width: phone))
         // A Mac's bordered press keeps its size whatever the type, so the largest phone press is
         // its label at the largest accessibility size (body at 53 points) with the press's margin.
         let largest = three.map { Self.label($0, points: 53) }
-        #expect(!ShellPressRow.inOneRow(largest, width: phone))
-        let stacked = ShellPressRow.arrangement(largest, spacing: ShellSpace.snug, width: phone)
-        #expect(stacked.origins.map(\.y) == stacked.origins.map(\.y).sorted() && Set(stacked.origins.map(\.y)).count == 3)
-        #expect(stacked.origins.allSatisfy { $0.x >= 0 }, "trailing, inside the width")
+        #expect(ShellPressRow.inOneRow(largest, width: phone), "always one row, even at the largest type")
+        let placed = ShellPressRow.arrangement(largest, spacing: ShellSpace.snug, width: phone)
+        #expect(Set(placed.origins.map(\.y)).count <= largest.count && placed.size.height == largest.map(\.height).max())
+        #expect(zip(placed.origins, placed.widths).allSatisfy { $0.x >= -0.5 && $0.x + $1 <= phone + 0.5 }, "trailing, inside the width")
+        #expect(placed.widths.reduce(0, +) < largest.map(\.width).reduce(0, +), "narrowed to fit, not stacked")
     }
     #endif
 }

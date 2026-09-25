@@ -300,6 +300,7 @@ struct CarryPasswordSheet: View {
                 .tint(ShellChrome.selectInk(colorScheme))
                 .disabled(!ready)
         }
+        .onePressLine()
         .frame(maxWidth: .infinity, alignment: .trailing)
         .buttonStyle(.bordered)
         .controlSize(.large)

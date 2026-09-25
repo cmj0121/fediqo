@@ -205,10 +205,10 @@ struct ShellConfirmCard: View {
         }
     }
 
-    /// In a row where they fit, and one above another where they do not — three choices at the
-    /// largest type on a phone (`ShellPressRow`).
+    /// Always one row, each label on one line (`ShellPressRow`, `onePressLine`).
     private var presses: some View {
         ShellPressRow { pressList }
+            .onePressLine()
             .frame(maxWidth: .infinity, alignment: .trailing)
             .buttonStyle(.bordered)
         .controlSize(.large)
