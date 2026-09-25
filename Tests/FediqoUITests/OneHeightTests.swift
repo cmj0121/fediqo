@@ -299,6 +299,42 @@ struct OneHeightTests {
         }
     }
 
+    /// Lays a row out at its own height and reads back where each band went.
+    private static func bands(_ item: DummyItem, layout: ShellLayout) -> [RowBand: CGRect] {
+        let probe = RowBandProbe()
+        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
+                               marks: .constant(DummyMarks()), probe: probe, onToast: { _ in })
+            .environment(\.shellLayout, layout)
+        let host = NSHostingView(rootView: row.frame(width: layout == .wide ? 720 : 390))
+        host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        host.layoutSubtreeIfNeeded()
+        return probe.frames
+    }
+
+    /// **What happened to a post is the row's first line** — above who wrote it, not the first
+    /// line of the words under the header — and then the post, then its marks.
+    @Test("A boosted, answering or quoting row reads decorator, header, post, marks, top to bottom",
+          arguments: [ShellLayout.wide, .narrow])
+    func decoratorHeadsTheRow(_ layout: ShellLayout) throws {
+        let quote = Quote(state: .pending)
+        let decorated = [
+            ("boosted", Self.note(body: Self.longPost, boostedBy: "Bob")),
+            ("answering", Self.note(body: "Short.", reply: Reply(handle: "@bob@first.example"))),
+            ("quoting", Self.note(body: Self.longPost, attachments: [Self.picture("a")], quote: quote)),
+        ]
+        for (name, item) in decorated {
+            let bands = Self.bands(item, layout: layout)
+            let decorator = try #require(bands[.decorator], "\(name): no decorator drawn")
+            let header = try #require(bands[.header])
+            let content = try #require(bands[.content])
+            let marks = try #require(bands[.marks])
+            #expect(decorator.height > 0)
+            #expect(decorator.maxY <= header.minY, "\(layout) \(name): decorator \(decorator), header \(header)")
+            #expect(header.maxY <= content.minY, "\(layout) \(name): header \(header), post \(content)")
+            #expect(content.maxY <= marks.minY, "\(layout) \(name): post \(content), marks \(marks)")
+        }
+    }
+
     @Test("The largest type makes every timeline row taller alike")
     func timelineRowGrowsWithType() {
         let short = Self.note()
@@ -363,16 +399,17 @@ struct OneHeightTests {
         #expect(AttachmentDeck.following(0, of: 9) == [1, 2, 3, 4])
     }
 
-    @Test("What happened to a post takes one of its lines, not a line of its own")
-    func decoratorTakesALine() {
+    @Test("What happened to a post has a line of the row's own, and takes none of its words")
+    func decoratorKeepsTheWords() {
         func lines(_ item: DummyItem) -> Int {
             DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
                          marks: .constant(DummyMarks()), onToast: { _ in }).bodyLines
         }
         #expect(lines(Self.note()) == 4, "the wide layout's four lines stay four")
-        #expect(lines(Self.note(boostedBy: "Bob")) == 3)
-        #expect(lines(Self.note(reply: Reply(handle: "@bob@first.example"))) == 3)
-        #expect(lines(Self.note(title: "t", kind: .discuz)) == 3)
+        #expect(lines(Self.note(boostedBy: "Bob")) == 4)
+        #expect(lines(Self.note(reply: Reply(handle: "@bob@first.example"))) == 4)
+        #expect(lines(Self.note(quote: Quote(state: .pending))) == 4)
+        #expect(lines(Self.note(title: "t", kind: .discuz)) == 3, "a title still takes a line of the words")
     }
 
     @Test("The marks break the same way on every row: by the page and the type size alone")
