@@ -59,31 +59,54 @@ struct NearbyTests {
             try PackageReader(at: url).open(with: key)
         }
 
+        /// Where set, a read back tells half its progress and waits here before the rest.
+        var gate: Gate?
+
         func readBack(_ url: URL, key: PackageKey, replacing: Bool, progress: @escaping @Sendable (PackageProgress) -> Void) async throws {
             let reader = try PackageReader(at: url)
             _ = try reader.open(with: key)
+            progress(PackageProgress(done: 2_500, total: 5_000))
+            await gate?.wait()
             for try await entry in reader.entries() { for try await _ in entry.chunks {} }
+            progress(PackageProgress(done: 5_000, total: 5_000))
             counts.withLock { $0.read.append(replacing) }
         }
+    }
+
+    /// Opened once, and every wait on it — before or after — goes on.
+    final class Gate: Sendable {
+        private let opened: AsyncStream<Void>
+        private let opener: AsyncStream<Void>.Continuation
+
+        init() {
+            (opened, opener) = AsyncStream<Void>.makeStream()
+        }
+
+        func open() { opener.finish() }
+        func wait() async { for await _ in opened {} }
     }
 
     /// Two sessions' worth of flow on one pipe: the device that holds and the one that offers.
     @MainActor
     final class Two {
         let link = PipeNearbyLink()
-        let holding = ShellNearby(work: SourceWork())
-        let offering = ShellNearby(work: SourceWork())
+        let holding: ShellNearby
+        let offering: ShellNearby
         let onto = FakeCarrier(device: "a tablet")
         let from = FakeCarrier(device: "a laptop")
         /// What each side said about holding still, and how often the receiver adopted.
         final class Log: Sendable {
             let stillness = Mutex<[String]>([])
             let adopted = Mutex(0)
+            /// What each side asked of the platform about staying awake, in order.
+            let awake = Mutex<[String]>([])
         }
 
         let log = Log()
 
         init() {
+            holding = ShellNearby(work: SourceWork(), awake: StayAwake { [log] on in log.awake.withLock { $0.append("hold \(on)") } })
+            offering = ShellNearby(work: SourceWork(), awake: StayAwake { [log] on in log.awake.withLock { $0.append("offer \(on)") } })
             holding.holdStill = { [log] on in log.stillness.withLock { $0.append("hold \(on)") } }
             offering.holdStill = { [log] on in log.stillness.withLock { $0.append("offer \(on)") } }
         }
@@ -226,6 +249,86 @@ struct NearbyTests {
         two.holding.dismiss()
         two.offering.dismiss()
         #expect(two.holding.step == nil && !two.holding.isUp && two.offering.step == nil)
+    }
+
+    @Test("The receiver's read back arrives as progress on its sheet, Cancel dimmed; neither side's progress sheet taken down by the system stops the move")
+    func readBackProgress() async throws {
+        let two = Two()
+        let gate = Gate()
+        two.onto.gate = gate
+        defer {
+            gate.open()
+            two.end()
+        }
+        await two.begin()
+        await two.offer()
+        two.offering.answer(true)
+        #expect(two.offering.sheet == .progress, "the sender waits on its progress sheet")
+        two.offering.sheetPutAway()
+        #expect(two.offering.step == .waiting(peer: "a tablet"), "taken down by the system, the move goes on")
+        let waiting = try #require(NearbyFlow.progress(two.offering, language: .english))
+        #expect(waiting.title == "Moving to a tablet" && waiting.stage == "Waiting for the other device to agree" && waiting.canCancel)
+        #expect(waiting.code == "Code " + NearbyCode.spaced(two.holding.code), "the code on both")
+        two.holding.answer(true)
+        await two.settle(two.holding) { if case .settling(let progress?, _) = $0 { progress.done == 2_500 } else { false } }
+        await two.settle(two.offering) { if case .settling = $0 { true } else { false } }
+        let there = try #require(NearbyFlow.progress(two.offering, language: .english))
+        #expect(there.stage == "The other device is proving the whole of it" && there.press == .close && there.canCancel,
+                "the sender waiting on the other's read back may still close its own screen")
+        #expect(two.holding.sheet == .progress)
+        let reading = try #require(NearbyFlow.progress(two.holding, language: .english))
+        #expect(reading.title == "Holding from a laptop" && reading.stage == "Reading it back")
+        #expect(reading.fraction == 0.5 && !reading.canCancel)
+        #expect(reading.code == waiting.code)
+        #expect(NearbySection.measured(two.holding.step) == PackageProgress(done: 2_500, total: 5_000), "the tab's row draws a bar too")
+        two.holding.sheetPutAway()
+        two.holding.dismiss()
+        if case .settling = two.holding.step {} else { Issue.record("the read back was stopped") }
+        #expect(reading.press == .runsToEnd)
+        // Close on the sender: its screen comes down; the receiver is told nothing and finishes.
+        two.offering.dismiss()
+        #expect(two.offering.step == nil && !two.offering.awake.on)
+        gate.open()
+        await two.settle(two.holding) { if case .done = $0 { true } else { false } }
+        #expect(two.onto.read == [false])
+    }
+
+    @Test("Both devices stay awake from the first press to the end of the run, a drop and a refusal included, and are let sleep once on every way out")
+    func staysAwake() async throws {
+        let two = Two()
+        defer { two.end() }
+        func asked(_ side: String) -> [Bool] {
+            two.log.awake.withLock { $0 }.filter { $0.hasPrefix(side) }.map { $0.hasSuffix("true") }
+        }
+        // Put away with the code and the list up.
+        await two.begin()
+        #expect(two.holding.awake.on && two.offering.awake.on, "awake while the code and the list are up")
+        two.holding.dismiss()
+        two.offering.dismiss()
+        #expect(!two.holding.awake.on && !two.offering.awake.on)
+        #expect(asked("hold") == [true, false] && asked("offer") == [true, false])
+
+        // A no: the side that said it ends at once, the other on its refusal.
+        await two.begin()
+        await two.offer()
+        #expect(two.offering.awake.on && two.holding.awake.on, "awake through the mark and the question")
+        two.holding.answer(false)
+        two.offering.answer(true)
+        await two.settle(two.offering) { $0 == .refused(.refusedThere) }
+        #expect(!two.holding.awake.on && !two.offering.awake.on, "a refusal on screen is the run ended")
+        two.offering.dismiss()
+        #expect(asked("hold") == [true, false, true, false] && asked("offer") == [true, false, true, false])
+
+        // A drop midway, back to waiting for the other, and on to the end.
+        await two.begin()
+        await two.offer()
+        two.link.cutNext(afterBytesFrames: 0)
+        two.offering.answer(true)
+        two.holding.answer(true)
+        await two.settle(two.holding) { if case .done = $0 { true } else { false } }
+        await two.settle(two.offering) { if case .done = $0 { true } else { false } }
+        #expect(asked("hold") == [true, false, true, false, true, false], "awake across the drop, told once each way")
+        #expect(asked("offer") == [true, false, true, false, true, false])
     }
 
     @Test("A no on either side closes with nothing written, and the sign-ins-only choice rides as that")
@@ -550,7 +653,7 @@ struct NearbyTests {
         #expect(NearbySection.Estimate.minutes(1).text(language: .english) == "about a minute left")
         #expect(NearbySection.Estimate.minutes(4).text(language: .taiwanese) == "大約還要 4 分鐘")
         #expect(NearbyCode.spaced("123456") == "123 456" && NearbyCode.spaced("12") == "12")
-        #expect(NearbySection.statusKey(.settling(peer: "x")) == "nearby.settling" && NearbySection.statusKey(nil) == nil)
+        #expect(NearbySection.statusKey(.settling(nil, peer: "x")) == "nearby.settling" && NearbySection.statusKey(nil) == nil)
         #expect(NearbyPickSheet.ridesLabel(.withPictures, weight: PackageWeight(withoutPictures: 1, withPictures: 2_000_000, free: 0, holdsStore: false), language: .english)
             == "Everything, with pictures (\(UsagePane.size(2_000_000, language: .english)))")
         #expect(NearbyPickSheet.ridesLabel(.signInsOnly, weight: nil, language: .english) == "Sign-ins only")

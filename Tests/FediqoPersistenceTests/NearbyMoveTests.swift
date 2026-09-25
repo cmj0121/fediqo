@@ -112,7 +112,12 @@ struct NearbyMoveTests {
         // Bytes were reported on both sides, and the estimate's total is the file's length.
         let moved = held.events.compactMap { if case .moving(let progress, _) = $0 { progress } else { nil } }
         #expect(moved.last?.done == Int(offer.fileBytes) && moved.first?.done == 0)
-        #expect(sent.events.contains { if case .settling = $0 { true } else { false } })
+        #expect(sent.events.contains { if case .settling(nil, _) = $0 { true } else { false } })
+        // The receiver's read back says how far it has come, so its last stage is not a spinner
+        // for minutes; the sender, which cannot know, says only that it is settling.
+        let readBack = held.events.compactMap { if case .settling(let progress?, _) = $0 { progress } else { nil } }
+        #expect(!readBack.isEmpty && readBack.last?.fraction == 1)
+        #expect(!sent.events.contains { if case .settling(_?, _) = $0 { true } else { false } })
 
         let onto = await pair.onto.store.snapshot()
         let from = await pair.from.store.snapshot()
@@ -525,6 +530,59 @@ struct NearbyMoveTests {
         // Now nobody is there: the next period closes the hold.
         await endPeriod(holdTicks, again: false)
         #expect(await held.until("timed out", Self.isRefused) == .refused(.timedOut))
+    }
+
+    /// A carrier whose read back waits for the test, and is otherwise the real one.
+    final class SlowReader: StoreCarrier, @unchecked Sendable {
+        let inner: StorePackager
+        private let (opened, opener) = AsyncStream<Void>.makeStream()
+
+        init(_ inner: StorePackager) { self.inner = inner }
+
+        func open() { opener.finish() }
+        func weigh() async throws -> PackageWeight { try await inner.weigh() }
+        func stagingFolder() -> URL { inner.stagingFolder() }
+        func takeAway(
+            to url: URL, key: PackageKey, pictures: Bool, contents: PackageSummary.Contents,
+            progress: @escaping @Sendable (PackageProgress) -> Void
+        ) async throws {
+            try await inner.takeAway(to: url, key: key, pictures: pictures, contents: contents, progress: progress)
+        }
+        func preview(_ url: URL, key: PackageKey) async throws -> PackageSummary { try await inner.preview(url, key: key) }
+        func readBack(_ url: URL, key: PackageKey, replacing: Bool, progress: @escaping @Sendable (PackageProgress) -> Void) async throws {
+            for await _ in opened {}
+            try await inner.readBack(url, key: key, replacing: replacing, progress: progress)
+        }
+    }
+
+    @Test("A sender whose last word never comes ends unsure at its deadline, and the receiver still reads it back")
+    func lastWordDeadline() async throws {
+        let from = try await PackagerFixture.populated()
+        let onto = try await Device()
+        defer { from.remove(); onto.remove() }
+        let link = PipeNearbyLink()
+        let ticks = Ticker()
+        let slow = SlowReader(onto.packager())
+        defer { slow.open() }
+        let sender = NearbyMove(
+            link: link, carrier: from.packager(), device: "a laptop", retryDelay: .milliseconds(20), retries: 5,
+            lastWordClock: ticks.period
+        )
+        let receiver = NearbyMove(link: link, carrier: slow, device: "a tablet")
+        let held = Watch(await receiver.hold())
+        guard case .code(let code, _)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else { return }
+        for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        let sent = Watch(await sender.offer(to: link.peers[0], code: code, pictures: false, contents: .whole))
+        await sent.until("the sender's question", Self.isAsking)
+        await held.until("the receiver's question", Self.isAsking)
+        await sender.answer(true)
+        await receiver.answer(true)
+        await sent.until("the sender settling", { if case .settling = $0 { true } else { false } })
+        await endPeriod(ticks, again: false)
+        #expect(await sent.until("unsure", Self.isRefused) == .refused(.unsure))
+        slow.open()
+        await held.until("the receiver done", Self.isDone)
+        #expect(await onto.store.snapshot().notes.count == 3)
     }
 
     @Test("A yes to a question the link dropped under is nothing: the question comes down, and the next offer is asked afresh")

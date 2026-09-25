@@ -163,14 +163,16 @@ struct ShellConfirmCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.pad) {
+            // The words keep the reading measure; the presses take the width their row needs, so
+            // a fitted sheet grows to hold three choices side by side (`ShellPressRow`).
             HStack(alignment: .top, spacing: ShellSpace.step) {
                 glyph
                 words
             }
+            .frame(maxWidth: measure - 2 * ShellSpace.room, alignment: .leading)
             presses
         }
         .padding(ShellSpace.room)
-        .frame(maxWidth: measure)
         .background(ShellChrome.page(colorScheme))
         .defaultFocus($focus, question.firstFocus)
         .task {
@@ -204,17 +206,11 @@ struct ShellConfirmCard: View {
     }
 
     /// In a row where they fit, and one above another where they do not — three choices at the
-    /// largest type on a phone.
+    /// largest type on a phone (`ShellPressRow`).
     private var presses: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: ShellSpace.snug) {
-                Spacer(minLength: 0)
-                pressList
-            }
-            VStack(alignment: .trailing, spacing: ShellSpace.snug) { pressList }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .buttonStyle(.bordered)
+        ShellPressRow { pressList }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .buttonStyle(.bordered)
         .controlSize(.large)
     }
 
