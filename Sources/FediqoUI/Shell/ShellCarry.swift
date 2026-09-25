@@ -75,7 +75,43 @@ final class ShellCarry {
         case readBack(PackageSummary)
     }
 
-    private(set) var step: Step?
+    private(set) var step: Step? {
+        didSet { awake.set(Self.staysAwake(step)) }
+    }
+
+    /// Whether the device is kept awake at `step`: while the package is written or read back,
+    /// and not while a question, a sheet or the mover waits on the person.
+    static func staysAwake(_ step: Step?) -> Bool {
+        switch step {
+        case .taking, .reading: true
+        default: false
+        }
+    }
+
+    /// Whether the progress sheet is up at `step`: while the package is written or read back.
+    static func showsProgress(_ step: Step?) -> Bool { staysAwake(step) }
+
+    /// What the progress sheet says at `step`, or nothing where nothing is being written or read.
+    /// A read back cannot be stopped once begun (`confirmReadBack`), and its Cancel says so.
+    static func progress(_ step: Step?, language: DummyLanguage? = nil) -> ShellProgress? {
+        let reading: Bool
+        let progress: PackageProgress
+        switch step {
+        case .taking(let now): (reading, progress) = (false, now)
+        case .reading(let now): (reading, progress) = (true, now)
+        default: return nil
+        }
+        return ShellProgress(
+            symbol: reading ? "square.and.arrow.down" : "square.and.arrow.up",
+            title: L10n.t(reading ? "carry.reading" : "carry.taking", language: language),
+            stage: L10n.t(reading ? "nearby.stage.reading" : "nearby.stage.packing", language: language),
+            fraction: progress.total > 0 ? progress.fraction : nil,
+            amount: NearbySection.amountLine(progress, since: nil, language: language),
+            code: nil,
+            canCancel: !reading,
+            cancelHelp: "carry.progress.stop.help"
+        )
+    }
 
     /// What is asked of the person right now, as a sheet: a password to set, or one to give.
     enum Ask: Identifiable, Equatable {
@@ -125,14 +161,17 @@ final class ShellCarry {
     /// A picked file this flow is allowed to read, until it is dismissed.
     @ObservationIgnored private var scoped: URL?
     @ObservationIgnored let work: SourceWork
+    /// The device kept awake while the package is written or read back.
+    @ObservationIgnored let awake: StayAwake
 
     /// Told while the store is being taken away or read back, and once it is not: what holds
     /// the room limit still (`ShellSession.holdsStill`, #249), set before the first byte moves
     /// and cleared on every way out, a refusal and a dismissal included.
     @ObservationIgnored var holding: (@MainActor (Bool) -> Void)?
 
-    init(work: SourceWork = .shared) {
+    init(work: SourceWork = .shared, awake: StayAwake = StayAwake()) {
         self.work = work
+        self.awake = awake
     }
 
     // MARK: - Taking away

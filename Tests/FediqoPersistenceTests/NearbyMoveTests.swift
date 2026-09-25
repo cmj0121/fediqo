@@ -112,7 +112,12 @@ struct NearbyMoveTests {
         // Bytes were reported on both sides, and the estimate's total is the file's length.
         let moved = held.events.compactMap { if case .moving(let progress, _) = $0 { progress } else { nil } }
         #expect(moved.last?.done == Int(offer.fileBytes) && moved.first?.done == 0)
-        #expect(sent.events.contains { if case .settling = $0 { true } else { false } })
+        #expect(sent.events.contains { if case .settling(nil, _) = $0 { true } else { false } })
+        // The receiver's read back says how far it has come, so its last stage is not a spinner
+        // for minutes; the sender, which cannot know, says only that it is settling.
+        let readBack = held.events.compactMap { if case .settling(let progress?, _) = $0 { progress } else { nil } }
+        #expect(!readBack.isEmpty && readBack.last?.fraction == 1)
+        #expect(!sent.events.contains { if case .settling(_?, _) = $0 { true } else { false } })
 
         let onto = await pair.onto.store.snapshot()
         let from = await pair.from.store.snapshot()

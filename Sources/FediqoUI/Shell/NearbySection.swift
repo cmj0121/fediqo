@@ -41,15 +41,15 @@ struct NearbySection: View {
     @ViewBuilder
     private var line: some View {
         let nearby = session.nearby
-        if let progress = nearby.progress, case .moving = nearby.step {
+        if let progress = Self.measured(nearby.step) {
             VStack(alignment: .leading, spacing: ShellSpace.hair) {
                 ProgressView(value: progress.fraction)
-                Text(Self.progressLine(progress, peer: nearby.peer ?? "", sending: nearby.side == .offering, since: nearby.since))
+                Text(Self.summaryLine(nearby.step, peer: nearby.peer ?? "", sending: nearby.side == .offering, since: nearby.since))
                     .shellFont(.meta)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 code
             }
-        } else if let key = Self.statusKey(nearby.step) {
+        } else if let key = Self.statusKey(nearby.step, side: nearby.side) {
             VStack(alignment: .leading, spacing: ShellSpace.hair) {
                 HStack(spacing: ShellSpace.snug) {
                     ProgressView().controlSize(.small)
@@ -78,8 +78,10 @@ struct NearbySection: View {
     }
 
     /// The line a step that is not bytes on the wire says, with the peer's name to format in.
-    static func statusKey(_ step: ShellNearby.Step?) -> String? {
+    /// The receiver proving what arrived says so of itself.
+    static func statusKey(_ step: ShellNearby.Step?, side: ShellNearby.Side? = .offering) -> String? {
         switch step {
+        case .settling where side == .holding: "nearby.stage.proving"
         case .packing: "nearby.packing"
         case .connecting: "nearby.connecting"
         case .waiting: "nearby.waiting"
@@ -89,15 +91,50 @@ struct NearbySection: View {
         }
     }
 
+    /// A step that is bytes whose fraction is known — on the wire, or the receiver's read back —
+    /// drawn as a bar rather than a spinner.
+    static func measured(_ step: ShellNearby.Step?) -> PackageProgress? {
+        switch step {
+        case .moving(let progress, _), .settling(let progress?, _): progress
+        default: nil
+        }
+    }
+
+    /// The row's line under its bar: "Moving to a tablet · 1.2 GB of 3.4 GB · …" on the wire,
+    /// "Reading it back · 1.2 GB of 3.4 GB" once the receiver reads back.
+    static func summaryLine(
+        _ step: ShellNearby.Step?, peer: String, sending: Bool, since: Date?, now: Date = Date(),
+        language: DummyLanguage? = nil
+    ) -> String {
+        switch step {
+        case .settling(let progress?, _):
+            let line = L10n.t("nearby.stage.reading", language: language)
+            return amountLine(progress, since: nil, language: language).map { line + " · " + $0 } ?? line
+        case .moving(let progress, _):
+            return progressLine(progress, peer: peer, sending: sending, since: since, now: now, language: language)
+        default:
+            return ""
+        }
+    }
+
     /// "Moving to a laptop · 1.2 GB of 3.4 GB · about 2 minutes left" — the estimate plain, from
     /// the pace so far, and left out until there is a pace.
     static func progressLine(
         _ progress: PackageProgress, peer: String, sending: Bool, since: Date?, now: Date = Date(),
         language: DummyLanguage? = nil
     ) -> String {
-        var line = String(format: L10n.t(sending ? "nearby.moving.to" : "nearby.moving.from", language: language), peer)
-        guard progress.total > 0 else { return line }
-        line += " · " + String(
+        let line = String(format: L10n.t(sending ? "nearby.moving.to" : "nearby.moving.from", language: language), peer)
+        guard let amount = amountLine(progress, since: since, now: now, language: language) else { return line }
+        return line + " · " + amount
+    }
+
+    /// "1.2 GB of 3.4 GB · about 2 minutes left" — the bytes, and the estimate where `since`
+    /// gives a pace; nothing until there is a total.
+    static func amountLine(
+        _ progress: PackageProgress, since: Date?, now: Date = Date(), language: DummyLanguage? = nil
+    ) -> String? {
+        guard progress.total > 0 else { return nil }
+        var line = String(
             format: L10n.t("carry.progress", language: language),
             UsagePane.size(progress.done, language: language), UsagePane.size(progress.total, language: language)
         )
@@ -139,8 +176,15 @@ extension NearbyCode {
 }
 
 /// Everything the flow asks, on the pane: the questions (`ShellQuestion`), the receiver's code
-/// sheet and the sender's pick sheet. **A modifier, and the only way this is presented**, so the
-/// pane adds one line and the presenters stay out of any long view chain.
+/// sheet, the sender's pick sheet, and — on both devices, while the move runs — its progress
+/// sheet. **A modifier, and the only way this is presented**, so the pane adds one line and the
+/// presenters stay out of any long view chain.
+///
+/// **On the pane, not the root.** Every move begins from a press on the Move tab, and from then
+/// on a sheet is up for the whole of it — the code, the list, a question, the progress — which
+/// holds the window: the person cannot leave Preferences while it runs, so a presenter at the
+/// root would show nothing more, and would split one flow's hand-offs (code → question →
+/// progress → notice) across two presenters that could each be mid-animation at once.
 struct NearbyFlow: ViewModifier {
     let session: ShellSession?
 
@@ -156,6 +200,8 @@ struct NearbyFlow: ViewModifier {
                     )
                 case .pick:
                     if let session { NearbyPickSheet(session: session) }
+                case .progress:
+                    if let session { NearbyProgressSheet(session: session) }
                 }
             }
     }
@@ -174,8 +220,37 @@ struct NearbyFlow: ViewModifier {
         })
     }
 
+    /// Put away by any route but a press on it: judged on the sheet up (`sheetPutAway`), so the
+    /// progress sheet taken down by the system never stops a move.
     private var sheet: Binding<ShellNearby.Sheet?> {
-        Binding(get: { session?.nearby.sheet }, set: { if $0 == nil { session?.nearby.dismiss() } })
+        Binding(get: { session?.nearby.sheet }, set: { if $0 == nil { session?.nearby.sheetPutAway() } })
+    }
+
+    /// What the progress sheet says at the step up, or nothing where no move is running.
+    static func progress(
+        _ nearby: ShellNearby, now: Date = Date(), language: DummyLanguage? = nil
+    ) -> ShellProgress? {
+        guard let stage = ShellNearby.stage(nearby.step, side: nearby.side) else { return nil }
+        let sending = nearby.side != .holding
+        let peer = nearby.peer ?? L10n.t("nearby.unnamed", language: language)
+        let amount: String? = switch nearby.step {
+        case .packing(let progress), .settling(let progress?, _):
+            NearbySection.amountLine(progress, since: nil, now: now, language: language)
+        case .moving(let progress, _):
+            NearbySection.amountLine(progress, since: nearby.since, now: now, language: language)
+        default: nil
+        }
+        return ShellProgress(
+            symbol: sending ? "paperplane" : "antenna.radiowaves.left.and.right",
+            title: String(format: L10n.t(sending ? "nearby.moving.to" : "nearby.progress.from", language: language), peer),
+            stage: L10n.t(stage.line, language: language),
+            fraction: stage.fraction,
+            amount: amount,
+            code: nearby.code.isEmpty
+                ? nil : String(format: L10n.t("nearby.code.line", language: language), NearbyCode.spaced(nearby.code)),
+            canCancel: stage.canCancel,
+            cancelHelp: "nearby.progress.stop.help"
+        )
     }
 
     static func question(_ step: ShellNearby.Step) -> ShellConfirmation {
@@ -199,6 +274,18 @@ struct NearbyFlow: ViewModifier {
             session.nearby.markMatched(with: carrier, link: link, device: session.deviceName) { await session.persist?() }
         case .asking: session.nearby.answer(id == ShellQuestion.yes)
         default: session.nearby.dismiss()
+        }
+    }
+}
+
+/// Either device's sheet while the move runs: `NearbyFlow.progress`, redrawn as each step lands,
+/// and Cancel ending the move while it still may.
+struct NearbyProgressSheet: View {
+    let session: ShellSession
+
+    var body: some View {
+        if let progress = NearbyFlow.progress(session.nearby) {
+            ShellProgressSheet(progress: progress) { session.nearby.dismiss() }
         }
     }
 }
@@ -240,11 +327,13 @@ struct NearbyHoldSheet: View {
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .shellHelp("nearby.hold.sheet.help", about: L10n.t("nearby.title"))
-            HStack {
-                Spacer(minLength: 0)
+            HStack(spacing: ShellSpace.snug) {
                 ProgressView().controlSize(.small)
-                Button(L10n.t("board.choose.cancel"), role: .cancel, action: onCancel)
-                    .keyboardShortcut(.cancelAction)
+                ShellPressRow {
+                    Button(L10n.t("board.choose.cancel"), role: .cancel, action: onCancel)
+                        .keyboardShortcut(.cancelAction)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
@@ -375,14 +464,14 @@ struct NearbyPickSheet: View {
     }
 
     private var presses: some View {
-        HStack(spacing: ShellSpace.snug) {
-            Spacer(minLength: 0)
+        ShellPressRow {
             Button(L10n.t("board.choose.cancel"), role: .cancel) { session.nearby.dismiss() }
                 .keyboardShortcut(.cancelAction)
             Button(L10n.t("nearby.pick.go"), action: go)
                 .tint(ShellChrome.selectInk(colorScheme))
                 .disabled(!ready)
         }
+        .frame(maxWidth: .infinity, alignment: .trailing)
         .buttonStyle(.bordered)
         .controlSize(.large)
     }

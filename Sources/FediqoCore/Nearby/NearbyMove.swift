@@ -53,7 +53,9 @@ public actor NearbyMove {
         /// The link dropped; waiting for it to come back.
         case reconnecting(peer: String)
         /// Every byte is there: the receiver is proving and reading it back; the sender waits.
-        case settling(peer: String)
+        /// How far the read back has come, on the receiver once it has begun; nothing while the
+        /// package is proven, and nothing on the sender, which cannot know.
+        case settling(PackageProgress?, peer: String)
         case done(PackageSummary, peer: String)
         case refused(NearbyRefusal)
         /// This side said no, or stopped: nothing written on either.
@@ -436,13 +438,18 @@ public actor NearbyMove {
                 }
                 try handle.synchronize()
                 try handle.close()
-                await emit(.settling(peer: peer))
+                await emit(.settling(nil, peer: peer))
                 let packageKey = PackageKey.direct(key)
                 // The identical read back (#252): proven whole here before anything changes —
                 // and the header proven to be the one the question was asked from.
                 let summary = try await carrier.preview(held.file, key: packageKey)
                 guard summary == held.offer.summary else { throw NearbyRefusal.malformed }
-                try await carrier.readBack(held.file, key: packageKey, replacing: held.held) { _ in }
+                // Progress goes straight to the stream, in order, as the sender's packing does: a
+                // read back of a large store takes minutes, and a screen shows how far it is.
+                let events = await continuation
+                try await carrier.readBack(held.file, key: packageKey, replacing: held.held) { progress in
+                    events?.yield(.settling(progress, peer: peer))
+                }
                 // Read back: said here whatever the wire does next, and remembered for a join
                 // that missed the word.
                 held.finished = true
@@ -586,7 +593,7 @@ public actor NearbyMove {
         }
         try await channel.send(.done)
         sentDone = true
-        await emit(.settling(peer: peer))
+        await emit(.settling(nil, peer: peer))
         switch try await channel.next() {
         case .done:
             await emit(.done(offer.summary, peer: peer))

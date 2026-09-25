@@ -1,9 +1,6 @@
 import FediqoCore
 import Foundation
 import Observation
-#if os(iOS)
-import UIKit
-#endif
 
 /// A store moving to or from a device nearby (#253, #6) — the steps on the shell, with every
 /// decision in one place and nothing drawn here. `NearbyMove` runs the move; this reads its
@@ -20,8 +17,12 @@ import UIKit
 /// on every way out — so the list shows where it went, and nothing else.
 ///
 /// **The store is held still** while the move runs (`holdStill`): from the sender's first byte
-/// written and the receiver's yes, until every way out. The screen stays awake on a phone
-/// meanwhile, and the move is foreground-only: a suspension is a dropped link that resumes.
+/// written and the receiver's yes, until every way out.
+///
+/// **The device stays awake for the whole run** (`awake`, `staysAwake`), a longer span than the
+/// store's stillness: from the first press — the code up, the list up — to the flow's end, a
+/// drop back to the code included, and let go on every way out. The move is foreground-only: a
+/// suspension is a dropped link that resumes.
 @MainActor
 @Observable
 final class ShellNearby {
@@ -49,8 +50,9 @@ final class ShellNearby {
         case waiting(peer: String)
         case moving(PackageProgress, peer: String)
         case reconnecting(peer: String)
-        /// Every byte is there; the receiver proves and reads it back.
-        case settling(peer: String)
+        /// Every byte is there; the receiver proves and reads it back — how far, once the read
+        /// back has begun, and nothing while it proves or on the sender.
+        case settling(PackageProgress?, peer: String)
         case done(PackageSummary, peer: String)
         case refused(NearbyRefusal)
     }
@@ -84,7 +86,9 @@ final class ShellNearby {
         var contents: PackageSummary.Contents { self == .signInsOnly ? .signInsOnly : .whole }
     }
 
-    private(set) var step: Step?
+    private(set) var step: Step? {
+        didSet { awake.set(Self.staysAwake(step)) }
+    }
     private(set) var side: Side?
     /// The device the sender's pick sheet has lit.
     var picked: NearbyPeer?
@@ -100,6 +104,8 @@ final class ShellNearby {
     /// Holds the store still for the move, and lets it go: the session's `holdsStill`.
     @ObservationIgnored var holdStill: ((Bool) -> Void)?
     @ObservationIgnored let work: SourceWork
+    /// The device kept awake while the flow runs, and let sleep once it ends.
+    @ObservationIgnored let awake: StayAwake
     @ObservationIgnored private var move: NearbyMove?
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var browsing: Task<Void, Never>?
@@ -117,8 +123,19 @@ final class ShellNearby {
     /// The devices last listed, for the list to come back to.
     @ObservationIgnored private var lastPeers: [NearbyPeer] = []
 
-    init(work: SourceWork = .shared) {
+    init(work: SourceWork = .shared, awake: StayAwake = StayAwake()) {
         self.work = work
+        self.awake = awake
+    }
+
+    /// Whether the device is kept awake at `step`: every step of a run — the code up, the list,
+    /// the mark, the questions, the bytes — and not once it has ended, on its notice or with
+    /// nothing up.
+    static func staysAwake(_ step: Step?) -> Bool {
+        switch step {
+        case nil, .done, .refused: false
+        default: true
+        }
     }
 
     // MARK: - What a screen reads
@@ -131,25 +148,67 @@ final class ShellNearby {
         }
     }
 
-    /// The sheet up right now: the receiver's code, or the sender's list.
+    /// The sheet up right now: the receiver's code, the sender's list, or — on either side,
+    /// while the move runs and nothing is asked — how far it has come.
     enum Sheet: Identifiable, Equatable {
         case hold(code: String)
         case pick
+        /// One id for every running step, so the sheet stays up and redraws as the move goes on
+        /// rather than coming down and going up again at each.
+        case progress
 
         var id: String {
             switch self {
             case .hold(let code): "hold " + code
             case .pick: "pick"
+            case .progress: "progress"
             }
         }
     }
 
-    var sheet: Sheet? {
+    var sheet: Sheet? { Self.sheet(for: step) }
+
+    static func sheet(for step: Step?) -> Sheet? {
         switch step {
         case .holding(let code): .hold(code: code)
         case .browsing: .pick
-        default: nil
+        default: stage(step, side: .offering) == nil ? nil : .progress
         }
+    }
+
+    /// Where a running move is, as the progress sheet says it: the stage's line, how far where
+    /// that is known, and whether it may still be stopped.
+    struct Stage: Equatable {
+        let line: String
+        let fraction: Double?
+        let canCancel: Bool
+    }
+
+    /// The stage at `step` on `side`, or nothing where the step is not a running move — a code,
+    /// the list, a question, a notice.
+    ///
+    /// **Stopped by the person until the receiver is reading back**, the rule `dismiss` keeps:
+    /// once every byte is there the read back runs to its end, and on the sender a stop then
+    /// stops nothing that matters and only loses the notice.
+    static func stage(_ step: Step?, side: Side?) -> Stage? {
+        let sending = side != .holding
+        switch step {
+        case .packing(let progress): return Stage(line: "nearby.stage.packing", fraction: known(progress), canCancel: true)
+        case .connecting: return Stage(line: "nearby.stage.connecting", fraction: nil, canCancel: true)
+        case .waiting: return Stage(line: "nearby.stage.waiting", fraction: nil, canCancel: true)
+        case .moving(let progress, _):
+            return Stage(line: sending ? "nearby.stage.sending" : "nearby.stage.receiving", fraction: known(progress), canCancel: true)
+        case .reconnecting: return Stage(line: "nearby.stage.reconnecting", fraction: nil, canCancel: true)
+        case .settling(let progress, _):
+            let line = sending ? "nearby.stage.provingThere" : progress == nil ? "nearby.stage.proving" : "nearby.stage.reading"
+            return Stage(line: line, fraction: progress.flatMap(known), canCancel: false)
+        default: return nil
+        }
+    }
+
+    /// A fraction only where there is a total to be a fraction of.
+    private static func known(_ progress: PackageProgress) -> Double? {
+        progress.total > 0 ? progress.fraction : nil
     }
 
     var peers: [NearbyPeer] {
@@ -158,7 +217,7 @@ final class ShellNearby {
 
     var progress: PackageProgress? {
         switch step {
-        case .packing(let progress), .moving(let progress, _): progress
+        case .packing(let progress), .moving(let progress, _), .settling(let progress?, _): progress
         default: nil
         }
     }
@@ -167,7 +226,7 @@ final class ShellNearby {
     var peer: String? {
         switch step {
         case .connecting(let peer), .waiting(let peer), .moving(_, let peer), .reconnecting(let peer),
-             .settling(let peer), .done(_, let peer):
+             .settling(_, let peer), .done(_, let peer):
             peer
         case .asking(let ask): ask.peer
         case .packing: picked?.name
@@ -176,6 +235,10 @@ final class ShellNearby {
     }
 
     var isUp: Bool { step != nil }
+
+    private var isSettling: Bool {
+        if case .settling = step { true } else { false }
+    }
 
     // MARK: - Holding (the receiver)
 
@@ -290,6 +353,18 @@ final class ShellNearby {
 
     // MARK: - Every way out
 
+    /// The sheet up was put away by something other than a press on it — Escape on the code, a
+    /// swipe, the pane going. The code or the list is out, as ever. **The progress sheet is no
+    /// question**: a move under way goes on whatever takes its sheet down, and only its Cancel
+    /// stops it. Judged on the sheet up, so a clearing written back once the step has moved on
+    /// stops nothing.
+    func sheetPutAway() {
+        switch sheet {
+        case .hold, .pick: dismiss()
+        case .progress, nil: break
+        }
+    }
+
     /// Whatever is up comes down and whatever is running stops. A move whose bytes have all
     /// arrived is being read back and runs to its end (`confirmReadBack`'s rule); dismissing
     /// then does nothing.
@@ -312,7 +387,7 @@ final class ShellNearby {
         since = nil
     }
 
-    /// The record's line ended, the store let go, the copies released, the screen let sleep.
+    /// The record's line ended, the store let go, the copies released.
     private func end() {
         if let token {
             work.end(token)
@@ -322,8 +397,8 @@ final class ShellNearby {
         pictures = nil
     }
 
-    /// What a yes took is given back: the store let go, the screen let sleep, and the copies
-    /// released. **At most one hold of the copies is ever outstanding**: one returned is in
+    /// What a yes took is given back: the store let go and the copies released — the device
+    /// stays awake, which is the run's, not the yes's (`staysAwake`). **At most one hold of the copies is ever outstanding**: one returned is in
     /// `heldPictures` and released here, once; one still pending sees `round` moved on and
     /// gives them straight back. Called on every way back to the code and every way out.
     private func letGo() {
@@ -331,22 +406,12 @@ final class ShellNearby {
         round += 1
         heldPictures?.release()
         heldPictures = nil
-        Self.keepAwake(false)
     }
 
     private func hold(_ on: Bool) {
         guard on != holding else { return }
         holding = on
         holdStill?(on)
-        Self.keepAwake(on)
-    }
-
-    /// The screen stays awake on a phone while the move runs: a phone that sleeps is a link
-    /// that drops.
-    private static func keepAwake(_ on: Bool) {
-        #if os(iOS)
-        UIApplication.shared.isIdleTimerDisabled = on
-        #endif
     }
 
     // MARK: - Following the move
@@ -392,8 +457,11 @@ final class ShellNearby {
             step = .moving(progress, peer: peer)
         case .reconnecting(let peer):
             step = .reconnecting(peer: peer)
-        case .settling(let peer):
-            step = .settling(peer: peer)
+        case .settling(let progress, let peer):
+            // A read back's figure is taken only while settling: a late one never moves a
+            // later step back.
+            if progress != nil, !isSettling { return }
+            step = .settling(progress, peer: peer)
         case .done(let summary, let peer):
             let adopt = side == .holding ? self.adopt : nil
             end()

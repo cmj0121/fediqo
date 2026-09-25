@@ -64,7 +64,14 @@ struct CarrySection: View {
 }
 
 /// Everything the flow asks, on the pane: the questions (`ShellQuestion`), the password sheet,
-/// the system's mover once the package is written, and its picker for a file to read back.
+/// the progress sheet while the package is written or read back (`ShellProgressSheet`, shared
+/// with the move nearby), the system's mover once the package is written, and its picker for a
+/// file to read back.
+///
+/// **The password and the progress are one presenter** (`Sheet`), so the hand-off from one to
+/// the other is a change of item SwiftUI sequences itself. **The mover waits for the progress
+/// sheet to have gone** (`progressUp`): the system's panel is not asked up while a sheet is still
+/// sliding away, which a small package written in a blink would otherwise race.
 ///
 /// **A modifier, and the only way this is presented**, so the pane adds one line and the
 /// presenters stay out of any long view chain (the runner's type checker).
@@ -72,12 +79,38 @@ struct CarryFlow: ViewModifier {
     /// Nothing where the pane has no session — a preview, a test — and then nothing is asked.
     let session: ShellSession?
     @Environment(DummyPrefs.self) private var prefs
+    /// Whether the progress sheet is on screen — up from its first draw until its dismissal has
+    /// finished — which the mover waits on.
+    @State private var progressUp = false
+
+    /// The sheet up: a password asked, or how far the package has come.
+    enum Sheet: Identifiable, Equatable {
+        case password(ShellCarry.Ask)
+        case progress
+
+        var id: String {
+            switch self {
+            case .password(let ask): "password " + ask.id
+            case .progress: "progress"
+            }
+        }
+    }
+
+    static func sheet(for carry: ShellCarry) -> Sheet? {
+        if let ask = carry.ask { return .password(ask) }
+        return ShellCarry.showsProgress(carry.step) ? .progress : nil
+    }
 
     func body(content: Content) -> some View {
         content
             .shellConfirm(asking, question: Self.question, onChoice: answer)
-            .sheet(item: askingPassword) { ask in
-                CarryPasswordSheet(ask: ask, onDone: gave, onCancel: { session?.carry.dismiss() })
+            .sheet(item: sheet, onDismiss: { progressUp = false }) { sheet in
+                switch sheet {
+                case .password(let ask):
+                    CarryPasswordSheet(ask: ask, onDone: gave, onCancel: { session?.carry.dismiss() })
+                case .progress:
+                    if let session { CarryProgressSheet(carry: session.carry).onAppear { progressUp = true } }
+                }
             }
             .fileMover(isPresented: moverUp, file: session?.carry.moving) { session?.carry.moved($0) }
             .fileImporter(isPresented: pickerUp, allowedContentTypes: [.data], onCompletion: picked)
@@ -93,12 +126,23 @@ struct CarryFlow: ViewModifier {
         })
     }
 
-    private var askingPassword: Binding<ShellCarry.Ask?> {
-        Binding(get: { session?.carry.ask }, set: { if $0 == nil { session?.carry.dismiss() } })
+    /// A password sheet put away is Cancel, as ever; the progress sheet put away by the system
+    /// stops nothing — only its Cancel does (`sheetPutAway`).
+    private var sheet: Binding<Sheet?> {
+        Binding(get: { session.flatMap { Self.sheet(for: $0.carry) } }, set: {
+            guard $0 == nil, let carry = session?.carry else { return }
+            Self.sheetPutAway(carry)
+        })
+    }
+
+    /// Judged on the sheet up: a password sheet put away is out; the progress sheet, or none,
+    /// is nothing.
+    static func sheetPutAway(_ carry: ShellCarry) {
+        if case .password = sheet(for: carry) { carry.dismiss() }
     }
 
     private var moverUp: Binding<Bool> {
-        Binding(get: { session?.carry.moving != nil }, set: { if !$0 { session?.carry.moveCancelled() } })
+        Binding(get: { session?.carry.moving != nil && !progressUp }, set: { if !$0 { session?.carry.moveCancelled() } })
     }
 
     private var pickerUp: Binding<Bool> {
@@ -140,6 +184,18 @@ struct CarryFlow: ViewModifier {
     private func picked(_ result: Result<URL, any Error>) {
         session?.carryPicking = false
         if case .success(let url) = result { session?.carry.picked(url) }
+    }
+}
+
+/// The progress sheet while a package is written or read back: `ShellCarry.progress`, redrawn
+/// as each figure lands.
+struct CarryProgressSheet: View {
+    let carry: ShellCarry
+
+    var body: some View {
+        if let progress = ShellCarry.progress(carry.step) {
+            ShellProgressSheet(progress: progress) { carry.dismiss() }
+        }
     }
 }
 
@@ -226,14 +282,14 @@ struct CarryPasswordSheet: View {
     }
 
     private var presses: some View {
-        HStack(spacing: ShellSpace.snug) {
-            Spacer(minLength: 0)
+        ShellPressRow {
             Button(L10n.t("board.choose.cancel"), role: .cancel, action: onCancel)
                 .keyboardShortcut(.cancelAction)
             Button(L10n.t(setting ? "carry.password.set.go" : "carry.password.open.go"), action: submit)
                 .tint(ShellChrome.selectInk(colorScheme))
                 .disabled(!ready)
         }
+        .frame(maxWidth: .infinity, alignment: .trailing)
         .buttonStyle(.bordered)
         .controlSize(.large)
     }
