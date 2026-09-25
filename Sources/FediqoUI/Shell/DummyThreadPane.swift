@@ -143,9 +143,12 @@ struct DummyThreadPane: View {
                         proxy.scrollTo(id, anchor: .center)
                     }
                 }
+                // The first row drawn — the first ancestor, or the opened post where there is
+                // none — which is the row `g` lit (`FediqoRootView.jumpedToTop`).
                 .onChange(of: jumpToTop) { _, _ in
+                    let first = conversation.ancestors.first?.id ?? conversation.post.id
                     withAnimation(.easeInOut(duration: 0.18)) {
-                        proxy.scrollTo(conversation.post.id, anchor: .top)
+                        proxy.scrollTo(first, anchor: .top)
                     }
                 }
             }
