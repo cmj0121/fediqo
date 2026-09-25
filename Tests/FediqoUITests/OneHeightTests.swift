@@ -248,6 +248,10 @@ struct OneHeightTests {
             ("answering, long warning", note(body: longPost, reply: Reply(handle: "@bob@first.example"),
                                              sensitive: true, spoiler: longPost)),
             ("thread", note(body: longPost, title: "A thread's title", board: "A board", kind: .discuz)),
+            ("answering thread", note(body: longPost, title: "A thread's title", board: "A board", kind: .discuz,
+                                      reply: Reply(handle: "@bob@first.example"))),
+            ("covered, pictured", note(body: longPost, attachments: [picture("a")], sensitive: true, spoiler: longPost)),
+            ("boosted, pictured", note(body: longPost, boostedBy: "Bob", attachments: [picture("a")])),
             ("everything", note(body: longPost, reply: Reply(handle: "@bob@first.example"), boostedBy: "Bob",
                                 attachments: [picture("a")], sensitive: true, spoiler: longPost, quote: quote)),
         ]
@@ -256,18 +260,18 @@ struct OneHeightTests {
     #if os(macOS)
     private static func rowHeight(
         _ item: DummyItem, layout: ShellLayout, size: DynamicTypeSize, lifted: Bool = false, asked: Bool = false,
-        acting: ItemActing = ItemActing()
+        acting: ItemActing = ItemActing(), inFull: Bool = false
     ) -> CGFloat {
         let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
-                               marks: .constant(DummyMarks()), acting: acting, bandAsked: asked, lifted: lifted,
-                               onToast: { _ in })
+                               marks: .constant(DummyMarks()), acting: acting, inFull: inFull, bandAsked: asked,
+                               lifted: lifted, onToast: { _ in })
             .environment(\.shellLayout, layout)
         return height(row, size: size, width: layout == .wide ? 720 : 390)
     }
 
     /// One case a layout and a size, so no case holds the main actor for long.
     @Test("Every post in a timeline is one height, wide and narrow, at the standard and the largest type",
-          arguments: [ShellLayout.wide, .narrow], [DynamicTypeSize.large, .accessibility3])
+          arguments: [ShellLayout.wide, .narrow], [DynamicTypeSize.large, .accessibility3, .accessibility5])
     func timelineRowIsOneHeight(_ layout: ShellLayout, _ size: DynamicTypeSize) {
         var measured = Self.variants().map { ($0.0, Self.rowHeight($0.1, layout: layout, size: size)) }
         // Every mark, counted: the longest marks line a row draws is the same one line.
@@ -293,6 +297,12 @@ struct OneHeightTests {
             Self.note(body: Self.longPost, title: "A title", board: "A board", kind: .discuz,
                       reply: Reply(handle: "@bob@first.example")),
             Self.note(body: Self.longPost),
+            // And with no decorator, where the words have the decorator's line as well.
+            Self.note(body: Self.longPost, title: "A thread's title " + Self.longPost, board: "A board",
+                      kind: .discuz, attachments: [Self.picture("a")], sensitive: true, spoiler: Self.longPost),
+            Self.note(body: Self.longPost, attachments: [Self.picture("a")], sensitive: true, spoiler: Self.longPost),
+            Self.note(body: Self.longPost, title: "A title", board: "A board", kind: .discuz),
+            Self.note(body: Self.longPost, attachments: [Self.picture("a")]),
         ]
         for item in worst {
             for lifted in [false, true] {
@@ -377,6 +387,45 @@ struct OneHeightTests {
         }
     }
 
+    /// **No empty strip on a row that has nothing to say about how it got here**: it starts with
+    /// its header, and pays for the decorator's line under it — so it is its decorated
+    /// neighbour's height, with its picture the same size and at the same place under the header.
+    @Test("A row with no decorator starts with its header; its picture is its decorated neighbour's size",
+          arguments: [ShellLayout.wide, .narrow])
+    func undecoratedStartsWithItsHeader(_ layout: ShellLayout) throws {
+        let plain = Self.bands(Self.note(body: Self.longPost, attachments: [Self.picture("a")]), layout: layout)
+        let boosted = Self.bands(Self.note(body: Self.longPost, boostedBy: "Bob", attachments: [Self.picture("a")]),
+                                 layout: layout)
+        #expect(plain[.decorator] == nil, "nothing is drawn where there is nothing to say")
+        let header = try #require(plain[.header])
+        #expect(abs(header.minY) < 0.5, "\(layout): the header is the row's first line, at \(header.minY)")
+        let picture = try #require(plain[.picture])
+        let decoratedPicture = try #require(boosted[.picture])
+        #expect(picture.size == decoratedPicture.size, "\(layout): \(picture.size) and \(decoratedPicture.size)")
+        let content = try #require(plain[.content])
+        #expect(abs(picture.minY - content.minY) < 0.5, "the picture stands at the top of the band")
+        let decoratedContent = try #require(boosted[.content])
+        let plainMarks = try #require(plain[.marks])
+        let boostedMarks = try #require(boosted[.marks])
+        #expect(abs(plainMarks.minY - boostedMarks.minY) < 0.01, "\(layout): the marks start at one height")
+        #expect(content.height > decoratedContent.height, "the band holds the decorator's room below the header")
+        let pictures = Self.bands(Self.note(body: "", attachments: [Self.picture("a"), Self.picture("b")]), layout: layout)
+        let spread = try #require(pictures[.picture])
+        #expect(spread.height == decoratedPicture.height, "a post of pictures alone draws them the slot's size")
+    }
+
+    /// The thread pane holds nothing to a height, but a short post there still measures the row it
+    /// was in the list — decorated or not.
+    @Test("A short post in the thread pane is one height, with a decorator or without",
+          arguments: [DynamicTypeSize.large, .accessibility3])
+    func paneShortPostIsOneHeight(_ size: DynamicTypeSize) {
+        let heights = [Self.note(), Self.note(boostedBy: "Bob"), Self.note(attachments: [Self.picture("a")]),
+                       Self.note(reply: Reply(handle: "@bob@first.example"), attachments: [Self.picture("a")])]
+            .map { Self.rowHeight($0, layout: .wide, size: size, inFull: true) }
+        #expect(Set(heights).count == 1, "\(size): \(heights)")
+        #expect(heights.first == Self.rowHeight(Self.note(), layout: .wide, size: size), "the list row's height")
+    }
+
     @Test("The largest type makes every timeline row taller alike")
     func timelineRowGrowsWithType() {
         let short = Self.note()
@@ -441,17 +490,18 @@ struct OneHeightTests {
         #expect(AttachmentDeck.following(0, of: 9) == [1, 2, 3, 4])
     }
 
-    @Test("What happened to a post has a line of the row's own, and takes none of its words")
-    func decoratorKeepsTheWords() {
+    @Test("A row that draws a decorator gives its words one line fewer; a row that draws none keeps it")
+    func decoratorTakesALine() {
         func lines(_ item: DummyItem) -> Int {
             DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
                          marks: .constant(DummyMarks()), onToast: { _ in }).bodyLines
         }
-        #expect(lines(Self.note()) == 4, "the wide layout's four lines stay four")
+        #expect(lines(Self.note()) == 5, "the decorator's line is the words' where there is none")
         #expect(lines(Self.note(boostedBy: "Bob")) == 4)
         #expect(lines(Self.note(reply: Reply(handle: "@bob@first.example"))) == 4)
         #expect(lines(Self.note(quote: Quote(state: .pending))) == 4)
-        #expect(lines(Self.note(title: "t", kind: .discuz)) == 3, "a title still takes a line of the words")
+        #expect(lines(Self.note(title: "t", kind: .discuz)) == 4, "a title still takes a line of the words")
+        #expect(lines(Self.note(title: "t", kind: .discuz, reply: Reply(handle: "@bob@first.example"))) == 3)
     }
 
     @Test("The marks' line closes its gaps first, then narrows every mark, and always ends inside the width")
