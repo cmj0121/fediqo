@@ -1,5 +1,6 @@
 import CryptoKit
 import FediqoCore
+import FediqoPersistence
 import Foundation
 import Synchronization
 import Testing
@@ -316,6 +317,27 @@ struct NearbyTests {
         session.nearby.answer(false)
         #expect(!session.holdsStill && session.nearby.step == nil)
         holding.dismiss()
+    }
+
+    @Test("A hold put away before its yes gives back no copies it never took")
+    func cancelledHoldLeavesTheCopiesRunning() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("fediqo-nearby-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cache = try MediaCache(directory: folder)
+        let disk = DiskCopies(cache)
+        let link = PipeNearbyLink()
+        let onto = FakeCarrier(device: "a tablet")
+        defer { try? FileManager.default.removeItem(at: onto.staging) }
+        // Put away with the code up: the copies were never held, so nothing is resumed (a resume
+        // of a queue not suspended traps the process — this test would not come back).
+        let nearby = ShellNearby(work: SourceWork())
+        nearby.beginHold(with: onto, link: link, device: "a tablet", pictures: disk) {}
+        nearby.dismiss()
+        nearby.beginHold(with: onto, link: link, device: "a tablet", pictures: disk) {}
+        nearby.dismiss()
+        disk.store(Data("x".utf8), host: "a.example", url: URL(string: "https://a.example/one.jpg")!)
+        await disk.settled()
+        #expect(cache.bytes(host: "a.example") == 1, "the copies still run after a hold put away twice")
     }
 
     // MARK: - What is said

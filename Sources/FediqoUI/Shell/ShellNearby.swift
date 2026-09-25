@@ -105,6 +105,13 @@ final class ShellNearby {
     @ObservationIgnored private var browsing: Task<Void, Never>?
     @ObservationIgnored private var token: SourceWork.Token?
     @ObservationIgnored private var pictures: DiskCopies?
+    /// The copies actually held — set once `hold()` has returned, and released once, by `end`.
+    /// A hold put away before its yes never took them, and must never give them back: resuming
+    /// a queue that was not suspended is a crash.
+    @ObservationIgnored private var heldPictures: DiskCopies?
+    /// Moves on at every `end`, so a hold of the copies that returns after its move ended gives
+    /// them straight back instead of keeping them for a move that is gone.
+    @ObservationIgnored private var round = 0
     @ObservationIgnored private var adopt: (@MainActor () async -> Void)?
     @ObservationIgnored private var holding = false
     /// The devices last listed, for the list to come back to.
@@ -267,8 +274,16 @@ final class ShellNearby {
         step = .waiting(peer: ask.peer)
         hold(true)
         let pictures = ask.receiving ? self.pictures : nil
-        Task { @MainActor in
-            await pictures?.hold()
+        let round = self.round
+        Task { @MainActor [weak self] in
+            if let pictures {
+                await pictures.hold()
+                guard let self, self.round == round else {
+                    pictures.release()
+                    return
+                }
+                self.heldPictures = pictures
+            }
             await move.answer(true)
         }
     }
@@ -304,7 +319,9 @@ final class ShellNearby {
             self.token = nil
         }
         hold(false)
-        pictures?.release()
+        round += 1
+        heldPictures?.release()
+        heldPictures = nil
         pictures = nil
         Self.keepAwake(false)
     }
