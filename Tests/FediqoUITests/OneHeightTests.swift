@@ -508,16 +508,23 @@ struct OneHeightTests {
     func marksLineGivesWay() {
         let widths: [CGFloat] = [40, 40, 32, 40, 32, 32, 32, 32]
         let gaps: [CGFloat] = [8, 8, 8, 8, 24, 8, 8, 8]
-        let ideal = widths.reduce(0, +) + gaps.dropFirst().reduce(0, +)
+        let idealMarks: CGFloat = widths.reduce(0, +)
+        let idealGaps: CGFloat = gaps.dropFirst().reduce(0, +)
+        let ideal: CGFloat = idealMarks + idealGaps
         let roomy = MarksLine.fit(widths, gaps: gaps, least: 1, width: ideal + 10)
         #expect(roomy.gaps == gaps && roomy.widths == widths, "room enough: nothing gives way")
         let closer = MarksLine.fit(widths, gaps: gaps, least: 1, width: ideal - 30)
         #expect(closer.widths == widths, "the gaps close before a mark is narrowed")
         #expect(closer.gaps.dropFirst().allSatisfy { $0 >= 1 })
-        #expect(abs(closer.widths.reduce(0, +) + closer.gaps.dropFirst().reduce(0, +) - (ideal - 30)) < 0.01)
+        let closerMarks: CGFloat = closer.widths.reduce(0, +)
+        let closerGaps: CGFloat = closer.gaps.dropFirst().reduce(0, +)
+        let closerOver: CGFloat = closerMarks + closerGaps - (ideal - 30)
+        #expect(abs(closerOver) < 0.01)
         let narrowed = MarksLine.fit(widths, gaps: gaps, least: 1, width: 150)
         #expect(narrowed.gaps.dropFirst().allSatisfy { $0 == 1 })
-        #expect(abs(narrowed.widths.reduce(0, +) + 7 - 150) < 0.01, "every mark gives up its share")
+        let narrowedMarks: CGFloat = narrowed.widths.reduce(0, +)
+        let narrowedOver: CGFloat = narrowedMarks + 7 - 150
+        #expect(abs(narrowedOver) < 0.01, "every mark gives up its share")
         #expect(narrowed.widths.allSatisfy { $0 > 0 }, "no mark is dropped")
     }
 }
