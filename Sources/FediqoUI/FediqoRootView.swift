@@ -1039,20 +1039,37 @@ public struct FediqoRootView: View {
     }
 
     private func jumpListOrThreadToTop() -> Bool {
+        Self.jumpedToTop(
+            in: currentListIDs, standing: walk.standing, place: place,
+            selected: &selectedItemID, jump: &jumpToTop
+        )
+    }
+
+    /// `g`: the lamp on the first row of the list in front, and the list scrolled so that row
+    /// is at the top. Static so a test presses the rule the root does, as `moved` is.
+    ///
+    /// **The first row `j` and `k` walk, in a conversation too.** A conversation is drawn as its
+    /// ancestors, then the post it was opened from, then the answers — `DummyConversation.inOrder`,
+    /// the same list `k` climbs — so its top is the first ancestor, or the opened post where
+    /// there are none. It used to be the opened post always, which left every ancestor above
+    /// where `g` landed and, with the opened post already lit, moved nothing at all.
+    ///
+    /// The jump is bumped even where the lamp is already on the first row: the rows may have
+    /// been scrolled away from it, and the press is what brings them back. **No `default:`.**
+    static func jumpedToTop(
+        in rows: [String]?, standing: ShellStep?, place: ShellPlace,
+        selected: inout String?, jump: inout Int
+    ) -> Bool {
         guard place == .timeline else { return false }
-        // The top of a conversation is its own opening post, which is not the first row of the
-        // list the walk is standing on — every other case is. **No `default:`.**
-        switch walk.standing {
-        case .thread(let opened) where session.held(opened) != nil:
-            selectedItemID = opened
+        switch standing {
         // A page read out of a post is somebody else's page, and its top is its own business.
         case .link:
             return false
         case .person, .tag, .thread, nil:
-            guard let first = currentListItems.first else { return false }
-            selectedItemID = first.id
+            guard let first = rows?.first else { return false }
+            selected = first
         }
-        jumpToTop += 1
+        jump += 1
         return true
     }
 
