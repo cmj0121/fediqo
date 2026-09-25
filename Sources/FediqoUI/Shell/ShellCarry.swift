@@ -108,8 +108,8 @@ final class ShellCarry {
             fraction: progress.total > 0 ? progress.fraction : nil,
             amount: NearbySection.amountLine(progress, since: nil, language: language),
             code: nil,
-            canCancel: !reading,
-            cancelHelp: "carry.progress.stop.help"
+            press: reading ? .runsToEnd : .stop,
+            pressHelp: "carry.progress.stop.help"
         )
     }
 

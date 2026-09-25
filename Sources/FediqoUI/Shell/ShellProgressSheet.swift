@@ -17,10 +17,25 @@ struct ShellProgress: Equatable {
     let amount: String?
     /// The code both screens show, on a move nearby.
     let code: String?
-    /// Whether Cancel may still stop it: not once a read back has begun.
-    let canCancel: Bool
-    /// What Cancel does, as a key: told to VoiceOver and the pointer.
-    let cancelHelp: String
+    /// What the one press at the head does.
+    let press: Press
+    /// What it does, as a key: told to VoiceOver and the pointer.
+    let pressHelp: String
+
+    /// The press at the head of the sheet.
+    enum Press: Equatable {
+        /// Stop: ends the move.
+        case stop
+        /// Close: the sheet and the flow here come down, and nothing is said to the other
+        /// device — the sender once its last byte is sent, which can stop nothing there and
+        /// only loses the notice.
+        case close
+        /// Nothing may stop it: a read back runs to its end, and the sheet says so.
+        case runsToEnd
+    }
+
+    /// Whether the press is live.
+    var canCancel: Bool { press != .runsToEnd }
 
     /// VoiceOver's value for the bar: the stage, and the percent where there is one.
     static func spoken(stage: String, fraction: Double?, language: DummyLanguage? = nil) -> String {
@@ -32,8 +47,9 @@ struct ShellProgress: Equatable {
 
 /// A move under way, on its own sheet so it is seen whatever tab is up: the glyph and which way
 /// at the head with Cancel at its end, the stage in one line, the bar — determinate where the
-/// flow knows how far — the bytes and the estimate, and the code. Where it can no longer be
-/// stopped Cancel is dimmed and one line says so, the rest behind (?).
+/// flow knows how far — the bytes and the estimate, and the code. Where a read back can no
+/// longer be stopped the press is dimmed and one line says so, the rest behind (?); the sender
+/// waiting on the other's read back has Close instead, which ends only its own screen.
 ///
 /// **Only Cancel ends it.** The sheet cannot be swiped or escaped away
 /// (`interactiveDismissDisabled`), and a flow judges any clearing of it as nothing
@@ -51,7 +67,7 @@ struct ShellProgressSheet: View {
             head
             bar
             facts
-            if !progress.canCancel { cannot }
+            if progress.press == .runsToEnd { cannot }
         }
         .padding(ShellSpace.room)
         .frame(minWidth: min(measure, 320), maxWidth: measure, alignment: .leading)
@@ -75,8 +91,11 @@ struct ShellProgressSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: ShellSpace.snug)
-            ShellIconButton("xmark.circle", name: "progress.stop", help: progress.cancelHelp, action: onCancel)
-                .disabled(!progress.canCancel)
+            ShellIconButton(
+                progress.press == .close ? "xmark" : "xmark.circle",
+                name: progress.press == .close ? "progress.close" : "progress.stop", help: progress.pressHelp, action: onCancel
+            )
+            .disabled(!progress.canCancel)
         }
     }
 

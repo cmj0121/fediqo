@@ -271,6 +271,10 @@ struct NearbyTests {
         #expect(waiting.code == "Code " + NearbyCode.spaced(two.holding.code), "the code on both")
         two.holding.answer(true)
         await two.settle(two.holding) { if case .settling(let progress?, _) = $0 { progress.done == 2_500 } else { false } }
+        await two.settle(two.offering) { if case .settling = $0 { true } else { false } }
+        let there = try #require(NearbyFlow.progress(two.offering, language: .english))
+        #expect(there.stage == "The other device is proving the whole of it" && there.press == .close && there.canCancel,
+                "the sender waiting on the other's read back may still close its own screen")
         #expect(two.holding.sheet == .progress)
         let reading = try #require(NearbyFlow.progress(two.holding, language: .english))
         #expect(reading.title == "Holding from a laptop" && reading.stage == "Reading it back")
@@ -280,9 +284,12 @@ struct NearbyTests {
         two.holding.sheetPutAway()
         two.holding.dismiss()
         if case .settling = two.holding.step {} else { Issue.record("the read back was stopped") }
+        #expect(reading.press == .runsToEnd)
+        // Close on the sender: its screen comes down; the receiver is told nothing and finishes.
+        two.offering.dismiss()
+        #expect(two.offering.step == nil && !two.offering.awake.on)
         gate.open()
         await two.settle(two.holding) { if case .done = $0 { true } else { false } }
-        await two.settle(two.offering) { if case .done = $0 { true } else { false } }
         #expect(two.onto.read == [false])
     }
 

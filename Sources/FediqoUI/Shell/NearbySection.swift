@@ -248,8 +248,8 @@ struct NearbyFlow: ViewModifier {
             amount: amount,
             code: nearby.code.isEmpty
                 ? nil : String(format: L10n.t("nearby.code.line", language: language), NearbyCode.spaced(nearby.code)),
-            canCancel: stage.canCancel,
-            cancelHelp: "nearby.progress.stop.help"
+            press: stage.press,
+            pressHelp: stage.press == .close ? "nearby.progress.close.help" : "nearby.progress.stop.help"
         )
     }
 
@@ -327,14 +327,12 @@ struct NearbyHoldSheet: View {
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
                 .shellHelp("nearby.hold.sheet.help", about: L10n.t("nearby.title"))
-            HStack(spacing: ShellSpace.snug) {
+            ShellPressRow {
                 ProgressView().controlSize(.small)
-                ShellPressRow {
-                    Button(L10n.t("board.choose.cancel"), role: .cancel, action: onCancel)
-                        .keyboardShortcut(.cancelAction)
-                }
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                Button(L10n.t("board.choose.cancel"), role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
             }
+            .frame(maxWidth: .infinity, alignment: .trailing)
             .buttonStyle(.bordered)
             .controlSize(.large)
         }

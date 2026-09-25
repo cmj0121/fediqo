@@ -70,8 +70,9 @@ struct CarrySection: View {
 ///
 /// **The password and the progress are one presenter** (`Sheet`), so the hand-off from one to
 /// the other is a change of item SwiftUI sequences itself. **The mover waits for the progress
-/// sheet to have gone** (`progressUp`): the system's panel is not asked up while a sheet is still
-/// sliding away, which a small package written in a blink would otherwise race.
+/// sheet to have gone** (`progressUp`, set the moment the sheet is asked for and cleared once
+/// it has gone): the system's panel is not asked up while a sheet is still sliding away, which
+/// a small package written in a blink would otherwise race.
 ///
 /// **A modifier, and the only way this is presented**, so the pane adds one line and the
 /// presenters stay out of any long view chain (the runner's type checker).
@@ -109,8 +110,18 @@ struct CarryFlow: ViewModifier {
                 case .password(let ask):
                     CarryPasswordSheet(ask: ask, onDone: gave, onCancel: { session?.carry.dismiss() })
                 case .progress:
-                    if let session { CarryProgressSheet(carry: session.carry).onAppear { progressUp = true } }
+                    if let session { CarryProgressSheet(carry: session.carry) }
                 }
+            }
+            .onChange(of: session.flatMap { Self.sheet(for: $0.carry) }) { _, now in
+                if now == .progress { progressUp = true }
+            }
+            // A sheet asked for and taken back before it was ever drawn has no dismissal to
+            // clear it: the mover is not kept waiting past a moment for one.
+            .task(id: session?.carry.moving) {
+                guard session?.carry.moving != nil, progressUp else { return }
+                try? await Task.sleep(for: .seconds(1))
+                progressUp = false
             }
             .fileMover(isPresented: moverUp, file: session?.carry.moving) { session?.carry.moved($0) }
             .fileImporter(isPresented: pickerUp, allowedContentTypes: [.data], onCompletion: picked)

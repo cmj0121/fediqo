@@ -26,6 +26,12 @@ final class StayAwake {
         self.hook = hook
     }
 
+    /// An owner that goes while it still wants the device awake — a scene closed mid-move —
+    /// lets it go, so the platform is never left holding it.
+    isolated deinit {
+        if on { hook(false) }
+    }
+
     /// What the flow wants now; the platform is told only of a change.
     func set(_ wanted: Bool) {
         guard wanted != on else { return }

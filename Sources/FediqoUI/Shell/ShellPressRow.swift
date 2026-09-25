@@ -48,18 +48,27 @@ struct ShellPressRow: Layout {
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        Self.arrangement(subviews.map { $0.sizeThatFits(.unspecified) }, spacing: spacing, width: proposal.width).size
+        Self.arrangement(sizes(subviews, width: proposal.width), spacing: spacing, width: proposal.width).size
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let sizes = sizes(subviews, width: bounds.width)
         let origins = Self.arrangement(sizes, spacing: spacing, width: bounds.width).origins
         for (index, subview) in subviews.enumerated() {
-            let width = min(sizes[index].width, bounds.width)
             subview.place(
                 at: CGPoint(x: bounds.minX + origins[index].x, y: bounds.minY + origins[index].y),
-                proposal: ProposedViewSize(width: width, height: sizes[index].height)
+                proposal: ProposedViewSize(width: sizes[index].width, height: sizes[index].height)
             )
+        }
+    }
+
+    /// Each press's size: its ideal, and — stacked, where one is wider than the width there is —
+    /// measured again at that width, so a long label wraps rather than being cut short.
+    private func sizes(_ subviews: Subviews, width: CGFloat?) -> [CGSize] {
+        let ideal = subviews.map { $0.sizeThatFits(.unspecified) }
+        guard let bound = width, bound.isFinite, !Self.inOneRow(ideal, spacing: spacing, width: bound) else { return ideal }
+        return zip(subviews, ideal).map { subview, size in
+            size.width <= bound ? size : subview.sizeThatFits(ProposedViewSize(width: bound, height: nil))
         }
     }
 }

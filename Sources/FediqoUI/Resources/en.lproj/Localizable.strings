@@ -1073,6 +1073,8 @@
 "nearby.progress.stop.help" = "Ends the move on both devices; nothing here changes";
 "carry.progress.stop.help" = "Stops writing the package; nothing is kept";
 "progress.stop" = "Stop";
+"progress.close" = "Close";
+"nearby.progress.close.help" = "Closes this here only; the other device reads it back on its own, and only its last word is missed here";
 "progress.spoken" = "Progress";
 "progress.percent" = "%d percent";
 "progress.cannot" = "Reading back runs to its end";

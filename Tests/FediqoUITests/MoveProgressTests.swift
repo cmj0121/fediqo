@@ -40,24 +40,24 @@ struct MoveProgressTests {
 
     // MARK: - The stage, both sides
 
-    @Test("Every running step has its stage, its fraction where known, and Cancel until the read back; nothing else has one")
+    @Test("Every running step has its stage, its fraction where known, and Stop until the read back — the receiver's runs to its end, the sender may Close; nothing else has one")
     func stages() {
         typealias Stage = ShellNearby.Stage
         func stage(_ step: Step, _ side: ShellNearby.Side) -> Stage? { ShellNearby.stage(step, side: side) }
         // The sender.
-        #expect(stage(.packing(Self.unknown), .offering) == Stage(line: "nearby.stage.packing", fraction: nil, canCancel: true))
-        #expect(stage(.packing(Self.half), .offering) == Stage(line: "nearby.stage.packing", fraction: 0.5, canCancel: true))
-        #expect(stage(.connecting(peer: "t"), .offering) == Stage(line: "nearby.stage.connecting", fraction: nil, canCancel: true))
-        #expect(stage(.waiting(peer: "t"), .offering) == Stage(line: "nearby.stage.waiting", fraction: nil, canCancel: true))
-        #expect(stage(.moving(Self.half, peer: "t"), .offering) == Stage(line: "nearby.stage.sending", fraction: 0.5, canCancel: true))
-        #expect(stage(.reconnecting(peer: "t"), .offering) == Stage(line: "nearby.stage.reconnecting", fraction: nil, canCancel: true))
-        #expect(stage(.settling(nil, peer: "t"), .offering) == Stage(line: "nearby.stage.provingThere", fraction: nil, canCancel: false))
+        #expect(stage(.packing(Self.unknown), .offering) == Stage(line: "nearby.stage.packing", fraction: nil, press: .stop))
+        #expect(stage(.packing(Self.half), .offering) == Stage(line: "nearby.stage.packing", fraction: 0.5, press: .stop))
+        #expect(stage(.connecting(peer: "t"), .offering) == Stage(line: "nearby.stage.connecting", fraction: nil, press: .stop))
+        #expect(stage(.waiting(peer: "t"), .offering) == Stage(line: "nearby.stage.waiting", fraction: nil, press: .stop))
+        #expect(stage(.moving(Self.half, peer: "t"), .offering) == Stage(line: "nearby.stage.sending", fraction: 0.5, press: .stop))
+        #expect(stage(.reconnecting(peer: "t"), .offering) == Stage(line: "nearby.stage.reconnecting", fraction: nil, press: .stop))
+        #expect(stage(.settling(nil, peer: "t"), .offering) == Stage(line: "nearby.stage.provingThere", fraction: nil, press: .close))
         // The receiver: the question is its own; then the bytes, the proof and the read back.
-        #expect(stage(.waiting(peer: "l"), .holding) == Stage(line: "nearby.stage.waiting", fraction: nil, canCancel: true))
-        #expect(stage(.moving(Self.half, peer: "l"), .holding) == Stage(line: "nearby.stage.receiving", fraction: 0.5, canCancel: true))
-        #expect(stage(.reconnecting(peer: "l"), .holding) == Stage(line: "nearby.stage.reconnecting", fraction: nil, canCancel: true))
-        #expect(stage(.settling(nil, peer: "l"), .holding) == Stage(line: "nearby.stage.proving", fraction: nil, canCancel: false))
-        #expect(stage(.settling(Self.half, peer: "l"), .holding) == Stage(line: "nearby.stage.reading", fraction: 0.5, canCancel: false))
+        #expect(stage(.waiting(peer: "l"), .holding) == Stage(line: "nearby.stage.waiting", fraction: nil, press: .stop))
+        #expect(stage(.moving(Self.half, peer: "l"), .holding) == Stage(line: "nearby.stage.receiving", fraction: 0.5, press: .stop))
+        #expect(stage(.reconnecting(peer: "l"), .holding) == Stage(line: "nearby.stage.reconnecting", fraction: nil, press: .stop))
+        #expect(stage(.settling(nil, peer: "l"), .holding) == Stage(line: "nearby.stage.proving", fraction: nil, press: .runsToEnd))
+        #expect(stage(.settling(Self.half, peer: "l"), .holding) == Stage(line: "nearby.stage.reading", fraction: 0.5, press: .runsToEnd))
         // A code, the list, the mark, a question and a notice are their own sheets, never progress.
         for step in Self.steps {
             let running = stage(step, .offering) != nil
@@ -88,7 +88,7 @@ struct MoveProgressTests {
             "nearby.progress.from", "nearby.stage.packing", "nearby.stage.connecting", "nearby.stage.waiting",
             "nearby.stage.sending", "nearby.stage.receiving", "nearby.stage.reconnecting", "nearby.stage.provingThere",
             "nearby.stage.proving", "nearby.stage.reading", "nearby.progress.stop.help", "carry.progress.stop.help",
-            "progress.stop", "progress.spoken", "progress.percent", "progress.cannot", "progress.cannot.help",
+            "progress.stop", "progress.close", "nearby.progress.close.help", "progress.spoken", "progress.percent", "progress.cannot", "progress.cannot.help",
         ]
         let resources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -190,6 +190,13 @@ struct MoveProgressTests {
         awake.set(false)
         awake.set(false)
         #expect(asked.withLock { $0 } == [true, false], "the platform is told only of a change")
+
+        // An owner that goes while still awake — a scene closed mid-move — lets the device sleep.
+        let gone = Mutex<[Bool]>([])
+        var owner: StayAwake? = StayAwake { on in gone.withLock { $0.append(on) } }
+        owner?.set(true)
+        owner = nil
+        #expect(gone.withLock { $0 } == [true, false])
     }
 
     // MARK: - Presses in one row
@@ -223,12 +230,15 @@ struct MoveProgressTests {
             ShellQuestion.carryDone(.taken, language: .english),
         ]
         for question in questions {
-            let host = NSHostingView(rootView: ShellConfirmCard(question: question, answer: { _ in }))
-            host.layoutSubtreeIfNeeded()
-            let width = host.fittingSize.width - 2 * ShellSpace.room
             let labels = (question.cancel.map { [$0] } ?? []) + question.choices.map(\.label)
             let sizes = labels.map { Self.press($0) }
-            #expect(ShellPressRow.inOneRow(sizes, width: width), "\(labels) at \(width)")
+            // One row at a Mac card's width...
+            #expect(ShellPressRow.inOneRow(sizes, width: 340), "\(labels) at 340")
+            // ...and the card, fitted to itself as a Mac sheet is, leaves its presses that row.
+            let host = NSHostingView(rootView: ShellConfirmCard(question: question, answer: { _ in }))
+            host.layoutSubtreeIfNeeded()
+            let row = sizes.map(\.width).reduce(0, +) + ShellSpace.snug * CGFloat(sizes.count - 1)
+            #expect(host.fittingSize.width - 2 * ShellSpace.room >= row - 0.5, "\(labels): the card is narrower than its presses")
         }
         // The sheets' own: the list's Cancel and Move, the password's Cancel and Set.
         for labels in [["Cancel", "Move"], ["Cancel", "Set password"]] {

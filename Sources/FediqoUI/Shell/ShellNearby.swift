@@ -181,27 +181,31 @@ final class ShellNearby {
     struct Stage: Equatable {
         let line: String
         let fraction: Double?
-        let canCancel: Bool
+        let press: ShellProgress.Press
+
+        var canCancel: Bool { press != .runsToEnd }
     }
 
     /// The stage at `step` on `side`, or nothing where the step is not a running move — a code,
     /// the list, a question, a notice.
     ///
     /// **Stopped by the person until the receiver is reading back**, the rule `dismiss` keeps:
-    /// once every byte is there the read back runs to its end, and on the sender a stop then
-    /// stops nothing that matters and only loses the notice.
+    /// once every byte is there the receiver's read back runs to its end. The sender, waiting on
+    /// that, may still Close: its own screen comes down, the other is told nothing, and only
+    /// the last notice is lost.
     static func stage(_ step: Step?, side: Side?) -> Stage? {
         let sending = side != .holding
         switch step {
-        case .packing(let progress): return Stage(line: "nearby.stage.packing", fraction: known(progress), canCancel: true)
-        case .connecting: return Stage(line: "nearby.stage.connecting", fraction: nil, canCancel: true)
-        case .waiting: return Stage(line: "nearby.stage.waiting", fraction: nil, canCancel: true)
+        case .packing(let progress): return Stage(line: "nearby.stage.packing", fraction: known(progress), press: .stop)
+        case .connecting: return Stage(line: "nearby.stage.connecting", fraction: nil, press: .stop)
+        case .waiting: return Stage(line: "nearby.stage.waiting", fraction: nil, press: .stop)
         case .moving(let progress, _):
-            return Stage(line: sending ? "nearby.stage.sending" : "nearby.stage.receiving", fraction: known(progress), canCancel: true)
-        case .reconnecting: return Stage(line: "nearby.stage.reconnecting", fraction: nil, canCancel: true)
+            return Stage(line: sending ? "nearby.stage.sending" : "nearby.stage.receiving", fraction: known(progress), press: .stop)
+        case .reconnecting: return Stage(line: "nearby.stage.reconnecting", fraction: nil, press: .stop)
         case .settling(let progress, _):
-            let line = sending ? "nearby.stage.provingThere" : progress == nil ? "nearby.stage.proving" : "nearby.stage.reading"
-            return Stage(line: line, fraction: progress.flatMap(known), canCancel: false)
+            guard !sending else { return Stage(line: "nearby.stage.provingThere", fraction: nil, press: .close) }
+            let line = progress == nil ? "nearby.stage.proving" : "nearby.stage.reading"
+            return Stage(line: line, fraction: progress.flatMap(known), press: .runsToEnd)
         default: return nil
         }
     }
