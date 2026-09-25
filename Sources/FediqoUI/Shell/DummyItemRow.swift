@@ -64,6 +64,10 @@ struct DummyItemRow: View {
     /// **a measurement, never a layout**: what a test compares against the held band, so "the
     /// band holds everything it is given" is measured rather than assumed. No screen sets it.
     var bandAsked = false
+    /// Where each of the row's four bands was laid out — **a measurement, never a layout**, like
+    /// `bandAsked`: what a test reads back to say the decorator is above the header, the header
+    /// above the post and the post above its marks. Nothing on any screen sets it.
+    var probe: RowBandProbe?
     /// Which attachment is on top. It belongs to the app rather than to this view, so that a
     /// refresh that replaces the list leaves a reader who turned to the third one looking at the
     /// third one. See `ShellDecks`.
@@ -214,17 +218,17 @@ struct DummyItemRow: View {
     /// Three bands, and every row has all three whether or not it has anything to put
     /// in them — **so every row in a timeline is one height** (#245, rule 6 of #242):
     ///
+    ///     [decorator                                                            ]
     ///     [avatar][name                   ]     [source][visibility][timestamp  ]
-    ///     [decorator                      ]                        [            ]
     ///     [words, `bodyLines` of them     ]                        [ attachment ]
     ///     [marks                                                                ]
     ///
-    /// Who wrote it and when is one line; the words band is the attachment slot's height, held
-    /// open on a short post and cut on a long one, whose whole is in its thread; the marks are one
-    /// line on a wide page and two on a narrow one or at the accessibility sizes, on every row
-    /// alike. What happened to a post — a reply, a boost, a quote — is the words band's first
-    /// line rather than a band of its own, so a boosted or quoting post is not a line taller than
-    /// the post beside it: it gives its words one line fewer (`bodyLines`).
+    /// What happened to a post — a reply, a boost, a quote — is the row's first line, above who
+    /// wrote it, and every row in a list keeps that line whether it has one or not (`decorator`),
+    /// so a boosted post is exactly as tall as the post beside it. Who wrote it and when is one
+    /// line; the words band is the attachment slot's height, held open on a short post and cut on
+    /// a long one, whose whole is in its thread; the marks are one line on a wide page and two on
+    /// a narrow one or at the accessibility sizes, on every row alike.
     var body: some View {
         // Worked out once for the pass and handed down, not read by each band that wants a
         // piece of it: before the hop below has answered, `written` builds the post's own
@@ -350,6 +354,7 @@ struct DummyItemRow: View {
             // The row itself is an accessibility container, and a container is not an
             // element — a trait put on it is announced to nobody. The headline is the
             // row's identity, so it is the element that carries the selection.
+            decorator(openQuote)
             headline(written)
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(selected ? .isSelected : [])
@@ -363,19 +368,43 @@ struct DummyItemRow: View {
                     personAction
                     quoteAction(openQuote)
                 }
-            mainBox(written, openQuote)
+                .modifier(Probed(band: .header, probe: probe))
+            mainBox(written)
+                .modifier(Probed(band: .content, probe: probe))
             quoteBand(openQuote)
             actions
+                .modifier(Probed(band: .marks, probe: probe))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .coordinateSpace(.named(RowBandProbe.space))
     }
 
-    /// What happened to this post before it got here — that it is a reply, that
-    /// somebody passed it on, that it quotes another. Drawn only when there is something to say,
-    /// as the first line of the words band (#245): it takes one of the words' lines rather than a
-    /// line of the row's own, so a row that has one is exactly as tall as a row that has none.
-    @ViewBuilder
+    /// What happened to this post before it got here — that it is a reply, that somebody passed
+    /// it on, that it quotes another — **as the row's first line, above who wrote it.**
+    ///
+    /// **The line is held open on every row in a list, drawn on or not** (#245's one height):
+    /// a boosted post and the post beside it are the same height because both keep this line,
+    /// and neither gives a line of its words for it. The alternative — the band giving up a body
+    /// line where a decorator shows — would have to shrink the slot beside the words with it, so
+    /// a boosted post's picture would be a different size from its neighbour's. The line is the
+    /// smallest type on the row, so an empty one reads as the row's top margin.
+    ///
+    /// The decorator is laid over the held line rather than beside it, so whatever it says —
+    /// a glyph, a long handle cut short — cannot make the line taller than the empty one. The
+    /// thread pane (`inFull`) keeps the line too: `inFull` changes the three things it names and
+    /// no fourth, so a short post opened in the pane still measures the row it was in the list.
     private func decorator(_ openQuote: (() -> Void)?) -> some View {
+        Text(verbatim: " ")
+            .shellFont(.mark)
+            .lineLimit(1)
+            .hidden()
+            .accessibilityHidden(true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .leading) { decoratorLine(openQuote) }
+    }
+
+    @ViewBuilder
+    private func decoratorLine(_ openQuote: (() -> Void)?) -> some View {
         if decorated {
             HStack(spacing: ShellSpace.snug) {
                 if item.answering != .nothing { answered }
@@ -388,6 +417,7 @@ struct DummyItemRow: View {
             .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .lineLimit(1)
+            .modifier(Probed(band: .decorator, probe: probe))
         }
     }
 
@@ -717,14 +747,14 @@ struct DummyItemRow: View {
     /// picture stands in the band and never makes it taller. A post of pictures alone draws them
     /// where its words would be, side by side and filling the band (`picturePlace`).
     @ViewBuilder
-    private func mainBox(_ written: Written, _ openQuote: (() -> Void)?) -> some View {
+    private func mainBox(_ written: Written) -> some View {
         if inFull {
             // **`inFull` is the pane, and the pane is not a list under a thumb.** There is one
             // post, the reader opened it to read it, and holding it to the slot would cut the one
             // thing they asked for. See `inFull`.
             if narrow {
                 VStack(alignment: .leading, spacing: ShellSpace.snug) {
-                    wordsColumn(written, openQuote)
+                    wordsColumn(written)
                     if item.hasThumb { coveredThumb }
                 }
             } else {
@@ -737,14 +767,14 @@ struct DummyItemRow: View {
                 // to; a post that carries nothing and quotes nothing keeps the slot, and the
                 // height it measured.
                 HStack(alignment: .top, spacing: ShellSpace.step) {
-                    wordsColumn(written, openQuote)
+                    wordsColumn(written)
                     if item.hasThumb || !drawsQuoteCard { coveredThumb }
                 }
             }
         } else {
             HStack(alignment: .top, spacing: ShellSpace.step) {
                 if picturePlace == .column {
-                    picturesColumn(openQuote)
+                    picturesColumn()
                     // The slot stays open and empty, so the column ends where every row's does.
                     if !narrow {
                         Color.clear
@@ -752,7 +782,7 @@ struct DummyItemRow: View {
                             .accessibilityHidden(true)
                     }
                 } else {
-                    wordsColumn(written, openQuote)
+                    wordsColumn(written)
                     if !narrow || item.hasThumb { coveredThumb }
                 }
             }
@@ -786,30 +816,23 @@ struct DummyItemRow: View {
     private static let unseen = CharacterSet.whitespacesAndNewlines
         .union(CharacterSet(charactersIn: "\u{200B}\u{200C}\u{200D}\u{2060}\u{FEFF}\u{00AD}"))
 
-    /// A post of pictures alone: what happened to it, then its pictures side by side where the
-    /// words would be, squares of whatever height the band leaves them — so the row is the height
-    /// of every other, and the pictures fill it.
-    private func picturesColumn(_ openQuote: (() -> Void)?) -> some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            decorator(openQuote)
-            GeometryReader { room in
-                AttachmentDeck(
-                    attachments: item.attachments, top: top, side: room.size.height, host: item.source.host,
-                    radius: Box.plate, player: player, onPlay: onPlay, onOpen: onView, onTurn: onTurn,
-                    onEnded: onEnded, spread: true, onOpenAt: onViewAt
-                )
-            }
+    /// A post of pictures alone: its pictures side by side where the words would be, squares of
+    /// the band's height — so the row is the height of every other, and the pictures fill it.
+    private func picturesColumn() -> some View {
+        GeometryReader { room in
+            AttachmentDeck(
+                attachments: item.attachments, top: top, side: room.size.height, host: item.source.host,
+                radius: Box.plate, player: player, onPlay: onPlay, onOpen: onView, onTurn: onTurn,
+                onEnded: onEnded, spread: true, onOpenAt: onViewAt
+            )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The words band's column: what happened to the post, then the post.
-    private func wordsColumn(_ written: Written, _ openQuote: (() -> Void)?) -> some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            decorator(openQuote)
-            coveredWords(written)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    /// The words band's column: the post. What happened to it is above the header (`decorator`).
+    private func wordsColumn(_ written: Written) -> some View {
+        coveredWords(written)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Whether the blur is on: the author put a cover here and the reader has not taken it off.
@@ -1125,19 +1148,27 @@ struct DummyItemRow: View {
     /// things. `bodyLines` is arithmetic about how much room the slot leaves once a title and a
     /// board name have taken their line; this is the one question a call site answers. A test can
     /// then assert the arithmetic without a screen and the rule without arithmetic.
-    var wordLines: Int? { inFull ? nil : bodyLines }
+    ///
+    /// **Under a cover, the lines the author's warning leaves.** The notice stands in the same
+    /// band above the words, so once the reader lifts the cover the two share the band's lines:
+    /// a warning cut at `coverLines` and the words under it at the rest. Without this a lifted
+    /// post with a long warning asked for more than the band holds and was cut mid-line.
+    var wordLines: Int? {
+        if inFull { return nil }
+        return item.covered ? max(1, bodyLines - coverLines) : bodyLines
+    }
 
     /// What fits in the slot's height beside it. A row that grows to whatever somebody
     /// wrote makes the list a series of unrelated heights; the rest of the post is a
     /// press away, which is what the thread is for.
     ///
-    /// Four lines, less one for each line the band gives to something else: a title, a board's
-    /// name, and what happened to the post (`decorator`).
+    /// Four lines, less one for each line the band gives to something else: a title and a
+    /// board's name. What happened to the post is not one of them — it has a line of the row's
+    /// own, above the header (`decorator`), held open on every row.
     var bodyLines: Int {
         var lines = 4
         if item.title != nil { lines -= 1 }
         if item.source.kind == .board, item.board != nil { lines -= 1 }
-        if decorated { lines -= 1 }
         return max(1, lines)
     }
 
@@ -1591,4 +1622,39 @@ extension EnvironmentValues {
     /// longer here. Nothing means nobody said: every host is taken as here. See
     /// `DummyItemRow.sourceLeft`.
     @Entry var shellSourcesHere: Set<String>?
+}
+
+/// The row's four bands, top to bottom as they are drawn and heard.
+enum RowBand: Hashable {
+    case decorator
+    case header
+    case content
+    case marks
+}
+
+/// Where a hosted row laid its bands out, in the row's own space. See `DummyItemRow.probe`.
+@MainActor
+final class RowBandProbe {
+    static let space = "DummyItemRow.bands"
+    var frames: [RowBand: CGRect] = [:]
+}
+
+/// Reports a band's frame to a probe, where one is handed in; draws nothing and changes nothing.
+private struct Probed: ViewModifier {
+    let band: RowBand
+    let probe: RowBandProbe?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let probe {
+            content.background(
+                GeometryReader { room in
+                    let _ = probe.frames[band] = room.frame(in: .named(RowBandProbe.space))
+                    Color.clear
+                }
+            )
+        } else {
+            content
+        }
+    }
 }
