@@ -115,6 +115,36 @@ struct CarryTests {
         carry.dismiss()
     }
 
+    @Test("The pictures question answered on the card takes its step, a refusal it asks stays up, and put away it closes")
+    func answeredThroughTheCard() async {
+        let session = ShellSession(http: FixtureHTTP())
+        let carrier = FakeCarrier()
+        carrier.weight = PackageWeight(withoutPictures: 100, withPictures: 300, free: 200, holdsStore: false)
+        session.carrier = carrier
+        let flow = CarryFlow(session: session)
+        let carry = session.carry
+        func press(_ answer: ShellConfirmAnswer) async {
+            await settle(carry) { $0 != .weighing }
+            guard let asked = carry.asking else { Issue.record("nothing asked"); return }
+            ShellConfirmAnswer.settle(answer, asked: asked, item: flow.asking, onChoice: flow.answer)
+            for _ in 0..<4 {
+                await Task.yield()
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        carry.beginTakeAway(with: carrier)
+        await press(.choice(ShellQuestion.withoutPictures))
+        #expect(carry.step == .setting(pictures: false), "the choice was not taken as put away")
+        carry.dismiss()
+        carry.beginTakeAway(with: carrier)
+        await press(.choice(ShellQuestion.withPictures))
+        #expect(carry.step == .refused(.noRoom(needed: 300, free: 200)), "the refusal the answer asked is left up")
+        carry.dismiss()
+        carry.beginTakeAway(with: carrier)
+        await press(.cancel)
+        #expect(carry.step == nil, "put away, it closes")
+    }
+
     @Test("Moving cancelled or failed takes the scratch file with it")
     func moveCancelled() async throws {
         let carrier = FakeCarrier()

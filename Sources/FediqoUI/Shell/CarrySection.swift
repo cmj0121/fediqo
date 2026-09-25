@@ -83,8 +83,13 @@ struct CarryFlow: ViewModifier {
             .fileImporter(isPresented: pickerUp, allowedContentTypes: [.data], onCompletion: picked)
     }
 
-    private var asking: Binding<ShellCarry.Step?> {
-        Binding(get: { session?.carry.asking }, set: { if $0 == nil { session?.carry.dismiss() } })
+    /// Put away unanswered is out; judged a turn later, as a yes clears this too
+    /// (`ShellConfirmAnswer.putAway`).
+    var asking: Binding<ShellCarry.Step?> {
+        Binding(get: { session?.carry.asking }, set: {
+            guard $0 == nil, let carry = session?.carry else { return }
+            ShellConfirmAnswer.putAway(carry.step, now: { carry.step }) { _ in carry.dismiss() }
+        })
     }
 
     private var askingPassword: Binding<ShellCarry.Ask?> {
@@ -109,7 +114,7 @@ struct CarryFlow: ViewModifier {
         }
     }
 
-    private func answer(_ step: ShellCarry.Step, _ id: String) {
+    func answer(_ step: ShellCarry.Step, _ id: String) {
         guard let session, let carrier = session.carrier else { return }
         switch step {
         case .choosing:

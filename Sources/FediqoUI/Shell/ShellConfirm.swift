@@ -109,6 +109,27 @@ enum ShellConfirmAnswer: Equatable {
         item.wrappedValue = nil
         if case .choice(let id) = answer { onChoice(value, id) }
     }
+
+    /// **For a binding whose clearing is itself an act** — a flow that goes back, or out, when its
+    /// question is put away (`CarryFlow`, `NearbyFlow`). `settle` takes the question down before
+    /// it hands over the answer, so such a setter runs first on a yes too, and acting there
+    /// undid the step the yes was about to take: "The same" and a take-away's choice did nothing
+    /// (#253). Handing the answer over first is no cure — an answer that asks the next question
+    /// (a take-away with no room is refused) would then have it cleared at once.
+    ///
+    /// So the put-away is judged one main-actor turn later, and acted on only if the step is
+    /// still the one asked about: an answer has moved it on by then, and only a question left
+    /// standing was put away unanswered.
+    @MainActor
+    static func putAway<Step: Equatable>(
+        _ asked: Step?, now: @escaping @MainActor () -> Step?, act: @escaping @MainActor (Step) -> Void
+    ) {
+        guard let asked else { return }
+        Task { @MainActor in
+            guard now() == asked else { return }
+            act(asked)
+        }
+    }
 }
 
 /// The question, drawn by the app rather than the system's alert.

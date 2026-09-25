@@ -319,6 +319,77 @@ struct NearbyTests {
         holding.dismiss()
     }
 
+    /// A few turns of the main actor: long enough for a put-away judged a turn later to act.
+    static func turns() async {
+        for _ in 0..<4 {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    /// A sender's session over `two`'s pipe, its question up, answered the way the card answers:
+    /// through `settle`, which takes the question down before it hands over the answer.
+    private static func sender(_ two: Two) async -> (ShellSession, NearbyFlow)? {
+        let session = ShellSession(http: FixtureHTTP())
+        session.carrier = two.from
+        session.nearbyLink = two.link
+        session.deviceName = "a laptop"
+        two.holding.beginHold(with: two.onto, link: two.link, device: "a tablet") {}
+        await two.settle(two.holding) { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
+        session.nearby.beginOffer(with: two.from, link: two.link)
+        await two.settle(session.nearby) { if case .browsing(let peers) = $0 { !peers.isEmpty } else { false } }
+        guard case .holding(let code) = two.holding.step else { Issue.record("no code"); return nil }
+        session.nearby.picked = session.nearby.peers.first
+        session.nearby.offer(code: code, rides: .withoutPictures)
+        guard case .checkingMark = session.nearby.step else { Issue.record("no mark asked"); return nil }
+        return (session, NearbyFlow(session: session))
+    }
+
+    private static func press(_ answer: ShellConfirmAnswer, on flow: NearbyFlow, _ nearby: ShellNearby) {
+        guard let asked = nearby.asking else { Issue.record("nothing asked"); return }
+        ShellConfirmAnswer.settle(answer, asked: asked, item: flow.asking, onChoice: flow.answer)
+    }
+
+    @Test("\"The same\" and a yes, pressed on the card, move the step on: the question going down first does not undo them")
+    func yesThroughTheCard() async throws {
+        let two = Two()
+        defer { two.end() }
+        guard let (session, flow) = await Self.sender(two) else { return }
+        defer { session.nearby.dismiss() }
+        Self.press(.choice(ShellQuestion.yes), on: flow, session.nearby)
+        await Self.turns()
+        #expect(session.nearby.sheet != .pick, "\"The same\" was not taken as put away")
+        switch session.nearby.step {
+        case .packing, .connecting, .asking: break
+        default: Issue.record("the mark's yes did nothing: \(String(describing: session.nearby.step))")
+        }
+        await two.settle(session.nearby) { if case .asking = $0 { true } else { false } }
+        await two.settle(two.holding) { if case .asking = $0 { true } else { false } }
+        Self.press(.choice(ShellQuestion.yes), on: flow, session.nearby)
+        await Self.turns()
+        #expect(session.nearby.step == .waiting(peer: "a tablet"), "the ask's yes waits for the other screen")
+    }
+
+    @Test("Put away on the card, the mark question goes back to the list and the ask closes")
+    func cancelThroughTheCard() async throws {
+        let two = Two()
+        defer { two.end() }
+        guard let (session, flow) = await Self.sender(two) else { return }
+        defer { session.nearby.dismiss() }
+        Self.press(.cancel, on: flow, session.nearby)
+        await Self.turns()
+        #expect(session.nearby.sheet == .pick, "not the same: back to the list")
+        if case .browsing = session.nearby.step {} else { Issue.record("not back to the list: \(String(describing: session.nearby.step))") }
+
+        guard case .holding(let code) = two.holding.step else { Issue.record("no code"); return }
+        session.nearby.offer(code: code, rides: .withoutPictures)
+        Self.press(.choice(ShellQuestion.yes), on: flow, session.nearby)
+        await two.settle(session.nearby) { if case .asking = $0 { true } else { false } }
+        Self.press(.cancel, on: flow, session.nearby)
+        await Self.turns()
+        #expect(session.nearby.step == nil, "the ask put away closes the move")
+    }
+
     @Test("A hold put away before its yes gives back no copies it never took")
     func cancelledHoldLeavesTheCopiesRunning() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("fediqo-nearby-\(UUID().uuidString)")
