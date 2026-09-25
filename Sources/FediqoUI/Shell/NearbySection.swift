@@ -332,7 +332,8 @@ struct NearbyHoldSheet: View {
                 Button(L10n.t("board.choose.cancel"), role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            .onePressLine()
+        .frame(maxWidth: .infinity, alignment: .trailing)
             .buttonStyle(.bordered)
             .controlSize(.large)
         }
@@ -469,6 +470,7 @@ struct NearbyPickSheet: View {
                 .tint(ShellChrome.selectInk(colorScheme))
                 .disabled(!ready)
         }
+        .onePressLine()
         .frame(maxWidth: .infinity, alignment: .trailing)
         .buttonStyle(.bordered)
         .controlSize(.large)
