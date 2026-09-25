@@ -533,14 +533,25 @@ struct NearbyTests {
         #expect(L10n.t("work.purpose.nearbyMove", language: .taiwanese).contains("鄰近"))
     }
 
-    @Test("The group is on Preferences beside Take away, its flow is one modifier there, the root's chain is untouched, and the plists ask what the system asks")
+    @Test("The group is on Preferences' Move tab under Take away, its flow is one modifier on the pane whatever tab is in front, the root's chain is untouched, and the plists ask what the system asks")
     func whereItLives() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let shell = root.appendingPathComponent("Sources/FediqoUI")
         let prefs = try String(contentsOf: shell.appendingPathComponent("Shell/PreferencesPane.swift"), encoding: .utf8)
-        #expect(prefs.contains("NearbySection(session: session)"))
-        #expect(prefs.contains(".modifier(NearbyFlow(session: session))"))
+        let move = try #require(prefs.range(of: "private var move: some View {"))
+        let next = try #require(prefs.range(of: "\n    }\n", range: move.upperBound..<prefs.endIndex))
+        let tab = prefs[move.upperBound..<next.lowerBound]
+        #expect(tab.contains("CarrySection(session: session)\n            NearbySection(session: session)"), "beside Take away, under it")
+        let choices = try #require(prefs.range(of: "private var choices: some View {"))
+        let choicesEnd = try #require(prefs.range(of: "\n    }\n", range: choices.upperBound..<prefs.endIndex))
+        #expect(!prefs[choices.upperBound..<choicesEnd.lowerBound].contains("Section(session: session)"), "off the first tab")
+        #expect(prefs.contains("case .move: move"))
+        // On the pane, after the page's switch: a tab changed mid-move tears nothing down.
+        let flow = try #require(prefs.range(of: ".modifier(NearbyFlow(session: session))"))
+        let form = try #require(prefs.range(of: "var body: some View {\n        Form {"))
+        let page = try #require(prefs.range(of: "private var page: some View {"))
+        #expect(form.upperBound < flow.lowerBound && flow.upperBound < page.lowerBound)
         let rootView = try String(contentsOf: shell.appendingPathComponent("FediqoRootView.swift"), encoding: .utf8)
         #expect(!rootView.contains("Nearby") || !rootView.contains("NearbyFlow"), "the root's chain grows by nothing")
         let section = try String(contentsOf: shell.appendingPathComponent("Shell/NearbySection.swift"), encoding: .utf8)

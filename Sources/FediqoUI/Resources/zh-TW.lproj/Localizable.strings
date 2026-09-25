@@ -859,6 +859,7 @@
 
 /* Preferences says the least first (#233). */
 "prefs.tab.hosts" = "自訂主機";
+"prefs.tab.move" = "搬移";
 "prefs.askEvery.brief" = "這台裝置等多久再問一次。";
 "prefs.latest.brief" = "時間軸只顯示到這一天結束為止。";
 "about.brief" = "這個版本建置時留下的紀錄。";

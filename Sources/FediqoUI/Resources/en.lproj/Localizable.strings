@@ -881,6 +881,7 @@
 
 /* Preferences says the least first (#233). */
 "prefs.tab.hosts" = "Your hosts";
+"prefs.tab.move" = "Move";
 "prefs.askEvery.brief" = "How long this device waits before asking again.";
 "prefs.latest.brief" = "Timelines stop at the end of this day.";
 "about.brief" = "What this build was stamped with.";

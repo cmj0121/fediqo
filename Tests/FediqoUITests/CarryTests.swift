@@ -369,7 +369,7 @@ struct CarryTests {
         #expect(ShellQuestion.carryRefused(.shortPassword, language: .english).line.contains("8"))
     }
 
-    @Test("The group is on Preferences' settings tab, its flow is one modifier there, and the root's chain is untouched")
+    @Test("The group is on Preferences' Move tab, its flow is one modifier on the pane, and the root's chain is untouched")
     func wherItLives() throws {
         let shell = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -377,6 +377,10 @@ struct CarryTests {
         let prefs = try String(contentsOf: shell.appendingPathComponent("Shell/PreferencesPane.swift"), encoding: .utf8)
         #expect(prefs.contains("CarrySection(session: session)"))
         #expect(prefs.contains(".modifier(CarryFlow(session: session))"))
+        let move = try #require(prefs.range(of: "private var move: some View {"))
+        #expect(prefs.range(of: "CarrySection(session: session)")!.lowerBound > move.upperBound, "on the Move tab")
+        let flow = try #require(prefs.range(of: ".modifier(CarryFlow(session: session))"))
+        #expect(flow.upperBound < prefs.range(of: "private var page: some View {")!.lowerBound, "on the pane, not the tab")
         let root = try String(contentsOf: shell.appendingPathComponent("FediqoRootView.swift"), encoding: .utf8)
         #expect(!root.contains("Carry"), "the root's chain grows by nothing")
         let section = try String(contentsOf: shell.appendingPathComponent("Shell/CarrySection.swift"), encoding: .utf8)
