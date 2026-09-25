@@ -84,11 +84,12 @@ struct CarryFlow: ViewModifier {
     }
 
     /// Put away unanswered is out; judged a turn later, as a yes clears this too
-    /// (`ShellConfirmAnswer.putAway`).
+    /// (`ShellConfirmAnswer.putAway`), and on the question up rather than the step, so a
+    /// clearing written back with none up stops nothing.
     var asking: Binding<ShellCarry.Step?> {
         Binding(get: { session?.carry.asking }, set: {
             guard $0 == nil, let carry = session?.carry else { return }
-            ShellConfirmAnswer.putAway(carry.step, now: { carry.step }) { _ in carry.dismiss() }
+            ShellConfirmAnswer.putAway(carry.asking, now: { carry.asking }) { _ in carry.dismiss() }
         })
     }
 

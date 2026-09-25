@@ -117,9 +117,10 @@ enum ShellConfirmAnswer: Equatable {
     /// (#253). Handing the answer over first is no cure — an answer that asks the next question
     /// (a take-away with no room is refused) would then have it cleared at once.
     ///
-    /// So the put-away is judged one main-actor turn later, and acted on only if the step is
-    /// still the one asked about: an answer has moved it on by then, and only a question left
-    /// standing was put away unanswered.
+    /// So the put-away is judged one main-actor turn later, and acted on only if the question
+    /// is still the one asked: an answer has moved it on by then, and only a question left
+    /// standing was put away unanswered. `asked` and `now` are the question up, never the step
+    /// under it — a clearing written back with no question up is no put-away.
     @MainActor
     static func putAway<Step: Equatable>(
         _ asked: Step?, now: @escaping @MainActor () -> Step?, act: @escaping @MainActor (Step) -> Void

@@ -318,11 +318,19 @@ final class ShellNearby {
             work.end(token)
             self.token = nil
         }
+        letGo()
+        pictures = nil
+    }
+
+    /// What a yes took is given back: the store let go, the screen let sleep, and the copies
+    /// released. **At most one hold of the copies is ever outstanding**: one returned is in
+    /// `heldPictures` and released here, once; one still pending sees `round` moved on and
+    /// gives them straight back. Called on every way back to the code and every way out.
+    private func letGo() {
         hold(false)
         round += 1
         heldPictures?.release()
         heldPictures = nil
-        pictures = nil
         Self.keepAwake(false)
     }
 
@@ -358,6 +366,9 @@ final class ShellNearby {
     private func took(_ event: NearbyMove.Event) {
         switch event {
         case .code(let code, let sessionID):
+            // Back to the code — a first code, or a new one after a drop — nothing is being
+            // moved in: whatever a yes held is let go, so the next yes holds afresh.
+            letGo()
             self.code = code
             mark = NearbyCode.mark(code: code, sessionID: sessionID)
             step = .holding(code: code)

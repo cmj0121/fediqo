@@ -7,9 +7,10 @@ import SwiftUI
 /// **Six tabs, in Usage's shape** (#143, #164, #226, #233, #247): what a person chooses, which
 /// Fediqo this is, what it is asking of the sources right now, what the app starts with letting
 /// through beyond them, the hosts the person added, and moving what this device holds — taken
-/// away to a file and read back, or sent to a device nearby. The same pills at the head of the same grouped
-/// `Form`, and the same key — Tab and ⇧Tab rotate them (`ShellSession.rotatePreferencesTab`) — so
-/// the page is reached and walked on a Mac and on a phone the way Usage already is. The second
+/// away to a file and read back, or sent to a device nearby. The same pills at the head of the
+/// same grouped `Form`, and the same key — Tab and ⇧Tab rotate them
+/// (`ShellSession.rotatePreferencesTab`) — so the page is reached and walked on a Mac and on a
+/// phone the way Usage already is. The second
 /// tab is `BuildStampSection`, whole, the third `SourceWorkSection`, the fourth
 /// `AllowanceSection`, the fifth `OwnHostsSection` and the sixth `CarrySection` over
 /// `NearbySection`: each one style, a list or a form, never both (#231).

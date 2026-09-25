@@ -368,6 +368,10 @@ struct NearbyTests {
         Self.press(.choice(ShellQuestion.yes), on: flow, session.nearby)
         await Self.turns()
         #expect(session.nearby.step == .waiting(peer: "a tablet"), "the ask's yes waits for the other screen")
+        // The sheet let down after the yes writes the clearing back once more, with no question up.
+        flow.asking.wrappedValue = nil
+        await Self.turns()
+        #expect(session.nearby.step == .waiting(peer: "a tablet"), "a clearing with no question up stops nothing")
     }
 
     @Test("Put away on the card, the mark question goes back to the list and the ask closes")
@@ -409,6 +413,58 @@ struct NearbyTests {
         disk.store(Data("x".utf8), host: "a.example", url: URL(string: "https://a.example/one.jpg")!)
         await disk.settled()
         #expect(cache.bytes(host: "a.example") == 1, "the copies still run after a hold put away twice")
+    }
+
+    /// The receiver's question up over `two`'s pipe, with `disk` as the copies a yes holds.
+    private static func asked(_ two: Two, pictures disk: DiskCopies) async -> Bool {
+        two.holding.beginHold(with: two.onto, link: two.link, device: "a tablet", pictures: disk) {}
+        await two.settle(two.holding) { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
+        two.offering.beginOffer(with: two.from, link: two.link)
+        await two.settle(two.offering) { if case .browsing(let peers) = $0 { !peers.isEmpty } else { false } }
+        await two.offer()
+        guard case .asking = two.holding.step else { Issue.record("no question on the receiver"); return false }
+        return true
+    }
+
+    /// Whether the copies run: a write and a read of it come back within a couple of seconds.
+    /// A queue left suspended never answers, so this asks off to the side and stops looking.
+    private static func running(_ disk: DiskCopies, _ cache: MediaCache, _ name: String) async -> Bool {
+        let done = Mutex(false)
+        Task.detached {
+            disk.store(Data("x".utf8), host: "a.example", url: URL(string: "https://a.example/\(name).jpg")!)
+            await disk.settled()
+            done.withLock { $0 = true }
+        }
+        for _ in 0..<200 where !done.withLock({ $0 }) { try? await Task.sleep(for: .milliseconds(10)) }
+        return done.withLock { $0 }
+    }
+
+    @Test("A yes put away before its hold of the copies returns, or after, leaves them running; at most one hold is ever out")
+    func yesThenPutAwayLeavesTheCopiesRunning() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("fediqo-nearby-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cache = try MediaCache(directory: folder)
+        let disk = DiskCopies(cache)
+        let two = Two()
+        defer { two.end() }
+
+        // Before: the test holds the copies first, so the yes's hold is left pending behind it.
+        guard await Self.asked(two, pictures: disk) else { return }
+        await disk.hold()
+        two.holding.answer(true)
+        await Self.turns()
+        two.holding.dismiss()
+        disk.release()
+        #expect(await Self.running(disk, cache, "one"), "a pending hold that returns after its move is given straight back")
+        two.offering.dismiss()
+
+        // After: the yes's hold has returned, and the put-away releases it, once.
+        guard await Self.asked(two, pictures: disk) else { return }
+        two.holding.answer(true)
+        await Self.turns()
+        two.holding.dismiss()
+        #expect(await Self.running(disk, cache, "two"), "a returned hold is released on the way out")
+        #expect(cache.bytes(host: "a.example") == 2)
     }
 
     // MARK: - What is said
