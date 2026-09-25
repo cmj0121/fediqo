@@ -227,8 +227,8 @@ struct DummyItemRow: View {
     /// wrote it, and every row in a list keeps that line whether it has one or not (`decorator`),
     /// so a boosted post is exactly as tall as the post beside it. Who wrote it and when is one
     /// line; the words band is the attachment slot's height, held open on a short post and cut on
-    /// a long one, whose whole is in its thread; the marks are one line on a wide page and two on
-    /// a narrow one or at the accessibility sizes, on every row alike.
+    /// a long one, whose whole is in its thread; the marks are one line on every page and at every
+    /// type size, giving way rather than breaking where the line is narrow (`actions`).
     var body: some View {
         // Worked out once for the pass and handed down, not read by each band that wants a
         // piece of it: before the hop below has answered, `written` builds the post's own
@@ -1206,59 +1206,47 @@ struct DummyItemRow: View {
         }
     }
 
-    /// Every mark is a press, and a press has a floor it cannot be squeezed below. On
-    /// a narrow row, or at the largest sizes, the two groups take a line each rather than
-    /// the last of them sliding off the edge.
+    /// Every mark on one line, on every row, at every width and every type size (#245).
     ///
-    /// **Decided by the page and the type size, never by the row** (#245). Which marks a post
-    /// offers differs from row to row — a post of the reader's own can be taken back, a source
-    /// not signed in to offers none — so a line that broke where one row's marks ran long would
-    /// make that row taller than its neighbours. Every row on a page breaks the same way.
+    /// **Never two lines.** The marks used to take a line each for the two groups on a narrow
+    /// page or from `.xxLarge` up, which put a post's marks on two lines in a Mac window dragged
+    /// narrow. Now the line gives way instead of breaking: the gaps close, then each mark gives
+    /// up its touch room, its count and then the size of its glyph (`MarksLine`,
+    /// `DummyMarkButton`). Every mark is still there to press and still named.
+    ///
+    /// **One height on every row**, because the line is a press's floor tall whatever the marks
+    /// on it — so a row whose marks run long is not taller than its neighbours.
     private var actions: some View {
-        Group {
-            if Self.marksStack(narrow: narrow, size: typeSize) {
-                VStack(alignment: .leading, spacing: ShellSpace.tight) { passOn; keep }
-            } else {
-                HStack(spacing: ShellSpace.room) { passOn; keep; Spacer(minLength: 0) }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Whether the marks take two lines: on a narrow page, and from the second-largest ordinary
-    /// size up, where eight marks and a refusal no longer fit a wide column on one line.
-    static func marksStack(narrow: Bool, size: DynamicTypeSize) -> Bool {
-        narrow || size >= .xxLarge
-    }
-
-    private var passOn: some View {
-        HStack(spacing: ShellSpace.snug) {
+        MarksLine(spacing: ShellSpace.snug) {
             actMark(.answer)
             actMark(.boost)
             mark("quote.bubble", label: "item.act.quote", on: false) {
                 onToast(L10n.t("item.toast.quote"))
             }
             actMark(.favourite)
+            keep
+            refusal
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    @ViewBuilder
     private var keep: some View {
-        HStack(spacing: ShellSpace.snug) {
-            mark(marks.bookmarked ? "bookmark.fill" : "bookmark",
-                 label: "item.act.bookmark", on: marks.bookmarked) {
-                marks.bookmarked.toggle()
-                onToast(L10n.t(marks.bookmarked ? "item.toast.bookmark.on" : "item.toast.bookmark.off"))
-            }
-            mark(marks.kept ? "archivebox.fill" : "archivebox",
-                 label: "item.act.kept", on: marks.kept) {
-                marks.kept.toggle()
-                onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
-            }
-            actMark(.withdraw)
-            mark("ellipsis", label: "item.act.more", on: false) {
-                onToast(L10n.t("item.toast.more"))
-            }
-            refusal
+        mark(marks.bookmarked ? "bookmark.fill" : "bookmark",
+             label: "item.act.bookmark", on: marks.bookmarked) {
+            marks.bookmarked.toggle()
+            onToast(L10n.t(marks.bookmarked ? "item.toast.bookmark.on" : "item.toast.bookmark.off"))
+        }
+        // The marks that keep a post stand a little apart from the ones that pass it on.
+        .layoutValue(key: MarkGap.self, value: ShellSpace.room)
+        mark(marks.kept ? "archivebox.fill" : "archivebox",
+             label: "item.act.kept", on: marks.kept) {
+            marks.kept.toggle()
+            onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
+        }
+        actMark(.withdraw)
+        mark("ellipsis", label: "item.act.more", on: false) {
+            onToast(L10n.t("item.toast.more"))
         }
     }
 
@@ -1289,6 +1277,7 @@ struct DummyItemRow: View {
                             countWidth: countBox, touch: touch) {
                 perform(act)
             }
+            .modifier(ProbedMark(label: shown.spoken, probe: probe))
         }
     }
 
@@ -1312,6 +1301,7 @@ struct DummyItemRow: View {
         DummyMarkButton(symbol: symbol, count: nil, label: L10n.t(label),
                         on: on, quiet: !reading, glyph: glyph,
                         countWidth: countBox, touch: touch, action: action)
+            .modifier(ProbedMark(label: L10n.t(label), probe: probe))
     }
 
     // MARK: - The way out
@@ -1589,17 +1579,18 @@ private struct DummyMarkButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: ShellSpace.hair * 2) {
-                Image(systemName: symbol)
-                    .font(.system(size: glyph, weight: .medium))
-                    .frame(width: glyph, height: glyph)
-                if let count {
-                    Text(String(count))
-                        .shellFont(.reading)
-                        .frame(minWidth: countWidth, alignment: .leading)
-                }
+            // **What a mark gives up, in order, where its line is narrower than the marks**
+            // (`MarksLine`): the touch room around it, then the room held for its count, then the
+            // count, then the size of its glyph. Never its place on the line, and never its name.
+            ViewThatFits(in: .horizontal) {
+                face(count: count, side: glyph, floor: touch, countFloor: countWidth)
+                face(count: count, side: glyph, floor: 0, countFloor: countWidth)
+                face(count: count, side: glyph, floor: 0, countFloor: 0)
+                face(count: nil, side: glyph, floor: 0, countFloor: 0)
+                face(count: nil, side: glyph * 0.75, floor: 0, countFloor: 0)
+                face(count: nil, side: glyph * 0.5, floor: 0, countFloor: 0)
             }
-            .frame(minWidth: touch, minHeight: touch, alignment: .leading)
+            .frame(minHeight: touch)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1607,7 +1598,25 @@ private struct DummyMarkButton: View {
         .animation(.easeInOut(duration: 0.15), value: quiet)
         .help(label)
         .accessibilityLabel(label)
+        // The count is heard whether or not the line had room to draw it.
+        .accessibilityValue(Text(count.map { String($0) } ?? ""))
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func face(count: Int?, side: CGFloat, floor: CGFloat, countFloor: CGFloat) -> some View {
+        HStack(spacing: ShellSpace.hair * 2) {
+            Image(systemName: symbol)
+                .font(.system(size: side, weight: .medium))
+                .frame(width: side, height: side)
+            if let count {
+                Text(String(count))
+                    .shellFont(.reading)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .frame(minWidth: countFloor, alignment: .leading)
+            }
+        }
+        .frame(minWidth: floor, alignment: .leading)
     }
 
     private var tint: Color {
@@ -1637,6 +1646,8 @@ enum RowBand: Hashable {
 final class RowBandProbe {
     static let space = "DummyItemRow.bands"
     var frames: [RowBand: CGRect] = [:]
+    /// Where each mark was laid out, by its name.
+    var marks: [String: CGRect] = [:]
 }
 
 /// Reports a band's frame to a probe, where one is handed in; draws nothing and changes nothing.
@@ -1650,6 +1661,26 @@ private struct Probed: ViewModifier {
             content.background(
                 GeometryReader { room in
                     let _ = probe.frames[band] = room.frame(in: .named(RowBandProbe.space))
+                    Color.clear
+                }
+            )
+        } else {
+            content
+        }
+    }
+}
+
+/// Reports one mark's frame to a probe, by the mark's name; draws nothing and changes nothing.
+private struct ProbedMark: ViewModifier {
+    let label: String
+    let probe: RowBandProbe?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let probe {
+            content.background(
+                GeometryReader { room in
+                    let _ = probe.marks[label] = room.frame(in: .named(RowBandProbe.space))
                     Color.clear
                 }
             )

@@ -18,7 +18,8 @@ import SwiftUI
 public enum ShellLayout: Hashable, Sendable, CaseIterable {
     /// The page alone, the places as tabs, and compose as a button over the page. The rows keep
     /// their narrow arrangement: no empty slot beside the words, a picture beside them held to
-    /// the standard size's slot, and the marks on two lines (#245).
+    /// the standard size's slot, and the marks on one line that gives way rather than breaking
+    /// (#245).
     case narrow
     /// The rail on the left, the page beside it.
     case wide

@@ -255,10 +255,12 @@ struct OneHeightTests {
 
     #if os(macOS)
     private static func rowHeight(
-        _ item: DummyItem, layout: ShellLayout, size: DynamicTypeSize, lifted: Bool = false, asked: Bool = false
+        _ item: DummyItem, layout: ShellLayout, size: DynamicTypeSize, lifted: Bool = false, asked: Bool = false,
+        acting: ItemActing = ItemActing()
     ) -> CGFloat {
         let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
-                               marks: .constant(DummyMarks()), bandAsked: asked, lifted: lifted, onToast: { _ in })
+                               marks: .constant(DummyMarks()), acting: acting, bandAsked: asked, lifted: lifted,
+                               onToast: { _ in })
             .environment(\.shellLayout, layout)
         return height(row, size: size, width: layout == .wide ? 720 : 390)
     }
@@ -267,7 +269,9 @@ struct OneHeightTests {
     @Test("Every post in a timeline is one height, wide and narrow, at the standard and the largest type",
           arguments: [ShellLayout.wide, .narrow], [DynamicTypeSize.large, .accessibility3])
     func timelineRowIsOneHeight(_ layout: ShellLayout, _ size: DynamicTypeSize) {
-        let measured = Self.variants().map { ($0.0, Self.rowHeight($0.1, layout: layout, size: size)) }
+        var measured = Self.variants().map { ($0.0, Self.rowHeight($0.1, layout: layout, size: size)) }
+        // Every mark, counted: the longest marks line a row draws is the same one line.
+        measured.append(("every act", Self.rowHeight(Self.counted(), layout: layout, size: size, acting: Self.everyAct)))
         let heights = Set(measured.map(\.1))
         #expect(heights.count == 1, "\(layout) at \(size): \(measured.map { "\($0.0) \($0.1)" })")
     }
@@ -332,6 +336,44 @@ struct OneHeightTests {
             #expect(decorator.maxY <= header.minY, "\(layout) \(name): decorator \(decorator), header \(header)")
             #expect(header.maxY <= content.minY, "\(layout) \(name): header \(header), post \(content)")
             #expect(content.maxY <= marks.minY, "\(layout) \(name): post \(content), marks \(marks)")
+        }
+    }
+
+    /// A post of the reader's own that offers every act, with counts: the most marks a row draws.
+    private static let everyAct = ItemActing(acts: PostActs(offered: Set(PostAct.allCases)), perform: { _ in })
+
+    private static func counted() -> DummyItem {
+        DummyItem(Note(
+            id: "n1", source: Source(host: "first.example", kind: .mastodon), author: "Ada",
+            handle: "@ada@author.example", body: "Short.", postedAt: posted, categories: [.public],
+            counts: Counts(replies: 12_345, reblogs: 67_890, favourites: 123_456), statusID: "1"
+        ))
+    }
+
+    /// **One line, where a narrow Mac window and the larger sizes used to break it in two.** Every
+    /// mark is laid out, at one height, inside the row.
+    @Test("A post's marks sit on one line at a narrow width and at the larger sizes",
+          arguments: [(ShellLayout.narrow, DynamicTypeSize.large), (.narrow, .xxLarge), (.wide, .xxLarge),
+                      (.narrow, .accessibility3), (.wide, .accessibility5)])
+    func marksOnOneLine(_ layout: ShellLayout, _ size: DynamicTypeSize) throws {
+        let probe = RowBandProbe()
+        let width: CGFloat = layout == .wide ? 720 : 390
+        let row = DummyItemRow(item: Self.counted(), catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
+                               marks: .constant(DummyMarks()), acting: Self.everyAct, probe: probe, onToast: { _ in })
+            .environment(\.shellLayout, layout)
+            .dynamicTypeSize(size)
+        let host = NSHostingView(rootView: row.frame(width: width))
+        host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        host.layoutSubtreeIfNeeded()
+        let marks = probe.marks
+        #expect(marks.count == 8, "every mark is laid out: \(marks.keys.sorted())")
+        let middles = Set(marks.values.map { ($0.midY * 2).rounded() / 2 })
+        #expect(middles.count == 1, "\(layout) \(size): marks at \(marks.values.map(\.midY).sorted())")
+        let band = try #require(probe.frames[.marks])
+        for (name, frame) in marks {
+            #expect(frame.minX >= band.minX - 0.5 && frame.maxX <= band.maxX + 0.5,
+                    "\(layout) \(size): \(name) \(frame) outside \(band)")
+            #expect(frame.width > 0, "\(name) is drawn")
         }
     }
 
@@ -412,12 +454,20 @@ struct OneHeightTests {
         #expect(lines(Self.note(title: "t", kind: .discuz)) == 3, "a title still takes a line of the words")
     }
 
-    @Test("The marks break the same way on every row: by the page and the type size alone")
-    func marksBreakByPage() {
-        #expect(!DummyItemRow.marksStack(narrow: false, size: .large))
-        #expect(!DummyItemRow.marksStack(narrow: false, size: .xLarge))
-        #expect(DummyItemRow.marksStack(narrow: false, size: .xxLarge))
-        #expect(DummyItemRow.marksStack(narrow: true, size: .large))
-        #expect(DummyItemRow.marksStack(narrow: false, size: .accessibility1))
+    @Test("The marks' line closes its gaps first, then narrows every mark, and always ends inside the width")
+    func marksLineGivesWay() {
+        let widths: [CGFloat] = [40, 40, 32, 40, 32, 32, 32, 32]
+        let gaps: [CGFloat] = [8, 8, 8, 8, 24, 8, 8, 8]
+        let ideal = widths.reduce(0, +) + gaps.dropFirst().reduce(0, +)
+        let roomy = MarksLine.fit(widths, gaps: gaps, least: 1, width: ideal + 10)
+        #expect(roomy.gaps == gaps && roomy.widths == widths, "room enough: nothing gives way")
+        let closer = MarksLine.fit(widths, gaps: gaps, least: 1, width: ideal - 30)
+        #expect(closer.widths == widths, "the gaps close before a mark is narrowed")
+        #expect(closer.gaps.dropFirst().allSatisfy { $0 >= 1 })
+        #expect(abs(closer.widths.reduce(0, +) + closer.gaps.dropFirst().reduce(0, +) - (ideal - 30)) < 0.01)
+        let narrowed = MarksLine.fit(widths, gaps: gaps, least: 1, width: 150)
+        #expect(narrowed.gaps.dropFirst().allSatisfy { $0 == 1 })
+        #expect(abs(narrowed.widths.reduce(0, +) + 7 - 150) < 0.01, "every mark gives up its share")
+        #expect(narrowed.widths.allSatisfy { $0 > 0 }, "no mark is dropped")
     }
 }
