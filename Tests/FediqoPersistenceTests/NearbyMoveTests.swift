@@ -618,6 +618,58 @@ struct NearbyMoveTests {
         await again.stop()
     }
 
+    /// Reads one side's events as they come, saying yes to its question, until the move ends
+    /// there. A code the receiver shows is passed on through `codes`.
+    private static func drive(
+        _ move: NearbyMove, _ events: AsyncStream<Event>, codes: AsyncStream<String>.Continuation? = nil
+    ) async -> [Event] {
+        var seen: [Event] = []
+        for await event in events {
+            seen.append(event)
+            switch event {
+            case .code(let code, _): codes?.yield(code)
+            case .asking: await move.answer(true)
+            case .done, .refused, .closed: return seen
+            default: continue
+            }
+        }
+        return seen
+    }
+
+    @Test("The receiver ends its listen on its one join and keeps the peer it took: one join, no rejoin, and the move completes")
+    func oneJoinPerListen() async throws {
+        let pair = Pair(from: try await PackagerFixture.populated(), onto: try await Device())
+        defer { pair.remove() }
+        let (codes, codeSink) = AsyncStream<String>.makeStream()
+        let receiver = pair.receiver
+        let holding = await receiver.hold()
+        async let held = Self.drive(receiver, holding, codes: codeSink)
+        var codeReader = codes.makeAsyncIterator()
+        let code = await codeReader.next() ?? ""
+        var peer: NearbyPeer?
+        for try await peers in pair.link.browse() where !peers.isEmpty {
+            peer = peers[0]
+            break
+        }
+        let seen = try #require(peer)
+        let sent = await Self.drive(pair.sender, await pair.sender.offer(to: seen, code: code, pictures: false, contents: .whole))
+        let sentDone = sent.contains(where: Self.isDone)
+        // A move that never completes leaves the receiver listening: it is put away so its
+        // events end, and what it saw is still checked.
+        if !sentDone { await pair.receiver.stop() }
+        let heldEvents = await held
+        let joins: Int = heldEvents.filter { $0 == .joined }.count
+        let connects: Int = sent.filter { $0 == .connecting }.count
+        let rejoined: Bool = sent.contains { if case .reconnecting = $0 { true } else { false } }
+        #expect(sentDone, "\(sent)")
+        #expect(heldEvents.contains(where: Self.isDone), "\(heldEvents)")
+        #expect(joins == 1)
+        #expect(connects == 1)
+        #expect(!rejoined)
+        #expect(await pair.onto.store.snapshot().notes.count == 3)
+        await pair.receiver.stop()
+    }
+
     @Test("Not allowed to look nearby is said as that, on either side")
     func notAllowed() async throws {
         let pair = Pair(from: try await PackagerFixture.populated(), onto: try await Device())

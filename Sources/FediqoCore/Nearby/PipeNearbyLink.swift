@@ -10,11 +10,15 @@ import Synchronization
 /// A wrong key never joins: `connect` throws `NearbyRefusal.wrongCode` and the device holding
 /// is told `.failedHandshake`, as the real handshake would. `cut()` drops every joined pair at
 /// once, as a walk out of range would, and `deny()` makes the next look nearby refused.
+///
+/// **A listen hands over as the real one does**, through the same `NearbyListen`: the end that
+/// joined is the holder's once it is yielded, and a listen put away closes only an end not yet
+/// handed over.
 public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
     private struct Holding {
         let peer: NearbyPeer
         let psk: SymmetricKey
-        let arrivals: AsyncThrowingStream<NearbyArrival, any Error>.Continuation
+        let listen: NearbyListen<PipeConnection>
     }
 
     private struct Room {
@@ -83,9 +87,10 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
     public func advertise(name: String, sessionID: String, psk: SymmetricKey) -> AsyncThrowingStream<NearbyArrival, any Error> {
         let (stream, continuation) = AsyncThrowingStream<NearbyArrival, any Error>.makeStream()
         let peer = NearbyPeer(id: sessionID, name: name, sessionID: sessionID)
+        let listen = NearbyListen<PipeConnection>(continuation)
         let denied = room.withLock { room in
             guard !room.denied else { return true }
-            room.holding[sessionID] = Holding(peer: peer, psk: psk, arrivals: continuation)
+            room.holding[sessionID] = Holding(peer: peer, psk: psk, listen: listen)
             return false
         }
         if denied {
@@ -93,7 +98,10 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
             return stream
         }
         continuation.onTermination = { [weak self] _ in
-            self?.room.withLock { $0.holding[sessionID] = nil }
+            self?.room.withLock { room in
+                if room.holding[sessionID]?.listen === listen { room.holding[sessionID] = nil }
+            }
+            listen.end()
             self?.tellBrowsers()
         }
         tellBrowsers()
@@ -130,7 +138,7 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
         if unreachable { throw NearbyDropped() }
         guard let holding else { throw NearbyDropped() }
         guard holding.psk == psk else {
-            holding.arrivals.yield(.failedHandshake)
+            holding.listen.failed(nil, handshake: true)
             throw NearbyRefusal.wrongCode
         }
         let pair = PipePair(record: { [weak self] data in self?.room.withLock { $0.transcript.append(data) } })
@@ -142,7 +150,10 @@ public final class PipeNearbyLink: NearbyLink, @unchecked Sendable {
             room.cutBeforeLastWord = false
         }
         let (ours, theirs) = pair.ends(name: peer.name)
-        holding.arrivals.yield(.joined(theirs))
+        // A listen that ended while this join was on its way has nobody to take it: the end is
+        // closed there, and this side sees the drop it would on the air.
+        guard holding.listen.opening(theirs) else { throw NearbyDropped() }
+        holding.listen.joined(theirs)
         return ours
     }
 
