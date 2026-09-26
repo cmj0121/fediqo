@@ -82,6 +82,14 @@ public struct SourceProfile: Sendable, Hashable, Identifiable {
     /// The rules the server asks its people to keep, in the order it listed them. Empty is both
     /// "there are none" and "this protocol has no such idea" — see the note on the type.
     public let rules: [String]
+    /// When the source said this, where this device wrote it down (#188); nothing for an answer
+    /// just read off the wire and kept nowhere yet.
+    ///
+    /// **Stamped by the store and not by the wire.** What is being recorded is when this device
+    /// heard it, which is the one moment a relaunch can be honest about: a server publishes no
+    /// date on its own description, so the alternative is a stamp invented at decode time that
+    /// would then be written down as the server's. `ItemStore.said(_:at:)` is the one writer.
+    public let asOf: Date?
 
     public enum Registration: String, Sendable, Hashable {
         case open
@@ -101,7 +109,8 @@ public struct SourceProfile: Sendable, Hashable, Identifiable {
         posts: Int? = nil,
         registration: Registration? = nil,
         readsWithoutAccount: Bool? = nil,
-        rules: [String] = []
+        rules: [String] = [],
+        asOf: Date? = nil
     ) {
         self.host = host
         self.kind = kind
@@ -115,6 +124,18 @@ public struct SourceProfile: Sendable, Hashable, Identifiable {
         self.registration = registration
         self.readsWithoutAccount = readsWithoutAccount
         self.rules = rules
+        self.asOf = asOf
+    }
+
+    /// The same answer, marked as said at `moment` — and under the host folded once, as every
+    /// `Source` is, so what is kept is filed where the store looks it up.
+    public func said(at moment: Date) -> SourceProfile {
+        SourceProfile(
+            host: host.lowercased(), kind: kind, title: title, summary: summary, thumbnail: thumbnail,
+            activeMonth: activeMonth, statusLimit: statusLimit, people: people, posts: posts,
+            registration: registration, readsWithoutAccount: readsWithoutAccount, rules: rules,
+            asOf: moment
+        )
     }
 }
 

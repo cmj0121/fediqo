@@ -126,9 +126,12 @@ struct BuildStampTests {
         }
     }
 
-    @Test("Preferences has five tabs: choices, this build, in flight, allowed and the hosts added, in both languages")
+    @Test("Preferences has six tabs: choices, this build, in flight, allowed, the hosts added and moving, in both languages")
     func preferencesTabs() {
-        #expect(PreferencesPane.Purpose.allCases == [.choices, .build, .work, .reach, .hosts])
+        #expect(PreferencesPane.Purpose.allCases == [.choices, .build, .work, .reach, .hosts, .move])
+        #expect(L10n.t("prefs.tab.move", language: .english) == "Move")
+        #expect(L10n.t("prefs.tab.move", language: .taiwanese) == "搬移")
+        #expect(PreferencesPane.Purpose.move.symbol == "arrow.left.arrow.right")
         #expect(L10n.t("prefs.tab.hosts", language: .english) == "Your hosts")
         #expect(L10n.t("prefs.tab.hosts", language: .taiwanese) == "自訂主機")
         #expect(L10n.t("prefs.tab.reach", language: .english) == "Allowed")
@@ -141,16 +144,16 @@ struct BuildStampTests {
         #expect(L10n.t("prefs.tab.build", language: .taiwanese) == "這個 Fediqo")
     }
 
-    @Test("Tab on Preferences goes Settings, This Fediqo, In flight, Allowed, Your hosts, and round again, as on Usage")
+    @Test("Tab on Preferences goes Settings, This Fediqo, In flight, Allowed, Your hosts, Move, and round again, as on Usage")
     func preferencesTabOrder() {
         let session = ShellSession(http: FixtureHTTP())
         #expect(session.preferencesPurpose == .choices)
         var visited: [PreferencesPane.Purpose] = []
-        for _ in 0..<6 {
+        for _ in 0..<7 {
             #expect(session.rotatePreferencesTab(by: 1))
             visited.append(session.preferencesPurpose)
         }
-        #expect(visited == [.build, .work, .reach, .hosts, .choices, .build])
+        #expect(visited == [.build, .work, .reach, .hosts, .move, .choices, .build])
         session.rotatePreferencesTab(by: -1)
         #expect(session.preferencesPurpose == .choices)
         #expect(session.usagePurpose == .source, "Preferences' tabs are its own, not Usage's")
@@ -171,6 +174,7 @@ struct BuildStampTests {
         #expect(pane.contains("case .work: SourceWorkSection(work: session?.work ?? .shared, onOpen: openRecord)"))
         #expect(pane.contains("case .reach: AllowanceSection(book: .shared, opened: opened, returning: session?.preferencesReturning)"))
         #expect(pane.contains("case .hosts: OwnHostsSection(\n                book: .shared, sources: session?.sources.map(\\.host) ?? [], opened: opened,"))
+        #expect(pane.contains("case .move: move"))
         #expect(root.contains("case .preferences: session.rotatePreferencesTab(by: step)"))
     }
 

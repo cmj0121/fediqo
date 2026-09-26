@@ -72,6 +72,10 @@ struct UsagePane: View {
     private struct Probe: Equatable {
         let hosts: [String]
         let cleared: Int
+        /// The newest line of the limits' account and how many there are (#251): a limit that
+        /// acted moved the figures, and a clear moved the lines.
+        let acted: UUID?
+        let lines: Int
     }
 
     private var sources: [Source] { session?.sources ?? [] }
@@ -86,6 +90,10 @@ struct UsagePane: View {
     /// A narrower window the reader picked and not yet confirmed: it would drop posts, so it asks
     /// first. A wider one, or forever, drops nothing and applies at once.
     @State private var shortening: Int?
+
+    /// A smaller room the reader picked and not yet confirmed (#249): copies and posts may go at
+    /// once, so it asks first. A larger one, or no limit, lets nothing go and applies at once.
+    @State private var tightening: Int?
 
     /// The windows offered for keeping, in months. Forever, the default, is offered beside them.
     static let monthChoices = [1, 3, 6, 12]
@@ -144,7 +152,10 @@ struct UsagePane: View {
         .scrollIndicators(.never)
         .clearsFloatingCorner()
         .padding(ShellSpace.snug)
-        .task(id: Probe(hosts: sources.map(\.host), cleared: session?.cleared ?? 0)) {
+        .task(id: Probe(
+            hosts: sources.map(\.host), cleared: session?.cleared ?? 0,
+            acted: session?.limitAccount.first?.id, lines: session?.limitAccount.count ?? 0
+        )) {
             await readCatalogues()
             await readDisk()
         }
@@ -154,6 +165,9 @@ struct UsagePane: View {
         }
         .shellConfirm($shortening, question: { ShellQuestion.shorten(months: $0) }) { months, _ in
             prefs.keepMonths = months
+        }
+        .shellConfirm($tightening, question: { ShellQuestion.tighten(room: $0) }) { room, _ in
+            prefs.roomBytes = room
         }
     }
 
@@ -180,8 +194,10 @@ struct UsagePane: View {
             case .time:
                 breakdown(session)
             case .keep:
-                keep
+                keep(session)
+                SpanSection(session: session)
                 GoneSection(session: session)
+                LimitAccountSection(session: session)
             case .copies:
                 copies(session)
             }
@@ -189,7 +205,8 @@ struct UsagePane: View {
     }
 
     /// The list of sources, or the one the reader entered. A source removed while its detail is
-    /// open leaves the list in its place.
+    /// open leaves the list in its place — unless its posts stayed (#250), when its detail is
+    /// what a removed source holds.
     @ViewBuilder
     private func sources(_ session: ShellSession) -> some View {
         if session.usageDetailShown, let host = session.usageOpened,
@@ -198,6 +215,9 @@ struct UsagePane: View {
                 session: session, source: source, catalogue: catalogues?[host],
                 cataloguesRead: catalogues != nil, onDisk: onDisk
             )
+        } else if session.usageDetailShown, let host = session.usageOpened,
+                  let source = UsageSourceList.removed(session).first(where: { $0.host == host }) {
+            UsageRemovedSourceDetail(session: session, source: source)
         } else {
             UsageSourceList(session: session, onDisk: onDisk, returning: session.usageReturning)
         }
@@ -215,34 +235,41 @@ struct UsagePane: View {
             }
             .pickerStyle(.segmented)
             // All sources first, in the rows' own shape; where it says none, no stretch follows.
+            // Everything held, aside rows included (#194), and what it all weighs on disk.
             stretch(
                 Text(L10n.t("prefs.held.total")).shellFont(.name).foregroundStyle(ShellChrome.ink(colorScheme)),
-                posts: holdings.posts
+                figure: Self.totalLine(holdings.posts, onDisk: session.storeBytes)
             )
+            if holdings.aside > 0 {
+                stretch(reading(Text(L10n.t("prefs.held.aside"))), figure: Self.postsLine(holdings.aside))
+            }
             ForEach(holdings.byPeriod.prefix(Self.stretchesShown), id: \.start) { bucket in
                 stretch(reading(Text(Self.stretchLabel(bucket.start, period: session.heldPeriod))),
-                        posts: bucket.posts)
+                        figure: Self.postsLine(bucket.posts))
             }
         } header: {
             ShellSectionHead(title: "prefs.held.breakdown")
         }
     }
 
-    /// One line of the breakdown: what it counts, and its posts at the trailing edge.
-    private func stretch(_ label: some View, posts: Int) -> some View {
+    /// One line of the breakdown: what it counts, and its figure at the trailing edge.
+    private func stretch(_ label: some View, figure: String) -> some View {
         HStack {
             label
             Spacer()
-            reading(Text(Self.postsLine(posts)))
+            reading(Text(figure))
         }
     }
 
     /// How many weeks or months the breakdown lists before it stops.
     static let stretchesShown = 12
 
-    /// How long posts are kept (#7, by time). Shortening asks first; Forever and a longer window
-    /// drop nothing and apply at once.
-    private var keep: some View {
+    /// How long posts are kept (#7, by time), and how much room they and the picture copies may
+    /// take (#249) — two limits side by side, and whichever is reached first acts. Shortening or
+    /// tightening asks first; Forever, no limit, a longer window or a larger room let nothing go
+    /// and apply at once. Under them, the figure the room is judged by: the index and the copies
+    /// on disk, the same two numbers Time and Copies show.
+    private func keep(_ session: ShellSession) -> some View {
         Section {
             Picker(L10n.t("prefs.keep"), selection: keepSelection) {
                 Text(L10n.t("prefs.keep.forever")).tag(Int?.none)
@@ -250,9 +277,53 @@ struct UsagePane: View {
                     Text(L10n.count("prefs.keep.months", months)).tag(Int?.some(months))
                 }
             }
+            Picker(L10n.t("prefs.room"), selection: roomSelection) {
+                Text(L10n.t("prefs.room.none")).tag(Int?.none)
+                ForEach(RoomPolicy.choices, id: \.self) { room in
+                    Text(Self.size(room)).tag(Int?.some(room))
+                }
+            }
+            if let line = Self.roomLine(
+                index: session.storeBytes, copies: onDisk.map { $0.values.reduce(0, +) }, room: prefs.roomBytes
+            ) {
+                reading(Text(line))
+            }
         } header: {
-            ShellSectionHead(title: "prefs.keep")
+            ShellSectionHead(title: "prefs.keep", line: "prefs.keep.line", help: "prefs.keep.help")
         }
+    }
+
+    /// The Room picker's binding, `keepSelection`'s twin: a room that may let something go waits
+    /// on `tightening`'s question; one that lets nothing go is written straight through.
+    private var roomSelection: Binding<Int?> {
+        Binding(
+            get: { prefs.roomBytes },
+            set: { room in
+                if RoomPolicy.tightens(from: prefs.roomBytes, to: room) {
+                    tightening = room
+                } else {
+                    prefs.roomBytes = room
+                }
+            }
+        )
+    }
+
+    /// "1.2 MB index · 3.4 MB picture copies · 4.6 MB of 100 MB used": the figure the room limit is
+    /// judged by (#249), and nothing until both halves have been measured — a half would lie.
+    /// Without a room, the two halves alone.
+    static func roomLine(index: Int?, copies: Int?, room: Int?, language: DummyLanguage? = nil) -> String? {
+        guard let index, let copies else { return nil }
+        var line = String(
+            format: L10n.t("prefs.room.figure", language: language),
+            size(index, language: language), size(copies, language: language)
+        )
+        if let room {
+            line += " · " + String(
+                format: L10n.t("prefs.room.within", language: language),
+                size(index + copies, language: language), size(room, language: language)
+            )
+        }
+        return line
     }
 
     /// Picture copies, all sources together, and the drop that takes them (#7, by cache).
@@ -290,6 +361,19 @@ struct UsagePane: View {
 
     static func postsLine(_ count: Int) -> String {
         count == 0 ? L10n.t("prefs.held.posts.none") : L10n.count("prefs.held.posts", count)
+    }
+
+    /// "12 posts · 1.2 MB on disk", with the disk half left off until the index has been measured
+    /// (#194) — the same rule the pictures line keeps, for the same reason.
+    static func totalLine(_ count: Int, onDisk: Int?) -> String {
+        guard let onDisk else { return postsLine(count) }
+        return postsLine(count) + " · " + String(format: L10n.t("prefs.held.disk"), size(onDisk))
+    }
+
+    /// "3 held apart from the timelines", or nothing where none is (#194): what a source holds
+    /// that no timeline shows, said beside its count.
+    static func asideLine(_ count: Int) -> String? {
+        count == 0 ? nil : L10n.t("prefs.held.aside") + " · " + postsLine(count)
     }
 
     /// A week by the day it starts, a month by its name, both in the shell's language.
@@ -332,8 +416,8 @@ struct UsagePane: View {
         )
     }
 
-    static func size(_ bytes: Int) -> String {
-        Int64(bytes).formatted(.byteCount(style: .file).locale(L10n.locale()))
+    static func size(_ bytes: Int, language: DummyLanguage? = nil) -> String {
+        Int64(bytes).formatted(.byteCount(style: .file).locale(L10n.locale(language)))
     }
 
     private func reading(_ text: Text) -> some View {
@@ -362,9 +446,11 @@ struct UsagePane: View {
         catalogues = next
     }
 
-    /// Reads what each source's copies weigh on disk, off the main actor (#7).
+    /// Reads what each source's copies weigh on disk, and what the index does (#7, #194), off the
+    /// main actor.
     private func readDisk() async {
         guard let session else { return }
         onDisk = await session.pictures.diskBytes(hosts: session.sources.map(\.host))
+        await session.readStoreBytes()
     }
 }

@@ -192,6 +192,7 @@ struct InventoryTests {
         func keepOnly(hosts: some Sequence<String>) {}
         func removeAll() { held = 0 }
         func bytes(host: String) -> Int { held }
+        func count() -> Int { held > 0 ? 1 : 0 }
         func trim(toBytes cap: Int) -> Int {
             trims += 1
             held = min(held, cap)

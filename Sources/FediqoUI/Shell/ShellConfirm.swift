@@ -109,6 +109,28 @@ enum ShellConfirmAnswer: Equatable {
         item.wrappedValue = nil
         if case .choice(let id) = answer { onChoice(value, id) }
     }
+
+    /// **For a binding whose clearing is itself an act** — a flow that goes back, or out, when its
+    /// question is put away (`CarryFlow`, `NearbyFlow`). `settle` takes the question down before
+    /// it hands over the answer, so such a setter runs first on a yes too, and acting there
+    /// undid the step the yes was about to take: "The same" and a take-away's choice did nothing
+    /// (#253). Handing the answer over first is no cure — an answer that asks the next question
+    /// (a take-away with no room is refused) would then have it cleared at once.
+    ///
+    /// So the put-away is judged one main-actor turn later, and acted on only if the question
+    /// is still the one asked: an answer has moved it on by then, and only a question left
+    /// standing was put away unanswered. `asked` and `now` are the question up, never the step
+    /// under it — a clearing written back with no question up is no put-away.
+    @MainActor
+    static func putAway<Step: Equatable>(
+        _ asked: Step?, now: @escaping @MainActor () -> Step?, act: @escaping @MainActor (Step) -> Void
+    ) {
+        guard let asked else { return }
+        Task { @MainActor in
+            guard now() == asked else { return }
+            act(asked)
+        }
+    }
 }
 
 /// The question, drawn by the app rather than the system's alert.
@@ -141,14 +163,16 @@ struct ShellConfirmCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.pad) {
+            // The words keep the reading measure; the presses take the width their row needs, so
+            // a fitted sheet grows to hold three choices side by side (`ShellPressRow`).
             HStack(alignment: .top, spacing: ShellSpace.step) {
                 glyph
                 words
             }
+            .frame(maxWidth: measure - 2 * ShellSpace.room, alignment: .leading)
             presses
         }
         .padding(ShellSpace.room)
-        .frame(maxWidth: measure)
         .background(ShellChrome.page(colorScheme))
         .defaultFocus($focus, question.firstFocus)
         .task {
@@ -181,18 +205,12 @@ struct ShellConfirmCard: View {
         }
     }
 
-    /// In a row where they fit, and one above another where they do not — three choices at the
-    /// largest type on a phone.
+    /// Always one row, each label on one line (`ShellPressRow`, `onePressLine`).
     private var presses: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: ShellSpace.snug) {
-                Spacer(minLength: 0)
-                pressList
-            }
-            VStack(alignment: .trailing, spacing: ShellSpace.snug) { pressList }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .buttonStyle(.bordered)
+        ShellPressRow { pressList }
+            .onePressLine()
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .buttonStyle(.bordered)
         .controlSize(.large)
     }
 

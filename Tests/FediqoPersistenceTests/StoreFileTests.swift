@@ -44,6 +44,52 @@ struct StoreFileTests {
         #expect(loaded.notes == [saved])
     }
 
+    @Test("A post kept from a source since removed comes back as that source's, boards and all gone (#250)")
+    func keptPostOfRemovedSourceSurvivesRelaunch() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 33, name: "a")])
+        let kept = note(id: "https://forum.example/1", source: forum, categories: [.board(id: "33")])
+        try await file.save(sources: [mastodon], notes: [kept, note(id: "2")])
+        let loaded = try file.load()
+        #expect(loaded.sources == [mastodon])
+        #expect(loaded.notes.map(\.id) == [kept.id, "2"])
+        let back = try #require(loaded.notes.first)
+        #expect(back.source == Source(host: "forum.example", kind: .discuz))
+        #expect(back.body == kept.body && back.categories == kept.categories)
+    }
+
+    /// #188: what a source said about itself survives a relaunch with the moment it was said, on
+    /// its source's row; a source nothing was heard from reads back as one nothing was heard from.
+    @Test("What a source said about itself survives a relaunch, as of when, and a word of no source goes nowhere")
+    func saidSurvivesRelaunch() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 33, name: "a")])
+        let said = SourceProfile(
+            host: mastodon.host, kind: .mastodon, title: "The first server", summary: "",
+            thumbnail: URL(string: "https://first.example/thumb.png"), activeMonth: 1200,
+            statusLimit: 1500, registration: .byApproval, rules: ["Be kind", "No spam"]
+        ).said(at: Date(timeIntervalSince1970: 1_750_000_000))
+        let stranger = SourceProfile(host: "gone.example", kind: .mastodon, statusLimit: 9)
+            .said(at: Date(timeIntervalSince1970: 1_750_000_000))
+        try await file.save(sources: [mastodon, forum], notes: [note()], said: [said, stranger])
+        let loaded = try file.load()
+        #expect(loaded.sources == [mastodon, forum])
+        #expect(loaded.said == [said])
+        #expect(loaded.notes == [note()])
+    }
+
+    @Test("A word of a Discourse, with what only a forum states, reads back whole")
+    func forumWordSurvivesRelaunch() async throws {
+        let file = try StoreFile(database: DatabaseQueue())
+        let discourse = Source(host: "discourse.example", kind: .discourse)
+        let said = SourceProfile(
+            host: discourse.host, kind: .discourse, title: "Meta", summary: nil, people: 40, posts: 900,
+            readsWithoutAccount: false
+        ).said(at: Date(timeIntervalSince1970: 1_750_000_000))
+        try await file.save(sources: [discourse], notes: [], said: [said])
+        #expect(try file.load().said == [said])
+    }
+
     @Test("A post held aside is still held aside after a relaunch, and one that arrived still arrived")
     func holdingSurvivesRelaunch() async throws {
         let file = try StoreFile(database: DatabaseQueue())
@@ -362,12 +408,16 @@ struct StoreFileTests {
         #expect(opened.sources.map(\.host) == [mastodon.host], "the source did not stay joined")
     }
 
-    @Test("A note whose host has no source row is dropped on load")
+    @Test("A note whose host has no source row, written before rows knew their kind, is dropped on load")
     func orphanDropped() async throws {
         let file = try StoreFile(database: DatabaseQueue())
         let kept = note(id: "1")
         let orphan = note(id: "2", source: Source(host: "gone.example", kind: .mastodon))
         try await file.save(sources: [mastodon], notes: [kept, orphan])
+        // A row from before #250 wrote no kind; such a row has no source to be drawn as.
+        try await file.db.write { db in
+            try db.execute(sql: "UPDATE note SET facts = json_remove(facts, '$.kind')")
+        }
         #expect(try file.load().notes == [kept])
     }
 
@@ -574,6 +624,19 @@ struct StoreFileTests {
 
     private func scratch() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+    @Test("The index is measured on disk in one place, and a store not on disk weighs nothing")
+    func bytesOnDisk() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = try StoreFile(at: dir)
+        try await file.save(sources: [mastodon], notes: (1...50).map { note(id: "\($0)") })
+        let measured = file.bytesOnDisk()
+        let index = dir.appendingPathComponent("index.sqlite")
+        let onDisk = try #require(try index.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+        #expect(measured >= onDisk && onDisk > 0, "the figure is the file and whatever SQLite left beside it")
+        #expect(StoreFile.bytesOnDisk(indexAt: index.path) == measured)
+        #expect(try StoreFile(database: DatabaseQueue()).bytesOnDisk() == 0)
     }
 }
 

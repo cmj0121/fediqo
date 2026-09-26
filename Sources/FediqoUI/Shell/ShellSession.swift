@@ -133,6 +133,21 @@ final class ShellSession {
     /// different things two panes apart. `UsagePane` sets this too.
     var clearing: String?
 
+    /// What takes this device's store away and reads one back (#247), or nothing where the app
+    /// handed none in — a preview, a test — and then Preferences offers neither.
+    @ObservationIgnored var carrier: (any StoreCarrier)?
+    /// The take-away and read-back flow, its steps and its questions.
+    let carry: ShellCarry
+    /// The file picker for a read back is up.
+    var carryPicking = false
+    /// The radios a move nearby goes over (#253), or nothing where the app handed none in — a
+    /// preview, a test — and then Preferences offers neither press.
+    @ObservationIgnored var nearbyLink: (any NearbyLink)?
+    /// What this device calls itself, advertised nearby and written into a package's header.
+    @ObservationIgnored var deviceName = ""
+    /// The move-nearby flow, its steps and its questions.
+    let nearby: ShellNearby
+
     /// The Mastodon whose sign-in has been pressed and whose scope question has not been answered
     /// yet, or nothing (#69).
     ///
@@ -319,7 +334,7 @@ final class ShellSession {
     }
     var notes: [Note] = [] {
         didSet {
-            holdings = Holdings(notes: notes, per: heldPeriod)
+            recount()
             textIndexIsCurrent = false
             notesRevision += 1
             heldRevision += 1
@@ -338,6 +353,13 @@ final class ShellSession {
     }
     /// Bumped as `notes` or `aside` is assigned: what a search's answer is kept against.
     private(set) var heldRevision = 0
+
+    /// Every post held aside, **a forum topic's replies included** — what `aside` leaves out for
+    /// the search's sake (#177), counted here all the same (#194): the device holds them, and what
+    /// the device says it holds is measured against them. Read by the count alone.
+    private(set) var heldAside: [Note] = [] {
+        didSet { recount() }
+    }
 
     /// Everything a search reads: what the timelines draw, and what is held aside.
     var searchable: [Note] { aside.isEmpty ? notes : notes + aside }
@@ -405,14 +427,108 @@ final class ShellSession {
         heldNote(rowID) ?? conversations.note(rowID)
     }
 
-    /// What `notes` holds, counted (#7) — rebuilt where `notes` is assigned or the breakdown
-    /// switches between week and month, never on a redraw.
+    /// Everything this device holds, counted (#7): `notes` and `heldAside` together (#194), so the
+    /// figure is the store's and not a timeline's. Rebuilt where either is assigned or the
+    /// breakdown switches between week and month, never on a redraw.
     private(set) var holdings = Holdings(notes: [], per: .month)
 
     /// Whether the breakdown is by week or by month.
     var heldPeriod: HeldPeriod = .month {
-        didSet { holdings = Holdings(notes: notes, per: heldPeriod) }
+        didSet { recount() }
     }
+
+    /// Set while `notes` and `heldAside` are assigned together, so one adopt counts once.
+    @ObservationIgnored private var recountHeld = false
+
+    private func recount() {
+        guard !recountHeld else { return }
+        holdings = Holdings(notes: notes + heldAside, per: heldPeriod)
+    }
+
+    /// Both halves of what is held assigned in one breath, nil where one did not move, and the
+    /// count rebuilt once for the pair rather than once an assignment. No await inside, so
+    /// nothing else on this actor sees the count held back.
+    private func adoptHeld(notes drawn: [Note]?, aside held: [Note]?) {
+        guard drawn != nil || held != nil else { return }
+        recountHeld = true
+        if let drawn { notes = drawn }
+        if let held {
+            heldAside = held
+            aside = held.filter { DiscuzPost(held: $0) == nil }
+        }
+        recountHeld = false
+        recount()
+    }
+
+    /// What the index weighs on disk, as last measured — nil until it has been. **The one figure
+    /// of the store's size** (#194): read through `measureStore`, which the app sets to the
+    /// index file's own measure, so what Usage shows is what a limit on the store will be held
+    /// to. Measured after a drop by time lands, and whenever Usage asks.
+    var storeBytes: Int?
+
+    /// Measures the index on disk. Set by the app beside `persist`; nil where this run has no
+    /// index, and then nothing is shown for it.
+    @ObservationIgnored var measureStore: (@Sendable () async -> Int)?
+
+    /// Reads `storeBytes` again, off the main actor — after every drop that is written, and
+    /// whenever Usage asks. **The one call a limit on the store makes too**, so what it is held
+    /// to is what is shown.
+    func readStoreBytes() async {
+        guard let measureStore else { return }
+        storeBytes = await measureStore()
+    }
+
+    /// Gives the index back the room that rows let go of left in it, so `measureStore` sees them
+    /// go (#249). Set by the app beside `measureStore`; nil where this run has no index. Throws
+    /// where the rebuild did not happen — a full disk, a run cancelled — and then the file keeps
+    /// its size until it is asked again.
+    @ObservationIgnored var compactStore: (@Sendable () async throws -> Void)?
+
+    /// What the rows held weigh, whatever the file does (`StoreFile.bytesHeld`): what the room
+    /// check judges each round by, since `measureStore` only moves once `compactStore` has run.
+    /// nil where this run has no index.
+    @ObservationIgnored var weighStore: (@Sendable () async -> Int)?
+
+    /// The room this device gives the store and the picture copies together (#249), in bytes,
+    /// or nil for no limit — the default. `KeepingWithinRoom` hands it in from the preferences;
+    /// the store is judged by it at launch, when it changes, and after each landing.
+    var roomBytes: Int?
+
+    /// Set while an export or an import of the store runs (#247): the room limit does nothing
+    /// meanwhile, so nothing goes out from under a copy being taken or put back. Cleared, the
+    /// check runs again. **The contract**: set it before the first byte moves, clear it after
+    /// the last, and clear it on every way out, a failure included — `ShellCarry` keeps it. A
+    /// move this session makes itself — a remove, a clear, a drop, a span let go — holds through
+    /// `holdingStill(_:)` instead, which nests. **Only the room limit honours it**: the months
+    /// limit, a remove, a span let go and every press of the person's own go ahead regardless,
+    /// because each is the person's act and not a check running by itself.
+    var holdsStill = false {
+        didSet { if !holdsStill, oldValue { roomMayBeReached() } }
+    }
+
+    /// How many of this session's own moves are running (`holdingStill(_:)`).
+    @ObservationIgnored var holding = 0
+
+    /// The check the last landing asked for, waiting out `roomDebounce`; nil where none waits.
+    @ObservationIgnored var roomCheck: Task<Void, Never>?
+
+    /// The room check is on its way: a landing meanwhile asks for the next, never a second.
+    @ObservationIgnored var roomChecking = false
+
+    /// A check was asked for while one ran; the one running asks again as it ends.
+    @ObservationIgnored var roomAskedAgain = false
+
+    /// The account has been read from `limitStore` this run; until it has, a line recorded is
+    /// written after the read rather than over it.
+    @ObservationIgnored var limitAccountLoaded = false
+
+    /// The limits' account (#251), newest first: each time a limit acted, which, when, how many
+    /// posts and picture copies went, and from which sources. Read from `limitStore` at launch.
+    var limitAccount: [LimitAct] = []
+
+    /// Where the account outlives a relaunch. Set by the app beside `persist`; nil in a run with
+    /// no index, and then the lines live for the run.
+    @ObservationIgnored var limitStore: (any LimitAccountStore)?
 
     /// Which purpose Usage is showing. Tab rotates it the way it rotates timeline queries.
     var usagePurpose: UsagePane.Purpose = .source
@@ -427,9 +543,11 @@ final class ShellSession {
     private(set) var usageReturning: String?
 
     /// Whether a source's detail is what Usage is drawing: the Sources tab, and a host still
-    /// joined. A host left over from another tab or a removed source is not shown.
+    /// joined or one removed whose posts stayed (#250). A host left over from another tab, or a
+    /// removed source nothing is held from, is not shown.
     var usageDetailShown: Bool {
-        usagePurpose == .source && usageOpened.map { host in sources.contains { $0.host == host } } == true
+        guard usagePurpose == .source, let host = usageOpened else { return false }
+        return sources.contains { $0.host == host } || holdings.posts(host: host) > 0
     }
 
     /// Escape on Usage: back from a source's detail to the list. Only a detail on screen is closed,
@@ -482,7 +600,7 @@ final class ShellSession {
     var activityFrom: String?
 
     /// Tab and ⇧Tab on Preferences, the way they rotate Usage: Settings, This Fediqo, In flight,
-    /// Allowed, Your hosts, and round again — closing a detail left open, as a pill does.
+    /// Allowed, Your hosts, Move, and round again — closing a detail left open, as a pill does.
     @discardableResult
     func rotatePreferencesTab(by step: Int) -> Bool {
         preferencesPurpose = DummyCommand.advanced(
@@ -591,6 +709,8 @@ final class ShellSession {
     ) {
         self.http = http
         timelineStore = timelines
+        carry = ShellCarry(work: work)
+        nearby = ShellNearby(work: work)
         self.store = store
         self.pictures = pictures
         self.emojis = emojis
@@ -630,6 +750,10 @@ final class ShellSession {
             let from = (note.object as AnyObject?).map(ObjectIdentifier.init)
             MainActor.assumeIsolated { self?.allowancesChanged(by: from) }
         }
+        // Last, once every property is set: a take-away or a read back holds the room limit still (#249).
+        carry.holding = { [weak self] held in self?.holdsStill = held }
+        // And a move nearby likewise (#253): from the package's first byte to every way out.
+        nearby.holdStill = { [weak self] held in self?.holdsStill = held }
     }
 
     /// The watch on the person's list, taken off as this goes.
@@ -664,27 +788,49 @@ final class ShellSession {
         composeHost = offered.first?.host
     }
 
+    /// How long a post on `host` may be: what the source says about itself — kept from the last
+    /// run and replaced by this run's ask as it lands (#188) — then what the composer's own ask
+    /// was told this run, then Mastodon's 500.
+    ///
+    /// **The profile before the composer's answer**, because the profile is the later word: the
+    /// composer asks once a run and remembers, while the profile is written again by every ask
+    /// that reads the instance, so a ceiling the server changed reaches the composer through it.
     func postLimit(of host: String) -> Int {
-        if let held = postLimits[host] { return held }
         if case .stated(let profile) = profiles[host] {
             return MastodonWrite.limit(advertised: profile.statusLimit)
         }
+        if let held = postLimits[host] { return held }
         return MastodonWrite.defaultLimit
     }
 
     /// Asks the instance where this run has not already been told, and remembers the answer.
     /// The composer's chosen source where no host is named; an answer names its own (#108).
+    ///
+    /// **Nothing is asked where this run has the source's own word** (#188): one its look read
+    /// this run, or one the reload's ask has just written down. A word kept from an earlier run
+    /// is drawn meanwhile — the composer knows the ceiling before this asks — and is still
+    /// asked behind, so a run whose reload was dark does not go on speaking last week's ceiling
+    /// once the network is back (#222).
     func refreshPostLimit(of named: String? = nil) async {
         guard let host = named ?? composeHost else { return }
         if postLimits[host] != nil { return }
-        if case .stated(let profile) = profiles[host] {
-            postLimits[host] = MastodonWrite.limit(advertised: profile.statusLimit)
+        if case .stated(let profile) = profiles[host],
+           profile.asOf == nil || flavours.flavour(of: host) == .said(profile.kind) {
             return
         }
         do {
-            postLimits[host] = try await MastodonClient(
+            // The same document the reload reads, and what it says goes to the store too (#188):
+            // a source this device kept no word of yet has one from here on.
+            let (_, profile) = try await MastodonClient(
                 http: WatchedHTTP(http, for: .serverCheck, in: work), host: host
-            ).statusLimit()
+            ).introduction()
+            postLimits[host] = MastodonWrite.limit(advertised: profile?.statusLimit)
+            if let profile {
+                await store.said(profile)
+                // Landed here as well as followed from the store, so the composer that asked
+                // reads the new ceiling now rather than after the next adopt.
+                if let kept = await store.said(host: host) { profiles[host] = .stated(kept) }
+            }
         } catch where DarkNetwork.caused(error) {
             // Not remembered: the next open asks again once the network is back (#222), and
             // `postLimit(of:)` says Mastodon's own 500 meanwhile.
@@ -2094,6 +2240,34 @@ final class ShellSession {
         await adopt()
     }
 
+    /// What a read back replaced, adopted without a relaunch (#247): the store, the person's
+    /// timelines and choices read again off the preferences, who is signed in read again off
+    /// the Keychain, and the picture copies measured again.
+    func adoptReadBack(prefs: DummyPrefs) async {
+        switch timelineStore?.load() {
+        case .timelines(let kept)?:
+            written = kept
+            timelinesUnreadable = false
+        case .unreadable?:
+            timelinesUnreadable = true
+        case nil:
+            break
+        }
+        prefs.reread()
+        if work === SourceWork.shared { AllowanceBook.shared.reread() }
+        mastodon.refresh()
+        pictures.forgetAll()
+        emojis.clear()
+        pictures.disk?.trim()
+        cleared += 1
+        // The package's account rides with its store (#251): this device's lines give way to
+        // it, then the months limit has its turn on what was read back and writes its line as
+        // at a launch.
+        await replaceLimitAccount()
+        await keep(months: prefs.keepMonths)
+        await reloadFromStore()
+    }
+
     /// The store, followed: each time it says it changed, what it holds is adopted again — so a
     /// landing renews the screen reading it with no key pressed (#175), whoever asked for it.
     ///
@@ -2107,6 +2281,8 @@ final class ShellSession {
         await adopt()
         for await _ in changes {
             await adopt()
+            // A landing may have taken the store past its room (#249): asked, not measured, here.
+            roomMayBeReached()
         }
     }
 
@@ -2130,20 +2306,18 @@ final class ShellSession {
         await adoptSources()
         let asideRevision = await store.asideRevision
         let drawn = await store.drawn
-        if adopted?.store != drawn || adopted?.notes != notesRevision {
-            notes = await store.all()
-            adopted = (store: drawn, notes: notesRevision)
-        }
+        let all = adopted?.store != drawn || adopted?.notes != notesRevision ? await store.all() : nil
         // What is held aside has a count of its own, as what is drawn has, so a landing only
         // the timelines see neither reads it again nor redraws a search (#176).
         //
-        // **A forum topic's kept replies are not among them** (#177): each is a post of a thread,
-        // not a thread, and a search drawing one would draw it as a row that opens nowhere. A
-        // microblog answer is a post in its own right, and stays.
-        if adoptedAside != asideRevision {
-            aside = await store.aside().filter { DiscuzPost(held: $0) == nil }
-            adoptedAside = asideRevision
-        }
+        // **A forum topic's kept replies are not among the search's** (#177): each is a post of a
+        // thread, not a thread, and a search drawing one would draw it as a row that opens
+        // nowhere. A microblog answer is a post in its own right, and stays. All of them are
+        // counted (#194): `adoptHeld` hands the count every row and the search the rest.
+        let held = adoptedAside != asideRevision ? await store.aside() : nil
+        adoptHeld(notes: all, aside: held)
+        if all != nil { adopted = (store: drawn, notes: notesRevision) }
+        if held != nil { adoptedAside = asideRevision }
         if heldRevision != renewedConversations {
             renewConversation()
             renewedConversations = heldRevision
@@ -2176,11 +2350,20 @@ final class ShellSession {
     @ObservationIgnored private var adopted: (store: Int, notes: Int)?
 
     private func adoptSources() async {
+        // **What each source last said about itself, as this device kept it** (#188): drawn by
+        // the rows and read by the composer before anything asks, and replaced whole when an
+        // ask lands — the store is the one writer, and this is the one reader. A host with no
+        // kept word keeps whatever this run's look put in `profiles`, which is the answer for a
+        // host not yet joined.
+        let said = await store.saidAll()
+        for (host, profile) in said where profiles[host] != .stated(profile) {
+            profiles[host] = .stated(profile)
+        }
         // **Projected through what each server says it is** — #86. One place, so the row, the
         // tabs, a rule and a read all speak to a host under the name its own server gave rather
-        // than the one written down when it was joined. Identity where nothing has been said,
-        // which is every host until a read asks one.
-        let spoken = await store.sources().map(flavours.spoken)
+        // than the one written down when it was joined. What it last said, where this device
+        // kept that, until this run asks; identity behind both.
+        let spoken = await store.sources().map { flavours.spoken($0, keptAs: said[$0.host]?.kind) }
         if spoken != sources { sources = spoken }
         // A source the store holds again, and not one on its way out, is asked as before (#221).
         reload.readmit(spoken.map(\.host).filter { !removals.contains($0) })
@@ -2313,7 +2496,15 @@ final class ShellSession {
     /// reader subscribed to *because* they were signed in is a board they will have to sign in
     /// for again the next time it is read. The subscription outliving the session that reached it
     /// is the right way round — the alternative is a reader losing their picks to a cookie.
-    func clear(host: String) async {
+    ///
+    /// `keepingRows` is `remove(host:keepingPosts:)`'s case (#250): the rows of this host are
+    /// staying on screen, so the pictures go without the generation bump that would make every
+    /// one of them ask a host nothing may ask.
+    func clear(host: String, keepingRows: Bool = false) async {
+        await holdingStill { await clearNow(host: host, keepingRows: keepingRows) }
+    }
+
+    private func clearNow(host: String, keepingRows: Bool) async {
         let host = host.lowercased()
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about. `remove`'s own line, for
@@ -2325,7 +2516,7 @@ final class ShellSession {
         stopReadingAsYou(host: host)
         await emoji.forget(host: host)
         emojis.forget(host: host)
-        pictures.forget(host: host)
+        if keepingRows { pictures.letGo(host: host) } else { pictures.forget(host: host) }
         // Six kinds became seven. A forum's opening posts were this device's copy of that
         // server's words, held for exactly the reason the pictures are — until #154 kept them
         // with their rows, which a Clear keeps (#7). So the ones this run read are handed to
@@ -2342,8 +2533,11 @@ final class ShellSession {
         // copy of that server's words too.
         conversations.forget(host: host)
         // And nine: what the server last said it was is that server's word, not this device's
-        // note. Dropped with the rest, so the next read asks it again.
+        // note. Dropped with the rest, so the next read asks it again — and what it said about
+        // itself with it (#188), from this run and from the store, for the same reason.
         flavours.forget(host: host)
+        profiles[host] = nil
+        await store.forgetSaid(host: host)
         // Eleven: what this run read about the forum's sub-boards is its word too (#161).
         subBoards[host] = nil
         lookedUnder[host] = nil
@@ -2373,9 +2567,12 @@ final class ShellSession {
     /// the queue reaches it, so it stays dropped after a relaunch without a save. Bumps `cleared`
     /// for the emoji lines, as a Clear does.
     func dropCopies() {
+        holding += 1
         pictures.forgetAll()
         emojis.clear()
         cleared += 1
+        holding -= 1
+        roomMayBeReached()
     }
 
     /// Keeps only the latest `months` months, or everything where nil — the drop by time (#7).
@@ -2384,13 +2581,23 @@ final class ShellSession {
     /// something, the rows are read again and the store is written, so the drop holds after a
     /// relaunch; where it dropped nothing — forever, a wider window, a launch with nothing old —
     /// neither happens. Returns how many notes went.
+    ///
+    /// **What went is written into the limits' account** (#251): the months limit acted, when,
+    /// how many posts and from which sources — the one thing that can still be said of them.
     @discardableResult
     func keep(months: Int?, from now: Date = Date()) async -> Int {
-        let dropped = await store.setRetention(months: months, from: now)
-        guard dropped > 0 else { return 0 }
-        notes = await store.all()
+        let went = await store.letGoBeyond(months: months, from: now)
+        guard went.posts > 0 else { return 0 }
+        // The window cuts what is held aside too, and the count says so at once (#194).
+        let all = await store.all()
+        let held = await store.aside()
+        adoptHeld(notes: all, aside: held)
+        adoptedAside = await store.asideRevision
         await persist?()
-        return dropped
+        try? await compactStore?()
+        await readStoreBytes()
+        await record(LimitAct(limit: .months, at: now, posts: went.posts, sources: went.sources))
+        return went.posts
     }
 
     /// An opening post just read, kept with its row in the store and saved (#154).
@@ -2672,7 +2879,10 @@ final class ShellSession {
     /// emoji requests aimed at the host the reader has just deleted. `adopt()` in between is what
     /// takes those rows out of the list before the bump lands, so the re-fetch has nothing to
     /// re-fetch. Nothing in the code says this; it is why the two awaits are in this order and not
-    /// the other.
+    /// the other. **Where the rows stay** (`keepingPosts`, #250) `adopt()` takes nothing out, so
+    /// `clear` is told to let the host's pictures go *without* the bump (`ShellPictures.letGo`):
+    /// the rows on screen are then not told to ask again, and what they draw where a picture was
+    /// is nothing, not a refusal with a retry.
     ///
     /// **Before either, what is left over of the reader's last errand**, where that errand was
     /// about this host — ended ahead of the first await, so no errand can land in the gaps between
@@ -2680,7 +2890,17 @@ final class ShellSession {
     /// about, so it is what the token, the refusal sentence, the unread boards and their count are
     /// gated on — clearing them unconditionally would take away a sentence owed about a different
     /// server.
-    func remove(host raw: String) async {
+    ///
+    /// **`keepingPosts` is the reader's standing choice** (#250, `DummyPrefs.removedPostsStay`):
+    /// the store keeps the rows and drops the source, and everything else here goes exactly as it
+    /// does when they go — the reads on the wire, the sign-in, the pictures, the boards. The rows
+    /// stay drawn from the store as they were, marked by the row as from a host no longer in
+    /// `sources`.
+    func remove(host raw: String, keepingPosts: Bool = false) async {
+        await holdingStill { await removeNow(host: raw, keepingPosts: keepingPosts) }
+    }
+
+    private func removeNow(host raw: String, keepingPosts: Bool) async {
         let host = raw.lowercased()
         // The question has been answered, so nothing is pending any more — set before the awaits,
         // so no dialog state outlives the decision it was asking about.
@@ -2717,9 +2937,9 @@ final class ShellSession {
             unreadAll = 0
             progressHost = ""
         }
-        await store.remove(host: host)
+        await store.remove(host: host, keepingPosts: keepingPosts)
         await adopt()
-        await clear(host: host)
+        await clear(host: host, keepingRows: keepingPosts)
 
         // Folded on both sides rather than on one. `Host.parse` lowercases everything it returns,
         // so all three of these are already folded today — and that is a guarantee three files

@@ -795,6 +795,19 @@ final class ShellPictures {
         disk?.forget(host: host)
     }
 
+    /// `forget(host:)` for a source removed whose rows stay (#250): everything it holds and every
+    /// mark of absence under the host go, in memory and on disk, **and the generation does not
+    /// bump**. A bump is a promise that a row still on screen asks again, and the rows that stay
+    /// are rows whose host nothing may ask again — a re-ask would be refused at the gate (#220)
+    /// and drawn as a source that did not answer, with a retry that can only refuse. The rows
+    /// draw nothing where the picture was (`RemoteImage`, a host no longer here), and are not
+    /// told to try.
+    func letGo(host: String) {
+        let host = Self.tag(host)
+        strike({ $0 == host }, renewing: false)
+        disk?.forget(host: host)
+    }
+
     /// Drops every picture this device holds, in memory and on disk: the drop by cache (#7).
     ///
     /// `forget(host:)` for every host at once, through the same `strike`: nothing in flight lands
@@ -806,9 +819,10 @@ final class ShellPictures {
     }
 
     /// Strikes every host `goes` names off work in flight, off the pictures held and off the marks
-    /// of absence, dropping an entry where no host is left on it; then bumps the generation. The
-    /// one body behind both `forget(host:)` and `forgetAll()`.
-    private func strike(_ goes: (String) -> Bool) {
+    /// of absence, dropping an entry where no host is left on it; then bumps the generation,
+    /// unless `renewing` is false (`letGo(host:)`). The one body behind `forget(host:)`,
+    /// `forgetAll()` and `letGo(host:)`.
+    private func strike(_ goes: (String) -> Bool, renewing: Bool = true) {
         // Over a copy of the keys, because the body writes back into the map it is walking.
         for (key, fetch) in inFlight where fetch.hosts.contains(where: goes) {
             inFlight[key]?.hosts = fetch.hosts.filter { !goes($0) }
@@ -836,13 +850,26 @@ final class ShellPictures {
             missing.removeValue(forKey: key)
             missingSources.removeValue(forKey: key)
         }
-        generation += 1
+        if renewing { generation += 1 }
     }
 
     /// What each host's copies on this device weigh, read off the main actor. Empty where this
     /// cache keeps no copies on disk.
     func diskBytes(hosts: [String]) async -> [String: Int] {
         await disk?.bytes(hosts: hosts.map(Self.tag)) ?? [:]
+    }
+
+    /// What every copy on disk weighs, all hosts together: what the room limit measures, the
+    /// same set `trimDisk` acts on. Nothing where no copies are kept.
+    func diskTotal() async -> Int? {
+        await disk?.measure()
+    }
+
+    /// Drops the copies on disk, oldest written first, until they weigh no more than `cap`: the
+    /// room limit's first step (#249). What is held in memory stays and still draws; a copy
+    /// dropped comes back when its picture is read again. Nothing where no copies are kept.
+    func trimDisk(toBytes cap: Int, hosts: [String]) async -> DiskCopies.Trimmed? {
+        await disk?.trim(toBytes: cap, among: hosts.map(Self.tag))
     }
 
     /// Lets go of everything held at viewer tier, when the viewer stops drawing it.
@@ -1164,6 +1191,11 @@ struct RemoteImage: View {
         /// change of identity and re-fires. Becoming *inactive* re-fires too and the guard
         /// returns at once, which costs a task creation and nothing else.
         let active: Bool
+        /// Whether the host is still on this device (#250), **in the identity for `active`'s
+        /// reason**: a row kept past its source's removal asks nothing while the host is gone,
+        /// and a source added again is a change of identity that re-fires the ask — without it
+        /// the kept rows already on screen would stay blank until something else moved them.
+        let here: Bool
     }
 
     let url: URL?
@@ -1228,11 +1260,19 @@ struct RemoteImage: View {
     /// Held wins: a copy this device already has is drawn at once, even if a mark says it was
     /// once gone. Still coming is a URL that has not been answered yet. A URL that was asked
     /// for and came back with nothing is failed — the wait ended, and a press asks again. A
-    /// nil URL is still absent: there is nothing to try.
-    static func fill(have: Bool, url: URL?, missing: Bool) -> Fill {
+    /// nil URL is still absent: there is nothing to try — and so is any URL read through a host
+    /// no longer on this device (#250, `here` false): nothing may ask it, so there is no wait to
+    /// draw, no failure to report and no retry to offer.
+    static func fill(have: Bool, url: URL?, missing: Bool, here: Bool = true) -> Fill {
         if have { return .held }
-        guard url != nil else { return .absent }
+        guard url != nil, here else { return .absent }
         return missing ? .failed : .waiting
+    }
+
+    /// Whether `host` is still a source here. Nothing said of what is here — a preview, a test —
+    /// is every host here, as `DummyItemRow.sourceLeft` reads it.
+    static func isHere(_ host: String, among here: Set<String>?) -> Bool {
+        here?.contains(host.lowercased()) ?? true
     }
 
     /// What a screen reader is told. Waiting reuses the shell's one sentence; arrived keeps
@@ -1253,15 +1293,19 @@ struct RemoteImage: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.displayScale) private var displayScale
     @Environment(\.shellPlaceIsActive) private var placeIsActive
+    /// The hosts still on this device (#250). See `fill(have:url:missing:here:)`.
+    @Environment(\.shellSourcesHere) private var sourcesHere
 
     private var cache: ShellPictures { .shared }
 
     var body: some View {
         let picture = cache.picture(url, scale: displayScale, tier: tier, host: host)
+        let here = Self.isHere(host, among: sourcesHere)
         let fill = Self.fill(
             have: picture != nil,
             url: url,
-            missing: cache.isMissing(url, scale: displayScale, tier: tier)
+            missing: cache.isMissing(url, scale: displayScale, tier: tier),
+            here: here
         )
         let sentence = Self.voice(fill: fill, alt: alt, speaks: speaks, source: host)
         return voiced(
@@ -1298,7 +1342,8 @@ struct RemoteImage: View {
                 have: picture != nil,
                 generation: cache.generation,
                 host: host,
-                active: placeIsActive
+                active: placeIsActive,
+                here: here
             )
         ) {
             // Decision 20. **Only the fetch is gated** — `cache.picture(…)` above still runs and
@@ -1310,7 +1355,9 @@ struct RemoteImage: View {
             // An inactive deck-tier row therefore still competes for admission with active ones,
             // which is fine and was checked rather than assumed: 96MB holds 245 deck entries, and
             // the tripwire that matters is viewer-tier.
-            guard placeIsActive else { return }
+            // And never through a host no longer here (#250): the gate would refuse it, and a
+            // refusal noted here would be drawn as a failure with a retry that can only refuse.
+            guard placeIsActive, here else { return }
             await cache.fetch(url, scale: displayScale, tier: tier, host: host)
         }
     }

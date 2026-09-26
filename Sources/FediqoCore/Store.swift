@@ -3,6 +3,13 @@ import Foundation
 /// Notes this device is holding, until it forgets them.
 public actor ItemStore {
     private var sourceList: [Source] = []
+    /// What each source last said about itself, by host, marked as of when it was said (#188).
+    ///
+    /// **Beside the source list and not inside `Source`.** A `Source` is what the reader chose —
+    /// a host, and the boards and lists they picked on it — and this is the server's own word,
+    /// which the next successful ask replaces whole and a Remove takes away with the rest. Kept
+    /// apart, a server restating its size does not make every source look changed.
+    private var saidByHost: [String: SourceProfile] = [:]
     /// One row per `NoteKey`: two hosts carrying the same Mastodon URI are two rows (#10).
     private var notes: [NoteKey: Note] = [:]
     /// When each row first arrived, as a count that only goes up. Nothing reads the number; what
@@ -96,9 +103,15 @@ public actor ItemStore {
     /// app that does not open. So the rules `add` and `ingest` keep hold here too: one source per
     /// host, the first one winning as `add` has it, and one row per `NoteKey`, the later copy
     /// winning outright — a snapshot is one moment written once, not two reads to merge.
-    public init(sources: [Source], notes incoming: [Note]) {
+    public init(sources: [Source], notes incoming: [Note], said: [SourceProfile] = []) {
         for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
             sourceList.append(source)
+        }
+        // Only of a source still here, and without a moment it was said is a word nothing can
+        // draw as said then: the first `said(_:at:)` is what puts one in.
+        let hosts = Set(sourceList.map(\.host))
+        for profile in said where Self.isWord(profile) && hosts.contains(profile.host) {
+            saidByHost[profile.host] = profile
         }
         notes = Dictionary(incoming.map { ($0.key, $0) }, uniquingKeysWith: { _, new in new })
         // The order the rows are handed over is the order they arrived in: the run that wrote
@@ -108,6 +121,34 @@ public actor ItemStore {
             arrival[note.key] = arrivals
             arrivals += 1
         }
+    }
+
+    /// Everything here replaced by `sources` and `notes` in one hop — what a read back leaves
+    /// (#247): the snapshot read off the package's store, adopted exactly as a relaunch would
+    /// adopt it, with the same rules `init(sources:notes:)` keeps. The keep window stays the
+    /// reader's and is applied to what comes in; every screen is told, and the watcher of the
+    /// sources hears the new list.
+    public func replace(sources: [Source], notes incoming: [Note], said: [SourceProfile] = []) {
+        sourceList = []
+        for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
+            sourceList.append(source)
+        }
+        let hosts = Set(sourceList.map(\.host))
+        saidByHost = [:]
+        for profile in said where Self.isWord(profile) && hosts.contains(profile.host) {
+            saidByHost[profile.host] = profile
+        }
+        notes = Dictionary(
+            incoming.filter(withinRetention).map { ($0.key, $0) }, uniquingKeysWith: { _, new in new }
+        )
+        arrival = [:]
+        arrivals = 0
+        for note in incoming where notes[note.key] != nil && arrival[note.key] == nil {
+            arrival[note.key] = arrivals
+            arrivals += 1
+        }
+        sourcesWatcher?(sourceList.map(\.host))
+        changed(shown: true, aside: true)
     }
 
     /// Whether `note` is inside the reader's keep window.
@@ -487,10 +528,23 @@ public actor ItemStore {
     ///
     /// Silent where the host is not here, for the reason `subscribe(host:to:)` is: nothing in this
     /// package puts a source in the list, or takes one out of it, by a side door.
-    public func remove(host raw: String) {
+    ///
+    /// **`keepingPosts` leaves the notes where they are** (#250): the reader chose that a removed
+    /// source's posts stay. They are still drawn by `all()` and found by a search, and they go
+    /// the way any other note goes — by the window, or by a later story's limit. What stops is
+    /// everything that reads by the source: `ingest(_:ifSourceHere:)`, `keep`, `markGone` and
+    /// the rest all ask `sourceList` first, so nothing new lands under a host that has gone.
+    /// Each note still names its source, so a row can say which host it was read through and
+    /// that the host is no longer here.
+    public func remove(host raw: String, keepingPosts: Bool = false) {
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
+        saidByHost[host] = nil
         sourcesWatcher?(sourceList.map(\.host))
+        if keepingPosts {
+            changed(shown: false, aside: false)
+            return
+        }
         let aside = notes.contains { $0.key.host == host && $0.value.holding == .aside }
         notes = notes.filter { $0.key.host != host }
         arrival = arrival.filter { $0.key.host != host }
@@ -501,14 +555,65 @@ public actor ItemStore {
         sourceList
     }
 
+    /// Writes down what `profile.host` has just said about itself, as of `moment`, in place of
+    /// whatever it said before (#188). Silent where the host is not a source here, for
+    /// `subscribe(host:to:)`'s reason: a description of a server nobody joined has nowhere to go.
+    ///
+    /// **A change a save writes and no timeline shows**: the row and the composer read it, All
+    /// does not.
+    public func said(_ profile: SourceProfile, at moment: Date = Date()) {
+        let stamped = profile.said(at: moment)
+        guard Self.isWord(stamped), sourceList.contains(where: { $0.host == stamped.host }) else { return }
+        let before = saidByHost[stamped.host]
+        saidByHost[stamped.host] = stamped
+        // The same word again moves only the moment, and the moment is not written: a launch
+        // that hears every source say what it said last time would otherwise write the index
+        // once per source for nothing a reader could tell apart. The screens are told, so the
+        // page says the newer moment this run; the index keeps the older until a word changes.
+        let sameWord = before.map { $0.said(at: moment) == stamped } ?? false
+        changed(shown: false, aside: false, kept: !sameWord)
+    }
+
+    /// Whether `profile` is a word worth keeping: said at a moment, and of a kind this app can
+    /// name. A kept `.unknown` would stand in for the join's note across relaunches and put a
+    /// source nothing reads in the list, with no ask to move it — so it is no word at all.
+    private static func isWord(_ profile: SourceProfile) -> Bool {
+        profile.asOf != nil && profile.kind != .unknown
+    }
+
+    /// What `host` last said about itself, marked as of when, or nothing where it has not been
+    /// heard, or a Clear let its word go.
+    public func said(host raw: String) -> SourceProfile? {
+        saidByHost[raw.lowercased()]
+    }
+
+    /// Every source's last word about itself, by host.
+    public func saidAll() -> [String: SourceProfile] {
+        saidByHost
+    }
+
+    /// Lets go of what `host` said about itself — a Clear, which empties what this device holds
+    /// of a server and leaves the server joined. The next ask writes it down again.
+    public func forgetSaid(host raw: String) {
+        let host = raw.lowercased()
+        guard saidByHost.removeValue(forKey: host) != nil else { return }
+        changed(shown: false, aside: false)
+    }
+
     /// Keeps only the latest `months` months as of `now` from here on, or everything where
     /// `months` is nil — forever, the default (#7). Drops what is already older, and returns how
     /// many notes went, so a caller writes and redraws only when something did. Sources are
     /// untouched: a source with nothing left inside the window stays joined.
     @discardableResult
     public func setRetention(months: Int?, from now: Date = Date(), calendar: Calendar = .current) -> Int {
+        letGoBeyond(months: months, from: now, calendar: calendar).posts
+    }
+
+    /// `setRetention`, saying which sources the posts went from as well as how many (#251) — what
+    /// the months limit writes into its account.
+    public func letGoBeyond(months: Int?, from now: Date = Date(), calendar: Calendar = .current) -> WentByLimit {
         retention = KeepPolicy.cutoff(keepingMonths: months, from: now, calendar: calendar)
-        guard let retention else { return 0 }
+        guard let retention else { return .none }
         let before = notes.count
         let asideBefore = Set(notes.filter { $0.value.holding == .aside }.keys)
         // A quoted post a kept post quotes stays, as `ingest` keeps it (#214) — held aside from
@@ -517,6 +622,7 @@ public actor ItemStore {
         let quoted = Set(notes.values.filter { $0.postedAt >= retention }.compactMap(\.quotedKey))
         var demoted = false
         var kept: [NoteKey: Note] = [:]
+        var gone: Set<String> = []
         for (key, note) in notes {
             if note.postedAt >= retention {
                 kept[key] = note
@@ -527,6 +633,8 @@ public actor ItemStore {
                     demoted = true
                 }
                 kept[key] = aside
+            } else {
+                gone.insert(key.host)
             }
         }
         notes = kept
@@ -536,7 +644,72 @@ public actor ItemStore {
             // count where it was while the rows themselves changed.
             changed(shown: true, aside: Set(notes.filter { $0.value.holding == .aside }.keys) != asideBefore)
         }
-        return before - notes.count
+        return WentByLimit(posts: before - notes.count, sources: gone.sorted())
+    }
+
+    /// Lets go of the `count` oldest posts held — the room limit's step past the picture copies
+    /// (#249). Returns how many went and from which sources.
+    ///
+    /// **Oldest by when they were posted, across every source, rows held aside included**: the
+    /// room is this device's and not one source's, and a search's find held aside weighs what a
+    /// timeline's post does. Two posted in the same second go in the order they arrived. A post
+    /// another held post quotes stays whatever its age, as the keep window keeps it (#214): it
+    /// goes once the post quoting it has.
+    public func letGoOldest(count: Int) -> WentByLimit {
+        guard count > 0, !notes.isEmpty else { return .none }
+        let quoted = Set(notes.values.compactMap(\.quotedKey))
+        let arrival = self.arrival
+        let going = notes.values
+            .filter { !quoted.contains($0.key) }
+            .sorted {
+                $0.postedAt != $1.postedAt
+                    ? $0.postedAt < $1.postedAt
+                    : (arrival[$0.key] ?? 0) < (arrival[$1.key] ?? 0)
+            }
+            .prefix(count)
+        guard !going.isEmpty else { return .none }
+        for note in going {
+            notes[note.key] = nil
+            self.arrival[note.key] = nil
+        }
+        changed(shown: going.contains { $0.holding == .arrived }, aside: going.contains { $0.holding == .aside })
+        return WentByLimit(posts: going.count, sources: Set(going.map(\.key.host)).sorted())
+    }
+
+    /// How many rows were posted inside `span` and, where `host` is given, came through that host
+    /// — arrived and aside alike (#248). What a press to let a span go would take, so the question
+    /// before it names the true count.
+    public func count(span: Range<Date>, host raw: String? = nil) -> Int {
+        let host = raw?.lowercased()
+        return notes.values.reduce(0) { $0 + (Self.inside(span, host: host, $1) ? 1 : 0) }
+    }
+
+    /// Lets go of every row posted inside `span`, from `host` or from every host where nil — the
+    /// reader's own press (#248). Returns how many went.
+    ///
+    /// **Exactly the rows named, and nothing the app chooses.** The keep-for window spares a post
+    /// a kept post quotes; this does not, because the reader said these days go and a quoted post
+    /// posted on them is one of them. Nothing outside the span or from another host moves, and
+    /// every source stays joined — a host with nothing left is a source with nothing held, as
+    /// `setRetention` leaves one. The host need not be a source here: a source removed while its
+    /// posts were kept (#250) leaves rows this reaches like any other.
+    @discardableResult
+    public func letGo(span: Range<Date>, host raw: String? = nil) -> Int {
+        let host = raw?.lowercased()
+        let going = notes.values.filter { Self.inside(span, host: host, $0) }
+        guard !going.isEmpty else { return 0 }
+        for note in going {
+            notes[note.key] = nil
+            arrival[note.key] = nil
+        }
+        changed(shown: going.contains { $0.holding == .arrived }, aside: going.contains { $0.holding == .aside })
+        return going.count
+    }
+
+    /// Whether `note` is what `letGo(span:host:)` reaches: posted inside `span`, and from `host`
+    /// where one is named.
+    private static func inside(_ span: Range<Date>, host: String?, _ note: Note) -> Bool {
+        span.contains(note.postedAt) && (host == nil || note.source.host == host)
     }
 
     /// Everything this store holds, read in one hop — what a save writes to disk.
@@ -547,10 +720,12 @@ public actor ItemStore {
     /// for the sources and the notes in two awaits would let an ingest or a remove land between
     /// them, writing notes whose source is gone. This is the counterpart of
     /// `init(sources:notes:)`. `revision` is the one this snapshot is of, read in the same hop.
-    public func snapshot() -> (sources: [Source], notes: [Note], revision: Int) {
+    public func snapshot() -> (sources: [Source], notes: [Note], said: [SourceProfile], revision: Int) {
         let arrival = self.arrival
         let ordered = notes.values.sorted { (arrival[$0.key] ?? 0) < (arrival[$1.key] ?? 0) }
-        return (sourceList, ordered, revision)
+        // By host, so one state of the store is always written one way.
+        let said = saidByHost.values.sorted { $0.host < $1.host }
+        return (sourceList, ordered, said, revision)
     }
 
     /// Every row a timeline may show, newest first — and **never one held aside** (#175).
