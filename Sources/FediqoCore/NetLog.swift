@@ -11,6 +11,8 @@ import os
 public enum NetLog {
     public static let network = Logger(subsystem: "Fediqo", category: "network")
     public static let auth = Logger(subsystem: "Fediqo", category: "auth")
+    /// A move nearby, step by step, on either side (#253), its lines built by `NearbyLog`.
+    public static let nearby = Logger(subsystem: "Fediqo", category: "nearby")
 
     /// `request m.example: NSURLErrorDomain -1001`, `sign-in m.example: MastodonSignInError.denied`.
     public static func line(_ what: StaticString, host: String, error: any Error) -> String {

@@ -79,14 +79,19 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         var txt = NWTXTRecord()
         txt["id"] = sessionID
         listener.service = NWListener.Service(name: name, type: NearbyCode.service, txtRecord: txt)
-        // Every connection handed over and not yet closed by its taker: cancelled with the
-        // listen, so a stream put away leaves no socket open.
-        let open = Mutex<[ObjectIdentifier: NWPeerConnection]>([:])
+        // A connection still opening is the listen's, cancelled with it so a stream put away
+        // leaves no socket open; one that is ready is handed over and is its taker's — the
+        // hold ends this listen on its one join, and must keep the connection it took.
+        let listen = NearbyListen<NWPeerConnection>(continuation)
         listener.stateUpdateHandler = { state in
             switch state {
+            case .ready:
+                NearbyLog.note(.receiver, "listening")
             case .failed(let error):
+                NearbyLog.note(.receiver, "listen failed", Self.kind(error))
                 continuation.finish(throwing: Self.refusal(error))
             case .waiting(let error):
+                NearbyLog.note(.receiver, "listen waiting", Self.kind(error))
                 // Waiting is a network not there yet, unless it is the permission refused.
                 if Self.isPolicy(error) { continuation.finish(throwing: NearbyRefusal.notAllowed) }
             case .cancelled:
@@ -97,25 +102,21 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         }
         listener.newConnectionHandler = { [queue] connection in
             let peer = NWPeerConnection(connection, peerName: nil, queue: queue)
-            open.withLock { $0[ObjectIdentifier(peer)] = peer }
+            NearbyLog.note(.receiver, "connection arriving")
+            guard listen.opening(peer) else { return }
             peer.open { ready in
                 if ready {
-                    continuation.yield(.joined(peer))
+                    listen.joined(peer)
                 } else {
-                    open.withLock { $0[ObjectIdentifier(peer)] = nil }
                     // Only a handshake that failed is a guess; a probe that never got that
                     // far, or the framework's own racing attempt, rolls nothing.
-                    if peer.failedHandshake { continuation.yield(.failedHandshake) }
+                    listen.failed(peer, handshake: peer.failedHandshake)
                 }
             }
         }
         continuation.onTermination = { _ in
             listener.cancel()
-            let peers = open.withLock { held in
-                defer { held = [:] }
-                return Array(held.values)
-            }
-            for peer in peers { peer.close() }
+            listen.end()
         }
         listener.start(queue: queue)
         return stream
@@ -129,6 +130,7 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         browser.stateUpdateHandler = { state in
             switch state {
             case .failed(let error), .waiting(let error):
+                NearbyLog.note(.sender, "browse failed", Self.kind(error))
                 continuation.finish(throwing: Self.refusal(error))
             case .cancelled:
                 continuation.finish()
@@ -172,9 +174,22 @@ public final class NWNearbyLink: NearbyLink, @unchecked Sendable {
         guard ready else {
             // A handshake that fails against a device that is there is the code; a device that
             // cannot be reached at all is a drop, to be tried again.
-            throw wrapped.failedHandshake || wrapped.reset ? NearbyRefusal.wrongCode : NearbyDropped()
+            let wrong = wrapped.failedHandshake || wrapped.reset
+            NearbyLog.note(.sender, wrong ? "join refused as the code" : "join not reached")
+            throw wrong ? NearbyRefusal.wrongCode : NearbyDropped()
         }
         return wrapped
+    }
+
+    /// A transport error's kind — its domain and code, `posix 54` (ECONNRESET), `tls -9806` — and
+    /// never its description, which can name an address.
+    static func kind(_ error: NWError) -> String {
+        switch error {
+        case .posix(let code): return "posix \(code.rawValue)"
+        case .dns(let code): return "dns \(code)"
+        case .tls(let status): return "tls \(status)"
+        default: return "other"
+        }
     }
 
     /// The local-network permission refused, as the system reports it; anything else as itself.
@@ -216,6 +231,15 @@ final class NWPeerConnection: NearbyPeerConnection, @unchecked Sendable {
         self.peerName = peerName
     }
 
+    /// A connection nobody closed — a join handed to a listen that ended before it was read —
+    /// is cancelled as it goes, so no socket outlives what held it.
+    deinit {
+        connection.cancel()
+    }
+
+    /// The side this end is on: the joining side knows its peer's name.
+    private var side: NearbyLog.Side { peerName == nil ? .receiver : .sender }
+
     /// Whether the handshake itself — TLS bytes exchanged and refused — is what failed.
     var failedHandshake: Bool { state.withLock { $0.failedHandshake } }
 
@@ -231,11 +255,13 @@ final class NWPeerConnection: NearbyPeerConnection, @unchecked Sendable {
             switch state {
             case .ready:
                 guard self.suiteHolds() else {
+                    NearbyLog.note(self.side, "tls suite refused")
                     self.take(handshakeFailed: true)?(false)
                     self.connection.cancel()
                     return
                 }
                 self.state.withLock { $0.ready = true }
+                NearbyLog.note(self.side, "tls ready")
                 self.take(handshakeFailed: false)?(true)
             case .waiting(let error) where !NWNearbyLink.isPolicy(error):
                 // Not there yet: the attempt stands until the timeout ends it.
@@ -244,6 +270,7 @@ final class NWPeerConnection: NearbyPeerConnection, @unchecked Sendable {
                 // A handshake refused reads as a TLS error, or — on the joining side, where the
                 // holder closed on the proof — as the connection reset under it; a device out
                 // of reach reads as anything else. On the holding side a reset is a bare probe.
+                NearbyLog.note(self.side, "connection failed", NWNearbyLink.kind(error))
                 let handshake: Bool
                 switch error {
                 case .tls: handshake = true
@@ -263,6 +290,7 @@ final class NWPeerConnection: NearbyPeerConnection, @unchecked Sendable {
         if let timeout {
             queue.asyncAfter(deadline: .now() + .nanoseconds(Int(timeout / .nanoseconds(1)))) { [weak self] in
                 guard let self, let opened = self.take(handshakeFailed: false) else { return }
+                NearbyLog.note(self.side, "join timed out")
                 opened(false)
                 self.connection.cancel()
             }
@@ -294,8 +322,13 @@ final class NWPeerConnection: NearbyPeerConnection, @unchecked Sendable {
 
     private func receive(_ length: Int) async throws -> Data {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, any Error>) in
-            connection.receive(minimumIncompleteLength: length, maximumLength: length) { data, _, _, error in
+            connection.receive(minimumIncompleteLength: length, maximumLength: length) { [side] data, _, complete, error in
                 guard let data, data.count == length, error == nil else {
+                    if let error {
+                        NearbyLog.note(side, "dropped on read", NWNearbyLink.kind(error))
+                    } else {
+                        NearbyLog.note(side, complete ? "dropped on read: peer closed" : "dropped on read: short")
+                    }
                     continuation.resume(throwing: NearbyDropped())
                     return
                 }
@@ -317,8 +350,13 @@ final class NWPeerConnection: NearbyPeerConnection, @unchecked Sendable {
         data.appendLE(UInt32(body.count))
         data.append(body)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-            connection.send(content: data, completion: .contentProcessed { error in
-                if error != nil { continuation.resume(throwing: NearbyDropped()) } else { continuation.resume() }
+            connection.send(content: data, completion: .contentProcessed { [side] error in
+                guard let error else {
+                    continuation.resume()
+                    return
+                }
+                NearbyLog.note(side, "dropped on write", NWNearbyLink.kind(error))
+                continuation.resume(throwing: NearbyDropped())
             })
         }
     }

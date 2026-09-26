@@ -237,15 +237,23 @@ public actor NearbyMove {
                     // a move under way — and is cancelled when the hold loop ends.
                     while true {
                         try await self.holdClock()
-                        if await self.idle() { throw NearbyRefusal.timedOut }
+                        if await self.idle() {
+                            NearbyLog.note(.receiver, "hold timed out")
+                            throw NearbyRefusal.timedOut
+                        }
                     }
                 }
                 try await group.next()
                 group.cancelAll()
             }
         } catch {
-            guard !Task.isCancelled else { return }
-            emit(.refused(NearbyRefusal(error)))
+            guard !Task.isCancelled else {
+                NearbyLog.note(.receiver, "stopped")
+                return
+            }
+            let refusal = NearbyRefusal(error)
+            NearbyLog.note(.receiver, "refused", error: refusal)
+            emit(.refused(refusal))
         }
     }
 
@@ -256,6 +264,7 @@ public actor NearbyMove {
             let code = NearbyCode.make()
             let sessionID = NearbyCode.sessionID()
             let psk = NearbyCode.psk(code: code, sessionID: sessionID)
+            NearbyLog.note(.receiver, "code shown")
             await emit(.code(code, sessionID: sessionID))
             var accepted: Accepted?
             // Whatever was staged goes on every way out of this code: done, refused, stopped.
@@ -265,9 +274,11 @@ public actor NearbyMove {
             // cannot reach a move in progress, and comes back only after a drop.
             while !roll {
                 var joined: (any NearbyPeerConnection)?
+                NearbyLog.note(.receiver, "listen up")
                 for try await arrival in link.advertise(name: device, sessionID: sessionID, psk: psk) {
                     switch arrival {
                     case .failedHandshake:
+                        NearbyLog.note(.receiver, "handshake failed")
                         // A handshake that failed is a guess — until the code was proven, when
                         // nothing a stranger does is counted against the move.
                         guard accepted == nil else { continue }
@@ -275,6 +286,7 @@ public actor NearbyMove {
                         guard guesses < guessCap else { throw NearbyRefusal.guessing }
                         roll = true
                     case .joined(let connection):
+                        NearbyLog.note(.receiver, "joined")
                         joined = connection
                     }
                     break
@@ -294,13 +306,16 @@ public actor NearbyMove {
                         over: connection, inbox: mailbox, role: .receiver, psk: psk, sessionID: sessionID
                     )
                     channel = opened
+                    NearbyLog.note(.receiver, "proven")
                     if try await serve(opened, mailbox: mailbox, accepted: &accepted, code: code, sessionID: sessionID) { return }
                 } catch is NearbyDropped {
+                    NearbyLog.note(.receiver, accepted == nil ? "dropped" : "dropped, holding for a resume")
                     // The link dropped: what is held stays, and the listen goes up again.
                     await disengage()
                     try Task.checkCancellation()
                     if accepted != nil { await emit(.reconnecting(peer: accepted?.offer.summary.device ?? "")) }
                 } catch NearbyRefusal.wrongCode {
+                    NearbyLog.note(.receiver, "proof mismatch")
                     // The proof did not match: a guess, counted like a failed handshake.
                     guard accepted == nil else { continue }
                     guesses += 1
@@ -309,6 +324,7 @@ public actor NearbyMove {
                 } catch {
                     // Said inside the channel where one is open, so the other side hears a
                     // refusal and not a word it cannot read — a hold put away included.
+                    NearbyLog.note(.receiver, "refusing", error: NearbyRefusal(error))
                     if let channel { try? await channel.send(.refuse) } else { try? await connection.send(.refuse) }
                     try Task.checkCancellation()
                     throw error
@@ -330,6 +346,7 @@ public actor NearbyMove {
         // which lets the hold wait for anyone again.
         let deadline = Task { [offerClock] in
             try await offerClock()
+            NearbyLog.note(.receiver, "offer deadline passed")
             mailbox.close()
         }
         let first: NearbyFrame
@@ -341,16 +358,19 @@ public actor NearbyMove {
             throw error
         }
         guard case .offer(let offer) = first else { throw NearbyRefusal.malformed }
+        NearbyLog.note(.receiver, "offer received")
         let peer = offer.summary.device
         var fresh = false
         if let held = accepted {
             // The same offer, back after a drop: no second question — and, once read back, the
             // answer it missed.
             guard held.offer.id == offer.id else {
+                NearbyLog.note(.receiver, "offer refused: not the one accepted")
                 try? await channel.send(.refuse)
                 return false
             }
             if held.finished {
+                NearbyLog.note(.receiver, "done, said again")
                 try? await channel.send(.done)
                 return false
             }
@@ -361,6 +381,7 @@ public actor NearbyMove {
             guard !overflow, needed <= Int64(Int.max) else { throw NearbyRefusal.malformed }
             guard weight.free >= Int(needed) else { throw NearbyRefusal.noRoom(needed: Int(needed), free: weight.free) }
             await ask(offer.id)
+            NearbyLog.note(.receiver, "asking")
             await emit(.asking(offer, peer: peer, held: weight.holdsStore))
             let yes: Bool
             do {
@@ -382,6 +403,7 @@ public actor NearbyMove {
                 throw error
             }
             guard yes else {
+                NearbyLog.note(.receiver, "said no")
                 try? await channel.send(.refuse)
                 await emit(.closed)
                 return true
@@ -401,6 +423,7 @@ public actor NearbyMove {
                 throw error
             }
             await self.accepted()
+            NearbyLog.note(.receiver, "accepted")
             fresh = true
             // Staged only once the yes was heard on the wire: a link that drops on the way
             // leaves nothing to sweep.
@@ -428,6 +451,8 @@ public actor NearbyMove {
         // written before a drop is exactly what the sender must go on from.
         var have = Self.bytesOnDisk(held.file)
         try await channel.send(.have(have))
+        var milestones = NearbyLog.Milestones()
+        Self.progress(.receiver, &milestones, done: have, total: held.offer.fileBytes)
         await emit(.moving(PackageProgress(done: Int(have), total: Int(held.offer.fileBytes)), peer: peer))
         let handle = try FileHandle(forWritingTo: held.file)
         defer { try? handle.close() }
@@ -438,6 +463,7 @@ public actor NearbyMove {
                 guard have + Int64(data.count) <= held.offer.fileBytes else { throw NearbyRefusal.malformed }
                 try handle.write(contentsOf: data)
                 have += Int64(data.count)
+                Self.progress(.receiver, &milestones, done: have, total: held.offer.fileBytes)
                 await emit(.moving(PackageProgress(done: Int(have), total: Int(held.offer.fileBytes)), peer: peer))
             case .done:
                 guard have == held.offer.fileBytes, Self.bytesOnDisk(held.file) == held.offer.fileBytes else {
@@ -445,6 +471,7 @@ public actor NearbyMove {
                 }
                 try handle.synchronize()
                 try handle.close()
+                NearbyLog.note(.receiver, "all bytes in, reading back")
                 await emit(.settling(nil, peer: peer))
                 let packageKey = PackageKey.direct(key)
                 // The identical read back (#252): proven whole here before anything changes —
@@ -465,6 +492,7 @@ public actor NearbyMove {
                 // on disk past its read back.
                 try? FileManager.default.removeItem(at: held.folder)
                 try? await channel.send(.done)
+                NearbyLog.note(.receiver, "done")
                 await emit(.done(summary, peer: peer))
                 return false
             case .refuse:
@@ -493,6 +521,7 @@ public actor NearbyMove {
             try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
             let file = scratch.appendingPathComponent("package.fdq")
             let key = SymmetricKey(size: .bits256)
+            NearbyLog.note(.sender, "packing")
             emit(.packing(PackageProgress(done: 0, total: 0)))
             // Progress goes straight to the stream, in order: a task hopping onto the actor could
             // land a "still packing" after the join had been said.
@@ -502,12 +531,14 @@ public actor NearbyMove {
             }
             let summary = try await carrier.preview(file, key: .direct(key))
             let offer = NearbyOffer(summary: summary, fileBytes: Self.bytesOnDisk(file))
+            NearbyLog.note(.sender, "packed")
             let psk = NearbyCode.psk(code: code, sessionID: peer.sessionID)
             var attempt = 0
             var joinedOnce = false
             var sentDone = false
             while true {
                 try Task.checkCancellation()
+                NearbyLog.note(.sender, joinedOnce ? "rejoining" : "joining", "attempt \(attempt)")
                 emit(joinedOnce ? .reconnecting(peer: peer.name) : .connecting)
                 let connection: any NearbyPeerConnection
                 do {
@@ -515,7 +546,10 @@ public actor NearbyMove {
                 } catch is NearbyDropped {
                     // Not there yet: wait, and try again while there are tries left.
                     attempt += 1
-                    guard joinedOnce, attempt <= retries else { throw sentDone ? NearbyRefusal.unsure : .lost }
+                    guard joinedOnce, attempt <= retries else {
+                        NearbyLog.note(.sender, "join not reached, giving up")
+                        throw sentDone ? NearbyRefusal.unsure : .lost
+                    }
                     try await Task.sleep(for: retryDelay)
                     continue
                 }
@@ -529,22 +563,33 @@ public actor NearbyMove {
                         over: connection, inbox: mailbox, role: .sender, psk: psk, sessionID: peer.sessionID
                     )
                     joinedOnce = true
+                    NearbyLog.note(.sender, "proven")
                     if try await send(offer, file: file, key: key, over: channel, mailbox: mailbox, peer: peer.name, sentDone: &sentDone) {
                         return
                     }
+                    NearbyLog.note(.sender, "said no")
                     emit(.closed)
                     return
                 } catch is NearbyDropped {
                     // The link dropped: join again and go on from what the receiver holds — or,
                     // after the last word was sent, to hear whether it was read back.
+                    NearbyLog.note(.sender, joinedOnce ? "dropped" : "dropped before proven")
                     attempt += 1
-                    guard attempt <= retries else { throw sentDone ? NearbyRefusal.unsure : .lost }
+                    guard attempt <= retries else {
+                        NearbyLog.note(.sender, "retries spent, giving up")
+                        throw sentDone ? NearbyRefusal.unsure : .lost
+                    }
                     try await Task.sleep(for: retryDelay)
                 }
             }
         } catch {
-            guard !Task.isCancelled else { return }
-            emit(.refused(NearbyRefusal(error)))
+            guard !Task.isCancelled else {
+                NearbyLog.note(.sender, "stopped")
+                return
+            }
+            let refusal = NearbyRefusal(error)
+            NearbyLog.note(.sender, "refused", error: refusal)
+            emit(.refused(refusal))
         }
     }
 
@@ -556,6 +601,7 @@ public actor NearbyMove {
         peer: String, sentDone: inout Bool
     ) async throws -> Bool {
         try await channel.send(.offer(offer))
+        NearbyLog.note(.sender, "offer sent")
         if await answered[offer.id] == nil {
             await ask(offer.id)
             await emit(.asking(offer, peer: peer, held: false))
@@ -567,16 +613,20 @@ public actor NearbyMove {
             try? await channel.send(.refuse)
             return false
         }
+        NearbyLog.note(.sender, "said yes")
         await emit(.waiting(peer: peer))
         let word: NearbyFrame
         if let heard { word = heard } else { word = try await channel.next() }
         switch word {
-        case .accept: break
+        case .accept: NearbyLog.note(.sender, "accepted there")
         case .done:
             // Read back before the link dropped: the word that was missed.
+            NearbyLog.note(.sender, "done, heard again")
             await emit(.done(offer.summary, peer: peer))
             return true
-        case .refuse: throw NearbyRefusal.refusedThere
+        case .refuse:
+            NearbyLog.note(.sender, "refused there")
+            throw NearbyRefusal.refusedThere
         default: throw NearbyRefusal.malformed
         }
         // The key leaves as bytes only here, sealed, and the receiver holds it from then on.
@@ -587,6 +637,8 @@ public actor NearbyMove {
             throw NearbyDropped()
         }
         guard case .have(let have) = try await channel.next(), have <= offer.fileBytes else { throw NearbyRefusal.malformed }
+        var milestones = NearbyLog.Milestones()
+        Self.progress(.sender, &milestones, done: have, total: offer.fileBytes)
         await emit(.moving(PackageProgress(done: Int(have), total: Int(offer.fileBytes)), peer: peer))
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
@@ -596,10 +648,12 @@ public actor NearbyMove {
             try Task.checkCancellation()
             try await channel.send(.bytes(chunk))
             sent += Int64(chunk.count)
+            Self.progress(.sender, &milestones, done: sent, total: offer.fileBytes)
             await emit(.moving(PackageProgress(done: Int(sent), total: Int(offer.fileBytes)), peer: peer))
         }
         try await channel.send(.done)
         sentDone = true
+        NearbyLog.note(.sender, "all bytes sent, waiting for the read back")
         await emit(.settling(nil, peer: peer))
         // A receiver that never says whether it read the package back would keep this side
         // waiting for ever: past the deadline the sender ends unsure, which is what it is.
@@ -607,6 +661,7 @@ public actor NearbyMove {
         let deadline = Task { [lastWordClock] in
             try await lastWordClock()
             late.withLock { $0 = true }
+            NearbyLog.note(.sender, "last word timed out")
             mailbox.close()
         }
         defer { deadline.cancel() }
@@ -619,6 +674,7 @@ public actor NearbyMove {
         }
         switch last {
         case .done:
+            NearbyLog.note(.sender, "done")
             await emit(.done(offer.summary, peer: peer))
             return true
         case .refuse: throw NearbyRefusal.refusedThere
@@ -634,6 +690,14 @@ public actor NearbyMove {
     /// accept. Anywhere a peer may say something else, this would read and drop that word.
     private nonisolated static func lastWord(_ channel: NearbyChannel) async throws {
         if case .refuse? = try? await channel.next() { throw NearbyRefusal.refusedThere }
+    }
+
+    /// Logs the bytes' progress where it passed a new tenth.
+    private nonisolated static func progress(
+        _ side: NearbyLog.Side, _ milestones: inout NearbyLog.Milestones, done: Int64, total: Int64
+    ) {
+        guard let percent = milestones.passed(done: done, total: total) else { return }
+        NearbyLog.note(side, "bytes", "\(percent)%")
     }
 
     /// The file's length now, as the file system says it.
