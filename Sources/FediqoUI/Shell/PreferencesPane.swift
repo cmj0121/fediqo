@@ -4,14 +4,21 @@ import SwiftUI
 /// Language, theme, type, and the latest date every timeline stops at (#22) — what a person
 /// chooses. What this device holds is on `UsagePane` (#21).
 ///
-/// **Five tabs, in Usage's shape** (#143, #164, #226, #233): what a person chooses, which Fediqo
-/// this is, what it is asking of the sources right now, what the app starts with letting through
-/// beyond them, and the hosts the person added. The same pills at the head of the same grouped
-/// `Form`, and the same key — Tab and ⇧Tab rotate them (`ShellSession.rotatePreferencesTab`) — so
-/// the page is reached and walked on a Mac and on a phone the way Usage already is. The second
+/// **Six tabs, in Usage's shape** (#143, #164, #226, #233, #247): what a person chooses, which
+/// Fediqo this is, what it is asking of the sources right now, what the app starts with letting
+/// through beyond them, the hosts the person added, and moving what this device holds — taken
+/// away to a file and read back, or sent to a device nearby. The same pills at the head of the
+/// same grouped `Form`, and the same key — Tab and ⇧Tab rotate them
+/// (`ShellSession.rotatePreferencesTab`) — so the page is reached and walked on a Mac and on a
+/// phone the way Usage already is. The second
 /// tab is `BuildStampSection`, whole, the third `SourceWorkSection`, the fourth
-/// `AllowanceSection` and the fifth `OwnHostsSection`: each one style, a list or a form, never
-/// both (#231).
+/// `AllowanceSection`, the fifth `OwnHostsSection` and the sixth `CarrySection` over
+/// `NearbySection`: each one style, a list or a form, never both (#231).
+///
+/// **The moves are asked on the pane, not on their tab** (`CarryFlow`, `NearbyFlow`): what a
+/// move has reached is the session's, and its questions and sheets hang off the `Form`, so a
+/// move under way — a read back that cannot be stopped once begun — goes on, and its next
+/// question still comes up, whichever tab is in front.
 ///
 /// **Every setting says one short line**, and its long explanation is behind the (?) beside it.
 struct PreferencesPane: View {
@@ -33,6 +40,7 @@ struct PreferencesPane: View {
         case work
         case reach
         case hosts
+        case move
 
         var id: Self { self }
 
@@ -43,6 +51,7 @@ struct PreferencesPane: View {
             case .work: "prefs.tab.work"
             case .reach: "prefs.tab.reach"
             case .hosts: "prefs.tab.hosts"
+            case .move: "prefs.tab.move"
             }
         }
 
@@ -53,6 +62,7 @@ struct PreferencesPane: View {
             case .work: "arrow.up.arrow.down"
             case .reach: "checkmark.shield"
             case .hosts: "globe"
+            case .move: "arrow.left.arrow.right"
             }
         }
     }
@@ -107,6 +117,8 @@ struct PreferencesPane: View {
         .scrollIndicators(.never)
         .clearsFloatingCorner()
         .padding(ShellSpace.snug)
+        .modifier(CarryFlow(session: session))
+        .modifier(NearbyFlow(session: session))
     }
 
     /// The tab the page is on, whole.
@@ -122,6 +134,7 @@ struct PreferencesPane: View {
                 book: .shared, sources: session?.sources.map(\.host) ?? [], opened: opened,
                 returning: session?.preferencesReturning, onTyping: typing
             )
+        case .move: move
         }
     }
 
@@ -155,6 +168,7 @@ struct PreferencesPane: View {
             }
         }
         askAgain
+        removed
         Section {
             Toggle(L10n.t("prefs.latest"), isOn: latestIsOn)
             if prefs.latestDate != nil {
@@ -162,6 +176,16 @@ struct PreferencesPane: View {
             }
         } header: {
             ShellSectionHead(title: "prefs.latest.head", line: "prefs.latest.brief", help: "prefs.latest.footer")
+        }
+    }
+
+    /// Moving what this device holds (#247, #253): taken away and read back, then sent to a
+    /// device nearby. Each group draws itself only where the shell handed it what it needs.
+    @ViewBuilder
+    private var move: some View {
+        if let session {
+            CarrySection(session: session)
+            NearbySection(session: session)
         }
     }
 
@@ -176,6 +200,20 @@ struct PreferencesPane: View {
             }
         } header: {
             ShellSectionHead(title: "prefs.askEvery.head", line: "prefs.askEvery.brief", help: "prefs.askEvery.footer")
+        }
+    }
+
+    /// What happens to a removed source's posts (#250): they go with it, or they stay. One
+    /// choice, in `askAgain`'s shape; Remove honours it without asking again.
+    private var removed: some View {
+        @Bindable var prefs = prefs
+        return Section {
+            Picker(L10n.t("prefs.removed"), selection: $prefs.removedPostsStay) {
+                Text(L10n.t("prefs.removed.go")).tag(false)
+                Text(L10n.t("prefs.removed.stay")).tag(true)
+            }
+        } header: {
+            ShellSectionHead(title: "prefs.removed.head", line: "prefs.removed.brief", help: "prefs.removed.footer")
         }
     }
 

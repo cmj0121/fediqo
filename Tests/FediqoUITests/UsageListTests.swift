@@ -102,17 +102,17 @@ struct UsageListTests {
 
     @Test("The long explanations are drawn only behind a (?), and every action is an icon")
     func footersAndActions() throws {
-        let files = try ["UsagePane", "UsageSources", "GoneSection"].map(Self.source)
+        let files = try ["UsagePane", "UsageSources", "GoneSection", "SpanSection"].map(Self.source)
         let all = files.joined()
         for (line, help) in [
             ("usage.cache.line", "prefs.cache.footer"), ("usage.drop.line", "prefs.drop.footer"),
-            ("usage.gone.line", "prefs.gone.footer"),
+            ("usage.gone.line", "prefs.gone.footer"), ("usage.span.line", "prefs.span.footer"),
         ] {
             #expect(all.contains("line: \"\(line)\", help: \"\(help)\")"), "\(help) is not behind its heading's (?)")
             #expect(!all.contains("L10n.t(\"\(help)\")"), "\(help) is still drawn inline")
         }
         // The questions' own buttons are #238's; every press on the page itself is an icon.
-        for name in ["prefs.cache.clear", "prefs.drop.copies", "prefs.password.forget", "prefs.gone.now"] {
+        for name in ["prefs.cache.clear", "prefs.drop.copies", "prefs.password.forget", "prefs.gone.now", "usage.span.now"] {
             #expect(all.contains("name: \"\(name)\""), "\(name) is not an icon button")
             #expect(!all.contains("Button(L10n.t(\"\(name)\")"), "\(name) is still a text button")
         }

@@ -175,14 +175,14 @@ struct MastodonWriteTests {
         let advertised = FixtureHTTP([
             "/api/v2/instance": .text(#"{"configuration":{"statuses":{"max_characters":2000}}}"#),
         ])
-        #expect(try await MastodonClient(http: advertised, host: host).statusLimit() == 2000)
+        #expect(MastodonWrite.limit(advertised: try await MastodonClient(http: advertised, host: host).introduction().profile?.statusLimit) == 2000)
 
         let silent = FixtureHTTP(["/api/v2/instance": .text("{}")])
-        #expect(try await MastodonClient(http: silent, host: host).statusLimit() == 500)
+        #expect(MastodonWrite.limit(advertised: try await MastodonClient(http: silent, host: host).introduction().profile?.statusLimit) == 500)
 
         let down = FixtureHTTP(["/api/v2/instance": .fail])
         await #expect(throws: (any Error).self) {
-            try await MastodonClient(http: down, host: host).statusLimit()
+            try await MastodonClient(http: down, host: host).introduction()
         }
     }
 }

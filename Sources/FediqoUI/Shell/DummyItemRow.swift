@@ -64,6 +64,10 @@ struct DummyItemRow: View {
     /// **a measurement, never a layout**: what a test compares against the held band, so "the
     /// band holds everything it is given" is measured rather than assumed. No screen sets it.
     var bandAsked = false
+    /// Where each of the row's four bands was laid out — **a measurement, never a layout**, like
+    /// `bandAsked`: what a test reads back to say the decorator is above the header, the header
+    /// above the post and the post above its marks. Nothing on any screen sets it.
+    var probe: RowBandProbe?
     /// Which attachment is on top. It belongs to the app rather than to this view, so that a
     /// refresh that replaces the list leaves a reader who turned to the third one looking at the
     /// third one. See `ShellDecks`.
@@ -110,6 +114,8 @@ struct DummyItemRow: View {
 
     /// Where a press on the quote goes (#214). See `ShellQuotes`.
     @Environment(\.shellQuotes) private var quotes
+    /// The hosts still on this device (#250); nothing — a preview, a test — means every host is.
+    @Environment(\.shellSourcesHere) private var sourcesHere
     @State private var hovering = false
     @State private var resolved = Written()
     @Environment(\.colorScheme) private var colorScheme
@@ -209,20 +215,21 @@ struct DummyItemRow: View {
     /// an acceptance line that has to be measurable.
     static let visRole: ShellType = .name
 
-    /// Three bands, and every row has all three whether or not it has anything to put
-    /// in them — **so every row in a timeline is one height** (#245, rule 6 of #242):
+    /// Three bands, and a fourth above them where the post has something to say about how it got
+    /// here — **and every row in a timeline is one height either way** (#245, rule 6 of #242):
     ///
+    ///     [decorator                                                            ]  only if any
     ///     [avatar][name                   ]     [source][visibility][timestamp  ]
-    ///     [decorator                      ]                        [            ]
     ///     [words, `bodyLines` of them     ]                        [ attachment ]
     ///     [marks                                                                ]
     ///
-    /// Who wrote it and when is one line; the words band is the attachment slot's height, held
-    /// open on a short post and cut on a long one, whose whole is in its thread; the marks are one
-    /// line on a wide page and two on a narrow one or at the accessibility sizes, on every row
-    /// alike. What happened to a post — a reply, a boost, a quote — is the words band's first
-    /// line rather than a band of its own, so a boosted or quoting post is not a line taller than
-    /// the post beside it: it gives its words one line fewer (`bodyLines`).
+    /// What happened to a post — a reply, a boost, a quote — is the row's first line, above who
+    /// wrote it, and a row with nothing to say there starts with its header (`decorator`). Who
+    /// wrote it and when is one line. The words band is the attachment slot's height plus the
+    /// decorator's line on a row that draws none, so the two kinds of row come to one height and
+    /// the picture is one size on both (`HeldBand`); the words get the line the decorator did not
+    /// take (`bodyLines`). The marks are one line on every page and at every type size, giving
+    /// way rather than breaking where the line is narrow (`actions`).
     var body: some View {
         // Worked out once for the pass and handed down, not read by each band that wants a
         // piece of it: before the hop below has answered, `written` builds the post's own
@@ -348,6 +355,7 @@ struct DummyItemRow: View {
             // The row itself is an accessibility container, and a container is not an
             // element — a trait put on it is announced to nobody. The headline is the
             // row's identity, so it is the element that carries the selection.
+            if decorated { decorator(openQuote) }
             headline(written)
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(selected ? .isSelected : [])
@@ -361,32 +369,48 @@ struct DummyItemRow: View {
                     personAction
                     quoteAction(openQuote)
                 }
-            mainBox(written, openQuote)
+                .modifier(Probed(band: .header, probe: probe))
+            mainBox(written)
+                .modifier(Probed(band: .content, probe: probe))
             quoteBand(openQuote)
             actions
+                .modifier(Probed(band: .marks, probe: probe))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .coordinateSpace(.named(RowBandProbe.space))
     }
 
-    /// What happened to this post before it got here — that it is a reply, that
-    /// somebody passed it on, that it quotes another. Drawn only when there is something to say,
-    /// as the first line of the words band (#245): it takes one of the words' lines rather than a
-    /// line of the row's own, so a row that has one is exactly as tall as a row that has none.
-    @ViewBuilder
+    /// What happened to this post before it got here — that it is a reply, that somebody passed
+    /// it on, that it quotes another — **as the row's first line, above who wrote it**, and only
+    /// on a row that has one: a row with nothing to say here starts with its header.
+    ///
+    /// **One height all the same** (#245). The line is paid for below the header: the words
+    /// band of a row that draws no decorator is this line taller (`HeldBand`), and its words
+    /// have the line this row's gave up (`bodyLines`). The picture beside them is the slot's
+    /// size on both, so a boosted post's picture is its neighbour's size.
+    ///
+    /// The decorator is laid over `DecoratorRoom` rather than being the line itself, so whatever it
+    /// says — a glyph, a long handle cut short — is exactly as tall as the room an undecorated
+    /// row's band holds for it, and the two kinds of row come out equal to the point.
     private func decorator(_ openQuote: (() -> Void)?) -> some View {
-        if decorated {
-            HStack(spacing: ShellSpace.snug) {
-                if item.answering != .nothing { answered }
-                if let who = item.boostedBy { boosted(by: who) }
-                // Beside the booster, on the same one line (#214): a boost of a quote is one line.
-                if let quote = item.quote {
-                    QuoteMark(quote: quote, lifted: quoteLifted, covered: covered, onOpen: openQuote)
-                }
+        DecoratorRoom()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .leading) { decoratorLine(openQuote) }
+    }
+
+    private func decoratorLine(_ openQuote: (() -> Void)?) -> some View {
+        HStack(spacing: ShellSpace.snug) {
+            if item.answering != .nothing { answered }
+            if let who = item.boostedBy { boosted(by: who) }
+            // Beside the booster, on the same one line (#214): a boost of a quote is one line.
+            if let quote = item.quote {
+                QuoteMark(quote: quote, lifted: quoteLifted, covered: covered, onOpen: openQuote)
             }
-            .shellFont(.mark)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-            .lineLimit(1)
         }
+        .shellFont(.mark)
+        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+        .lineLimit(1)
+        .modifier(Probed(band: .decorator, probe: probe))
     }
 
     /// Whether this post says what happened to it before it got here.
@@ -463,6 +487,7 @@ struct DummyItemRow: View {
         HStack(spacing: ShellSpace.snug) {
             sourcePill
                 .layoutPriority(0)
+            leftMark
             goneMark
             visibility
             postedAgo
@@ -587,6 +612,47 @@ struct DummyItemRow: View {
         L10n.t("item.gone", language: language)
     }
 
+    /// The source it was read through is no longer on this device, and the reader kept its posts
+    /// (#250): the row stays, and says so, right after the pill that names the host.
+    ///
+    /// **The gone mark's shape, word for word**: a glyph out of the accessibility tree and a word
+    /// that keeps its size, because it is the same kind of fact — the one thing on the meta line
+    /// nothing else on the row tells, and the reason nothing under it reaches the source. The
+    /// glyph is a quiet minus in a ring, not the bin: nobody deleted the post; the reader let the
+    /// server go. Ink dimmed like the pill's, so the mark reads as a note about the pill and not
+    /// as a second headline, in light and dark alike.
+    @ViewBuilder
+    private var leftMark: some View {
+        if Self.sourceLeft(item, here: sourcesHere) {
+            HStack(spacing: ShellSpace.tight) {
+                Image(systemName: "minus.circle")
+                    .accessibilityHidden(true)
+                Text(Self.leftWord())
+            }
+            .shellFont(.mark)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
+            .help(L10n.t("item.left.detail"))
+        }
+    }
+
+    /// Whether **every** source `item` came through is no longer among `here` (#250) — the gone
+    /// mark's rule (`goneEverywhere`): a post another source still carries is still there to read
+    /// and act on through that source, and the row is drawn as that copy
+    /// (`DummyItem.init(merging:here:)`). Nothing known of what is here — a preview, a test — is
+    /// every host here, so no row is marked by mistake.
+    static func sourceLeft(_ item: DummyItem, here: Set<String>?) -> Bool {
+        guard let here else { return false }
+        return item.sources.allSatisfy { !here.contains($0.host) }
+    }
+
+    /// What the left mark reads, in the shell's language — named for `goneWord`'s reason.
+    static func leftWord(language: DummyLanguage? = nil) -> String {
+        L10n.t("item.left", language: language)
+    }
+
     /// What the audience mark is called, in the shell's own language.
     ///
     /// A named function rather than a string built in the view body, for the reason the way out
@@ -673,14 +739,14 @@ struct DummyItemRow: View {
     /// picture stands in the band and never makes it taller. A post of pictures alone draws them
     /// where its words would be, side by side and filling the band (`picturePlace`).
     @ViewBuilder
-    private func mainBox(_ written: Written, _ openQuote: (() -> Void)?) -> some View {
+    private func mainBox(_ written: Written) -> some View {
         if inFull {
             // **`inFull` is the pane, and the pane is not a list under a thumb.** There is one
             // post, the reader opened it to read it, and holding it to the slot would cut the one
             // thing they asked for. See `inFull`.
             if narrow {
                 VStack(alignment: .leading, spacing: ShellSpace.snug) {
-                    wordsColumn(written, openQuote)
+                    wordsColumn(written)
                     if item.hasThumb { coveredThumb }
                 }
             } else {
@@ -692,15 +758,21 @@ struct DummyItemRow: View {
                 // lines of words held the card a slot's height away from the words it belongs
                 // to; a post that carries nothing and quotes nothing keeps the slot, and the
                 // height it measured.
+                //
+                // Where the slot is drawn it is the band's floor, and a row that draws no
+                // decorator keeps that line's room under its header, as it does in the list: a
+                // short post opened here measures the row it was in the list.
                 HStack(alignment: .top, spacing: ShellSpace.step) {
-                    wordsColumn(written, openQuote)
+                    wordsColumn(written)
                     if item.hasThumb || !drawsQuoteCard { coveredThumb }
                 }
+                .modifier(HeldBand(height: thumbSide, roomAbove: !decorated,
+                                   hold: item.hasThumb || !drawsQuoteCard ? .floor : .asked))
             }
         } else {
             HStack(alignment: .top, spacing: ShellSpace.step) {
                 if picturePlace == .column {
-                    picturesColumn(openQuote)
+                    picturesColumn()
                     // The slot stays open and empty, so the column ends where every row's does.
                     if !narrow {
                         Color.clear
@@ -708,11 +780,11 @@ struct DummyItemRow: View {
                             .accessibilityHidden(true)
                     }
                 } else {
-                    wordsColumn(written, openQuote)
+                    wordsColumn(written)
                     if !narrow || item.hasThumb { coveredThumb }
                 }
             }
-            .modifier(HeldBand(height: thumbSide, asked: bandAsked))
+            .modifier(HeldBand(height: thumbSide, roomAbove: !decorated, hold: bandAsked ? .asked : .held))
         }
     }
 
@@ -742,30 +814,23 @@ struct DummyItemRow: View {
     private static let unseen = CharacterSet.whitespacesAndNewlines
         .union(CharacterSet(charactersIn: "\u{200B}\u{200C}\u{200D}\u{2060}\u{FEFF}\u{00AD}"))
 
-    /// A post of pictures alone: what happened to it, then its pictures side by side where the
-    /// words would be, squares of whatever height the band leaves them — so the row is the height
-    /// of every other, and the pictures fill it.
-    private func picturesColumn(_ openQuote: (() -> Void)?) -> some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            decorator(openQuote)
-            GeometryReader { room in
-                AttachmentDeck(
-                    attachments: item.attachments, top: top, side: room.size.height, host: item.source.host,
-                    radius: Box.plate, player: player, onPlay: onPlay, onOpen: onView, onTurn: onTurn,
-                    onEnded: onEnded, spread: true, onOpenAt: onViewAt
-                )
-            }
-        }
+    /// A post of pictures alone: its pictures side by side where the words would be, squares of
+    /// the slot's side — the size a picture is on every other row, decorated or not.
+    private func picturesColumn() -> some View {
+        AttachmentDeck(
+            attachments: item.attachments, top: top, side: thumbSide, host: item.source.host,
+            radius: Box.plate, player: player, onPlay: onPlay, onOpen: onView, onTurn: onTurn,
+            onEnded: onEnded, spread: true, onOpenAt: onViewAt
+        )
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: thumbSide, alignment: .top)
+        .modifier(Probed(band: .picture, probe: probe))
     }
 
-    /// The words band's column: what happened to the post, then the post.
-    private func wordsColumn(_ written: Written, _ openQuote: (() -> Void)?) -> some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            decorator(openQuote)
-            coveredWords(written)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    /// The words band's column: the post. What happened to it is above the header (`decorator`).
+    private func wordsColumn(_ written: Written) -> some View {
+        coveredWords(written)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Whether the blur is on: the author put a cover here and the reader has not taken it off.
@@ -1081,19 +1146,33 @@ struct DummyItemRow: View {
     /// things. `bodyLines` is arithmetic about how much room the slot leaves once a title and a
     /// board name have taken their line; this is the one question a call site answers. A test can
     /// then assert the arithmetic without a screen and the rule without arithmetic.
-    var wordLines: Int? { inFull ? nil : bodyLines }
+    ///
+    /// **Under a cover, the lines the author's warning leaves.** The notice stands in the same
+    /// band above the words, so once the reader lifts the cover the two share the band's lines:
+    /// a warning cut at `coverLines` and the words under it at the rest. Without this a lifted
+    /// post with a long warning asked for more than the band holds and was cut mid-line.
+    var wordLines: Int? {
+        if inFull { return nil }
+        return item.covered ? max(1, bodyLines - coverLines) : bodyLines
+    }
 
     /// What fits in the slot's height beside it. A row that grows to whatever somebody
     /// wrote makes the list a series of unrelated heights; the rest of the post is a
     /// press away, which is what the thread is for.
     ///
-    /// Four lines, less one for each line the band gives to something else: a title, a board's
-    /// name, and what happened to the post (`decorator`).
+    /// Five lines, less one for each line given to something else: what happened to the post,
+    /// a title and a board's name.
+    ///
+    /// **The decorator's line is the fifth.** A row that draws one takes it above the header,
+    /// and the band under the header is the slot's height — four lines. A row that draws none
+    /// has that line's room at the foot of its band instead (`HeldBand`), and its words have it:
+    /// the row is the same height either way, the picture the same size, and a boosted post shows
+    /// one line of its words fewer than the post beside it.
     var bodyLines: Int {
-        var lines = 4
+        var lines = 5
+        if decorated { lines -= 1 }
         if item.title != nil { lines -= 1 }
         if item.source.kind == .board, item.board != nil { lines -= 1 }
-        if decorated { lines -= 1 }
         return max(1, lines)
     }
 
@@ -1124,6 +1203,7 @@ struct DummyItemRow: View {
                 onEnded: onEnded
             )
             .frame(width: slotSide, height: slotSide)
+            .modifier(Probed(band: .picture, probe: probe))
         } else {
             Color.clear
                 .frame(width: slotSide, height: slotSide)
@@ -1131,59 +1211,47 @@ struct DummyItemRow: View {
         }
     }
 
-    /// Every mark is a press, and a press has a floor it cannot be squeezed below. On
-    /// a narrow row, or at the largest sizes, the two groups take a line each rather than
-    /// the last of them sliding off the edge.
+    /// Every mark on one line, on every row, at every width and every type size (#245).
     ///
-    /// **Decided by the page and the type size, never by the row** (#245). Which marks a post
-    /// offers differs from row to row — a post of the reader's own can be taken back, a source
-    /// not signed in to offers none — so a line that broke where one row's marks ran long would
-    /// make that row taller than its neighbours. Every row on a page breaks the same way.
+    /// **Never two lines.** The marks used to take a line each for the two groups on a narrow
+    /// page or from `.xxLarge` up, which put a post's marks on two lines in a Mac window dragged
+    /// narrow. Now the line gives way instead of breaking: the gaps close, then each mark gives
+    /// up its touch room, its count and then the size of its glyph (`MarksLine`,
+    /// `DummyMarkButton`). Every mark is still there to press and still named.
+    ///
+    /// **One height on every row**, because the line is a press's floor tall whatever the marks
+    /// on it — so a row whose marks run long is not taller than its neighbours.
     private var actions: some View {
-        Group {
-            if Self.marksStack(narrow: narrow, size: typeSize) {
-                VStack(alignment: .leading, spacing: ShellSpace.tight) { passOn; keep }
-            } else {
-                HStack(spacing: ShellSpace.room) { passOn; keep; Spacer(minLength: 0) }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Whether the marks take two lines: on a narrow page, and from the second-largest ordinary
-    /// size up, where eight marks and a refusal no longer fit a wide column on one line.
-    static func marksStack(narrow: Bool, size: DynamicTypeSize) -> Bool {
-        narrow || size >= .xxLarge
-    }
-
-    private var passOn: some View {
-        HStack(spacing: ShellSpace.snug) {
+        MarksLine(spacing: ShellSpace.snug) {
             actMark(.answer)
             actMark(.boost)
             mark("quote.bubble", label: "item.act.quote", on: false) {
                 onToast(L10n.t("item.toast.quote"))
             }
             actMark(.favourite)
+            keep
+            refusal
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    @ViewBuilder
     private var keep: some View {
-        HStack(spacing: ShellSpace.snug) {
-            mark(marks.bookmarked ? "bookmark.fill" : "bookmark",
-                 label: "item.act.bookmark", on: marks.bookmarked) {
-                marks.bookmarked.toggle()
-                onToast(L10n.t(marks.bookmarked ? "item.toast.bookmark.on" : "item.toast.bookmark.off"))
-            }
-            mark(marks.kept ? "archivebox.fill" : "archivebox",
-                 label: "item.act.kept", on: marks.kept) {
-                marks.kept.toggle()
-                onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
-            }
-            actMark(.withdraw)
-            mark("ellipsis", label: "item.act.more", on: false) {
-                onToast(L10n.t("item.toast.more"))
-            }
-            refusal
+        mark(marks.bookmarked ? "bookmark.fill" : "bookmark",
+             label: "item.act.bookmark", on: marks.bookmarked) {
+            marks.bookmarked.toggle()
+            onToast(L10n.t(marks.bookmarked ? "item.toast.bookmark.on" : "item.toast.bookmark.off"))
+        }
+        // The marks that keep a post stand a little apart from the ones that pass it on.
+        .layoutValue(key: MarkGap.self, value: ShellSpace.room)
+        mark(marks.kept ? "archivebox.fill" : "archivebox",
+             label: "item.act.kept", on: marks.kept) {
+            marks.kept.toggle()
+            onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
+        }
+        actMark(.withdraw)
+        mark("ellipsis", label: "item.act.more", on: false) {
+            onToast(L10n.t("item.toast.more"))
         }
     }
 
@@ -1214,6 +1282,7 @@ struct DummyItemRow: View {
                             countWidth: countBox, touch: touch) {
                 perform(act)
             }
+            .modifier(ProbedMark(label: shown.spoken, probe: probe))
         }
     }
 
@@ -1237,6 +1306,7 @@ struct DummyItemRow: View {
         DummyMarkButton(symbol: symbol, count: nil, label: L10n.t(label),
                         on: on, quiet: !reading, glyph: glyph,
                         countWidth: countBox, touch: touch, action: action)
+            .modifier(ProbedMark(label: L10n.t(label), probe: probe))
     }
 
     // MARK: - The way out
@@ -1387,18 +1457,43 @@ struct DummyItemRow: View {
     }
 }
 
-/// The words band held to the slot's height — or, measured, left at the height it asks for.
+/// The words band held to its one height — the slot's side, and on a row that draws no
+/// decorator that line's room as well (`roomAbove`) — or, measured, left at the height it asks for.
+///
+/// **Equal to the point, and why.** A decorated row is `decorator + snug + header + snug + slot +
+/// snug + marks`; an undecorated one is `header + snug + (decorator + snug + slot) + snug + marks`.
+/// The band's extra room is the same `DecoratorRoom` the decorator is laid over, with the same
+/// `snug` the row's stack puts under it, so the two sums are the same numbers in another order —
+/// whatever the font measures on this machine.
 private struct HeldBand: ViewModifier {
+    enum Hold {
+        /// The band's height and no more: what a list draws.
+        case held
+        /// The band's height at least, and the rest of the post under it: the thread pane.
+        case floor
+        /// The height its contents ask for: a measurement, never a layout.
+        case asked
+    }
+
     let height: CGFloat
-    let asked: Bool
+    let roomAbove: Bool
+    let hold: Hold
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if asked {
+        switch hold {
+        case .asked:
             content.fixedSize(horizontal: false, vertical: true)
-        } else {
-            content
-                .frame(height: height, alignment: .top)
+        case .floor:
+            ZStack(alignment: .topLeading) {
+                room
+                content
+            }
+        case .held:
+            room
+                .overlay(alignment: .topLeading) {
+                    content.frame(maxHeight: .infinity, alignment: .top)
+                }
                 // The frame fixes what this band *takes*; this fixes what it can *draw*. A fixed
                 // frame does not stop a child rendering outside it, so the worst case the line
                 // limit still allows would have drawn over the marks below rather than made the
@@ -1406,6 +1501,29 @@ private struct HeldBand: ViewModifier {
                 // height" to mean anything.
                 .clipped()
         }
+    }
+
+    /// The band's one height, drawn as nothing.
+    private var room: some View {
+        VStack(spacing: ShellSpace.snug) {
+            if roomAbove { DecoratorRoom() }
+            Color.clear.frame(height: height)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The height of the decorator's line: one line of the smallest type on the row, drawn as nothing.
+/// The decorator is laid over it, and a band that has no decorator above it holds it open — one
+/// view for both, so the two cannot come to measure differently.
+private struct DecoratorRoom: View {
+    var body: some View {
+        Text(verbatim: " ")
+            .shellFont(.mark)
+            .lineLimit(1)
+            .hidden()
+            .accessibilityHidden(true)
     }
 }
 
@@ -1514,17 +1632,18 @@ private struct DummyMarkButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: ShellSpace.hair * 2) {
-                Image(systemName: symbol)
-                    .font(.system(size: glyph, weight: .medium))
-                    .frame(width: glyph, height: glyph)
-                if let count {
-                    Text(String(count))
-                        .shellFont(.reading)
-                        .frame(minWidth: countWidth, alignment: .leading)
-                }
+            // **What a mark gives up, in order, where its line is narrower than the marks**
+            // (`MarksLine`): the touch room around it, then the room held for its count, then the
+            // count, then the size of its glyph. Never its place on the line, and never its name.
+            ViewThatFits(in: .horizontal) {
+                face(count: count, side: glyph, floor: touch, countFloor: countWidth)
+                face(count: count, side: glyph, floor: 0, countFloor: countWidth)
+                face(count: count, side: glyph, floor: 0, countFloor: 0)
+                face(count: nil, side: glyph, floor: 0, countFloor: 0)
+                face(count: nil, side: glyph * 0.75, floor: 0, countFloor: 0)
+                face(count: nil, side: glyph * 0.5, floor: 0, countFloor: 0)
             }
-            .frame(minWidth: touch, minHeight: touch, alignment: .leading)
+            .frame(minHeight: touch)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1532,11 +1651,96 @@ private struct DummyMarkButton: View {
         .animation(.easeInOut(duration: 0.15), value: quiet)
         .help(label)
         .accessibilityLabel(label)
+        // The count is heard whether or not the line had room to draw it.
+        .accessibilityValue(Text(count.map { String($0) } ?? ""))
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func face(count: Int?, side: CGFloat, floor: CGFloat, countFloor: CGFloat) -> some View {
+        HStack(spacing: ShellSpace.hair * 2) {
+            Image(systemName: symbol)
+                .font(.system(size: side, weight: .medium))
+                .frame(width: side, height: side)
+            if let count {
+                Text(String(count))
+                    .shellFont(.reading)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .frame(minWidth: countFloor, alignment: .leading)
+            }
+        }
+        .frame(minWidth: floor, alignment: .leading)
     }
 
     private var tint: Color {
         if on { return ShellChrome.filament(colorScheme) }
         return quiet ? ShellChrome.inkFaint(colorScheme) : ShellChrome.inkDim(colorScheme)
+    }
+}
+
+extension EnvironmentValues {
+    /// The hosts of every source on this device, handed down once from the root (#250), so a row
+    /// drawn anywhere — a timeline, a thread, a search, a person's page — can say its source is no
+    /// longer here. Nothing means nobody said: every host is taken as here. See
+    /// `DummyItemRow.sourceLeft`.
+    @Entry var shellSourcesHere: Set<String>?
+}
+
+/// The row's four bands, top to bottom as they are drawn and heard.
+enum RowBand: Hashable {
+    case decorator
+    case header
+    case content
+    case marks
+    /// The picture beside the words, or a post of pictures alone.
+    case picture
+}
+
+/// Where a hosted row laid its bands out, in the row's own space. See `DummyItemRow.probe`.
+@MainActor
+final class RowBandProbe {
+    static let space = "DummyItemRow.bands"
+    var frames: [RowBand: CGRect] = [:]
+    /// Where each mark was laid out, by its name.
+    var marks: [String: CGRect] = [:]
+}
+
+/// Reports a band's frame to a probe, where one is handed in; draws nothing and changes nothing.
+private struct Probed: ViewModifier {
+    let band: RowBand
+    let probe: RowBandProbe?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let probe {
+            content.background(
+                GeometryReader { room in
+                    let _ = probe.frames[band] = room.frame(in: .named(RowBandProbe.space))
+                    Color.clear
+                }
+            )
+        } else {
+            content
+        }
+    }
+}
+
+/// Reports one mark's frame to a probe, by the mark's name; draws nothing and changes nothing.
+private struct ProbedMark: ViewModifier {
+    let label: String
+    let probe: RowBandProbe?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let probe {
+            content.background(
+                GeometryReader { room in
+                    let _ = probe.marks[label] = room.frame(in: .named(RowBandProbe.space))
+                    Color.clear
+                }
+            )
+        } else {
+            content
+        }
     }
 }

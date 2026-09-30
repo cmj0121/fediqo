@@ -63,6 +63,9 @@ struct DummyThreadPane: View {
     var onBack: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
+    /// The hosts still on this device (#250): a thread on a source that has gone says so under
+    /// the post, in place of the forum's sentence about nobody having answered.
+    @Environment(\.shellSourcesHere) private var sourcesHere
     /// The post at the top of the view, kept there as the thread renews under it (#198): an answer
     /// laid in above it moves what is below the reader, never the post they are reading.
     @State private var topID: String?
@@ -140,9 +143,12 @@ struct DummyThreadPane: View {
                         proxy.scrollTo(id, anchor: .center)
                     }
                 }
+                // The first row drawn — the first ancestor, or the opened post where there is
+                // none — which is the row `g` lit (`FediqoRootView.jumpedToTop`).
                 .onChange(of: jumpToTop) { _, _ in
+                    let first = conversation.ancestors.first?.id ?? conversation.post.id
                     withAnimation(.easeInOut(duration: 0.18)) {
-                        proxy.scrollTo(conversation.post.id, anchor: .top)
+                        proxy.scrollTo(first, anchor: .top)
                     }
                 }
             }
@@ -479,6 +485,11 @@ struct DummyThreadPane: View {
         switch conversations.standing(of: root.id) {
         case .unasked, .coming:
             ForumWaiting(line: L10n.t("thread.replies.loading"))
+                .padding(.top, ShellSpace.snug)
+        case .none where !RemoteImage.isHere(root.source.host, among: sourcesHere):
+            // Its source is no longer here (#250): nothing was asked and nothing will be, and
+            // the plain reason is the whole of what there is to say under it.
+            quiet(L10n.t("thread.source.left"))
                 .padding(.top, ShellSpace.snug)
         case .none:
             // The forum's own sentence for the same fact, so one thing is worded one way: the

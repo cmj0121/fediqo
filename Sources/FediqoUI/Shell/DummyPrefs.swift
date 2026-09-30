@@ -98,11 +98,24 @@ final class DummyPrefs {
         didSet { write("keepMonths", keepMonths.map(String.init) ?? "") }
     }
 
+    /// How much room this device gives the store and the picture copies together (#249), in
+    /// bytes; nil, the default, sets no limit. Past it the copies go first, then the oldest posts.
+    var roomBytes: Int? {
+        didSet { write("roomBytes", roomBytes.map(String.init) ?? "") }
+    }
+
     /// How many days a post its source deleted stays, marked, before it is let go (#179); nil, the
     /// default, keeps it until the reader says. The keep-for window above still wins where it is
     /// the shorter (`GoneWait`).
     var goneDays: Int? {
         didSet { write("goneDays", goneDays.map(String.init) ?? "") }
+    }
+
+    /// Whether a removed source's posts stay on this device (#250); false, the default, lets
+    /// them go with it, as they always did. Removing honours this without asking again, and the
+    /// question before it says which will happen.
+    var removedPostsStay: Bool {
+        didSet { write("removedPostsStay", removedPostsStay ? "1" : "") }
     }
 
     /// The last day every timeline shows (#22); nil, the default, shows up to now.
@@ -123,15 +136,39 @@ final class DummyPrefs {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        func read(_ name: String) -> String? { defaults.string(forKey: Self.prefix + name) }
-        keepMonths = Int(read("keepMonths") ?? "").flatMap { $0 > 0 ? $0 : nil }
-        goneDays = Int(read("goneDays") ?? "").flatMap { $0 > 0 ? $0 : nil }
-        latestDate = LatestDate(read("latestDate") ?? "")
-        askMinutes = Int(read("askMinutes") ?? "").flatMap { Self.waits.contains($0) ? $0 : nil } ?? 1
-        language = DummyLanguage(rawValue: read("language") ?? "") ?? .system
-        theme = DummyTheme(rawValue: read("theme") ?? "") ?? .system
-        fontSize = DummyFontSize(rawValue: read("fontSize") ?? "") ?? .standard
+        (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, language, theme, fontSize) = Self.read(defaults)
         L10n.language = language
+    }
+
+    /// Every choice read again off the preferences — after a take-away was read back (#247),
+    /// which replaced them under this object.
+    func reread() {
+        let read = Self.read(defaults)
+        if keepMonths != read.keepMonths { keepMonths = read.keepMonths }
+        if goneDays != read.goneDays { goneDays = read.goneDays }
+        if removedPostsStay != read.removedPostsStay { removedPostsStay = read.removedPostsStay }
+        if latestDate != read.latestDate { latestDate = read.latestDate }
+        if askMinutes != read.askMinutes { askMinutes = read.askMinutes }
+        if language != read.language { language = read.language }
+        if theme != read.theme { theme = read.theme }
+        if fontSize != read.fontSize { fontSize = read.fontSize }
+    }
+
+    private static func read(_ defaults: UserDefaults) -> (
+        keepMonths: Int?, goneDays: Int?, roomBytes: Int?, removedPostsStay: Bool, latestDate: LatestDate?, askMinutes: Int,
+        language: DummyLanguage, theme: DummyTheme, fontSize: DummyFontSize
+    ) {
+        func read(_ name: String) -> String? { defaults.string(forKey: Self.prefix + name) }
+        let keepMonths = Int(read("keepMonths") ?? "").flatMap { $0 > 0 ? $0 : nil }
+        let goneDays = Int(read("goneDays") ?? "").flatMap { $0 > 0 ? $0 : nil }
+        let roomBytes = Int(read("roomBytes") ?? "").flatMap { $0 > 0 ? $0 : nil }
+        let removedPostsStay = read("removedPostsStay") == "1"
+        let latestDate = LatestDate(read("latestDate") ?? "")
+        let askMinutes = Int(read("askMinutes") ?? "").flatMap { Self.waits.contains($0) ? $0 : nil } ?? 1
+        let language = DummyLanguage(rawValue: read("language") ?? "") ?? .system
+        let theme = DummyTheme(rawValue: read("theme") ?? "") ?? .system
+        let fontSize = DummyFontSize(rawValue: read("fontSize") ?? "") ?? .standard
+        return (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, language, theme, fontSize)
     }
 
     private static let prefix = "fediqo.dummy."

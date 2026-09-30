@@ -687,6 +687,7 @@ struct SourcePageTests {
             "account.sources.marks",
             "account.source.boards", "account.source.unread",
             "account.source.remove.label", "account.source.signout.label", "shell.account.summary",
+            "source.said.asOf",
         ]
         for key in keys {
             #expect(L10n.t(key, language: .taiwanese) != key, "\(key) is missing from the Chinese")

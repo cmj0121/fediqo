@@ -812,12 +812,20 @@ public struct SourceJoin: Sendable {
     /// is the same reason `subscribe(_:to:)` reads it off the offer: asking a stranger's server
     /// what it is twice for one errand is traffic nobody owes this app.
     public func begin(_ preview: SourcePreview) async throws -> JoinStep {
-        try await begin(
+        let step = try await begin(
             host: preview.host,
             kind: preview.kind,
             askingBoards: true,
             index: preview.boards
         )
+        // What the look heard the server say is kept with the source it has just become (#188),
+        // so a relaunch draws it before anything asks again. Only once there is a source to keep
+        // it with: a forum paused on its boards has not been added, and the store would refuse
+        // it anyway.
+        if case .joined = step, case .stated(let profile) = preview.profile {
+            await store.said(profile)
+        }
+        return step
     }
 
     /// The paused door — D28, and the first half of what a forum join actually is.

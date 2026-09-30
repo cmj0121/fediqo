@@ -40,6 +40,12 @@
 	<string>$(FEDIQO_SOURCE_REVISION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_fediqo._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Fediqo looks for your other devices nearby only while you move what this device holds to one of them, or hold what one sends. Nothing passes through anywhere but the two devices.</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.social-networking</string>
 	<key>UILaunchScreen</key>

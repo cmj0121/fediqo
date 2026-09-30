@@ -107,13 +107,17 @@ public enum TimelineQuery: Hashable, Identifiable, Sendable {
     /// they always were, and a post is drawn once from the copies they let through — so a
     /// timeline whose rule reaches only one of two copies still shows the post, drawn as that
     /// copy and naming that source, and a copy a rule hid is not named on the row. It has no default, so a list drawn without asking about it does not compile.
+    ///
+    /// `here` is the hosts still on this device (#250), for `DummyItem.merged(_:here:)`: a post
+    /// carried by a source since removed and by one still here is drawn as the latter's copy.
     public func items(
         from notes: [Note],
         among written: [TimelineDefinition] = [],
         index: TextIndex = TextIndex([]),
-        latest: LatestDate?
+        latest: LatestDate?,
+        here: Set<String>? = nil
     ) -> [DummyItem] {
         let shown = CompiledTimeline(definition(among: written), sources: []).shown(notes, index)
-        return DummyItem.merged(latest?.shown(shown) ?? shown)
+        return DummyItem.merged(latest?.shown(shown) ?? shown, here: here)
     }
 }

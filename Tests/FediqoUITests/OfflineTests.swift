@@ -115,7 +115,14 @@ struct OfflineTests {
 
     /// A session as a launch with no network builds it: the store read from this device, the
     /// sign-in read from the Keychain, and a network that answers nothing.
-    private func launch(signedIn: Bool = true) async throws -> (ShellSession, Network) {
+    /// What the source said about itself last run, as the store kept it (#188): a ceiling the
+    /// live document above disagrees with, so a refresh is told apart from a kept word.
+    private static let keptAt = Date(timeIntervalSince1970: 1_750_000_000)
+    private static let kept = SourceProfile(
+        host: host, kind: .mastodon, title: "Social, as it was", statusLimit: 1500
+    ).said(at: keptAt)
+
+    private func launch(signedIn: Bool = true, said: SourceProfile? = nil) async throws -> (ShellSession, Network) {
         let network = Network(Self.routes)
         let tokens = MemoryMastodonTokens()
         if signedIn {
@@ -124,8 +131,8 @@ struct OfflineTests {
                 scopes: Self.writing
             ))
         }
-        let store = ItemStore()
-        await store.add(Self.source)
+        // As a launch builds it: the source and its last word read back from disk together.
+        let store = ItemStore(sources: [Self.source], notes: [], said: said.map { [$0] } ?? [])
         await store.ingest(Self.held)
         let session = ShellSession(
             http: network, store: store,
@@ -265,6 +272,83 @@ struct OfflineTests {
         #expect(session.reload.failed.isEmpty)
         #expect(session.reload.line == nil)
         #expect(shown(session).contains("back online"), "what the source sent landed")
+    }
+
+    // MARK: - What a source said about itself (#188)
+
+    @Test("After a relaunch with the network off, a source's page says what it last said about itself, and when")
+    func sourceSaysWhatItSaid() async throws {
+        let (session, network) = try await launch(said: Self.kept)
+
+        let row = try #require(session.rows.first)
+        #expect(row.profile == .stated(Self.kept), "drawn from what was kept, before anything asks")
+        session.openSource(host: Self.host)
+        guard case .previewing(let preview, .joined, _) = session.stage else {
+            Issue.record("the source's page did not open")
+            return
+        }
+        #expect(preview.profile == .stated(Self.kept))
+        let line = try #require(SourcePreviewView.asOfLine(Self.kept, host: Self.host, language: .english))
+        #expect(line.hasPrefix("As \(Self.host) said it, "), "and says when: \(line)")
+        #expect(await network.asked.isEmpty)
+    }
+
+    @Test("The composer knows how long a post may be before anything is asked, and a dark ask leaves it so")
+    func composerKnowsTheCeiling() async throws {
+        let (session, network) = try await launch(said: Self.kept)
+        session.prepareCompose()
+        #expect(session.composeHost == Self.host)
+        #expect(session.postLimit(of: Self.host) == 1500, "what the source said, before anything is asked")
+        #expect(await network.asked.isEmpty)
+
+        await session.refreshPostLimit()
+
+        #expect(session.postLimit(of: Self.host) == 1500, "a dark network is not a new ceiling")
+        #expect(await network.asked == ["/api/v2/instance"], "asked behind the kept word, once")
+        #expect(await session.store.said(host: Self.host) == Self.kept, "and the kept word stands")
+
+        await network.light()
+        await session.refreshPostLimit()
+        #expect(session.postLimit(of: Self.host) == 2000, "the next open asks again, and hears the source now")
+        #expect(await session.store.said(host: Self.host)?.statusLimit == 2000)
+    }
+
+    @Test("A dark reload leaves what was kept standing, as of when it was said")
+    func darkReloadKeepsTheWord() async throws {
+        let (session, _) = try await launch(said: Self.kept)
+
+        await session.reload.timeline(.all, in: session)
+
+        #expect(session.rows.first?.profile == .stated(Self.kept))
+        #expect(await session.store.said(host: Self.host) == Self.kept, "not settled, and not lost")
+    }
+
+    @Test("When the network returns, the next reload replaces what was kept with what the source says now")
+    func reloadReplacesTheWord() async throws {
+        let (session, network) = try await launch(said: Self.kept)
+        await network.light()
+
+        await session.reload.timeline(.all, in: session)
+
+        let now = try #require(await session.store.said(host: Self.host))
+        #expect(now.statusLimit == 2000)
+        #expect(now.title == Self.host)
+        #expect(try #require(now.asOf) > Self.keptAt, "marked as of the ask that just landed")
+        #expect(session.rows.first?.profile == .stated(now), "the page draws the new word")
+        #expect(session.postLimit(of: Self.host) == 2000, "and the composer reads the new ceiling")
+        #expect(await network.asked.filter { $0 == "/api/v2/instance" }.count == 1, "one document, read twice")
+    }
+
+    @Test("A source this device kept no word of is asked by the composer, and the answer is kept from then on")
+    func composerAskKeepsTheWord() async throws {
+        let (session, network) = try await launch()
+        await network.light()
+        session.prepareCompose()
+
+        await session.refreshPostLimit()
+
+        #expect(session.postLimit(of: Self.host) == 2000)
+        #expect(await session.store.said(host: Self.host)?.statusLimit == 2000, "written down for the next launch")
     }
 
     @Test("What a server says it is is asked again once the network is back, not written off")

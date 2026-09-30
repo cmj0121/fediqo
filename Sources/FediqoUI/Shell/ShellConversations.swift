@@ -248,7 +248,12 @@ final class ShellConversations {
     /// is let be, and the next wait asks again. Cancelled — the thread left — nothing it brings
     /// lands, and the thread is as it was.
     func renew(_ item: DummyItem, in session: ShellSession) async {
-        guard inFlight[item.id] == nil, furtherWork[item.id] == nil else { return }
+        guard inFlight[item.id] == nil, furtherWork[item.id] == nil,
+              // A source no longer here is not asked on the wait either (#250): `read` would
+              // settle it as none at once, but a wait that spends a task on that every time is
+              // a wait about nothing.
+              session.sources.contains(where: { $0.host == item.source.host })
+        else { return }
         switch standing(of: item.id) {
         // Unasked too: a Clear lets go of an open thread, and it is asked for again here rather
         // than left saying it is on its way.
@@ -475,6 +480,10 @@ final class ShellConversations {
         // The pane draws an unasked standing as coming, so a post this returns from in silence
         // would wait for an answer nothing is going to bring.
         guard let held = session.heldNote(item.id),
+              // A post kept from a source since removed (#250) has no source to ask: nothing
+              // may reach it, and a wait that asks it again is a wait that is refused every
+              // time. Settled as a post with nobody under it, and the pane says why.
+              session.sources.contains(where: { $0.host == held.source.host }),
               // The server's own answer where it has given one — #86. A host that has stopped
               // being a Mastodon has no conversation this unit can ask it for, whatever the row
               // was stored as.

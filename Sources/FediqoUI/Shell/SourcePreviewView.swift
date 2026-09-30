@@ -185,6 +185,12 @@ struct SourcePreviewView: View {
                     }
                 }
                 figures(profile)
+                if let asOf = Self.asOfLine(profile, host: preview.host) {
+                    Text(asOf)
+                        .shellFont(.meta)
+                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, ShellSpace.pad)
@@ -259,6 +265,21 @@ struct SourcePreviewView: View {
                 }
             }
         }
+    }
+
+    /// When the server said all this, as one sentence — or nothing for a word just read off the
+    /// wire (#188). A kept word carries the moment this device wrote it down, so a source drawn
+    /// after a relaunch says when it was asked as well as what it answered, and a detail opened
+    /// with the network off is not mistaken for this morning's.
+    ///
+    /// The date and the time both, in the shell's language: two asks on one day are told apart,
+    /// and "as of Tuesday" would be a claim about which Tuesday.
+    static func asOfLine(_ profile: SourceProfile, host: String, language: DummyLanguage? = nil) -> String? {
+        guard let asOf = profile.asOf else { return nil }
+        let when = asOf.formatted(
+            Date.FormatStyle(date: .abbreviated, time: .shortened).locale(L10n.locale(language))
+        )
+        return String(format: L10n.t("source.said.asOf", language: language), host, when)
     }
 
     static func figureLine(_ profile: SourceProfile) -> Text? {

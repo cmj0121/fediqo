@@ -21,6 +21,13 @@ final class Launch {
     let forums: ForumSessions
     let mastodon: MastodonSessions
     let saver: StoreSaver
+    /// What takes the store away as one locked file and reads one back (#247). Built on what
+    /// this launch opened, so it writes the index this run writes and replaces it in place.
+    let carrier: StorePackager
+    /// The index on disk, measured for Usage (#194); nil where this run has none.
+    let file: StoreFile?
+    /// The limits' account beside the index (#251); nil where the folder could not be made.
+    let limits: LimitAccountFile?
     /// The index was written by a newer build and left alone; the root view says so. Cleared when
     /// the reader dismisses that, so it is said once a launch rather than once a window.
     var storeIsNewer: Bool
@@ -29,13 +36,28 @@ final class Launch {
     /// off would leave the store empty while the first frame draws, and every save asked for in
     /// that gap would have to be held back or it would write the empty store over the index.
     private init() {
+        // What a take-away or a read back that was killed midway left on disk goes first (#247):
+        // a plaintext index in scratch is nothing a later run reads.
+        let media = try? MediaCache.caches()
+        StorePackager.sweepLeftovers(directory: StoreFile.applicationSupportDirectory, media: media?.location)
         let opened = StoreFile.openApplicationSupport()
-        store = ItemStore(sources: opened.sources, notes: opened.notes)
+        store = ItemStore(sources: opened.sources, notes: opened.notes, said: opened.said)
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
         saver = StoreSaver(store: store, file: opened.file)
+        file = opened.file
+        // Only beside an index this run writes: a run that must not write the index (a newer
+        // build's, or one that could not be set aside) writes no lines about it either.
+        limits = opened.file == nil ? nil : try? LimitAccountFile(directory: StoreFile.applicationSupportDirectory)
         storeIsNewer = opened.storeIsNewer
+        carrier = StorePackager(
+            directory: StoreFile.applicationSupportDirectory, file: opened.file, store: store,
+            media: media, tokens: KeychainMastodonTokens(), credentials: KeychainCredentials(),
+            defaults: .standard, device: Self.deviceName,
+            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+            storeIsNewer: opened.storeIsNewer, saver: saver
+        )
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).
         FediqoRootView.onlyToSources(
@@ -59,9 +81,19 @@ final class Launch {
         )
         forums.signInAgain(hosts: opened.sources.filter { $0.kind == .discuz }.map(\.host))
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
-        if let media = try? MediaCache.caches() {
+        if let media {
             FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host))
         }
+    }
+
+    /// What this device calls itself, written into a take-away's header so the device it came
+    /// from can be named when it is read back.
+    static var deviceName: String {
+        #if os(macOS)
+        Host.current().localizedName ?? "Mac"
+        #else
+        UIDevice.current.name
+        #endif
     }
 
     /// As a run ends: the save, and then nothing of where this run went left behind (#219) — the
@@ -155,13 +187,39 @@ struct FediqoApp: App {
     #endif
     @Environment(\.scenePhase) private var scenePhase
 
+    /// The index's one measure on disk (#194), or nothing where this run has no index.
+    private var measureStore: (@Sendable () async -> Int)? {
+        guard let file = Launch.shared.file else { return nil }
+        return { file.bytesOnDisk() }
+    }
+
+    /// Gives the index back what rows let go of left in it (#249), or nothing where this run
+    /// has no index.
+    private var compactStore: (@Sendable () async throws -> Void)? {
+        guard let file = Launch.shared.file else { return nil }
+        let saver = Launch.shared.saver
+        // Where a save would run: after every save asked for before it and before any after,
+        // and never inside a read back's commit, which holds the same place (#247).
+        return { try await saver.exclusively { try await file.compact() } }
+    }
+
+    /// What the rows held weigh, whatever the file does (#249); nothing where this run has no index.
+    private var weighStore: (@Sendable () async -> Int)? {
+        guard let file = Launch.shared.file else { return nil }
+        return { file.bytesHeld() }
+    }
+
     var body: some Scene {
         WindowGroup {
             FediqoRootView(
                 store: Launch.shared.store, forums: Launch.shared.forums,
                 mastodon: Launch.shared.mastodon, persist: save,
+                measureStore: measureStore, compactStore: compactStore, weighStore: weighStore,
+                limits: Launch.shared.limits,
                 storeIsNewer: Launch.shared.storeIsNewer,
-                storeNoticeSeen: { Launch.shared.storeIsNewer = false }
+                storeNoticeSeen: { Launch.shared.storeIsNewer = false },
+                carrier: Launch.shared.carrier,
+                nearby: NWNearbyLink(), deviceName: Launch.deviceName
             )
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background {

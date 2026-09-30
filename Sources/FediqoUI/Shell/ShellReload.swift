@@ -598,7 +598,11 @@ final class ShellReload {
         await withTaskGroup(of: Void.self) { group in
             for ask in asks where sources.first(where: { $0.host == ask.host })?.kind.hasTimelines == true {
                 let asking = self.timed(session.http, for: .serverCheck, in: session)
-                group.addTask { await self.onSource(ask.host) { await session.flavours.ask(ask.host, through: asking) } }
+                group.addTask {
+                    await self.onSource(ask.host) {
+                        await session.flavours.ask(ask.host, through: asking, into: session.store)
+                    }
+                }
             }
         }
         guard !Task.isCancelled else { return }

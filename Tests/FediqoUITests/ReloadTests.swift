@@ -927,7 +927,10 @@ struct ReloadTests {
         let after = await session.store.snapshot()
         #expect(after.notes == before.notes)
         #expect(after.sources == before.sources)
-        #expect(after.revision == before.revision, "nothing for a save to write")
+        // The two Mastodons did answer what they are, and that word is kept (#188) — the one
+        // thing this reload could honestly write down. Nothing else moved the revision.
+        #expect(after.said.map(\.host).sorted() == [Self.one, Self.two].sorted())
+        #expect(after.revision == before.revision + 2, "one word each, and nothing else for a save to write")
     }
 
     @Test("r on an open Mastodon post asks that post and its context, unsigned, and the edit lands")

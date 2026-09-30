@@ -250,7 +250,7 @@ final class ShellSearch {
         let found = search.found(shown, index)
         // One post is one row here as it is on the timeline (#114): a search that drew a merged
         // row twice would be the complaint #10 left for later, arriving through the search field.
-        let items = DummyItem.merged(latest?.shown(found) ?? found)
+        let items = DummyItem.merged(latest?.shown(found) ?? found, here: Set(sources.map(\.host)))
         cached = (key, items)
         return items
     }

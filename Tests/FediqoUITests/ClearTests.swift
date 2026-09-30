@@ -351,7 +351,7 @@ struct ClearTests {
         func wanted(active: Bool) -> RemoteImage.Wanted {
             RemoteImage.Wanted(
                 url: address("avatar.png"), scale: 2, tier: .deck, have: false,
-                generation: 0, host: alpha, active: active
+                generation: 0, host: alpha, active: active, here: true
             )
         }
         #expect(wanted(active: true) != wanted(active: false), """

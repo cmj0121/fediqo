@@ -1,3 +1,4 @@
+import FediqoCore
 import SwiftUI
 
 /// Every question the app asks before something that cannot be undone, and the two notices that
@@ -27,16 +28,24 @@ enum ShellQuestion {
         )
     }
 
-    /// Removing a source. The boards it takes do not come back, so where there are any the line
-    /// itself names them; the (?) says the rest.
-    static func remove(host: String, boards: Int, language: DummyLanguage? = nil) -> ShellConfirmation {
-        ShellConfirmation(
+    /// Removing a source. The line says what will happen to its posts — they go, or they stay
+    /// as the reader chose on Preferences (#250, `postsStay`) — and the boards it takes do not
+    /// come back, so where there are any the line names them too; the (?) says the rest.
+    static func remove(
+        host: String, boards: Int, postsStay: Bool = false, language: DummyLanguage? = nil
+    ) -> ShellConfirmation {
+        let stay = postsStay ? ".stay" : ""
+        // Only the boards keys carry a count to format; the rest are said as written.
+        func said(_ key: String) -> String {
+            boards > 0
+                ? String(format: L10n.t("\(key)\(stay).boards", language: language), boards)
+                : L10n.t("\(key)\(stay)", language: language)
+        }
+        let line = postsStay || boards > 0 ? said("account.remove.line") : L10n.t("account.remove.detail", language: language)
+        let help = postsStay || boards > 0 ? said("account.remove.detail") : nil
+        return ShellConfirmation(
             symbol: "trash", title: String(format: L10n.t("account.remove.title", language: language), host),
-            line: boards > 0
-                ? String(format: L10n.t("account.remove.line.boards", language: language), boards)
-                : L10n.t("account.remove.detail", language: language),
-            help: boards > 0
-                ? String(format: L10n.t("account.remove.detail.boards", language: language), boards) : nil,
+            line: line, help: help,
             choices: [.init(yes, L10n.t("account.remove.confirm", language: language), role: .destructive)],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
@@ -109,6 +118,31 @@ enum ShellQuestion {
         )
     }
 
+    /// Giving the store less room than now (#249): the copies, and then the oldest posts, may go
+    /// at once.
+    static func tighten(room: Int, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "internaldrive",
+            title: String(format: L10n.t("prefs.room.tighten.title", language: language), UsagePane.size(room, language: language)),
+            line: L10n.t("prefs.room.tighten.line", language: language),
+            help: L10n.t("prefs.room.tighten.detail", language: language),
+            choices: [.init(yes, L10n.t("prefs.drop.confirm", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Clearing the limits' account (#251). **Plain, not a loss**: only the lines go, and they
+    /// were about posts already gone; nothing held goes with them.
+    static func clearAccount(language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "eraser", title: L10n.t("prefs.limits.clear.title", language: language),
+            line: L10n.t("prefs.limits.clear.line", language: language),
+            help: L10n.t("prefs.limits.clear.detail", language: language),
+            choices: [.init(yes, L10n.t("prefs.limits.clear.confirm", language: language), role: .plain)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     /// Letting go now of `posts` posts deleted at their source and `places` settled places (#179,
     /// #204): each counted apart in the title, and the line saying only what goes of each.
     static func letGo(posts: Int, places: Int, language: DummyLanguage? = nil) -> ShellConfirmation {
@@ -118,6 +152,23 @@ enum ShellQuestion {
             symbol: "trash", title: GoneSection.askLine(posts, places: places, language: language),
             line: L10n.t(line, language: language),
             help: GoneSection.askDetail(posts: posts, places: places, language: language),
+            choices: [.init(yes, L10n.t("prefs.gone.confirm", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Letting go of the posts of a span of days, from one source or every one (#248): the title
+    /// counts them, the line names the days and where they come from and that they do not come
+    /// back, and the (?) says what stays.
+    static func letGo(_ ask: SpanAsk, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "trash", title: L10n.count("prefs.span.ask", ask.posts, language: language),
+            line: String(
+                format: L10n.t("prefs.span.ask.line", language: language),
+                SpanSection.spanLabel(from: ask.from, to: ask.to, language: language),
+                SpanSection.whereLabel(ask.host, language: language)
+            ),
+            help: L10n.t("prefs.span.ask.detail", language: language),
             choices: [.init(yes, L10n.t("prefs.gone.confirm", language: language), role: .destructive)],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
@@ -140,6 +191,195 @@ enum ShellQuestion {
             line: L10n.t("store.newer.line", language: language),
             help: L10n.t("store.newer.detail", language: language),
             choices: [], cancel: L10n.t("store.newer.ok", language: language)
+        )
+    }
+
+    // MARK: - Taking away and reading back (#247, #252)
+
+    static let withPictures = "with"
+    static let withoutPictures = "without"
+
+    /// Whether the picture copies ride, with what each would come to on the line. Neither is a
+    /// loss; without is the one a key answers, being the smaller.
+    static func takeAway(_ weight: PackageWeight, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "square.and.arrow.up", title: L10n.t("carry.take.ask.title", language: language),
+            line: String(
+                format: L10n.t("carry.take.ask.line", language: language),
+                UsagePane.size(weight.withPictures, language: language),
+                UsagePane.size(weight.withoutPictures, language: language)
+            ),
+            help: L10n.t("carry.take.ask.help", language: language),
+            choices: [
+                .init(withoutPictures, L10n.t("carry.take.without", language: language), role: .keyed),
+                .init(withPictures, L10n.t("carry.take.with", language: language), role: .plain),
+            ],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// #252's question: how many posts, from which sources, taken away when — and, where this
+    /// device holds a store, that a yes replaces it, which is a loss and is drawn as one.
+    static func readBack(_ summary: PackageSummary, held: Bool, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let sources = summary.sources.map(\.host).joined(separator: ", ")
+        let day = summary.takenAt.formatted(
+            Date.FormatStyle(date: .abbreviated, time: .omitted).locale(L10n.locale(language))
+        )
+        var help = String(
+            format: L10n.t("carry.read.ask.help", language: language), sources, day, summary.device, summary.appVersion
+        )
+        if held { help = String(format: L10n.t("carry.read.ask.help.held", language: language), help) }
+        return ShellConfirmation(
+            symbol: "square.and.arrow.down",
+            title: L10n.count("carry.read.ask.title", summary.posts, language: language),
+            line: String(format: L10n.t("carry.read.ask.line", language: language), sources, day),
+            help: help,
+            choices: [held
+                ? .init(yes, L10n.t("carry.read.replace", language: language), role: .destructive)
+                : .init(yes, L10n.t("carry.read.go", language: language), role: .primary)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Why a take-away or a read back stopped, each its own sentence, and nothing to choose.
+    static func carryRefused(_ trouble: ShellCarry.Trouble, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let (key, line): (String, String)
+        switch trouble {
+        case .package(let refusal):
+            key = "carry.refused.\(refusal)"
+            line = L10n.t(key + ".line", language: language)
+        case .noRoom(let needed, let free):
+            key = "carry.refused.noRoom"
+            line = String(
+                format: L10n.t(key + ".line", language: language),
+                UsagePane.size(needed, language: language), UsagePane.size(free, language: language)
+            )
+        case .emptyPassword:
+            key = "carry.refused.empty"
+            line = L10n.t(key + ".line", language: language)
+        case .shortPassword:
+            key = "carry.refused.short"
+            line = String(format: L10n.t(key + ".line", language: language), PackageFormat.minPasswordCount)
+        case .indexIsNewer:
+            key = "carry.refused.indexNewer"
+            line = L10n.t(key + ".line", language: language)
+        case .unwound(let steps):
+            key = "carry.refused.unwound"
+            let named = steps.map { L10n.t("carry.step.\($0)", language: language) }.joined(separator: ", ")
+            line = String(format: L10n.t(key + ".line", language: language), named)
+        case .other(let said):
+            key = "carry.refused.other"
+            line = String(format: L10n.t(key + ".line", language: language), said)
+        }
+        return ShellConfirmation(
+            symbol: "exclamationmark.triangle", title: L10n.t(key + ".title", language: language),
+            line: line, help: nil, choices: [], cancel: L10n.t("store.newer.ok", language: language)
+        )
+    }
+
+    /// It is done: taken away, or read back with the count.
+    static func carryDone(_ done: ShellCarry.Done, language: DummyLanguage? = nil) -> ShellConfirmation {
+        switch done {
+        case .taken:
+            ShellConfirmation(
+                symbol: "checkmark.circle", title: L10n.t("carry.done.taken.title", language: language),
+                line: L10n.t("carry.done.taken.line", language: language), help: nil, choices: [],
+                cancel: L10n.t("store.newer.ok", language: language)
+            )
+        case .readBack(let summary):
+            ShellConfirmation(
+                symbol: "checkmark.circle", title: L10n.t("carry.done.read.title", language: language),
+                line: L10n.count("carry.done.read.line", summary.posts, language: language), help: nil, choices: [],
+                cancel: L10n.t("store.newer.ok", language: language)
+            )
+        }
+    }
+
+    // MARK: - Moving to and from a device nearby (#253, #6)
+
+    /// #252's question, asked on both devices: what would move, to or from which device, and —
+    /// on the one that will hold it — that a store here is replaced, which is a loss and is
+    /// drawn as one. Sign-ins alone (#6) are asked as that.
+    static func nearbyAsk(_ ask: ShellNearby.Ask, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let summary = ask.offer.summary
+        let sources = summary.sources.map(\.host).joined(separator: ", ")
+        let signInsOnly = summary.contents == .signInsOnly
+        let way = ask.receiving ? "hold" : "move"
+        let title = signInsOnly
+            ? String(format: L10n.t("nearby.ask.\(way).signIns.title", language: language), ask.peer)
+            : counted("nearby.ask.\(way).title", summary.posts, ask.peer, language: language)
+        let size = UsagePane.size(Int(ask.offer.fileBytes), language: language)
+        let line = String(format: L10n.t("nearby.ask.line", language: language), sources, size)
+        var help = String(
+            format: L10n.t(ask.receiving ? "nearby.ask.hold.help" : "nearby.ask.move.help", language: language),
+            ask.peer, summary.device, summary.appVersion
+        )
+        if ask.receiving, ask.held, !signInsOnly {
+            help = String(format: L10n.t("carry.read.ask.help.held", language: language), help)
+        }
+        let replaces = ask.receiving && ask.held && !signInsOnly
+        return ShellConfirmation(
+            symbol: ask.receiving ? "antenna.radiowaves.left.and.right" : "paperplane",
+            title: title, line: line, help: help,
+            choices: [replaces
+                ? .init(yes, L10n.t("carry.read.replace", language: language), role: .destructive)
+                : .init(yes, L10n.t(ask.receiving ? "nearby.ask.hold.go" : "nearby.ask.move.go", language: language), role: .primary)],
+            cancel: L10n.t("nearby.ask.refuse", language: language)
+        )
+    }
+
+    /// A count and a name in one sentence, singular where the count is one and the language has
+    /// it (`L10n.count`'s rule): the count is `%1$d` and the name `%2$@`.
+    static func counted(_ key: String, _ count: Int, _ name: String, language: DummyLanguage? = nil) -> String {
+        let one = key + ".one"
+        let singular = count == 1 ? L10n.t(one, language: language) : one
+        return String(format: singular == one ? L10n.t(key, language: language) : singular, count, name)
+    }
+
+    /// Before the sender joins: the mark its digits and the chosen device's session make, and
+    /// whether the other screen shows the same one. Not the same is the way out, back to the
+    /// list; nothing has joined either way.
+    static func nearbyMark(_ mark: String, peer: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "checkmark.seal",
+            title: String(format: L10n.t("nearby.mark.ask.title", language: language), mark),
+            line: String(format: L10n.t("nearby.mark.ask.line", language: language), peer),
+            help: L10n.t("nearby.mark.ask.help", language: language),
+            choices: [.init(yes, L10n.t("nearby.mark.ask.same", language: language), role: .primary)],
+            cancel: L10n.t("nearby.mark.ask.different", language: language)
+        )
+    }
+
+    /// Why a move nearby stopped, each its own sentence. A refused look nearby is said as that —
+    /// this device was not allowed to look — never as nobody being there.
+    static func nearbyRefused(_ refusal: NearbyRefusal, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let (key, line): (String, String)
+        switch refusal {
+        case .package(let inner):
+            return carryRefused(.package(inner), language: language)
+        case .noRoom(let needed, let free):
+            return carryRefused(.noRoom(needed: needed, free: free), language: language)
+        case .notAllowed, .wrongCode, .refusedThere, .lost, .malformed, .unsure, .guessing, .timedOut:
+            key = "nearby.refused.\(refusal)"
+            line = L10n.t(key + ".line", language: language)
+        case .other(let said):
+            key = "nearby.refused.other"
+            line = String(format: L10n.t(key + ".line", language: language), said)
+        }
+        return ShellConfirmation(
+            symbol: "exclamationmark.triangle", title: L10n.t(key + ".title", language: language),
+            line: line, help: nil, choices: [], cancel: L10n.t("store.newer.ok", language: language)
+        )
+    }
+
+    /// It is done, and where it went or came from.
+    static func nearbyDone(_ summary: PackageSummary, peer: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let line = summary.contents == .signInsOnly
+            ? L10n.t("nearby.done.signIns.line", language: language)
+            : L10n.count("carry.done.read.line", summary.posts, language: language)
+        return ShellConfirmation(
+            symbol: "checkmark.circle", title: String(format: L10n.t("nearby.done.title", language: language), peer),
+            line: line, help: nil, choices: [], cancel: L10n.t("store.newer.ok", language: language)
         )
     }
 

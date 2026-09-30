@@ -31,19 +31,92 @@ struct UsageSourceList: View {
                 }
                 .listRowInsets(EdgeInsets())
             }
+            // The sources removed whose posts stayed (#250), after the ones here: one row each,
+            // so the rows still sum to the total on Time. What the row briefs is the one fact
+            // about it, and its detail says what it holds and how it goes.
+            ForEach(Self.removed(session)) { source in
+                ShellListRow(
+                    id: source.host, title: source.host,
+                    brief: L10n.t("item.left"),
+                    figure: UsagePane.postsLine(session.holdings.posts(host: source.host)),
+                    selection: $lit,
+                    onOpen: { session.usageOpened = source.host },
+                    onStep: step
+                ) {
+                    UsageSourceMark(source: source)
+                }
+                .listRowInsets(EdgeInsets())
+            }
             .onAppear { if let returning { lit = returning } }
         } header: {
             ShellSectionHead(title: "prefs.cache", line: "usage.cache.line", help: "prefs.cache.footer")
         }
     }
 
+    /// The sources no longer here that this device still holds posts from (#250), by host: the
+    /// hosts the count knows (`holdings.bySource`, arrived and aside alike, #194) that are not
+    /// among the sources, each with the kind its notes were stamped with — nothing else
+    /// remembers a removed source. Sorted by host, since nothing else orders them.
+    static func removed(_ session: ShellSession) -> [Source] {
+        let here = Set(session.sources.map(\.host))
+        let kinds = Dictionary(
+            (session.notes + session.heldAside).map { ($0.source.host, $0.source.kind) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return session.holdings.bySource.keys
+            .filter { !here.contains($0) }
+            .sorted()
+            .map { Source(host: $0, kind: kinds[$0] ?? .unknown) }
+    }
+
+    /// The source `host` names on this list: one here, or one removed whose posts stayed.
+    static func source(_ host: String, in session: ShellSession) -> Source? {
+        session.sources.first { $0.host == host } ?? removed(session).first { $0.host == host }
+    }
+
     /// ↑ and ↓ move the lamp through the sources, and stop at either end.
     private func step(_ by: Int) {
-        lit = ShellListStep.stepped(session.sources.map(\.host), from: lit, by: by)
+        lit = ShellListStep.stepped(
+            session.sources.map(\.host) + Self.removed(session).map(\.host), from: lit, by: by
+        )
     }
 }
 
-/// Everything this device holds from one source, and the Clear that lets it go (#234).
+/// What this device holds from a source removed whose posts stayed (#250): the posts, and how
+/// they go. Nothing to clear — Remove took everything else with the source — so there is no
+/// press here; the posts go by the window, or by a later limit, like any other post.
+struct UsageRemovedSourceDetail: View {
+    let session: ShellSession
+    let source: Source
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Section {
+            ShellDetailHead(source.host, back: "usage.source.back", onBack: { session.usageOpened = nil }) {
+                UsageSourceMark(source: source)
+            }
+        }
+        Section {
+            reading(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
+            if let apart = UsagePane.asideLine(session.holdings.aside(host: source.host)) {
+                reading(Text(apart))
+            }
+            reading(Text(L10n.t("usage.removed.line")))
+        } header: {
+            ShellSectionHead(title: "prefs.cache", line: "item.left", help: "usage.removed.help")
+        }
+    }
+
+    private func reading(_ text: Text) -> some View {
+        text
+            .shellFont(.reading)
+            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+    }
+}
+
+/// Everything this device holds from one source, and the Clear that lets it go (#234). Its posts
+/// are everything the store holds from it, and the ones no timeline shows are said apart (#194).
 ///
 /// **Clear asks, rather than fires** (decision 29): it sets `session.clearing`, the one presenter
 /// on `FediqoRootView`, so a Clear here and on Account are one question. The password line is
@@ -66,6 +139,9 @@ struct UsageSourceDetail: View {
         Section {
             if cataloguesRead { catalogueLine }
             reading(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
+            if let apart = UsagePane.asideLine(session.holdings.aside(host: source.host)) {
+                reading(Text(apart))
+            }
             reading(Text(UsagePane.picturesLine(source, in: session, onDisk: onDisk)))
             postLine
             passwordLine

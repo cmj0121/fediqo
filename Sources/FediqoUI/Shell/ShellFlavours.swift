@@ -53,10 +53,19 @@ final class ShellFlavours {
         flavours[raw.lowercased()]
     }
 
-    /// **What to speak to this host** — the server's own answer, or what was written down at
-    /// join until it has given one.
-    func speaking(_ raw: String, storedAs stored: ProtocolKind) -> ProtocolKind {
-        guard case .said(let kind) = flavour(of: raw) else { return stored }
+    /// **What to speak to this host** — the server's own answer this run; until it has given
+    /// one, what it last said and this device kept (#188), where `kept` names it; and what was
+    /// written down at join behind both.
+    ///
+    /// A kept word stands only until this run asks: `.unsaid` — asked, and it would not say —
+    /// leaves the kept word standing rather than the join's note, because it is the later of the
+    /// two things the server itself said. A dark network leaves everything as it was.
+    func speaking(_ raw: String, storedAs stored: ProtocolKind, keptAs kept: ProtocolKind? = nil) -> ProtocolKind {
+        guard case .said(let kind) = flavour(of: raw) else {
+            // A kept `.unknown` is no word: spoken as it, the source would have no timelines to
+            // ask and so never be asked again, with only a Clear to recover it.
+            return kept.flatMap { $0 == .unknown ? nil : $0 } ?? stored
+        }
         return kind
     }
 
@@ -66,9 +75,10 @@ final class ShellFlavours {
     ///
     /// **Everything else about it is untouched.** The boards and lists the reader picked are
     /// theirs and not the server's to revise, and the host is the key both halves are filed
-    /// under. Only the name of what it speaks comes from the wire.
-    func spoken(_ source: Source) -> Source {
-        let kind = speaking(source.host, storedAs: source.kind)
+    /// under. Only the name of what it speaks comes from the wire, or from what the wire last
+    /// said and this device kept (`kept`).
+    func spoken(_ source: Source, keptAs kept: ProtocolKind? = nil) -> Source {
+        let kind = speaking(source.host, storedAs: source.kind, keptAs: kept)
         guard kind != source.kind else { return source }
         return Source(host: source.host, kind: kind, boards: source.boards, lists: source.lists)
     }
@@ -79,16 +89,21 @@ final class ShellFlavours {
     /// The transport is the caller's, so the deadline a reader is waiting under is the reload's
     /// one deadline rather than a second knob that can be set to disagree with it.
     ///
+    /// **The same document says what the server is like, and that goes into `store`** (#188) —
+    /// the one ask a run already makes, read twice rather than made twice, so a relaunch draws
+    /// what the server said last time before this run's ask comes back, and this run's answer
+    /// replaces it whole once it does. Nowhere, where no store is named.
+    ///
     /// Cancelled — the reader stopped the reload — it leaves the host exactly as it found it, so
     /// walking away is never mistaken for a server that would not say.
-    func ask(_ raw: String, through http: any HTTPClient) async {
+    func ask(_ raw: String, through http: any HTTPClient, into store: ItemStore? = nil) async {
         let host = raw.lowercased()
         if let running = inFlight[host] {
             await running.value
             return
         }
         guard flavours[host] == nil else { return }
-        let task = Task { @MainActor in await self.read(host, through: http) }
+        let task = Task { @MainActor in await self.read(host, through: http, into: store) }
         inFlight[host] = task
         await task.value
         inFlight[host] = nil
@@ -102,11 +117,15 @@ final class ShellFlavours {
         inFlight[host] = nil
     }
 
-    private func read(_ host: String, through http: any HTTPClient) async {
+    private func read(_ host: String, through http: any HTTPClient, into store: ItemStore?) async {
         do {
-            let kind = try await MastodonClient(http: http, host: host).flavour()
+            let (kind, profile) = try await MastodonClient(http: http, host: host).introduction()
             try Task.checkCancellation()
             flavours[host] = .said(kind)
+            // After the flavour is written, so the store's change is adopted under the name the
+            // server just gave; and only a word this app could read — a kind and nothing more
+            // leaves what was kept standing rather than replacing it with nothing.
+            if let store, let profile { await store.said(profile) }
         } catch let error where Cancellation.happened(error) {
             flavours[host] = nil
         } catch let error where DarkNetwork.caused(error) {

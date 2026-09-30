@@ -24,7 +24,9 @@ import Synchronization
 /// may still drop the error, because it is already in the log.
 public actor StoreSaver {
     /// Writes one snapshot to the index.
-    public typealias Write = @Sendable (_ sources: [Source], _ notes: [Note]) async throws -> Void
+    public typealias Write = @Sendable (
+        _ sources: [Source], _ notes: [Note], _ said: [SourceProfile]
+    ) async throws -> Void
 
     /// How a `flush(deadline:)` ended.
     public enum Outcome: Equatable, Sendable {
@@ -63,9 +65,31 @@ public actor StoreSaver {
     public init(store: ItemStore, file: StoreFile?) {
         var write: Write?
         if let file {
-            write = { sources, notes in try await file.save(sources: sources, notes: notes) }
+            write = { sources, notes, said in
+                try await file.save(sources: sources, notes: notes, said: said)
+            }
         }
         self.init(store: store, write: write)
+    }
+
+    /// Runs `body` where a save would run: after every save asked for before it, and before any
+    /// asked for after — so a read back that writes the index and replaces the store inside it
+    /// (#247) is never raced by a save writing the old snapshot over the new index.
+    public func exclusively<T: Sendable>(_ body: @escaping @Sendable () async throws -> T) async throws -> T {
+        let previous = tail
+        let task = Task<T, any Error> {
+            _ = await previous?.result
+            return try await body()
+        }
+        tail = Task { _ = try await task.value }
+        return try await task.value
+    }
+
+    /// What a launch's sweep found of a read back killed between moving the old index aside
+    /// and finishing (#247): said here, where the index's log is, and only as a count.
+    public static func reportHalfCommits(_ count: Int) {
+        guard count > 0 else { return }
+        log.notice("Found \(count, privacy: .public) read back(s) that did not finish; the old index is kept aside")
     }
 
     /// Writes what the store holds now, after every save asked for before this one.
@@ -121,7 +145,7 @@ public actor StoreSaver {
         let snapshot = await store.snapshot()
         guard snapshot.revision != written else { return }
         do {
-            try await write(snapshot.sources, snapshot.notes)
+            try await write(snapshot.sources, snapshot.notes, snapshot.said)
             written = snapshot.revision
         } catch {
             Self.log.error("Saving the index failed: \(String(describing: error), privacy: .public)")

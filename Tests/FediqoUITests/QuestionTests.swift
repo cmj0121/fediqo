@@ -17,6 +17,8 @@ struct QuestionTests {
         [
             ShellQuestion.remove(host: "a.example", boards: 0, language: language),
             ShellQuestion.remove(host: "a.example", boards: 3, language: language),
+            ShellQuestion.remove(host: "a.example", boards: 0, postsStay: true, language: language),
+            ShellQuestion.remove(host: "a.example", boards: 3, postsStay: true, language: language),
             ShellQuestion.signIn(host: "a.example", language: language),
             ShellQuestion.dropCopies(language: language),
             ShellQuestion.shorten(months: 6, language: language),
@@ -24,11 +26,41 @@ struct QuestionTests {
             ShellQuestion.letGo(posts: 4, places: 0, language: language),
             ShellQuestion.letGo(posts: 4, places: 2, language: language),
             ShellQuestion.letGo(posts: 0, places: 2, language: language),
+            ShellQuestion.letGo(SpanAsk(posts: 3, from: Date(), to: Date(), host: nil), language: language),
+            ShellQuestion.letGo(SpanAsk(posts: 1, from: Date(), to: Date(), host: "a.example"), language: language),
             ShellQuestion.removeTimeline(named: "Art", language: language),
+            ShellQuestion.tighten(room: 250_000_000, language: language),
+            ShellQuestion.clearAccount(language: language),
             ShellQuestion.storeNewer(language: language),
             ShellQuestion.signedOut(hosts: ["a.example", "b.example"], language: language),
+            ShellQuestion.takeAway(
+                PackageWeight(withoutPictures: 40_000_000, withPictures: 1_300_000_000, free: 0, holdsStore: true),
+                language: language
+            ),
+            ShellQuestion.readBack(carried, held: false, language: language),
+            ShellQuestion.readBack(carried, held: true, language: language),
+            ShellQuestion.carryRefused(.package(.altered), language: language),
+            ShellQuestion.carryRefused(.noRoom(needed: 2_000_000, free: 1_000), language: language),
+            ShellQuestion.carryDone(.readBack(carried), language: language),
+            ShellQuestion.nearbyAsk(.init(offer: nearby, peer: "a tablet", held: false, receiving: true), language: language),
+            ShellQuestion.nearbyAsk(.init(offer: nearby, peer: "a tablet", held: true, receiving: true), language: language),
+            ShellQuestion.nearbyAsk(.init(offer: nearby, peer: "a tablet", held: false, receiving: false), language: language),
+            ShellQuestion.nearbyRefused(.notAllowed, language: language),
+            ShellQuestion.nearbyMark("AB12", peer: "a tablet", language: language),
+            ShellQuestion.nearbyRefused(.wrongCode, language: language),
+            ShellQuestion.nearbyDone(carried, peer: "a tablet", language: language),
         ] + clearKeys.map { ShellQuestion.clear(host: "a.example", detailKey: $0, language: language) }
     }
+
+    /// What a take-away says it holds, as #252's question is asked from it.
+    private static let carried = PackageSummary(
+        sources: [.init(host: "a.example", kind: .mastodon), .init(host: "b.example", kind: .discuz)],
+        posts: 12, timelines: 2, takenAt: Date(timeIntervalSince1970: 1_800_000_000), withPictures: true,
+        bytes: 3_000, hasSecrets: true, device: "a laptop", appVersion: "0.7.0", entryCount: 5
+    )
+
+    /// What a device nearby offers, as both screens' question is asked from it.
+    private static let nearby = NearbyOffer(id: "o", summary: carried, fileBytes: 3_100)
 
     private static let clearKeys = [
         SourceRow.clearDetailKey(hasPassword: false, reachedSignIn: false),
@@ -132,9 +164,9 @@ struct QuestionTests {
             .appendingPathComponent("Sources/FediqoUI/Resources")
         let keys = [
             "withdraw.line", "store.newer.line", "account.signin.ask.line", "account.mastodon.ended.line",
-            "prefs.drop.copies.line", "prefs.keep.shorten.line", "prefs.gone.ask.line",
+            "prefs.drop.copies.line", "prefs.keep.shorten.line", "prefs.gone.ask.line", "prefs.span.ask.line",
             "prefs.gone.ask.line.places", "prefs.gone.ask.line.placesonly", "account.remove.line.boards",
-            "confirm.destructive.hint",
+            "account.remove.line.stay", "account.remove.line.stay.boards", "confirm.destructive.hint",
         ] + Self.clearKeys.map(ShellQuestion.clearLineKey)
         for lproj in ["en", "zh-TW", "zh-Hant"] {
             let strings = try String(

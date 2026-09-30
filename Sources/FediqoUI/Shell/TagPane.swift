@@ -87,6 +87,8 @@ struct HeldTag {
         let definition: TimelineDefinition
         let sent: Set<NoteKey>
         let latest: LatestDate?
+        /// The hosts still here (#250), as `DrawnTimeline.Key` carries them.
+        let hosts: Set<String>
     }
 
     let key: Key

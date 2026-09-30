@@ -92,14 +92,28 @@ public struct FediqoRootView: View {
         forums: ForumSessions = ForumSessions(),
         mastodon: MastodonSessions = MastodonSessions(),
         persist: (@MainActor () async -> Void)? = nil,
+        measureStore: (@Sendable () async -> Int)? = nil,
+        compactStore: (@Sendable () async throws -> Void)? = nil,
+        weighStore: (@Sendable () async -> Int)? = nil,
+        limits: (any LimitAccountStore)? = nil,
         storeIsNewer: Bool = false,
-        storeNoticeSeen: (@MainActor () -> Void)? = nil
+        storeNoticeSeen: (@MainActor () -> Void)? = nil,
+        carrier: (any StoreCarrier)? = nil,
+        nearby: (any NearbyLink)? = nil,
+        deviceName: String = ""
     ) {
         let session = ShellSession(
             http: http, store: store, forums: forums, mastodon: mastodon,
             timelines: WrittenTimelineStore(defaults: .standard)
         )
         session.persist = persist
+        session.carrier = carrier
+        session.nearbyLink = nearby
+        session.deviceName = deviceName
+        session.measureStore = measureStore
+        session.compactStore = compactStore
+        session.weighStore = weighStore
+        session.limitStore = limits
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)
         self.storeNoticeSeen = storeNoticeSeen
@@ -199,8 +213,13 @@ public struct FediqoRootView: View {
                 placeLinksInPage()
                 tags.placing = { tag, row in openTag(tag, from: row) }
                 placeQuotes()
+                await session.loadLimitAccount()
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
+                // Then the room (#249), judged once what is held is known and the months limit
+                // has had its turn — the one order in which each limit acts once at a launch.
+                session.roomBytes = prefs.roomBytes
+                await session.keepWithinRoom()
                 // The store has now said what is held, which is the first moment this launch can
                 // be asked where it lands (#101). Asked here and nowhere else, so it is asked
                 // once.
@@ -216,6 +235,8 @@ public struct FediqoRootView: View {
             }
             // Posts their source deleted go on this device's wait (#179).
             .modifier(LettingGoneGo(session: session))
+            // And the store is held within the room the person gave it (#249).
+            .modifier(KeepingWithinRoom(session: session))
             .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
@@ -330,7 +351,7 @@ public struct FediqoRootView: View {
             }
             // Remove's question, Clear's, and the notice that a server ended a sign-in: each a
             // modifier of its own rather than spelled here. See `HostQuestion` for why.
-            .modifier(HostQuestion.remove(session))
+            .modifier(HostQuestion.remove(session, prefs: prefs))
             .modifier(HostQuestion.clear(session))
             .modifier(EndedSignInNotice(session: session))
             .modifier(ActivitySheet(session: session))
@@ -408,6 +429,9 @@ public struct FediqoRootView: View {
             .environment(\.shellReader, linkReader)
             .environment(\.shellTags, tags)
             .environment(\.shellQuotes, quotes)
+            // The hosts still here, handed down once for the same reason: a row from a source
+            // since removed says so wherever it is drawn (#250), and only the root knows which.
+            .environment(\.shellSourcesHere, Set(session.sources.map(\.host)))
             .environment(\.locale, prefs.language.locale)
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
@@ -1015,20 +1039,37 @@ public struct FediqoRootView: View {
     }
 
     private func jumpListOrThreadToTop() -> Bool {
+        Self.jumpedToTop(
+            in: currentListIDs, standing: walk.standing, place: place,
+            selected: &selectedItemID, jump: &jumpToTop
+        )
+    }
+
+    /// `g`: the lamp on the first row of the list in front, and the list scrolled so that row
+    /// is at the top. Static so a test presses the rule the root does, as `moved` is.
+    ///
+    /// **The first row `j` and `k` walk, in a conversation too.** A conversation is drawn as its
+    /// ancestors, then the post it was opened from, then the answers — `DummyConversation.inOrder`,
+    /// the same list `k` climbs — so its top is the first ancestor, or the opened post where
+    /// there are none. It used to be the opened post always, which left every ancestor above
+    /// where `g` landed and, with the opened post already lit, moved nothing at all.
+    ///
+    /// The jump is bumped even where the lamp is already on the first row: the rows may have
+    /// been scrolled away from it, and the press is what brings them back. **No `default:`.**
+    static func jumpedToTop(
+        in rows: [String]?, standing: ShellStep?, place: ShellPlace,
+        selected: inout String?, jump: inout Int
+    ) -> Bool {
         guard place == .timeline else { return false }
-        // The top of a conversation is its own opening post, which is not the first row of the
-        // list the walk is standing on — every other case is. **No `default:`.**
-        switch walk.standing {
-        case .thread(let opened) where session.held(opened) != nil:
-            selectedItemID = opened
+        switch standing {
         // A page read out of a post is somebody else's page, and its top is its own business.
         case .link:
             return false
         case .person, .tag, .thread, nil:
-            guard let first = currentListItems.first else { return false }
-            selectedItemID = first.id
+            guard let first = rows?.first else { return false }
+            selected = first
         }
-        jumpToTop += 1
+        jump += 1
         return true
     }
 
@@ -1743,13 +1784,20 @@ private struct HostQuestion: ViewModifier {
     /// It is asked at all because Remove takes the board picks the reader made, and
     /// `ShellSession.clear`'s comment is the argument: pictures come back by themselves, a pick
     /// of eight boards out of forty does not.
-    static func remove(_ session: ShellSession) -> HostQuestion {
+    ///
+    /// **What happens to its posts is `prefs`' standing choice** (#250), read when the question
+    /// is asked and again when it is answered, so the line and the act agree: the reader is not
+    /// asked twice, and the one line says which of the two it will be.
+    static func remove(_ session: ShellSession, prefs: DummyPrefs) -> HostQuestion {
         HostQuestion(
             session: session, asking: \.removing,
             question: { host in
-                ShellQuestion.remove(host: host, boards: FediqoRootView.boards(of: host, in: session.sources))
+                ShellQuestion.remove(
+                    host: host, boards: FediqoRootView.boards(of: host, in: session.sources),
+                    postsStay: prefs.removedPostsStay
+                )
             },
-            act: { await session.remove(host: $0) }
+            act: { await session.remove(host: $0, keepingPosts: prefs.removedPostsStay) }
         )
     }
 

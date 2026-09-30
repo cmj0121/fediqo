@@ -87,8 +87,9 @@ struct ThreadReadingTests {
 
     /// **The diagnosis, as a fact about the code rather than about a screenshot.**
     ///
-    /// A forum row's words get `4 - 1` lines — four, less one for the title the thread carries —
-    /// so the post the reader opened the thread *in order to read* was cut to three. In the pane
+    /// A forum row's words get `5 - 1` lines — five where no decorator takes one, less one for the
+    /// title the thread carries — so the post the reader opened the thread *in order to read* was
+    /// cut to four. In the pane
     /// it gets none, and the arithmetic underneath is unchanged, which is why the two are separate
     /// properties: `bodyLines` is how much room the slot leaves, `wordLines` is whether the slot's
     /// rule applies at all.
@@ -96,18 +97,18 @@ struct ThreadReadingTests {
     func theOpeningPostIsNotCutInThePane() {
         let posts = ForumPosts()
         let listed = Self.row(Self.item(), posts: posts)
-        #expect(listed.bodyLines == 3, "a titled forum row leaves three lines for the words")
-        #expect(listed.wordLines == 3)
+        #expect(listed.bodyLines == 4, "a titled forum row leaves four lines for the words")
+        #expect(listed.wordLines == 4)
 
         let opened = Self.row(Self.item(), posts: posts, inFull: true)
         // The arithmetic is untouched. What changed is whether anything applies it.
-        #expect(opened.bodyLines == 3)
+        #expect(opened.bodyLines == 4)
         #expect(opened.wordLines == nil, "the post the reader opened is not line-limited")
 
-        // A row with no title keeps the fourth line, in both places — the fitting is about what
+        // A row with no title keeps the fifth line, in both places — the fitting is about what
         // else is in the band, and `inFull` is about which band this is.
         let untitled = Self.row(Self.item(title: nil), posts: posts)
-        #expect(untitled.bodyLines == 4)
+        #expect(untitled.bodyLines == 5)
         #expect(Self.row(Self.item(title: nil), posts: posts, inFull: true).wordLines == nil)
     }
 

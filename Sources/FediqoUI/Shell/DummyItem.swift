@@ -327,19 +327,29 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// Every copy of one post, drawn as one row: the first copy, naming the rest (#114).
     ///
     /// `copies` are one post's by `SamePost.gathered` and in the order they arrived, which is the
-    /// store's; the first is the row. **The row's identity is the first copy's own row**, so a
+    /// store's; the first is the row. **The row's identity is the lead copy's own row**, so a
     /// post held from one source keeps exactly the id it always had, and whatever is keyed by a
     /// row — the lamp, a mark, a place — acts on the merged row once.
-    init(merging copies: [Note]) {
-        self.init(copies[0])
-        otherCopies = copies.dropFirst().map(DummyItem.init)
+    ///
+    /// **Drawn as the first copy whose source is still here** (#250, `here`): a copy from a source
+    /// since removed leads only where every copy's source has gone, so a post another source
+    /// still carries is drawn, named and acted on through that source. Nothing said of what is
+    /// here is every host here — the order the copies arrived in, as before. **The id follows
+    /// the lead**, so it changes once when the first-arrived copy's source is removed and once
+    /// more if that source is added again: a lamp or a place keyed by the old id is lost at
+    /// that moment, as it would be for any row redrawn under a new key, and never otherwise.
+    init(merging copies: [Note], here: Set<String>? = nil) {
+        let lead = here.flatMap { here in copies.firstIndex { here.contains($0.source.host) } } ?? 0
+        self.init(copies[lead])
+        otherCopies = copies.enumerated().filter { $0.offset != lead }.map { DummyItem($0.element) }
     }
 
     /// Notes, in the order they are to be drawn, as rows: one per post, however many sources
     /// carried it. The one place a list of held notes becomes a list of rows, so the timeline and
-    /// the search cannot come to disagree about when two copies are one.
-    static func merged(_ notes: [Note]) -> [DummyItem] {
-        SamePost.gathered(notes).map(DummyItem.init(merging:))
+    /// the search cannot come to disagree about when two copies are one. `here` is the hosts
+    /// still on this device, for `init(merging:here:)`.
+    static func merged(_ notes: [Note], here: Set<String>? = nil) -> [DummyItem] {
+        SamePost.gathered(notes).map { DummyItem(merging: $0, here: here) }
     }
 
     /// One stored note, drawn as a row.

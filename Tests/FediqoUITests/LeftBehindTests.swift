@@ -281,6 +281,9 @@ struct LeftBehindTests {
             for loose in ["print(", "NSLog(", "os_log(", "debugPrint(", "dump("] {
                 #expect(!code.contains(loose), "\(path) writes with \(loose)")
             }
+            if code.contains("NetLog.nearby.") {
+                #expect(path == "Sources/FediqoCore/Nearby/NearbyLog.swift", "\(path) logs a move nearby not built by NearbyLog")
+            }
             if code.contains("Logger(subsystem") {
                 #expect(
                     ["Sources/FediqoCore/NetLog.swift", "Sources/FediqoPersistence/StoreSaver.swift"]

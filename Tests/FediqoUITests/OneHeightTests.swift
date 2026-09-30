@@ -248,6 +248,10 @@ struct OneHeightTests {
             ("answering, long warning", note(body: longPost, reply: Reply(handle: "@bob@first.example"),
                                              sensitive: true, spoiler: longPost)),
             ("thread", note(body: longPost, title: "A thread's title", board: "A board", kind: .discuz)),
+            ("answering thread", note(body: longPost, title: "A thread's title", board: "A board", kind: .discuz,
+                                      reply: Reply(handle: "@bob@first.example"))),
+            ("covered, pictured", note(body: longPost, attachments: [picture("a")], sensitive: true, spoiler: longPost)),
+            ("boosted, pictured", note(body: longPost, boostedBy: "Bob", attachments: [picture("a")])),
             ("everything", note(body: longPost, reply: Reply(handle: "@bob@first.example"), boostedBy: "Bob",
                                 attachments: [picture("a")], sensitive: true, spoiler: longPost, quote: quote)),
         ]
@@ -255,19 +259,23 @@ struct OneHeightTests {
 
     #if os(macOS)
     private static func rowHeight(
-        _ item: DummyItem, layout: ShellLayout, size: DynamicTypeSize, lifted: Bool = false, asked: Bool = false
+        _ item: DummyItem, layout: ShellLayout, size: DynamicTypeSize, lifted: Bool = false, asked: Bool = false,
+        acting: ItemActing = ItemActing(), inFull: Bool = false
     ) -> CGFloat {
         let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
-                               marks: .constant(DummyMarks()), bandAsked: asked, lifted: lifted, onToast: { _ in })
+                               marks: .constant(DummyMarks()), acting: acting, inFull: inFull, bandAsked: asked,
+                               lifted: lifted, onToast: { _ in })
             .environment(\.shellLayout, layout)
         return height(row, size: size, width: layout == .wide ? 720 : 390)
     }
 
     /// One case a layout and a size, so no case holds the main actor for long.
     @Test("Every post in a timeline is one height, wide and narrow, at the standard and the largest type",
-          arguments: [ShellLayout.wide, .narrow], [DynamicTypeSize.large, .accessibility3])
+          arguments: [ShellLayout.wide, .narrow], [DynamicTypeSize.large, .accessibility3, .accessibility5])
     func timelineRowIsOneHeight(_ layout: ShellLayout, _ size: DynamicTypeSize) {
-        let measured = Self.variants().map { ($0.0, Self.rowHeight($0.1, layout: layout, size: size)) }
+        var measured = Self.variants().map { ($0.0, Self.rowHeight($0.1, layout: layout, size: size)) }
+        // Every mark, counted: the longest marks line a row draws is the same one line.
+        measured.append(("every act", Self.rowHeight(Self.counted(), layout: layout, size: size, acting: Self.everyAct)))
         let heights = Set(measured.map(\.1))
         #expect(heights.count == 1, "\(layout) at \(size): \(measured.map { "\($0.0) \($0.1)" })")
     }
@@ -289,6 +297,12 @@ struct OneHeightTests {
             Self.note(body: Self.longPost, title: "A title", board: "A board", kind: .discuz,
                       reply: Reply(handle: "@bob@first.example")),
             Self.note(body: Self.longPost),
+            // And with no decorator, where the words have the decorator's line as well.
+            Self.note(body: Self.longPost, title: "A thread's title " + Self.longPost, board: "A board",
+                      kind: .discuz, attachments: [Self.picture("a")], sensitive: true, spoiler: Self.longPost),
+            Self.note(body: Self.longPost, attachments: [Self.picture("a")], sensitive: true, spoiler: Self.longPost),
+            Self.note(body: Self.longPost, title: "A title", board: "A board", kind: .discuz),
+            Self.note(body: Self.longPost, attachments: [Self.picture("a")]),
         ]
         for item in worst {
             for lifted in [false, true] {
@@ -297,6 +311,119 @@ struct OneHeightTests {
                 #expect(asked <= held, "\(layout) \(size) lifted \(lifted): asks \(asked), held \(held)")
             }
         }
+    }
+
+    /// Lays a row out at its own height and reads back where each band went.
+    private static func bands(_ item: DummyItem, layout: ShellLayout) -> [RowBand: CGRect] {
+        let probe = RowBandProbe()
+        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
+                               marks: .constant(DummyMarks()), probe: probe, onToast: { _ in })
+            .environment(\.shellLayout, layout)
+        let host = NSHostingView(rootView: row.frame(width: layout == .wide ? 720 : 390))
+        host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        host.layoutSubtreeIfNeeded()
+        return probe.frames
+    }
+
+    /// **What happened to a post is the row's first line** — above who wrote it, not the first
+    /// line of the words under the header — and then the post, then its marks.
+    @Test("A boosted, answering or quoting row reads decorator, header, post, marks, top to bottom",
+          arguments: [ShellLayout.wide, .narrow])
+    func decoratorHeadsTheRow(_ layout: ShellLayout) throws {
+        let quote = Quote(state: .pending)
+        let decorated = [
+            ("boosted", Self.note(body: Self.longPost, boostedBy: "Bob")),
+            ("answering", Self.note(body: "Short.", reply: Reply(handle: "@bob@first.example"))),
+            ("quoting", Self.note(body: Self.longPost, attachments: [Self.picture("a")], quote: quote)),
+        ]
+        for (name, item) in decorated {
+            let bands = Self.bands(item, layout: layout)
+            let decorator = try #require(bands[.decorator], "\(name): no decorator drawn")
+            let header = try #require(bands[.header])
+            let content = try #require(bands[.content])
+            let marks = try #require(bands[.marks])
+            #expect(decorator.height > 0)
+            #expect(decorator.maxY <= header.minY, "\(layout) \(name): decorator \(decorator), header \(header)")
+            #expect(header.maxY <= content.minY, "\(layout) \(name): header \(header), post \(content)")
+            #expect(content.maxY <= marks.minY, "\(layout) \(name): post \(content), marks \(marks)")
+        }
+    }
+
+    /// A post of the reader's own that offers every act, with counts: the most marks a row draws.
+    private static let everyAct = ItemActing(acts: PostActs(offered: Set(PostAct.allCases)), perform: { _ in })
+
+    private static func counted() -> DummyItem {
+        DummyItem(Note(
+            id: "n1", source: Source(host: "first.example", kind: .mastodon), author: "Ada",
+            handle: "@ada@author.example", body: "Short.", postedAt: posted, categories: [.public],
+            counts: Counts(replies: 12_345, reblogs: 67_890, favourites: 123_456), statusID: "1"
+        ))
+    }
+
+    /// **One line, where a narrow Mac window and the larger sizes used to break it in two.** Every
+    /// mark is laid out, at one height, inside the row.
+    @Test("A post's marks sit on one line at a narrow width and at the larger sizes",
+          arguments: [(ShellLayout.narrow, DynamicTypeSize.large), (.narrow, .xxLarge), (.wide, .xxLarge),
+                      (.narrow, .accessibility3), (.wide, .accessibility5)])
+    func marksOnOneLine(_ layout: ShellLayout, _ size: DynamicTypeSize) throws {
+        let probe = RowBandProbe()
+        let width: CGFloat = layout == .wide ? 720 : 390
+        let row = DummyItemRow(item: Self.counted(), catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
+                               marks: .constant(DummyMarks()), acting: Self.everyAct, probe: probe, onToast: { _ in })
+            .environment(\.shellLayout, layout)
+            .dynamicTypeSize(size)
+        let host = NSHostingView(rootView: row.frame(width: width))
+        host.frame = NSRect(origin: .zero, size: host.fittingSize)
+        host.layoutSubtreeIfNeeded()
+        let marks = probe.marks
+        #expect(marks.count == 8, "every mark is laid out: \(marks.keys.sorted())")
+        let middles = Set(marks.values.map { ($0.midY * 2).rounded() / 2 })
+        #expect(middles.count == 1, "\(layout) \(size): marks at \(marks.values.map(\.midY).sorted())")
+        let band = try #require(probe.frames[.marks])
+        for (name, frame) in marks {
+            #expect(frame.minX >= band.minX - 0.5 && frame.maxX <= band.maxX + 0.5,
+                    "\(layout) \(size): \(name) \(frame) outside \(band)")
+            #expect(frame.width > 0, "\(name) is drawn")
+        }
+    }
+
+    /// **No empty strip on a row that has nothing to say about how it got here**: it starts with
+    /// its header, and pays for the decorator's line under it — so it is its decorated
+    /// neighbour's height, with its picture the same size and at the same place under the header.
+    @Test("A row with no decorator starts with its header; its picture is its decorated neighbour's size",
+          arguments: [ShellLayout.wide, .narrow])
+    func undecoratedStartsWithItsHeader(_ layout: ShellLayout) throws {
+        let plain = Self.bands(Self.note(body: Self.longPost, attachments: [Self.picture("a")]), layout: layout)
+        let boosted = Self.bands(Self.note(body: Self.longPost, boostedBy: "Bob", attachments: [Self.picture("a")]),
+                                 layout: layout)
+        #expect(plain[.decorator] == nil, "nothing is drawn where there is nothing to say")
+        let header = try #require(plain[.header])
+        #expect(abs(header.minY) < 0.5, "\(layout): the header is the row's first line, at \(header.minY)")
+        let picture = try #require(plain[.picture])
+        let decoratedPicture = try #require(boosted[.picture])
+        #expect(picture.size == decoratedPicture.size, "\(layout): \(picture.size) and \(decoratedPicture.size)")
+        let content = try #require(plain[.content])
+        #expect(abs(picture.minY - content.minY) < 0.5, "the picture stands at the top of the band")
+        let decoratedContent = try #require(boosted[.content])
+        let plainMarks = try #require(plain[.marks])
+        let boostedMarks = try #require(boosted[.marks])
+        #expect(abs(plainMarks.minY - boostedMarks.minY) < 0.01, "\(layout): the marks start at one height")
+        #expect(content.height > decoratedContent.height, "the band holds the decorator's room below the header")
+        let pictures = Self.bands(Self.note(body: "", attachments: [Self.picture("a"), Self.picture("b")]), layout: layout)
+        let spread = try #require(pictures[.picture])
+        #expect(spread.height == decoratedPicture.height, "a post of pictures alone draws them the slot's size")
+    }
+
+    /// The thread pane holds nothing to a height, but a short post there still measures the row it
+    /// was in the list — decorated or not.
+    @Test("A short post in the thread pane is one height, with a decorator or without",
+          arguments: [DynamicTypeSize.large, .accessibility3])
+    func paneShortPostIsOneHeight(_ size: DynamicTypeSize) {
+        let heights = [Self.note(), Self.note(boostedBy: "Bob"), Self.note(attachments: [Self.picture("a")]),
+                       Self.note(reply: Reply(handle: "@bob@first.example"), attachments: [Self.picture("a")])]
+            .map { Self.rowHeight($0, layout: .wide, size: size, inFull: true) }
+        #expect(Set(heights).count == 1, "\(size): \(heights)")
+        #expect(heights.first == Self.rowHeight(Self.note(), layout: .wide, size: size), "the list row's height")
     }
 
     @Test("The largest type makes every timeline row taller alike")
@@ -363,24 +490,41 @@ struct OneHeightTests {
         #expect(AttachmentDeck.following(0, of: 9) == [1, 2, 3, 4])
     }
 
-    @Test("What happened to a post takes one of its lines, not a line of its own")
+    @Test("A row that draws a decorator gives its words one line fewer; a row that draws none keeps it")
     func decoratorTakesALine() {
         func lines(_ item: DummyItem) -> Int {
             DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
                          marks: .constant(DummyMarks()), onToast: { _ in }).bodyLines
         }
-        #expect(lines(Self.note()) == 4, "the wide layout's four lines stay four")
-        #expect(lines(Self.note(boostedBy: "Bob")) == 3)
-        #expect(lines(Self.note(reply: Reply(handle: "@bob@first.example"))) == 3)
-        #expect(lines(Self.note(title: "t", kind: .discuz)) == 3)
+        #expect(lines(Self.note()) == 5, "the decorator's line is the words' where there is none")
+        #expect(lines(Self.note(boostedBy: "Bob")) == 4)
+        #expect(lines(Self.note(reply: Reply(handle: "@bob@first.example"))) == 4)
+        #expect(lines(Self.note(quote: Quote(state: .pending))) == 4)
+        #expect(lines(Self.note(title: "t", kind: .discuz)) == 4, "a title still takes a line of the words")
+        #expect(lines(Self.note(title: "t", kind: .discuz, reply: Reply(handle: "@bob@first.example"))) == 3)
     }
 
-    @Test("The marks break the same way on every row: by the page and the type size alone")
-    func marksBreakByPage() {
-        #expect(!DummyItemRow.marksStack(narrow: false, size: .large))
-        #expect(!DummyItemRow.marksStack(narrow: false, size: .xLarge))
-        #expect(DummyItemRow.marksStack(narrow: false, size: .xxLarge))
-        #expect(DummyItemRow.marksStack(narrow: true, size: .large))
-        #expect(DummyItemRow.marksStack(narrow: false, size: .accessibility1))
+    @Test("The marks' line closes its gaps first, then narrows every mark, and always ends inside the width")
+    func marksLineGivesWay() {
+        let widths: [CGFloat] = [40, 40, 32, 40, 32, 32, 32, 32]
+        let gaps: [CGFloat] = [8, 8, 8, 8, 24, 8, 8, 8]
+        let idealMarks: CGFloat = widths.reduce(0, +)
+        let idealGaps: CGFloat = gaps.dropFirst().reduce(0, +)
+        let ideal: CGFloat = idealMarks + idealGaps
+        let roomy = MarksLine.fit(widths, gaps: gaps, least: 1, width: ideal + 10)
+        #expect(roomy.gaps == gaps && roomy.widths == widths, "room enough: nothing gives way")
+        let closer = MarksLine.fit(widths, gaps: gaps, least: 1, width: ideal - 30)
+        #expect(closer.widths == widths, "the gaps close before a mark is narrowed")
+        #expect(closer.gaps.dropFirst().allSatisfy { $0 >= 1 })
+        let closerMarks: CGFloat = closer.widths.reduce(0, +)
+        let closerGaps: CGFloat = closer.gaps.dropFirst().reduce(0, +)
+        let closerOver: CGFloat = closerMarks + closerGaps - (ideal - 30)
+        #expect(abs(closerOver) < 0.01)
+        let narrowed = MarksLine.fit(widths, gaps: gaps, least: 1, width: 150)
+        #expect(narrowed.gaps.dropFirst().allSatisfy { $0 == 1 })
+        let narrowedMarks: CGFloat = narrowed.widths.reduce(0, +)
+        let narrowedOver: CGFloat = narrowedMarks + 7 - 150
+        #expect(abs(narrowedOver) < 0.01, "every mark gives up its share")
+        #expect(narrowed.widths.allSatisfy { $0 > 0 }, "no mark is dropped")
     }
 }

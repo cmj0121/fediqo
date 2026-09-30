@@ -47,6 +47,8 @@ public struct StoreFile: Sendable {
         public let file: StoreFile?
         public let sources: [Source]
         public let notes: [Note]
+        /// What each source last said about itself, as of when (#188).
+        public let said: [SourceProfile]
         /// Where an unreadable index was moved, when one was. It is left there for a person, or a
         /// later version of this code, to look at; nothing in the app reads it again.
         public let setAside: URL?
@@ -55,12 +57,13 @@ public struct StoreFile: Sendable {
         public let storeIsNewer: Bool
 
         init(
-            file: StoreFile?, sources: [Source] = [], notes: [Note] = [], setAside: URL? = nil,
-            storeIsNewer: Bool = false
+            file: StoreFile?, sources: [Source] = [], notes: [Note] = [], said: [SourceProfile] = [],
+            setAside: URL? = nil, storeIsNewer: Bool = false
         ) {
             self.file = file
             self.sources = sources
             self.notes = notes
+            self.said = said
             self.setAside = setAside
             self.storeIsNewer = storeIsNewer
         }
@@ -85,7 +88,7 @@ public struct StoreFile: Sendable {
         do {
             let file = try StoreFile(at: directory)
             let snapshot = try file.load()
-            return Opened(file: file, sources: snapshot.sources, notes: snapshot.notes)
+            return Opened(file: file, sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said)
         } catch is Newer {
             return Opened(file: nil, storeIsNewer: true)
         } catch {
@@ -98,8 +101,36 @@ public struct StoreFile: Sendable {
 
     /// `open(at:now:)` on the index this app keeps in Application Support.
     public static func openApplicationSupport() -> Opened {
-        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return open(at: root.appendingPathComponent("Fediqo", isDirectory: true))
+        open(at: applicationSupportDirectory)
+    }
+
+    /// Where the index this app keeps lives, and what sits beside it (the limits' account, #251).
+    public static var applicationSupportDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Fediqo", isDirectory: true)
+    }
+
+    /// What the rows held weigh, whatever the file does (#249): the pages in use, without the
+    /// free ones a deleted row leaves behind until `compact()`. **What a limit judges each round
+    /// by**: `bytesOnDisk()` does not move until the file is rebuilt, and a rebuild that failed —
+    /// a full disk, a run cancelled — would otherwise read as rows that never went. Zero where it
+    /// cannot be asked.
+    public func bytesHeld() -> Int {
+        (try? db.read { db in
+            let pages = try Int.fetchOne(db, sql: "PRAGMA page_count") ?? 0
+            let free = try Int.fetchOne(db, sql: "PRAGMA freelist_count") ?? 0
+            let size = try Int.fetchOne(db, sql: "PRAGMA page_size") ?? 0
+            return max(0, pages - free) * size
+        }) ?? 0
+    }
+
+    /// Gives back the room that rows let go of left in the file (#249). SQLite keeps a deleted
+    /// row's pages for the next insert, so a save with fewer rows weighs what the last one did
+    /// until the file is rebuilt — and a limit judged by `bytesOnDisk()` would never see the
+    /// posts it let go of. Asked only after a limit acted, never on the ordinary save: it
+    /// rewrites the whole index.
+    public func compact() async throws {
+        try await db.writeWithoutTransaction { db in try db.execute(sql: "VACUUM") }
     }
 
     /// Moves `index.sqlite` and any journal SQLite left beside it to
@@ -118,40 +149,70 @@ public struct StoreFile: Sendable {
         let base = "index-unreadable-\(formatter.string(from: now))-\(random)"
         let aside = directory.appendingPathComponent(base + ".sqlite")
         try manager.moveItem(at: index, to: aside)
-        for suffix in ["-journal", "-wal", "-shm"] {
+        for suffix in sidecars {
             let sidecar = directory.appendingPathComponent(indexName + suffix)
             if manager.fileExists(atPath: sidecar.path) {
                 try manager.moveItem(at: sidecar, to: directory.appendingPathComponent(base + ".sqlite" + suffix))
             }
         }
+        // The limits' account (#251) is about this index and goes aside with it: lines naming
+        // what was let go of a store that is no longer there would be lines about nothing.
+        let account = directory.appendingPathComponent(LimitAccountFile.name)
+        if manager.fileExists(atPath: account.path) {
+            try? manager.moveItem(at: account, to: directory.appendingPathComponent(base + "-" + LimitAccountFile.name))
+        }
         return aside
     }
 
     private static let indexName = "index.sqlite"
+    /// What SQLite may leave beside the index: moved with it, and weighed with it.
+    static let sidecars = ["-journal", "-wal", "-shm"]
 
-    public func load() throws -> (sources: [Source], notes: [Note]) {
+    /// What the index weighs on disk right now: the file and any journal SQLite left beside it
+    /// (#194). **The one measure of the store's size**: Usage's figure is this, and a limit on
+    /// the store is held to the same call, so the two cannot disagree. Zero where there is no
+    /// file, or for a store not on disk at all.
+    public func bytesOnDisk() -> Int {
+        Self.bytesOnDisk(indexAt: db.path)
+    }
+
+    /// `bytesOnDisk()` for the index at `path`, and what SQLite keeps beside it.
+    static func bytesOnDisk(indexAt path: String) -> Int {
+        guard path != ":memory:", !path.isEmpty else { return 0 }
+        return ([""] + sidecars).reduce(0) { sum, suffix in
+            let values = try? URL(fileURLWithPath: path + suffix).resourceValues(forKeys: [.fileSizeKey])
+            return sum + (values?.fileSize ?? 0)
+        }
+    }
+
+    public func load() throws -> (sources: [Source], notes: [Note], said: [SourceProfile]) {
         try db.read { db in
-            let sources = try SourceRecord.fetchAll(db).map(\.source)
+            let records = try SourceRecord.fetchAll(db)
+            let sources = records.map(\.source)
+            let said = records.compactMap(\.saidProfile)
             let byHost = Dictionary(uniqueKeysWithValues: sources.map { ($0.host, $0) })
             // In the order they were written, which `ItemStore.snapshot` made the order they
             // arrived in: the copy of a post a merged row is drawn as is the one that came
             // first (#114), and a table read in no stated order is read in whatever order
             // SQLite likes. Stated, so that it is a guarantee rather than a habit.
             let notes = try NoteRecord.order(Column.rowID).fetchAll(db).compactMap { record in
-                byHost[record.host].map(record.note(from:))
+                (byHost[record.host] ?? record.formerSource).map(record.note(from:))
             }
-            return (sources, notes)
+            return (sources, notes, said)
         }
     }
 
     /// Empties both tables and writes `sources` and `notes` in their place, in one transaction,
-    /// on GRDB's queue rather than the caller's. The app saves through `StoreSaver`.
-    public func save(sources: [Source], notes: [Note]) async throws {
+    /// on GRDB's queue rather than the caller's. `said` is what each source last said about
+    /// itself (#188), written on its source's row; one of a host not in `sources` goes nowhere.
+    /// The app saves through `StoreSaver`.
+    public func save(sources: [Source], notes: [Note], said: [SourceProfile] = []) async throws {
+        let saidByHost = Dictionary(said.map { ($0.host, $0) }, uniquingKeysWith: { a, _ in a })
         try await db.write { db in
             try NoteRecord.deleteAll(db)
             try SourceRecord.deleteAll(db)
             for source in sources {
-                try SourceRecord(source).insert(db)
+                try SourceRecord(source, said: saidByHost[source.host]).insert(db)
             }
             for note in notes {
                 try NoteRecord(note).insert(db)
@@ -240,6 +301,21 @@ private var migrator: DatabaseMigrator {
     migrator.registerMigration("v4-gone") { db in
         try db.alter(table: "note") { t in
             t.add(column: "gone_at", .datetime)
+        }
+    }
+    // What a source last said about itself, and when (#188), or NULL. Every source already stored
+    // is one whose word this device kept nowhere, so the NULL each row takes is the truth, and
+    // the first ask after this build opens the store writes one in.
+    //
+    // **A migration id for `v3-holding`'s reason.** An older build ignores columns it does not
+    // read, so it would open this store without complaint and then, at its first save, write the
+    // source table back without them — a relaunch under this build finding every word gone. The
+    // id makes it refuse the store instead.
+    migrator.registerMigration("v5-said") { db in
+        try db.alter(table: "source") { t in
+            // A JSON `SaidRow`: what a row draws and nothing reads by, so one column.
+            t.add(column: "said", .text)
+            t.add(column: "said_at", .datetime)
         }
     }
     return migrator
@@ -335,11 +411,27 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
     /// A board list that is not JSON throws when the row is fetched, so a damaged row fails the
     /// load — and the load fails closed — rather than coming back as a source with no boards.
     var boards: [SubscriptionRow]
+    /// What this source last said about itself (#188), or nothing where it has not been heard.
+    /// A column behind its own migration id, for `holding`'s reason: an older build must refuse
+    /// this store rather than save it back without every word.
+    var said: SaidRow?
+    /// When `said` was said. Nothing where `said` is nothing.
+    var said_at: Date?
 
-    init(_ source: Source) {
+    init(_ source: Source, said profile: SourceProfile?) {
         host = source.host
         kind = source.kind.rawValue
         boards = source.boards.map(SubscriptionRow.init) + source.lists.map(SubscriptionRow.init)
+        said = profile.map(SaidRow.init)
+        said_at = profile?.asOf
+    }
+
+    /// The word this row keeps, marked as of when — or nothing where either half is missing, or
+    /// the kind is one this build cannot name: a word with no moment is one nothing could draw as
+    /// said then.
+    var saidProfile: SourceProfile? {
+        guard let said, let said_at else { return nil }
+        return said.profile(host: host, asOf: said_at)
     }
 
     var source: Source {
@@ -352,6 +444,56 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
             lists: boards.compactMap { row in
                 row.list.map { ListSubscription(id: $0, name: row.name) }
             }
+        )
+    }
+}
+
+/// `SourceProfile` as `source.said` writes it (#188): every field the page draws, and none of
+/// the host or the moment, which are the row's own columns. Core's `SourceProfile` stays free of
+/// a storage format; this is the storage format.
+///
+/// **Every field optional, so a word written before a field existed still reads.** A registration
+/// this build does not know reads as nothing said, never as a guess; a kind it does not know is
+/// no word at all (`profile(host:asOf:)`), because a kept `.unknown` would silence the ask that
+/// could correct it.
+private struct SaidRow: Codable {
+    var kind: String?
+    var title: String?
+    var summary: String?
+    var thumbnail: URL?
+    var activeMonth: Int?
+    var statusLimit: Int?
+    var people: Int?
+    var posts: Int?
+    var registration: String?
+    var readsWithoutAccount: Bool?
+    var rules: [String]?
+
+    init(_ profile: SourceProfile) {
+        kind = profile.kind.rawValue
+        title = profile.title
+        summary = profile.summary
+        thumbnail = profile.thumbnail
+        activeMonth = profile.activeMonth
+        statusLimit = profile.statusLimit
+        people = profile.people
+        posts = profile.posts
+        registration = profile.registration?.rawValue
+        readsWithoutAccount = profile.readsWithoutAccount
+        rules = profile.rules.isEmpty ? nil : profile.rules
+    }
+
+    func profile(host: String, asOf: Date) -> SourceProfile? {
+        guard let kind = kind.flatMap(ProtocolKind.init(rawValue:)), kind != .unknown else { return nil }
+        return SourceProfile(
+            host: host, kind: kind, title: title,
+            summary: summary,
+            // Admitted through `Host.fetchableURL` before it was written, as every address in
+            // `NoteFacts` was; read back as the rows' pictures are.
+            thumbnail: thumbnail,
+            activeMonth: activeMonth, statusLimit: statusLimit, people: people, posts: posts,
+            registration: registration.flatMap(SourceProfile.Registration.init(rawValue:)),
+            readsWithoutAccount: readsWithoutAccount, rules: rules ?? [], asOf: asOf
         )
     }
 }
@@ -417,6 +559,12 @@ private struct NoteFacts: Codable {
     /// the network off. Additive and optional for `boosted`'s reasons: a row written before reads
     /// as one that quotes nothing until a read says otherwise, and an older build ignores the key.
     var quote: QuoteRow?
+    /// `Note.source.kind` (#250), so a note kept after its source was removed still knows what
+    /// kind of server it was read through: `load()` has no source row to take that from. Written
+    /// on every row and read only where the host has no source row. Additive and optional for
+    /// `boosted`'s reasons: a row written before reads as none, and such a row always has a
+    /// source row, since nothing before this kept a note past its source.
+    var kind: String?
 }
 
 /// `Quote` as `NoteFacts` writes it: the state in the source's spelling, and the quoted post.
@@ -683,13 +831,24 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
                 .sorted { $0.category < $1.category },
             audience: note.audience?.rawValue,
             counts: CountsRow(note.counts),
-            quote: note.quote.map(QuoteRow.init)
+            quote: note.quote.map(QuoteRow.init),
+            kind: note.source.kind.rawValue
         )
     }
 
-    /// The note this row holds, stamped with `source` — the row `load()` read for this host.
-    /// The note table keeps no copy of a source; `load()` drops a note whose host has no source
-    /// row, since a note from a server nobody follows is one nothing should draw.
+    /// The source a note kept past its source's removal is stamped with (#250): the host, and
+    /// the kind `facts` wrote down. Its boards and lists are gone with the source row, which is
+    /// right — a row draws by host and kind, and a category is the note's own. Nothing where the
+    /// row wrote no kind, which is a row from before this and a host nobody follows: nothing
+    /// should draw it, as before.
+    var formerSource: Source? {
+        facts.kind.flatMap(ProtocolKind.init(rawValue:)).map { Source(host: host, kind: $0) }
+    }
+
+    /// The note this row holds, stamped with `source` — the row `load()` read for this host, or
+    /// `formerSource` where that row has gone and the reader kept the posts (#250). The note
+    /// table keeps no copy of a source's boards; `load()` drops a note whose host has neither,
+    /// since a note from a server nobody follows is one nothing should draw.
     ///
     /// Categories come back as they went in, an empty set included: what a note arrived through
     /// is a fact about it, and filling in `.public` for none would put it somewhere it was never

@@ -1453,6 +1453,9 @@ struct ForumPostBand: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.shellPlaceIsActive) private var placeIsActive
+    /// The hosts still on this device (#250): a band on a forum that has gone asks it nothing,
+    /// and where the words were never read it draws nothing rather than a wait or a refusal.
+    @Environment(\.shellSourcesHere) private var sourcesHere
 
     /// How long a row must stay before it costs somebody a request.
     ///
@@ -1483,6 +1486,9 @@ struct ForumPostBand: View {
         let settled: Bool
         let generation: Int
         let active: Bool
+        /// Whether the forum is still here (#250), in the identity for `RemoteImage.Wanted`'s
+        /// reason: a forum added again re-fires the ask on the rows kept from it.
+        let here: Bool
     }
 
     var body: some View {
@@ -1490,7 +1496,8 @@ struct ForumPostBand: View {
         // band on screen re-stamps its interest between one arrival and the next; a band that
         // stops reading looks infinitely stale to the eviction predicate however recently it was
         // drawn. Do not move this, and do not wrap this view in an `EquatableView`.
-        let reading = posts.reading(thread, opened: inFull)
+        let here = RemoteImage.isHere(thread.host, among: sourcesHere)
+        let reading = Self.settled(posts.reading(thread, opened: inFull), here: here)
         // Read in `body` for the same reason, and drawn above the words the way `ForumReplyRow`
         // draws a reply's: whoever was quoted spoke first, so their sentence comes first.
         let quoted = Self.quotations(posts.quoted(of: thread), inFull: inFull)
@@ -1508,7 +1515,8 @@ struct ForumPostBand: View {
                 thread: thread,
                 settled: !posts.fetches(thread, opened: inFull),
                 generation: posts.generation,
-                active: placeIsActive
+                active: placeIsActive,
+                here: here
             )
         ) {
             // Decision 20: a post is fetched only for the place the reader is in. **Only the
@@ -1517,11 +1525,23 @@ struct ForumPostBand: View {
             //
             // **And in a list, only a thread the reader's boards make theirs** — the points guard,
             // `ForumPosts.readsWhenReached`. The opened thread (`inFull`) is the reader's choice.
-            guard placeIsActive, posts.fetches(thread, opened: inFull) else { return }
+            guard placeIsActive, here, posts.fetches(thread, opened: inFull) else { return }
             // Cancelled by the row going away, which is the whole point of it. A thrown
             // cancellation here means this row did not stay, so nothing is asked for.
             do { try await Task.sleep(for: Self.settle) } catch { return }
             await posts.fetch(thread)
+        }
+    }
+
+    /// What the band draws of `reading` where its forum is no longer here (#250): the words where
+    /// they were read, and silence where they were not — a wait nothing will end, or a refusal
+    /// with a retry that can only refuse, would each be this app talking about a server the
+    /// reader let go of. Every reading as it is where the forum is here.
+    static func settled(_ reading: ForumReading, here: Bool) -> ForumReading {
+        guard !here else { return reading }
+        switch reading {
+        case .coming, .absent, .unread: return .silent
+        case .words, .withheld, .silent: return reading
         }
     }
 
