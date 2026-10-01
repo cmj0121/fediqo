@@ -1,3 +1,4 @@
+import FediqoCore
 import Foundation
 import SwiftUI
 
@@ -138,11 +139,22 @@ struct ShellFront: Equatable, Sendable {
 /// **The shape is versioned** — this build writes `{"version":1,"timeline":…}` with `lamp`, `top`
 /// and `thread` where the place names them. **Any later shape change bumps `version`.** The load
 /// **fails closed**, as `WrittenTimelineStore`'s does: another version, a field this build does
-/// not know or a value of another type is no place, and is never written over. A timeline id this
-/// build does not know is the one thing read past, as All — the same answer `TimelineQuery` gives
-/// everywhere else.
+/// not know, a value of another type or one larger than any place this build writes (`maxBytes`)
+/// is no place, and is never written over — not by a move, not by a source removed, not as
+/// nothing comes to be joined. A timeline id this build does not know is the one thing read past,
+/// as All — the same answer `TimelineQuery` gives everywhere else.
+///
+/// **One exception, and it is not this type's to decide**: a place a read back brought that this
+/// build cannot read is taken away (`discardUnreadable()`, asked by `ShellSession.adoptReadBack`
+/// alone). What stays unread on a device is what a newer build of the app wrote there, and is
+/// that build's to come back to; what arrives in a package was never this device's, and kept it
+/// would switch coming back off here for good.
 struct ReadingPlaceStore {
     static let version = 1
+
+    /// More than a place can be: a timeline's id and three row ids, a few hundred bytes. What
+    /// is larger is not read at all, so nothing that came from outside is parsed at any length.
+    static let maxBytes = 4096
 
     let defaults: UserDefaults
     var key = "fediqo.place"
@@ -157,13 +169,51 @@ struct ReadingPlaceStore {
 
     /// Written only where it differs from what is kept: the pane reports a new top
     /// row on every row that passes, and most of what it reports is the place already here.
-    /// Refused while what is kept cannot be read: it is never written over, whoever asks.
-    func save(_ place: ReadingPlace) {
+    /// Refused while what is kept cannot be read: it is never written over, whoever asks — and
+    /// the answer is false then, so whoever asked need not ask again for every row that passes.
+    @discardableResult
+    func save(_ place: ReadingPlace) -> Bool {
         switch kept() {
-        case .unreadable: return
-        case .place(let held): guard held != place else { return }
+        case .unreadable: return false
+        case .place(let held): guard held != place else { return true }
         case .nothing: break
         }
+        write(place)
+        return true
+    }
+
+    /// Nothing is kept from here: nothing is joined, and there is no place to come back to.
+    /// What cannot be read is left as it is.
+    func remove() {
+        if case .unreadable = kept() { return }
+        defaults.removeObject(forKey: key)
+    }
+
+    /// The posts of a source the person removed are no longer named (#221): the lamp, the top
+    /// row and the conversation each go where the row is that host's, and the rest of the place
+    /// stays. Written only where one of them went; what cannot be read is left as it is.
+    func forget(host: String) {
+        guard case .place(var place) = kept() else { return }
+        let host = host.lowercased()
+        func names(_ row: String?) -> Bool {
+            row.flatMap(NoteKey.init(rowID:))?.host.lowercased() == host
+        }
+        guard names(place.lamp) || names(place.top) || names(place.thread) else { return }
+        if names(place.lamp) { place.lamp = nil }
+        if names(place.top) { place.top = nil }
+        if names(place.thread) { place.thread = nil }
+        write(place)
+    }
+
+    /// What is kept and cannot be read is taken away — the one exception to never writing over
+    /// it, and only for what a read back brought. A place that can be read, and none, are left.
+    func discardUnreadable() {
+        guard case .unreadable = kept() else { return }
+        defaults.removeObject(forKey: key)
+    }
+
+    /// A place too large to be read back is not written: it would be kept and never read again.
+    private func write(_ place: ReadingPlace) {
         let row = Row(
             version: Self.version,
             timeline: place.timeline.id,
@@ -171,7 +221,7 @@ struct ReadingPlaceStore {
             top: place.top,
             thread: place.thread
         )
-        guard let data = try? JSONEncoder().encode(row) else { return }
+        guard let data = try? JSONEncoder().encode(row), data.count <= Self.maxBytes else { return }
         defaults.set(data, forKey: key)
     }
 
@@ -186,6 +236,7 @@ struct ReadingPlaceStore {
     private func kept() -> Kept {
         guard let value = defaults.object(forKey: key) else { return .nothing }
         guard let data = value as? Data,
+              data.count <= Self.maxBytes,
               Self.knowsEveryField(data),
               let row = try? JSONDecoder().decode(Row.self, from: data),
               row.version == Self.version

@@ -69,6 +69,7 @@ extension ShellSession {
         let went = WentGone(posts: posts, places: await store.letSettledGo(markedBy: cutoff))
         guard !went.isNone else { return went }
         await reloadFromStore()
+        placeAfterLettingGo()
         await persist?()
         await readStoreBytes()
         return went

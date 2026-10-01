@@ -296,9 +296,55 @@ final class ShellSession {
 
     /// Where reading stands now: the timeline in front, its lamp, its top row and the
     /// conversation open over it. Nothing while nothing is joined, which is no place to keep.
+    ///
+    /// **No post of a source the person removed is named** (#221): the root view may go on
+    /// standing on a row whose source has gone, and what it says is not written down
+    /// (`named(_:)`).
     var readingPlace: ReadingPlace? {
         guard let timelineID else { return nil }
-        return ReadingPlace(timeline: timelineID, lamp: standing.lamp, top: scrolledTop, thread: standing.thread)
+        return ReadingPlace(
+            timeline: timelineID, lamp: named(standing.lamp), top: named(scrolledTop), thread: named(standing.thread)
+        )
+    }
+
+    /// The row, where the place may name it: one of a source still joined, or one this device
+    /// still holds — a removed source's posts kept by the person's choice (#250), which the
+    /// store names too. A row of a source that went and took its posts is nothing. Asked of the
+    /// sources first, which answers for every row but those; only for them is what is held
+    /// walked.
+    private func named(_ row: String?) -> String? {
+        guard let row, let host = NoteKey(rowID: row)?.host else { return row }
+        if sources.contains(where: { $0.host == host }) { return row }
+        return heldNote(row) == nil ? nil : row
+    }
+
+    /// A source was removed (#221): what is kept stops naming its posts at once — whatever
+    /// holds the store still, and whether or not the place is being written — and where nothing
+    /// is joined any more there is no place to keep at all. `rowsWent` is false where the
+    /// person's choice keeps the source's posts (#250): the store still names them, and so may
+    /// the place. What this session stands on needs no telling: `readingPlace` names no row of
+    /// a source that went.
+    private func placeLetsGo(host: String, rowsWent: Bool) {
+        guard let placeStore else { return }
+        guard timelineID != nil else {
+            placeStore.remove()
+            placeHanded = nil
+            return
+        }
+        guard rowsWent else { return }
+        placeStore.forget(host: host)
+        // What was last handed over may be what was just changed underneath: no witness to
+        // what is kept any more. The same source joined again with the root still on the same
+        // post is that place again, and it has to be written, not taken for written.
+        placeHanded = nil
+    }
+
+    /// Posts were let go — a span, what was marked gone, a limit (#273). Where the place named
+    /// one of a source since removed, whose posts the person had kept (#250), it stops naming
+    /// it now and not at the reader's next move (#221); nothing is written where the place is
+    /// as it was.
+    func placeAfterLettingGo() {
+        keepPlace()
     }
 
     /// The place last handed to the store, so one that has not moved is not handed over twice:
@@ -315,11 +361,17 @@ final class ShellSession {
 
     /// From here nothing is written, until `keepPlaceFromHere()` says so again — for whoever
     /// replaces what is kept underneath this session. What was last handed over is forgotten
-    /// with it: it is no longer a witness to what is kept.
+    /// with it: it is no longer a witness to what is kept — nor is having found it unreadable.
     func stopKeepingPlace() {
         keepsPlace = false
         placeHanded = nil
+        placeRefused = false
     }
+
+    /// The store refused a place because what is kept cannot be read. It will refuse the next
+    /// one for the same reason, so it is not asked again — a blob read and judged on every row
+    /// that passes — until what is kept may have been replaced: `stopKeepingPlace()`.
+    @ObservationIgnored private var placeRefused = false
 
     /// The root view's half of the place moved: the lamp, or the conversation in front.
     ///
@@ -341,9 +393,9 @@ final class ShellSession {
     /// (`adoptReadBack`) where it stands is about a store no longer here. A move made meanwhile
     /// is written as the store is let go.
     private func keepPlace() {
-        guard keepsPlace, !holdsStill, let place = readingPlace, place != placeHanded else { return }
+        guard keepsPlace, !holdsStill, !placeRefused, let place = readingPlace, place != placeHanded else { return }
         placeHanded = place
-        placeStore?.save(place)
+        if placeStore?.save(place) == false { placeRefused = true }
     }
 
     /// Comes back to the place kept (#273): what `ReadingPlace.landing` makes of it against what
@@ -390,15 +442,17 @@ final class ShellSession {
     /// kept: `landAtKeptPlace`, against the store and the timelines read back.
     ///
     /// **Where it brought none, or one this build cannot read, All with nothing lit** — a
-    /// package taken away by a build that kept no place, say. The place this device stood on
-    /// was about the store replaced, and does not outlive it: the next move writes a fresh one,
-    /// or nothing where what is kept cannot be read, which is never written over. With nothing
-    /// joined there is no timeline to put in front, and the root is still told to let go of
-    /// what it stood on.
+    /// package taken away by a build that kept no place, say, or by a newer one. The place this
+    /// device stood on was about the store replaced, and does not outlive it: the next move
+    /// writes a fresh one. With nothing joined there is no timeline to put in front, and the
+    /// root is still told to let go of what it stood on.
     ///
     /// **The posts stood on in each timeline this run go too** (#100): they were that store's.
     private func landAfterReadBack(latest: LatestDate?) {
         timelinePlaces = TimelinePlaces()
+        // What the package brought and this build cannot read is treated as none, and taken
+        // away: left, nothing could ever be kept on this device again. See `ReadingPlaceStore`.
+        placeStore?.discardUnreadable()
         defer {
             // Where the session now stands is what the read back put it on, and is not a move:
             // counted as handed over, so the store let go after this writes nothing over the
@@ -1973,6 +2027,8 @@ final class ShellSession {
                 await store.remove(host: offer.host)
             }
             await adopt()
+            // A join taken back is a source removed, and the place names nothing of it (#273).
+            if mine != errand { placeLetsGo(host: offer.host, rowsWent: true) }
             if mine == errand, !origin.isRestate { showJoined() }
             // Where a board that failed was the only thing the reader was after, the rail is
             // still worth landing them on the one that worked — `adopt` does that — but the
@@ -2857,6 +2913,7 @@ final class ShellSession {
         let held = await store.aside()
         adoptHeld(notes: all, aside: held)
         adoptedAside = await store.asideRevision
+        placeAfterLettingGo()
         await persist?()
         try? await compactStore?()
         await readStoreBytes()
@@ -3203,6 +3260,8 @@ final class ShellSession {
         }
         await store.remove(host: host, keepingPosts: keepingPosts)
         await adopt()
+        // The place reading stopped at names nothing of it from here (#273).
+        placeLetsGo(host: host, rowsWent: !keepingPosts)
         await clear(host: host, keepingRows: keepingPosts)
 
         // Folded on both sides rather than on one. `Host.parse` lowercases everything it returns,

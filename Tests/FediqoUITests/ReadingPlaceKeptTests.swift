@@ -178,7 +178,10 @@ struct ReadingPlaceKeptTests {
         #expect(desk.kept == ReadingPlace(timeline: .all))
     }
 
-    @Test("The last source removed leaves the place kept as it was")
+    /// The tabs rebuilt for nothing joined, which writes nothing by itself. The person's own
+    /// act of removing the last source is `ShellSession.remove`, and that one takes the place
+    /// kept away (`ReadingPlaceLeftBehindTests.lastSourceRemoved`).
+    @Test("The tabs rebuilt with nothing joined write nothing: the place kept is as it was")
     func lastSourceRemoved() {
         let desk = landed()
         let session = desk.session

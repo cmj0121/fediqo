@@ -107,6 +107,7 @@ extension ShellSession {
             posts += went.posts
             from.formUnion(went.sources)
             await reloadFromStore()
+            placeAfterLettingGo()
             await persist?()
             let after = await weighStore()
             // A round that gave nothing back — a save that did not land — is not tried again.

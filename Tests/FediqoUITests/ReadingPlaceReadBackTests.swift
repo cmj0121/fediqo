@@ -271,11 +271,11 @@ struct ReadingPlaceReadBackTests {
         #expect(here.device.kept == ReadingPlace(timeline: .all, lamp: row("r1")))
     }
 
-    /// A newer build's shape. **What the reader sees**: All from the top with nothing lit and no
-    /// conversation, as with no place at all — and from then on this build keeps no place on
-    /// this device, since what is kept is never written over; the build that can read it lands
-    /// on it.
-    @Test("A place in the package this build cannot read: All with nothing lit, and the bytes are never written over")
+    /// A newer build's shape, or a crafted one. **What the reader sees**: All from the top with
+    /// nothing lit and no conversation, as with no place at all. It is taken away as it is
+    /// adopted — the one place an unreadable blob is not left alone, since kept it would stop
+    /// this device keeping any place again — and the next move writes a fresh one.
+    @Test("A place in the package this build cannot read is treated as none: All with nothing lit, the bytes gone, and the next move writes a fresh place")
     func unreadablePlace() async throws {
         var here = try await here { _ in ReadingPlace(timeline: .trends, lamp: row("t2"), thread: row("t2")) }
         let session = here.session
@@ -290,16 +290,28 @@ struct ReadingPlaceReadBackTests {
         _ = here.root.answer(session)
         #expect(here.root.selected == nil)
         #expect(here.root.walk.isEmpty)
-        #expect(here.bytes == newer)
+        #expect(here.device.defaults.object(forKey: "fediqo.place") == nil)
 
-        // A lamp lit and a timeline pressed, each of which is written on any other day.
         here.root.selected = row("r1")
         _ = here.root.answer(session)
-        #expect(session.readingPlace == ReadingPlace(timeline: .all, lamp: row("r1")))
+        #expect(here.device.kept == ReadingPlace(timeline: .all, lamp: row("r1")))
+    }
+
+    /// The exception is the read back's alone: what a launch finds unreadable on its own device
+    /// is a newer build's, and is left for that build.
+    @Test("A place a launch cannot read is left as it is: not taken away, and not written over")
+    func unreadableAtLaunchIsLeft() async throws {
+        let device = KeptDevice()
+        await device.hold()
+        let newer = Data(#"{"version":2,"timeline":"trends","lamp":"x","pane":"left"}"#.utf8)
+        device.defaults.set(newer, forKey: "fediqo.place")
+
+        let session = device.session()
+        #expect(await device.launch(session) == nil)
+        #expect(session.timelineID == .all)
+        session.stands(ReadingPlace.Standing(lamp: row("p2")))
         session.timelineID = .trends
-        _ = here.root.answer(session)
-        #expect(session.timelineID == .trends)
-        #expect(here.bytes == newer)
+        #expect(device.defaults.data(forKey: "fediqo.place") == newer)
     }
 
     @Test("A read back that holds no source: nothing is in front, the root lets go of what it stood on, and the place read back is left as it is")

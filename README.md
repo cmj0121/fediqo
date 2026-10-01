@@ -58,7 +58,7 @@ has asked. Each line names the source it was for, when it left, and what it was 
 an address, a query, or anything that could sign in as you. What a source pointed to is listed
 under that source, and what an entry let through names the entry. The list can be narrowed to
 one source. It is this run only: quitting leaves nothing of where you went. Posts and their
-pictures are the store, and they stay.
+pictures are the store, and they stay — and so does the one place you stopped reading.
 
 To check it from outside the app, watch Fediqo while it runs — with the iPhone's App Privacy
 Report, or any network monitor on the Mac. Every host it reaches is a source you added,

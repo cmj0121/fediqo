@@ -171,6 +171,7 @@ extension ShellSession {
             let went = await store.letGo(span: span, host: host)
             guard went > 0 else { return 0 }
             await reloadFromStore()
+            placeAfterLettingGo()
             await persist?()
             await readStoreBytes()
             return went
