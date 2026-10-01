@@ -58,7 +58,7 @@ has asked. Each line names the source it was for, when it left, and what it was 
 an address, a query, or anything that could sign in as you. What a source pointed to is listed
 under that source, and what an entry let through names the entry. The list can be narrowed to
 one source. It is this run only: quitting leaves nothing of where you went. Posts and their
-pictures are the store, and they stay.
+pictures are the store, and they stay — and so does the one place you stopped reading.
 
 To check it from outside the app, watch Fediqo while it runs — with the iPhone's App Privacy
 Report, or any network monitor on the Mac. Every host it reaches is a source you added,
@@ -111,6 +111,10 @@ An empty launch opens Account. Add a Mastodon host or a Discuz forum from the ca
 typing its hostname. It names the protocol; only those two join this session. What a source
 sends lands in this device's store, and every timeline is a query of that store. Notices and
 compose stay off until they have something.
+
+Closing the app and opening it again comes back to where reading stopped — the timeline, the
+selected post, how far down it was scrolled, and the thread that was open — and that place
+goes with the store when it is taken away or moved nearby.
 
 ### Writing a post
 

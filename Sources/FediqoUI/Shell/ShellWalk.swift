@@ -101,6 +101,10 @@ struct ShellWalk: Hashable, Sendable {
         }?.step
     }
 
+    /// The row the lamp was on when the reader stepped off the stream, which is the stream's own
+    /// lamp for as long as a page stands in front of it (#273). Nothing on the stream itself.
+    var streamLamp: String? { taken.first?.lamp }
+
     var isEmpty: Bool { taken.isEmpty }
 
     /// How far out the reader has walked. Nothing dispatches on it; it is what a test counts to

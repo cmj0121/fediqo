@@ -263,8 +263,248 @@ final class ShellSession {
     var unreadAll = 0
 
     var queries: [TimelineQuery] = []
-    /// The query in front. Nothing only while nothing is joined; not persisted.
-    var timelineID: TimelineQuery?
+    /// The query in front. Nothing only while nothing is joined. Kept as part of the place
+    /// reading stopped at (#273), which is what a launch puts in front again.
+    var timelineID: TimelineQuery? {
+        didSet {
+            guard timelineID != oldValue else { return }
+            // Another list, so the row the last one had at the top means nothing here — nor the
+            // post lit in it, nor the conversation open over it, until the root says what the
+            // one arrived at stands on (#273).
+            standing = ReadingPlace.Standing()
+            scrolledTop = nil
+            resultsTop = nil
+            topIsOwed = false
+            keepPlace()
+        }
+    }
+
+    /// Where the place reading stopped at is kept, or nothing for a session that keeps none.
+    @ObservationIgnored let placeStore: ReadingPlaceStore?
+
+    /// The lamp of the timeline in front and the conversation open over it, as the root view
+    /// last said them (#273): both are its own state, and this is the copy the place is written
+    /// from. Past observation, for nothing draws from it.
+    @ObservationIgnored private var standing = ReadingPlace.Standing()
+
+    /// Whether a place that moved is written down yet (#273).
+    ///
+    /// **Not from the start.** A launch puts a timeline in front the moment the store says what
+    /// is joined, before its lamp and its top row have been come back to (`landAtKeptPlace`), and
+    /// writing that down would be the place written over on the way to reading it.
+    @ObservationIgnored private(set) var keepsPlace = false
+
+    /// Where reading stands now: the timeline in front, its lamp, its top row and the
+    /// conversation open over it. Nothing while nothing is joined, which is no place to keep.
+    ///
+    /// **No post of a source the person removed is named** (#221): the root view may go on
+    /// standing on a row whose source has gone, and what it says is not written down
+    /// (`named(_:)`).
+    var readingPlace: ReadingPlace? {
+        guard let timelineID else { return nil }
+        return ReadingPlace(
+            timeline: timelineID, lamp: named(standing.lamp), top: named(scrolledTop), thread: named(standing.thread)
+        )
+    }
+
+    /// The row, where the place may name it: one of a source still joined, or one this device
+    /// still holds — a removed source's posts kept by the person's choice (#250), which the
+    /// store names too. A row of a source that went and took its posts is nothing. Asked of the
+    /// sources first, which answers for every row but those; only for them is what is held
+    /// walked.
+    private func named(_ row: String?) -> String? {
+        guard let row, let host = NoteKey(rowID: row)?.host else { return row }
+        if sources.contains(where: { $0.host == host }) { return row }
+        return heldNote(row) == nil ? nil : row
+    }
+
+    /// A source was removed (#221): what is kept stops naming its posts at once — whatever
+    /// holds the store still, and whether or not the place is being written — and where nothing
+    /// is joined any more there is no place to keep at all. `rowsWent` is false where the
+    /// person's choice keeps the source's posts (#250): the store still names them, and so may
+    /// the place. What this session stands on needs no telling: `readingPlace` names no row of
+    /// a source that went.
+    private func placeLetsGo(host: String, rowsWent: Bool) {
+        guard let placeStore else { return }
+        guard timelineID != nil else {
+            placeStore.remove()
+            placeHanded = nil
+            return
+        }
+        guard rowsWent else { return }
+        placeStore.forget(host: host)
+        // What was last handed over may be what was just changed underneath: no witness to
+        // what is kept any more. The same source joined again with the root still on the same
+        // post is that place again, and it has to be written, not taken for written.
+        placeHanded = nil
+    }
+
+    /// Posts were let go — a span, what was marked gone, a limit (#273). Where the place named
+    /// one of a source since removed, whose posts the person had kept (#250), it stops naming
+    /// it now and not at the reader's next move (#221); nothing is written where the place is
+    /// as it was.
+    func placeAfterLettingGo() {
+        keepPlace()
+    }
+
+    /// The place last handed to the store, so one that has not moved is not handed over twice:
+    /// the store reads what is kept before it writes, and most asks to write are the place
+    /// already there. Forgotten by `stopKeepingPlace()`.
+    @ObservationIgnored private var placeHanded: ReadingPlace?
+
+    /// The launch has landed: from here every move of the place is written down. Where the
+    /// session stands at this moment is not — it is where the launch put it, and is written by
+    /// the first move away from it.
+    func keepPlaceFromHere() {
+        keepsPlace = true
+    }
+
+    /// From here nothing is written, until `keepPlaceFromHere()` says so again — for whoever
+    /// replaces what is kept underneath this session. What was last handed over is forgotten
+    /// with it: it is no longer a witness to what is kept — nor is having found it unreadable.
+    func stopKeepingPlace() {
+        keepsPlace = false
+        placeHanded = nil
+        placeRefused = false
+    }
+
+    /// The store refused a place because what is kept cannot be read. It will refuse the next
+    /// one for the same reason, so it is not asked again — a blob read and judged on every row
+    /// that passes — until what is kept may have been replaced: `stopKeepingPlace()`.
+    @ObservationIgnored private var placeRefused = false
+
+    /// The root view's half of the place moved: the lamp, or the conversation in front.
+    ///
+    /// **Not taken while the root has yet to stand on a landing** (`takeLanding()`). What it
+    /// says until then is where it stood before — at a launch nothing, after a read back the
+    /// lamp of a store no longer here — and taken, that would be written over the place just
+    /// come back to.
+    func stands(_ standing: ReadingPlace.Standing) {
+        guard landed == nil, standing != self.standing else { return }
+        self.standing = standing
+        keepPlace()
+    }
+
+    /// Writes the place down as it stands. A change of tab reaches nothing here: which page the
+    /// rail is on is no part of the place.
+    ///
+    /// **Not while the store is held still** (`holdsStill`): a read back replaces the place
+    /// kept along with everything else, and until this session has come back to it
+    /// (`adoptReadBack`) where it stands is about a store no longer here. A move made meanwhile
+    /// is written as the store is let go.
+    private func keepPlace() {
+        guard keepsPlace, !holdsStill, !placeRefused, let place = readingPlace, place != placeHanded else { return }
+        placeHanded = place
+        if placeStore?.save(place) == false { placeRefused = true }
+    }
+
+    /// Comes back to the place kept (#273): what `ReadingPlace.landing` makes of it against what
+    /// this device holds now is put in front, and the half of it that is the root view's — the
+    /// lamp, and the conversation to open again — is handed back for the root to stand on. Nothing
+    /// where no place is kept, or nothing is joined; the place kept is then left as it is.
+    ///
+    /// **Asked before `keepPlaceFromHere()`**, so coming back writes nothing — no preference, and
+    /// no row of the store, which is only read. The place kept stays exactly as it was until the
+    /// reader moves.
+    ///
+    /// **The timeline first.** It forgets the top row and the standing of the one it replaces as
+    /// it changes, so they are set after it. At a launch it is already the one in front:
+    /// `rebuildQueries` put it there as the store said what is joined.
+    ///
+    /// **The lamp is filed as that timeline's place too** (#100): the pane answers a timeline
+    /// coming in front by lighting what is filed for it, and would otherwise put the lamp out.
+    @discardableResult
+    func landAtKeptPlace(latest: LatestDate?) -> ReadingPlace.Standing? {
+        guard let kept = placeStore?.load(),
+              let place = kept.landing(
+                  among: queries,
+                  rows: { query in rows(of: query, latest: latest) },
+                  holds: { row in heldNote(row) != nil }
+              )
+        else { return nil }
+        land(at: place)
+        return place.standing
+    }
+
+    private func land(at place: ReadingPlace) {
+        timelineID = place.timeline
+        scrolledTop = place.top
+        topIsOwed = place.top != nil
+        // Set here and not through `stands(_:)`, which takes nothing while a landing is owed.
+        standing = place.standing
+        keepPlace()
+        timelinePlaces.leave(place.timeline, standingOn: place.lamp)
+        landed = place.standing
+        landings += 1
+    }
+
+    /// Comes back to the place a read back brought (#273), as a launch comes back to the one
+    /// kept: `landAtKeptPlace`, against the store and the timelines read back.
+    ///
+    /// **Where it brought none, or one this build cannot read, All with nothing lit** — a
+    /// package taken away by a build that kept no place, say, or by a newer one. The place this
+    /// device stood on was about the store replaced, and does not outlive it: the next move
+    /// writes a fresh one. With nothing joined there is no timeline to put in front, and the
+    /// root is still told to let go of what it stood on.
+    ///
+    /// **The posts stood on in each timeline this run go too** (#100): they were that store's.
+    private func landAfterReadBack(latest: LatestDate?) {
+        timelinePlaces = TimelinePlaces()
+        // What the package brought and this build cannot read is treated as none, and taken
+        // away: left, nothing could ever be kept on this device again. See `ReadingPlaceStore`.
+        placeStore?.discardUnreadable()
+        defer {
+            // Where the session now stands is what the read back put it on, and is not a move:
+            // counted as handed over, so the store let go after this writes nothing over the
+            // bytes read back — not even where a part of the place was not held any more.
+            placeHanded = readingPlace
+        }
+        guard landAtKeptPlace(latest: latest) == nil else { return }
+        guard timelineID != nil else {
+            landed = ReadingPlace.Standing()
+            landings += 1
+            return
+        }
+        land(at: ReadingPlace(timeline: .all))
+    }
+
+    /// How many times a kept place was put in front. Observed: a list already drawn moves to the
+    /// place as this changes, where one not yet drawn lands on it as it appears, and the root
+    /// view stands on it (`takeLanding()`).
+    private(set) var landings = 0
+
+    /// The root view's half of the last landing, until the root has stood on it.
+    @ObservationIgnored private var landed: ReadingPlace.Standing?
+
+    /// What the root view is to stand on after a landing — the lamp, and the conversation to
+    /// open again — handed over once: nothing where no landing is waiting. From here what the
+    /// root says of where it stands is taken again (`stands(_:)`).
+    func takeLanding() -> ReadingPlace.Standing? {
+        defer { landed = nil }
+        return landed
+    }
+
+    /// Whether the list has yet to be scrolled to the top row a landing put here (#273).
+    ///
+    /// **Until it has, what the list says is in view is not where reading stands.** A list just
+    /// drawn reports its first rows before it is scrolled anywhere, and taken as the top row they
+    /// would replace the one come back to — in the place written, and as the row the list then
+    /// lands on. So nothing the timeline's list reports is taken until the pane says it has
+    /// landed (`listLanded(for:)`), or the timeline changes.
+    @ObservationIgnored private(set) var topIsOwed = false
+
+    /// The pane has put its list where `TimelinePane.landing` said: from here the top row is
+    /// what the list reports. `landing` is `landings` as the pane read the place it then
+    /// scrolled to.
+    ///
+    /// **Only for the landing that is still the last.** The pane scrolls a tick after it reads
+    /// the place, and a list that appeared just before a kept place was come back to read none:
+    /// its tick comes round after the landing, having scrolled nowhere, and is not the list
+    /// reaching the row now owed. The landing itself moves the list again, and that one counts.
+    func listLanded(for landing: Int) {
+        guard landing == landings else { return }
+        topIsOwed = false
+    }
 
     /// The post the reader was standing on in each timeline they have left this run (#100).
     ///
@@ -384,7 +624,38 @@ final class ShellSession {
     /// past observation**, because the scroll view writes it on every row that passes the top,
     /// and a redraw of everything that reads this session on every one of those would be the
     /// scroll paying for a note nobody reads until the list is drawn again.
-    @ObservationIgnored var scrolledTop: String?
+    ///
+    /// **Part of the place reading stopped at** (#273), so a row that passes is written down;
+    /// and cleared where the timeline changes, by `timelineID` itself and by nothing else.
+    @ObservationIgnored var scrolledTop: String? {
+        didSet { if scrolledTop != oldValue { keepPlace() } }
+    }
+
+    /// The row at the top of a search's results, as the reader last left them scrolled, and the
+    /// pattern they were the results of. Beside `scrolledTop` and not in it (#273): the results
+    /// are not the timeline, and a result written there would be kept as the place the timeline
+    /// was left at. This run only, and only for that pattern: another search's results are
+    /// another list.
+    @ObservationIgnored private var resultsTop: (pattern: String, row: String)?
+
+    /// The pane's list scrolled. `pattern` is what the list is the results of, or nothing where
+    /// it is the timeline's own rows — no search open, or one with nothing typed in it yet,
+    /// under which the timeline is still what is drawn and what is scrolled. Not taken while the
+    /// list has yet to reach the top row a landing came back to (`topIsOwed`).
+    func scrolled(to top: String, found pattern: String?) {
+        if let pattern {
+            resultsTop = (pattern, top)
+        } else if !topIsOwed {
+            scrolledTop = top
+        }
+    }
+
+    /// The top row of the list the pane is drawing: what a list drawn afresh lands on, and what
+    /// a renewal holds still. `pattern` as `scrolled(to:found:)` takes it.
+    func listTop(found pattern: String?) -> String? {
+        guard let pattern else { return scrolledTop }
+        return resultsTop?.pattern == pattern ? resultsTop?.row : nil
+    }
 
     /// The row one id stands for, anywhere in what this device holds — or nothing, where this
     /// device does not hold it any more.
@@ -499,11 +770,26 @@ final class ShellSession {
     /// check runs again. **The contract**: set it before the first byte moves, clear it after
     /// the last, and clear it on every way out, a failure included — `ShellCarry` keeps it. A
     /// move this session makes itself — a remove, a clear, a drop, a span let go — holds through
-    /// `holdingStill(_:)` instead, which nests. **Only the room limit honours it**: the months
-    /// limit, a remove, a span let go and every press of the person's own go ahead regardless,
-    /// because each is the person's act and not a check running by itself.
+    /// `holdingStill(_:)` instead, which nests.
+    ///
+    /// **The room limit honours it, and so does the place reading stopped at** (#273,
+    /// `keepPlace`): the place is not written meanwhile, and is written as it then stands when
+    /// the store is let go. The months limit, a remove, a span let go and every press of the
+    /// person's own go ahead regardless, because each is the person's act and not a check
+    /// running by itself.
+    ///
+    /// **The side that receives a store keeps its hold until `adoptReadBack` has begun.** What
+    /// arrives brings its own place, and until the adoption has stopped the writing this session
+    /// still stands on the store replaced: let go a turn earlier, that is the place written —
+    /// over the one that just arrived. `ShellCarry` and `ShellNearby` both hold through the
+    /// adoption's end.
     var holdsStill = false {
-        didSet { if !holdsStill, oldValue { roomMayBeReached() } }
+        didSet {
+            guard !holdsStill, oldValue else { return }
+            roomMayBeReached()
+            // A move made meanwhile was not written (#273): the place as it now stands is.
+            keepPlace()
+        }
     }
 
     /// How many of this session's own moves are running (`holdingStill(_:)`).
@@ -705,10 +991,12 @@ final class ShellSession {
         mastodon: MastodonSessions = MastodonSessions(),
         posts: ForumPosts? = nil,
         blogs: ForumBlogs? = nil,
-        timelines: WrittenTimelineStore? = nil
+        timelines: WrittenTimelineStore? = nil,
+        place: ReadingPlaceStore? = nil
     ) {
         self.http = http
         timelineStore = timelines
+        placeStore = place
         carry = ShellCarry(work: work)
         nearby = ShellNearby(work: work)
         self.store = store
@@ -1739,6 +2027,8 @@ final class ShellSession {
                 await store.remove(host: offer.host)
             }
             await adopt()
+            // A join taken back is a source removed, and the place names nothing of it (#273).
+            if mine != errand { placeLetsGo(host: offer.host, rowsWent: true) }
             if mine == errand, !origin.isRestate { showJoined() }
             // Where a board that failed was the only thing the reader was after, the rail is
             // still worth landing them on the one that worked — `adopt` does that — but the
@@ -2243,7 +2533,18 @@ final class ShellSession {
     /// What a read back replaced, adopted without a relaunch (#247): the store, the person's
     /// timelines and choices read again off the preferences, who is signed in read again off
     /// the Keychain, and the picture copies measured again.
-    func adoptReadBack(prefs: DummyPrefs) async {
+    ///
+    /// **And the place it brought is come back to** (#273), on whichever page the rail is: the
+    /// timeline place shows it when it is next in front. Nothing is written from the first line
+    /// to the landing — the place now kept is the read back's, and where this session stood
+    /// until then is not to be written over it — and the timelines are read before it, since
+    /// the place may name one of them.
+    ///
+    /// **Not where only sign-ins moved** (`placeToo` false): neither the store nor the place
+    /// kept was replaced, so where the reader stands is still where they stand.
+    func adoptReadBack(prefs: DummyPrefs, placeToo: Bool = true) async {
+        let kept = keepsPlace
+        if placeToo { stopKeepingPlace() }
         switch timelineStore?.load() {
         case .timelines(let kept)?:
             written = kept
@@ -2266,6 +2567,15 @@ final class ShellSession {
         await replaceLimitAccount()
         await keep(months: prefs.keepMonths)
         await reloadFromStore()
+        guard placeToo else { return }
+        landAfterReadBack(latest: prefs.latestDate)
+        if kept { keepPlaceFromHere() }
+    }
+
+    /// What a move nearby brought, adopted as it is done (#253): `adoptReadBack`, less the place
+    /// where the move carried sign-ins only.
+    func adoptNearbyMove(prefs: DummyPrefs) async {
+        await adoptReadBack(prefs: prefs, placeToo: nearby.step?.movedStore ?? true)
     }
 
     /// The store, followed: each time it says it changed, what it holds is adopted again — so a
@@ -2388,6 +2698,16 @@ final class ShellSession {
         var rebuilt: [TimelineQuery] = sources.contains(where: { Self.hasTrends($0.kind) }) ? [.all, .trends] : [.all]
         rebuilt += written.map { .written($0.id) }
         if rebuilt != queries { queries = rebuilt }
+        guard timelineID != nil else {
+            // Nothing was in front. At a launch the timeline reading stopped on comes in front,
+            // where it is still one of the tabs (#273), and its lamp and its top row are
+            // `landAtKeptPlace`'s, once the launch asks. **Only until the launch has landed**: a
+            // source joined later in the run, after the last was let go or after a launch that
+            // held none, is read from All as a first source always was — the place kept is not
+            // half come back to, and is written over as the reader moves there.
+            timelineID = (keepsPlace ? nil : placeStore?.load()?.timeline(among: queries)) ?? .all
+            return
+        }
         if !queries.contains(where: { $0 == timelineID }) {
             timelineID = .all
         }
@@ -2593,6 +2913,7 @@ final class ShellSession {
         let held = await store.aside()
         adoptHeld(notes: all, aside: held)
         adoptedAside = await store.asideRevision
+        placeAfterLettingGo()
         await persist?()
         try? await compactStore?()
         await readStoreBytes()
@@ -2939,6 +3260,8 @@ final class ShellSession {
         }
         await store.remove(host: host, keepingPosts: keepingPosts)
         await adopt()
+        // The place reading stopped at names nothing of it from here (#273).
+        placeLetsGo(host: host, rowsWent: !keepingPosts)
         await clear(host: host, keepingRows: keepingPosts)
 
         // Folded on both sides rather than on one. `Host.parse` lowercases everything it returns,

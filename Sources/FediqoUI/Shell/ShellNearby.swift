@@ -17,7 +17,9 @@ import Observation
 /// on every way out — so the list shows where it went, and nothing else.
 ///
 /// **The store is held still** while the move runs (`holdStill`): from the sender's first byte
-/// written and the receiver's yes, until every way out.
+/// written and the receiver's yes, until every way out. **The receiver holds on past a move
+/// done, until what it read back is adopted** (#273) — the place reading stopped at came with
+/// the move, and is not to be written over before the session has come back to it.
 ///
 /// **The device stays awake for the whole run** (`awake`, `staysAwake`), a longer span than the
 /// store's stillness: from the first press — the code up, the list up — to the flow's end, a
@@ -392,12 +394,15 @@ final class ShellNearby {
     }
 
     /// The record's line ended, the store let go, the copies released.
-    private func end() {
+    ///
+    /// `stillHeld` leaves the store held, for the one way out that has more to do with it held
+    /// (#273): a move done on the device that received it, whose adoption lets it go.
+    private func end(stillHeld: Bool = false) {
         if let token {
             work.end(token)
             self.token = nil
         }
-        letGo()
+        letGo(stillHeld: stillHeld)
         pictures = nil
     }
 
@@ -405,8 +410,8 @@ final class ShellNearby {
     /// stays awake, which is the run's, not the yes's (`staysAwake`). **At most one hold of the copies is ever outstanding**: one returned is in
     /// `heldPictures` and released here, once; one still pending sees `round` moved on and
     /// gives them straight back. Called on every way back to the code and every way out.
-    private func letGo() {
-        hold(false)
+    private func letGo(stillHeld: Bool = false) {
+        if !stillHeld { hold(false) }
         round += 1
         heldPictures?.release()
         heldPictures = nil
@@ -468,10 +473,19 @@ final class ShellNearby {
             step = .settling(progress, peer: peer)
         case .done(let summary, let peer):
             let adopt = side == .holding ? self.adopt : nil
-            end()
+            // **The store stays held until what was read back is adopted** (#273), as a read
+            // back from a file holds it (`ShellCarry.confirmReadBack`): let go a turn earlier,
+            // the session would write where it stood before over the place just moved in. Let
+            // go here only if no later round has taken or given back a hold of its own.
+            end(stillHeld: adopt != nil)
             step = .done(summary, peer: peer)
             if let adopt {
-                Task { @MainActor in await adopt() }
+                let round = round
+                Task { @MainActor [weak self] in
+                    await adopt()
+                    guard let self, self.round == round else { return }
+                    self.hold(false)
+                }
             }
         case .refused(let refusal):
             end()
@@ -497,5 +511,14 @@ final class ShellNearby {
             return
         }
         work.renameNearby(token, peer: peer)
+    }
+}
+
+extension ShellNearby.Step {
+    /// Whether the move this step ends replaced the store and the settings with it — all but a
+    /// move of sign-ins only, which leaves both as they were.
+    var movedStore: Bool {
+        guard case .done(let summary, _) = self else { return true }
+        return summary.contents != .signInsOnly
     }
 }

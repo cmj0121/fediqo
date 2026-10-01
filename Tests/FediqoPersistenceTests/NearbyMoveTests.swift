@@ -125,6 +125,8 @@ struct NearbyMoveTests {
         #expect(onto.notes.map(\.id).sorted() == from.notes.map(\.id).sorted())
         #expect(try StoreFile(at: pair.onto.directory).load().notes.count == 3)
         #expect(pair.onto.defaults.string(forKey: "fediqo.dummy.keepMonths") == "6")
+        // Where reading stopped moves with the settings, byte for byte (#273).
+        #expect(pair.onto.defaults.data(forKey: "fediqo.place") == PackagerFixture.place)
         #expect(try pair.onto.tokens.token(host: PackagerFixture.mastodon.host)?.accessToken == "t")
         #expect(try pair.onto.credentials.credential(host: PackagerFixture.forum.host)?.password == "hunter2")
         #expect(pair.onto.media.totalBytes() == (pictures ? 3100 : 0))
@@ -267,6 +269,7 @@ struct NearbyMoveTests {
         let snapshot = await pair.onto.store.snapshot()
         #expect(snapshot.sources == [other] && snapshot.notes.map(\.id) == ["9"], "the store is untouched")
         #expect(pair.onto.defaults.string(forKey: "fediqo.dummy.keepMonths") == nil, "no settings ride")
+        #expect(pair.onto.defaults.object(forKey: "fediqo.place") == nil, "nor where reading stopped")
         #expect(pair.onto.media.totalBytes() == 0, "no pictures ride")
         #expect(try pair.onto.tokens.token(host: PackagerFixture.mastodon.host)?.accessToken == "t")
         #expect(try pair.onto.tokens.app(host: PackagerFixture.mastodon.host)?.clientSecret == "s")
