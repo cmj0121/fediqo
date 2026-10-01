@@ -179,22 +179,3 @@ struct ReadingPlaceTests {
         #expect(shelf.store.load() == ReadingPlace(timeline: .all, lamp: "a3"))
     }
 }
-
-/// Defaults whose values live in this object only, and which count each value set on them:
-/// nothing reaches `cfprefsd` or the disk.
-private final class CountingDefaults: UserDefaults, @unchecked Sendable {
-    private var values: [String: Any] = [:]
-    private(set) var writes = 0
-
-    init() {
-        super.init(suiteName: nil)!
-    }
-
-    override func object(forKey key: String) -> Any? { values[key] }
-    override func data(forKey key: String) -> Data? { values[key] as? Data }
-    override func set(_ value: Any?, forKey key: String) {
-        writes += 1
-        values[key] = value
-    }
-    override func removeObject(forKey key: String) { values[key] = nil }
-}

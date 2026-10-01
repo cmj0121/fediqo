@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Where the reader stopped reading: which timeline, the post the lamp was on, the row at the top
 /// of the stream, and the conversation that was open (#273).
@@ -23,6 +24,41 @@ struct ReadingPlace: Equatable, Sendable {
         self.lamp = lamp
         self.top = top
         self.thread = thread
+    }
+}
+
+extension ReadingPlace {
+    /// The half of the place the root view holds: the lamp and the walk are its, as the timeline
+    /// and the top row are the session's.
+    struct Standing: Equatable, Sendable {
+        var lamp: String?
+        var thread: String?
+
+        init(lamp: String? = nil, thread: String? = nil) {
+            self.lamp = lamp
+            self.thread = thread
+        }
+    }
+
+    /// What the root's lamp, walk and search say of the timeline in front.
+    ///
+    /// **The stream's own lamp, whatever is in front of it.** Inside a conversation the lamp is
+    /// on one of its posts and under a search it is on a result, and neither is where the
+    /// timeline was left: that is the row the walk was taken from, or the post the search parked
+    /// — what leaving either gives back.
+    ///
+    /// **The conversation in front, or the one a page was read out of.** A person's page and a
+    /// tag's are not places reading stops at, so with one of them in front no conversation is
+    /// named.
+    static func standing(lamp: String?, walk: ShellWalk, searching: Bool, parked: String?) -> Standing {
+        var standing = Standing(lamp: lamp)
+        if searching {
+            standing.lamp = parked
+        } else if !walk.isEmpty {
+            standing.lamp = walk.streamLamp
+        }
+        if case .thread(let id) = walk.beneath { standing.thread = id }
+        return standing
     }
 }
 
@@ -101,6 +137,41 @@ struct ReadingPlaceStore {
     private static func knowsEveryField(_ data: Data) -> Bool {
         guard let top = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
         return Set(top.keys).isSubset(of: ["version", "timeline", "lamp", "top", "thread"])
+    }
+}
+
+/// Tells the session where the root view's half of the place stands, each time it moves (#273):
+/// the lamp and the walk are the root's own state, and the session is what writes the place.
+///
+/// **Read a tick after it moved, as it then is, and not as this pass saw it.** A timeline switched
+/// is answered on the same pass by the pane, which lights the arrived-at timeline's own post, and
+/// by the root, which ends the walk; the lamp this pass was drawn with is still the one left.
+/// **Only while the pane is drawn.** With the timeline place not in front nobody relights the
+/// lamp for the timeline arrived at — one removed from Preferences, say — and what is told is the
+/// lamp as it was left. Whether a lamp belongs to the list it is read back into is the landing's
+/// to say.
+///
+/// **Told where the timeline changes, though the lamp may read the same**: the session forgets
+/// the lamp of the timeline it left as it leaves, and a post two timelines both hold may be what
+/// each was left on.
+///
+/// A modifier of its own, so the root view's chain gains one line and no closure.
+struct KeepsReadingPlace: ViewModifier {
+    let session: ShellSession
+    /// What the root stands on as this pass was drawn: what says that it moved.
+    let standing: ReadingPlace.Standing
+    /// What the root stands on, read when it is asked.
+    let now: @MainActor () -> ReadingPlace.Standing
+
+    private struct Moved: Equatable {
+        let timeline: TimelineQuery?
+        let standing: ReadingPlace.Standing
+    }
+
+    func body(content: Content) -> some View {
+        content.onChange(of: Moved(timeline: session.timelineID, standing: standing)) { _, _ in
+            Task { @MainActor in session.stands(now()) }
+        }
     }
 }
 

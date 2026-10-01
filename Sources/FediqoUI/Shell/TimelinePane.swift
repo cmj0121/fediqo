@@ -78,9 +78,14 @@ struct TimelinePane: View {
     /// one for the life of the window — so whether one is open is this, and not `search == nil`.
     private var searching: Bool { search?.isOpen == true }
 
-    private var items: [DummyItem] {
+    /// What the open search found, or nothing where the list is the timeline's own rows: no
+    /// search open, or one with nothing typed in it yet.
+    private var results: [DummyItem]? {
         search.flatMap { session.searched($0, latest: prefs.latestDate) }
-            ?? session.timelineItems(latest: prefs.latestDate)
+    }
+
+    private var items: [DummyItem] {
+        results ?? session.timelineItems(latest: prefs.latestDate)
     }
 
     /// Running first; a live note replaces a leftover line; otherwise the reload
@@ -265,8 +270,6 @@ struct TimelinePane: View {
         // parked instead — among the posts that timeline shows, not among the results — so
         // closing the search gives back the post of the timeline the reader is in.
         .onChange(of: session.timelineID) { left, arrived in
-            // Another list, so the row the last one had at the top means nothing here.
-            session.scrolledTop = nil
             // A tag's page stays over the switch, and its lamp and the place under it are
             // `FediqoRootView.timelineSwitched`'s (#197): only the search's parked post is filed here.
             let onTag = if case .tag = standing { true } else { false }
@@ -407,16 +410,24 @@ struct TimelinePane: View {
     private var underneath: some View {
         // Bound once: the list, each row's rule under it and the jump to the top all read the
         // same rows, and each read of `items` used to ask the session for them again.
-        let items = items
+        //
+        // **Whether they are a search's results is asked here too, once** (#273), and not of
+        // `searching`: a search open with nothing typed still draws the timeline, and the row at
+        // the top of it is the timeline's.
+        let results = results
+        let items = results ?? session.timelineItems(latest: prefs.latestDate)
         if items.isEmpty {
             empty
         } else {
-            list(items)
+            list(items, found: results == nil ? nil : search?.pattern)
         }
     }
 
-    private func list(_ items: [DummyItem]) -> some View {
+    /// `found` is the pattern these rows are the results of, or nothing where they are the
+    /// timeline's own.
+    private func list(_ items: [DummyItem], found: String?) -> some View {
         let last = items.count - 1
+        let rows: [String] = items.map(\.id)
         // Where the timeline in front is not whole, said at its place (#201). A search's results
         // are not a timeline, and say nothing of the kind.
         let gaps = searching ? [:] : session.gapMarks(in: items)
@@ -483,11 +494,11 @@ struct TimelinePane: View {
             .scrollIndicators(.never)
             // The end of the list stops short of whatever floats over the page (#112).
             .clearsFloatingCorner()
-            .modifier(KeepsTopRow(session: session))
-            .modifier(HoldsPlace(session: session, proxy: proxy))
+            .modifier(KeepsTopRow(session: session, rows: rows, timeline: timeline, found: found))
+            .modifier(HoldsPlace(session: session, proxy: proxy, found: found))
             .onAppear {
                 // A tick later: a lazy stack just built has not laid out the row to scroll to.
-                switch Self.landing(selected: selectedID, top: session.scrolledTop) {
+                switch Self.landing(selected: selectedID, top: session.listTop(found: found)) {
                 case .centred(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
                 case .top(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .top) }
                 case nil: break
@@ -746,15 +757,41 @@ struct TimelinePane: View {
 /// screen after the swap. This only reports, so what moves the list on appearing is
 /// `TimelinePane.landing` and nothing else.
 ///
+/// **Only a row of the list it sits on** (#273). What is in view is said in no order, and after
+/// the list is replaced — a timeline switched — it is first said of the rows that were there
+/// before; a list emptied says nothing is in view at all. None of that is where this list is
+/// scrolled to, and since the top row is part of the place reading stopped at, a row taken on
+/// trust would be kept as one. `top` is the choice, and a test asks it.
+///
 /// A modifier of its own rather than a closure in the list's chain, which is long enough already
 /// for the compiler the CI builds with.
 struct KeepsTopRow: ViewModifier {
     let session: ShellSession
+    /// The rows of the list this sits on, in their order.
+    let rows: [String]
+    /// The timeline that list was drawn for.
+    let timeline: TimelineQuery
+    /// The pattern the list is the results of, whose top row is theirs and not the timeline's;
+    /// nothing where the list is the timeline's own rows.
+    let found: String?
 
     func body(content: Content) -> some View {
         content.onScrollTargetVisibilityChange(idType: String.self) { visible in
-            session.scrolledTop = visible.first
+            guard let top = Self.top(visible: visible, of: rows, on: timeline, inFront: session.currentTimeline)
+            else { return }
+            session.scrolled(to: top, found: found)
         }
+    }
+
+    /// The first row of this list, in the list's own order, that is in view — or nothing, where
+    /// nothing in view is this list's, or the list is no longer the one in front. Nothing is
+    /// never a top row cleared: that is the timeline changing, and the session's to do.
+    static func top(
+        visible: [String], of rows: [String], on timeline: TimelineQuery, inFront: TimelineQuery
+    ) -> String? {
+        guard timeline == inFront, !visible.isEmpty else { return nil }
+        let seen = Set(visible)
+        return rows.first(where: seen.contains)
     }
 }
 
@@ -768,10 +805,13 @@ struct KeepsTopRow: ViewModifier {
 struct HoldsPlace: ViewModifier {
     let session: ShellSession
     let proxy: ScrollViewProxy
+    /// The pattern the list is the results of, and the row held is those results' own top;
+    /// nothing where the list is the timeline's own rows.
+    let found: String?
 
     func body(content: Content) -> some View {
         content.onChange(of: session.notesRevision) { _, _ in
-            guard let top = session.scrolledTop else { return }
+            guard let top = session.listTop(found: found) else { return }
             proxy.scrollTo(top, anchor: .top)
         }
     }

@@ -104,7 +104,8 @@ public struct FediqoRootView: View {
     ) {
         let session = ShellSession(
             http: http, store: store, forums: forums, mastodon: mastodon,
-            timelines: WrittenTimelineStore(defaults: .standard)
+            timelines: WrittenTimelineStore(defaults: .standard),
+            place: ReadingPlaceStore(defaults: .standard)
         )
         session.persist = persist
         session.carrier = carrier
@@ -159,6 +160,20 @@ public struct FediqoRootView: View {
     }
 
     private var availability: ShellAvailability { session.availability }
+
+    /// The lamp of the timeline in front and the conversation open over it (#273), from the
+    /// three things here that hold them. See `ReadingPlace.standing`.
+    private var readingStands: ReadingPlace.Standing {
+        ReadingPlace.standing(
+            lamp: selectedItemID, walk: walk, searching: search.isOpen, parked: search.selectionBefore
+        )
+    }
+
+    /// Written out here rather than in the chain, for `stagePresented`'s reason: a closure built
+    /// inside it is one more thing for the type-checker to solve there.
+    private var keepsReadingPlace: KeepsReadingPlace {
+        KeepsReadingPlace(session: session, standing: readingStands, now: { readingStands })
+    }
 
     /// Reduce motion never mounts the overlay, so a reader who asked for stillness does not
     /// get one frame of a flip and then a skip.
@@ -226,6 +241,10 @@ public struct FediqoRootView: View {
                 if let landing = launch.settle(availability, standingOn: place) {
                     place = landing
                 }
+                // The launch has landed, so from here where reading stands is written down as it
+                // moves (#273) — and not before, when All is in front only because nothing else
+                // has been yet.
+                session.keepPlaceFromHere()
                 // Last, because it does not return: from here every landing renews what is in
                 // front, with no key pressed (#175).
                 await session.followStore()
@@ -266,6 +285,9 @@ public struct FediqoRootView: View {
             // used to do it through a binding whose one meaning was "close the thread".
             // A tag's page in front stays, and is asked again of the new timeline (#197).
             .onChange(of: session.timelineID) { left, arrived in timelineSwitched(from: left, to: arrived) }
+            // Where reading stands, told to the session that writes it down (#273). A change of
+            // `place` is no part of it: the rail's page is not where reading stopped.
+            .modifier(keepsReadingPlace)
             .sheet(isPresented: $composing) {
                 ComposerSheet()
                     #if os(iOS)

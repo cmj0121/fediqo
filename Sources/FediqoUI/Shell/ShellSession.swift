@@ -264,7 +264,75 @@ final class ShellSession {
 
     var queries: [TimelineQuery] = []
     /// The query in front. Nothing only while nothing is joined; not persisted.
-    var timelineID: TimelineQuery?
+    var timelineID: TimelineQuery? {
+        didSet {
+            guard timelineID != oldValue else { return }
+            // Another list, so the row the last one had at the top means nothing here — nor the
+            // post lit in it, nor the conversation open over it, until the root says what the
+            // one arrived at stands on (#273).
+            standing = ReadingPlace.Standing()
+            scrolledTop = nil
+            resultsTop = nil
+            keepPlace()
+        }
+    }
+
+    /// Where the place reading stopped at is kept, or nothing for a session that keeps none.
+    @ObservationIgnored let placeStore: ReadingPlaceStore?
+
+    /// The lamp of the timeline in front and the conversation open over it, as the root view
+    /// last said them (#273): both are its own state, and this is the copy the place is written
+    /// from. Past observation, for nothing draws from it.
+    @ObservationIgnored private var standing = ReadingPlace.Standing()
+
+    /// Whether a place that moved is written down yet (#273).
+    ///
+    /// **Not from the start.** A launch puts All in front the moment the store says what is
+    /// joined, before anything has asked where reading stopped, and writing that down would be
+    /// the place written over on the way to reading it.
+    @ObservationIgnored private(set) var keepsPlace = false
+
+    /// Where reading stands now: the timeline in front, its lamp, its top row and the
+    /// conversation open over it. Nothing while nothing is joined, which is no place to keep.
+    var readingPlace: ReadingPlace? {
+        guard let timelineID else { return nil }
+        return ReadingPlace(timeline: timelineID, lamp: standing.lamp, top: scrolledTop, thread: standing.thread)
+    }
+
+    /// The place last handed to the store, so one that has not moved is not handed over twice:
+    /// the store reads what is kept before it writes, and most asks to write are the place
+    /// already there. Forgotten by `stopKeepingPlace()`.
+    @ObservationIgnored private var placeHanded: ReadingPlace?
+
+    /// The launch has landed: from here every move of the place is written down. Where the
+    /// session stands at this moment is not — it is where the launch put it, and is written by
+    /// the first move away from it.
+    func keepPlaceFromHere() {
+        keepsPlace = true
+    }
+
+    /// From here nothing is written, until `keepPlaceFromHere()` says so again — for whoever
+    /// replaces what is kept underneath this session. What was last handed over is forgotten
+    /// with it: it is no longer a witness to what is kept.
+    func stopKeepingPlace() {
+        keepsPlace = false
+        placeHanded = nil
+    }
+
+    /// The root view's half of the place moved: the lamp, or the conversation in front.
+    func stands(_ standing: ReadingPlace.Standing) {
+        guard standing != self.standing else { return }
+        self.standing = standing
+        keepPlace()
+    }
+
+    /// Writes the place down as it stands. A change of tab reaches nothing here: which page the
+    /// rail is on is no part of the place.
+    private func keepPlace() {
+        guard keepsPlace, let place = readingPlace, place != placeHanded else { return }
+        placeHanded = place
+        placeStore?.save(place)
+    }
 
     /// The post the reader was standing on in each timeline they have left this run (#100).
     ///
@@ -384,7 +452,37 @@ final class ShellSession {
     /// past observation**, because the scroll view writes it on every row that passes the top,
     /// and a redraw of everything that reads this session on every one of those would be the
     /// scroll paying for a note nobody reads until the list is drawn again.
-    @ObservationIgnored var scrolledTop: String?
+    ///
+    /// **Part of the place reading stopped at** (#273), so a row that passes is written down;
+    /// and cleared where the timeline changes, by `timelineID` itself and by nothing else.
+    @ObservationIgnored var scrolledTop: String? {
+        didSet { if scrolledTop != oldValue { keepPlace() } }
+    }
+
+    /// The row at the top of a search's results, as the reader last left them scrolled, and the
+    /// pattern they were the results of. Beside `scrolledTop` and not in it (#273): the results
+    /// are not the timeline, and a result written there would be kept as the place the timeline
+    /// was left at. This run only, and only for that pattern: another search's results are
+    /// another list.
+    @ObservationIgnored private var resultsTop: (pattern: String, row: String)?
+
+    /// The pane's list scrolled. `pattern` is what the list is the results of, or nothing where
+    /// it is the timeline's own rows — no search open, or one with nothing typed in it yet,
+    /// under which the timeline is still what is drawn and what is scrolled.
+    func scrolled(to top: String, found pattern: String?) {
+        if let pattern {
+            resultsTop = (pattern, top)
+        } else {
+            scrolledTop = top
+        }
+    }
+
+    /// The top row of the list the pane is drawing: what a list drawn afresh lands on, and what
+    /// a renewal holds still. `pattern` as `scrolled(to:found:)` takes it.
+    func listTop(found pattern: String?) -> String? {
+        guard let pattern else { return scrolledTop }
+        return resultsTop?.pattern == pattern ? resultsTop?.row : nil
+    }
 
     /// The row one id stands for, anywhere in what this device holds — or nothing, where this
     /// device does not hold it any more.
@@ -705,10 +803,12 @@ final class ShellSession {
         mastodon: MastodonSessions = MastodonSessions(),
         posts: ForumPosts? = nil,
         blogs: ForumBlogs? = nil,
-        timelines: WrittenTimelineStore? = nil
+        timelines: WrittenTimelineStore? = nil,
+        place: ReadingPlaceStore? = nil
     ) {
         self.http = http
         timelineStore = timelines
+        placeStore = place
         carry = ShellCarry(work: work)
         nearby = ShellNearby(work: work)
         self.store = store
