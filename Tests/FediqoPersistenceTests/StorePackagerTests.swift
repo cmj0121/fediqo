@@ -56,6 +56,8 @@ struct StorePackagerTests {
     func roundTrip(pictures: Bool) async throws {
         let from = try await Self.populated()
         let onto = try await Device()
+        // Where this device stopped reading, which the read back replaces with the package's (#273).
+        onto.defaults.set(Data(#"{"version":1,"timeline":"trends"}"#.utf8), forKey: "fediqo.place")
         let url = package()
         defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
 
@@ -97,6 +99,9 @@ struct StorePackagerTests {
         #expect(reopened.said == [word])
         // The person's settings.
         #expect(onto.defaults.data(forKey: "fediqo.timelines") == from.defaults.data(forKey: "fediqo.timelines"))
+        // Where reading stopped rides among them, byte for byte (#273), and is no entry of its own.
+        #expect(from.defaults.data(forKey: "fediqo.place") == PackagerFixture.place)
+        #expect(onto.defaults.data(forKey: "fediqo.place") == PackagerFixture.place)
         #expect(onto.defaults.string(forKey: "fediqo.dummy.language") == "zh-TW")
         #expect(onto.defaults.string(forKey: "fediqo.dummy.keepMonths") == "6")
         // What signs in.
@@ -108,6 +113,23 @@ struct StorePackagerTests {
         #expect(copy == (pictures ? Data(repeating: 7, count: 3000) : nil))
         #expect(onto.media.totalBytes() == (pictures ? 3100 : 0))
         #expect(try await onto.packager().weigh().holdsStore)
+    }
+
+    /// A package taken away by a build that kept no place (#273): the settings are replaced
+    /// whole, so the place this device kept — about the store replaced — goes with them.
+    @Test("A package carrying no place, read back onto a device that kept one, leaves none kept")
+    func noPlaceInThePackage() async throws {
+        let from = try await Device(sources: [Self.mastodon], notes: [Self.note("1")])
+        from.defaults.set("6", forKey: "fediqo.dummy.keepMonths")
+        let onto = try await Device()
+        onto.defaults.set(PackagerFixture.place, forKey: "fediqo.place")
+        let url = package()
+        defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
+
+        try await from.packager().takeAway(to: url, key: .password("open sesame"), pictures: false) { _ in }
+        try await readAll(url, key: .password("open sesame"), onto: onto)
+        #expect(onto.defaults.string(forKey: "fediqo.dummy.keepMonths") == "6")
+        #expect(onto.defaults.object(forKey: "fediqo.place") == nil)
     }
 
     @Test("A store larger than one chunk streams through, and the index is opened whole after")

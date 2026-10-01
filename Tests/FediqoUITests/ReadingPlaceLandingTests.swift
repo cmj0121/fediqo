@@ -61,20 +61,29 @@ struct KeptDevice {
     /// What is kept, read the way a relaunch reads it.
     var kept: ReadingPlace? { ReadingPlaceStore(defaults: defaults).load() }
 
-    /// A session as a launch makes it, before the store has said anything.
+    /// A session as a launch makes it, before the store has said anything. Its pictures, its
+    /// emoji, its sign-ins and its record of work are its own, so a read back adopted here
+    /// (`adoptReadBack`) clears and rereads nothing another suite shares.
     func session() -> ShellSession {
-        ShellSession(
+        let session = ShellSession(
             http: FixtureHTTP([:]), store: store,
+            pictures: ShellPictures(http: FixtureHTTP([:])),
+            emojis: EmojiCache(http: FixtureHTTP([:])),
+            mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: ActServer([:])),
             timelines: WrittenTimelineStore(defaults: defaults),
             place: ReadingPlaceStore(defaults: defaults)
         )
+        session.work = SourceWork()
+        return session
     }
 
     /// The launch as the root view runs it, without the view: the store adopted, the place come
-    /// back to, and only then the writing started. What the root would stand on is handed back.
+    /// back to and stood on, and only then the writing started. What the root stands on is
+    /// handed back.
     func launch(_ session: ShellSession) async -> ReadingPlace.Standing? {
         await session.reloadFromStore()
-        let standing = session.landAtKeptPlace(latest: nil)
+        session.landAtKeptPlace(latest: nil)
+        let standing = session.takeLanding()
         session.keepPlaceFromHere()
         return standing
     }
@@ -235,6 +244,23 @@ struct ReadingPlaceLandingTests {
         #expect(left?.lamp == stopped.lamp)
     }
 
+    /// After a read back the walk still holds what was walked to on the store replaced.
+    @Test("Steps taken before the landing are gone: the walk is the place's conversation, or nothing")
+    func stepsBeforeAreGone() {
+        var walk = ShellWalk()
+        _ = walk.walk(to: .thread("old-1"), from: "old-1")
+        _ = walk.walk(to: .thread("old-2"), from: "old-reply")
+        let lamp = FediqoRootView.land(ReadingPlace.Standing(lamp: "a2", thread: "a3"), on: &walk)
+        #expect(lamp == "a3")
+        #expect(walk.depth == 1)
+        #expect(ReadingPlace.standing(lamp: lamp, walk: walk, searching: false, parked: nil)
+            == ReadingPlace.Standing(lamp: "a2", thread: "a3"))
+
+        _ = walk.walk(to: .thread("old-2"), from: "old-reply")
+        #expect(FediqoRootView.land(ReadingPlace.Standing(lamp: "a2"), on: &walk) == "a2")
+        #expect(walk.isEmpty)
+    }
+
     @Test("A place with no conversation takes no step: the lamp kept, or none")
     func noConversationNoStep() {
         for stopped in [ReadingPlace.Standing(lamp: "a2"), ReadingPlace.Standing()] {
@@ -325,10 +351,20 @@ struct ReadingPlaceLaunchTests {
         #expect(TimelinePane.landing(selected: standing?.lamp, top: session.listTop(found: nil)) == .centred(row("p3")))
 
         session.keepPlaceFromHere()
-        // The root says what it stands on, which is what it was handed.
+        // The root has not stood on the landing yet: what it says is where it stood before —
+        // nothing — and is not taken, so the place come back to is not written over with it.
+        session.stands(ReadingPlace.Standing())
+        #expect(session.readingPlace == stopped)
+        #expect(device.defaults.writes == writes)
+
+        // The landing is handed over once; from there the root's word is taken again.
+        #expect(session.takeLanding() == standing)
+        #expect(session.takeLanding() == nil)
         session.stands(try #require(standing))
         #expect(device.defaults.writes == writes)
         #expect(device.kept == stopped)
+        session.stands(ReadingPlace.Standing(lamp: row("p1")))
+        #expect(device.kept == ReadingPlace(timeline: mine, lamp: row("p1"), top: row("p1")))
     }
 
     /// The root takes the conversation's step whichever page the rail is on (`FediqoRootView.land`
@@ -351,7 +387,8 @@ struct ReadingPlaceLaunchTests {
         let moved = launch.settle(session.availability, standingOn: .preferences)
         #expect(moved == nil)
 
-        let standing = try #require(session.landAtKeptPlace(latest: nil))
+        session.landAtKeptPlace(latest: nil)
+        let standing = try #require(session.takeLanding())
         var walk = ShellWalk()
         let lamp = FediqoRootView.land(standing, on: &walk)
         session.keepPlaceFromHere()

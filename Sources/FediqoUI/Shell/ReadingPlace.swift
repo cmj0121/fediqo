@@ -100,6 +100,35 @@ extension ReadingPlace {
     }
 }
 
+/// What the session has in front, as the root view answers its moving (#273): the timeline, and
+/// how many times a kept place was landed on.
+///
+/// **One value and one handler, because the two are answered in an order.** A read back lands on
+/// a place while another timeline is in front, so both move at once: the switch ends the walk
+/// that stood on the list replaced, and only then is the landing's own conversation opened —
+/// answered the other way round, the switch would end the conversation just come back to. Two
+/// handlers of one pass run in no order anybody wrote down; `answers(after:)` is the order, and
+/// a test asks it.
+struct ShellFront: Equatable, Sendable {
+    var timeline: TimelineQuery?
+    var landings: Int
+
+    enum Answer: Equatable, Sendable {
+        /// Another timeline is in front: `FediqoRootView.timelineSwitched`.
+        case switched(from: TimelineQuery?, to: TimelineQuery?)
+        /// A kept place was landed on: the root stands on its half of it.
+        case landed
+    }
+
+    /// What the root does about having moved here from `left`, in the order it does it.
+    func answers(after left: ShellFront) -> [Answer] {
+        var answers: [Answer] = []
+        if timeline != left.timeline { answers.append(.switched(from: left.timeline, to: timeline)) }
+        if landings != left.landings { answers.append(.landed) }
+        return answers
+    }
+}
+
 /// The place reading stopped at, kept on this device (#273).
 ///
 /// **In the preferences, not the store**, beside the timelines the reader wrote:

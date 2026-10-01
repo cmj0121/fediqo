@@ -169,6 +169,11 @@ public struct FediqoRootView: View {
         )
     }
 
+    /// The timeline in front and the landings so far, answered together in `frontMoved`.
+    private var front: ShellFront {
+        ShellFront(timeline: session.timelineID, landings: session.landings)
+    }
+
     /// Written out here rather than in the chain, for `stagePresented`'s reason: a closure built
     /// inside it is one more thing for the type-checker to solve there.
     private var keepsReadingPlace: KeepsReadingPlace {
@@ -242,7 +247,10 @@ public struct FediqoRootView: View {
                     place = landing
                 }
                 // Which page is the launch's to say, above; on the timeline, the place reading
-                // stopped at is come back to (#273) — whichever page that was.
+                // stopped at is come back to (#273) — whichever page that was. Stood on here, in
+                // the same turn, so the pane is first drawn with its lamp; `frontMoved` finds
+                // nothing left to stand on when it answers the same landing.
+                session.landAtKeptPlace(latest: prefs.latestDate)
                 landWhereReadingStopped()
                 // The launch has landed, so from here where reading stands is written down as it
                 // moves (#273) — and not before, when the timeline is in front without the lamp
@@ -287,7 +295,10 @@ public struct FediqoRootView: View {
             // same change. Here rather than in the pane because the walk is held here — the pane
             // used to do it through a binding whose one meaning was "close the thread".
             // A tag's page in front stays, and is asked again of the new timeline (#197).
-            .onChange(of: session.timelineID) { left, arrived in timelineSwitched(from: left, to: arrived) }
+            //
+            // A kept place landed on is answered in the same handler, after the switch it may
+            // have come with (#273): see `ShellFront`.
+            .onChange(of: front) { left, arrived in frontMoved(from: left, to: arrived) }
             // Where reading stands, told to the session that writes it down (#273). A change of
             // `place` is no part of it: the rail's page is not where reading stopped.
             .modifier(keepsReadingPlace)
@@ -1238,23 +1249,41 @@ public struct FediqoRootView: View {
         return walk.walk(to: .thread(id), from: selectedItemID)
     }
 
-    /// The launch comes back to where reading stopped (#273). The session puts the timeline and
-    /// its top row in front and says what is this view's to stand on, which `land` stands on.
+    /// The session's front moved: a timeline switched is answered first, then a kept place
+    /// landed on — `ShellFront.answers(after:)`'s order.
+    private func frontMoved(from left: ShellFront, to arrived: ShellFront) {
+        for answer in arrived.answers(after: left) {
+            switch answer {
+            case .switched(let left, let arrived): timelineSwitched(from: left, to: arrived)
+            case .landed: landWhereReadingStopped()
+            }
+        }
+    }
+
+    /// The session landed on a kept place (#273) — at a launch, or as a read back was adopted —
+    /// and this view stands on its half of it: the lamp, and the conversation that was open.
+    /// Nothing where the landing has been stood on already.
     ///
-    /// **In one turn with the session's half**, so what `KeepsReadingPlace` reads a tick later is
-    /// the place come back to and not the nothing this view started with — which, told to the
-    /// session, would be written over it.
+    /// **Until it has, the session takes nothing this view says of where it stands**
+    /// (`ShellSession.stands`), so what `KeepsReadingPlace` reads a tick later is the place come
+    /// back to — and not the nothing this view started with, or the lamp of the store a read
+    /// back replaced.
+    ///
+    /// **Whatever was walked to before goes**, a page read out of a post with it: after a read
+    /// back those steps stood on rows of a store no longer here.
     ///
     /// **The conversation is asked of its source as it is drawn**, as one pressed is (#198): the
     /// ask is the pane opening, whoever opened it.
     private func landWhereReadingStopped() {
-        guard let stopped = session.landAtKeptPlace(latest: prefs.latestDate) else { return }
+        guard let stopped = session.takeLanding() else { return }
+        clearWalk()
         selectedItemID = Self.land(stopped, on: &walk)
     }
 
     /// The step a kept place puts the walk on, and the row the lamp goes to: the conversation
     /// that was open, over the stream's lamp as it was kept — which need not be the post the
-    /// conversation is around, one opened from somebody's page, say — or the lamp alone. Static,
+    /// conversation is around, one opened from somebody's page, say — or the lamp alone. Any
+    /// step taken before is gone: the place is the whole of where the reader now stands. Static,
     /// so a test can take the step without a window.
     ///
     /// **Whichever page the rail is on**, where a press is refused off the timeline place
@@ -1263,6 +1292,7 @@ public struct FediqoRootView: View {
     /// change of tab does not end the walk. Refused, the next thing told to the session would be
     /// that no conversation is open, and the place would be written without it.
     static func land(_ stopped: ReadingPlace.Standing, on walk: inout ShellWalk) -> String? {
+        walk.clear()
         guard let thread = stopped.thread else { return stopped.lamp }
         _ = walk.walk(to: .thread(thread), from: stopped.lamp)
         return thread

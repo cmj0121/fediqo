@@ -21,7 +21,7 @@ struct NearbySection: View {
                     ShellIconButton("antenna.radiowaves.left.and.right", name: "nearby.hold", help: "nearby.hold.help") {
                         session.nearby.beginHold(
                             with: carrier, link: link, device: session.deviceName, pictures: session.pictures.disk
-                        ) { await session.adoptReadBack(prefs: prefs) }
+                        ) { await session.adoptNearbyMove(prefs: prefs) }
                     }
                     ShellIconButton("paperplane", name: "nearby.offer", help: "nearby.offer.help") {
                         session.nearby.beginOffer(with: carrier, link: link)

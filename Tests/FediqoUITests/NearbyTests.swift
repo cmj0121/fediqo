@@ -115,7 +115,11 @@ struct NearbyTests {
             // A hold put away a moment ago leaves the pipe as its stream ends; a second round
             // starts once it has, as a browser lists only devices still holding.
             for _ in 0..<600 where !link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
-            holding.beginHold(with: onto, link: link, device: "a tablet") { [log] in log.adopted.withLock { $0 += 1 } }
+            holding.beginHold(with: onto, link: link, device: "a tablet") { [log] in
+                log.adopted.withLock { $0 += 1 }
+                // Among what was said about holding still, so the order between them can be asked.
+                log.stillness.withLock { $0.append("adopted") }
+            }
             await settle(holding) { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
             offering.beginOffer(with: from, link: link)
             await settle(offering) { if case .browsing(let peers) = $0 { !peers.isEmpty } else { false } }
@@ -246,6 +250,9 @@ struct NearbyTests {
         // Held still on the sender from the package's writing, on the receiver from its yes, and let go once.
         #expect(two.log.stillness.withLock { $0 }.filter { $0.hasPrefix("offer") }.map { $0.hasSuffix("true") } == [true, false])
         #expect(two.log.stillness.withLock { $0 }.filter { $0.hasPrefix("hold") }.map { $0.hasSuffix("true") } == [true, false])
+        // And on the receiver only once what was moved in is adopted (#273): let go before it,
+        // the session would write where it stood over the place that came with the move.
+        #expect(two.log.stillness.withLock { $0 }.filter { !$0.hasPrefix("offer") } == ["hold true", "adopted", "hold false"])
         two.holding.dismiss()
         two.offering.dismiss()
         #expect(two.holding.step == nil && !two.holding.isUp && two.offering.step == nil)

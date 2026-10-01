@@ -68,7 +68,8 @@ struct ReadingPlaceLandingHostedTests {
         /// The root's `.task` from `launch.settle` on, less the conversation.
         private func land() {
             launch.onTimeline = true
-            if let stopped = session.landAtKeptPlace(latest: prefs.latestDate) {
+            session.landAtKeptPlace(latest: prefs.latestDate)
+            if let stopped = session.takeLanding() {
                 selected = stopped.lamp
             }
             session.keepPlaceFromHere()

@@ -81,14 +81,22 @@ enum PackagerFixture {
         )
     }
 
-    /// A device holding two sources, three posts (one aside), two timelines, a preference, a
-    /// token, an app registration and a forum password, and two picture copies.
+    /// Where reading stopped (#273), in the shape the shell keeps it under `fediqo.place`: bytes
+    /// to this target, which carries every `fediqo.*` default and reads none of them.
+    static let place = Data(
+        #"{"version":1,"timeline":"all","lamp":"one.example\u001e2","top":"one.example\u001e1","thread":"one.example\u001e2"}"#.utf8
+    )
+
+    /// A device holding two sources, three posts (one aside), two timelines, the place reading
+    /// stopped at, a preference, a token, an app registration and a forum password, and two
+    /// picture copies.
     static func populated() async throws -> PackagerDevice {
         let device = try await PackagerDevice(
             sources: [mastodon, forum],
             notes: [note("1"), note("2", source: forum), note("3", holding: .aside)]
         )
         device.defaults.set(Data("{\"version\":2,\"timelines\":[{\"id\":\"a\",\"name\":\"A\",\"rules\":[]},{\"id\":\"b\",\"name\":\"B\",\"rules\":[]}]}".utf8), forKey: "fediqo.timelines")
+        device.defaults.set(place, forKey: "fediqo.place")
         device.defaults.set("zh-TW", forKey: "fediqo.dummy.language")
         device.defaults.set("6", forKey: "fediqo.dummy.keepMonths")
         try device.tokens.save(MastodonToken(host: mastodon.host, accessToken: "t", clientID: "c", clientSecret: "s", scopes: "read"))
