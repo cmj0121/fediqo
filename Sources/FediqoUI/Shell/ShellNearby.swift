@@ -17,7 +17,9 @@ import Observation
 /// on every way out — so the list shows where it went, and nothing else.
 ///
 /// **The store is held still** while the move runs (`holdStill`): from the sender's first byte
-/// written and the receiver's yes, until every way out.
+/// written and the receiver's yes, until every way out. **The receiver holds on past a move
+/// done, until what it read back is adopted** (#273) — the place reading stopped at came with
+/// the move, and is not to be written over before the session has come back to it.
 ///
 /// **The device stays awake for the whole run** (`awake`, `staysAwake`), a longer span than the
 /// store's stillness: from the first press — the code up, the list up — to the flow's end, a
@@ -509,5 +511,14 @@ final class ShellNearby {
             return
         }
         work.renameNearby(token, peer: peer)
+    }
+}
+
+extension ShellNearby.Step {
+    /// Whether the move this step ends replaced the store and the settings with it — all but a
+    /// move of sign-ins only, which leaves both as they were.
+    var movedStore: Bool {
+        guard case .done(let summary, _) = self else { return true }
+        return summary.contents != .signInsOnly
     }
 }

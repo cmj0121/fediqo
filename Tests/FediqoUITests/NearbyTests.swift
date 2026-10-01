@@ -258,6 +258,65 @@ struct NearbyTests {
         #expect(two.holding.step == nil && !two.holding.isUp && two.offering.step == nil)
     }
 
+    /// The receiver holds past a move done until what it read back is adopted (#273), and lets
+    /// go as the adoption ends. Put away meanwhile, it has let go already; and a second move
+    /// agreed to before the first adoption ends holds for itself, which that end must not undo.
+    @Test("Put away while what was moved is still being adopted, the store is let go once; the adoption ending later lets go nothing a later move holds")
+    func putAwayWhileAdopting() async throws {
+        let two = Two()
+        // The adoption says when it has begun, waits to be let through, and says when it ends.
+        let started = Gate()
+        let adopting = Gate()
+        let finished = Gate()
+        defer {
+            // The adoption's own wait, so no way out of this test leaves it standing there.
+            adopting.open()
+            two.end()
+        }
+        // `begin()`, with that adoption.
+        two.holding.beginHold(with: two.onto, link: two.link, device: "a tablet") { [log = two.log] in
+            log.stillness.withLock { $0.append("adopting") }
+            started.open()
+            await adopting.wait()
+            log.stillness.withLock { $0.append("adopted") }
+            finished.open()
+        }
+        await two.settle(two.holding) { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
+        two.offering.beginOffer(with: two.from, link: two.link)
+        await two.settle(two.offering) { if case .browsing(let peers) = $0 { !peers.isEmpty } else { false } }
+        await two.offer()
+        two.offering.answer(true)
+        two.holding.answer(true)
+        await two.settle(two.holding) { if case .done = $0 { true } else { false } }
+        await two.settle(two.offering) { if case .done = $0 { true } else { false } }
+        let said: () -> [String] = { [log = two.log] in log.stillness.withLock { $0 }.filter { !$0.hasPrefix("offer") } }
+        // A move that never came to done has said so above, and begins no adoption to wait for.
+        guard case .done = two.holding.step else { return }
+        await started.wait()
+        #expect(said() == ["hold true", "adopting"], "done, and still held while it is adopted")
+
+        two.holding.dismiss()
+        two.offering.dismiss()
+        #expect(said() == ["hold true", "adopting", "hold false"])
+
+        // A second move, agreed to on this side, while the first adoption has not ended.
+        await two.begin()
+        await two.offer()
+        two.holding.answer(true)
+        #expect(said() == ["hold true", "adopting", "hold false", "hold true"])
+
+        adopting.open()
+        await finished.wait()
+        // The adoption's task goes on from the closure's return to its own end — where it lets
+        // go, or does not — in the turn that opened `finished`, with nothing to wait for on the
+        // way; this test is on the same actor, and is resumed only once that turn is over.
+        #expect(said() == ["hold true", "adopting", "hold false", "hold true", "adopted"])
+
+        two.holding.dismiss()
+        two.offering.dismiss()
+        #expect(said().filter { $0 == "hold false" }.count == 2)
+    }
+
     @Test("The receiver's read back arrives as progress on its sheet, Cancel dimmed; neither side's progress sheet taken down by the system stops the move")
     func readBackProgress() async throws {
         let two = Two()

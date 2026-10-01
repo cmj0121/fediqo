@@ -112,6 +112,10 @@ typing its hostname. It names the protocol; only those two join this session. Wh
 sends lands in this device's store, and every timeline is a query of that store. Notices and
 compose stay off until they have something.
 
+Closing the app and opening it again comes back to where reading stopped — the timeline, the
+selected post, how far down it was scrolled, and the thread that was open — and that place
+goes with the store when it is taken away or moved nearby.
+
 ### Writing a post
 
 From a timeline, `c` or the compose control opens writing over the page. You pick a source

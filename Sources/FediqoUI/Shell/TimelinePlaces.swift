@@ -15,8 +15,10 @@
 /// Each query keeps its own, so one cannot overwrite another and a timeline opened for the first
 /// time this run has nothing to inherit.
 ///
-/// **This run only.** Nothing here is written down, and coming back to where reading stopped
-/// after a quit is #63 — a different question with a store schema in it.
+/// **This run only.** Nothing here is written down. What a quit keeps is one place — the
+/// timeline in front, its post, its top row and the conversation open over it (#273,
+/// `ReadingPlace`), in the preferences and in no schema — and a launch files that post here, for
+/// that timeline, as it comes back to it. Every other timeline starts the run with nothing.
 struct TimelinePlaces: Hashable, Sendable {
     private var held: [TimelineQuery: String] = [:]
 

@@ -263,7 +263,8 @@ final class ShellSession {
     var unreadAll = 0
 
     var queries: [TimelineQuery] = []
-    /// The query in front. Nothing only while nothing is joined; not persisted.
+    /// The query in front. Nothing only while nothing is joined. Kept as part of the place
+    /// reading stopped at (#273), which is what a launch puts in front again.
     var timelineID: TimelineQuery? {
         didSet {
             guard timelineID != oldValue else { return }
@@ -715,10 +716,19 @@ final class ShellSession {
     /// check runs again. **The contract**: set it before the first byte moves, clear it after
     /// the last, and clear it on every way out, a failure included — `ShellCarry` keeps it. A
     /// move this session makes itself — a remove, a clear, a drop, a span let go — holds through
-    /// `holdingStill(_:)` instead, which nests. **Only the room limit honours it** — and the
-    /// place reading stopped at, which is not written meanwhile (#273, `keepPlace`): the months
-    /// limit, a remove, a span let go and every press of the person's own go ahead regardless,
-    /// because each is the person's act and not a check running by itself.
+    /// `holdingStill(_:)` instead, which nests.
+    ///
+    /// **The room limit honours it, and so does the place reading stopped at** (#273,
+    /// `keepPlace`): the place is not written meanwhile, and is written as it then stands when
+    /// the store is let go. The months limit, a remove, a span let go and every press of the
+    /// person's own go ahead regardless, because each is the person's act and not a check
+    /// running by itself.
+    ///
+    /// **The side that receives a store keeps its hold until `adoptReadBack` has begun.** What
+    /// arrives brings its own place, and until the adoption has stopped the writing this session
+    /// still stands on the store replaced: let go a turn earlier, that is the place written —
+    /// over the one that just arrived. `ShellCarry` and `ShellNearby` both hold through the
+    /// adoption's end.
     var holdsStill = false {
         didSet {
             guard !holdsStill, oldValue else { return }
@@ -3409,14 +3419,5 @@ private struct RemovedStops: HTTPClient {
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         if await removed() { throw CancellationError() }
         return try await inner.data(from: url)
-    }
-}
-
-extension ShellNearby.Step {
-    /// Whether the move this step ends replaced the store and the settings with it — all but a
-    /// move of sign-ins only, which leaves both as they were.
-    var movedStore: Bool {
-        guard case .done(let summary, _) = self else { return true }
-        return summary.contents != .signInsOnly
     }
 }
