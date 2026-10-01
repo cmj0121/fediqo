@@ -273,6 +273,7 @@ final class ShellSession {
             standing = ReadingPlace.Standing()
             scrolledTop = nil
             resultsTop = nil
+            topIsOwed = false
             keepPlace()
         }
     }
@@ -287,9 +288,9 @@ final class ShellSession {
 
     /// Whether a place that moved is written down yet (#273).
     ///
-    /// **Not from the start.** A launch puts All in front the moment the store says what is
-    /// joined, before anything has asked where reading stopped, and writing that down would be
-    /// the place written over on the way to reading it.
+    /// **Not from the start.** A launch puts a timeline in front the moment the store says what
+    /// is joined, before its lamp and its top row have been come back to (`landAtKeptPlace`), and
+    /// writing that down would be the place written over on the way to reading it.
     @ObservationIgnored private(set) var keepsPlace = false
 
     /// Where reading stands now: the timeline in front, its lamp, its top row and the
@@ -332,6 +333,64 @@ final class ShellSession {
         guard keepsPlace, let place = readingPlace, place != placeHanded else { return }
         placeHanded = place
         placeStore?.save(place)
+    }
+
+    /// Comes back to the place kept (#273): what `ReadingPlace.landing` makes of it against what
+    /// this device holds now is put in front, and the half of it that is the root view's — the
+    /// lamp, and the conversation to open again — is handed back for the root to stand on. Nothing
+    /// where no place is kept, or nothing is joined; the place kept is then left as it is.
+    ///
+    /// **Asked before `keepPlaceFromHere()`**, so coming back writes nothing — no preference, and
+    /// no row of the store, which is only read. The place kept stays exactly as it was until the
+    /// reader moves.
+    ///
+    /// **The timeline first.** It forgets the top row and the standing of the one it replaces as
+    /// it changes, so they are set after it. At a launch it is already the one in front:
+    /// `rebuildQueries` put it there as the store said what is joined.
+    ///
+    /// **The lamp is filed as that timeline's place too** (#100): the pane answers a timeline
+    /// coming in front by lighting what is filed for it, and would otherwise put the lamp out.
+    func landAtKeptPlace(latest: LatestDate?) -> ReadingPlace.Standing? {
+        guard let kept = placeStore?.load(),
+              let place = kept.landing(
+                  among: queries,
+                  rows: { query in rows(of: query, latest: latest) },
+                  holds: { row in heldNote(row) != nil }
+              )
+        else { return nil }
+        timelineID = place.timeline
+        scrolledTop = place.top
+        topIsOwed = place.top != nil
+        stands(place.standing)
+        timelinePlaces.leave(place.timeline, standingOn: place.lamp)
+        landings += 1
+        return place.standing
+    }
+
+    /// How many times a kept place was put in front. Observed: a list already drawn moves to the
+    /// place as this changes, where one not yet drawn lands on it as it appears.
+    private(set) var landings = 0
+
+    /// Whether the list has yet to be scrolled to the top row a landing put here (#273).
+    ///
+    /// **Until it has, what the list says is in view is not where reading stands.** A list just
+    /// drawn reports its first rows before it is scrolled anywhere, and taken as the top row they
+    /// would replace the one come back to — in the place written, and as the row the list then
+    /// lands on. So nothing the timeline's list reports is taken until the pane says it has
+    /// landed (`listLanded(for:)`), or the timeline changes.
+    @ObservationIgnored private(set) var topIsOwed = false
+
+    /// The pane has put its list where `TimelinePane.landing` said: from here the top row is
+    /// what the list reports. `landing` is `landings` as the pane read the place it then
+    /// scrolled to.
+    ///
+    /// **Only for the landing that is still the last.** The pane scrolls a tick after it reads
+    /// the place, and a list that appeared just before a kept place was come back to read none:
+    /// its tick comes round after the landing, having scrolled nowhere, and is not the list
+    /// reaching the row now owed. The landing itself moves the list again, and that one counts.
+    func listLanded(for landing: Int) {
+        guard landing == landings else { return }
+        topIsOwed = false
     }
 
     /// The post the reader was standing on in each timeline they have left this run (#100).
@@ -468,11 +527,12 @@ final class ShellSession {
 
     /// The pane's list scrolled. `pattern` is what the list is the results of, or nothing where
     /// it is the timeline's own rows — no search open, or one with nothing typed in it yet,
-    /// under which the timeline is still what is drawn and what is scrolled.
+    /// under which the timeline is still what is drawn and what is scrolled. Not taken while the
+    /// list has yet to reach the top row a landing came back to (`topIsOwed`).
     func scrolled(to top: String, found pattern: String?) {
         if let pattern {
             resultsTop = (pattern, top)
-        } else {
+        } else if !topIsOwed {
             scrolledTop = top
         }
     }
@@ -2488,6 +2548,16 @@ final class ShellSession {
         var rebuilt: [TimelineQuery] = sources.contains(where: { Self.hasTrends($0.kind) }) ? [.all, .trends] : [.all]
         rebuilt += written.map { .written($0.id) }
         if rebuilt != queries { queries = rebuilt }
+        guard timelineID != nil else {
+            // Nothing was in front. At a launch the timeline reading stopped on comes in front,
+            // where it is still one of the tabs (#273), and its lamp and its top row are
+            // `landAtKeptPlace`'s, once the launch asks. **Only until the launch has landed**: a
+            // source joined later in the run, after the last was let go or after a launch that
+            // held none, is read from All as a first source always was — the place kept is not
+            // half come back to, and is written over as the reader moves there.
+            timelineID = (keepsPlace ? nil : placeStore?.load()?.timeline(among: queries)) ?? .all
+            return
+        }
         if !queries.contains(where: { $0 == timelineID }) {
             timelineID = .all
         }

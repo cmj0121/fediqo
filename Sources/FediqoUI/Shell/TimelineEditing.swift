@@ -148,13 +148,27 @@ extension ShellSession {
         let hosts = Set(sources.map(\.host))
         let key = DrawnTimeline.Key(definition: definition, notesRevision: notesRevision, latest: latest, hosts: hosts)
         if let drawnTimeline, drawnTimeline.key == key { return drawnTimeline.items }
-        let items = currentTimeline.items(
-            from: notes, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: latest,
-            here: hosts
-        )
+        let items = drawn(currentTimeline, as: definition, latest: latest, here: hosts)
         drawnTimeline = DrawnTimeline(key: key, items: items)
         timelineEvaluations += 1
         return items
+    }
+
+    private func drawn(
+        _ query: TimelineQuery, as definition: TimelineDefinition, latest: LatestDate?, here hosts: Set<String>
+    ) -> [DummyItem] {
+        query.items(
+            from: notes, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: latest,
+            here: hosts
+        )
+    }
+
+    /// The rows one timeline would draw, whether or not it is the one in front: what a place kept
+    /// is asked against before anything is put in front (#273). The one in front is read as the
+    /// stream reads it, kept; another is worked out and not kept.
+    func rows(of query: TimelineQuery, latest: LatestDate?) -> [String] {
+        guard query != currentTimeline else { return timelineItems(latest: latest).map(\.id) }
+        return drawn(query, as: definition(of: query), latest: latest, here: Set(sources.map(\.host))).map(\.id)
     }
 
     /// What this device holds under one hashtag, newest first — every timeline's rows and what

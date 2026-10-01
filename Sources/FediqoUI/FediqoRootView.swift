@@ -241,9 +241,12 @@ public struct FediqoRootView: View {
                 if let landing = launch.settle(availability, standingOn: place) {
                     place = landing
                 }
+                // Which page is the launch's to say, above; on the timeline, the place reading
+                // stopped at is come back to (#273) — whichever page that was.
+                landWhereReadingStopped()
                 // The launch has landed, so from here where reading stands is written down as it
-                // moves (#273) — and not before, when All is in front only because nothing else
-                // has been yet.
+                // moves (#273) — and not before, when the timeline is in front without the lamp
+                // and the top row it was left with.
                 session.keepPlaceFromHere()
                 // Last, because it does not return: from here every landing renews what is in
                 // front, with no key pressed (#175).
@@ -1235,6 +1238,36 @@ public struct FediqoRootView: View {
         return walk.walk(to: .thread(id), from: selectedItemID)
     }
 
+    /// The launch comes back to where reading stopped (#273). The session puts the timeline and
+    /// its top row in front and says what is this view's to stand on, which `land` stands on.
+    ///
+    /// **In one turn with the session's half**, so what `KeepsReadingPlace` reads a tick later is
+    /// the place come back to and not the nothing this view started with — which, told to the
+    /// session, would be written over it.
+    ///
+    /// **The conversation is asked of its source as it is drawn**, as one pressed is (#198): the
+    /// ask is the pane opening, whoever opened it.
+    private func landWhereReadingStopped() {
+        guard let stopped = session.landAtKeptPlace(latest: prefs.latestDate) else { return }
+        selectedItemID = Self.land(stopped, on: &walk)
+    }
+
+    /// The step a kept place puts the walk on, and the row the lamp goes to: the conversation
+    /// that was open, over the stream's lamp as it was kept — which need not be the post the
+    /// conversation is around, one opened from somebody's page, say — or the lamp alone. Static,
+    /// so a test can take the step without a window.
+    ///
+    /// **Whichever page the rail is on**, where a press is refused off the timeline place
+    /// (`canWalk`). A reader who went elsewhere while the store was read is left there by the
+    /// launch, and the conversation is what the timeline place shows when they come to it: a
+    /// change of tab does not end the walk. Refused, the next thing told to the session would be
+    /// that no conversation is open, and the place would be written without it.
+    static func land(_ stopped: ReadingPlace.Standing, on walk: inout ShellWalk) -> String? {
+        guard let thread = stopped.thread else { return stopped.lamp }
+        _ = walk.walk(to: .thread(thread), from: stopped.lamp)
+        return thread
+    }
+
     /// Whether `r` — and the mark in the header that is its touch path (#33) — has anything to
     /// ask for now.
     ///
@@ -1442,12 +1475,14 @@ public struct FediqoRootView: View {
     /// shows it under the new timeline's rules, and goes out where it does not.
     private func timelineSwitched(from left: TimelineQuery?, to arrived: TimelineQuery?) {
         let hadLink = walk.openedLink != nil
-        guard let tag = Self.timelineSwitched(
+        let stays = Self.timelineSwitched(
             on: &walk, places: &session.timelinePlaces, from: left, to: arrived,
             shown: session.timelineItems(latest: prefs.latestDate).map(\.id),
             results: session.searched(search, latest: prefs.latestDate)?.map(\.id)
-        ) else { return clearWalk() }
-        if hadLink { linkReader.close() }
+        )
+        // A page read out of a post that went with its step is closed, as `clearWalk` closes it.
+        if hadLink, walk.openedLink == nil { linkReader.close() }
+        guard let tag = stays else { return session.reload.endTag() }
         if let lamp = selectedItemID,
            !session.heldPosts(under: tag, latest: prefs.latestDate).contains(where: { $0.id == lamp }) {
             selectedItemID = nil
@@ -1461,16 +1496,24 @@ public struct FediqoRootView: View {
     /// is the search's parked post, which `TimelinePane` files (#145): the row is kept where the
     /// new timeline's `results` still hold it, and goes out where they do not. `results` is
     /// nothing with no search open.
+    ///
+    /// **The walk is ended here, where no tag's page stays** — and left as it is where nothing
+    /// was in front (#273). With no timeline there was no list for a walk to stand on, so none
+    /// ends; the one a launch comes back to was taken on the timeline arrived at, and this change
+    /// may be answered after it was.
     static func timelineSwitched(
         on walk: inout ShellWalk, places: inout TimelinePlaces,
         from left: TimelineQuery?, to arrived: TimelineQuery?, shown: [String], results: [String]?
     ) -> PostTag? {
-        walk.timelineSwitched { lamp in
+        guard left != nil else { return nil }
+        let stays = walk.timelineSwitched { lamp in
             guard let results else {
                 return places.switched(from: left, to: arrived, standingOn: lamp, among: shown)
             }
             return lamp.flatMap { results.contains($0) ? $0 : nil }
         }
+        if stays == nil { walk.clear() }
+        return stays
     }
 
     /// Back to the stream in one go, for a list that has been replaced. A page read out of a post

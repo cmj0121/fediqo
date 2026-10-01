@@ -193,8 +193,9 @@ struct ReadingPlaceKeptTests {
         #expect(desk.defaults.writes == writes)
     }
 
-    /// The order a launch needs: All comes in front as the store is adopted, before anything has
-    /// read where reading stopped, and the place kept must still be there to read.
+    /// The order a launch needs: a timeline comes in front as the store is adopted — the one
+    /// kept, since #273's landing — before its lamp and top row have been come back to, and the
+    /// place kept must still be there to read.
     @Test("Until the launch has landed nothing is written, and landing itself writes nothing")
     func nothingBeforeLanding() {
         let desk = Desk()
@@ -205,7 +206,7 @@ struct ReadingPlaceKeptTests {
 
         session.sources = [Self.microblog]
         session.rebuildQueries()
-        #expect(session.timelineID == .all)
+        #expect(session.timelineID == .trends)
         session.scrolledTop = "a1"
         session.stands(ReadingPlace.Standing(lamp: "a3"))
         #expect(!session.keepsPlace)
@@ -217,7 +218,7 @@ struct ReadingPlaceKeptTests {
 
         // The first move after it is written, with everything the session stood on before it.
         session.scrolledTop = "a2"
-        #expect(desk.kept == ReadingPlace(timeline: .all, lamp: "a3", top: "a2"))
+        #expect(desk.kept == ReadingPlace(timeline: .trends, lamp: "a3", top: "a2"))
     }
 
     @Test("A place this build cannot read is not written over by a move")

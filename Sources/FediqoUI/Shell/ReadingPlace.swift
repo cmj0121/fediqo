@@ -60,6 +60,44 @@ extension ReadingPlace {
         if case .thread(let id) = walk.beneath { standing.thread = id }
         return standing
     }
+
+    /// The root view's half of this place.
+    var standing: Standing { Standing(lamp: lamp, thread: thread) }
+}
+
+extension ReadingPlace {
+    /// The timeline this place comes back to among the tabs there are today, or nothing where
+    /// there are none — nothing joined, which is no place to come back to (#273). One that has
+    /// since been deleted, or a Trends no source offers any more, is All.
+    func timeline(among queries: [TimelineQuery]) -> TimelineQuery? {
+        guard !queries.isEmpty else { return nil }
+        return queries.contains(timeline) ? timeline : .all
+    }
+
+    /// What to land on, given this place as it was kept and what this device holds today (#273).
+    ///
+    /// **Each part is asked on its own, and one that fails takes no other with it.** The timeline
+    /// is `timeline(among:)`. The lamp and the top row are each kept only where that timeline's
+    /// list — `rows`, asked of the timeline landed on and of no other — still holds them: what is
+    /// kept can name a post let go since, and a row of a timeline deleted since. The conversation
+    /// is kept where `holds` still has its post, in any list or held aside.
+    ///
+    /// What comes of the answer is `TimelinePane.landing`'s: the lamp, else the top row, else the
+    /// top of the timeline. Nothing here is written, and nothing held is touched to ask it.
+    func landing(
+        among queries: [TimelineQuery],
+        rows: (TimelineQuery) -> [String],
+        holds: (String) -> Bool
+    ) -> ReadingPlace? {
+        guard let timeline = timeline(among: queries) else { return nil }
+        let list = Set(rows(timeline))
+        return ReadingPlace(
+            timeline: timeline,
+            lamp: lamp.flatMap { list.contains($0) ? $0 : nil },
+            top: top.flatMap { list.contains($0) ? $0 : nil },
+            thread: thread.flatMap { holds($0) ? $0 : nil }
+        )
+    }
 }
 
 /// The place reading stopped at, kept on this device (#273).

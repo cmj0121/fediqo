@@ -496,14 +496,7 @@ struct TimelinePane: View {
             .clearsFloatingCorner()
             .modifier(KeepsTopRow(session: session, rows: rows, timeline: timeline, found: found))
             .modifier(HoldsPlace(session: session, proxy: proxy, found: found))
-            .onAppear {
-                // A tick later: a lazy stack just built has not laid out the row to scroll to.
-                switch Self.landing(selected: selectedID, top: session.listTop(found: found)) {
-                case .centred(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
-                case .top(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .top) }
-                case nil: break
-                }
-            }
+            .modifier(LandsList(session: session, proxy: proxy, selectedID: $selectedID, found: found))
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -792,6 +785,47 @@ struct KeepsTopRow: ViewModifier {
         guard timeline == inFront, !visible.isEmpty else { return nil }
         let seen = Set(visible)
         return rows.first(where: seen.contains)
+    }
+}
+
+/// Puts a list where `TimelinePane.landing` says: one drawn afresh as it appears (#110), and one
+/// already drawn as a kept place is come back to under it (#273).
+///
+/// **And says so to the session once it has**, which until then takes nothing the list reports
+/// as the top row (`ShellSession.topIsOwed`): the rows a list is first drawn with are in view
+/// before it has been scrolled to the row come back to. Said for a search's results too — a list
+/// that first appears as them is never scrolled to the timeline's row, and holding out for it
+/// would be the top row never told again.
+///
+/// A modifier of its own, for `KeepsTopRow`'s reason.
+struct LandsList: ViewModifier {
+    let session: ShellSession
+    let proxy: ScrollViewProxy
+    /// The lamp, read as the list lands and not as this pass was drawn.
+    @Binding var selectedID: String?
+    /// The pattern the list is the results of, as `HoldsPlace` takes it.
+    let found: String?
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { land() }
+            .onChange(of: session.landings) { _, _ in land() }
+    }
+
+    private func land() {
+        let landing = TimelinePane.landing(selected: selectedID, top: session.listTop(found: found))
+        // Which coming back this place was read after: one that lands meanwhile is not this
+        // scroll's to answer for.
+        let asked = session.landings
+        // A tick later: a lazy stack just built has not laid out the row to scroll to.
+        Task { @MainActor in
+            switch landing {
+            case .centred(let id): proxy.scrollTo(id, anchor: .center)
+            case .top(let id): proxy.scrollTo(id, anchor: .top)
+            case nil: break
+            }
+            session.listLanded(for: asked)
+        }
     }
 }
 
