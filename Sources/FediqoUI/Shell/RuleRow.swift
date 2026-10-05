@@ -9,6 +9,8 @@ enum RuleTarget: Hashable {
     /// A category as one source holds it. Public, trends and home mean the same on every
     /// Mastodon source; a board or a list is that source's own.
     case category(FediqoCore.Category, on: String)
+    /// A value of a field one kind of source declares (#287): the field's name, and the value.
+    case field(String, FieldValue)
 }
 
 /// The rule the editor may build, and only that: every scope offered is one the factories take,
@@ -39,6 +41,41 @@ enum RuleBuilder {
             case .trends:
                 return [.every] + sources.filter(\.kind.hasTrends).map { .source(host: $0.host) }
             }
+        // Every source, or one whose kind declares the field: no other could match it.
+        case .field(let name, _):
+            return [.every] + sources.filter { $0.kind.field(named: name) != nil }.map { .source(host: $0.host) }
+        }
+    }
+
+    /// The fields the reader's sources declare, each once, in the order their kinds list them
+    /// (#287). What the editor offers a rule on — and nothing where no source here declares one.
+    static func fields(in sources: [Source]) -> [SourceField] {
+        var seen: Set<String> = []
+        return sources.flatMap(\.kind.fields).filter { seen.insert($0.name).inserted }
+    }
+
+    /// How many values of an open field are offered: the ones most held posts say.
+    static let valuesOffered = 60
+
+    /// The values of `field` a rule may ask for (#287) — **only ones the reader's sources can
+    /// give**: a yes and a no; a fixed set of options as its kind names them; and, where a field
+    /// is open — a language — what held posts from sources that declare it say, most posts first.
+    static func values(of field: SourceField, sources: [Source], notes: [Note]) -> [FieldValue] {
+        switch field.type {
+        case .flag:
+            return [.flag(true), .flag(false)]
+        case .options(let fixed, let open):
+            guard open else { return fixed.map(FieldValue.option) }
+            var counts: [String: Int] = [:]
+            let hosts = Set(sources.filter { $0.kind.field(named: field.name) != nil }.map(\.host))
+            for note in notes where hosts.contains(note.source.host) {
+                if case .option(let said)? = note.value(of: field.name) { counts[said, default: 0] += 1 }
+            }
+            let held = counts.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.map(\.key)
+            return (fixed + held.filter { !fixed.contains($0) }).prefix(valuesOffered).map(FieldValue.option)
+        // Nothing asks one of these yet, so nothing is offered for one.
+        case .text, .number, .date:
+            return []
         }
     }
 
@@ -51,6 +88,7 @@ enum RuleBuilder {
         case .keyword(let text): Rule.keyword(text, in: scope, effect: effect, id: id)
         case .category(let category, _):
             Rule.category(category, in: scope, effect: effect, sources: sources, id: id)
+        case .field(let name, let value): Rule.field(name, is: value, in: scope, effect: effect, id: id)
         }
     }
 
@@ -101,6 +139,40 @@ enum RuleText {
         case .keyword(let text, _): text
         case .category(let category, let scope):
             categoryName(category, host: host(of: scope), sources: sources, language: language)
+        case .field(let name, let value, _):
+            String(
+                format: L10n.t("rule.field.title", language: language),
+                fieldName(name, language: language), valueName(value, of: name, language: language)
+            )
+        }
+    }
+
+    /// What a field is called, in the shell's language — or by its own name, for one this build
+    /// has no word for.
+    static func fieldName(_ name: String, language: DummyLanguage? = nil) -> String {
+        let key = "rule.field.\(name)"
+        let said = L10n.t(key, language: language)
+        return said == key ? name : said
+    }
+
+    /// What a field's value is called (#287): how far a post was sent by the composer's own
+    /// words for it, a language by its name in the shell's language where the system has one and
+    /// by its code where it has none, a yes or a no.
+    static func valueName(_ value: FieldValue, of name: String, language: DummyLanguage? = nil) -> String {
+        switch value {
+        case .flag(let yes):
+            return L10n.t(yes ? "rule.field.yes" : "rule.field.no", language: language)
+        case .option(let option):
+            if name == SourceField.audience.name, let audience = Audience(rawValue: option) {
+                return L10n.t(ComposerSheet.visibilityKey(audience), language: language)
+            }
+            if name == SourceField.language.name {
+                return L10n.locale(language).localizedString(forIdentifier: option) ?? option
+            }
+            return option
+        case .text(let text): return text
+        case .number(let number): return number.formatted(.number.locale(L10n.locale(language)))
+        case .date(let date): return date.formatted(.dateTime.year().month().day().locale(L10n.locale(language)))
         }
     }
 
@@ -122,13 +194,28 @@ enum RuleText {
 
     /// "posts containing “swift”" — the kind and its target.
     static func phrase(_ rule: Rule, sources: [Source], language: DummyLanguage? = nil) -> String {
+        if case .field(let name, let value, _) = rule.kind {
+            return fieldPhrase(name, value, language: language)
+        }
         let key = switch rule.kind {
         case .source: "rule.source"
         case .author: "rule.author"
         case .keyword: "rule.keyword"
-        case .category: "rule.category"
+        case .category, .field: "rule.category"
         }
         return String(format: L10n.t(key, language: language), target(rule, sources: sources, language: language))
+    }
+
+    /// A rule on a field as the middle of a sentence (#287): "posts in Japanese", "posts sent to
+    /// Followers", "posts their author covered" — each field's own phrase where it has one, and
+    /// "posts whose <field> is <value>" for a field this build has no phrase for.
+    static func fieldPhrase(_ name: String, _ value: FieldValue, language: DummyLanguage? = nil) -> String {
+        let said = valueName(value, of: name, language: language)
+        var key = "rule.field.\(name).phrase"
+        if case .flag(let yes) = value { key += yes ? ".yes" : ".no" }
+        let phrase = L10n.t(key, language: language)
+        guard phrase == key else { return String(format: phrase, said) }
+        return String(format: L10n.t("rule.field.phrase", language: language), fieldName(name, language: language), said)
     }
 
     /// "on every source" / "only on host", or nothing for a source rule.
@@ -158,7 +245,8 @@ enum RuleText {
     private static func host(of kind: RuleKind) -> String? {
         switch kind {
         case .source(let host): host
-        case .author(_, let scope), .keyword(_, let scope), .category(_, let scope): host(of: scope)
+        case .author(_, let scope), .keyword(_, let scope), .category(_, let scope), .field(_, _, let scope):
+            host(of: scope)
         }
     }
 

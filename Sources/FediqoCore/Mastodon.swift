@@ -376,6 +376,9 @@ struct StatusDTO: Decodable, Sendable {
     /// Whether the account this was fetched as has favourited it (#107). Absent on an unsigned
     /// read, as `reblogged` is.
     let favourited: Bool?
+    /// The language the status says it is in (#287), or nothing where it says none. Read
+    /// leniently: a value of another shape is no language, and never costs the status.
+    let language: Lenient<String>?
     /// Whether the account this was fetched as has bookmarked it (#285). Absent on an unsigned
     /// read, as `reblogged` is.
     let bookmarked: Bool?
@@ -594,7 +597,8 @@ struct StatusDTO: Decodable, Sendable {
             // The boosted post's quote on a boost, as every other fact here (#214).
             quote: quote,
             // And the boosted post's own change, never the boost's (#286).
-            editedAt: Self.edited(subject.editedAt?.value, posted: subject.createdAt, now: Date())
+            editedAt: Self.edited(subject.editedAt?.value, posted: subject.createdAt, now: Date()),
+            language: subject.language?.value
         )
     }
 

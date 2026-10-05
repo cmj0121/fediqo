@@ -578,6 +578,10 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// rides, and is gone when the row is: there is no second place a wording its author took
     /// back could be left behind in.
     public let earlier: [Wording]
+    /// The language the post says it is in, as its source spelled it and folded to lower case
+    /// (#287), or nothing where the source said none — which is not a language, and matches no
+    /// rule on one.
+    public let language: String?
 
     public init(
         id: String,
@@ -612,7 +616,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         quote: Quote? = nil,
         kept: Bool = false,
         editedAt: Date? = nil,
-        earlier: [Wording] = []
+        earlier: [Wording] = [],
+        language: String? = nil
     ) {
         self.id = id
         self.source = source
@@ -647,6 +652,9 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.kept = kept
         self.editedAt = editedAt
         self.earlier = earlier
+        // Held to what a language tag looks like wherever a note is made (#287) — off the wire,
+        // back from the store, in a test — so nothing that is not one is ever on a row.
+        self.language = SourceField.languageTag(language)
     }
 
     /// What the post says, as a wording: its words and its author's warning, and whether it was
@@ -718,7 +726,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url,
             counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
             holding: holding, goneSince: goneSince, gaps: gaps, listed: listed, quote: quote,
-            kept: kept, editedAt: editedAt, earlier: earlier
+            kept: kept, editedAt: editedAt, earlier: earlier, language: language
         )
     }
 
@@ -744,7 +752,10 @@ public struct Note: Identifiable, Hashable, Sendable {
             quote: source.kind.saysQuotes
                 ? later.quote.flatMap { Quote.later($0, over: quote) }
                 : Quote.later(later.quote, over: quote),
-            kept: kept, editedAt: later.editedAt, earlier: later.earlier(after: was)
+            kept: kept, editedAt: later.editedAt, earlier: later.earlier(after: was),
+            // The language the post says it is in **now**, nothing included: a post changed to
+            // state none no longer matches a rule on the one it used to state.
+            language: later.language
         )
     }
 
@@ -798,7 +809,11 @@ public struct Note: Identifiable, Hashable, Sendable {
             kept: held.kept,
             // What it said before this read changed it, kept (#286) — only where the source says
             // it changed since, and only what this device held.
-            editedAt: editedAt(over: held), earlier: earlier(after: held)
+            editedAt: editedAt(over: held), earlier: earlier(after: held),
+            // A read of the post itself is the whole of what its source says of it now, so the
+            // language is this copy's even where it states none — unlike the reader's marks,
+            // which a signed-out read leaves unsaid rather than says no to.
+            language: language
         )
     }
 
@@ -843,7 +858,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             goneSince: goneSince, gaps: gaps, listed: listed,
             // The later copy's quote wins, as its counts do (#214) — see `Quote.later`.
             quote: Quote.later(other.quote, over: quote),
-            kept: kept, editedAt: editedAt, earlier: earlier
+            kept: kept, editedAt: editedAt, earlier: earlier, language: language ?? other.language
         )
     }
 
@@ -859,7 +874,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
             goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
-            editedAt: editedAt, earlier: earlier
+            editedAt: editedAt, earlier: earlier, language: language
         )
     }
 
@@ -873,7 +888,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
             goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
-            editedAt: editedAt, earlier: earlier
+            editedAt: editedAt, earlier: earlier, language: language
         )
     }
 }

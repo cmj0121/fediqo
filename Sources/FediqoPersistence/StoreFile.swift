@@ -358,6 +358,18 @@ private var migrator: DatabaseMigrator {
             t.add(column: "earlier", .text)
         }
     }
+    // The language a row's source says it is in (#287), or NULL where it said none — which every
+    // row already stored takes, and is the truth: none was read for it.
+    //
+    // **A migration id for `v3-holding`'s reason.** A timeline may now be made of the posts that
+    // say one language; an older build's first save would write every row back without what it
+    // said, and that timeline would be empty under this build until every post was read again.
+    // The id makes it refuse the store instead.
+    migrator.registerMigration("v9-language") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "language", .text)
+        }
+    }
     return migrator
 }
 
@@ -892,6 +904,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     /// has lost what it said before and is whole in every other way, and setting the reader's
     /// whole store aside for that would cost them far more than the cell held.
     var earlier: String?
+    /// `Note.language` (#287). A column behind its own migration id, for `holding`'s reason.
+    var language: String?
 
     init(_ note: Note) {
         host = note.source.host
@@ -903,6 +917,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         bookmarked = note.bookmarked
         edited_at = note.editedAt
         earlier = WordingRow.text(note.earlier)
+        language = note.language
         categories = note.categories.map(CategoryRow.init).sorted()
         facts = NoteFacts(
             author: note.author,
@@ -992,7 +1007,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             kept: kept,
             editedAt: edited_at,
             // Held to the bounds every kept wording is held to, whoever wrote the cell.
-            earlier: Wording.bounded(WordingRow.wordings(earlier))
+            earlier: Wording.bounded(WordingRow.wordings(earlier)),
+            language: language
         )
     }
 }

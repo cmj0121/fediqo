@@ -7,8 +7,11 @@ import Foundation
 /// or the keep window, and the GRDB index holds what servers sent; keeping it beside `DummyPrefs`
 /// adds no migration to the one 0.2.0 has (Decision 2).
 ///
-/// **The shape is versioned** — this build writes `{"version":2,"timelines":[…]}` (`desc` on a
-/// timeline) and still reads version 1, which has none. Kind, effect and category strings stay
+/// **The shape is versioned** — this build writes `{"version":3,"timelines":[…]}` (a rule on a
+/// field one kind of source declares, #287: `field` and `type` on a rule) and still reads
+/// version 2 (`desc` on a timeline) and version 1, which has neither. **A build from before a
+/// version does not read it**: version 3 is outside what it reads, so it says the timelines
+/// cannot be read and writes nothing over them, rather than open them with a rule dropped. Kind, effect and category strings stay
 /// what a later build reads. **Any later shape change bumps `version`.** The load **fails closed**
 /// (Decision 15): a missing or other version, a field or a kind this build does not know, is
 /// reported as unreadable and never written over, because dropping one rule would widen a
@@ -19,7 +22,7 @@ struct WrittenTimelineStore {
         case unreadable
     }
 
-    static let version = 2
+    static let version = 3
 
     let defaults: UserDefaults
     var key = "fediqo.timelines"
@@ -61,7 +64,8 @@ struct WrittenTimelineStore {
                   let rules = timeline["rules"] as? [[String: Any]]
             else { return false }
             for rule in rules {
-                guard Set(rule.keys).isSubset(of: ["id", "effect", "kind", "value", "category", "host"]) else {
+                guard Set(rule.keys).isSubset(of: ["id", "effect", "kind", "value", "category", "host", "field", "type"])
+                else {
                     return false
                 }
                 if let category = rule["category"] {
@@ -113,6 +117,11 @@ private struct RuleRow: Codable {
     var value: String?
     var category: CategoryValue?
     var host: String?
+    /// The name of the field a field rule is on (#287), and the type of its value — `option`,
+    /// `flag`, `text`, `number` or `date` — whose own spelling is in `value`. All five types have
+    /// a spelling so the shape does not change when a rule can ask the last three.
+    var field: String?
+    var type: String?
 
     init(_ rule: Rule) {
         id = rule.id
@@ -133,6 +142,36 @@ private struct RuleRow: Codable {
             kind = "category"
             self.category = CategoryValue(category)
             host = Self.host(of: scope)
+        case .field(let name, let asked, let scope):
+            kind = "field"
+            field = name
+            (type, value) = Self.spelled(asked)
+            host = Self.host(of: scope)
+        }
+    }
+
+    /// A field's value as it is kept: its type's name, and the value in that type's spelling.
+    private static func spelled(_ value: FieldValue) -> (type: String, value: String) {
+        switch value {
+        case .option(let option): ("option", option)
+        case .flag(let yes): ("flag", yes ? "yes" : "no")
+        case .text(let text): ("text", text)
+        case .number(let number): ("number", String(number))
+        case .date(let date): ("date", ISO8601DateFormatter().string(from: date))
+        }
+    }
+
+    /// The value a kept type and spelling name, or nothing where either is not one this build
+    /// writes.
+    private static func value(type: String, spelled: String) -> FieldValue? {
+        switch (type, spelled) {
+        case ("option", _): .option(spelled)
+        case ("flag", "yes"): .flag(true)
+        case ("flag", "no"): .flag(false)
+        case ("text", _): .text(spelled)
+        case ("number", _): Double(spelled).map(FieldValue.number)
+        case ("date", _): ISO8601DateFormatter().date(from: spelled).map(FieldValue.date)
+        default: nil
         }
     }
 
@@ -157,6 +196,14 @@ private struct RuleRow: Codable {
             return Rule.keyword(text, in: scope, effect: effect, id: id)
         case ("category", _, let category?):
             return Rule.category(category, in: scope, effect: effect, sources: [], id: id)
+        // Through the factory, which refuses a value no rule can be asked of yet, and a value
+        // its field cannot hold — a language that is no language tag, an audience that is not
+        // one — so neither is read here as a rule that matches nothing. **Refused, the whole
+        // load fails closed**, this file's standing rule and for its reason: a hide dropped would
+        // bring back what the reader hid, and a hide kept that can never match already has.
+        case ("field", let spelled?, _):
+            guard let field, let type, let asked = Self.value(type: type, spelled: spelled) else { return nil }
+            return Rule.field(field, is: asked, in: scope, effect: effect, id: id)
         default:
             return nil
         }

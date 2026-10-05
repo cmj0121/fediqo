@@ -45,7 +45,10 @@ struct TimelineEditor: View {
             case .timeline: timelineTab
             case .rules: rulesTab
             }
-            EditorKeyStrip(stage: flow.stage, changing: flow.changing != nil, tab: flow.tab)
+            EditorKeyStrip(
+                stage: flow.stage, changing: flow.changing != nil, tab: flow.tab,
+                fields: RuleBuilder.fields(in: sources).count
+            )
         }
         .padding(ShellSpace.pad)
         #if os(macOS)
@@ -65,7 +68,8 @@ struct TimelineEditor: View {
                 option: press.modifiers.contains(.option),
                 stage: flow.stage,
                 fieldFocused: focus == .name || focus == .desc || focus == .text,
-                keysHeld: focus == .keys || (flow.tab == .rules && flow.focusedRule != nil)
+                keysHeld: focus == .keys || (flow.tab == .rules && flow.focusedRule != nil),
+                fields: RuleBuilder.fields(in: sources).map(\.name)
             )
             guard let action else { return .ignored }
             perform(action)
@@ -114,6 +118,10 @@ struct TimelineEditor: View {
         case .pickKind(let tag):
             flow.pickKind(tag)
             handFocus()
+        case .pickField(let name):
+            guard let field = RuleBuilder.fields(in: sources).first(where: { $0.name == name }) else { return }
+            flow.pickField(field)
+            handFocus()
         case .nextChoice: flow.adding.step(1, through: Self.choices(for: flow.adding, in: session), sources: sources)
         case .previousChoice: flow.adding.step(-1, through: Self.choices(for: flow.adding, in: session), sources: sources)
         case .toggleEffect: flow.adding.toggleEffect()
@@ -127,11 +135,11 @@ struct TimelineEditor: View {
     /// What the lit rule's kind picks from, for opening it where the picker lists it.
     private var kindChoices: [RuleTarget] {
         guard let rule = flow.drawnRules.first(where: { $0.id == flow.focusedRule }) else { return [] }
-        return Self.choices(for: RuleDraft(rule.kind.tag), in: session)
+        return Self.choices(for: RuleDraft(kindOf: rule), in: session)
     }
 
     private func open(_ id: Rule.ID) {
-        let choices = draft.rules.first { $0.id == id }.map { Self.choices(for: RuleDraft($0.kind.tag), in: session) }
+        let choices = draft.rules.first { $0.id == id }.map { Self.choices(for: RuleDraft(kindOf: $0), in: session) }
         flow.open(id, sources: sources, choices: choices ?? [])
         handFocus()
     }
@@ -159,6 +167,14 @@ struct TimelineEditor: View {
         case .category:
             return RuleBuilder.categories(in: session.sources, notes: session.notes, signedIn: session.isSignedIn)
                 .flatMap { group in group.categories.map { RuleTarget.category($0, on: group.host) } }
+        case .field:
+            // The values the reader's sources can give for this field, and nothing where none
+            // of them declares it any more — a rule kept from before its source went.
+            guard let name = draft.field,
+                  let field = RuleBuilder.fields(in: session.sources).first(where: { $0.name == name })
+            else { return [] }
+            return RuleBuilder.values(of: field, sources: session.sources, notes: session.notes)
+                .map { .field(name, $0) }
         }
     }
 
@@ -201,7 +217,11 @@ struct TimelineEditor: View {
                 onAdd: { perform(.addRule) }
             )
         case .kinds:
-            EditorKinds(onBack: { perform(.back) }, onPick: { perform(.pickKind($0)) })
+            EditorKinds(
+                fields: RuleBuilder.fields(in: sources),
+                onBack: { perform(.back) }, onPick: { perform(.pickKind($0)) },
+                onPickField: { perform(.pickField($0.name)) }
+            )
         case .form:
             RuleForm(
                 session: session,
@@ -222,6 +242,7 @@ struct TimelineEditor: View {
         case .author: "rule.band.author"
         case .keyword: "rule.band.keyword"
         case .category: "rule.band.category"
+        case .field: "rule.band.field"
         }
     }
 
@@ -231,6 +252,7 @@ struct TimelineEditor: View {
         case .author: "rule.kind.author"
         case .keyword: "rule.kind.keyword"
         case .category: "rule.kind.category"
+        case .field: "rule.kind.field"
         }
     }
 
@@ -241,6 +263,7 @@ struct TimelineEditor: View {
         case .author: "person"
         case .keyword: "text.magnifyingglass"
         case .category: "tray.2"
+        case .field: "tag"
         }
     }
 }
@@ -251,14 +274,27 @@ struct EditorBands {
     struct Band {
         let key: String
         let rules: [Rule]
+        /// The field the band's rules are all on (#287), where it is a field's band: each field
+        /// is a band of its own, any among its rules and all against every other band.
+        var field: String?
+
+        /// What the band is headed, in the shell's language.
+        func title(language: DummyLanguage? = nil) -> String {
+            guard let field else { return L10n.t(key, language: language) }
+            return String(format: L10n.t(key, language: language), RuleText.fieldName(field, language: language))
+        }
     }
 
     let bands: [Band]
 
     init(_ rules: [Rule]) {
-        var bands = RuleKind.Tag.allCases.compactMap { tag -> Band? in
-            let kind = rules.filter { $0.effect == .include && $0.kind.tag == tag }
-            return kind.isEmpty ? nil : Band(key: TimelineEditor.bandKey(tag), rules: kind)
+        let includes = rules.filter { $0.effect == .include }
+        var bands = RuleKind.groups(of: includes).map { group -> Band in
+            let kind = includes.filter { $0.kind.group == group }
+            switch group {
+            case .kind(let tag): return Band(key: TimelineEditor.bandKey(tag), rules: kind)
+            case .field(let name): return Band(key: TimelineEditor.bandKey(.field), rules: kind, field: name)
+            }
         }
         let hides = rules.filter { $0.effect == .exclude }
         if !hides.isEmpty { bands.append(Band(key: "rule.band.hide", rules: hides)) }
@@ -369,7 +405,7 @@ private struct EditorRulesList: View {
     }
 
     private func heading(_ band: EditorBands.Band, joined: Bool) -> some View {
-        Text((joined ? L10n.t("rule.band.and") + " " : "") + L10n.t(band.key))
+        Text((joined ? L10n.t("rule.band.and") + " " : "") + band.title())
             .textCase(.uppercase)
             .shellFont(.name)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
@@ -383,20 +419,29 @@ private struct EditorRulesList: View {
 
 /// Which kind of rule to add: a pill per kind, each led by the kind's glyph.
 private struct EditorKinds: View {
+    /// The fields the reader's sources declare (#287), each offered as a kind of its own after
+    /// the four every source has. None where no source here declares one.
+    let fields: [SourceField]
     let onBack: () -> Void
     let onPick: (RuleKind.Tag) -> Void
+    let onPickField: (SourceField) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
             ShellIconButton("chevron.backward", name: "rule.back") { onBack() }
             ScrollView(.horizontal) {
                 HStack(spacing: ShellSpace.tight) {
-                    ForEach(RuleKind.Tag.allCases, id: \.self) { tag in
+                    ForEach(EditorAction.kinds, id: \.self) { tag in
                         ShellTabPill(
                             L10n.t(TimelineEditor.kindKey(tag)),
                             symbol: TimelineEditor.kindSymbol(tag),
                             selected: false
                         ) { onPick(tag) }
+                    }
+                    ForEach(fields) { field in
+                        ShellTabPill(
+                            RuleText.fieldName(field.name), symbol: TimelineEditor.kindSymbol(.field), selected: false
+                        ) { onPickField(field) }
                     }
                 }
             }
@@ -411,6 +456,8 @@ private struct EditorKeyStrip: View {
     let stage: EditorStage
     let changing: Bool
     let tab: EditorTab
+    /// How many fields the kinds offer after the four, for the cap that numbers them.
+    var fields = 0
     @Environment(\.colorScheme) private var colorScheme
 
     /// Only where there is a keyboard: on a phone without one it names keys nobody can press.
@@ -426,7 +473,7 @@ private struct EditorKeyStrip: View {
     }
 
     private var caps: some View {
-        ForEach(EditorAction.strip(for: stage, changing: changing, tab: tab), id: \.caps) { line in
+        ForEach(EditorAction.strip(for: stage, changing: changing, tab: tab, fields: fields), id: \.caps) { line in
             HStack(spacing: ShellSpace.tight) {
                 Text(line.caps)
                     .shellFont(.reading)
@@ -463,7 +510,10 @@ private struct RuleForm: View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
             HStack(spacing: ShellSpace.tight) {
                 ShellIconButton("chevron.backward", name: changing == nil ? "rule.back.kinds" : "rule.back") { onBack() }
-                Label(L10n.t(TimelineEditor.kindKey(draft.tag)), systemImage: TimelineEditor.kindSymbol(draft.tag))
+                Label(
+                    draft.field.map { RuleText.fieldName($0) } ?? L10n.t(TimelineEditor.kindKey(draft.tag)),
+                    systemImage: TimelineEditor.kindSymbol(draft.tag)
+                )
                     .shellFont(.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .accessibilityAddTraits(.isHeader)
@@ -533,6 +583,7 @@ private struct RuleForm: View {
         case .author(let handle): handle
         case .keyword(let text): text
         case .category(let category, let host): RuleText.categoryName(category, host: host, sources: sources)
+        case .field(let name, let value): RuleText.valueName(value, of: name)
         }
     }
 

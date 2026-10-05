@@ -9,6 +9,8 @@ import Foundation
 //
 // How rules combine: rules of one kind are any, rules of different kinds are all, and an
 // exclude hides whatever it matches. A timeline with no include rules is All, less its excludes.
+// A rule on a field one kind of source declares (#287) is of its field's kind: two on one field
+// are any, and two on two fields are all.
 
 /// Which sources a rule is for.
 public enum RuleScope: Hashable, Sendable {
@@ -36,11 +38,18 @@ public enum RuleKind: Hashable, Sendable {
     /// Anywhere, with no word breaking: `#swift` matches `#swiftui` too.
     case keyword(String, in: RuleScope)
     case category(Category, in: RuleScope)
+    /// What a field one kind of source declares says of a post (#287): the field by its stable
+    /// name, and the value asked for, typed as the field is. **One kind for every such field**, so
+    /// a field or a type added later is a new name or a new value and never a new kind.
+    ///
+    /// A post whose source's kind declares no such field, or says nothing for it, does not match:
+    /// the rule neither shows it nor hides it.
+    case field(name: String, is: FieldValue, in: RuleScope)
 
     /// The kinds, in the order a timeline tries them — which is also the order that decides
     /// which rule an omitted post is put down to (Decision 14).
     public enum Tag: CaseIterable, Hashable, Sendable {
-        case source, author, keyword, category
+        case source, author, keyword, category, field
     }
 
     public var tag: Tag {
@@ -49,14 +58,40 @@ public enum RuleKind: Hashable, Sendable {
         case .author: .author
         case .keyword: .keyword
         case .category: .category
+        case .field: .field
         }
+    }
+
+    /// What rules are grouped by, to be any among themselves and all across: the kind — and,
+    /// for a rule on a field, the field. Two rules on one field are any; a rule on one field and
+    /// a rule on another are all.
+    public enum Group: Hashable, Sendable {
+        case kind(Tag)
+        case field(String)
+    }
+
+    public var group: Group {
+        if case .field(let name, _, _) = self { return .field(name) }
+        return .kind(tag)
     }
 
     var scope: RuleScope {
         switch self {
         case .source(let host): .source(host: host)
-        case .author(_, let scope), .keyword(_, let scope), .category(_, let scope): scope
+        case .author(_, let scope), .keyword(_, let scope), .category(_, let scope), .field(_, _, let scope): scope
         }
+    }
+
+    /// The groups `rules` fall into, in the order a timeline tries them: the kinds in `Tag`'s
+    /// order, then each field in the order its first rule stands.
+    public static func groups(of rules: [Rule]) -> [Group] {
+        var seen: Set<Group> = []
+        let kinds = Tag.allCases.map(Group.kind).filter { group in rules.contains { $0.kind.group == group } }
+        let fields = rules.map(\.kind.group).filter { group in
+            if case .field = group { return seen.insert(group).inserted }
+            return false
+        }
+        return kinds + fields
     }
 }
 
@@ -141,6 +176,34 @@ public struct Rule: Hashable, Sendable, Identifiable {
         return Rule(id: id, effect: effect, kind: .category(category, in: scope))
     }
 
+    /// A rule on a field one kind of source declares (#287): the field's name, and the value
+    /// asked for. An option is folded to lower case, as a note's is.
+    ///
+    /// **Nothing for a value no rule can be asked of yet** — text, a number, a date — so a stored
+    /// rule of a type this build cannot compare is refused whole, never kept as one that matches
+    /// nothing. **And nothing for a value its field cannot hold**, where this build declares the
+    /// field (`SourceField.accepts`): a yes asked of how far a post was sent, an audience that is
+    /// not one of the four, a language that is no language tag. Such a rule could never match —
+    /// a hide written that way would hide nothing and say it was hiding — so it is not a rule.
+    ///
+    /// Whether any source *here* declares the field is not asked: a rule naming one that no
+    /// source here declares stays and says so (`RuleStatus.missingField`), as one naming a source
+    /// that has gone does; and a name no kind of source declares at all is the same, since a
+    /// later build may.
+    public static func field(
+        _ name: String,
+        is value: FieldValue,
+        in scope: RuleScope,
+        effect: RuleEffect = .include,
+        id: UUID = UUID()
+    ) -> Rule? {
+        guard !name.isEmpty, value.isAsked, let scope = normalised(scope) else { return nil }
+        if case .option(let option) = value, option.isEmpty { return nil }
+        let folded = value.folded
+        if let field = SourceField.declared[name], !field.accepts(folded) { return nil }
+        return Rule(id: id, effect: effect, kind: .field(name: name, is: folded, in: scope))
+    }
+
     private static func normalised(_ scope: RuleScope) -> RuleScope? {
         switch scope {
         case .every: .every
@@ -198,6 +261,9 @@ public enum RuleStatus: Equatable, Sendable {
     case present
     case missingSource(host: String)
     case missingCategory
+    /// No source the rule is for declares the field it names (#287): the kind of source that did
+    /// has gone from this device.
+    case missingField
 }
 
 /// One source a timeline wants asked on a reload (#29), and what to ask it for.
@@ -219,6 +285,7 @@ public struct CompiledTimeline: Sendable {
         case handle(String)
         case keyword(String)
         case category(Category)
+        case field(String, FieldValue)
     }
 
     private struct Matcher: Sendable {
@@ -230,7 +297,7 @@ public struct CompiledTimeline: Sendable {
     public let definition: TimelineDefinition
     private let sources: [Source]
     private let excludes: [Matcher]
-    /// One entry per kind that has includes, in `Tag` order.
+    /// One entry per kind — and per field (#287) — that has includes, in the order they are tried.
     private let groups: [[Matcher]]
 
     public init(_ definition: TimelineDefinition, sources: [Source]) {
@@ -239,9 +306,8 @@ public struct CompiledTimeline: Sendable {
         let matchers = definition.rules.map { rule in (rule, Self.matcher(rule)) }
         excludes = matchers.filter { $0.0.effect == .exclude }.map(\.1)
         let includes = matchers.filter { $0.0.effect == .include }
-        groups = RuleKind.Tag.allCases.compactMap { tag in
-            let group = includes.filter { $0.0.kind.tag == tag }.map(\.1)
-            return group.isEmpty ? nil : group
+        groups = RuleKind.groups(of: includes.map(\.0)).map { group in
+            includes.filter { $0.0.kind.group == group }.map(\.1)
         }
     }
 
@@ -255,6 +321,7 @@ public struct CompiledTimeline: Sendable {
         case .author(let handle, _): .handle(handle)
         case .keyword(let text, _): .keyword(Fold.key(text))
         case .category(let category, _): .category(category)
+        case .field(let name, let value, _): .field(name, value)
         }
         return Matcher(id: rule.id, host: host, check: check)
     }
@@ -266,6 +333,9 @@ public struct CompiledTimeline: Sendable {
             switch matcher.check {
             case .host: return true
             case .category(let category): return note.categories.contains(category)
+            // Nothing said is not a value: a post whose source declares no such field, or says
+            // nothing for it, matches no rule on it.
+            case .field(let name, let value): return note.value(of: name) == value
             case .handle(let handle):
                 let found = entry ?? index.entry(for: note)
                 entry = found
@@ -290,8 +360,15 @@ public struct CompiledTimeline: Sendable {
     }
 
     public func status(of rule: Rule) -> RuleStatus {
-        guard case .source(let host) = rule.kind.scope else { return .present }
+        guard case .source(let host) = rule.kind.scope else {
+            // For every source: missing only where no source here declares the field it names.
+            if case .field(let name, _, _) = rule.kind, !sources.contains(where: { $0.kind.field(named: name) != nil }) {
+                return .missingField
+            }
+            return .present
+        }
         guard let source = sources.first(where: { $0.host == host }) else { return .missingSource(host: host) }
+        if case .field(let name, _, _) = rule.kind, source.kind.field(named: name) == nil { return .missingField }
         if case .category(.board(let id), _) = rule.kind, !source.boards.contains(where: { String($0.fid) == id }) {
             return .missingCategory
         }
@@ -312,9 +389,8 @@ public struct CompiledTimeline: Sendable {
         let excludes = definition.rules.filter { $0.effect == .exclude }
 
         var hosts = Set(sources.map(\.host))
-        for tag in RuleKind.Tag.allCases {
-            let group = includes.filter { $0.kind.tag == tag }
-            guard !group.isEmpty else { continue }
+        for key in RuleKind.groups(of: includes) {
+            let group = includes.filter { $0.kind.group == key }
             hosts.formIntersection(sources.filter { source in group.contains { reaches($0, source) } }.map(\.host))
         }
         for rule in excludes {
@@ -341,6 +417,9 @@ public struct CompiledTimeline: Sendable {
     private func reaches(_ rule: Rule, _ source: Source) -> Bool {
         guard status(of: rule) == .present else { return false }
         if case .source(let host) = rule.kind.scope, host != source.host { return false }
+        // A rule on a field reaches only a source whose kind declares it (#287): no post of any
+        // other can match, so asking one for this timeline would bring nothing it shows.
+        if case .field(let name, _, _) = rule.kind { return source.kind.field(named: name) != nil }
         guard case .category(let category, _) = rule.kind else { return true }
         switch category {
         case .public, .home, .list: return source.kind.hasTimelines

@@ -277,13 +277,13 @@ struct WrittenTimelineTests {
         #expect(read[0].desc == nil)
     }
 
-    @Test("What is written carries version 2 and nothing but the known fields")
+    @Test("What is written carries version 3 and nothing but the known fields")
     func savedIsVersioned() throws {
         let store = freshStore()
         store.save([TimelineDefinition(name: "V", rules: try everyKind())])
         let data = try #require(store.defaults.data(forKey: store.key))
         let top = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(top["version"] as? Int == 2)
+        #expect(top["version"] as? Int == 3)
         #expect(Set(top.keys) == ["version", "timelines"])
         let rows = try #require(top["timelines"] as? [[String: Any]])
         #expect(Set(rows[0].keys) == ["id", "name", "rules"])
@@ -297,7 +297,7 @@ struct WrittenTimelineTests {
         #expect(store.load() == .timelines([timeline]))
         let data = try #require(store.defaults.data(forKey: store.key))
         let top = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(top["version"] as? Int == 2)
+        #expect(top["version"] as? Int == 3)
         let rows = try #require(top["timelines"] as? [[String: Any]])
         #expect(rows[0]["desc"] as? String == "Friends posting about Swift")
 
@@ -324,7 +324,7 @@ struct WrittenTimelineTests {
             #"{"version":1,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[{"id":"00000000-0000-0000-0000-000000000001","effect":"include","kind":"category","category":{"kind":"channel","id":"1"}}]}]}"#,
             #"{"version":1,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[{"id":"00000000-0000-0000-0000-000000000001","effect":"include","kind":"category","category":{"kind":"board","id":"1"}}]}]}"#,
             #"{"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[]}]}"#,
-            #"{"version":3,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[]}]}"#,
+            #"{"version":4,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[]}]}"#,
             #"{"version":0,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[]}]}"#,
             #"{"version":1,"timelines":[],"pinned":true}"#,
             #"{"version":1,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[],"colour":"red"}]}"#,
@@ -368,7 +368,7 @@ struct WrittenTimelineTests {
     @Test("The store itself refuses to write over what it cannot read, whoever asks")
     func saveRefusesOverUnreadable() {
         let store = freshStore()
-        let kept = Data(#"{"version":3,"timelines":[]}"#.utf8)
+        let kept = Data(#"{"version":4,"timelines":[]}"#.utf8)
         store.defaults.set(kept, forKey: store.key)
         store.save([TimelineDefinition(id: UUID(), name: "Would overwrite", rules: [])])
         #expect(store.defaults.data(forKey: store.key) == kept)
@@ -709,7 +709,8 @@ struct WrittenTimelineTests {
 
     @Test("Kinds are picked by 1–4; a rule's effect, scope, choice and Add have keys; Esc steps back")
     func editorFormKeys() {
-        for (index, tag) in RuleKind.Tag.allCases.enumerated() {
+        // The four kinds every source has; a field a source declares is numbered on after them (#287).
+        for (index, tag) in EditorAction.kinds.enumerated() {
             #expect(EditorAction.from(Character("\(index + 1)"), stage: .kinds, fieldFocused: false) == .pickKind(tag))
         }
         #expect(EditorAction.from("5", stage: .kinds, fieldFocused: false) == nil)

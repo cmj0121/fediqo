@@ -330,6 +330,8 @@ extension ShellSession {
 /// factories make the rule, so Add has nothing to offer until they return one.
 struct RuleDraft: Equatable {
     let tag: RuleKind.Tag
+    /// The field a rule on a field is about (#287), by its name. Nothing for every other kind.
+    let field: String?
     var target: RuleTarget?
     var typed = ""
     var effect: RuleEffect = .include
@@ -337,6 +339,20 @@ struct RuleDraft: Equatable {
 
     init(_ tag: RuleKind.Tag) {
         self.tag = tag
+        field = nil
+    }
+
+    /// A rule on `field`, with nothing picked yet.
+    init(field: SourceField) {
+        tag = .field
+        self.field = field.name
+    }
+
+    /// A draft of the kind `rule` is — and, for a rule on a field, of its field — with nothing
+    /// picked: what its choices are asked of.
+    init(kindOf rule: Rule) {
+        tag = rule.kind.tag
+        if case .field(let name, _, _) = rule.kind { field = name } else { field = nil }
     }
 
     /// A rule already written, opened to be changed: what it names, its effect and its scope, as
@@ -347,7 +363,7 @@ struct RuleDraft: Equatable {
     /// (`choices`, the picker's own list), since the picker lists categories by source; its
     /// scope stays every source until it is changed.
     init(editing rule: Rule, sources: [Source], choices: [RuleTarget] = []) {
-        tag = rule.kind.tag
+        self.init(kindOf: rule)
         effect = rule.effect
         switch rule.kind {
         case .source(let host):
@@ -366,6 +382,9 @@ struct RuleDraft: Equatable {
                 return host
             }.first
             target = .category(category, on: RuleText.host(of: scope) ?? listed ?? sources.first?.host ?? "")
+            self.scope = scope
+        case .field(let name, let value, let scope):
+            target = .field(name, value)
             self.scope = scope
         }
     }
@@ -399,7 +418,7 @@ struct RuleDraft: Equatable {
         switch tag {
         case .author: pick(.author(text), sources: sources)
         case .keyword: pick(.keyword(text), sources: sources)
-        case .source, .category: break
+        case .source, .category, .field: break
         }
     }
 
@@ -447,6 +466,8 @@ enum EditorAction: Equatable {
     /// The name field, to rename the timeline.
     case focusName
     case pickKind(RuleKind.Tag)
+    /// A field one of the reader's sources declares, picked by its name (#287).
+    case pickField(String)
     case nextChoice
     case previousChoice
     case toggleEffect
@@ -479,7 +500,7 @@ enum EditorAction: Equatable {
     /// wherever a field does not have the keys.
     static func from(
         _ key: Character, command: Bool = false, option: Bool = false, stage: EditorStage, fieldFocused: Bool,
-        keysHeld: Bool = true
+        keysHeld: Bool = true, fields: [String] = []
     ) -> EditorAction? {
         if key == KeyEquivalent.escape.character { return escapeIsExitCommand ? nil : escape(at: stage) }
         if option, !command, case .form = stage, key == "o" || key == "ø" { return .nextScope }
@@ -505,10 +526,15 @@ enum EditorAction: Equatable {
             default: return down ? .nextRule : up ? .previousRule : nil
             }
         case .kinds:
-            guard let digit = key.wholeNumberValue, (1...RuleKind.Tag.allCases.count).contains(digit) else {
-                return nil
-            }
-            return .pickKind(RuleKind.Tag.allCases[digit - 1])
+            // The kinds every source has, then the fields the reader's sources declare (#287),
+            // numbered on in the order the pills are drawn. **Nine is as far as a digit goes**: a
+            // pill past it has none, and is pressed or walked to with Tab — which this stage
+            // never takes, so the system's own focus moves along the pills. See
+            // `ProtocolKind.fields`.
+            let kinds = Self.kinds
+            guard let digit = key.wholeNumberValue, digit >= 1 else { return nil }
+            if digit <= kinds.count { return .pickKind(kinds[digit - 1]) }
+            return fields.indices.contains(digit - kinds.count - 1) ? .pickField(fields[digit - kinds.count - 1]) : nil
         case .form:
             switch key {
             case "x": return .toggleEffect
@@ -522,17 +548,21 @@ enum EditorAction: Equatable {
         }
     }
 
-    /// Whether ⌫ removes the rule open in this stage's form: a source or a category, which have
-    /// no field to type back into.
+    /// The kinds of rule every source can be asked by, in the order they are offered. A rule on
+    /// a field is offered by its field instead, after these.
+    static let kinds: [RuleKind.Tag] = [.source, .author, .keyword, .category]
+
+    /// Whether ⌫ removes the rule open in this stage's form: a source, a category or a field's
+    /// value, which have no field to type back into.
     static func removesFromForm(_ stage: EditorStage) -> Bool {
-        stage == .form(.source) || stage == .form(.category)
+        stage == .form(.source) || stage == .form(.category) || stage == .form(.field)
     }
 
     /// The keycap strip under each stage: the caps, and the key naming what they do. A rule
     /// opened to be changed says it can be removed from there, and is confirmed as a change. The
     /// timeline tab names only the keys that act on the timeline.
     static func strip(
-        for stage: EditorStage, changing: Bool = false, tab: EditorTab = .rules
+        for stage: EditorStage, changing: Bool = false, tab: EditorTab = .rules, fields: Int = 0
     ) -> [(caps: String, key: String)] {
         if tab == .timeline {
             return [("⇥ t", "editor.keys.tab"), ("m", "editor.keys.name"), ("[ ]", "editor.keys.move"),
@@ -545,7 +575,7 @@ enum EditorAction: Equatable {
              ("⌫", "editor.keys.remove"), ("⌘⌫", "editor.keys.removeTimeline"),
              ("⌘↩", "editor.keys.done"), ("esc", "editor.keys.cancel")]
         case .kinds:
-            [("1–4", "editor.keys.kind"), ("esc", "editor.keys.back")]
+            [("1–\(kinds.count + fields)", "editor.keys.kind"), ("esc", "editor.keys.back")]
         case .form where changing && removesFromForm(stage):
             [("j k", "editor.keys.pick"), ("x", "editor.keys.effect"), ("o ⌥O", "editor.keys.scope"),
              ("↩", "editor.keys.change"), ("⌫", "editor.keys.remove"), ("esc", "editor.keys.back")]

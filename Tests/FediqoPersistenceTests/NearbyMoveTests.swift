@@ -190,6 +190,26 @@ struct NearbyMoveTests {
         #expect(try StoreFile(at: pair.onto.directory).load().notes.first?.earlier == changed.earlier)
     }
 
+    @Test("The language each post says, and the timelines whose rules ask about it, move with the store")
+    func languageAndItsRulesMove() async throws {
+        let plain = PackagerFixture.note("1")
+        let japanese = Note(
+            id: plain.id, source: plain.source, author: plain.author, handle: plain.handle, body: plain.body,
+            postedAt: plain.postedAt, categories: plain.categories, language: "ja"
+        )
+        // A written timeline with a rule on a field, as the app keeps it: carried as it is kept.
+        let timelines = Data(#"{"version":3,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"日本語","rules":[{"id":"00000000-0000-0000-0000-000000000001","effect":"include","kind":"field","field":"language","type":"option","value":"ja"}]}]}"#.utf8)
+        let from = try await Device(sources: [PackagerFixture.mastodon], notes: [japanese, PackagerFixture.note("2")])
+        from.defaults.set(timelines, forKey: "fediqo.timelines")
+        let pair = Pair(from: from, onto: try await Device())
+        defer { pair.remove() }
+        _ = await moveWhole(pair, pictures: false)
+
+        #expect(await pair.onto.store.snapshot().notes.map(\.language) == ["ja", nil])
+        #expect(try StoreFile(at: pair.onto.directory).load().notes.map(\.language) == ["ja", nil])
+        #expect(pair.onto.defaults.data(forKey: "fediqo.timelines") == timelines, "the rule did not move with what the device holds")
+    }
+
     @Test("A receiver holding a store is asked to replace, and replaces only on that yes")
     func replaces() async throws {
         let other = Source(host: "other.example", kind: .mastodon)

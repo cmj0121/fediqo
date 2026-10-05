@@ -101,7 +101,7 @@ struct KeptStoreTests {
         let migrations = try DatabaseQueue(path: index.path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
         }
-        #expect(migrations == ["v1-index", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions"])
+        #expect(migrations == ["v1-index", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions", "v9-language"])
     }
 
     @Test("A post kept in a carried-forward store is still kept after a save and a reopen, and no other is")

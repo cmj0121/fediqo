@@ -30,8 +30,9 @@ revisions, what you can do to an item, and how one is let go.
 
 The concept is where Fediqo is going, and Using it, below, is what this checkout does today.
 Today a Mastodon host or a Discuz forum can be joined. A post's own revisions are here; a
-timeline's are not. The deleted mark before a purge, a source's own fields in a rule, and a
-timeline built on another timeline are not here yet.
+timeline's are not. A rule can ask a Mastodon source's own fields; no other kind of source
+declares any yet. The deleted mark before a purge, and a timeline built on another timeline,
+are not here yet.
 
 ## How it works
 
@@ -151,9 +152,11 @@ A timeline is its rules. A rule names one kind of thing:
 | author   | posts by that person (`user@instance`), or boosted by them     |
 | keyword  | posts whose text contains it, hashtags included                |
 | category | posts that arrived through it                                  |
+| a field  | posts whose source says that of them — see below               |
 
 - Rules of the same kind are any: one of them is enough.
-- Rules of different kinds are all: each kind must let the post through.
+- Rules of different kinds are all: each kind must let the post through. Each field is a kind
+  of its own: two language rules are any, a language rule and a Sent to rule are all.
 - A Hide rule hides what it matches, whatever else lets it through. A timeline with only Hide
   rules is All, less what they hide.
 - An author, keyword, or category rule can be for every source or for one. A list or a board
@@ -169,6 +172,26 @@ applies to the posts this device holds.
 
 A timeline shows only what this device holds. An author rule shows that person's posts that
 arrived here, not everything they ever wrote.
+
+### What one kind of source says
+
+Some things only one kind of source says about a post. A Mastodon says three, and a rule can
+ask each:
+
+| Field                 | Says                                              | A rule asks for        |
+| --------------------- | ------------------------------------------------- | ---------------------- |
+| Sent to               | how far the post was sent                         | one of its audiences   |
+| Language              | the language the post says it is in               | a language held posts say |
+| Covered by its author | whether it was marked sensitive or given a warning | yes, or no            |
+
+The editor offers a field only while one of your sources declares it, and only the values
+those sources can give: every audience, yes and no, and for Language the languages the posts
+this device holds actually say, named in your language. A post whose source says no such
+thing does not match: a forum's post has no Sent to, so a rule on it neither shows that post
+nor hides it, and a post that states no language matches no language rule. Such a rule can be
+for every source or for one that declares the field. When the last source that declares a
+field is removed, the rule stays and is marked missing, as any rule naming something gone is.
+A reload of a timeline made only of these asks the sources that declare the field.
 
 ### Categories
 

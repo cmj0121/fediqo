@@ -67,6 +67,12 @@ struct EditorFlow: Equatable {
         stage = .form(tag)
     }
 
+    /// A field picked from the kinds (#287): its form, with its values to pick from.
+    mutating func pickField(_ field: SourceField) {
+        adding = RuleDraft(field: field)
+        stage = .form(.field)
+    }
+
     /// `j` or `k`, bringing the rules in front where they were not.
     mutating func step(by step: Int) {
         tab = .rules
