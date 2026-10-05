@@ -35,7 +35,7 @@ An item is something only if it has all four of these.
 | publish time | the source's own word about this item, to the day at least          |
 | an ID        | one for this item on this source; the same when it is read again    |
 | a source     | where it came from                                                  |
-| content      | something to show                                                   |
+| content      | something to show, or a reference to another item and who made it   |
 
 The publish time is the only time an item is ordered by, and it does not move. The moment an
 item was fetched is not its publish time. Neither is a stamp the whole page shares, nor the
@@ -161,9 +161,15 @@ says what kind it is: this answers that, this quotes that, this reblogs that.
   is marked as a reblog and refers to the item it reblogs. The item it reblogs stands at its own
   publish time.
 - A favourite is a mark on an item. It is not an item.
-- What an item refers to is held too. If it is not there, it is loaded.
-- An item loaded that way is an ordinary item: it stands in timelines at its own publish time,
-  like any other.
+- What an item refers to is held too. When an item first arrives and what it refers to is not
+  there, that is loaded — once, and only what it refers to directly: what a loaded item refers
+  to in turn is not followed. Until it has come, its place says it is on its way.
+- If what was loaded is later purged, it is not loaded again; the item that refers to it says it
+  is no longer held.
+- Everything held is an ordinary item: it stands in timelines at its own publish time, like any
+  other, whether it arrived, was loaded, or was found by a search.
+- A reblog shows what it reblogs. A rule on words is asked of those words too, so what hides a
+  post hides its reblog; a rule on an author is asked of who reblogged.
 
 A reference is read when an item is opened, to show what belongs with it. A timeline does not
 fold one item under another because of it.
