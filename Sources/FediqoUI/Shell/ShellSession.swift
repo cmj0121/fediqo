@@ -85,6 +85,10 @@ final class ShellSession {
     /// reads, joins and writes this session starts are put on it while they run; the caches and
     /// sign-ins it holds carry their own, the same one in the app. A test hands in another.
     @ObservationIgnored var work: SourceWork = .shared
+    /// The line each source's loads wait in (#293): what items refer to, read without anybody
+    /// asking, and so held to a pace per source. Letting a source go — removed, cleared, signed
+    /// out — drops what waits in its line. A test hands in one with a clock it turns.
+    @ObservationIgnored var loads = LoadPacer()
     /// What the system's shared stores keep of a source, dropped as it is signed out of or
     /// removed (#221). The system's own; a test hands in its own jar.
     @ObservationIgnored var jar = SystemJar()
@@ -2571,6 +2575,10 @@ final class ShellSession {
         clearing = nil
         // Before the first await: Home posts read before the Clear must not land after it.
         stopReadingAsYou(host: host)
+        // What waits in the source's line of loads goes too (#293) — here for a Clear, and for a
+        // Remove, which clears. At this function's first await and not before it: everything
+        // above must have happened before anything can run between.
+        await loads.letGo(host: host)
         await emoji.forget(host: host)
         emojis.forget(host: host)
         if keepingRows { pictures.letGo(host: host) } else { pictures.forget(host: host) }
@@ -2771,6 +2779,7 @@ final class ShellSession {
     func signOut(host: String) async {
         if kind(of: host) == .mastodon {
             stopReadingAsYou(host: host)
+            await loads.letGo(host: host)
             await mastodon.signOut(host: host)
             // What the source said this reader did to its posts goes with the sign-in, now and
             // on disk (#285) — before anything can take the store away with it still said.

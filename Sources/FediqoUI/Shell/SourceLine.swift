@@ -49,6 +49,7 @@ extension SourceWork.Purpose {
         case .signOut: "rectangle.portrait.and.arrow.right"
         case .write: "square.and.pencil"
         case .search: "magnifyingglass"
+        case .reference: "arrowshape.turn.up.left.2"
         case .page: "doc.richtext"
         case .video: "play.rectangle"
         case .signInPage: "arrow.up.forward.square"

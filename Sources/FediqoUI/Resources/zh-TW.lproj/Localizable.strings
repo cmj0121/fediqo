@@ -472,6 +472,7 @@
 "work.purpose.signOut" = "登出中";
 "work.purpose.write" = "送出你寫的或按下的內容";
 "work.purpose.search" = "搜尋一個來源";
+"work.purpose.reference" = "讀取另一則貼文提到的貼文";
 "work.purpose.page" = "開啟文章連結的網頁";
 "work.purpose.video" = "播放影片";
 "work.purpose.signInPage" = "從論壇登入頁前往的頁面";

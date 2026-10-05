@@ -474,6 +474,7 @@
 "work.purpose.signOut" = "Signing out";
 "work.purpose.write" = "Sending what you wrote or pressed";
 "work.purpose.search" = "Searching a server";
+"work.purpose.reference" = "Reading a post another post refers to";
 "work.purpose.page" = "Opening a page a post links to";
 "work.purpose.video" = "Playing a video";
 "work.purpose.signInPage" = "A page followed from a forum's sign-in";

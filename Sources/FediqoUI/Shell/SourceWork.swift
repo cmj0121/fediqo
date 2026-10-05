@@ -58,6 +58,10 @@ final class SourceWork {
         case signOut
         case write
         case search
+        /// A post another post refers to — what it answers, quotes or reblogs — read because the
+        /// post that refers to it arrived, and nobody pressed anything (#293). Paced
+        /// (`LoadPacer`), and listed like every other read so the record shows each one.
+        case reference
         /// A page a post links to, opened in the app's own reader.
         case page
         /// A video, played. Fetched by the system's player rather than through an `HTTPClient`.
