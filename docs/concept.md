@@ -52,7 +52,7 @@ An item has two layers, and each has one owner.
 
 Each item on each source has one ID. It is stable: the content can change under it and the ID
 does not. It is never used again for something else. Everything about an item hangs on it —
-its revisions, keep, the deleted mark, and what it is a child of.
+its revisions, keep, the deleted mark, and what it refers to.
 
 The same item read through another timeline keeps its ID.
 
@@ -62,7 +62,10 @@ The same item read through another timeline keeps its ID.
 | -------- | -------------------------------------- | ------------------------------------------------- |
 | required | the four above                         | every item has them                               |
 | general  | author, category, keyword, and others  | one name everywhere; a source fills what it can   |
-| dynamic  | fields that belong to one source       | the source names them, for a filter to use later  |
+| dynamic  | fields that belong to one source       | the source names them and says their type         |
+
+A dynamic field says what type it is: text, a number, a date, yes or no, or one of a fixed set
+of options, which it lists. That is how a filter knows what it may ask of it.
 
 A category is the source's own division of what it serves. An item carries each one it arrived
 through; you do not make them.
@@ -124,8 +127,8 @@ timeline.
 | Act       | Kept      | Note                                             |
 | --------- | --------- | ------------------------------------------------ |
 | post      | at source | a new item                                       |
-| reply     | at source | a new item, the child of what it answers         |
-| reblog    | at source |                                                  |
+| reply     | at source | a new item, referring to what it answers         |
+| reblog    | at source | a new item, referring to what it reblogs         |
 | favourite | at source |                                                  |
 | bookmark  | at source |                                                  |
 | withdraw  | at source | takes back what you sent                         |
@@ -142,12 +145,28 @@ source that can only be read, keep is the one act there is.
 | deleted | marked, and still on this device                     |
 | purged  | gone; you purge all that is marked, or what is older than a span |
 
+An item its source takes back is marked deleted without you asking. It stays until you purge it.
+
+A purge leaves nothing behind, not even the ID. An item its source still serves comes back the
+next time it is read. To stop seeing something, hide it with a rule.
+
 Keep always wins: no purge and no limit takes a kept item.
 
-## Relationship
+## What an item refers to
 
-An item can be the child of another. That is read only when an item is opened, to find what
-belongs with it. A timeline does not look at it.
+An item can refer to other items, by their IDs. It can refer to several, and each reference
+says what kind it is: this answers that, this quotes that, this reblogs that.
+
+- A reblog is an item of its own. It has its own ID and its own time, the time of the reblog; it
+  is marked as a reblog and refers to the item it reblogs. The item it reblogs stands at its own
+  publish time.
+- A favourite is a mark on an item. It is not an item.
+- What an item refers to is held too. If it is not there, it is loaded.
+- An item loaded that way is an ordinary item: it stands in timelines at its own publish time,
+  like any other.
+
+A reference is read when an item is opened, to show what belongs with it. A timeline does not
+fold one item under another because of it.
 
 ## What this device holds
 
@@ -158,8 +177,8 @@ go, and say which limit did.
 ## Later
 
 The same thing from two sources is one item. That is true today where two sources name it
-alike; the general case is long work, and is added as a link between two IDs, with neither ID
-changed.
+alike, and stays so. The general case is the next story: a link between two IDs, with neither
+ID changed.
 
 ## What it is not
 
@@ -167,11 +186,3 @@ changed.
 - Not a reader of what has no time.
 - Not a way past anything a source does to keep a program from reading it.
 - There is no Fediqo server. It does not exist.
-
-## Not settled yet
-
-- Whether an item a source takes back is marked deleted without you asking.
-- Whether a purge leaves the ID behind, so the item does not return while its source still
-  serves it.
-- Whether an item has one parent or several, and whether a relationship says what kind it is.
-- Whether a dynamic field says what type it is.
