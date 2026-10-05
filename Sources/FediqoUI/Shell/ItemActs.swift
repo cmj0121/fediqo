@@ -40,6 +40,12 @@ struct ItemActing {
     ///
     /// Nothing where the list cannot act — a fixture, a preview — and then no mark is drawn.
     var perform: ((PostAct) -> Void)?
+    /// The press on the keep mark (#284): keeps the row, or un-keeps it. **Beside `perform` and
+    /// not one of its acts**, because it is none of #54's: nothing is sent to a source, so it is
+    /// offered on a row whatever its source offers, signed in or not, and it has no standing to
+    /// be on its way or to fail. Nothing where the list cannot act, and then the press changes
+    /// nothing.
+    var keep: (() -> Void)?
 }
 
 /// What one act's mark draws on one row — `ItemActs.mark`'s answer.

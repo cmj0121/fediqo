@@ -109,6 +109,9 @@ public struct MastodonWrite: Sendable {
     /// not there — taken back elsewhere, or already gone — and that is what the reader asked for,
     /// so the row goes then too rather than standing as a post the source says does not exist.
     ///
+    /// **A row the person keeps does not go** (#284): `ItemStore.forget` leaves it, marked as gone
+    /// from its source, which it now is.
+    ///
     /// Nothing checks here that the post is the reader's own: the source refuses anybody else's,
     /// and the one place that decides whether to offer it is `PostActs.on`.
     public func withdraw(_ note: Note) async throws {

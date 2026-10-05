@@ -492,7 +492,15 @@ final class ShellSession {
     /// The room this device gives the store and the picture copies together (#249), in bytes,
     /// or nil for no limit — the default. `KeepingWithinRoom` hands it in from the preferences;
     /// the store is judged by it at launch, when it changes, and after each landing.
-    var roomBytes: Int?
+    var roomBytes: Int? {
+        didSet { if roomBytes == nil { roomHeldByKept = false } }
+    }
+
+    /// The last room check ended over the room with nothing left it may let go (#284): what the
+    /// person keeps holds the store past it. Drawn under the Room preference and read by nothing
+    /// else: it is what the last check found, and the next asks the store afresh
+    /// (`keepWithinRoom`). False again once a check ends within the room or with a post to go.
+    var roomHeldByKept = false
 
     /// Set while an export or an import of the store runs (#247): the room limit does nothing
     /// meanwhile, so nothing goes out from under a copy being taken or put back. Cleared, the
@@ -1016,6 +1024,9 @@ final class ShellSession {
     /// every other server to drop it; leaving them here would redraw the row as the next copy and
     /// put back the post the reader just watched go. They are dropped only after the source has
     /// said the post went.
+    ///
+    /// **A copy the person keeps does not go** (#284): it stays in the timeline, in an open thread
+    /// and in the store, marked as gone from its source, until it is un-kept and let go.
     func withdraw(_ item: DummyItem) async {
         withdrawing = nil
         guard let copy = actingCopy(of: item, for: .withdraw) else { return }
@@ -1025,9 +1036,15 @@ final class ShellSession {
             try await MastodonWrite(door: door, store: self.store).withdraw(note)
             for key in [note.key] + others {
                 await self.store.forget(key)
-                self.conversations.drop(key)
+                // A copy the person keeps stays, marked gone from its source (#284): it is laid
+                // into an open thread as it now is, rather than dropped from it.
+                if let stays = await self.store.note(key) {
+                    self.conversations.replace(stays)
+                } else {
+                    self.conversations.drop(key)
+                }
             }
-            return note
+            return await self.store.note(note.key) ?? note
         }
     }
 
@@ -2939,7 +2956,11 @@ final class ShellSession {
         }
         await store.remove(host: host, keepingPosts: keepingPosts)
         await adopt()
-        await clear(host: host, keepingRows: keepingPosts)
+        // A post the person keeps stays though the rest went (#284), and a row that stays is
+        // `keepingPosts`' case for the pictures: let go without the bump, so it asks nothing of
+        // a host nothing may ask.
+        let rowsStay = keepingPosts ? true : !(await store.held(host: host)).isEmpty
+        await clear(host: host, keepingRows: rowsStay)
 
         // Folded on both sides rather than on one. `Host.parse` lowercases everything it returns,
         // so all three of these are already folded today — and that is a guarantee three files

@@ -31,6 +31,14 @@ import SwiftUI
 ///
 /// **What a limit lets go is written down**, once per act, through `record`: never a post, only
 /// the limit, the moment, the counts and the sources.
+///
+/// **Where what the person keeps is alone more than the room, the limit cannot be met, and says
+/// so rather than working at it** (#284, `roomHeldByKept`). A check that finds the rows alone
+/// over the room and nothing the store may let go leaves the picture copies be — no trim could
+/// reach the room, and each copy would only be read again and let go again — lets nothing go,
+/// writes no line and rebuilds nothing. **Asked of the store at each check and never
+/// remembered**: the moment a post may go again — one un-kept, one newly arrived — the copies go
+/// first as they always do, so no post goes that a copy going would have spared.
 extension ShellSession {
     /// How long after a landing the room is measured, so a burst of pages is one check.
     static let roomDebounce: Duration = .seconds(2)
@@ -92,7 +100,12 @@ extension ShellSession {
         var copies = 0
         var posts = 0
         var from: Set<String> = []
-        if over > 0, copyBytes > 0, let trimmed = await pictures.trimDisk(toBytes: max(0, copyBytes - over), hosts: hosts) {
+        // The rows alone past the room and none of them may go (#284): no copy going could bring
+        // it within. Asked now, never carried over from the last check.
+        var keptHoldIt = false
+        if over > 0, held > room { keptHoldIt = !(await store.holdsWhatRoomMayLetGo()) }
+        if over > 0, copyBytes > 0, !keptHoldIt,
+           let trimmed = await pictures.trimDisk(toBytes: max(0, copyBytes - over), hosts: hosts) {
             copies = trimmed.dropped
             copyBytes = trimmed.kept
             from.formUnion(trimmed.sources)
@@ -114,11 +127,21 @@ extension ShellSession {
             held = after
             over = RoomPolicy.over(total: held + copyBytes, room: room)
         }
+        // What this check found, for the Room to say; nothing reads it to decide anything. The
+        // rows alone are past the room and none may go: every one is kept, or quoted by one that is.
+        if over > 0, held > room, holdings.posts > 0 {
+            roomHeldByKept = !(await store.holdsWhatRoomMayLetGo())
+        } else {
+            roomHeldByKept = false
+        }
         // The file is rebuilt once, where posts went or where it still holds room its rows gave
         // back and that room is what puts it over. Where the rebuild throws, the file keeps its
-        // size; nothing more goes for that, and the next check asks again.
+        // size; nothing more goes for that, and the next check asks again. **Never where the rows
+        // themselves are what is over** (#284): a file with no room to give back is rebuilt into
+        // the same file, and a store its kept posts hold past the room would be rebuilt at every
+        // landing.
         let onDisk = await measureStore()
-        if posts > 0 || RoomPolicy.over(total: onDisk + copyBytes, room: room) > 0 {
+        if posts > 0 || (onDisk > held && RoomPolicy.over(total: onDisk + copyBytes, room: room) > 0) {
             try? await compactStore?()
             storeBytes = await measureStore()
         } else {

@@ -556,6 +556,8 @@ struct TimelinePane: View {
                 session.askToWithdraw(item)
             }
         }
+        // What `y` does (#284), and it says so itself: one act, one outcome, whichever asked.
+        acting.keep = { Task { await session.toggleKept(item) } }
         return acting
     }
 

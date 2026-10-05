@@ -138,8 +138,10 @@ public actor ItemStore {
         for profile in said where Self.isWord(profile) && hosts.contains(profile.host) {
             saidByHost[profile.host] = profile
         }
+        // A kept row comes in whatever its age (#284): the window is a limit, and keep wins.
         notes = Dictionary(
-            incoming.filter(withinRetention).map { ($0.key, $0) }, uniquingKeysWith: { _, new in new }
+            incoming.filter { $0.kept || withinRetention($0) }.map { ($0.key, $0) },
+            uniquingKeysWith: { _, new in new }
         )
         arrival = [:]
         arrivals = 0
@@ -276,7 +278,9 @@ public actor ItemStore {
     /// read again quotes (#214), which the keep window does not cut while it quotes them.
     private func admit(_ incoming: [Note], exempt: Bool) {
         guard !incoming.isEmpty else { return }
-        let admitted = exempt ? incoming : incoming.filter(withinRetention)
+        // A copy of a row the person keeps is taken in whatever its age (#284): the row is here
+        // past the window, and what its source says of it now is still news about it.
+        let admitted = exempt ? incoming : incoming.filter { withinRetention($0) || notes[$0.key]?.kept == true }
         let incoming = admitted + admitted.compactMap(\.quotedNote)
         var moved = false
         var recounted = false
@@ -536,6 +540,10 @@ public actor ItemStore {
     /// the rest all ask `sourceList` first, so nothing new lands under a host that has gone.
     /// Each note still names its source, so a row can say which host it was read through and
     /// that the host is no longer here.
+    ///
+    /// **A post the person keeps stays either way** (#284), exactly as `keepingPosts` leaves one:
+    /// still drawn, still naming the source it was read through, and marked by the row as from a
+    /// host no longer here. It goes once it is un-kept and something lets it go.
     public func remove(host raw: String, keepingPosts: Bool = false) {
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
@@ -545,10 +553,12 @@ public actor ItemStore {
             changed(shown: false, aside: false)
             return
         }
-        let aside = notes.contains { $0.key.host == host && $0.value.holding == .aside }
-        notes = notes.filter { $0.key.host != host }
-        arrival = arrival.filter { $0.key.host != host }
-        changed(shown: true, aside: aside)
+        let going = notes.values.filter { $0.key.host == host && !$0.kept }
+        for note in going {
+            notes[note.key] = nil
+            arrival[note.key] = nil
+        }
+        changed(shown: true, aside: going.contains { $0.holding == .aside })
     }
 
     public func sources() -> [Source] {
@@ -610,7 +620,8 @@ public actor ItemStore {
     }
 
     /// `setRetention`, saying which sources the posts went from as well as how many (#251) — what
-    /// the months limit writes into its account.
+    /// the months limit writes into its account. **A kept post stays whatever its age** (#284),
+    /// where a timeline drew it or aside as it was, and is counted in nothing that went.
     public func letGoBeyond(months: Int?, from now: Date = Date(), calendar: Calendar = .current) -> WentByLimit {
         retention = KeepPolicy.cutoff(keepingMonths: months, from: now, calendar: calendar)
         guard let retention else { return .none }
@@ -619,12 +630,12 @@ public actor ItemStore {
         // A quoted post a kept post quotes stays, as `ingest` keeps it (#214) — held aside from
         // here, where a timeline had brought it: the timeline's reach has passed it, the quote's
         // has not.
-        let quoted = Set(notes.values.filter { $0.postedAt >= retention }.compactMap(\.quotedKey))
+        let quoted = Set(notes.values.filter { $0.kept || $0.postedAt >= retention }.compactMap(\.quotedKey))
         var demoted = false
         var kept: [NoteKey: Note] = [:]
         var gone: Set<String> = []
         for (key, note) in notes {
-            if note.postedAt >= retention {
+            if note.kept || note.postedAt >= retention {
                 kept[key] = note
             } else if quoted.contains(key) {
                 var aside = note
@@ -654,13 +665,12 @@ public actor ItemStore {
     /// room is this device's and not one source's, and a search's find held aside weighs what a
     /// timeline's post does. Two posted in the same second go in the order they arrived. A post
     /// another held post quotes stays whatever its age, as the keep window keeps it (#214): it
-    /// goes once the post quoting it has.
+    /// goes once the post quoting it has. **A kept post is never one of them** (#284): the oldest
+    /// that are not kept go, and where only kept posts are left nothing goes at all.
     public func letGoOldest(count: Int) -> WentByLimit {
         guard count > 0, !notes.isEmpty else { return .none }
-        let quoted = Set(notes.values.compactMap(\.quotedKey))
         let arrival = self.arrival
-        let going = notes.values
-            .filter { !quoted.contains($0.key) }
+        let going = mayGoForRoom()
             .sorted {
                 $0.postedAt != $1.postedAt
                     ? $0.postedAt < $1.postedAt
@@ -676,9 +686,23 @@ public actor ItemStore {
         return WentByLimit(posts: going.count, sources: Set(going.map(\.key.host)).sorted())
     }
 
+    /// Whether `letGoOldest` could let anything go right now (#284): a post is held that is
+    /// neither kept nor quoted by a held post. What the room check asks before it spends the
+    /// picture copies — asked of the store each time, so a post un-kept, from this window or
+    /// another, is seen by the very next check.
+    public func holdsWhatRoomMayLetGo() -> Bool {
+        !mayGoForRoom().isEmpty
+    }
+
+    /// The rows `letGoOldest` chooses among: not kept, and not quoted by a held post.
+    private func mayGoForRoom() -> [Note] {
+        let quoted = Set(notes.values.compactMap(\.quotedKey))
+        return notes.values.filter { !$0.kept && !quoted.contains($0.key) }
+    }
+
     /// How many rows were posted inside `span` and, where `host` is given, came through that host
     /// — arrived and aside alike (#248). What a press to let a span go would take, so the question
-    /// before it names the true count.
+    /// before it names the true count: a kept post is not counted, since the press leaves it (#284).
     public func count(span: Range<Date>, host raw: String? = nil) -> Int {
         let host = raw?.lowercased()
         return notes.values.reduce(0) { $0 + (Self.inside(span, host: host, $1) ? 1 : 0) }
@@ -693,6 +717,9 @@ public actor ItemStore {
     /// every source stays joined — a host with nothing left is a source with nothing held, as
     /// `setRetention` leaves one. The host need not be a source here: a source removed while its
     /// posts were kept (#250) leaves rows this reaches like any other.
+    ///
+    /// **Never a post the person keeps** (#284): keep is their word too, and the later one to
+    /// undo. A post a kept post quotes is not spared for that, as above.
     @discardableResult
     public func letGo(span: Range<Date>, host raw: String? = nil) -> Int {
         let host = raw?.lowercased()
@@ -706,10 +733,10 @@ public actor ItemStore {
         return going.count
     }
 
-    /// Whether `note` is what `letGo(span:host:)` reaches: posted inside `span`, and from `host`
-    /// where one is named.
+    /// Whether `note` is what `letGo(span:host:)` reaches: posted inside `span`, from `host`
+    /// where one is named, and not kept.
     private static func inside(_ span: Range<Date>, host: String?, _ note: Note) -> Bool {
-        span.contains(note.postedAt) && (host == nil || note.source.host == host)
+        !note.kept && span.contains(note.postedAt) && (host == nil || note.source.host == host)
     }
 
     /// Everything this store holds, read in one hop — what a save writes to disk.
@@ -756,9 +783,37 @@ public actor ItemStore {
     /// **One row and never a host's worth.** `remove(host:)` is the reader letting go of a server;
     /// this is a server saying one post no longer exists, and the other copies of it through other
     /// sources are theirs to say about.
-    public func forget(_ key: NoteKey) {
-        guard let gone = notes.removeValue(forKey: key) else { return }
+    ///
+    /// **A row the person keeps is not let go by this either** (#284): it stays, marked as gone
+    /// from its source as of `moment` — which it now is — and goes once it is un-kept and what is
+    /// marked is let go. One already marked keeps the moment it was first heard.
+    public func forget(_ key: NoteKey, at moment: Date = Date()) {
+        guard var gone = notes[key] else { return }
+        if gone.kept {
+            guard gone.goneSince == nil else { return }
+            gone.goneSince = moment
+            notes[key] = gone
+        } else {
+            notes[key] = nil
+            arrival[key] = nil
+        }
         changed(shown: gone.holding == .arrived, aside: gone.holding == .aside)
+    }
+
+    /// Keeps one row, or un-keeps it (#284) — the person's own mark, sent nowhere. Silent where
+    /// the row is not held, and where it already is as asked; returns whether anything changed,
+    /// so a caller writes it down only then. The row's source need not be here: a kept post
+    /// outlives its source's removal, and is un-kept like any other.
+    ///
+    /// **Un-keeping lets nothing go by itself.** The row is an ordinary one from that moment, and
+    /// goes when a limit next acts or the person next lets something go — as it would have.
+    @discardableResult
+    public func setKept(_ kept: Bool, for key: NoteKey) -> Bool {
+        guard var held = notes[key], held.kept != kept else { return false }
+        held.kept = kept
+        notes[key] = held
+        changed(shown: held.holding == .arrived, aside: held.holding == .aside)
+        return true
     }
 
     /// Marks one row as gone from its source (#179): a read of that one post heard the source say
@@ -780,20 +835,22 @@ public actor ItemStore {
         return true
     }
 
-    /// How many rows are marked gone from their source (#179) — what a press would let go.
+    /// How many rows are marked gone from their source (#179) — what a press would let go, so
+    /// never one the person keeps (#284).
     public func goneCount() -> Int {
-        notes.values.reduce(0) { $0 + ($1.goneSince == nil ? 0 : 1) }
+        notes.values.reduce(0) { $0 + ($1.goneSince == nil || $1.kept ? 0 : 1) }
     }
 
     /// Lets go of every row marked gone from its source at or before `cutoff`, or of every marked
     /// row where `cutoff` is nil — the reader's press (#179). Returns how many went.
     ///
     /// **Marked rows and nothing else.** A row that merely did not arrive again carries no mark,
-    /// so no wait and no press here can reach it.
+    /// so no wait and no press here can reach it. **And never a kept one** (#284): it stays,
+    /// still marked, for as long as it is kept.
     @discardableResult
     public func letGoneGo(markedBy cutoff: Date? = nil) -> Int {
         let going = notes.values.filter { note in
-            guard let gone = note.goneSince else { return false }
+            guard !note.kept, let gone = note.goneSince else { return false }
             return cutoff.map { gone <= $0 } ?? true
         }
         guard !going.isEmpty else { return 0 }
@@ -808,13 +865,15 @@ public actor ItemStore {
     /// How many places say their source no longer has what lay there (#204) — what a press would
     /// let go beside the posts `goneCount` counts.
     public func settledCount() -> Int {
-        // A post marked gone takes its places with it, and is counted as the post it is.
-        notes.values.filter { $0.goneSince == nil }.reduce(0) { $0 + $1.gaps.filter { $0.kind == .settled }.count }
+        // A post marked gone takes its places with it, and is counted as the post it is — unless
+        // it is kept (#284), which stays, so its places are counted as places.
+        notes.values.filter { $0.goneSince == nil || $0.kept }.reduce(0) { $0 + $1.gaps.filter { $0.kind == .settled }.count }
     }
 
     /// Lets go of every place settled at or before `cutoff`, or of every one where `cutoff` is nil
     /// — `letGoneGo`'s wait and press, for the places a read down settled (#204). The mark goes
-    /// and the post it sits by stays. Returns how many went.
+    /// and the post it sits by stays — so a kept post's places go like any other's (#284): a
+    /// place is a mark beside an item, and no item goes here. Returns how many went.
     @discardableResult
     public func letSettledGo(markedBy cutoff: Date? = nil) -> Int {
         var went = 0
@@ -842,6 +901,14 @@ public actor ItemStore {
     /// row arrived through and about who boosted it.
     public func note(_ key: NoteKey) -> Note? {
         notes[key]
+    }
+
+    /// The rows held among `keys`, by key — one hop for a caller that just landed a read and
+    /// draws what the store made of it (#284), rather than what the wire said.
+    public func notes(_ keys: [NoteKey]) -> [NoteKey: Note] {
+        var found: [NoteKey: Note] = [:]
+        for key in keys { found[key] = notes[key] }
+        return found
     }
 
     /// Every row held from `host` whose id starts `idPrefix` — **aside ones included**, which is

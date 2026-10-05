@@ -92,6 +92,7 @@
 "shortcut.back" = "Back to the list";
 "shortcut.boost" = "Boost this post to its source, or take the boost back";
 "shortcut.favourite" = "Favourite this post on its source, or take the favourite back";
+"shortcut.keep" = "Keep this post on this device, or stop keeping it";
 "shortcut.answer" = "Answer the post you are on, from inside its conversation";
 "shortcut.withdraw" = "Take back the post you are on, where you wrote it";
 "shortcut.person" = "Open whoever wrote the post you are on";
@@ -308,7 +309,8 @@
 "item.act.quote" = "Quote";
 "item.act.favourite" = "Favourite";
 "item.act.bookmark" = "Bookmark";
-"item.act.kept" = "Kept";
+"item.act.keep" = "Keep";
+"item.act.unkeep" = "Stop keeping";
 "item.act.more" = "More";
 "item.toast.quote" = "A quote opens the composer. Not this session.";
 "item.toast.bookmark.on" = "Bookmarked, dummy.";
@@ -376,7 +378,7 @@
 "prefs.askEvery.footer" = "While Fediqo is open, every source on this device is asked again after this wait, and the timeline in front renews itself. r still reloads at once.";
 "prefs.removed.head" = "When a source is removed";
 "prefs.removed.brief" = "What happens to its posts.";
-"prefs.removed.footer" = "Removing a source takes everything this device holds for it: its sign-in, its pictures, the boards you picked. Its posts go with it, or stay — marked as from a source no longer here, still read in All and found by search, and let go like any other post. The question before removing says which.";
+"prefs.removed.footer" = "Removing a source takes everything this device holds for it: its sign-in, its pictures, the boards you picked. Its posts go with it, or stay — marked as from a source no longer here, still read in All and found by search, and let go like any other post. The question before removing says which. A post you keep stays either way.";
 "prefs.removed" = "Its posts";
 "prefs.removed.go" = "Go with it";
 "prefs.removed.stay" = "Stay";
@@ -455,7 +457,7 @@
 "prefs.keep.forever" = "Forever";
 "prefs.keep.shorten.title" = "Keep only the latest %d months?";
 "prefs.keep.shorten.title.one" = "Keep only the latest %d month?";
-"prefs.keep.shorten.detail" = "Posts older than that go from this device now, and any read later are not kept. Every source stays joined. A longer window, or Forever, drops nothing.";
+"prefs.keep.shorten.detail" = "Posts older than that go from this device now, and any read later are not kept. Every source stays joined. A longer window, or Forever, drops nothing. A post you keep stays.";
 "prefs.keep.shorten.line" = "Older posts go from this device now.";
 "prefs.keep.months" = "Latest %d months";
 "prefs.keep.months.one" = "Latest %d month";
@@ -476,12 +478,12 @@
 "prefs.gone.now" = "Let them all go now";
 "prefs.gone.ask" = "Let go of %d posts deleted at their source?";
 "prefs.gone.ask.one" = "Let go of %d post deleted at its source?";
-"prefs.gone.ask.detail" = "They go from this device now, from every screen. Nothing else is touched, and every source stays joined.";
+"prefs.gone.ask.detail" = "They go from this device now, from every screen. Nothing else is touched, and every source stays joined. A post you keep stays, and is not in that count.";
 "prefs.gone.confirm" = "Let go";
 "prefs.gone.went" = "%d posts went.";
 "prefs.gone.went.one" = "%d post went.";
 "prefs.gone.went.none" = "None were held.";
-"prefs.gone.footer" = "A post is marked deleted only when this device reads that one post again and its source says it is not there. A post that simply did not arrive is never marked, and never let go here. What you took back yourself goes at once. Where a timeline's source no longer has what lay between two posts, that place is marked the same way and goes the same way; the posts beside it stay.";
+"prefs.gone.footer" = "A post is marked deleted only when this device reads that one post again and its source says it is not there. A post that simply did not arrive is never marked, and never let go here. What you took back yourself goes at once, unless you keep it: then it stays, marked. Where a timeline's source no longer has what lay between two posts, that place is marked the same way and goes the same way; the posts beside it stay.";
 "prefs.gone.posts" = "%d posts";
 "prefs.gone.posts.one" = "%d post";
 "prefs.gone.places" = "%d places";
@@ -489,7 +491,7 @@
 "prefs.gone.ask.places" = "Let go of %d places whose source no longer has what lay there?";
 "prefs.gone.ask.places.one" = "Let go of %d place whose source no longer has what lay there?";
 "prefs.gone.ask.both" = "Let go of %1$@ deleted at their source, and %2$@ whose source no longer has what lay there?";
-"prefs.gone.ask.detail.places" = "Posts go from this device now, from every screen. A place loses only its mark, and the post it sits by stays. Nothing else is touched, and every source stays joined.";
+"prefs.gone.ask.detail.places" = "Posts go from this device now, from every screen. A place loses only its mark, and the post it sits by stays. Nothing else is touched, and every source stays joined. A post you keep stays, and is not in that count.";
 "prefs.gone.ask.detail.placesonly" = "Only their marks go, and the posts they sit by stay. Nothing else is touched, and every source stays joined.";
 "prefs.gone.ask.line" = "They go from this device now.";
 "prefs.gone.ask.line.places" = "The posts go now; the places lose only their marks.";
@@ -623,8 +625,8 @@
 
 /* Unit 3 — a source can be let go of, and what it asks before it does. */
 "account.remove.title" = "Remove %@?";
-"account.remove.detail" = "Its posts and everything this device holds for it go with it.";
-"account.remove.detail.boards" = "Its posts, everything this device holds for it, and the %d boards you picked go with it. The boards do not come back.";
+"account.remove.detail" = "Its posts and what this device holds for it go; a post you keep stays.";
+"account.remove.detail.boards" = "Its posts, everything this device holds for it, and the %d boards you picked go with it. The boards do not come back. A post you keep stays.";
 "account.remove.line.boards" = "Its posts go, and the %d boards you picked do not come back.";
 "account.remove.confirm" = "Remove";
 "account.remove.line.stay" = "Its posts stay, marked as from a source no longer here.";
@@ -928,12 +930,13 @@
 "prefs.room.none" = "No limit";
 "prefs.room.figure" = "%1$@ index · %2$@ picture copies";
 "prefs.room.within" = "%1$@ of %2$@ used";
+"prefs.room.kept" = "The posts you keep weigh more than this room by themselves, so the store stays over it. Until you stop keeping some, or give it more room, every other post is let go as it arrives.";
 "prefs.room.tighten.title" = "Give the store %@ of room?";
 "prefs.room.tighten.line" = "Past it, picture copies go first, then the oldest posts.";
-"prefs.room.tighten.detail" = "What this device holds is measured now and held to that room from here on. Picture copies on disk go first, oldest first, and come back when read again; only if that is not enough do the oldest posts go, from every source. Every source stays joined. A larger room, or no limit, lets nothing go.";
+"prefs.room.tighten.detail" = "What this device holds is measured now and held to that room from here on. Picture copies on disk go first, oldest first, and come back when read again; only if that is not enough do the oldest posts go, from every source. Every source stays joined. A larger room, or no limit, lets nothing go. A post you keep is never let go for room; if kept posts alone are more than the room, it stays over, and the Room says so.";
 "prefs.limits" = "What the limits let go";
 "prefs.limits.line" = "One line each time a limit acted; never a post.";
-"prefs.limits.help" = "A post a limit let go is no longer on this device, so nothing on it can say which limit did. This account says it instead: the limit, when, how many posts or picture copies went, and from which sources — and nothing else, not a post, not where it was read. What you let go yourself is not written here. Clearing the account lets nothing else go.";
+"prefs.limits.help" = "A post a limit let go is no longer on this device, so nothing on it can say which limit did. This account says it instead: the limit, when, how many posts or picture copies went, and from which sources — and nothing else, not a post, not where it was read. What you let go yourself is not written here. Clearing the account lets nothing else go. A post you keep is never let go by a limit, and never counted here.";
 "prefs.limits.none" = "No limit has acted yet.";
 "prefs.limits.copies" = "%d picture copies";
 "prefs.limits.copies.one" = "%d picture copy";
@@ -1023,7 +1026,7 @@
 /* Let go by dates (#248) */
 "prefs.span" = "Let go by dates";
 "usage.span.line" = "Posts from these days go from this device.";
-"prefs.span.footer" = "Pick a first and a last day, both included, in this device's time zone, and one source or every one. Before anything goes, a question says how many posts, from where, and that they do not come back: they are in no timeline, no search and no count afterwards. Nothing outside those days, and nothing from another source, is touched. Every source stays joined, and posts left by a source you removed can go here too.";
+"prefs.span.footer" = "Pick a first and a last day, both included, in this device's time zone, and one source or every one. Before anything goes, a question says how many posts, from where, and that they do not come back: they are in no timeline, no search and no count afterwards. Nothing outside those days, and nothing from another source, is touched. Every source stays joined, and posts left by a source you removed can go here too. A post you keep is never one of them.";
 "usage.span.from" = "From";
 "usage.span.to" = "To";
 "usage.span.source" = "Source";
@@ -1036,7 +1039,7 @@
 "prefs.span.ask" = "Let go of %d posts?";
 "prefs.span.ask.one" = "Let go of %d post?";
 "prefs.span.ask.line" = "Posted %1$@, from %2$@. They do not come back.";
-"prefs.span.ask.detail" = "Every post from those days and that source goes from this device now, from every screen and every count. Nothing outside those days, and nothing from another source, is touched. Every source stays joined.";
+"prefs.span.ask.detail" = "Every post from those days and that source goes from this device now, from every screen and every count. Nothing outside those days, and nothing from another source, is touched. Every source stays joined. A post you keep stays, and is not in that count.";
 "prefs.span.went" = "%d posts let go.";
 "prefs.span.went.one" = "%d post let go.";
 

@@ -29,9 +29,9 @@ existing one with a filter put on it.
 revisions, what you can do to an item, and how one is let go.
 
 The concept is where Fediqo is going, and Using it, below, is what this checkout does today.
-Today a Mastodon host or a Discuz forum can be joined. Keep, bookmark, revisions, the deleted
-mark before a purge, a source's own fields in a rule, and a timeline built on another timeline
-are not here yet.
+Today a Mastodon host or a Discuz forum can be joined. Bookmark, revisions, the deleted mark
+before a purge, a source's own fields in a rule, and a timeline built on another timeline are
+not here yet.
 
 ## How it works
 
@@ -82,8 +82,8 @@ The store is yours to take away and yours to let go. It leaves as one password-l
 your own hands, or moves to another of your devices nearby when both agree, and it passes
 through nowhere of ours and not through the Apple account. Part of it goes when you say so —
 by a span of dates, by a source — or when a limit you set is reached, and what a limit let go
-says which limit did. Nothing goes that neither you nor your own limit chose. How each works
-is under What this device holds, below.
+says which limit did. Nothing goes that neither you nor your own limit chose, and a post you
+keep goes by none of them. How each works is under What this device holds, below.
 
 Several sources go in and one timeline comes out, so the same post from two of them is one
 row rather than two. Nothing is scored or re-ordered on the way: the only thing between what
@@ -285,6 +285,21 @@ and the two ways the whole store leaves — Take away and Move nearby.
 What a source says about itself — its name, its figures, how long a post may be — stays on
 this device with the source. After a relaunch, with or without a network, its page shows what
 it last said and when, and asks again behind it. Something new replaces what was kept.
+
+#### Keeping a post
+
+Any post can be kept: the box under it, on its row and where it is opened, or `y` on the
+selected post. The same press un-keeps it. The mark is this device's own, and nothing is sent
+to the source. A kept post is never let go — not by either limit, not by dates, not with what
+its source deleted, and not when its source is removed, whichever was chosen for that source's
+posts: it stays, marked Source removed. A kept post of your own that you take back stays too,
+marked Deleted at source. Where a question says how many posts would go, kept ones are not in
+the number, and What the limits let go never counts one. Its picture copies are not kept with
+it: they go with a removed source and for room like any others, and come back when the post
+is read again while its source is here. Where kept posts alone are more than the room, the
+store stays over it and Room says so; other posts are then let go as they arrive. Kept survives a relaunch, and goes
+with a take-away and a move nearby. Un-kept, it is an ordinary post again from that moment:
+the press itself lets nothing go.
 
 #### The two limits
 

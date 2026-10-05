@@ -318,6 +318,17 @@ private var migrator: DatabaseMigrator {
             t.add(column: "said_at", .datetime)
         }
     }
+    // Whether the person keeps a row (#284). Every row already stored is one nobody kept, which
+    // is what the column's default says.
+    //
+    // **A migration id for `v3-holding`'s reason.** An older build knows nothing of this column:
+    // its limits would let a kept post go like any other, and its first save would write every
+    // row back without the mark. The id makes it refuse the store instead.
+    migrator.registerMigration("v6-kept") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "kept", .boolean).notNull().defaults(to: false)
+        }
+    }
     return migrator
 }
 
@@ -798,6 +809,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var holding: String
     /// `Note.goneSince` (#179). A column behind its own migration id, for `holding`'s reason.
     var gone_at: Date?
+    /// `Note.kept` (#284). A column behind its own migration id, for `holding`'s reason.
+    var kept: Bool
 
     init(_ note: Note) {
         host = note.source.host
@@ -805,6 +818,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         posted_at = note.postedAt
         holding = note.holding.rawValue
         gone_at = note.goneSince
+        kept = note.kept
         categories = note.categories.map(CategoryRow.init).sorted()
         facts = NoteFacts(
             author: note.author,
@@ -889,7 +903,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
                 (facts.listed ?? []).compactMap { row in row.category.category.map { ($0, row.id) } },
                 uniquingKeysWith: { a, _ in a }
             ),
-            quote: facts.quote?.quote
+            quote: facts.quote?.quote,
+            kept: kept
         )
     }
 }

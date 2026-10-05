@@ -540,9 +540,10 @@ final class ShellConversations {
             // the thread and not in the stream under it until something else asked.
             // Only where a held row did change: a thread of rows this device never held refreshes
             // nothing, and adopting then would be a round trip to the store for nothing.
-            if await Self.land(thread.ancestors + thread.descendants, host: host, in: session) {
-                await session.reloadFromStore()
-            }
+            let landed = await Self.land(thread.ancestors + thread.descendants, host: host, in: session)
+            if landed.changed { await session.reloadFromStore() }
+            let ancestors = thread.ancestors.map(landed.held)
+            let read = thread.descendants.map(landed.held)
             failedAtRoot.remove(item.id)
             if thread.isAlone {
                 standings[item.id] = ShellConversationStanding.none
@@ -554,12 +555,12 @@ final class ShellConversations {
             // it answers. What was read further (#177), which the source's first answer leaves
             // out, stays in its own subtree rather than going to the bottom, and the reader is not
             // sent back to the first answer.
-            var descendants = thread.descendants
+            var descendants = read
             if case .loaded(_, let drawn, _)? = before {
-                descendants = Self.renewed(drawn, with: thread.descendants, rootID: id)
+                descendants = Self.renewed(drawn, with: read, rootID: id)
             }
             asked[item.id] = (asked[item.id] ?? []).union([id])
-            standings[item.id] = .loaded(ancestors: thread.ancestors, descendants: descendants, rootID: id)
+            standings[item.id] = .loaded(ancestors: ancestors, descendants: descendants, rootID: id)
             furthers[item.id] = Self.settled(
                 root: held, rootID: id, descendants: descendants, asked: asked[item.id] ?? []
             )
@@ -684,15 +685,14 @@ final class ShellConversations {
             let post = session.conversationPost(host: host, within: deadline).post
             let thread = try await post.conversation(id: edge, source: stamp)
             try Task.checkCancellation()
-            if await Self.land(thread.descendants, host: host, in: session) {
-                await session.reloadFromStore()
-            }
+            let landed = await Self.land(thread.descendants, host: host, in: session)
+            if landed.changed { await session.reloadFromStore() }
             // Closed, or its server let go of, while this was on the wire: nothing to lay it under.
             guard case .loaded(let ancestors, let descendants, let rootID) = standings[item.id] else {
                 return
             }
             let drawn = Set((ancestors + descendants).map(\.key)).union([held.key])
-            let fresh = thread.descendants.filter { !drawn.contains($0.key) }
+            let fresh = thread.descendants.map(landed.held).filter { !drawn.contains($0.key) }
             let grown = descendants + fresh
             standings[item.id] = .loaded(ancestors: ancestors, descendants: grown, rootID: rootID)
             asked[item.id, default: []].insert(edge)
@@ -711,12 +711,27 @@ final class ShellConversations {
 
     /// Posts read in a thread, into the store **held aside** and saved, and those already held
     /// refreshed on the way past. Whether a held row changed, so a caller adopts only then.
-    private static func land(_ notes: [Note], host: String, in session: ShellSession) async -> Bool {
-        guard !notes.isEmpty else { return false }
+    ///
+    /// **And each post as the store now holds it** (`Landed.held`), which is what a thread draws
+    /// (#284): the source's words as just read, with what only this device knows of the post —
+    /// that the person keeps it — still on it. The one door a read's posts come through on their
+    /// way into a thread, so no caller lays in the wire's copy and draws a kept post as not kept.
+    private static func land(_ notes: [Note], host: String, in session: ShellSession) async -> Landed {
+        guard !notes.isEmpty else { return Landed(changed: false, copies: [:]) }
         await session.store.hold(notes, ifSourceHere: host)
         let changed = await session.store.refresh(notes, ifSourceHere: host)
         await session.persist?()
-        return changed
+        return Landed(changed: changed, copies: await session.store.notes(notes.map(\.key)))
+    }
+
+    /// What `land` made of a read: whether a held row changed, and the store's copy of each post.
+    private struct Landed {
+        let changed: Bool
+        let copies: [NoteKey: Note]
+
+        /// The store's copy of `read`, or `read` itself where the store took none — its source
+        /// removed while the read was on the wire.
+        func held(_ read: Note) -> Note { copies[read.key] ?? read }
     }
 
     /// The next post to ask for its own thread, or nothing where no drawn post has more to give.

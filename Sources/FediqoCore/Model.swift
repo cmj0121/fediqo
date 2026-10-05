@@ -523,7 +523,8 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// **Only a read of the post itself sets it.** A post missing from a listing merely did not
     /// arrive, and a listing is never a statement about any one post — so nothing that reads a
     /// timeline, a search or a thread's page touches it. What the reader took back themselves
-    /// (#109) is let go, not marked: `ItemStore.forget` is that path, and it never passes here.
+    /// (#109) is let go, not marked: `ItemStore.forget` is that path, and it sets this only on a
+    /// post they keep (#284), which stays.
     ///
     /// A `var` for `holding`'s reason: the store sets it on a row it already holds, and a read
     /// that finds the post again takes it off.
@@ -544,6 +545,15 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// The post this one quotes, as its source said (#214), or nothing where it quotes none or
     /// the source has no such idea. Kept with the row, so the quoted post shows offline.
     public let quote: Quote?
+    /// Whether the person keeps this item (#284). A kept item is never let go: no purge, no limit
+    /// and no removal of its source takes it, until the person un-keeps it.
+    ///
+    /// **This device's own, and nobody else's word.** No source says it and nothing is sent to
+    /// one, so no read sets it or takes it off: a copy that arrives again, and a post read again,
+    /// leave it as it was. Only `ItemStore.setKept` moves it.
+    ///
+    /// A `var` for `holding`'s reason: the store sets it on a row it already holds.
+    public var kept: Bool
 
     public init(
         id: String,
@@ -574,7 +584,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         goneSince: Date? = nil,
         gaps: Set<TimelineGap> = [],
         listed: [Category: String] = [:],
-        quote: Quote? = nil
+        quote: Quote? = nil,
+        kept: Bool = false
     ) {
         self.id = id
         self.source = source
@@ -605,6 +616,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.gaps = gaps
         self.listed = listed
         self.quote = quote
+        self.kept = kept
     }
 
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
@@ -651,7 +663,9 @@ public struct Note: Identifiable, Hashable, Sendable {
             // edit took away is gone. Only a source that never says a quote leaves the held one.
             quote: source.kind.saysQuotes
                 ? quote.flatMap { Quote.later($0, over: held.quote) }
-                : Quote.later(quote, over: held.quote)
+                : Quote.later(quote, over: held.quote),
+            // The person's own mark, which no read says anything about (#284).
+            kept: held.kept
         )
     }
 
@@ -684,7 +698,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             statusID: statusID ?? other.statusID, opening: opening, holding: holding,
             goneSince: goneSince, gaps: gaps, listed: listed,
             // The later copy's quote wins, as its counts do (#214) — see `Quote.later`.
-            quote: Quote.later(other.quote, over: quote)
+            quote: Quote.later(other.quote, over: quote),
+            kept: kept
         )
     }
 
@@ -697,7 +712,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             favourited: favourited, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
-            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote
+            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept
         )
     }
 }

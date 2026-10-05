@@ -1244,14 +1244,27 @@ struct DummyItemRow: View {
         }
         // The marks that keep a post stand a little apart from the ones that pass it on.
         .layoutValue(key: MarkGap.self, value: ShellSpace.room)
-        mark(marks.kept ? "archivebox.fill" : "archivebox",
-             label: "item.act.kept", on: marks.kept) {
-            marks.kept.toggle()
-            onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
-        }
+        keptMark
         actMark(.withdraw)
         mark("ellipsis", label: "item.act.more", on: false) {
             onToast(L10n.t("item.toast.more"))
+        }
+    }
+
+    /// The keep mark (#284): whether the person keeps this row, and the press that changes it.
+    ///
+    /// **Read off the item, which is the store's word**, never off `marks`: a kept post is one
+    /// no limit lets go, and a mark that filled on a press the store did not take would be a
+    /// promise nothing keeps. So the press only asks (`ItemActing.keep`), and the mark fills when
+    /// the row is drawn again from what the store then holds.
+    ///
+    /// **Drawn on every row, as it was before it was real**, so the marks line is the same line
+    /// everywhere; in a list with nowhere for the press to go — a fixture, a preview — the press
+    /// changes nothing, and the mark goes on saying what the item says.
+    private var keptMark: some View {
+        mark(item.kept ? "archivebox.fill" : "archivebox",
+             label: item.kept ? "item.act.unkeep" : "item.act.keep", on: item.kept) {
+            acting.keep?()
         }
     }
 

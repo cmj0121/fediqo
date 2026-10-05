@@ -578,6 +578,11 @@ public struct FediqoRootView: View {
             return actFocused(.boost)
         case .favourite:
             return actFocused(.favourite)
+        case .keep:
+            return onFocusedItem { item in
+                Task { await session.toggleKept(item) }
+                return true
+            }
         case .answer:
             return answerFocused()
         case .withdraw:

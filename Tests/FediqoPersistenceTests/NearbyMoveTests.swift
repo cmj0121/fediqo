@@ -135,6 +135,21 @@ struct NearbyMoveTests {
         #expect(held.events.filter(Self.isDone).count == 1 && sent.events.filter(Self.isDone).count == 1)
     }
 
+    @Test("What the person keeps moves with the store: kept on the sender is kept on the receiver, in memory and on disk")
+    func keptMoves() async throws {
+        var kept = PackagerFixture.note("1")
+        kept.kept = true
+        let pair = Pair(
+            from: try await Device(sources: [PackagerFixture.mastodon], notes: [kept, PackagerFixture.note("2")]),
+            onto: try await Device()
+        )
+        defer { pair.remove() }
+        _ = await moveWhole(pair, pictures: false)
+
+        #expect(await pair.onto.store.snapshot().notes.map(\.kept) == [true, false])
+        #expect(try StoreFile(at: pair.onto.directory).load().notes.map(\.kept) == [true, false])
+    }
+
     @Test("A receiver holding a store is asked to replace, and replaces only on that yes")
     func replaces() async throws {
         let other = Source(host: "other.example", kind: .mastodon)

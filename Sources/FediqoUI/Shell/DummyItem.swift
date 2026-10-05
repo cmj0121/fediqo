@@ -74,6 +74,10 @@ public struct DummyCounts: Hashable, Sendable {
 /// see and no other app agreed with; it is now `DummyItem.favourited`, which is what the source
 /// says. What is left here is what really is this device's own: a bookmark, which is a different
 /// thing on a source that has both and is not #107's, and what the reader chose to keep.
+///
+/// **`kept` is the store's word** (#284): `Note.kept`, carried on the item, and moved only by
+/// `ShellSession.setKept`. A row reads it off its item (`DummyItem.kept`) and never off a pane's
+/// own copy of these marks, which holds the bookmark and nothing else that is true.
 public struct DummyMarks: Hashable, Sendable {
     public var bookmarked: Bool
     public var kept: Bool
@@ -190,6 +194,14 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// live copy would be the mark and the acts disagreeing about one post.
     public var goneEverywhere: Bool {
         goneSince != nil && otherCopies.allSatisfy { $0.goneSince != nil }
+    }
+
+    /// Whether the person keeps this row (#284): **any** copy of it is kept. A post two sources
+    /// carried is one row, and keeping the row keeps every copy (`ShellSession.setKept`) — so a
+    /// row drawn as kept while one copy is not is a store moved from outside, and the next press
+    /// un-keeps them all.
+    public var kept: Bool {
+        marks.kept || otherCopies.contains { $0.marks.kept }
     }
 
     /// Every source this post came through, the row's own first. One for most rows.
@@ -394,7 +406,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
             reblogs: note.counts.reblogs,
             favourites: note.counts.favourites
         )
-        marks = DummyMarks()
+        marks = DummyMarks(kept: note.kept)
         quote = note.quote
         quotedRowID = note.quotedKey?.rowID
     }

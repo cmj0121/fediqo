@@ -288,6 +288,9 @@ struct UsagePane: View {
             ) {
                 reading(Text(line))
             }
+            if let line = Self.roomKeptLine(heldByKept: session.roomHeldByKept) {
+                reading(Text(line))
+            }
         } header: {
             ShellSectionHead(title: "prefs.keep", line: "prefs.keep.line", help: "prefs.keep.help")
         }
@@ -324,6 +327,12 @@ struct UsagePane: View {
             )
         }
         return line
+    }
+
+    /// What the Room says where the posts the person keeps are alone more than it (#284), and
+    /// nothing otherwise: the limit cannot be met, and the line says what would let it be.
+    static func roomKeptLine(heldByKept: Bool, language: DummyLanguage? = nil) -> String? {
+        heldByKept ? L10n.t("prefs.room.kept", language: language) : nil
     }
 
     /// Picture copies, all sources together, and the drop that takes them (#7, by cache).
