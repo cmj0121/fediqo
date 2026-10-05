@@ -359,7 +359,7 @@ public struct StoreFile: Sendable {
             // first (#114), and a table read in no stated order is read in whatever order
             // SQLite likes. Stated, so that it is a guarantee rather than a habit.
             let notes = try NoteRecord.order(Column.rowID).fetchAll(db).compactMap { record in
-                (byHost[record.host] ?? record.formerSource).map(record.note(from:))
+                (byHost[record.host] ?? record.formerSource).flatMap(record.note(from:))
             }
             return (sources, notes, said)
         }
@@ -1330,8 +1330,22 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     /// Categories come back as they went in, an empty set included: what a note arrived through
     /// is a fact about it, and filling in `.public` for none would put it somewhere it was never
     /// read from.
-    func note(from source: Source) -> Note {
-        Note(
+    ///
+    /// **Nothing for a row that is no item** (#290): one whose references will not read and that
+    /// holds no words, no title, no cover, no picture, no reply, no quote and no opening post. A
+    /// reblog is exactly such a row but for its reference, so one whose cell is damaged, too long
+    /// or names a kind this build does not know would otherwise open as an empty post by whoever
+    /// reblogged — under the reblog's name, with the reblog's own id as an id to send. It is left
+    /// out of the load instead, as a note whose host is gone is: the store is read and never set
+    /// aside for it, and since a save writes the rows held, the next one writes the file without
+    /// it. Nothing a reader could see is lost: the row had nothing to show and nothing to name.
+    func note(from source: Source) -> Note? {
+        let references = ReferenceRow.references(refs)
+        if references == nil, facts.body.isEmpty, (facts.title ?? "").isEmpty, (facts.spoiler ?? "").isEmpty,
+           facts.attachments.isEmpty, facts.reply == nil, facts.quote == nil, facts.opening == nil {
+            return nil
+        }
+        return Note(
             id: id,
             source: source,
             author: facts.author,

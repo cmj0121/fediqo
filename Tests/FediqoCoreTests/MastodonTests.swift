@@ -120,7 +120,7 @@ struct MastodonTests {
         #expect(await http.requested.first?.query == "limit=20")
     }
 
-    @Test("A boost unwraps the inner note and names the booster")
+    @Test("A boost read as a post is the post it carries, and says nothing of who boosted")
     func reblogUnwraps() throws {
         let json = """
         {
@@ -146,11 +146,11 @@ struct MastodonTests {
         #expect(note.id == "https://first.example/users/ada/statuses/1")
         #expect(note.author == "Ada")
         #expect(note.body == "Original")
-        #expect(note.boostedBy == "Bob")
+        #expect(note.boostedBy == nil && note.boosterHandle == nil && !note.isReblog)
         #expect(note.postedAt == MastodonJSON.date(from: "2024-01-15T12:00:00Z"))
     }
 
-    @Test("A boost keeps who boosted it as user@instance, and a status that is not a boost has nobody")
+    @Test("A boost a timeline lists is the booster's item, user@instance; the post it carries is its author's, and neither row carries a booster")
     func boosterHandle() throws {
         let boost = try Self.note("""
         {
@@ -168,8 +168,9 @@ struct MastodonTests {
           }
         }
         """)
-        #expect(boost.boosterHandle == "@bob@first.example")
+        #expect(boost.boosterHandle == nil)
         #expect(boost.handle == "@ada@second.example")
+        #expect(try Self.arrival(Self.boostOfAnotherHostsPost).item.handle == "@bob@first.example")
         #expect(try Self.note(Self.status()).boosterHandle == nil)
     }
 
@@ -534,9 +535,9 @@ struct MastodonTests {
         #expect(wave.staticURL == nil)
     }
 
-    @Test("A boost draws three accounts' words, so it carries three accounts' pictures")
+    @Test("A boost is two items and three accounts' words: the post carries its own pictures and its author's, the reblog the booster's")
     func boostCarriesEveryAlphabetTheRowDraws() throws {
-        let note = try Self.note("""
+        let json = """
         {
           "id": "boost",
           "uri": "https://first.example/users/cyd/statuses/boost",
@@ -589,13 +590,21 @@ struct MastodonTests {
             "mentions": []
           }
         }
-        """)
+        """
+        let note = try Self.note(json)
+        let reblog = try Self.arrival(json).item
         // The boosted status's own list spells its body and its spoiler line; its author's
         // spells the name drawn as the author; and the booster's spells the name drawn as
         // `boostedBy`. All three reach the row, so all three are here.
-        #expect(note.emojis.map(\.shortcode) == ["blobcat", "wave", "trumpet"])
+        #expect(note.emojis.map(\.shortcode) == ["blobcat", "wave"])
         #expect(note.author == "Ada :wave:")
-        #expect(note.boostedBy == "Cyd :trumpet:")
+        #expect(note.boostedBy == nil)
+        // The booster's name is on the reblog, and so are the pictures it is written in — the
+        // booster's account's, and never the wrapper status's own.
+        #expect(reblog.author == "Cyd :trumpet:" && reblog.isReblog)
+        #expect(reblog.emojis.map(\.shortcode) == ["trumpet", "blobcat"])
+        #expect(reblog.emojis[1].url == URL(string: "https://booster.example/blobcat.png"))
+        #expect(reblog.body.isEmpty && reblog.sensitive == nil && reblog.spoiler == nil, "a reblog has no words and no cover of its own")
         // The booster's *status* emojis are not among them: nothing on the row is written in
         // the wrapper's words, because a boost has no words of its own.
         #expect(!note.emojis.map(\.shortcode).contains("wrapper"))
@@ -607,6 +616,28 @@ struct MastodonTests {
         #expect(note.sensitive == false)
         #expect(note.spoiler == "")
     }
+
+    private static func arrival(_ json: String) throws -> (item: Note, reblogged: Note?) {
+        try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
+            .arrival(source: Source(host: "first.example", kind: .mastodon), categories: [.public], sent: .now())
+    }
+
+    private static let boostOfAnotherHostsPost = """
+        {
+          "id": "9",
+          "uri": "https://first.example/users/bob/statuses/boost",
+          "created_at": "2024-08-01T00:00:00.000Z",
+          "content": "",
+          "account": { "username": "bob", "acct": "bob", "display_name": "Bob" },
+          "reblog": {
+            "id": "1",
+            "uri": "https://second.example/users/ada/statuses/1",
+            "created_at": "2024-01-15T12:00:00Z",
+            "content": "<p>Original</p>",
+            "account": { "username": "ada", "acct": "ada@second.example", "display_name": "Ada" }
+          }
+        }
+        """
 
     private static func note(_ json: String) throws -> Note {
         let dto = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))

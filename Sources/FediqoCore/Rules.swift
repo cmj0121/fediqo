@@ -326,37 +326,79 @@ public struct CompiledTimeline: Sendable {
         return Matcher(id: rule.id, host: host, check: check)
     }
 
-    public func verdict(_ note: Note, _ index: TextIndex) -> Verdict {
+    /// What this timeline's rules say of `note`.
+    ///
+    /// **A reblog is asked two ways** (#290). Where it came from, what it arrived through and
+    /// who made it are its own: a rule on a source, a category or an author is asked of the
+    /// reblog, and the author is whoever reblogged. What it says is the post it reblogs —
+    /// `reblogged`, handed in by whoever holds the notes — so a rule on words, or on a field of
+    /// the post (its language, its cover, whom it was for), is asked of that post: an include
+    /// finds the reblog by the post's words, and what hides the post hides its reblog.
+    /// **A reblog whose post is not held says nothing**: it matches no rule on words or fields.
+    ///
+    /// **A hide on an author is asked both ways.** Showing a person shows what they made: the
+    /// posts they wrote and the reblogs they made, so an include is asked of who made the item
+    /// and of nobody else. Hiding a person hides their words wherever they would be drawn, so a
+    /// hide is asked of who reblogged **and** of who wrote the post reblogged — or somebody
+    /// else's reblog would draw the hidden person's words and pictures under it. A reblog whose
+    /// post is not held draws nobody's words, and is asked of who reblogged alone.
+    public func verdict(_ note: Note, _ index: TextIndex, reblogged: Note? = nil) -> Verdict {
+        let said: Note? = note.isReblog ? reblogged.flatMap { $0.isReblog ? nil : $0 } : note
         var entry: TextIndex.Entry?
-        func matches(_ matcher: Matcher) -> Bool {
+        var saidEntry: TextIndex.Entry?
+        func folded(_ note: Note) -> TextIndex.Entry {
+            let found = saidEntry ?? index.entry(for: note)
+            saidEntry = found
+            return found
+        }
+        func matches(_ matcher: Matcher, hiding: Bool) -> Bool {
             if let host = matcher.host, host != note.source.host { return false }
             switch matcher.check {
             case .host: return true
             case .category(let category): return note.categories.contains(category)
             // Nothing said is not a value: a post whose source declares no such field, or says
             // nothing for it, matches no rule on it.
-            case .field(let name, let value): return note.value(of: name) == value
+            case .field(let name, let value): return said?.value(of: name) == value
             case .handle(let handle):
                 let found = entry ?? index.entry(for: note)
                 entry = found
-                return found.foldedHandle == handle || found.foldedBooster == handle
+                if found.foldedHandle == handle { return true }
+                guard hiding, note.isReblog, let post = said else { return false }
+                return folded(post).foldedHandle == handle
             case .keyword(let text):
-                let found = entry ?? index.entry(for: note)
-                entry = found
-                return Fold.contains(found.text, text)
+                guard let post = said else { return false }
+                return Fold.contains(folded(post).text, text)
             }
         }
-        if let hit = excludes.first(where: matches) { return .hidden(by: hit.id) }
-        for group in groups where !group.contains(where: matches) {
+        if let hit = excludes.first(where: { matches($0, hiding: true) }) { return .hidden(by: hit.id) }
+        for group in groups where !group.contains(where: { matches($0, hiding: false) }) {
             return .hidden(by: group[0].id)
         }
         return .shown
     }
 
-    /// The notes this timeline lets through, in the order given.
-    public func shown(_ notes: [Note], _ index: TextIndex) -> [Note] {
+    /// Whether any rule here is asked of the post a reblog reblogs: a rule on words or on a
+    /// field, and a hide on an author.
+    private var readsWhatIsSaid: Bool {
+        let reads: (Matcher) -> Bool = {
+            switch $0.check {
+            case .keyword, .field: true
+            case .host, .handle, .category: false
+            }
+        }
+        return (excludes + groups.joined()).contains(where: reads) || excludes.contains {
+            if case .handle = $0.check { true } else { false }
+        }
+    }
+
+    /// The notes this timeline lets through, in the order given. `targets` is what each reblog
+    /// held reblogs (`verdict`) — the one lookup built where the held notes were replaced; where
+    /// none is handed in, it is looked up among `notes`, which must then be everything held.
+    public func shown(_ notes: [Note], _ index: TextIndex, targets: ReblogTargets? = nil) -> [Note] {
         if excludes.isEmpty && groups.isEmpty { return notes }
-        return notes.filter { verdict($0, index) == .shown }
+        guard readsWhatIsSaid else { return notes.filter { verdict($0, index) == .shown } }
+        let held = targets ?? ReblogTargets(notes)
+        return notes.filter { verdict($0, index, reblogged: held.target(of: $0)) == .shown }
     }
 
     public func status(of rule: Rule) -> RuleStatus {

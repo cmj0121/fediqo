@@ -90,9 +90,14 @@ public struct DummyPerson: Identifiable, Hashable, Sendable {
     /// **Newest first, and no rule applied.** A timeline's order is whatever its rules say; this
     /// is not a timeline, it is everything of theirs that is here, and the reader's question of a
     /// person's page is what they said last.
+    ///
+    /// **A reblog they made is theirs** (#290), and stands here at the time they made it, showing
+    /// the post it reblogs as that post is held. A post of theirs that somebody else reblogged is
+    /// here once, at its own publish time: the reblog is the other person's.
     public static func held(of person: DummyPerson, in notes: [Note]) -> [DummyItem] {
-        notes.filter(person.wrote)
-            .sorted { $0.postedAt > $1.postedAt }
-            .map(DummyItem.init)
+        let theirs = notes.filter(person.wrote)
+        let targets = ReblogTargets(theirs.contains(where: \.isReblog) ? notes : [])
+        return theirs.sorted { $0.postedAt > $1.postedAt }
+            .map { DummyItem($0, reblogging: targets.target(of: $0)) }
     }
 }

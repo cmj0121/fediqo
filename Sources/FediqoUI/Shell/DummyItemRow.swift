@@ -400,7 +400,7 @@ struct DummyItemRow: View {
     private func decoratorLine(_ openQuote: (() -> Void)?) -> some View {
         HStack(spacing: ShellSpace.snug) {
             if item.answering != .nothing { answered }
-            if let who = item.boostedBy { boosted(by: who) }
+            if let line = Self.reblogLine(item) { boosted(line) }
             // Beside the booster, on the same one line (#214): a boost of a quote is one line.
             if let quote = item.quote {
                 QuoteMark(quote: quote, lifted: quoteLifted, covered: covered, onOpen: openQuote)
@@ -414,7 +414,22 @@ struct DummyItemRow: View {
 
     /// Whether this post says what happened to it before it got here.
     var decorated: Bool {
-        item.answering != .nothing || item.boostedBy != nil || item.quote != nil
+        item.answering != .nothing || Self.reblogLine(item) != nil || item.quote != nil
+    }
+
+    /// What a row says of a reblog, or nothing where it has nothing to say of one (#290).
+    ///
+    /// **Three sentences for three facts.** A reblog says who reblogged — the row stands at the
+    /// time they did. A reblog whose post this device no longer holds says that instead of
+    /// drawing a post that is not there. And a post held from before a reblog was an item of its
+    /// own, which arrived as somebody's reblog, says that it did: it stands at its own publish
+    /// time, and the sentence must not read as though the row were the reblog.
+    static func reblogLine(_ item: DummyItem, language: DummyLanguage? = nil) -> String? {
+        if item.reblogUnheld { return L10n.t("item.reblog.unheld", language: language) }
+        guard let who = item.boostedBy else { return nil }
+        return String(
+            format: L10n.t(item.isReblog ? "item.boostedBy" : "item.arrivedAsReblogBy", language: language), who
+        )
     }
 
     private var answered: some View {
@@ -429,10 +444,10 @@ struct DummyItemRow: View {
         }
     }
 
-    private func boosted(by who: String) -> some View {
+    private func boosted(_ line: String) -> some View {
         HStack(spacing: ShellSpace.tight) {
             Image(systemName: "arrow.2.squarepath")
-            Text(String(format: L10n.t("item.boostedBy"), who))
+            Text(line)
         }
     }
 

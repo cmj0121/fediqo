@@ -361,8 +361,9 @@ struct ReadOnTests {
         await server.boost(10, of: 3)
         let store = await store(holding: [])
         _ = try await readPublic(store, from: server)
-        let boosted = await store.all().first { $0.statusID == "3" }
-        #expect(boosted?.listed[.public] == "10", "the boost's own id, not the post's")
+        let reblog = await store.all().first { $0.statusID == "10" }
+        #expect(reblog?.isReblog == true && reblog?.listed[.public] == "10", "the reblog is the item listed, under its own id")
+        #expect(await store.all().first { $0.statusID == "3" }?.listed[.public] == "3", "and the post is listed where it stands itself")
         #expect(await store.newestListedID(host: Self.host, category: .public) == "10")
 
         await server.post(11...20)

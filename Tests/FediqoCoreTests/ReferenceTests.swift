@@ -58,8 +58,8 @@ struct ReferenceTests {
         #expect(both.refs.map(\.kind) == [.answers, .quotes])
     }
 
-    @Test("A post that arrived as a boost refers to nothing by reblogging, and is no reblog: today it is the post itself")
-    func aBoostIsStillThePost() throws {
+    @Test("A row held from before, which arrived as a boost, is the post and no reblog; a reblog a timeline lists is an item whose one reference names the post, and the post's own references stay the post's")
+    func aReblogRefersToThePost() throws {
         let boosted = Self.note(boostedBy: "Bob")
         #expect(boosted.refs.isEmpty && !boosted.isReblog)
         let wrapper = """
@@ -68,8 +68,15 @@ struct ReferenceTests {
          "reblog":\(Self.status(#","in_reply_to_id":"41""#))}
         """
         let read = try Self.read(wrapper)
-        #expect(read.boostedBy == "Bob" && !read.isReblog)
+        #expect(read.boostedBy == nil && !read.isReblog, "read as the post it carries, saying nothing of who reblogged")
         #expect(read.refs == [Reference(kind: .answers, statusID: "41")], "the post's own reference, not the boost's")
+        let arrived = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(wrapper.utf8))
+            .arrival(source: Self.source, categories: [.home], sent: .now())
+        #expect(arrived.item.refs == [
+            Reference(kind: .reblogs, id: "https://one.example/users/ada/statuses/9", statusID: "9"),
+        ])
+        #expect(arrived.item.reblogKey == arrived.reblogged?.key)
+        #expect(arrived.reblogged?.refs == [Reference(kind: .answers, statusID: "41")])
         #expect(Self.note(refs: [Reference(kind: .reblogs, id: "https://one.example/1")]).isReblog)
     }
 
@@ -132,7 +139,8 @@ struct ReferenceTests {
         #expect(Self.note(refs: [Reference(kind: .answers, statusID: wide + "字")]).refs.isEmpty)
 
         let same = Reference(kind: .reblogs, id: "a")
-        #expect(Self.note(refs: [same, same, Reference(kind: .reblogs, id: "b")]).refs.count == 2)
+        #expect(Reference.bounded([same, same, Reference(kind: .reblogs, id: "b")]).count == 2, "none said twice")
+        #expect(Self.note(refs: [same, same, Reference(kind: .reblogs, id: "b")]).refs == [same], "and an item reblogs one thing: the first it names")
         #expect(Reference.bounded([]).isEmpty)
     }
 

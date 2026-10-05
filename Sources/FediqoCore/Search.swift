@@ -275,15 +275,31 @@ public struct NoteSearch: Sendable {
         }
     }
 
-    public func matches(_ note: Note, _ index: SearchIndex) -> Bool {
+    /// Whether the pattern is found in `note`. **A reblog is found by what it is and by what it
+    /// reblogs** (#290): who reblogged, its source and what it arrived through are its own, and
+    /// its words, its tags and who wrote them are those of `reblogged` — the post it reblogs,
+    /// handed in by whoever holds the notes. Each is read from its own entry, so nothing here is
+    /// stale when either of the two lands, changes or goes.
+    public func matches(_ note: Note, _ index: SearchIndex, reblogged: Note? = nil) -> Bool {
         if index.entry(for: note).fields.contains(where: pattern.matches) { return true }
+        if note.isReblog, let reblogged, !reblogged.isReblog,
+           index.entry(for: reblogged).fields.contains(where: pattern.matches) {
+            return true
+        }
         return note.categories.contains { category in
             names(of: category, on: note.source.host).contains(where: pattern.matches)
         }
     }
 
     /// The notes found, in the order given — store order, newest first, like a timeline.
-    public func found(_ notes: [Note], _ index: SearchIndex) -> [Note] {
-        notes.filter { matches($0, index) }
+    /// `held` is everything this device holds, where `notes` is only a part of it — what a
+    /// timeline's rules let through — so a reblog is still found by the words of a post those
+    /// rules left out.
+    /// `targets` is that same lookup already built, where the caller holds one.
+    public func found(
+        _ notes: [Note], _ index: SearchIndex, among held: [Note]? = nil, targets: ReblogTargets? = nil
+    ) -> [Note] {
+        let targets = targets ?? ReblogTargets(held ?? notes)
+        return notes.filter { matches($0, index, reblogged: targets.target(of: $0)) }
     }
 }

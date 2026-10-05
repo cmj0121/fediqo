@@ -103,9 +103,15 @@ struct MastodonQuoteTests {
     @Test("A boost of a quoting post carries the boosted post's quote")
     func boostCarriesTheQuote() throws {
         let boosted = try note(MastodonQuoteCaptures.boost)
-        #expect(boosted.boostedBy == "ada")
+        #expect(boosted.boostedBy == nil && !boosted.isReblog, "read as the post it carries")
         #expect(boosted.quote?.post?.body == "The first post, by Ada")
         #expect(boosted.body == "Bob says this is worth reading")
+        // As a timeline lists it, the reblog is an item of its own (#290) and the quote is the
+        // post's: the reblog quotes nothing.
+        let arrived = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(MastodonQuoteCaptures.boost.utf8))
+            .arrival(source: source, categories: [.home], sent: .now())
+        #expect(arrived.item.isReblog && arrived.item.author == "ada" && arrived.item.quote == nil)
+        #expect(arrived.reblogged?.quote?.post?.body == "The first post, by Ada")
     }
 
     @Test("A post that only links to another, with no quote, keeps every word")

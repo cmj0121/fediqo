@@ -277,8 +277,9 @@ struct EmptyNotice: Equatable, Sendable {
         guard !notes.isEmpty else { return nil }
         let compiled = CompiledTimeline(definition, sources: sources)
         var ids: Set<Rule.ID> = []
+        let targets = ReblogTargets(notes)
         for note in notes {
-            switch compiled.verdict(note, index) {
+            switch compiled.verdict(note, index, reblogged: targets.target(of: note)) {
             case .shown: return nil
             case .hidden(let id): ids.insert(id)
             }

@@ -468,14 +468,15 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// front page — which a source rule still reaches.
     public var categories: Set<Category>
     public let reply: Reply?
-    /// The name of whoever boosted this copy, as drawn.
+    /// Who this row arrived as a reblog by, as drawn — **a fact only of a row held from before a
+    /// reblog was an item of its own** (#290). No arrival writes it: a reblog a timeline lists is
+    /// an item (`isReblog`), and the post it brings says nothing of who reblogged. A row that
+    /// carries it stays the post, at its publish time, saying it arrived as a reblog by them,
+    /// until a timeline brings that reblog again and the store takes the word off.
     public let boostedBy: String?
-    /// Who boosted this copy, as `@user@instance`, so an author rule can match the booster (#26).
-    ///
-    /// **Only as good as the first copy.** A boost and its original share one row per host, and
-    /// the first copy to arrive is the one kept, so a boost that arrives after its original
-    /// leaves no booster here and matches on its author alone. Nothing fills it in afterwards,
-    /// and a note stored before this existed has none.
+    /// `boostedBy`'s person as `@user@instance`, where the row wrote one down — what tells that
+    /// reblog from another person's when it comes again. No rule reads it: an author rule is
+    /// asked of who made an item, and this row was made by its author.
     public let boosterHandle: String?
     /// Whether the reader this copy was fetched as has boosted it, **as the source said** — not
     /// as this device remembers pressing anything (#106).
@@ -669,7 +670,38 @@ public struct Note: Identifiable, Hashable, Sendable {
         refs: [Reference]? = nil,
         refsDue: Bool = false
     ) {
-        self.refs = Reference.bounded(refs ?? Reference.derived(reply: reply, quote: quote))
+        // **A reblog has no words of its own** (#290), wherever a note is made — off the wire,
+        // back from the store, out of a package, in a test. A note that says it reblogs another
+        // **is** a reblog: that one reference is all it refers by, and everything a post says —
+        // words, title, cover, pictures, counts, what the reader did, a reply, a quote, a
+        // change, a language, an address — is nothing on it, whatever it was handed. Settled
+        // this way round and not the other because the id of a row that says it reblogs may be
+        // a reblog's own, and a row kept as a post under that id would be one an act could be
+        // sent with; the words let go are a post's, which its source still has under the
+        // post's own name.
+        let bounded = Reference.bounded(refs ?? Reference.derived(reply: reply, quote: quote))
+        let reblogs = bounded.first { $0.kind == .reblogs }
+        let post = reblogs == nil
+        self.refs = reblogs.map { [$0] } ?? bounded
+        let body = post ? body : ""
+        let title = post ? title : nil
+        let reply = post ? reply : nil
+        let boostedBy = post ? boostedBy : nil
+        let boosterHandle = post ? boosterHandle : nil
+        let boosted = post ? boosted : nil
+        let favourited = post ? favourited : nil
+        let bookmarked = post ? bookmarked : nil
+        let audience = post ? audience : nil
+        let attachments = post ? attachments : []
+        let sensitive = post ? sensitive : nil
+        let spoiler = post ? spoiler : nil
+        let url = post ? url : nil
+        let counts = post ? counts : Counts()
+        let opening = post ? opening : nil
+        let quote = post ? quote : nil
+        let editedAt = post ? editedAt : nil
+        let earlier = post ? earlier : []
+        let language = post ? language : nil
         self.refsDue = refsDue
         self.id = id
         self.source = source
@@ -785,7 +817,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url,
             counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, quote: quote,
-            kept: kept, editedAt: editedAt, earlier: earlier, language: language, refsDue: refsDue
+            kept: kept, editedAt: editedAt, earlier: earlier, language: language,
+            refs: refs, refsDue: refsDue
         )
     }
 
@@ -799,7 +832,10 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// that, never off `self`, which `filled(from:)` may already have given the later copy's
     /// words (a quote arriving brings its words with it).
     func revised(by later: Note, was: Note) -> Note {
-        Note(
+        let quote = source.kind.saysQuotes
+            ? later.quote.flatMap { Quote.later($0, over: quote) }
+            : Quote.later(later.quote, over: quote)
+        return Note(
             id: id, source: source, author: later.author, handle: handle, body: later.body,
             title: later.title ?? title, board: board, postedAt: postedAt, categories: categories,
             reply: reply, boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
@@ -807,20 +843,19 @@ public struct Note: Identifiable, Hashable, Sendable {
             avatarURL: later.avatarURL ?? avatarURL, attachments: later.attachments,
             sensitive: later.sensitive ?? sensitive, spoiler: later.spoiler ?? spoiler,
             emojis: later.emojis, url: url, counts: counts, statusID: statusID, opening: opening,
-            goneSince: goneSince, gaps: gaps, listed: listed,
-            quote: source.kind.saysQuotes
-                ? later.quote.flatMap { Quote.later($0, over: quote) }
-                : Quote.later(later.quote, over: quote),
+            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote,
             kept: kept, editedAt: later.editedAt, earlier: later.earlier(after: was),
             // The language the post says it is in **now**, nothing included: a post changed to
             // state none no longer matches a rule on the one it used to state.
-            language: later.language, refsDue: refsDue
+            language: later.language,
+            refs: Reference.carried(refs, reply: reply, quote: quote), refsDue: refsDue
         )
     }
 
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
     /// now — text, cover, attachments, counts — with the categories the held copy arrived through
-    /// kept (and grown), its booster kept, and its board where this read names none.
+    /// kept (and grown), what it reblogs kept, the word that it arrived as a reblog kept where it
+    /// was held from before a reblog was an item (#290), and its board where this read names none.
     ///
     /// **`boosted`, `favourited` and `bookmarked` fall back to what was held, rather than being overwritten with
     /// nothing.** A
@@ -830,7 +865,12 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// says the mark must never do. A read made as the reader always says something, so it always
     /// wins.
     func refreshed(over held: Note, taking: Set<ReaderMark> = Set(ReaderMark.allCases)) -> Note {
-        Note(
+        // The quote as the source says it now (#214) — a quote taken back reads so, and one an
+        // edit took away is gone. Only a source that never says a quote leaves the held one.
+        let quote = source.kind.saysQuotes
+            ? quote.flatMap { Quote.later($0, over: held.quote) }
+            : Quote.later(quote, over: held.quote)
+        return Note(
             id: id, source: source, author: author, handle: handle, body: body, title: title,
             board: board ?? held.board, postedAt: postedAt,
             categories: held.categories.union(categories), reply: reply,
@@ -857,11 +897,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             // What a read of this one post says is nothing about where its timeline is whole.
             gaps: held.gaps,
             listed: held.listed.later(listed),
-            // The quote as the source says it now (#214) — a quote taken back reads so, and one an
-            // edit took away is gone. Only a source that never says a quote leaves the held one.
-            quote: source.kind.saysQuotes
-                ? quote.flatMap { Quote.later($0, over: held.quote) }
-                : Quote.later(quote, over: held.quote),
+            quote: quote,
             // The person's own mark, which no read says anything about (#284).
             kept: held.kept,
             // What it said before this read changed it, kept (#286) — only where the source says
@@ -871,6 +907,10 @@ public struct Note: Identifiable, Hashable, Sendable {
             // language is this copy's even where it states none — unlike the reader's marks,
             // which a signed-out read leaves unsaid rather than says no to.
             language: language,
+            // **What it reblogs is the held row's, always** (#290): a reblog's target does not
+            // change once it is held, so no later copy can turn a reblog — a kept one, which
+            // holds its post — towards another post.
+            refs: Reference.carried(held.refs, reply: reply, quote: quote),
             // This device's own, which no read says anything about (#293).
             refsDue: held.refsDue
         )
@@ -899,6 +939,8 @@ public struct Note: Identifiable, Hashable, Sendable {
         // reader pressed, landing after the source answered the press. And so one the store
         // knows was sent before the reader's act landed (#291), which is `marksStand`.
         let stale = marksStand || other.isEarlier(than: self)
+        // The later copy's quote wins, as its counts do (#214) — see `Quote.later`.
+        let quote = Quote.later(other.quote, over: quote)
         return Note(
             id: id, source: source, author: author, handle: handle,
             body: quoteArrives ? other.body : body, title: title,
@@ -916,10 +958,9 @@ public struct Note: Identifiable, Hashable, Sendable {
             emojis: emojis, url: url, counts: counts,
             statusID: statusID ?? other.statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
-            // The later copy's quote wins, as its counts do (#214) — see `Quote.later`.
-            quote: Quote.later(other.quote, over: quote),
+            quote: quote,
             kept: kept, editedAt: editedAt, earlier: earlier, language: language ?? other.language,
-            refsDue: refsDue
+            refs: Reference.carried(refs, reply: reply, quote: quote), refsDue: refsDue
         )
     }
 
@@ -935,7 +976,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
         )
     }
 
@@ -949,7 +990,21 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language, refsDue: refsDue
+            editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
+        )
+    }
+
+    /// This note without the word that it arrived as a reblog by somebody (#290) — what a row
+    /// held from before a reblog was an item goes back to once that reblog is here as itself.
+    func withoutArrivalAsReblog() -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board, postedAt: postedAt, categories: categories, reply: reply,
+            boosted: boosted, favourited: favourited, bookmarked: bookmarked, audience: audience,
+            avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
+            emojis: emojis, url: url, counts: counts, statusID: statusID, opening: opening,
+            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
+            editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
         )
     }
 }

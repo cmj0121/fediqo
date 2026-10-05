@@ -179,7 +179,7 @@ public struct MastodonAccount: Sendable {
         _ path: String, source: Source, category: Category, olderThan maxID: String? = nil
     ) async throws -> [Note] {
         try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))
-            .map(\.note)
+            .landing
     }
 
     /// One page, each post with the id the timeline lists it under — a boost's own.

@@ -65,9 +65,9 @@ public struct Reference: Hashable, Sendable {
 
     /// What an item's `reply` and `quote` say it refers to — the two an item says today.
     ///
-    /// **A boost is not among them.** A post that arrived as a boost is, today, the post itself
-    /// with a line saying who boosted it (`Note.boostedBy`): there is no item that is the boost,
-    /// so nothing here refers by reblogging. That changes when a reblog becomes an item (#290).
+    /// **A reblog is not among them.** That an item reblogs another is said by nothing but its
+    /// reference (#290) — a reblog has no `reply` or `quote` to say it with — so it is carried
+    /// from note to note by name (`carried`), and never worked out again.
     public static func derived(reply: Reply?, quote: Quote?) -> [Reference] {
         var references: [Reference] = []
         if let reply {
@@ -77,6 +77,17 @@ public struct Reference: Hashable, Sendable {
             references.append(Reference(kind: .quotes, id: quote.post?.id, statusID: quote.statusID, state: quote.state))
         }
         return references
+    }
+}
+
+extension Reference {
+    /// The references a note made anew from one that held `held` carries, where the new note's
+    /// `reply` and `quote` are these (#290): what those two state, and **every reference of
+    /// `held` that they cannot state** — a reblog's. Each place a note is rebuilt from another
+    /// names its references this way, so one that `reply` and `quote` cannot re-derive survives a
+    /// reload, a read again, a revision and the reader-marks sweep.
+    public static func carried(_ held: [Reference], reply: Reply?, quote: Quote?) -> [Reference] {
+        derived(reply: reply, quote: quote) + held.filter { $0.kind == .reblogs }
     }
 }
 
@@ -99,7 +110,37 @@ extension Quote {
 }
 
 extension Note {
-    /// Whether this item is a reblog: it refers to another by reblogging it. No item is, until
-    /// a reblog is an item of its own (#290).
+    /// Whether this item is a reblog (#290): it refers to another by reblogging it. It says who
+    /// reblogged and when, and nothing of its own besides — its words, pictures, counts and what
+    /// the reader did are the reblogged item's.
     public var isReblog: Bool { refs.contains { $0.kind == .reblogs } }
+
+    /// The item this one reblogs, as the store keys it, or nothing for anything but a reblog —
+    /// and for a reblog whose source named its target by the source's own id alone.
+    ///
+    /// **Within this item's own source, always.** A reference's id is a name, and it is looked
+    /// up among what this source handed over; it is never an address to ask.
+    public var reblogKey: NoteKey? {
+        refs.first { $0.kind == .reblogs }?.id.map { NoteKey(host: source.host, id: $0) }
+    }
+
+    /// The id a request about this item is made with, at its source: `statusID`, **and nothing
+    /// for a reblog** (#290). A reblog's `statusID` is the id its source gave the reblog; it is
+    /// kept on the note because it is what tells a name this device made up from one a server
+    /// minted (`Note.post`), and it is never what the reader means to act on, read again or
+    /// answer — that is the post, which has an id of its own on its own item. Every place that
+    /// puts an id into a request reads this and not `statusID`.
+    public var sendableID: String? { isReblog ? nil : statusID }
+
+    /// The items held for as long as this one is, whatever their own age: the post it quotes
+    /// (#214) and the post it reblogs (#290). What the limits leave while this item stays.
+    var heldWith: [NoteKey] { [quotedKey, reblogKey].compactMap { $0 } }
+
+    /// Whether this row, held from before a reblog was an item of its own, says it arrived as
+    /// the reblog `reblog` is: by the same person, as far as the row wrote down who.
+    func arrived(asReblogBy reblog: Note) -> Bool {
+        guard boostedBy != nil else { return false }
+        if let boosterHandle { return Fold.handle(boosterHandle) == Fold.handle(reblog.handle) }
+        return boostedBy == reblog.author
+    }
 }

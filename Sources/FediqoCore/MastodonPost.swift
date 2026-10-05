@@ -36,6 +36,8 @@ public struct MastodonPost: Sendable {
     /// Throws `MastodonAuthError.http(403)` where the token cannot search: one issued before
     /// `read:search` was asked for.
     public func id(of note: Note) async throws -> String? {
+        // A reblog is not a post to read again or to read around (#290): it names none.
+        guard !note.isReblog else { return nil }
         if let held = note.statusID { return held }
         guard case .signedIn = door else { return nil }
         let data = try await get("/api/v2/search", query: [

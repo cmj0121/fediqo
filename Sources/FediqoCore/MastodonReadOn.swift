@@ -7,8 +7,9 @@ import Foundation
 // already held was never asked for, and nothing said it was missing.
 //
 // **The anchor is the newest id that timeline listed a post under**, kept with each post a read of
-// it brought (`Note.listed`), so it outlives a relaunch with the rows. A boost's own id, not the
-// boosted post's: that is what the timeline pages by. A post the reader wrote, and anything a
+// it brought (`Note.listed`), so it outlives a relaunch with the rows. A reblog is an item of its
+// own (#290), listed under its own id — that is what the timeline pages by — and the post it
+// reblogs, which came in the same payload, is listed by nothing for having come that way. A post the reader wrote, and anything a
 // search or a thread brought, was listed by no timeline and never moves it; nor does a post its
 // source said is gone (#179), which the source will not hand back. A row stored before this was
 // listed by nothing, so a timeline held only from then is read as one held nowhere.
@@ -39,9 +40,9 @@ import Foundation
 //
 // **Reaching where posts may be missing reads down from it** (#204), before the id the marked
 // post was listed under, a bounded stretch at a time, toward what is held below it. Reaching an id
-// at or below the newest this timeline listed a held post under — or a post held there, listed as
-// itself and not boosted — fills the hole, and the mark goes: listed ids decide, never when a post
-// was written or boosted. The bound reached first moves the mark down to the oldest post read, and
+// at or below the newest this timeline listed a held item under — or an item held there, a post
+// or a reblog under its own key — fills the hole, and the mark goes: listed ids decide, never when
+// a post was written or reblogged. The bound reached first moves the mark down to the oldest post read, and
 // the mark keeps that id to read on from. Only a source answering with nothing settles it: what
 // lay there is no longer there, which is said for good and let go as a post deleted at its source
 // is (#179). Posts none older than asked are a server not paging, and fail the stretch.
@@ -126,17 +127,17 @@ public struct TimelineGap: Hashable, Sendable {
 
 /// A place posts may be missing, as reading down from it needs it (#204): `ItemStore.missing`.
 ///
-/// **Decided by listed ids alone** wherever this timeline listed what is held: a post's key is
-/// shared by its boosts, and when a post was written or boosted says nothing of where its
-/// timeline listed it.
+/// **Decided by listed ids alone** wherever this timeline listed what is held: when a post was
+/// written says nothing of where its timeline listed it. A reblog is listed as itself, under its
+/// own key (#290), so nothing here tells a reblog from a post.
 public struct MissingPlace: Sendable {
     /// The post the mark sits against, and the timeline it is of.
     public let post: NoteKey
     public let category: Category
     /// The id a read down reads before: the mark's own, or the one this timeline listed it under.
     public let listed: String
-    /// The posts held of that timeline below it, each listed as itself and not as a boost — what
-    /// a read down meets, under its own listing, to fill the hole.
+    /// The items held of that timeline below it, each listed as itself — what a read down meets,
+    /// under its own listing, to fill the hole.
     public let held: Set<NoteKey>
     /// The newest id among them. A read down listing at or below it has passed the hole, even
     /// where the post under that id is one the source has since deleted.
@@ -157,12 +158,12 @@ public struct MissingPlace: Sendable {
         self.hasBelow = hasBelow ?? (!held.isEmpty || floor != nil)
     }
 
-    /// Whether `post`, read down, is one held below the mark or reaches down past them. A boost
-    /// shares the key of the post it boosts, which may be held far below: only its id says where
-    /// it stands.
+    /// Whether `post`, read down, is one held below the mark or reaches down past them. What a
+    /// listing lists is an item under its own key — a reblog is the reblog (#290), never the
+    /// post it reblogs — so one held below is met by its key.
     func meets(_ post: Listed) -> Bool {
         if let floor, !StatusID.later(post.listed, than: floor) { return true }
-        return post.note.boostedBy == nil && held.contains(post.note.key)
+        return held.contains(post.note.key)
     }
 }
 
@@ -214,8 +215,14 @@ public struct ReadOn: Sendable {
     }
 }
 
-/// One post as a timeline listed it: under its own id, a boost's being the boost's.
-typealias Listed = (listed: String, note: Note)
+/// One item as a timeline listed it, under its own id — a reblog's being the reblog's (#290) —
+/// and what came with it in the payload without being listed: the post a reblog reblogs.
+typealias Listed = (listed: String, note: Note, carried: [Note])
+
+extension Array where Element == Listed {
+    /// Every note a stretch brought: each item listed, and what it carried.
+    var landing: [Note] { flatMap { [$0.note] + $0.carried } }
+}
 
 enum MastodonReadOn {
     /// How many stretches one read asks at most — five of `limit` posts.
@@ -235,7 +242,7 @@ enum MastodonReadOn {
     ) async throws -> ReadOn {
         guard let anchor else {
             let posts = try await newer(nil)
-            var read = ReadOn(notes: posts.map(\.note))
+            var read = ReadOn(notes: posts.landing)
             if !held.isEmpty, let oldest = oldest(posts), !posts.contains(where: { held.contains($0.note.key) }) {
                 read.missingBelow = oldest.note.key
             }
@@ -254,7 +261,7 @@ enum MastodonReadOn {
                 read.newerRemainAbove = last
                 return read
             }
-            read.notes += posts.map(\.note)
+            read.notes += posts.landing
             if stretch == 0, before != nil, let oldest = oldest(posts),
                !posts.contains(where: { $0.listed == anchor }) {
                 let below: [Listed]
@@ -263,7 +270,7 @@ enum MastodonReadOn {
                 } catch where !ends(error) {
                     below = []
                 }
-                read.notes += below.map(\.note)
+                read.notes += below.landing
                 if !below.contains(where: { !StatusID.later($0.listed, than: anchor) }) {
                     read.missingBelow = (self.oldest(below) ?? oldest).note.key
                 }
@@ -311,7 +318,7 @@ enum MastodonReadOn {
                 read.end = .further(from: cursor)
                 return read
             }
-            read.notes += posts.map(\.note)
+            read.notes += posts.landing
             if posts.contains(where: place.meets) {
                 read.end = .met
                 return read

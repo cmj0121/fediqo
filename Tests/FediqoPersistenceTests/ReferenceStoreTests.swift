@@ -279,6 +279,106 @@ struct ReferenceStoreTests {
         #expect(opened.notes == [answer, Self.note("22")])
     }
 
+    @Test("A row on disk that says it reblogs another and also holds words, a cover, counts and a reader's mark opens as a reblog with none of them — and is written back that way")
+    func aRowThatClaimsBoth() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let wordy = Note(
+            id: "1", source: Self.mastodon, author: "Ada", handle: "@ada", body: "words of its own",
+            postedAt: PackagerFixture.origin, categories: [.home], favourited: true, spoiler: "a cover",
+            counts: Counts(favourites: 9), statusID: "900"
+        )
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: [wordy])
+        let index = dir.appendingPathComponent("index.sqlite")
+        try await DatabaseQueue(path: index.path).write { db in
+            try db.execute(sql: #"UPDATE note SET refs = '[{"kind":"reblogs","id":"https://one.example/9"}]'"#)
+        }
+
+        let opened = StoreFile.open(at: dir)
+
+        #expect(opened.trouble == nil && opened.setAside == nil)
+        let note = try #require(opened.notes.first)
+        #expect(note.isReblog && note.refs == [Reference(kind: .reblogs, id: "https://one.example/9")])
+        #expect(note.body.isEmpty && note.spoiler == nil && note.favourited == nil && note.counts == Counts())
+        #expect(note.statusID == "900" && note.sendableID == nil && note.author == "Ada")
+        try await #require(opened.file).save(sources: opened.sources, notes: opened.notes)
+        try opened.file?.db.close()
+        #expect(try Data(contentsOf: index).range(of: Data("words of its own".utf8)) == nil, "the words are not left on disk")
+        #expect(StoreFile.open(at: dir).notes == opened.notes)
+    }
+
+    @Test(
+        "A reblog whose references cell will not read is no item: it is left out of the load — never opened as an empty post under the reblog's id — the store is not put aside, every other row is whole, and the next save writes the file without it",
+        arguments: [
+            "not json", "{}", #"[{"kind":"marries","id":"x"}]"#, #"[{"id":"x"}]"#, "", "NULL",
+            "[" + String(repeating: #"{"kind":"reblogs","id":"x"},"#, count: 4_000) + #"{"kind":"reblogs"}]"#,
+        ]
+    )
+    func aReblogWhoseCellWillNotRead(_ cell: String) async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let reblog = Note(
+            id: "r", source: Self.mastodon, author: "Bob", handle: "@bob", body: "", postedAt: PackagerFixture.origin,
+            categories: [.home], statusID: "900", kept: true, refs: [Reference(kind: .reblogs, id: "22")]
+        )
+        let post = Self.note("22")
+        let answer = Self.note("333", reply: Reply(handle: "@bob", inReplyToId: "41"))
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: [reblog, post, answer])
+        let index = dir.appendingPathComponent("index.sqlite")
+        try await DatabaseQueue(path: index.path).write { db in
+            if cell == "NULL" {
+                try db.execute(sql: "UPDATE note SET refs = NULL WHERE id = 'r'")
+            } else {
+                try db.execute(sql: "UPDATE note SET refs = ? WHERE id = 'r'", arguments: [cell])
+            }
+        }
+
+        let opened = StoreFile.open(at: dir)
+
+        #expect(opened.setAside == nil && opened.file != nil && opened.trouble == nil)
+        #expect(opened.notes == [post, answer], "the reblog is not here as anything, and the others are as they were")
+        #expect(!opened.notes.contains { $0.statusID == "900" }, "nothing holds the reblog's id")
+        try await #require(opened.file).save(sources: opened.sources, notes: opened.notes)
+        try opened.file?.db.close()
+        let ids = try await DatabaseQueue(path: index.path).read { db in try String.fetchAll(db, sql: "SELECT id FROM note ORDER BY id") }
+        #expect(ids == ["22", "333"], "the save wrote the rows held, and the row is gone from the file")
+    }
+
+    @Test(
+        "Read back onto a device that keeps only the latest months — from a file, and under a key handed over as a move nearby is — a kept reblog arrives with the post it shows, and a post in the window with the one it quotes; a reblog is brought for nothing that refers to it, and an old post nobody shows is not brought",
+        arguments: [PackageKey.password("password"), .direct(SymmetricKey(data: Data(repeating: 7, count: 32)))]
+    )
+    func readBackSparesWhatIsShown(_ key: PackageKey) async throws {
+        let now = Date()
+        func made(_ id: String, daysAgo: Double, kept: Bool = false, quote: Quote? = nil, refs: [Reference]? = nil) -> Note {
+            Note(
+                id: id, source: Self.mastodon, author: "Ada", handle: "@ada", body: refs == nil ? "post \(id)" : "",
+                postedAt: now.addingTimeInterval(-daysAgo * 86400), categories: [.home], statusID: id, quote: quote,
+                kept: kept, refs: refs
+            )
+        }
+        let shown = made("shown", daysAgo: 400)
+        let quoted = made("quoted", daysAgo: 400)
+        let notes = [
+            shown, made("kept-reblog", daysAgo: 300, kept: true, refs: [Reference(kind: .reblogs, id: "shown")]),
+            quoted, made("quoting", daysAgo: 1, quote: Quote(state: .accepted, post: QuotedPost(quoted))),
+            made("old-reblog", daysAgo: 300, refs: [Reference(kind: .reblogs, id: "nobody")]),
+            made("new-reblog", daysAgo: 1, refs: [Reference(kind: .reblogs, id: "old-reblog")]),
+            made("alone", daysAgo: 400),
+        ]
+        let from = try await Device(sources: [Self.mastodon], notes: notes)
+        let onto = try await Device()
+        let url = PackagerFixture.package()
+        defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
+        await onto.store.setRetention(months: 1, from: now)
+        try await from.packager().takeAway(to: url, key: key, pictures: false) { _ in }
+
+        try await onto.packager().readBack(url, key: key, replacing: false) { _ in }
+
+        #expect(Set(await onto.store.all().map(\.id)) == ["shown", "kept-reblog", "quoted", "quoting", "new-reblog"])
+        #expect(await onto.store.all().first { $0.id == "kept-reblog" }?.kept == true)
+    }
+
     @Test("A cell that reads but says more than an item may hold, or names longer than a name is, is held to the bounds every item is")
     func aCellPastTheBounds() async throws {
         let dir = scratch()

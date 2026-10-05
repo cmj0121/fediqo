@@ -236,6 +236,7 @@ final class ShellSearch {
         in timeline: TimelineDefinition,
         text: @autoclosure () -> TextIndex,
         from notes: @autoclosure () -> [Note],
+        targets: @autoclosure () -> ReblogTargets? = nil,
         revision: Int,
         sources: [Source],
         latest: LatestDate?
@@ -246,11 +247,17 @@ final class ShellSearch {
         guard isIndexed else { return [] }
         let key = Key(pattern: pattern, timeline: timeline, revision: revision, sources: sources, latest: latest)
         if let cached, cached.key == key { return cached.items }
-        let shown = CompiledTimeline(timeline, sources: []).shown(notes(), timeline.readsText ? text() : TextIndex([]))
-        let found = search.found(shown, index)
+        let held = notes()
+        // What each reblog reblogs (#290): the session's lookup, or one built here, once for the
+        // rules, the search and the rows.
+        let targets = targets() ?? ReblogTargets(held)
+        let shown = CompiledTimeline(timeline, sources: [])
+            .shown(held, timeline.readsText ? text() : TextIndex([]), targets: targets)
+        // A reblog is found by the words of the post it reblogs, held or shown.
+        let found = search.found(shown, index, targets: targets)
         // One post is one row here as it is on the timeline (#114): a search that drew a merged
         // row twice would be the complaint #10 left for later, arriving through the search field.
-        let items = DummyItem.merged(latest?.shown(found) ?? found, here: Set(sources.map(\.host)))
+        let items = DummyItem.merged(latest?.shown(found) ?? found, here: Set(sources.map(\.host)), targets: targets)
         cached = (key, items)
         return items
     }

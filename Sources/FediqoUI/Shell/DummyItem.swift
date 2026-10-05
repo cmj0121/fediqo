@@ -199,6 +199,34 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// is `SamePost`'s answer, a fact the sources stated; this only carries it.
     public private(set) var otherCopies: [DummyItem] = []
 
+    /// Whether this row is a reblog (#290): an item of its own, standing at the time of the
+    /// reblog, that shows the post it reblogs. Its id, its time, what it arrived through and
+    /// whether the person keeps it are the reblog's; `boostedBy` is who reblogged; everything
+    /// drawn of a post on it — words, author, pictures, cover, counts, what the reader did — is
+    /// the reblogged post's, read from that post's own item.
+    ///
+    /// **`statusID` is nothing on a reblog's row.** The id a source gave the reblog names the
+    /// reblog, and nothing a reader presses on this row is meant for the reblog: so the row
+    /// carries no id an act could be sent with, and what is pressed goes to `reblogged`.
+    public private(set) var isReblog = false
+    /// The post this reblog reblogs, as its own row — what an act pressed on this row is done
+    /// to, and what opening it opens. Empty on anything but a reblog, and on a reblog whose post
+    /// this device no longer holds (`reblogUnheld`).
+    public private(set) var reblogged: [DummyItem] = []
+    /// Whether this is a reblog of a post no longer held here: the row says who reblogged and
+    /// when, and that the post is not here, and draws nothing of a post.
+    public var reblogUnheld: Bool { isReblog && reblogged.isEmpty }
+    /// Whether this row is a post held from before a reblog was an item of its own, which
+    /// arrived as a reblog by `boostedBy` (#290): it stands at its own publish time and says so,
+    /// until a timeline brings that reblog again.
+    public var arrivedAsReblog: Bool { !isReblog && boostedBy != nil }
+
+    /// The rows an act pressed on this one goes to (#290): its own copies, or — for a reblog —
+    /// the post each copy reblogs. A reblog whose post is not held offers nothing to press.
+    public var actCopies: [DummyItem] {
+        isReblog ? copies.flatMap(\.reblogged) : copies
+    }
+
     /// Whether the row is marked as gone from its source (#179): **every** copy's source has said
     /// so. A post one server deleted and another still carries is still there to read and to act
     /// on through the other, and a row saying nothing can be sent while its acts go through the
@@ -361,24 +389,56 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// the lead**, so it changes once when the first-arrived copy's source is removed and once
     /// more if that source is added again: a lamp or a place keyed by the old id is lost at
     /// that moment, as it would be for any row redrawn under a new key, and never otherwise.
-    init(merging copies: [Note], here: Set<String>? = nil) {
+    init(merging copies: [Note], here: Set<String>? = nil, targets: ReblogTargets = ReblogTargets([])) {
         let lead = here.flatMap { here in copies.firstIndex { here.contains($0.source.host) } } ?? 0
-        self.init(copies[lead])
-        otherCopies = copies.enumerated().filter { $0.offset != lead }.map { DummyItem($0.element) }
+        self.init(copies[lead], reblogging: targets.target(of: copies[lead]))
+        otherCopies = copies.enumerated().filter { $0.offset != lead }
+            .map { DummyItem($0.element, reblogging: targets.target(of: $0.element)) }
     }
 
     /// Notes, in the order they are to be drawn, as rows: one per post, however many sources
     /// carried it. The one place a list of held notes becomes a list of rows, so the timeline and
     /// the search cannot come to disagree about when two copies are one. `here` is the hosts
     /// still on this device, for `init(merging:here:)`.
-    static func merged(_ notes: [Note], here: Set<String>? = nil) -> [DummyItem] {
-        SamePost.gathered(notes).map { DummyItem(merging: $0, here: here) }
+    ///
+    /// `held` is everything this device holds, where `notes` is only what is to be drawn of it:
+    /// a reblog's row shows the post it reblogs (#290), which is looked up there — a post the
+    /// timeline's rules left out is still what its reblog shows.
+    /// `targets` is that lookup already built, where the caller holds one — the session's, built
+    /// once where its notes were replaced.
+    static func merged(
+        _ notes: [Note], here: Set<String>? = nil, among held: [Note]? = nil, targets: ReblogTargets? = nil
+    ) -> [DummyItem] {
+        let targets = targets ?? ReblogTargets(held ?? notes)
+        return SamePost.gathered(notes).map { DummyItem(merging: $0, here: here, targets: targets) }
     }
 
-    /// One stored note, drawn as a row.
+    /// One stored note, drawn as a row. **A reblog drawn this way is drawn as one whose post is
+    /// not held**: what it reblogs is another item, which `init(_:reblogging:)` is handed.
     public init(_ note: Note) {
-        noteID = note.id
-        id = note.key.rowID
+        self.init(content: note, as: note)
+        isReblog = note.isReblog
+    }
+
+    /// One stored note drawn as a row, with the post it reblogs where it is a reblog and that
+    /// post is held (#290). Anything but a reblog is `init(_:)`, whatever `target` is.
+    public init(_ note: Note, reblogging target: Note?) {
+        guard note.isReblog, let target, !target.isReblog, target.source.host == note.source.host else {
+            self.init(note)
+            return
+        }
+        self.init(content: target, as: note)
+        isReblog = true
+        reblogged = [DummyItem(target)]
+    }
+
+    /// `content` drawn as a row that is `identity`'s: the same note for every row but a reblog's,
+    /// where the post reblogged is what is drawn and the reblog is what the row is — its id, its
+    /// time, what it arrived through, where its timeline is not whole, whether it is kept.
+    private init(content note: Note, as identity: Note) {
+        let reblog = identity.isReblog && identity.key != note.key
+        noteID = identity.id
+        id = identity.key.rowID
         source = DummySource.unsigned(note.source.host, kind: Self.shape(of: note.source.kind))
         author = note.author
         handle = note.handle
@@ -394,24 +454,26 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         body = blog.map(\.words).flatMap { $0.isEmpty ? nil : $0 } ?? note.body
         boardKey = nil
         boardText = note.board
-        postedAt = blog?.postedAt ?? note.postedAt
+        postedAt = reblog ? identity.postedAt : blog?.postedAt ?? note.postedAt
         workRelated = false
         answering = Self.answering(note.reply)
-        boostedBy = note.boostedBy
+        boostedBy = reblog ? identity.author : note.boostedBy
         boosted = note.boosted
         favourited = note.favourited
         bookmarked = note.bookmarked
-        statusID = note.statusID
+        // Never a reblog's own id (`isReblog`): not on a reblog showing its post, and not on
+        // one whose post is gone.
+        statusID = identity.isReblog ? nil : note.statusID
         audience = note.audience.map(DummyAudience.init)
         avatarURL = note.avatarURL ?? blog?.avatarURL
         url = note.url
         attachments = note.attachments
         opening = note.opening
-        categories = note.categories
-        goneSince = note.goneSince
+        categories = identity.categories
+        goneSince = identity.goneSince
         editedAt = note.editedAt
         earlier = note.earlier
-        gaps = note.gaps
+        gaps = identity.gaps
         sensitive = note.sensitive
         spoiler = note.spoiler
         emojis = note.emojis
@@ -420,7 +482,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
             reblogs: note.counts.reblogs,
             favourites: note.counts.favourites
         )
-        marks = DummyMarks(kept: note.kept)
+        marks = DummyMarks(kept: identity.kept)
         quote = note.quote
         quotedRowID = note.quotedKey?.rowID
     }

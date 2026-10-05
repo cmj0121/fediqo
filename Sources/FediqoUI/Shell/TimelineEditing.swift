@@ -150,7 +150,7 @@ extension ShellSession {
         if let drawnTimeline, drawnTimeline.key == key { return drawnTimeline.items }
         let items = currentTimeline.items(
             from: notes, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: latest,
-            here: hosts
+            here: hosts, targets: reblogTargets
         )
         drawnTimeline = DrawnTimeline(key: key, items: items)
         timelineEvaluations += 1
@@ -173,9 +173,9 @@ extension ShellSession {
         )
         if let drawnTag, drawnTag.key == key { return drawnTag.items }
         let shown = CompiledTimeline(definition, sources: [])
-            .shown(notes, definition.readsText ? textIndex : TextIndex([]))
+            .shown(notes, definition.readsText ? textIndex : TextIndex([]), targets: reblogTargets)
         let found = HeldUnderTag.held(under: tag, in: shown, sent: sent)
-        let items = DummyItem.merged(latest?.shown(found) ?? found, here: hosts)
+        let items = DummyItem.merged(latest?.shown(found) ?? found, here: hosts, targets: reblogTargets)
         drawnTag = HeldTag(key: key, items: items)
         return items
     }
@@ -207,6 +207,7 @@ extension ShellSession {
             in: definition(of: currentTimeline),
             text: textIndex,
             from: notes,
+            targets: reblogTargets,
             revision: heldRevision,
             sources: sources,
             latest: latest

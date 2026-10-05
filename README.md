@@ -149,7 +149,7 @@ A timeline is its rules. A rule names one kind of thing:
 | Kind     | Lets through                                                   |
 | -------- | -------------------------------------------------------------- |
 | source   | posts from that source                                         |
-| author   | posts by that person (`user@instance`), or boosted by them     |
+| author   | posts by that person (`user@instance`), and reblogs they made  |
 | keyword  | posts whose text contains it, hashtags included                |
 | category | posts that arrived through it                                  |
 | a field  | posts whose source says that of them — see below               |
@@ -159,6 +159,8 @@ A timeline is its rules. A rule names one kind of thing:
   of its own: two language rules are any, a language rule and a Sent to rule are all.
 - A Hide rule hides what it matches, whatever else lets it through. A timeline with only Hide
   rules is All, less what they hide.
+- A Hide on a person also hides what others reblog of theirs; showing a person shows what they
+  wrote and what they reblogged.
 - An author, keyword, or category rule can be for every source or for one. A list or a board
   belongs to one source, so a rule naming one is only for that source.
 - A keyword ignores case, and full-width against half-width, and matches anywhere in the text
@@ -307,6 +309,24 @@ half-width, do not change what is found. As you type, the posts this device hold
 searched. Return also asks the sources of the timeline in front that can be searched. What is
 found is in time order. Clearing the field returns to the timeline.
 
+A reblog is a row of its own. It stands at the time of the reblog and says who reblogged; the
+post it reblogs stands at the time it was published, as it does where it arrived with no
+reblog. Both rows show in a timeline whose rules let both through, and reading again moves
+neither. The reblog's row shows the post as this device holds it — or says the post is no
+longer held — and what you press on it is done to the post: favourite, reblog, bookmark and
+answer go to the post, and opening the row opens the post. Keeping the row keeps the reblog,
+and the post it shows stays for as long as the reblog is kept, whatever else is let go — a
+post you take back, or one its source says is gone, stays too, marked as gone from its source. A
+rule on an author is asked of who reblogged — and a Hide on a person also hides what others
+reblog of theirs, while showing a person shows what they wrote and what they reblogged; a rule
+on a keyword or a field is asked of the
+post reblogged, so what hides a post hides its reblogs; a rule on a category is asked of the
+reblog, which arrived through the timeline that listed it, while the post it brought arrived
+through none. A post held from before reblogs were rows, which arrived as a reblog, stays
+where it was and says it arrived as a reblog by that person, until a timeline brings that
+reblog again; from then the reblog is the row that timeline shows, and the post is shown by
+it only where it also arrives on its own.
+
 Everything this device holds stands in its timelines. What a search brought back, what was
 read under a hashtag, the answers read when a post was opened, and a post another one quotes
 are posts like any other: each stands in All at the time it was posted, and stays there after
@@ -418,7 +438,8 @@ write the number down says that it does not say.
 #### The two limits
 
 Keep posts holds only the latest months — and with them a post you keep, and an older post
-that one still held quotes, which stays in All until the post quoting it goes; Room is what this device gives the index and its
+that one still held quotes or reblogs, which stays in All until the post or reblog showing it
+goes; Room is what this device gives the index and its
 picture copies together. Side by side, and whichever is reached first acts. Past the room,
 picture copies go first, oldest first — they come back when read again — and only then the
 oldest posts, from every source. A limit never set lets nothing go, and every source stays

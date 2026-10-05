@@ -67,7 +67,7 @@ public struct MastodonWrite: Sendable {
         }
         var form = [("status", text), ("visibility", visibility.mastodon)]
         if let answering {
-            guard let id = answering.statusID, answering.source.host == host else {
+            guard let id = answering.sendableID, answering.source.host == host else {
                 throw MastodonWriteError.unfindable
             }
             form.append(("in_reply_to_id", id))
@@ -119,7 +119,7 @@ public struct MastodonWrite: Sendable {
         guard await store.sources().contains(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
         }
-        guard let id = note.statusID, ListSubscription.isPathSegment(id) else {
+        guard let id = note.sendableID, ListSubscription.isPathSegment(id) else {
             throw MastodonWriteError.unfindable
         }
         do {
@@ -159,7 +159,7 @@ public struct MastodonWrite: Sendable {
         guard await store.sources().contains(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
         }
-        guard let id = note.statusID, ListSubscription.isPathSegment(id) else {
+        guard let id = note.sendableID, ListSubscription.isPathSegment(id) else {
             throw MastodonWriteError.unfindable
         }
         let sent = ReadMoment.now()

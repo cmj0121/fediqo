@@ -26,7 +26,7 @@ struct ReadDownTests {
 
     /// Post `id` as the public timeline lists it, under `id` — or under `listing`, as a boost is.
     private static func listing(_ id: Int, as listing: Int? = nil) -> Listed {
-        (listed: "\(listing ?? id)", note: note(id))
+        (listed: "\(listing ?? id)", note: note(id), carried: [])
     }
 
     private static func key(_ id: Int) -> NoteKey { note(id).key }

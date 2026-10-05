@@ -788,7 +788,9 @@ final class ShellConversations {
     /// it answers up to the start, and what answered it walked depth first, the older answer
     /// first under each post. Each post once, so a loop in a stranger's parents ends.
     static func kept(around root: Note, among held: [Note]) -> (ancestors: [Note], descendants: [Note])? {
-        guard let rootID = root.statusID else { return nil }
+        // A reblog is in no thread (#290): it answers nothing, and its own id is not a post's.
+        guard let rootID = root.sendableID else { return nil }
+        let held = held.filter { !$0.isReblog }
         let byID = Dictionary(
             held.compactMap { note in note.statusID.map { ($0, note) } },
             uniquingKeysWith: { first, _ in first }

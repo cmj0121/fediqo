@@ -304,6 +304,20 @@ final class ShellSession {
     }
     @ObservationIgnored private var builtTextIndex: TextIndex?
     @ObservationIgnored private(set) var textIndexIsCurrent = false
+
+    /// The post each reblog held reblogs (#290), built the first time something asks after
+    /// `notes` changes and handed to every reader of it — a timeline's rules, the search, the
+    /// rows, a row looked up by id — so none of them builds its own over everything held.
+    var reblogTargets: ReblogTargets {
+        if let builtReblogTargets { return builtReblogTargets }
+        let built = ReblogTargets(notes)
+        builtReblogTargets = built
+        reblogTargetsBuilt += 1
+        return built
+    }
+    @ObservationIgnored private var builtReblogTargets: ReblogTargets?
+    /// How many times the lookup was built. For a test to read.
+    @ObservationIgnored private(set) var reblogTargetsBuilt = 0
     /// Bumped each time `notes` is assigned. Observed, so a view that read a cached timeline
     /// still redraws when the notes under it change.
     private(set) var notesRevision = 0
@@ -342,6 +356,7 @@ final class ShellSession {
         didSet {
             recount()
             textIndexIsCurrent = false
+            builtReblogTargets = nil
             notesRevision += 1
             heldRevision += 1
         }
@@ -382,7 +397,21 @@ final class ShellSession {
     /// up here — `heldNote(_:)`'s one rule, so the row a press opens and the note its marks act on
     /// are found the same way.
     func held(_ rowID: String) -> DummyItem? {
-        heldNote(rowID).map(DummyItem.init)
+        heldNote(rowID).map { DummyItem($0, reblogging: reblogTargets.target(of: $0)) }
+    }
+
+    /// The post `note` reblogs, where it is a reblog and this device holds that post (#290):
+    /// looked up by the reference's name within the reblog's own source, and nowhere else.
+    func reblogged(by note: Note) -> Note? {
+        reblogTargets.target(of: note)
+    }
+
+    /// The row a press to open `rowID` opens (#290): the row itself, or — for a reblog — the
+    /// post it reblogs. Nothing for a reblog whose post this device does not hold: there is no
+    /// conversation around a reblog, and nothing of the post to open.
+    func rowOpened(by rowID: String) -> String? {
+        guard let note = heldNote(rowID), note.isReblog else { return rowID }
+        return reblogged(by: note)?.key.rowID
     }
 
     /// The item one row id stands for, among every item this device holds (`notes`). See
@@ -892,8 +921,23 @@ final class ShellSession {
     /// A post whose host is not a source here offers nothing and says nothing: a fixture, a
     /// preview, a row left over from a Remove. That is `PostActs.none` rather than a refusal,
     /// because there is no source for a sentence to be about.
+    ///
+    /// **A reblog's row offers what the post it reblogs offers, and each act goes to that post**
+    /// (#290): `actCopies` is the post's own row, so the id sent, the door and the standing are
+    /// the post's, and the reblog's own id is on nothing a press can reach. Taking a post back is
+    /// not among them: that is offered on the post's own row.
     func acts(on item: DummyItem) -> PostActs {
-        Self.acts(from: item.copies.map(ownActs(on:)))
+        Self.acts(from: actsByCopy(of: item).map(\.acts))
+    }
+
+    /// Each row an act on `item` can go to, with what it offers there — `item.actCopies`, less
+    /// taking back where `item` is a reblog.
+    private func actsByCopy(of item: DummyItem) -> [(copy: DummyItem, acts: PostActs)] {
+        item.actCopies.map { copy in
+            let own = ownActs(on: copy)
+            guard item.isReblog, own.offers(.withdraw) else { return (copy, own) }
+            return (copy, PostActs(offered: own.offered.subtracting([.withdraw]), refused: own.refused, asking: own.asking))
+        }
     }
 
     /// The row's acts out of each copy's own, in the row's order — `acts(on:)` over copies
@@ -911,7 +955,7 @@ final class ShellSession {
     /// The copy behind `item` whose sign-in must be asked again before `act` is offered (#285),
     /// or nothing where no copy's is — `actingCopy`'s order, for the question instead of the act.
     func askingCopy(of item: DummyItem, for act: PostAct) -> DummyItem? {
-        item.copies.first { ownActs(on: $0).asks(act) }
+        actsByCopy(of: item).first { $0.acts.asks(act) }?.copy
     }
 
     /// The copy behind `item` that `act` goes through, or nothing where no copy offers it (#136).
@@ -925,7 +969,7 @@ final class ShellSession {
     ///
     /// For a row of one this is the row itself or nothing, exactly as before there were copies.
     func actingCopy(of item: DummyItem, for act: PostAct) -> DummyItem? {
-        item.copies.first { ownActs(on: $0).offers(act) }
+        actsByCopy(of: item).first { $0.acts.offers(act) }?.copy
     }
 
     /// A row's share of the acts, everything but the presses: what it offers, the copy each act
@@ -939,7 +983,7 @@ final class ShellSession {
     /// off them — `acts(on:)` and `actingCopy(of:for:)` asked separately would ask every copy
     /// again for every act.
     func acting(on item: DummyItem) -> ItemActing {
-        let each = item.copies.map { (copy: $0, acts: ownActs(on: $0)) }
+        let each = actsByCopy(of: item)
         var acting = ItemActing(acts: Self.acts(from: each.map(\.acts)))
         for act in PostAct.allCases {
             let copy = each.first { $0.acts.offers(act) }?.copy ?? item

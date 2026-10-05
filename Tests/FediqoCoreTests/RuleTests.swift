@@ -170,9 +170,9 @@ struct RuleTests {
         #expect(shown([.author("@ADA@one.example", in: .every, sources: Self.sources)]) == ["a1", "a2"])
     }
 
-    @Test("A boost matches both who boosted it and who wrote it")
-    func boostMatchesBoth() {
-        #expect(shown([.author("bob@two.example", in: .every, sources: Self.sources)]) == ["b1", "b2", "c1"])
+    @Test("A post held from before a reblog was an item, which arrived as somebody's reblog, is asked of who wrote it and not of who reblogged")
+    func aRowThatArrivedAsAReblogIsItsAuthors() {
+        #expect(shown([.author("bob@two.example", in: .every, sources: Self.sources)]) == ["b1", "b2"])
         #expect(shown([.author("cyd@one.example", in: .every, sources: Self.sources)]) == ["c1"])
     }
 

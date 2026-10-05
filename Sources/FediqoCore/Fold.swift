@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// One way of making two spellings of the same text compare equal, for everything that looks
 /// text up rather than draws it: a rule's keyword and author (#26), and later local search (#32).
@@ -102,24 +103,24 @@ public struct TextIndex: Sendable {
         // Strings are shared storage, so this costs no copy of the body.
         let body: String
         let handle: String
-        let boosterHandle: String?
 
         /// What a keyword reads: the body alone (Decision 13).
         let text: String
+        /// Who made the item: a post's author, and whoever reblogged for a reblog (#290). **Its
+        /// own and nobody else's** — a reblog's words are the entry of the post it reblogs, which
+        /// `CompiledTimeline.verdict` reads there, so each entry is right by its own note alone
+        /// whichever of the two lands, changes or goes.
         let foldedHandle: String
-        let foldedBooster: String?
 
         init(_ note: Note) {
             body = note.body
             handle = note.handle
-            boosterHandle = note.boosterHandle
             text = Fold.key(note.body)
             foldedHandle = Fold.handle(note.handle)
-            foldedBooster = note.boosterHandle.map(Fold.handle)
         }
 
         func describes(_ note: Note) -> Bool {
-            body == note.body && handle == note.handle && boosterHandle == note.boosterHandle
+            body == note.body && handle == note.handle
         }
     }
 
@@ -149,5 +150,54 @@ public struct TextIndex: Sendable {
     func entry(for note: Note) -> Entry {
         if let entry = entries[note.key], entry.describes(note) { return entry }
         return Entry(note)
+    }
+}
+
+/// The post each reblog among some notes reblogs, looked up among those same notes (#290).
+///
+/// **Built once wherever the held notes are replaced, and handed to everything that asks** —
+/// a timeline's rules, a search, the rows — so no evaluation walks everything held to build its
+/// own. Over the notes handed in: a reference is a name within one source, so what a reblog
+/// reblogs is the note held under that name from that source, or nothing. A reblog is never
+/// another reblog's target. **Only what some reblog names is kept**: two passes over the notes
+/// and a table the size of the reblogs, never one the size of the store.
+public struct ReblogTargets: Sendable {
+    private let byKey: [NoteKey: Note]
+
+    /// Counts the lookups built over notes while it is set, on the task that set it. For a test
+    /// to read: that one adopt builds one, whatever reads it. Nothing sets it otherwise.
+    @TaskLocal static var counting: Tally?
+
+    final class Tally: Sendable {
+        private let count = OSAllocatedUnfairLock(initialState: 0)
+        var built: Int { count.withLock { $0 } }
+        func add() { count.withLock { $0 += 1 } }
+    }
+
+    /// `wanted` false, or no reblog among `notes`, builds nothing and answers nothing.
+    public init(_ notes: [Note], wanted: Bool = true) {
+        guard wanted else {
+            byKey = [:]
+            return
+        }
+        if !notes.isEmpty { Self.counting?.add() }
+        var named: Set<NoteKey> = []
+        for note in notes { if let key = note.reblogKey { named.insert(key) } }
+        guard !named.isEmpty else {
+            byKey = [:]
+            return
+        }
+        var byKey: [NoteKey: Note] = [:]
+        byKey.reserveCapacity(named.count)
+        for note in notes where !note.isReblog {
+            let key = note.key
+            if named.contains(key), byKey[key] == nil { byKey[key] = note }
+        }
+        self.byKey = byKey
+    }
+
+    /// The post `note` reblogs, where it is a reblog and that post is among the notes.
+    public func target(of note: Note) -> Note? {
+        note.reblogKey.flatMap { byKey[$0] }
     }
 }
