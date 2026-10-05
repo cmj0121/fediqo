@@ -165,7 +165,7 @@ public struct MastodonWrite: Sendable {
             throw MastodonWriteError.unreadable
         }
         try Task.checkCancellation()
-        await store.refresh([answered], ifSourceHere: host)
+        await store.refresh([answered], ifSourceHere: host, acted: true)
         return await store.note(answered.key) ?? answered.refreshed(over: note)
     }
 }

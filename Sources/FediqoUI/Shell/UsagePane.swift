@@ -243,6 +243,10 @@ struct UsagePane: View {
             if holdings.aside > 0 {
                 stretch(reading(Text(L10n.t("prefs.held.aside"))), figure: Self.postsLine(holdings.aside))
             }
+            // What changed posts said before (#286): held with them, so counted with them.
+            if let earlier = Self.earlierFigure(holdings.earlier) {
+                stretch(reading(Text(L10n.t("prefs.held.earlier"))), figure: earlier)
+            }
             ForEach(holdings.byPeriod.prefix(Self.stretchesShown), id: \.start) { bucket in
                 stretch(reading(Text(Self.stretchLabel(bucket.start, period: session.heldPeriod))),
                         figure: Self.postsLine(bucket.posts))
@@ -381,6 +385,12 @@ struct UsagePane: View {
 
     /// "3 held apart from the timelines", or nothing where none is (#194): what a source holds
     /// that no timeline shows, said beside its count.
+    /// How many earlier wordings of changed posts are held, as a figure — or nothing where none
+    /// are, so a device that never saw a post change draws no line about it.
+    static func earlierFigure(_ count: Int, language: DummyLanguage? = nil) -> String? {
+        count == 0 ? nil : L10n.count("prefs.held.earlier.count", count, language: language)
+    }
+
     static func asideLine(_ count: Int) -> String? {
         count == 0 ? nil : L10n.t("prefs.held.aside") + " · " + postsLine(count)
     }

@@ -42,6 +42,9 @@ public struct Holdings: Equatable, Sendable {
     public let bySource: [String: Int]
     /// Of `bySource`, those held aside. A host holding none aside is absent.
     public let asideBySource: [String: Int]
+    /// How many earlier wordings of changed posts are held with them (#286): part of what this
+    /// device holds, and so part of what it says it holds.
+    public let earlier: Int
     /// Newest stretch first. Only stretches holding a post are listed.
     public let byPeriod: [Bucket]
 
@@ -51,6 +54,7 @@ public struct Holdings: Equatable, Sendable {
         let apart = notes.filter { $0.holding == .aside }
         aside = apart.count
         asideBySource = Dictionary(grouping: apart, by: \.source.host).mapValues(\.count)
+        earlier = notes.reduce(0) { $0 + $1.earlier.count }
         let component = period.component
         byPeriod = Dictionary(grouping: notes) {
             calendar.dateInterval(of: component, for: $0.postedAt)?.start ?? $0.postedAt

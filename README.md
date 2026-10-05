@@ -29,9 +29,9 @@ existing one with a filter put on it.
 revisions, what you can do to an item, and how one is let go.
 
 The concept is where Fediqo is going, and Using it, below, is what this checkout does today.
-Today a Mastodon host or a Discuz forum can be joined. Revisions, the deleted mark before a
-purge, a source's own fields in a rule, and a timeline built on another timeline are not here
-yet.
+Today a Mastodon host or a Discuz forum can be joined. A post's own revisions are here; a
+timeline's are not. The deleted mark before a purge, a source's own fields in a rule, and a
+timeline built on another timeline are not here yet.
 
 ## How it works
 
@@ -280,6 +280,19 @@ and pictures already brought. Rules are written and applied, and a search finds 
 What needs a network — asking a source, signing in, posting — says it could not reach the
 source, rather than hanging. When the network returns, what was left unasked is asked again,
 with no relaunch.
+
+A post its Mastodon source says was changed after it was published carries a Changed mark,
+and stays exactly where it was: its age is still when it was published, and no timeline moves
+it. It shows what it says now, on an ordinary reload as on `r` with the post open, and a rule
+or a search is asked of what it says now. What it said before stays on this device — only the
+wordings this device held, never fetched from the source — and is under the post where it is
+opened, oldest first, each with when its source said it changed. A post already changed when
+it was first read is marked and has nothing earlier to show. A wording is the post's words and
+its author's warning; an earlier wording that was covered stays covered until you lift the
+post's cover or press Show it on that wording. On a phone, a post carrying two or more of the
+Source removed, Deleted at source and Changed marks shows them as their glyphs alone. Earlier
+wordings are counted under Usage, ride a take-away and a move nearby with their post, and go
+when the post goes, by any way; a post you keep keeps them.
 
 A covered post carries a Covered mark, apart from its words. Where the author wrote a warning,
 it reads as their warning, set apart from the body. Where they wrote none, Fediqo puts no

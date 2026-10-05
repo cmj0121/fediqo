@@ -560,6 +560,24 @@ public struct Note: Identifiable, Hashable, Sendable {
     ///
     /// A `var` for `holding`'s reason: the store sets it on a row it already holds.
     public var kept: Bool
+    /// When its source says the post was last changed after it was published (#286), or nothing
+    /// where it says it never was — and on a source that says no such thing at all.
+    ///
+    /// **The source's word, and the one thing that tells a later copy from an earlier one.** A
+    /// copy that says a later moment than the one held is the post as it is now; one that says an
+    /// earlier moment, or none where the held copy says one, was read before the copy held and
+    /// is still on its way in. **Never where the item stands**: `postedAt` is when it was
+    /// published, and that is what every timeline orders by.
+    public let editedAt: Date?
+    /// What the post said before, as this device held it, oldest first (#286): each wording with
+    /// the moment its source said it changed. Empty on a post never seen to change — and on one
+    /// already changed when it was first read, since nothing is asked of the source for what
+    /// this device never held.
+    ///
+    /// **Part of the row, and nowhere else.** It is written with the row, rides where the row
+    /// rides, and is gone when the row is: there is no second place a wording its author took
+    /// back could be left behind in.
+    public let earlier: [Wording]
 
     public init(
         id: String,
@@ -592,7 +610,9 @@ public struct Note: Identifiable, Hashable, Sendable {
         gaps: Set<TimelineGap> = [],
         listed: [Category: String] = [:],
         quote: Quote? = nil,
-        kept: Bool = false
+        kept: Bool = false,
+        editedAt: Date? = nil,
+        earlier: [Wording] = []
     ) {
         self.id = id
         self.source = source
@@ -625,6 +645,107 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.listed = listed
         self.quote = quote
         self.kept = kept
+        self.editedAt = editedAt
+        self.earlier = earlier
+    }
+
+    /// What the post says, as a wording: its words and its author's warning, and whether it was
+    /// covered. See `Wording`.
+    func wording(until moment: Date) -> Wording {
+        Wording(body: body, spoiler: spoiler, sensitive: sensitive, until: moment)
+    }
+
+    /// A moment as two copies are compared by: whole milliseconds, which is what a store keeps.
+    /// A date read off the wire and the same date read back from disk are not always one
+    /// `Double`, and compared as they are the copy just read would look a hair later than the row
+    /// it is — a change every reload, written down every time.
+    private static func moment(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1000).rounded())
+    }
+
+    /// Whether this copy was read before `held` was, **by its source's own word** (#286): it says
+    /// an earlier change than the one held, or none where the held copy says one. Such a copy is
+    /// a read still on its way in when a later one landed, and takes nothing of the held one's.
+    func isEarlier(than held: Note) -> Bool {
+        switch (editedAt, held.editedAt) {
+        case (nil, .some): true
+        case (let mine?, let theirs?): Self.moment(mine) < Self.moment(theirs)
+        default: false
+        }
+    }
+
+    /// Whether this copy is the post as its source changed it after `held` was read: it says a
+    /// change, and a later one than the copy held says.
+    func isLater(than held: Note) -> Bool {
+        switch (editedAt, held.editedAt) {
+        case (.some, nil): true
+        case (let mine?, let theirs?): Self.moment(mine) > Self.moment(theirs)
+        default: false
+        }
+    }
+
+    /// The earlier wordings of `held`, with what it said until `self` — a later copy — changed
+    /// it, where the two say different things. Bounded (`Wording.bounded`), oldest going first.
+    private func earlier(after held: Note) -> [Wording] {
+        guard let editedAt, isLater(than: held) else { return held.earlier }
+        let was = held.wording(until: editedAt)
+        guard was.body != body || (was.spoiler ?? "") != (spoiler ?? "") else { return held.earlier }
+        return Wording.bounded(held.earlier + [was])
+    }
+
+    /// The moment this copy says it changed, spelled as `held` spells it where the two are the
+    /// same moment — so a copy that says nothing new is equal to the row it is, and rewrites
+    /// nothing.
+    private func editedAt(over held: Note) -> Date? {
+        isLater(than: held) || isEarlier(than: held) ? editedAt : held.editedAt ?? editedAt
+    }
+
+    /// This held note as `stale` restates it — a copy its source's own word says was read before
+    /// this one (#286). **No word of it is taken.** Its counts are, as any copy's are; and what
+    /// it says the reader did is taken only where `acted` — the source's answer to an act the
+    /// reader has just made, which is the latest word there is on that whatever the copy's age.
+    /// A timeline's or a thread's stale copy says nothing of the reader this row does not say
+    /// more lately.
+    func restated(by stale: Note, acted: Bool) -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board, postedAt: postedAt, categories: categories, reply: reply,
+            boostedBy: boostedBy, boosterHandle: boosterHandle,
+            boosted: acted ? stale.boosted ?? boosted : boosted,
+            favourited: acted ? stale.favourited ?? favourited : favourited,
+            bookmarked: acted ? stale.bookmarked ?? bookmarked : bookmarked,
+            audience: audience, avatarURL: avatarURL, attachments: attachments,
+            sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url,
+            counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
+            holding: holding, goneSince: goneSince, gaps: gaps, listed: listed, quote: quote,
+            kept: kept, editedAt: editedAt, earlier: earlier
+        )
+    }
+
+    /// This held note as `later` — a copy its source changed since — now says it (#286): the
+    /// later copy's words, warning, cover, attachments, emoji and quote, with what this one said
+    /// kept as an earlier wording. **Everything about where the row stands is this one's**: its
+    /// publish time, the timelines it arrived through, how it is held, and what this device
+    /// keeps of its own. What an ordinary reload does to a held row its source has changed.
+    ///
+    /// `was` is the row as it was held before this copy touched it — what it said is read off
+    /// that, never off `self`, which `filled(from:)` may already have given the later copy's
+    /// words (a quote arriving brings its words with it).
+    func revised(by later: Note, was: Note) -> Note {
+        Note(
+            id: id, source: source, author: later.author, handle: handle, body: later.body,
+            title: later.title ?? title, board: board, postedAt: postedAt, categories: categories,
+            reply: reply, boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
+            favourited: favourited, bookmarked: bookmarked, audience: later.audience ?? audience,
+            avatarURL: later.avatarURL ?? avatarURL, attachments: later.attachments,
+            sensitive: later.sensitive ?? sensitive, spoiler: later.spoiler ?? spoiler,
+            emojis: later.emojis, url: url, counts: counts, statusID: statusID, opening: opening,
+            holding: holding, goneSince: goneSince, gaps: gaps, listed: listed,
+            quote: source.kind.saysQuotes
+                ? later.quote.flatMap { Quote.later($0, over: quote) }
+                : Quote.later(later.quote, over: quote),
+            kept: kept, editedAt: later.editedAt, earlier: later.earlier(after: was)
+        )
     }
 
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
@@ -674,7 +795,10 @@ public struct Note: Identifiable, Hashable, Sendable {
                 ? quote.flatMap { Quote.later($0, over: held.quote) }
                 : Quote.later(quote, over: held.quote),
             // The person's own mark, which no read says anything about (#284).
-            kept: held.kept
+            kept: held.kept,
+            // What it said before this read changed it, kept (#286) — only where the source says
+            // it changed since, and only what this device held.
+            editedAt: editedAt(over: held), earlier: earlier(after: held)
         )
     }
 
@@ -696,6 +820,10 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// says the quote has its words without it. Keeping the held words would draw the quote twice.
     func filled(from other: Note) -> Note {
         let quoteArrives = quote == nil && other.quote != nil
+        // A copy its source's own word says was read before this one (#286) says nothing of the
+        // reader that this row does not say more lately: a reload still on its way when the
+        // reader pressed, landing after the source answered the press.
+        let stale = other.isEarlier(than: self)
         return Note(
             id: id, source: source, author: author, handle: handle,
             body: quoteArrives ? other.body : body, title: title,
@@ -705,8 +833,9 @@ public struct Note: Identifiable, Hashable, Sendable {
             // counts are: where the later copy says, it wins, so a boost, a favourite or a
             // bookmark taken off elsewhere reads as off after an ordinary reload. Where it says
             // nothing — a read made signed out — what was held stands.
-            boosted: other.boosted ?? boosted, favourited: other.favourited ?? favourited,
-            bookmarked: other.bookmarked ?? bookmarked,
+            boosted: stale ? boosted : other.boosted ?? boosted,
+            favourited: stale ? favourited : other.favourited ?? favourited,
+            bookmarked: stale ? bookmarked : other.bookmarked ?? bookmarked,
             audience: audience ?? other.audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive ?? other.sensitive, spoiler: spoiler ?? other.spoiler,
             emojis: emojis, url: url, counts: counts,
@@ -714,7 +843,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             goneSince: goneSince, gaps: gaps, listed: listed,
             // The later copy's quote wins, as its counts do (#214) — see `Quote.later`.
             quote: Quote.later(other.quote, over: quote),
-            kept: kept
+            kept: kept, editedAt: editedAt, earlier: earlier
         )
     }
 
@@ -729,7 +858,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             favourited: nil, bookmarked: nil, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
-            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept
+            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
+            editedAt: editedAt, earlier: earlier
         )
     }
 
@@ -742,8 +872,67 @@ public struct Note: Identifiable, Hashable, Sendable {
             favourited: favourited, bookmarked: bookmarked, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
-            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept
+            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
+            editedAt: editedAt, earlier: earlier
         )
+    }
+}
+
+/// What a post said before its source changed it (#286), as this device held it.
+///
+/// **The words and the author's warning, and nothing else.** Those are what a post says. Its
+/// pictures, a poll and its emoji are not kept here: a change to those alone still marks the post
+/// as changed, and offers no earlier wording. Counts and what the reader did to it are no part
+/// of what it says at all.
+public struct Wording: Hashable, Sendable {
+    /// How many earlier wordings a post keeps. A post rewritten more often than this lets its
+    /// oldest go, so a source restating one post at every read cannot grow one row without end.
+    public static let kept = 50
+    /// How much the earlier wordings of one post may weigh together, as UTF-8: 128 KB. Fifty
+    /// wordings of an ordinary post — five hundred characters, a kilobyte or two each — fit
+    /// several times over, and so do the last few of the longest post a large server allows;
+    /// what it stops is a source handing over a megabyte at every read and having each one kept.
+    public static let budget = 128 * 1024
+
+    public let body: String
+    /// The line the author covered it with then. Nothing where the source said none.
+    public let spoiler: String?
+    /// Whether the author had covered it then, or nothing where the source never said — the
+    /// post's own three answers (`Note.sensitive`), kept so a wording that was covered with no
+    /// line of warning is still known to have been covered once the post no longer is.
+    public let sensitive: Bool?
+    /// When its source said the post changed from this — the moment this stopped being what it
+    /// says.
+    public let until: Date
+
+    public init(body: String, spoiler: String? = nil, sensitive: Bool? = nil, until: Date) {
+        self.body = body
+        self.spoiler = spoiler
+        self.sensitive = sensitive
+        self.until = until
+    }
+
+    /// Whether the author had covered this wording: `DummyItem.covered`'s rule, asked of then.
+    public var covered: Bool { sensitive == true || !(spoiler ?? "").isEmpty }
+
+    /// What this wording weighs against `budget`.
+    var bytes: Int { body.utf8.count + (spoiler?.utf8.count ?? 0) }
+
+    /// `wordings` held to both bounds, the oldest going first: no more than `kept` of them, and
+    /// no more than `budget` between them. **The one rule, for a wording being kept and for a
+    /// row being read back**, so a store written by anything else is held to it too.
+    ///
+    /// **A wording heavier than the whole budget goes first, wherever it stands**: it could never
+    /// be kept, and trimmed oldest-first it would take every lighter wording before it on its
+    /// way out — one oversized rewrite costing a post everything it had said.
+    public static func bounded(_ wordings: [Wording]) -> [Wording] {
+        var held = Array(wordings.filter { $0.bytes <= budget }.suffix(kept))
+        var weight = held.reduce(0) { $0 + $1.bytes }
+        while weight > budget, let oldest = held.first {
+            weight -= oldest.bytes
+            held.removeFirst()
+        }
+        return held
     }
 }
 

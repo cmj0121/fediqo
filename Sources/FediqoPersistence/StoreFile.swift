@@ -341,6 +341,23 @@ private var migrator: DatabaseMigrator {
             t.add(column: "bookmarked", .boolean)
         }
     }
+    // When a row's source says it was last changed, and what the row said before each change this
+    // device saw (#286) — both NULL on every row already stored, which is the truth: none was
+    // seen to change.
+    //
+    // **A migration id for `v3-holding`'s reason.** An older build's first save would write every
+    // row back without either, and worse than losing them: its next read of a changed post would
+    // be told nothing was changed. The id makes it refuse the store instead.
+    //
+    // **On the note's own row and in no table of its own**, so an earlier wording cannot outlive
+    // its post: whatever lets the row go has let these go with it.
+    migrator.registerMigration("v8-revisions") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "edited_at", .datetime)
+            // A JSON array of `WordingRow`, oldest first.
+            t.add(column: "earlier", .text)
+        }
+    }
     return migrator
 }
 
@@ -752,6 +769,46 @@ private struct QuotationRow: Codable {
     }
 }
 
+/// `Wording` as `note.earlier` writes it.
+private struct WordingRow: Codable {
+    var body: String
+    var spoiler: String?
+    /// Absent where the source never said, which is `Wording.sensitive`'s own nothing.
+    var sensitive: Bool?
+    /// Milliseconds since 1970, the precision the row's own dates are kept at.
+    var until: Int64
+
+    init(_ wording: Wording) {
+        body = wording.body
+        spoiler = wording.spoiler
+        sensitive = wording.sensitive
+        until = Int64((wording.until.timeIntervalSince1970 * 1000).rounded())
+    }
+
+    var wording: Wording {
+        Wording(
+            body: body, spoiler: spoiler, sensitive: sensitive,
+            until: Date(timeIntervalSince1970: Double(until) / 1000)
+        )
+    }
+
+    /// `wordings` as the cell's text, or nothing for none.
+    static func text(_ wordings: [Wording]) -> String? {
+        guard !wordings.isEmpty, let data = try? JSONEncoder().encode(wordings.map(WordingRow.init)) else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The wordings a cell holds, or none where it holds nothing this build can read.
+    static func wordings(_ text: String?) -> [Wording] {
+        guard let text, let rows = try? JSONDecoder().decode([WordingRow].self, from: Data(text.utf8)) else {
+            return []
+        }
+        return rows.map(\.wording)
+    }
+}
+
 private struct ReplyRow: Codable {
     var handle: String?
     /// Absent in a row written before 0.4.0 learned it, which reads as a reply whose parent was
@@ -825,6 +882,16 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var kept: Bool
     /// `Note.bookmarked` (#285). A column behind its own migration id, for `holding`'s reason.
     var bookmarked: Bool?
+    /// `Note.editedAt` (#286). A column behind its own migration id, for `holding`'s reason.
+    var edited_at: Date?
+    /// `Note.earlier` (#286) as a JSON array of `WordingRow`, or nothing where the row holds
+    /// none. With `edited_at`'s id.
+    ///
+    /// **Kept as text and read leniently, unlike `facts`.** A `facts` that is not JSON fails the
+    /// load closed, because a row with no words is not a row; a damaged `earlier` is a row that
+    /// has lost what it said before and is whole in every other way, and setting the reader's
+    /// whole store aside for that would cost them far more than the cell held.
+    var earlier: String?
 
     init(_ note: Note) {
         host = note.source.host
@@ -834,6 +901,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         gone_at = note.goneSince
         kept = note.kept
         bookmarked = note.bookmarked
+        edited_at = note.editedAt
+        earlier = WordingRow.text(note.earlier)
         categories = note.categories.map(CategoryRow.init).sorted()
         facts = NoteFacts(
             author: note.author,
@@ -920,7 +989,10 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
                 uniquingKeysWith: { a, _ in a }
             ),
             quote: facts.quote?.quote,
-            kept: kept
+            kept: kept,
+            editedAt: edited_at,
+            // Held to the bounds every kept wording is held to, whoever wrote the cell.
+            earlier: Wording.bounded(WordingRow.wordings(earlier))
         )
     }
 }

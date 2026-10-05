@@ -342,6 +342,24 @@ struct StatusDTO: Decodable, Sendable {
     let uri: String?
     let url: String?
     let createdAt: Date
+    /// When the status was last edited (#286), or nothing where it never was — and on a server
+    /// older than editing, which sends no such field.
+    ///
+    /// **Read leniently**, as `quote` is: a moment this build cannot read is no word about a
+    /// change, and never costs the reader the status — or the page it is on, which one status
+    /// that will not decode takes with it.
+    let editedAt: LenientMoment?
+
+    /// A moment in the spelling this decoder reads dates in, or nothing where it is spelled any
+    /// other way — rather than a failed decode. Its own type and not `Lenient<Date>`: a `Date`
+    /// decoded by itself reads a number, not the decoder's date strategy.
+    struct LenientMoment: Decodable, Sendable {
+        let value: Date?
+
+        init(from decoder: any Decoder) throws {
+            value = (try? decoder.singleValueContainer().decode(String.self)).flatMap(MastodonJSON.date(from:))
+        }
+    }
     let content: String
     let account: Account
     let reblog: Box<StatusDTO>?
@@ -574,8 +592,28 @@ struct StatusDTO: Decodable, Sendable {
             // The post's own id on this server, the boosted one's on a boost: what the row is.
             statusID: subject.id,
             // The boosted post's quote on a boost, as every other fact here (#214).
-            quote: quote
+            quote: quote,
+            // And the boosted post's own change, never the boost's (#286).
+            editedAt: Self.edited(subject.editedAt?.value, posted: subject.createdAt, now: Date())
         )
+    }
+
+    /// How far ahead of this device's clock a source's edit moment may be: a clock a few minutes
+    /// out is ordinary, and anything past that is not a moment a post was changed at.
+    static let editSkew: TimeInterval = 300
+
+    /// When a status says it was changed, as this device will take it (#286): what it says, or
+    /// **when it was published** where what it says is later than `now` and a little — a moment
+    /// nothing was changed at.
+    ///
+    /// **The one thing two copies of a post are ordered by**, so a source naming a year far ahead
+    /// would otherwise make every true copy that followed look older than the one held, and the
+    /// row would never say anything new again. **And a value that does not move with the clock**:
+    /// the same impossible moment read again is the same moment here, so the row is marked as
+    /// changed once and rewritten for nothing after — and any true change, which cannot be
+    /// earlier than the post, is later than it.
+    static func edited(_ said: Date?, posted: Date, now: Date) -> Date? {
+        said.map { $0 > now.addingTimeInterval(editSkew) ? posted : $0 }
     }
 
     /// Every alphabet the row can actually need, folded into one list.

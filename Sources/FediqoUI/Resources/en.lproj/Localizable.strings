@@ -292,6 +292,7 @@
 "quote.short.mutedAccount" = "quoting someone you muted";
 "quote.short.unknown" = "quoted post not shown";
 "item.covered.show" = "Show it";
+"item.covered.again" = "Cover it again";
 "item.covered.label" = "Press s to show it";
 
 "item.act.boost" = "Boost";
@@ -449,6 +450,9 @@
 "prefs.cache.pictures.one" = "%d picture";
 "prefs.held.total" = "All sources";
 "prefs.held.aside" = "Held apart from the timelines";
+"prefs.held.earlier" = "What changed posts said before";
+"prefs.held.earlier.count" = "%d wordings";
+"prefs.held.earlier.count.one" = "%d wording";
 "prefs.held.memory" = "%@ in memory";
 "prefs.held.disk" = "%@ on disk";
 "prefs.held.breakdown" = "By week or month";
@@ -466,6 +470,9 @@
 "prefs.keep.months" = "Latest %d months";
 "prefs.keep.months.one" = "Latest %d month";
 "item.gone" = "Deleted at source";
+"item.changed" = "Changed";
+"item.changed.detail" = "Its source says it was last changed %@. It stays where it was published; open it to read what it said before.";
+"item.changed.detail.none" = "Its source says it was last changed %@. It stays where it was published. This device never held what it said before.";
 "item.gone.detail" = "Its source says it no longer has this post. It stays here, marked, until you let it go, and nothing can be sent to it.";
 "item.left" = "Source removed";
 "item.left.detail" = "You removed the source this post was read through and kept its posts. It stays here, marked, until you let it go, and nothing reaches its source again.";
@@ -820,6 +827,8 @@
 "item.source.join" = ", ";
 "thread.copies.title" = "As each source carried it";
 "thread.copies.from" = "From %@";
+"thread.earlier.title" = "What it said before";
+"thread.earlier.until" = "Until %@";
 "blog.title" = "Blog";
 "blog.reading" = "Reading the blog…";
 "blog.refused" = "%@ would not let this app read this blog.";

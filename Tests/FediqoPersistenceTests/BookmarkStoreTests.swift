@@ -104,7 +104,7 @@ struct BookmarkStoreTests {
         let migrations = try DatabaseQueue(path: index.path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
         }
-        #expect(migrations == ["v1-index", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked"])
+        #expect(migrations == ["v1-index", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions"])
     }
 
     @Test("What a source says of a bookmark in a carried-forward store is there after a save and a reopen")

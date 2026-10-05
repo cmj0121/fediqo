@@ -449,6 +449,7 @@ struct DummyItemRow: View {
         HStack(alignment: .center, spacing: ShellSpace.snug) {
             pressingPerson(avatar)
             pressingPerson(names(written))
+                .modifier(ProbedMeta(part: .names, probe: probe))
             Spacer(minLength: ShellSpace.snug)
             meta
         }
@@ -486,12 +487,18 @@ struct DummyItemRow: View {
         HStack(spacing: ShellSpace.snug) {
             sourcePill
                 .layoutPriority(0)
+                .modifier(ProbedMeta(part: .source, probe: probe))
             leftMark
+                .modifier(ProbedMeta(part: .left, probe: probe))
             goneMark
+                .modifier(ProbedMeta(part: .gone, probe: probe))
+            changedMark
+                .modifier(ProbedMeta(part: .changed, probe: probe))
             visibility
             postedAgo
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
+                .modifier(ProbedMeta(part: .age, probe: probe))
         }
     }
 
@@ -583,6 +590,25 @@ struct DummyItemRow: View {
         .frame(width: vis, height: vis)
     }
 
+    /// Whether the header's marks are drawn as their glyphs alone (#286): on a narrow page, where
+    /// two or more of them are drawn at once.
+    ///
+    /// **Given up on purpose, and all together.** Each mark is a word because it is a fact
+    /// nothing else on the row tells — but three words, a host and an age do not fit across a
+    /// phone, and left to itself the line pushed the age off the edge and the name down to a
+    /// letter. So where they cannot all be words, none is: three glyphs that differ by shape, each
+    /// still named to a pointer and to VoiceOver, with the name and the age where they were. One
+    /// mark alone keeps its word, which is every row but the rare one.
+    private var terse: Bool {
+        narrow && Self.headerMarks(item, here: sourcesHere) >= 2
+    }
+
+    /// How many of the header's marks `item` draws: its source removed, its post deleted at its
+    /// source, its post changed there.
+    static func headerMarks(_ item: DummyItem, here: Set<String>?) -> Int {
+        [sourceLeft(item, here: here), item.goneEverywhere, item.editedAt != nil].count(where: { $0 })
+    }
+
     /// Its source has said it no longer has this post (#179): the row stays, and says so.
     ///
     /// **A word and not only a glyph**, because this is the one fact on the meta line a reader
@@ -595,8 +621,10 @@ struct DummyItemRow: View {
             HStack(spacing: ShellSpace.tight) {
                 Image(systemName: "xmark.bin")
                     .accessibilityHidden(true)
-                Text(Self.goneWord())
+                if !terse { Text(Self.goneWord()) }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Self.goneWord())
             .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
@@ -604,6 +632,47 @@ struct DummyItemRow: View {
             .layoutPriority(1)
             .help(L10n.t("item.gone.detail"))
         }
+    }
+
+    /// Its source says the post was changed after it was published (#286): the row says so, and
+    /// stays where it was.
+    ///
+    /// **The gone mark's shape, word for word**, for its reason: a fact about the post nothing
+    /// else on the row tells, as a word a listener hears with a glyph beside it that they do not.
+    /// A pencil, not a clock: the age beside it is still when the post was published, and this
+    /// says only that what it says is not what it first said. When, and what it said before, are
+    /// where the post is opened.
+    @ViewBuilder
+    private var changedMark: some View {
+        if let editedAt = item.editedAt {
+            HStack(spacing: ShellSpace.tight) {
+                Image(systemName: "pencil")
+                    .accessibilityHidden(true)
+                if !terse { Text(Self.changedWord()) }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Self.changedWord())
+            .shellFont(.mark)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
+            .help(Self.changedDetail(editedAt, earlier: item.earlier.count))
+        }
+    }
+
+    /// What the changed mark reads, in the shell's language — named for `goneWord`'s reason.
+    static func changedWord(language: DummyLanguage? = nil) -> String {
+        L10n.t("item.changed", language: language)
+    }
+
+    /// What a pointer is told about the changed mark: when its source says it last changed, and
+    /// whether this device holds what it said before.
+    static func changedDetail(_ editedAt: Date, earlier: Int, language: DummyLanguage? = nil) -> String {
+        String(
+            format: L10n.t(earlier > 0 ? "item.changed.detail" : "item.changed.detail.none", language: language),
+            EarlierWordings.when(editedAt, language: language)
+        )
     }
 
     /// What the gone mark reads, in the shell's language — named for `spokenAudience`'s reason.
@@ -626,8 +695,10 @@ struct DummyItemRow: View {
             HStack(spacing: ShellSpace.tight) {
                 Image(systemName: "minus.circle")
                     .accessibilityHidden(true)
-                Text(Self.leftWord())
+                if !terse { Text(Self.leftWord()) }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Self.leftWord())
             .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
@@ -1744,6 +1815,34 @@ final class RowBandProbe {
     var frames: [RowBand: CGRect] = [:]
     /// Where each mark was laid out, by its name.
     var marks: [String: CGRect] = [:]
+    /// Where each part of the header's line was laid out.
+    var meta: [RowMetaPart: CGRect] = [:]
+}
+
+/// The parts of a row's header line a test reads the places of.
+enum RowMetaPart: Hashable {
+    case names, source, left, gone, changed, age
+}
+
+/// Reports where a part of the header's line was laid out to a probe, where one is handed in;
+/// draws nothing and changes nothing.
+private struct ProbedMeta: ViewModifier {
+    let part: RowMetaPart
+    let probe: RowBandProbe?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let probe {
+            content.background(
+                GeometryReader { room in
+                    let _ = probe.meta[part] = room.frame(in: .named(RowBandProbe.space))
+                    Color.clear
+                }
+            )
+        } else {
+            content
+        }
+    }
 }
 
 /// Reports a band's frame to a probe, where one is handed in; draws nothing and changes nothing.

@@ -154,6 +154,17 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// has. **This copy's fact**, which is what its acts are read off; what the row says is
     /// `goneEverywhere`.
     public var goneSince: Date?
+    /// When this copy's source says the post was last changed — `Note.editedAt`, carried so every
+    /// place a row is drawn marks it the same way (#286). Nothing on a post never changed.
+    /// **Never when it was posted**: `postedAt` is that, and it is what the row's age reads.
+    public var editedAt: Date?
+    /// What this copy said before, as this device held it, oldest first — `Note.earlier`, carried
+    /// so the pane a post is opened in can show it with nothing asked of anybody (#286).
+    ///
+    /// **This copy's, on a row two sources carried** (#114): each server tells its own copy's
+    /// changes when it hears of them, and the row is drawn as one copy — so what it says it said
+    /// before is what that copy said before.
+    public var earlier: [Wording] = []
     /// Where a timeline this copy arrived through is not whole next to it — `Note.gaps`, carried
     /// so the list can say so at its place (#201). **This copy's**, of its own source's timelines.
     public var gaps: Set<TimelineGap> = []
@@ -398,6 +409,8 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         opening = note.opening
         categories = note.categories
         goneSince = note.goneSince
+        editedAt = note.editedAt
+        earlier = note.earlier
         gaps = note.gaps
         sensitive = note.sensitive
         spoiler = note.spoiler

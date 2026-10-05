@@ -168,6 +168,28 @@ struct NearbyMoveTests {
         #expect(try StoreFile(at: pair.onto.directory).load().notes.map(\.bookmarked) == [true, nil])
     }
 
+    @Test("A changed post's mark and what it said before move with the store, in memory and on disk")
+    func revisionsMove() async throws {
+        let plain = PackagerFixture.note("1")
+        let changed = Note(
+            id: plain.id, source: plain.source, author: plain.author, handle: plain.handle, body: "as changed",
+            postedAt: plain.postedAt, categories: plain.categories,
+            editedAt: plain.postedAt.addingTimeInterval(600),
+            earlier: [Wording(body: "as written", spoiler: "", until: plain.postedAt.addingTimeInterval(600))]
+        )
+        let pair = Pair(
+            from: try await Device(sources: [PackagerFixture.mastodon], notes: [changed, PackagerFixture.note("2")]),
+            onto: try await Device()
+        )
+        defer { pair.remove() }
+        _ = await moveWhole(pair, pictures: false)
+
+        let moved = await pair.onto.store.snapshot().notes
+        #expect(moved.first?.earlier == changed.earlier && moved.first?.editedAt == changed.editedAt)
+        #expect(moved.last?.earlier.isEmpty == true)
+        #expect(try StoreFile(at: pair.onto.directory).load().notes.first?.earlier == changed.earlier)
+    }
+
     @Test("A receiver holding a store is asked to replace, and replaces only on that yes")
     func replaces() async throws {
         let other = Source(host: "other.example", kind: .mastodon)

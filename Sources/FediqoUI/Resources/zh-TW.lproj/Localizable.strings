@@ -291,6 +291,7 @@
 "quote.short.mutedAccount" = "引用了你靜音的人";
 "quote.short.unknown" = "被引用的貼文無法顯示";
 "item.covered.show" = "掀開";
+"item.covered.again" = "蓋回去";
 "item.covered.label" = "按 s 掀開";
 
 "item.act.boost" = "轉發";
@@ -444,6 +445,8 @@
 "prefs.held.posts.none" = "未存貼文";
 "prefs.held.total" = "所有來源";
 "prefs.held.aside" = "時間軸之外另存";
+"prefs.held.earlier" = "修改過的貼文之前說的";
+"prefs.held.earlier.count" = "%d 個版本";
 "prefs.held.memory" = "記憶體中 %@";
 "prefs.held.disk" = "磁碟上 %@";
 "prefs.held.breakdown" = "依週或月";
@@ -459,6 +462,9 @@
 "prefs.keep.shorten.line" = "較舊的貼文會立即從這台裝置移除。";
 "prefs.keep.months" = "最近 %d 個月";
 "item.gone" = "來源已刪除";
+"item.changed" = "已修改";
+"item.changed.detail" = "它的來源說它最後在 %@ 修改過。它留在發佈時的位置；打開它可以讀它之前說的。";
+"item.changed.detail.none" = "它的來源說它最後在 %@ 修改過。它留在發佈時的位置。這台裝置沒有留過它之前說的。";
 "item.gone.detail" = "它的來源表示已不再有這則貼文。它會帶著標記留在這裡，直到你放下它，也無法再對它送出任何東西。";
 "item.left" = "來源已移除";
 "item.left.detail" = "你移除了讀到這則貼文的來源，並留下了它的貼文。它會帶著標記留在這裡，直到你放下它，也不會再連到它的來源。";
@@ -798,6 +804,8 @@
 "item.source.join" = "、";
 "thread.copies.title" = "各來源帶來的樣子";
 "thread.copies.from" = "來自 %@";
+"thread.earlier.title" = "它之前說的";
+"thread.earlier.until" = "到 %@ 為止";
 "blog.title" = "日誌";
 "blog.reading" = "正在讀這篇日誌…";
 "blog.refused" = "%@ 不讓這個 app 讀這篇日誌。";

@@ -295,6 +295,11 @@ public actor ItemStore {
                 // What the held copy never said, this one may (#208): a row kept before its
                 // audience was written down takes it from the next timeline that brings it.
                 var merged = existing.filled(from: note)
+                // **Its source has changed it since this row was read** (#286): the row says what
+                // the post says now, where it stood, and keeps what it said. A copy that is the
+                // older of the two — a read still on its way when a later one landed — changes no
+                // word of it.
+                if note.isLater(than: existing) { merged = merged.revised(by: note, was: existing) }
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.
                 let kept = categories != existing.categories || holding != existing.holding
@@ -338,8 +343,13 @@ public actor ItemStore {
     /// booster (`Note.refreshed(over:)`). **A post not held is dropped**: reading one post again
     /// updates what is here, and brings in nothing the reader did not already have. Returns
     /// whether anything held really changed, so a caller adopts the store only then.
+    ///
+    /// **A copy its source says was read before the row was** (#286) changes no word of it. Its
+    /// counts still land. What it says the reader did lands only where `acted` — the source's own
+    /// answer to an act the reader has just made (`MastodonWrite`), which must never be lost to a
+    /// row that looks newer, and which no stale timeline or thread read is.
     @discardableResult
-    public func refresh(_ incoming: [Note], ifSourceHere host: String) -> Bool {
+    public func refresh(_ incoming: [Note], ifSourceHere host: String, acted: Bool = false) -> Bool {
         let host = host.lowercased()
         guard sourceList.contains(where: { $0.host == host }) else { return false }
         var moved = false
@@ -348,10 +358,11 @@ public actor ItemStore {
         var held: [Note] = []
         for note in incoming where note.source.host == host {
             guard let existing = notes[note.key] else { continue }
-            held.append(note)
+            let stale = note.isEarlier(than: existing)
+            if !stale { held.append(note) }
             // The same words read again are not a change (#175): a thread re-read with nothing
             // edited in it neither writes the store down again nor renews a screen.
-            let refreshed = note.refreshed(over: existing)
+            let refreshed = stale ? existing.restated(by: note, acted: acted) : note.refreshed(over: existing)
             guard refreshed != existing else { continue }
             notes[note.key] = refreshed
             moved = true

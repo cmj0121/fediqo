@@ -109,6 +109,12 @@ struct DummyThreadPane: View {
                             threaded(step.element, dimmed: true, depth: step.offset)
                         }
                         threaded(conversation.post, dimmed: false, depth: above)
+                        // What it said before its source changed it, where this device held it (#286).
+                        if !conversation.post.earlier.isEmpty {
+                            EarlierWordings(
+                                item: conversation.post, lifted: decks.isLifted(conversation.post.id)
+                            )
+                        }
                         if !root.otherCopies.isEmpty {
                             carried
                         }
