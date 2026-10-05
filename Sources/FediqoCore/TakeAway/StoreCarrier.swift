@@ -24,9 +24,6 @@ public protocol StoreCarrier: Sendable {
     /// What the package at `url` says it holds, once `key` opens it: #252's question, and nothing
     /// on this device changes.
     func preview(_ url: URL, key: PackageKey) async throws -> PackageSummary
-    /// Reads the package at `url` back onto this device, whole or not at all. `replacing` is the
-    /// person's answer to what becomes of a store already held: without it, a held store refuses
-    /// (`PackageFault.alreadyHeld`).
     func readBack(
         _ url: URL, key: PackageKey, replacing: Bool, progress: @escaping @Sendable (PackageProgress) -> Void
     ) async throws

@@ -48,6 +48,33 @@ public struct Holdings: Equatable, Sendable {
     /// Newest stretch first. Only stretches holding a post are listed.
     public let byPeriod: [Bucket]
 
+    /// What the person keeps of some of the posts held (#284, #294): how many, and what their
+    /// words weigh.
+    ///
+    /// **Words, and said to be words.** `bytes` is what the posts say — body, title, warning, and
+    /// every earlier wording held with them (#286) — as the bytes they are written in: a figure
+    /// counted from the notes themselves, so it needs no read of the disk and is the same on
+    /// every device holding them. It is not what their rows take in the index, which carries
+    /// more than words, and it is not their pictures: a picture copy is kept by its source and
+    /// not by its post (`MediaCopies`), so no copy can be said to be a kept post's.
+    public struct Kept: Equatable, Sendable {
+        public let posts: Int
+        public let bytes: Int
+
+        public static let none = Kept(posts: 0, bytes: 0)
+    }
+
+    /// Everything kept, every source together.
+    public let kept: Kept
+    /// What is kept from each source, by folded host — one that has been removed included, since
+    /// a kept post outlives its source and still names it. A host with nothing kept is absent.
+    public let keptBySource: [String: Kept]
+    /// Of each source's kept posts, how many are kept through another source too (#294): a post
+    /// two sources carry is two rows here and one on screen (`SamePost`), and it is drawn as
+    /// kept while either copy is. So stopping keeping one source's copies leaves these kept —
+    /// which the act that does it has to be able to say. A host with none is absent.
+    public let keptElsewhereBySource: [String: Int]
+
     public init(notes: [Note], per period: HeldPeriod, calendar: Calendar = .current) {
         posts = notes.count
         bySource = Dictionary(grouping: notes, by: \.source.host).mapValues(\.count)
@@ -55,6 +82,16 @@ public struct Holdings: Equatable, Sendable {
         aside = apart.count
         asideBySource = Dictionary(grouping: apart, by: \.source.host).mapValues(\.count)
         earlier = notes.reduce(0) { $0 + $1.earlier.count }
+        let keeping = notes.filter(\.kept)
+        kept = Kept(posts: keeping.count, bytes: keeping.reduce(0) { $0 + $1.wordBytes })
+        keptBySource = Dictionary(grouping: keeping, by: \.source.host).mapValues { held in
+            Kept(posts: held.count, bytes: held.reduce(0) { $0 + $1.wordBytes })
+        }
+        var elsewhere: [String: Int] = [:]
+        for copies in SamePost.gathered(keeping) where Set(copies.map(\.source.host)).count > 1 {
+            for copy in copies { elsewhere[copy.source.host, default: 0] += 1 }
+        }
+        keptElsewhereBySource = elsewhere
         let component = period.component
         byPeriod = Dictionary(grouping: notes) {
             calendar.dateInterval(of: component, for: $0.postedAt)?.start ?? $0.postedAt
@@ -65,6 +102,16 @@ public struct Holdings: Equatable, Sendable {
 
     public func posts(host: String) -> Int {
         bySource[host.lowercased()] ?? 0
+    }
+
+    /// What is kept from `host`, or nothing.
+    public func kept(host: String) -> Kept {
+        keptBySource[host.lowercased()] ?? .none
+    }
+
+    /// How many of `kept(host:).posts` stay kept through another source's copy.
+    public func keptElsewhere(host: String) -> Int {
+        keptElsewhereBySource[host.lowercased()] ?? 0
     }
 
     /// How many of `posts(host:)` are held aside from the timelines.

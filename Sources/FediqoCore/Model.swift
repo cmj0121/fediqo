@@ -714,6 +714,13 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.language = SourceField.languageTag(language)
     }
 
+    /// What this post's words weigh, in the bytes they are written in (#294): its body, title and
+    /// warning, and every earlier wording held with it. What `Holdings.Kept` adds up.
+    var wordBytes: Int {
+        body.utf8.count + (title?.utf8.count ?? 0) + (spoiler?.utf8.count ?? 0)
+            + earlier.reduce(0) { $0 + $1.bytes }
+    }
+
     /// What the post says, as a wording: its words and its author's warning, and whether it was
     /// covered. See `Wording`.
     func wording(until moment: Date) -> Wording {

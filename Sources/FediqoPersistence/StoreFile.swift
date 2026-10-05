@@ -269,6 +269,13 @@ public struct StoreFile: Sendable {
         }
     }
 
+    /// How many rows the index holds as kept (#284), asked of the table and not of the notes read
+    /// out of it: what a read back checks a package's header against (#294), so it is every row
+    /// the file carries, whether or not this build can draw it.
+    func keptCount() throws -> Int {
+        try db.read { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM note WHERE kept") ?? 0 }
+    }
+
     public func load() throws -> (sources: [Source], notes: [Note], said: [SourceProfile]) {
         try db.read { db in
             let records = try SourceRecord.fetchAll(db)

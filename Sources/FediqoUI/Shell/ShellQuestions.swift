@@ -15,6 +15,84 @@ enum ShellQuestion {
     /// The id every one-yes question answers with.
     static let yes = "yes"
 
+    /// How wide a question's line may be: one line of the sheet, at the widths it is drawn at,
+    /// counted in the columns a Latin letter takes.
+    static let lineLength = 70
+
+    /// How wide `text` is drawn, in columns: a Han character, a kana, a Hangul syllable or a
+    /// full-width mark takes about two of a Latin letter's. A line of seventy characters is one
+    /// line in English and nearly two in Chinese, so a rule that counts characters passes a line
+    /// that does not fit.
+    static func width(_ text: String) -> Int {
+        text.unicodeScalars.reduce(0) { sum, scalar in
+            switch scalar.value {
+            case 0x1100...0x115F, 0x2E80...0xA4CF, 0xAC00...0xD7A3, 0xF900...0xFAFF, 0xFE30...0xFE4F,
+                 0xFF00...0xFF60, 0xFFE0...0xFFE6, 0x1F300...0x1FAFF, 0x20000...0x3FFFD:
+                sum + 2
+            default:
+                sum + 1
+            }
+        }
+    }
+
+    /// A question's line and detail with one more whole sentence said (#294) — how many kept
+    /// posts stay, how many of the posts brought are kept. **On the line where the line can take
+    /// it**, since the line is what is read before the yes; behind the (?) where it cannot, and
+    /// then the detail is where it is. Nothing changes where there is no sentence to say.
+    ///
+    /// Joined as two sentences by a key of its own, so a language that puts nothing between two
+    /// sentences is not handed a space.
+    static func saying(
+        _ sentence: String?, line: String, help: String?, language: DummyLanguage? = nil
+    ) -> (line: String, help: String?) {
+        guard let sentence else { return (line, help) }
+        let join = L10n.t("question.join", language: language)
+        let longer = String(format: join, line, sentence)
+        if width(longer) <= lineLength { return (longer, help) }
+        return (line, help.map { String(format: join, $0, sentence) } ?? sentence)
+    }
+
+    /// "3 posts you keep stay." — or nothing where none is kept: what a question that lets posts
+    /// go says of the ones it leaves (#294).
+    static func keptStay(_ kept: Int, language: DummyLanguage? = nil) -> String? {
+        kept > 0 ? L10n.count("question.kept.stay", kept, language: language) : nil
+    }
+
+    /// "3 of them are kept." — what a question that brings posts in says of them (#294): none,
+    /// where the package says so; and that it does not say, where it does not.
+    static func keptBrought(_ kept: Int?, language: DummyLanguage? = nil) -> String {
+        guard let kept else { return L10n.t("question.kept.brought.unsaid", language: language) }
+        return kept == 0
+            ? L10n.t("question.kept.brought.none", language: language)
+            : L10n.count("question.kept.brought", kept, language: language)
+    }
+
+    /// Stopping keeping every kept post, or every one from one source (#294). The title names the
+    /// count; the line says whose and that nothing goes now; the (?) says what the yes costs.
+    /// **A loss, and drawn as one**: nothing goes at the press, but the marks do not come back by
+    /// themselves, and what they held back may go at the next limit.
+    ///
+    /// **The count is of posts that will be ordinary afterwards.** Where some of that source's
+    /// kept posts are kept through another source too, they stay kept, and the question says how
+    /// many rather than counting them in.
+    static func stopKeeping(_ ask: KeptAsk, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let (line, help) = saying(
+            ask.elsewhere > 0 ? L10n.count("usage.kept.elsewhere", ask.elsewhere, language: language) : nil,
+            line: String(
+                format: L10n.t("usage.kept.ask.line", language: language),
+                SpanSection.whereLabel(ask.host, language: language)
+            ),
+            help: L10n.t("usage.kept.ask.detail", language: language), language: language
+        )
+        return ShellConfirmation(
+            symbol: "bookmark.slash", title: L10n.count("usage.kept.ask", ask.posts, language: language),
+            line: line,
+            help: help,
+            choices: [.init(yes, L10n.t("usage.kept.stop", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     /// Taking back what the reader wrote (#109). `copy` is the copy that goes (#136): its words
     /// and its host are what is named.
     static func withdraw(_ copy: DummyItem, language: DummyLanguage? = nil) -> ShellConfirmation {
@@ -31,8 +109,13 @@ enum ShellQuestion {
     /// Removing a source. The line says what will happen to its posts — they go, or they stay
     /// as the reader chose on Preferences (#250, `postsStay`) — and the boards it takes do not
     /// come back, so where there are any the line names them too; the (?) says the rest.
+    ///
+    /// `kept` is how many of its posts the person keeps (#294): where its posts go, the line
+    /// itself says how many stay for that — a line of its own, so the count is read before the
+    /// yes — and the (?) says the rest as before. Where they all stay it says nothing of them:
+    /// none goes.
     static func remove(
-        host: String, boards: Int, postsStay: Bool = false, language: DummyLanguage? = nil
+        host: String, boards: Int, postsStay: Bool = false, kept: Int = 0, language: DummyLanguage? = nil
     ) -> ShellConfirmation {
         let stay = postsStay ? ".stay" : ""
         // Only the boards keys carry a count to format; the rest are said as written.
@@ -41,8 +124,17 @@ enum ShellQuestion {
                 ? String(format: L10n.t("\(key)\(stay).boards", language: language), boards)
                 : L10n.t("\(key)\(stay)", language: language)
         }
-        let line = postsStay || boards > 0 ? said("account.remove.line") : L10n.t("account.remove.detail", language: language)
-        let help = postsStay || boards > 0 ? said("account.remove.detail") : nil
+        var line = postsStay || boards > 0 ? said("account.remove.line") : L10n.t("account.remove.detail", language: language)
+        var help = postsStay || boards > 0 ? said("account.remove.detail") : nil
+        if kept > 0, !postsStay {
+            line = boards > 0
+                ? counted("account.remove.line.kept.boards", kept, String(boards), language: language)
+                : L10n.count("account.remove.line.kept", kept, language: language)
+            // The line has said how many stay; the (?) says the rest without saying it again.
+            help = boards > 0
+                ? String(format: L10n.t("account.remove.detail.boards.counted", language: language), boards)
+                : L10n.t("account.remove.detail.counted", language: language)
+        }
         return ShellConfirmation(
             symbol: "trash", title: String(format: L10n.t("account.remove.title", language: language), host),
             line: line, help: help,
@@ -159,13 +251,22 @@ enum ShellQuestion {
 
     /// Letting go now of `posts` posts deleted at their source and `places` settled places (#179,
     /// #204): each counted apart in the title, and the line saying only what goes of each.
-    static func letGo(posts: Int, places: Int, language: DummyLanguage? = nil) -> ShellConfirmation {
-        let line = places == 0 ? "prefs.gone.ask.line"
+    ///
+    /// `kept` is how many posts marked so the person keeps (#294): they stay, and the question
+    /// says how many — where any post goes at all.
+    static func letGo(posts: Int, places: Int, kept: Int = 0, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let key = places == 0 ? "prefs.gone.ask.line"
             : posts == 0 ? "prefs.gone.ask.line.placesonly" : "prefs.gone.ask.line.places"
+        let (line, help) = saying(
+            posts == 0 ? nil : keptStay(kept, language: language),
+            line: L10n.t(key, language: language),
+            help: GoneSection.askDetail(posts: posts, places: places, counted: posts > 0 && kept > 0, language: language),
+            language: language
+        )
         return ShellConfirmation(
             symbol: "trash", title: GoneSection.askLine(posts, places: places, language: language),
-            line: L10n.t(line, language: language),
-            help: GoneSection.askDetail(posts: posts, places: places, language: language),
+            line: line,
+            help: help,
             choices: [.init(yes, L10n.t("prefs.gone.confirm", language: language), role: .destructive)],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
@@ -175,14 +276,20 @@ enum ShellQuestion {
     /// counts them, the line names the days and where they come from and that they do not come
     /// back, and the (?) says what stays.
     static func letGo(_ ask: SpanAsk, language: DummyLanguage? = nil) -> ShellConfirmation {
-        ShellConfirmation(
-            symbol: "trash", title: L10n.count("prefs.span.ask", ask.posts, language: language),
+        let (line, help) = saying(
+            keptStay(ask.kept, language: language),
             line: String(
                 format: L10n.t("prefs.span.ask.line", language: language),
                 SpanSection.spanLabel(from: ask.from, to: ask.to, language: language),
                 SpanSection.whereLabel(ask.host, language: language)
             ),
-            help: L10n.t("prefs.span.ask.detail", language: language),
+            help: L10n.t(ask.kept > 0 ? "prefs.span.ask.detail.counted" : "prefs.span.ask.detail", language: language),
+            language: language
+        )
+        return ShellConfirmation(
+            symbol: "trash", title: L10n.count("prefs.span.ask", ask.posts, language: language),
+            line: line,
+            help: help,
             choices: [.init(yes, L10n.t("prefs.gone.confirm", language: language), role: .destructive)],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
@@ -234,6 +341,11 @@ enum ShellQuestion {
 
     /// #252's question: how many posts, from which sources, taken away when — and, where this
     /// device holds a store, that a yes replaces it, which is a loss and is drawn as one.
+    ///
+    /// **And how many of the posts it brings are kept** (#294), before the yes: a kept post is
+    /// one no limit here will let go, and a store read back arrives with every one of its marks.
+    /// What the header says — which the read back holds the package to (`StorePackager`) — or,
+    /// of a package whose header says nothing, that it does not say.
     static func readBack(_ summary: PackageSummary, held: Bool, language: DummyLanguage? = nil) -> ShellConfirmation {
         let sources = summary.sources.map(\.host).joined(separator: ", ")
         let day = summary.takenAt.formatted(
@@ -243,11 +355,16 @@ enum ShellQuestion {
             format: L10n.t("carry.read.ask.help", language: language), sources, day, summary.device, summary.appVersion
         )
         if held { help = String(format: L10n.t("carry.read.ask.help.held", language: language), help) }
+        let (line, said) = saying(
+            summary.contents == .whole ? keptBrought(summary.kept, language: language) : nil,
+            line: String(format: L10n.t("carry.read.ask.line", language: language), sources, day),
+            help: help, language: language
+        )
         return ShellConfirmation(
             symbol: "square.and.arrow.down",
             title: L10n.count("carry.read.ask.title", summary.posts, language: language),
-            line: String(format: L10n.t("carry.read.ask.line", language: language), sources, day),
-            help: help,
+            line: line,
+            help: said,
             choices: [held
                 ? .init(yes, L10n.t("carry.read.replace", language: language), role: .destructive)
                 : .init(yes, L10n.t("carry.read.go", language: language), role: .primary)],
@@ -323,15 +440,21 @@ enum ShellQuestion {
             ? String(format: L10n.t("nearby.ask.\(way).signIns.title", language: language), ask.peer)
             : counted("nearby.ask.\(way).title", summary.posts, ask.peer, language: language)
         let size = UsagePane.size(Int(ask.offer.fileBytes), language: language)
-        let line = String(format: L10n.t("nearby.ask.line", language: language), sources, size)
-        var help = String(
+        let plainLine = String(format: L10n.t("nearby.ask.line", language: language), sources, size)
+        var plainHelp = String(
             format: L10n.t(ask.receiving ? "nearby.ask.hold.help" : "nearby.ask.move.help", language: language),
             ask.peer, summary.device, summary.appVersion
         )
         if ask.receiving, ask.held, !signInsOnly {
-            help = String(format: L10n.t("carry.read.ask.help.held", language: language), help)
+            plainHelp = String(format: L10n.t("carry.read.ask.help.held", language: language), plainHelp)
         }
         let replaces = ask.receiving && ask.held && !signInsOnly
+        // How many of the posts are kept (#294), said on both devices: the one that will hold
+        // them is the one it matters to, and the one sending them reads the same question.
+        let (line, help) = saying(
+            signInsOnly ? nil : keptBrought(summary.kept, language: language), line: plainLine, help: plainHelp,
+            language: language
+        )
         return ShellConfirmation(
             symbol: ask.receiving ? "antenna.radiowaves.left.and.right" : "paperplane",
             title: title, line: line, help: help,

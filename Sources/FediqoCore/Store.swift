@@ -930,6 +930,40 @@ public actor ItemStore {
         return true
     }
 
+    /// Stops keeping every row kept, or every one that came through `host` where one is given
+    /// (#294) — a source no longer here included, as `setKept` reaches one. One act and one
+    /// change, however many rows. Returns how many were kept and are not now.
+    ///
+    /// **Lets nothing go by itself**, as un-keeping one row lets nothing go: each is an ordinary
+    /// row from this moment, and goes when a limit next acts or the person next lets something go.
+    @discardableResult
+    public func stopKeeping(host raw: String? = nil) -> Int {
+        let host = raw?.lowercased()
+        let keeping = notes.values.filter { $0.kept && (host == nil || $0.key.host == host) }
+        guard !keeping.isEmpty else { return 0 }
+        for var note in keeping {
+            note.kept = false
+            notes[note.key] = note
+        }
+        changed(shown: keeping.contains { $0.holding == .arrived }, aside: keeping.contains { $0.holding == .aside })
+        return keeping.count
+    }
+
+    /// How many kept rows were posted inside `span` and, where `host` is given, came through that
+    /// host (#294): what `letGo(span:host:)` would leave for being kept, so the question before
+    /// it can say how many stay.
+    public func keptCount(span: Range<Date>, host raw: String? = nil) -> Int {
+        let host = raw?.lowercased()
+        return notes.values.reduce(0) { sum, note in
+            sum + (note.kept && span.contains(note.postedAt) && (host == nil || note.key.host == host) ? 1 : 0)
+        }
+    }
+
+    /// How many kept rows are marked gone from their source (#294): what `letGoneGo` leaves.
+    public func keptGoneCount() -> Int {
+        notes.values.reduce(0) { $0 + ($1.kept && $1.goneSince != nil ? 1 : 0) }
+    }
+
     /// Marks one row as gone from its source (#179): a read of that one post heard the source say
     /// it no longer has it. The row stays, and `all()` still draws it where it drew it before.
     /// Only while `key`'s host is still a source here, only a row held, and only once — the first

@@ -195,6 +195,7 @@ struct UsagePane: View {
                 breakdown(session)
             case .keep:
                 keep(session)
+                KeptSection(session: session)
                 SpanSection(session: session)
                 GoneSection(session: session)
                 LimitAccountSection(session: session)

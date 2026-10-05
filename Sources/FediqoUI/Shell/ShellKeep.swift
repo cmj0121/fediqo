@@ -32,6 +32,30 @@ extension ShellSession {
         return true
     }
 
+    /// Stops keeping every post kept, or every one from `host` — a source here or one removed
+    /// (#294). Returns what that did. One act: the store is changed once, adopted once and
+    /// written down once, however many posts.
+    ///
+    /// **Lets nothing go.** Each post is an ordinary one from here, and the next limit or letting
+    /// go may take it. A copy laid into an open thread is laid in again as it now is.
+    ///
+    /// **One source's copies and no other's.** A post two sources carry is kept while either
+    /// copy is, so un-keeping this source's leaves it kept through the other — and that is said
+    /// (`StoppedKeeping.elsewhere`) rather than undone here: the other source's copies are that
+    /// source's, and the act that reaches them is the one for every source.
+    @discardableResult
+    func stopKeeping(host: String?) async -> StoppedKeeping {
+        let folded = host?.lowercased()
+        let elsewhere = folded.map(holdings.keptElsewhere(host:)) ?? 0
+        let keys = (notes + heldAside).filter { $0.kept && (folded == nil || $0.key.host == folded) }.map(\.key)
+        let stopped = await store.stopKeeping(host: host)
+        guard stopped > 0 else { return StoppedKeeping() }
+        for held in await store.notes(keys).values { conversations.replace(held) }
+        await reloadFromStore()
+        await persist?()
+        return StoppedKeeping(ordinary: max(0, stopped - elsewhere), elsewhere: min(stopped, elsewhere))
+    }
+
     /// The press on the keep mark, and `y`: keeps a row not kept, un-keeps one that is. Returns
     /// what the row now is, or nothing where the store took nothing.
     ///
@@ -45,4 +69,11 @@ extension ShellSession {
         showToast(L10n.t(kept ? "item.toast.kept.on" : "item.toast.kept.off"))
         return kept
     }
+}
+
+/// What stopping keeping did (#294): how many posts are ordinary posts now, and how many of the
+/// copies un-kept are of posts still kept through another source's copy.
+struct StoppedKeeping: Equatable, Sendable {
+    var ordinary = 0
+    var elsewhere = 0
 }

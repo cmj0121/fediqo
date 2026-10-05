@@ -56,6 +56,11 @@ extension ShellSession {
         WentGone(posts: await store.goneCount(), places: await store.settledCount())
     }
 
+    /// How many posts marked gone the person keeps: what the press leaves (#294).
+    func goneKept() async -> Int {
+        await store.keptGoneCount()
+    }
+
     /// Lets go of everything marked gone from its source, now — the reader's press. Returns what
     /// went, which is what the press says back.
     @discardableResult

@@ -451,6 +451,15 @@ public struct FediqoRootView: View {
         sources.first { $0.host == host }?.boards.count ?? 0
     }
 
+    /// The question before `host` is removed, with what this session holds for it read here: the
+    /// boards it takes, and how many of its posts the person keeps, which stay (#294).
+    static func removeQuestion(_ host: String, in session: ShellSession, postsStay: Bool) -> ShellConfirmation {
+        ShellQuestion.remove(
+            host: host, boards: boards(of: host, in: session.sources), postsStay: postsStay,
+            kept: session.holdings.kept(host: host).posts
+        )
+    }
+
     /// A forum's own page closed, on the window a Mac opens it in or the sheet elsewhere — **one
     /// body for both**, because this branch once lost the retry and the host when the page moved
     /// out of the sheet: the window was given the body the sheet had at the time, and the sheet
@@ -1797,12 +1806,7 @@ private struct HostQuestion: ViewModifier {
     static func remove(_ session: ShellSession, prefs: DummyPrefs) -> HostQuestion {
         HostQuestion(
             session: session, asking: \.removing,
-            question: { host in
-                ShellQuestion.remove(
-                    host: host, boards: FediqoRootView.boards(of: host, in: session.sources),
-                    postsStay: prefs.removedPostsStay
-                )
-            },
+            question: { FediqoRootView.removeQuestion($0, in: session, postsStay: prefs.removedPostsStay) },
             act: { await session.remove(host: $0, keepingPosts: prefs.removedPostsStay) }
         )
     }

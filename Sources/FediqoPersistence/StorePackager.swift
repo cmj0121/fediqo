@@ -360,7 +360,8 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             timelines: contents == .whole ? timelinesKept() : 0, takenAt: Date(),
             withPictures: pictures && contents == .whole,
             bytes: total, hasSecrets: pieces.contains { $0.kind == .secrets && $0.bytes > 0 },
-            device: device, appVersion: appVersion, entryCount: pieces.count
+            device: device, appVersion: appVersion, entryCount: pieces.count,
+            kept: contents == .whole ? snapshot.notes.filter(\.kept).count : nil
         )
         try? FileManager.default.removeItem(at: url)
         let writer = try PackageWriter(to: url, key: key, summary: summary, rounds: rounds)
@@ -697,11 +698,13 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         // Every tag has held and the footer was seen. Now: is the staged store one this build
         // can read? Opened before a byte here changes.
         var contents: (sources: [Source], notes: [Note], said: [SourceProfile])?
+        var kept: Int?
         if summary.contents == .whole {
             guard staged.index != nil, staged.settings != nil, staged.secrets != nil else { throw PackageRefusal.altered }
             do {
                 let index = try StoreFile(at: incoming)
                 contents = try index.load()
+                kept = try index.keptCount()
                 // Read, and so one this build may write: where this run has no file of its own
                 // the staged index is moved in as it stands, and it is not left holding words a
                 // build before this one freed without zeroing (#292).
@@ -714,6 +717,14 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             } catch {
                 throw PackageFault.unreadableStore
             }
+            // **The header's word on what is kept is checked against the store it came with**
+            // (#294), here, with the index staged and proven readable and nothing of this
+            // device's touched. The header is sealed, but by whoever made the package: one that
+            // says none is kept over a store in which every post is would have the question tell
+            // the person so, and bring in posts no limit here will ever let go. A header that
+            // states a number the index does not bear out is a package that is not as it says —
+            // from a file and from a device nearby alike, since both are read back through here.
+            if let said = summary.kept, said != kept { throw PackageRefusal.altered }
         } else {
             guard staged.secrets != nil else { throw PackageRefusal.altered }
             contents = nil

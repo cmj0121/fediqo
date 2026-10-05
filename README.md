@@ -343,7 +343,7 @@ The Usage page is tabbed by purpose: Sources, Time, Keep, and Copies. Tab rotate
 Sources holds the totals, each source's figures and its Clear; posts held without arriving
 through a timeline — a search's finds, a conversation's answers, a topic's replies — are
 counted, and said to be held apart from the timelines. Time holds the week or month
-breakdown. Keep holds the two limits, Let go by dates, and What the limits let go. Copies
+breakdown. Keep holds the two limits, Posts you keep, Let go by dates, and What the limits let go. Copies
 holds the pictures this device is keeping, and the drop that takes them. Clear takes a
 server's cached copies and its sign-in, and keeps its posts. Preferences keeps what you
 choose: language, theme, type, the latest date, what becomes of a removed source's posts,
@@ -376,6 +376,20 @@ is read again while its source is here. Where kept posts alone are more than the
 store stays over it and Room says so; other posts are then let go as they arrive. Kept survives a relaunch, and goes
 with a take-away and a move nearby. Un-kept, it is an ordinary post again from that moment:
 the press itself lets nothing go.
+
+Usage's Keep tab counts what you keep under Posts you keep: every source together, then each
+by name — a source you removed among them — with what their words weigh, earlier wordings
+counted in. Pictures are not in that figure; picture copies are counted by source, on Copies.
+Stop keeping, beside each figure, un-keeps all of them or all from that source at once. It asks
+first and names the count, and it lets nothing go: they are ordinary posts from then, and the
+next limit or letting go may take them. A post two sources carry stays kept through the other
+source's copy; one source's Stop keeping counts only the posts it makes ordinary and says how
+many stay kept that way, and Every source reaches them all. A question that lets posts go —
+removing a source, letting go by dates, letting go of what was deleted at its source — says
+how many kept posts stay. Reading back a store, and holding or moving one nearby, says how
+many of the posts it brings are kept before you agree, and a package whose store does not
+bear that number out is refused before anything here changes. One from a version that did not
+write the number down says that it does not say.
 
 #### The two limits
 
