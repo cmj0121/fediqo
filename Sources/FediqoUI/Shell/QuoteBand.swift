@@ -94,6 +94,30 @@ struct QuoteBand: View {
             }
         }
 
+        /// Of the post `item` answers, or nothing where there is nothing of the kind to say —
+        /// the same four, read the way `DummyItemRow.replyLine` reads them.
+        init?(answeredBy item: DummyItem) {
+            if item.owes.contains(.answers) {
+                self = item.owesStalled ? .stalled : .onItsWay
+            } else if item.refsGone.contains(.answers) {
+                self = .gone
+            } else if item.refsUnheld.contains(.answers) {
+                self = .unheld
+            } else {
+                return nil
+            }
+        }
+
+        /// What the opened view says in the place of a post that is answered and not here.
+        var aboveKey: String {
+            switch self {
+            case .onItsWay: "thread.above.onItsWay"
+            case .stalled: "thread.above.stalled"
+            case .gone: "thread.above.gone"
+            case .unheld: "thread.above.unheld"
+            }
+        }
+
         var key: String {
             switch self {
             case .onItsWay: "quote.short.onItsWay"

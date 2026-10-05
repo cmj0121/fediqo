@@ -60,6 +60,8 @@ struct DummyThreadPane: View {
     var jumpToTop: Int
     var onToast: (String) -> Void
     var onBack: () -> Void
+    /// Where a test reads the places of what is drawn. Nothing in the app.
+    var probe: ThreadPaneProbe?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
     /// The hosts still on this device (#250): a thread on a source that has gone says so under
@@ -76,15 +78,17 @@ struct DummyThreadPane: View {
     /// other, which is worth the longer name to say.
     private let deepestIndent = 4
 
-    /// What this pane draws: the conversation the source handed back, or this post alone until
-    /// one has. Built each pass rather than held, for `ShellConversationStanding.loaded`'s reason
-    /// — and built **once** a pass: `body` binds it and hands each row the depth its place in
+    /// What this pane draws: what the post refers to and what refers to it, among what is held
+    /// (#293), or this post alone where nothing does. Built each pass rather than held — the
+    /// root row is a value that changes under the reader, a mark pressed, a cover lifted — and
+    /// built **once** a pass: `body` binds it and hands each row the depth its place in
     /// the conversation already says, rather than every row asking the conversation again.
     private var conversation: DummyConversation { conversations.conversation(around: root) }
 
     var body: some View {
         let conversation = conversation
-        let above = conversation.ancestors.count
+        let lead = conversation.lead
+        let above = lead + conversation.ancestors.count
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: ShellSpace.snug) {
                 ShellBackButton("thread.back", action: onBack)
@@ -105,8 +109,13 @@ struct DummyThreadPane: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
+                        // The place of a post that is answered and not here (#293).
+                        if let missing = conversation.missing {
+                            placeAbove(missing.aboveKey)
+                                .modifier(ProbedPlace(part: .above, probe: probe))
+                        }
                         ForEach(Array(conversation.ancestors.enumerated()), id: \.element.id) { step in
-                            threaded(step.element, dimmed: true, depth: step.offset)
+                            threaded(step.element, dimmed: true, depth: lead + step.offset)
                         }
                         threaded(conversation.post, dimmed: false, depth: above)
                         // What it said before its source changed it, where this device held it (#286).
@@ -118,20 +127,42 @@ struct DummyThreadPane: View {
                         if !root.otherCopies.isEmpty {
                             carried
                         }
+                        // Who reblogged it, as far as their reblogs are held (#293).
+                        if let line = Self.rebloggedLine(conversation.rebloggers) {
+                            reblogged(line)
+                                .padding(.leading, indent(above))
+                                .modifier(ProbedPlace(part: .reblogged, probe: probe))
+                        }
                         ForEach(conversation.descendants, id: \.item.id) { entry in
+                            // An answer whose own parent is not here says so in its place (#293).
+                            if let key = entry.aboveKey {
+                                placeAbove(key)
+                                    .padding(.leading, indent(above + entry.depth))
+                                    .modifier(ProbedPlace(part: .aboveRow(entry.item.id), probe: probe))
+                            }
                             threaded(entry.item, dimmed: false, depth: above + entry.depth)
+                        }
+                        // The held posts that quote it (#293): each draws it as its quote.
+                        if !conversation.quoting.isEmpty {
+                            quotingTitle
+                                .padding(.leading, indent(above + 1))
+                                .modifier(ProbedPlace(part: .quoting, probe: probe))
+                            ForEach(conversation.quoting) { item in
+                                threaded(item, dimmed: false, depth: above + 1)
+                            }
                         }
                         if let thread {
                             rest(of: thread)
                         } else if let blog {
                             written(blog)
                         } else {
-                            around
+                            around(answered: !conversation.descendants.isEmpty)
                         }
                     }
                     .padding(.vertical, 8)
                     .padding(.trailing, 8)
                     .scrollTargetLayout()
+                    .coordinateSpace(.named(ThreadPaneProbe.space))
                 }
                 .scrollPosition(id: $topID, anchor: .top)
                 .scrollIndicators(.never)
@@ -274,6 +305,7 @@ struct DummyThreadPane: View {
             onToast: onToast
         )
         .opacity(dimmed ? 0.85 : 1)
+        .modifier(ProbedPlace(part: .row(item.id), probe: probe))
         .padding(.leading, indent(depth))
         .overlay(alignment: .leading) { rail(depth) }
         .id(item.id)
@@ -485,7 +517,7 @@ struct DummyThreadPane: View {
     ///
     /// **No `default:`.** A sixth standing has to be given a shape.
     @ViewBuilder
-    private var around: some View {
+    private func around(answered: Bool) -> some View {
         switch conversations.standing(of: root.id) {
         case .unasked, .coming:
             ForumWaiting(line: L10n.t("thread.replies.loading"))
@@ -500,7 +532,11 @@ struct DummyThreadPane: View {
             // post arrived, the source answered, and nobody has said anything under it. It is
             // told over `root.counts.replies`, which is the server's own count and may claim
             // answers this reader is not allowed to see.
-            if let notice = EmptyNotice.thread(
+            //
+            // **Not over answers drawn** (#293): what is held and answers this post is drawn
+            // whatever the source last said, and a sentence that nobody has answered would
+            // stand under the answers.
+            if !answered, let notice = EmptyNotice.thread(
                 descendantCount: 0, replyCount: 0, standing: ForumRepliesStanding.none
             ) {
                 ShellNotice(notice)
@@ -651,6 +687,61 @@ struct DummyThreadPane: View {
             .shellFont(.meta)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The place of the post the first row answers, where that post is not here (#293): one line
+    /// where its row would stand, in this app's own voice — dim, with the mark an answer's line
+    /// carries — and the rows under it one step in, as they would be under the post itself.
+    private func placeAbove(_ key: String) -> some View {
+        HStack(spacing: ShellSpace.tight) {
+            Image(systemName: "arrowshape.turn.up.left")
+                .accessibilityHidden(true)
+            Text(L10n.t(key))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .shellFont(.meta)
+        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+        .padding(.horizontal, ShellSpace.pad)
+        .padding(.vertical, ShellSpace.tight)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Who reblogged the opened post, on one line under it, with a reblog's own mark.
+    private func reblogged(_ line: String) -> some View {
+        HStack(spacing: ShellSpace.tight) {
+            Image(systemName: "arrow.2.squarepath")
+                .accessibilityHidden(true)
+            Text(line)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .shellFont(.meta)
+        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+        .padding(.horizontal, ShellSpace.pad)
+        .padding(.vertical, ShellSpace.tight)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// How many of those who reblogged are named before the rest are counted.
+    static let rebloggersNamed = 3
+
+    /// "Reblogged by A, B and C", and past `rebloggersNamed` of them how many more. Nothing
+    /// where no held reblog names this post.
+    static func rebloggedLine(_ names: [String], language: DummyLanguage? = nil) -> String? {
+        guard !names.isEmpty else { return nil }
+        let named = names.prefix(rebloggersNamed).joined(separator: L10n.t("thread.reblogs.between", language: language))
+        let more = names.count - rebloggersNamed
+        guard more > 0 else { return String(format: L10n.t("item.boostedBy", language: language), named) }
+        return String(format: L10n.t("thread.reblogs.more", language: language), named, more)
+    }
+
+    /// The title over the held posts that quote the opened one.
+    private var quotingTitle: some View {
+        Text(L10n.t("thread.quoting.title"))
+            .shellFont(.meta, weight: .medium)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.top, ShellSpace.snug)
+            .accessibilityAddTraits(.isHeader)
     }
 
     private func indent(_ depth: Int) -> CGFloat {
@@ -1135,6 +1226,48 @@ struct ForumQuotation: View {
             ForEach(levels.indices, id: \.self) { level in
                 ForumQuotation(quotation: levels[level])
             }
+        }
+    }
+}
+
+/// Where a test reads the places of what a thread's pane drew: each row by its id, and the lines
+/// the pane says in its own voice. In the stack's own space, so an `x` is an indentation.
+@MainActor
+final class ThreadPaneProbe {
+    static let space = "DummyThreadPane.rows"
+
+    enum Part: Hashable {
+        case row(String)
+        /// The place of a post the first row answers that is not here.
+        case above
+        /// The place of a post an answer answers that is not here, above that answer's row.
+        case aboveRow(String)
+        /// Who reblogged the opened post.
+        case reblogged
+        /// The title over the posts that quote it.
+        case quoting
+    }
+
+    var frames: [Part: CGRect] = [:]
+}
+
+/// Reports where one part of the pane was laid out, where a probe is handed in; draws nothing
+/// and changes nothing.
+private struct ProbedPlace: ViewModifier {
+    let part: ThreadPaneProbe.Part
+    let probe: ThreadPaneProbe?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let probe {
+            content.background(
+                GeometryReader { room in
+                    let _ = probe.frames[part] = room.frame(in: .named(ThreadPaneProbe.space))
+                    Color.clear
+                }
+            )
+        } else {
+            content
         }
     }
 }

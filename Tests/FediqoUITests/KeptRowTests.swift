@@ -400,7 +400,9 @@ struct KeptRowTests {
         let source = Source(host: host, kind: .mastodon)
         let root = Note(
             id: "https://\(host)/users/ada/statuses/9", source: source, author: "Ada",
-            handle: "@ada@\(host)", body: "the post", postedAt: origin, categories: [.public], statusID: "9"
+            handle: "@ada@\(host)", body: "the post", postedAt: origin, categories: [.public],
+            // It says what it answers, as its source's copy does: that is what puts 8 above it (#293).
+            reply: Reply(inReplyToId: "8"), statusID: "9"
         )
         let http = FixtureHTTP(thread)
         let session = ShellSession(

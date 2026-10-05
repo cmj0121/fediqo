@@ -358,6 +358,22 @@ no closer than three seconds apart, and further apart where it says to slow down
 for at most ten such posts; the rest are read when their rows come near the screen. A post
 read this way is a post like any other, and stays for as long as the post that refers to it.
 
+Opening a post shows what belongs with it, from what this device holds. Above it stands the
+post it answers, and the post that one answers, as far up as the posts held go; nothing is
+fetched by walking up. Where the next post up is on its way, could not be read for now, is
+gone at its source or is no longer held, a line in its place says so. Below it stand the held
+posts that answer it, each under the one it answers, and after them the held posts that quote
+it, under a title of their own. Who reblogged it, as far as their reblogs are held, is one
+line under the post. The thread is still read from the source when you open a post, and what
+that brings is shown because it is now held and answers — so an answer a search or a timeline
+brought stands there too, and with the network off the view is exactly what the device holds.
+An answer the thread read brings whose own earlier post the source did not hand over stands
+directly under the opened post, with a line above it saying what is known of that earlier
+post; that lasts until you quit, since which posts a source handed over as one thread is not
+written down — afterwards, with the network off, such an answer has no place in this view
+until the thread is read again, and stands in All all the same. A post the thread read brings that is
+older than you keep is shown until you quit, and is not held.
+
 Everything this device holds stands in its timelines. What a search brought back, what was
 read under a hashtag, the answers read when a post was opened, and a post another one quotes
 are posts like any other: each stands in All at the time it was posted, and stays there after

@@ -2414,17 +2414,13 @@ final class ShellSession {
     /// `heldRevision` as the open conversations last drew from what is held.
     @ObservationIgnored private var renewedConversations: Int?
 
-    /// The conversation in front drawn again from what this device holds of its posts (#193): the
-    /// store's copy of each, in the thread's own order. Only the thread in front, and only the
-    /// posts it draws are looked for, so an adopt with no thread open walks nothing; a thread left
-    /// is drawn again as it opens (`ShellReload.opened`).
+    /// The conversation in front drawn again from what this device holds (#193, #293): what the
+    /// opened post refers to and what refers to it, among everything held. Only the thread in
+    /// front, so an adopt with no thread open walks nothing; a thread left is drawn again as it
+    /// opens (`ShellReload.opened`).
     func renewConversation() {
-        guard let front = reload.inFront else { return }
-        let wanted = conversations.drawnKeys(around: front.id)
-        guard !wanted.isEmpty else { return }
-        var held: [NoteKey: Note] = [:]
-        for note in notes where wanted.contains(note.key) { held[note.key] = note }
-        conversations.renew(front.id, from: held)
+        guard let front = reload.inFront, let held = note(ofRow: front.id) else { return }
+        conversations.renew(front.id, around: held, among: notes)
     }
 
     /// The store's `repliesRevision` as the last adopt read the topics' kept replies.

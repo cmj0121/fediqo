@@ -608,18 +608,105 @@ public struct DummyConversation: Hashable, Sendable {
     public let ancestors: [DummyItem]
     public let post: DummyItem
     public let descendants: [DummyThreadEntry]
+    /// Where the post the first row answers stands, when it is not here to be drawn and there
+    /// is something to say of it (#293): on its way, not read for now, gone at its source, no
+    /// longer held. Said in that post's place — a line above the first row, one step out from
+    /// it — so the rows keep their places when it arrives.
+    var missing: QuoteBand.Loading?
+    /// The held posts that quote the opened one, drawn after its answers (#293).
+    public var quoting: [DummyItem] = []
+    /// Who reblogged the opened post, as far as this device holds their reblogs, the latest
+    /// first and each person once (#293). Said in one line under the post: a reblog is in no
+    /// thread, and its row would be the opened post drawn a second time.
+    public var rebloggers: [String] = []
 
-    public var inOrder: [DummyItem] {
-        ancestors + [post] + descendants.map(\.item)
+    public init(ancestors: [DummyItem], post: DummyItem, descendants: [DummyThreadEntry]) {
+        self.ancestors = ancestors
+        self.post = post
+        self.descendants = descendants
     }
 
+    /// Every row, in the order drawn — what `j` and `k` walk.
+    public var inOrder: [DummyItem] {
+        ancestors + [post] + descendants.map(\.item) + quoting
+    }
+
+    /// How many steps in the first row stands: one where a line stands above it in the place of
+    /// the post it answers, none otherwise.
+    public var lead: Int { missing == nil ? 0 : 1 }
+
     public func depth(of id: String) -> Int {
-        if let index = ancestors.firstIndex(where: { $0.id == id }) { return index }
-        if post.id == id { return ancestors.count }
+        if let index = ancestors.firstIndex(where: { $0.id == id }) { return lead + index }
+        if post.id == id { return lead + ancestors.count }
         if let entry = descendants.first(where: { $0.item.id == id }) {
-            return ancestors.count + entry.depth
+            return lead + ancestors.count + entry.depth
         }
+        if quoting.contains(where: { $0.id == id }) { return lead + ancestors.count + 1 }
         return 0
+    }
+}
+
+extension DummyConversation {
+    /// What belongs with the opened post, as rows (#293): `opened` is read off references among
+    /// what is held, and this draws it around the row the pane was given.
+    ///
+    /// **The post itself is the one the pane was already given**, for `around`'s reason.
+    ///
+    /// **The first row's own line about the post it answers is said above it instead**, where
+    /// there is something to say: the row is the first thing drawn, the place of what it
+    /// answers is the line over it, and one fact said twice a finger apart is noise. Every other
+    /// row's parent is the row above, and its line is the plain one.
+    static func opened(_ root: DummyItem, _ opened: Opened) -> DummyConversation {
+        var conversation = around(
+            root, rootID: root.statusID, ancestors: opened.above, descendants: opened.below
+        )
+        let first = conversation.ancestors.first ?? root
+        if let missing = QuoteBand.Loading(answeredBy: first) {
+            conversation = DummyConversation(
+                ancestors: conversation.ancestors.enumerated().map { $0.offset == 0 ? $0.element.sayingAbove() : $0.element },
+                post: conversation.ancestors.isEmpty ? root.sayingAbove() : root,
+                descendants: conversation.descendants
+            )
+            conversation.missing = missing
+        }
+        // An answer the thread's read brought whose parent is not here: at the first step, and
+        // what is known of that parent said above it — and so not on the row's own line.
+        if !opened.loose.isEmpty {
+            let loose = Set(opened.loose.map(\.rowID))
+            let missing = conversation.missing
+            conversation = DummyConversation(
+                ancestors: conversation.ancestors, post: conversation.post,
+                descendants: conversation.descendants.map { entry in
+                    // One that says it answers nothing has nothing to be said above it.
+                    guard loose.contains(entry.item.id), entry.item.answering != .nothing else { return entry }
+                    var said = DummyThreadEntry(item: entry.item.sayingAbove(), depth: entry.depth)
+                    said.aboveKey = QuoteBand.Loading(answeredBy: entry.item)?.aboveKey ?? "thread.above.notHere"
+                    return said
+                }
+            )
+            conversation.missing = missing
+        }
+        conversation.quoting = opened.quoting.filter { $0.key.rowID != root.id }.map(DummyItem.init)
+        var seen: Set<String> = []
+        // A reblog since taken back at its source is not somebody reblogging it now.
+        conversation.rebloggers = opened.reblogs.filter { $0.goneSince == nil }.compactMap { reblog in
+            // By handle, which is who they are; by name where a source gave no handle, so
+            // two such people are still two.
+            seen.insert(reblog.handle.isEmpty ? reblog.author : reblog.handle).inserted ? reblog.author : nil
+        }
+        return conversation
+    }
+}
+
+extension DummyItem {
+    /// This row with nothing to say of the post it answers but that it answers: where the pane
+    /// says where that post stands in the post's own place, above the row.
+    func sayingAbove() -> DummyItem {
+        var row = self
+        row.owes.remove(.answers)
+        row.refsGone.remove(.answers)
+        row.refsUnheld.remove(.answers)
+        return row
     }
 }
 
@@ -677,6 +764,10 @@ extension DummyConversation {
 public struct DummyThreadEntry: Hashable, Sendable {
     public let item: DummyItem
     public let depth: Int
+    /// What the pane says above this row, in the place of the post it answers, where that post
+    /// is not here and the row stands at the first step for want of it (#293): a string's key.
+    /// Nothing on a row whose parent is the row it stands under.
+    var aboveKey: String?
 
     public init(item: DummyItem, depth: Int) {
         self.item = item

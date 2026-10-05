@@ -274,6 +274,14 @@
 "quote.short.unheld" = "quoted post no longer held";
 "item.reply.gone" = "%@ — that post is gone at its source";
 "item.reply.unheld" = "%@ — that post is no longer held";
+"thread.above.onItsWay" = "The post this answers is on its way";
+"thread.above.stalled" = "The post this answers could not be read for now";
+"thread.above.gone" = "The post this answers is gone at its source";
+"thread.above.unheld" = "The post this answers is no longer held";
+"thread.above.notHere" = "Answers a post not held here";
+"thread.reblogs.between" = ", ";
+"thread.reblogs.more" = "Reblogged by %1$@ and %2$d more";
+"thread.quoting.title" = "Posts that quote this one";
 "item.arrivedAsReblogBy" = "Arrived as a reblog by %@";
 "item.reblog.unheld" = "Reblogged a post this device no longer holds.";
 "item.reblog.onItsWay" = "Reblogged a post that is on its way.";

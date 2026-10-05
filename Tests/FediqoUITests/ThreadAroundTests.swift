@@ -28,22 +28,29 @@ struct ThreadAroundTests {
             + #"],"descendants":["# + descendants.joined(separator: ",") + "]}")
     }
 
-    private static func note(_ id: String, statusID: String?, kind: ProtocolKind = .mastodon) -> Note {
+    /// The post the reader opens, answering `parent` where a test's thread has posts above it:
+    /// what is drawn above a post is what it says it answers (#293), as a source's own copy of a
+    /// post with a thread above it always does.
+    private static func note(
+        _ id: String, statusID: String?, kind: ProtocolKind = .mastodon, answering parent: String? = nil
+    ) -> Note {
         Note(
             id: "https://\(host)/users/ada/statuses/\(id)", source: Source(host: host, kind: kind),
             author: "Ada", handle: "@ada@\(host)", body: "the post",
-            postedAt: Date(timeIntervalSince1970: 0), categories: [.public], statusID: statusID
+            postedAt: Date(timeIntervalSince1970: 0), categories: [.public],
+            reply: parent.map { Reply(inReplyToId: $0) }, statusID: statusID
         )
     }
 
     /// A session holding one post on one Mastodon, and the thread route it will ask for.
     private func shell(
-        _ routes: [String: FixtureHTTP.Outcome], kind: ProtocolKind = .mastodon, statusID: String? = "9"
+        _ routes: [String: FixtureHTTP.Outcome], kind: ProtocolKind = .mastodon, statusID: String? = "9",
+        answering parent: String? = nil
     ) async -> (ShellSession, FixtureHTTP, DummyItem) {
         let http = FixtureHTTP(routes)
         let store = ItemStore()
         await store.add(Source(host: Self.host, kind: kind))
-        let held = Self.note("9", statusID: statusID, kind: kind)
+        let held = Self.note("9", statusID: statusID, kind: kind, answering: parent)
         await store.ingest([held])
         let session = ShellSession(http: http, store: store, posts: ForumPosts(http: http))
         await session.reloadFromStore()
@@ -51,6 +58,7 @@ struct ThreadAroundTests {
     }
 
     private static let threadPath = "/api/v1/statuses/9/context"
+    private static let parentPath = "/api/v1/statuses/8"
 
     @Test("Opening a post asks for its thread once, and the answers are what the pane draws")
     func opening() async throws {
@@ -59,11 +67,15 @@ struct ThreadAroundTests {
                 ancestors: [Self.status("7", "the start"), Self.status("8", "an answer", answering: "7")],
                 descendants: [Self.status("10", "a reply", answering: "9")]
             ),
-        ])
+            Self.parentPath: .text(Self.status("8", "an answer", answering: "7")),
+        ], answering: "8")
 
         await session.conversations.open(item, in: session)
 
-        #expect(await http.paths == [Self.threadPath], "one request, and no timeline under it")
+        // The post says it answers 8, which is not held: that one post is loaded for it (#293).
+        await session.refs.settled()
+        let asked = [Self.parentPath, Self.threadPath]
+        #expect(await http.paths.sorted() == asked, "the thread, the one post it answers, and no timeline under them")
         let drawn = session.conversations.conversation(around: item)
         #expect(drawn.ancestors.map(\.body) == ["the start", "an answer"], "oldest first, above the post")
         #expect(drawn.post.id == item.id, "the row the reader pressed, not the source's copy of it")
@@ -72,7 +84,8 @@ struct ThreadAroundTests {
 
         // Asked once per post per run: a pane reopened draws what is already held.
         await session.conversations.open(item, in: session)
-        #expect(await http.paths == [Self.threadPath])
+        await session.refs.settled()
+        #expect(await http.paths.sorted() == asked)
     }
 
     @Test("An answer to an answer stands a generation deeper, and an unplaceable one stands at the first")
@@ -99,7 +112,7 @@ struct ThreadAroundTests {
                 ancestors: [Self.status("7", "the start")],
                 descendants: [Self.status("10", "a reply", answering: "9")]
             ),
-        ])
+        ], answering: "7")
 
         await session.conversations.open(item, in: session)
 

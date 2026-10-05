@@ -15,10 +15,16 @@ import Observation
 // **Since #177 what comes back lands in the store first** — written down and saved — **and since
 // #296 each answer read is an item like any other**: it stands in All at the time it was posted,
 // through no category, so a timeline made of Home alone does not show it and one whose rule is an
-// author or a word it matches does. So a thread read once is there with the network off:
-// a read that finds nobody answering draws what this device holds around the post, and says at
-// the foot that the rest did not arrive. And a thread the source handed back only part of is read
-// further as the reader nears its foot, one ask at a time, until the source has nothing more.
+// author or a word it matches does.
+//
+// **What is drawn around a post is read off references among what is held** (#293, `Opened`):
+// what the post answers, up as far as held items go; every held item that answers it, quotes it
+// or reblogs it. The read is one way those items come to be held, and what it brought shows
+// because it is held and refers — as an answer a search brought does, with no read at all. So a
+// thread read once is there with the network off, a read that finds nobody answering draws what
+// this device holds around the post and says at the foot that the rest did not arrive, and a
+// thread the source handed back only part of is read further as the reader nears its foot, one
+// ask at a time, until the source has nothing more.
 
 /// Why a thread ended where it did, as far as asking again goes: one question both kinds of
 /// absence answer, so the foot of a thread reads either the same way.
@@ -71,24 +77,13 @@ enum ShellConversationStanding: Equatable, Sendable {
     case coming
     /// The source answered and there is nobody else in this thread.
     case none
-    /// The two halves, **as the source ordered them**, kept rather than the conversation built
-    /// from them.
-    ///
-    /// The built conversation carries the root row, and the root row is a value that changes
-    /// under the reader — a mark pressed, a cover lifted, a card turned. Holding one here would
-    /// hold the row as it was when the thread landed, and the pane would draw a post whose marks
-    /// stopped answering. So the halves are held and `conversation(around:)` builds against
-    /// whichever root the pane has this pass, which is the same thing `dummyConversation()` does
-    /// and costs the same walk.
-    case loaded(ancestors: [Note], descendants: [Note], rootID: String?)
+    /// The source answered with a thread. **Its posts are not here**: what is drawn around the
+    /// post is `ShellConversations.views`', read off references among what is held (#293), and
+    /// this says only that the read came back and by which id it was asked — the id
+    /// `ShellConversations.edge` and `settled` count answers against.
+    case loaded(rootID: String?)
     /// It could not be had, and why.
     case absent(ShellConversations.Absence)
-
-    /// The conversation to draw around `root`, or nothing where there is none to draw.
-    func conversation(around root: DummyItem) -> DummyConversation? {
-        guard case .loaded(let ancestors, let descendants, let rootID) = self else { return nil }
-        return .around(root, rootID: rootID, ancestors: ancestors, descendants: descendants)
-    }
 
     /// Whether asking again could do anything from here — **the one answer the button and the
     /// key both read**, `ForumRepliesStanding.wantsPressing`'s rule and for its reason: a mark
@@ -146,6 +141,20 @@ final class ShellConversations {
     /// Keyed by the row's own id — `NoteKey.rowID`, so one post held from two servers is two
     /// threads, which is what #10 says it is everywhere else.
     private(set) var standings: [String: ShellConversationStanding] = [:]
+    /// What is drawn around each opened post: what it refers to and what refers to it, among
+    /// what is held (#293). Laid when the pane opens — before anything is asked, so a post
+    /// opened with the network off shows what this device has — and again whenever what is held
+    /// changes under the thread in front.
+    private(set) var views: [String: Opened] = [:]
+    /// What the reader's own read of a thread brought that the store did not take — a post
+    /// older than the reader keeps, read because they opened its thread. Drawn for this run
+    /// with what is held, by the same references, and never written down.
+    @ObservationIgnored private var brought: [String: [NoteKey: Note]] = [:]
+    /// Which posts a read of each thread handed over as its answers, this run. An answer among
+    /// them that no reference places — it answers a post the source did not hand over — is
+    /// drawn at the first step under the post all the same (`Opened.loose`), and counted, so a
+    /// thread the source handed over whole is not said to be cut. Never written down.
+    @ObservationIgnored private var said: [String: Set<NoteKey>] = [:]
     /// Which host each key was read from, so `forget(host:)` is a sweep and not a search.
     @ObservationIgnored private var hosts: [String: String] = [:]
     /// What is on the wire, so a redraw that asks again while the first ask is out waits for it
@@ -218,7 +227,46 @@ final class ShellConversations {
     /// keys walked that was not the list on screen would put the lamp on a post the reader
     /// cannot see. One function, so the two cannot come apart.
     func conversation(around item: DummyItem) -> DummyConversation {
-        standing(of: item.id).conversation(around: item) ?? item.dummyConversation()
+        views[item.id].map { .opened(item, $0) } ?? item.dummyConversation()
+    }
+
+    /// What is drawn around `item` laid again from what the store holds now. Nothing asked of
+    /// any source. A post this device does not hold — one a thread read brought that is older
+    /// than the reader keeps — is laid around from the copy a thread here drew of it.
+    private func lay(_ item: DummyItem, in session: ShellSession) async {
+        guard let held = session.note(ofRow: item.id) else { return }
+        lay(around: held, among: await session.store.all(), under: item.id)
+    }
+
+    /// `Opened.around`, over what is held of the post's source and what this run's read brought
+    /// that was not kept. **The one place a view is made**, so every way rows come to be drawn —
+    /// the pane opening, a read landing, a later read, the store changing — draws by one rule.
+    /// Nothing is assigned where nothing moved.
+    private func lay(around held: Note, among notes: [Note], under id: String) {
+        let host = held.source.host
+        var pool = notes.filter { $0.source.host == host }
+        if var extra = brought[id] {
+            for note in pool { extra[note.key] = nil }
+            brought[id] = extra.isEmpty ? nil : extra
+        }
+        // Every thread's, not only this one's: a post one read brought and the store did not
+        // take may be opened in its turn, and what that read brought with it belongs with it.
+        var drawn = Set(pool.map(\.key))
+        for extra in brought.values {
+            for note in extra.values where note.source.host == host && drawn.insert(note.key).inserted {
+                pool.append(note)
+            }
+        }
+        let view = Opened.around(held, among: pool, said: said[id] ?? [])
+        hosts[id] = host
+        if views[id] != view { views[id] = view }
+    }
+
+    /// What a read of the thread around `id` handed over that the store holds no copy of.
+    private func keep(_ read: [Note], notHeldIn landed: Landed, under id: String) {
+        for note in read where landed.copies[note.key] == nil && !note.isReblog {
+            brought[id, default: [:]][note.key] = note
+        }
     }
 
     /// The thread around `item`, where nothing has asked for it yet — **the pane opening**.
@@ -229,6 +277,9 @@ final class ShellConversations {
     func open(_ item: DummyItem, in session: ShellSession) async {
         guard standings[item.id] == nil else {
             await inFlight[item.id]?.value
+            // Asked earlier this run: drawn from what is held now, which may be more or less
+            // than it was when the pane was last up.
+            await redraw(item, in: session)
             return
         }
         await ask(item, in: session)
@@ -266,53 +317,45 @@ final class ShellConversations {
         if inFlight[item.id] == task { inFlight[item.id] = nil }
     }
 
-    /// Every post drawn in the thread around `id`, by key — what `renew(_:from:)` asks the store
-    /// for. Nothing where it is not loaded.
-    func drawnKeys(around id: String) -> Set<NoteKey> {
-        guard case .loaded(let ancestors, let descendants, _) = standing(of: id) else { return [] }
-        return Set((ancestors + descendants).map(\.key))
-    }
-
-    /// **What this device now holds of each drawn post, drawn in its place** (#193, #198). The
-    /// thread keeps the order its source gave and the posts it drew; each post is the store's copy
-    /// of it, so an answer another read edited, or its source said was gone (#179), reads so here
-    /// with no key pressed. A post the store no longer holds keeps the copy drawn. Nothing is
-    /// assigned where nothing moved, so an adopt that changed no drawn post redraws nothing.
+    /// **What this device now holds around the post, drawn** (#193, #198, #293): the thread in
+    /// front laid again from `notes`, everything held. An answer another read edited, or its
+    /// source said was gone (#179), reads so here with no key pressed; an answer a search or a
+    /// timeline brought stands under what it answers; a post loaded for one drawn here takes its
+    /// place above it; one no longer held is no longer drawn.
     ///
     /// **The thread in front only** — the session's to say — so an adopt walks one thread, not
-    /// every thread read this run; one closed is drawn again from the store as it opens.
-    func renew(_ id: String, from held: [NoteKey: Note]) {
-        guard !held.isEmpty,
-              case .loaded(let ancestors, let descendants, let rootID) = standing(of: id)
+    /// every thread read this run; one closed is laid again as it opens. Nothing where the
+    /// thread was never opened here.
+    func renew(_ id: String, around held: Note, among notes: [Note]) {
+        guard let before = views[id] else { return }
+        lay(around: held, among: notes, under: id)
+        guard views[id] != before else { return }
+        resettle(id, root: held)
+    }
+
+    /// The foot of a loaded thread said again over what is drawn now, where it is one of the
+    /// settled sentences: more to ask, the end, or cut. One on the wire, or failed, is left.
+    private func resettle(_ id: String, root: Note) {
+        guard case .loaded(let rootID?) = standing(of: id), inFlight[id] == nil, furtherWork[id] == nil,
+              let further = furthers[id]
         else { return }
-        let swap = { (drawn: Note) in held[drawn.key] ?? drawn }
-        let renewed = ShellConversationStanding.loaded(
-            ancestors: ancestors.map(swap), descendants: descendants.map(swap), rootID: rootID
-        )
-        if renewed != standing(of: id) { standings[id] = renewed }
+        switch further {
+        case .more, .end, .cut:
+            furthers[id] = Self.settled(
+                root: root, rootID: rootID, descendants: views[id]?.below ?? [], asked: asked[id] ?? []
+            )
+        case .coming, .failed: break
+        }
     }
 
     /// The open thread drawn again from what this device holds, where another window's renewal
     /// has just read it (#198): an answer the store holds around the post and this thread does
     /// not draw yet is laid in under what it answers. Nothing asked of the source.
     func redraw(_ item: DummyItem, in session: ShellSession) async {
-        guard case .loaded(_, let drawn, let rootID) = standing(of: item.id),
-              let held = session.heldNote(item.id)
-        else { return }
-        let kept = await session.store.held(host: held.source.host)
-        guard case .loaded(let ancestors, let now, _) = standing(of: item.id), now == drawn,
-              let around = Self.kept(around: held, among: kept)
-        else { return }
-        let renewed = Self.renewed(drawn, with: around.descendants.filter { note in
-            !drawn.contains { $0.key == note.key }
-        }, rootID: rootID ?? held.statusID)
-        guard renewed != drawn else { return }
-        standings[item.id] = .loaded(ancestors: ancestors, descendants: renewed, rootID: rootID)
-        if let rootID {
-            furthers[item.id] = Self.settled(
-                root: held, rootID: rootID, descendants: renewed, asked: asked[item.id] ?? []
-            )
-        }
+        guard let held = session.heldNote(item.id) else { return }
+        let before = views[item.id]
+        await lay(item, in: session)
+        if views[item.id] != before { resettle(item.id, root: held) }
     }
 
     /// The note behind a row drawn in a conversation, where one of the loaded halves holds it.
@@ -322,11 +365,8 @@ final class ShellConversations {
     /// pressed on one has to find its note here, or the mark under it would be a control that is
     /// drawn and does nothing.
     func note(_ rowID: String) -> Note? {
-        for standing in standings.values {
-            guard case .loaded(let ancestors, let descendants, _) = standing else { continue }
-            if let found = (ancestors + descendants).first(where: { $0.key.rowID == rowID }) {
-                return found
-            }
+        for view in views.values {
+            if let found = view.rows.first(where: { $0.key.rowID == rowID }) { return found }
         }
         return nil
     }
@@ -335,25 +375,30 @@ final class ShellConversations {
     /// thread that holds it — so the mark under an answer in an open conversation says what the
     /// source said, as the timeline's does (#106).
     func replace(_ note: Note) {
-        for (id, standing) in standings {
-            guard case .loaded(let ancestors, let descendants, let rootID) = standing else { continue }
-            let swap = { (held: Note) in held.key == note.key ? note : held }
-            standings[id] = .loaded(
-                ancestors: ancestors.map(swap), descendants: descendants.map(swap), rootID: rootID
-            )
+        let swap = { (held: Note) in held.key == note.key ? note : held }
+        for (id, view) in views {
+            var swapped = view
+            swapped.above = view.above.map(swap)
+            swapped.below = view.below.map(swap)
+            swapped.quoting = view.quoting.map(swap)
+            if swapped != view { views[id] = swapped }
+            if brought[id]?[note.key] != nil { brought[id]?[note.key] = note }
         }
     }
 
     /// A post taken back (#109), let go of in every thread that drew it. The answers under it
-    /// stay until the thread is read again: whether they went with it is the source's to say.
+    /// stay until the thread is laid again: whether they went with it is the source's to say.
     func drop(_ key: NoteKey) {
-        for (id, standing) in standings {
-            guard case .loaded(let ancestors, let descendants, let rootID) = standing else { continue }
-            standings[id] = .loaded(
-                ancestors: ancestors.filter { $0.key != key },
-                descendants: descendants.filter { $0.key != key },
-                rootID: rootID
-            )
+        for (id, view) in views {
+            var left = view
+            left.above.removeAll { $0.key == key }
+            left.below.removeAll { $0.key == key }
+            left.quoting.removeAll { $0.key == key }
+            left.reblogs.removeAll { $0.key == key }
+            left.loose.remove(key)
+            said[id]?.remove(key)
+            if left != view { views[id] = left }
+            brought[id]?[key] = nil
         }
     }
 
@@ -369,29 +414,23 @@ final class ShellConversations {
     /// drawing a single answer under a sentence saying the thread could not be read would be two
     /// things saying opposite things about one pane.
     func landed(_ note: Note, under root: String, rootID: String?) {
+        let asked: String?
         switch standing(of: root) {
-        case .loaded(let ancestors, let descendants, let held):
-            standings[root] = .loaded(
-                ancestors: ancestors,
-                descendants: Self.placed(note, in: descendants, rootID: held ?? rootID),
-                rootID: held ?? rootID
-            )
+        case .loaded(let held):
+            asked = held ?? rootID
         case .unasked, .none, .coming:
-            standings[root] = .loaded(ancestors: [], descendants: [note], rootID: rootID)
+            asked = rootID
             hosts[root] = note.source.host
         case .absent:
-            break
+            return
         }
-    }
-
-    /// `drawn`, each post the copy in `read` where it has one, and every post of `read` not drawn
-    /// yet laid in where it belongs — in the order the source gave them, so an answer to one just
-    /// laid in follows it.
-    static func renewed(_ drawn: [Note], with read: [Note], rootID: String?) -> [Note] {
-        let copies = Dictionary(read.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
-        var renewed = drawn.map { copies[$0.key] ?? $0 }
-        for note in read { renewed = placed(note, in: renewed, rootID: rootID) }
-        return renewed
+        // Drawn until the store's copy of it is seen: it is held from the moment its source
+        // answered, and the next laying finds it there by what it answers.
+        brought[root, default: [:]][note.key] = note
+        var view = views[root] ?? Opened()
+        view.below = Self.placed(note, in: view.below, rootID: asked)
+        views[root] = view
+        standings[root] = .loaded(rootID: asked)
     }
 
     /// Where an answer goes among the answers already drawn: **directly after the last post under
@@ -427,6 +466,9 @@ final class ShellConversations {
         let host = raw.lowercased()
         for (id, from) in hosts where from == host {
             standings[id] = nil
+            views[id] = nil
+            brought[id] = nil
+            said[id] = nil
             hosts[id] = nil
             inFlight[id]?.cancel()
             inFlight[id] = nil
@@ -446,6 +488,9 @@ final class ShellConversations {
         inFlight = [:]
         furtherWork = [:]
         standings = [:]
+        views = [:]
+        brought = [:]
+        said = [:]
         furthers = [:]
         asked = [:]
         failedAtRoot = []
@@ -473,6 +518,10 @@ final class ShellConversations {
     /// The read itself. Cancelled — the reader closed the thread, or stopped the reload — it
     /// leaves the standing exactly as it found it: a thread half-read is not a thread that failed.
     private func read(_ item: DummyItem, in session: ShellSession) async {
+        // **What is held around the post is drawn before anything is asked** (#293), and whether
+        // or not anything can be: a post of a source since removed, or opened with the network
+        // off, shows what it refers to and what refers to it all the same.
+        await lay(item, in: session)
         // **Settled rather than left unasked, both times.** A forum thread's answers are
         // `ForumPosts`' and a row this device does not hold is a fixture or a row a Remove took
         // — neither has a conversation this unit can ask for, and neither is *waiting* for one.
@@ -541,27 +590,22 @@ final class ShellConversations {
             // nothing, and adopting then would be a round trip to the store for nothing.
             let landed = await Self.land(thread.ancestors + thread.descendants, host: host, in: session)
             if landed.changed { await session.reloadFromStore() }
-            let ancestors = thread.ancestors.map(landed.held)
-            let read = thread.descendants.map(landed.held)
+            // **And then drawn from what is held** (#293): the thread's posts show because the
+            // store now holds them and they refer, each under what it answers — where it was
+            // drawn before, since the place is the references' to say and they have not changed.
+            keep(thread.ancestors + thread.descendants, notHeldIn: landed, under: item.id)
+            said[item.id, default: []].formUnion(thread.descendants.filter { $0.key != held.key }.map(\.key))
+            await lay(item, in: session)
             failedAtRoot.remove(item.id)
             if thread.isAlone {
                 standings[item.id] = ShellConversationStanding.none
                 furthers[item.id] = nil
                 return
             }
-            // **A thread read again keeps what is drawn, where it is drawn** (#198): each post
-            // takes the copy just read, and only a post new to the thread is laid in — under what
-            // it answers. What was read further (#177), which the source's first answer leaves
-            // out, stays in its own subtree rather than going to the bottom, and the reader is not
-            // sent back to the first answer.
-            var descendants = read
-            if case .loaded(_, let drawn, _)? = before {
-                descendants = Self.renewed(drawn, with: read, rootID: id)
-            }
             asked[item.id] = (asked[item.id] ?? []).union([id])
-            standings[item.id] = .loaded(ancestors: ancestors, descendants: descendants, rootID: id)
+            standings[item.id] = .loaded(rootID: id)
             furthers[item.id] = Self.settled(
-                root: held, rootID: id, descendants: descendants, asked: asked[item.id] ?? []
+                root: held, rootID: id, descendants: views[item.id]?.below ?? [], asked: asked[item.id] ?? []
             )
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: host)
@@ -597,11 +641,10 @@ final class ShellConversations {
             failedAtRoot.insert(item.id)
             return
         }
-        let kept = await session.store.held(host: held.source.host)
-        if let around = Self.kept(around: held, among: kept) {
-            standings[item.id] = .loaded(
-                ancestors: around.ancestors, descendants: around.descendants, rootID: held.statusID
-            )
+        // What is held around it was laid as the read began. A post with a thread held around it
+        // is drawn with that, and the foot says the rest did not arrive.
+        if let view = views[item.id], !view.above.isEmpty || !view.below.isEmpty {
+            standings[item.id] = .loaded(rootID: held.statusID)
             furthers[item.id] = .failed(why)
             failedAtRoot.insert(item.id)
         } else {
@@ -634,7 +677,8 @@ final class ShellConversations {
             await again(item, in: session)
             return
         }
-        guard case .loaded(_, let descendants, let rootID) = standing(of: item.id) else { return }
+        guard case .loaded(let rootID) = standing(of: item.id) else { return }
+        let descendants = views[item.id]?.below ?? []
         guard let rootID, let held = session.heldNote(item.id) else {
             furthers[item.id] = .failed(.unfindable)
             return
@@ -687,13 +731,12 @@ final class ShellConversations {
             let landed = await Self.land(thread.descendants, host: host, in: session)
             if landed.changed { await session.reloadFromStore() }
             // Closed, or its server let go of, while this was on the wire: nothing to lay it under.
-            guard case .loaded(let ancestors, let descendants, let rootID) = standings[item.id] else {
-                return
-            }
-            let drawn = Set((ancestors + descendants).map(\.key)).union([held.key])
-            let fresh = thread.descendants.map(landed.held).filter { !drawn.contains($0.key) }
-            let grown = descendants + fresh
-            standings[item.id] = .loaded(ancestors: ancestors, descendants: grown, rootID: rootID)
+            guard case .loaded(let rootID) = standings[item.id] else { return }
+            keep(thread.descendants, notHeldIn: landed, under: item.id)
+            said[item.id, default: []].formUnion(thread.descendants.filter { $0.key != held.key }.map(\.key))
+            await lay(item, in: session)
+            guard case .loaded = standings[item.id] else { return }
+            let grown = views[item.id]?.below ?? []
             asked[item.id, default: []].insert(edge)
             furthers[item.id] = rootID.map {
                 Self.settled(root: held, rootID: $0, descendants: grown, asked: asked[item.id] ?? [])
@@ -711,10 +754,10 @@ final class ShellConversations {
     /// Posts read in a thread, into the store as items (#296) and saved, and those already held
     /// refreshed on the way past. Whether a held row changed, so a caller adopts only then.
     ///
-    /// **And each post as the store now holds it** (`Landed.held`), which is what a thread draws
-    /// (#284): the source's words as just read, with what only this device knows of the post —
-    /// that the person keeps it — still on it. The one door a read's posts come through on their
-    /// way into a thread, so no caller lays in the wire's copy and draws a kept post as not kept.
+    /// **A thread draws each post as the store now holds it** (#284, #293): the source's words
+    /// as just read, with what only this device knows of the post — that the person keeps it —
+    /// still on it. The one door a read's posts come through on their way into a thread, so no
+    /// caller lays in the wire's copy and draws a kept post as not kept.
     private static func land(_ notes: [Note], host: String, in session: ShellSession) async -> Landed {
         guard !notes.isEmpty else { return Landed(changed: false, copies: [:]) }
         await session.store.ingest(notes, ifSourceHere: host)
@@ -723,14 +766,12 @@ final class ShellConversations {
         return Landed(changed: changed, copies: await session.store.notes(notes.map(\.key)))
     }
 
-    /// What `land` made of a read: whether a held row changed, and the store's copy of each post.
+    /// What `land` made of a read: whether a held row changed, and the store's copy of each post
+    /// it took — none of a post it refused, older than the reader keeps, which `keep` draws for
+    /// this run.
     private struct Landed {
         let changed: Bool
         let copies: [NoteKey: Note]
-
-        /// The store's copy of `read`, or `read` itself where the store took none — its source
-        /// removed while the read was on the wire.
-        func held(_ read: Note) -> Note { copies[read.key] ?? read }
     }
 
     /// The next post to ask for its own thread, or nothing where no drawn post has more to give.
@@ -779,45 +820,6 @@ final class ShellConversations {
             if let parent = note.reply?.inReplyToId { answers[parent, default: 0] += 1 }
         }
         return answers
-    }
-
-    /// The thread around `root` as this device holds it — what an earlier read landed (#177) —
-    /// or nothing where it holds nobody else in it.
-    ///
-    /// Built from the answers' own parents, since the store keeps no order of the source's: what
-    /// it answers up to the start, and what answered it walked depth first, the older answer
-    /// first under each post. Each post once, so a loop in a stranger's parents ends.
-    static func kept(around root: Note, among held: [Note]) -> (ancestors: [Note], descendants: [Note])? {
-        // A reblog is in no thread (#290): it answers nothing, and its own id is not a post's.
-        guard let rootID = root.sendableID else { return nil }
-        let held = held.filter { !$0.isReblog }
-        let byID = Dictionary(
-            held.compactMap { note in note.statusID.map { ($0, note) } },
-            uniquingKeysWith: { first, _ in first }
-        )
-        var seen: Set<String> = [rootID]
-        var ancestors: [Note] = []
-        var up = root.reply?.inReplyToId
-        while let id = up, seen.insert(id).inserted, let parent = byID[id] {
-            ancestors.insert(parent, at: 0)
-            up = parent.reply?.inReplyToId
-        }
-        var answers: [String: [Note]] = [:]
-        for note in held where note.statusID != nil {
-            if let parent = note.reply?.inReplyToId { answers[parent, default: []].append(note) }
-        }
-        var descendants: [Note] = []
-        var stack = Self.oldestFirst(answers[rootID] ?? []).reversed().map { $0 }
-        while let next = stack.popLast() {
-            guard let id = next.statusID, seen.insert(id).inserted else { continue }
-            descendants.append(next)
-            stack += Self.oldestFirst(answers[id] ?? []).reversed()
-        }
-        return ancestors.isEmpty && descendants.isEmpty ? nil : (ancestors, descendants)
-    }
-
-    private static func oldestFirst(_ notes: [Note]) -> [Note] {
-        notes.sorted { ($0.postedAt, $0.statusID ?? "") < ($1.postedAt, $1.statusID ?? "") }
     }
 
     /// Every failure a thread read can end in, as one of three sentences.
