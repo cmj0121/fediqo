@@ -118,15 +118,17 @@ public struct QuotedPost: Hashable, Sendable {
     /// Whether the author covered it. `DummyItem.covered`'s rule: a yes, or a line.
     public var covered: Bool { sensitive == true || !(spoiler ?? "").isEmpty }
 
-    /// This post as a note of its own, through `source` — **held aside** and arrived through no
-    /// timeline, so holding it never grows All. Its own quote is its id alone, which a read of
-    /// the post itself fills in.
+    /// This post as a note of its own, through `source` — an item like any other (#296): it has
+    /// the source's own time for it, its ID, its source and its words. It arrived through no
+    /// category, so a rule on one does not show it; All does. Fewer facts than a copy read as
+    /// itself — no counts, no language — which the next copy that is fills in. Its own quote is
+    /// its id alone, which a read of the post itself fills in.
     public func note(through source: Source) -> Note {
         Note(
             id: id, source: source, author: author, handle: handle, body: body,
             postedAt: postedAt, categories: [], reply: reply, audience: audience,
             avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
-            emojis: emojis, url: url, statusID: statusID, holding: .aside,
+            emojis: emojis, url: url, statusID: statusID,
             quote: quoting.map { Quote(state: $0.state, statusID: $0.statusID) }
         )
     }
@@ -152,7 +154,7 @@ extension Quote {
     /// the quoted post with it — and one pending is accepted when the source says so. A copy that
     /// says nothing of a quote leaves the held one. **The one exception is the same quote said
     /// again**: accepted both times, of the same post, where the later copy came as an id alone
-    /// (the quoted post's own copy, held aside) — the held post stays rather than being lost.
+    /// (the quoted post's own copy) — the held post stays rather than being lost.
     static func later(_ later: Quote?, over held: Quote?) -> Quote? {
         guard let later else { return held }
         guard let held, later.state == .accepted, held.state == .accepted,
@@ -165,9 +167,8 @@ extension Quote {
 }
 
 extension Note {
-    /// The post this one quotes, as a note of its own through the same source — **held aside**,
-    /// so opening it works with the network off and it never grows All. Nothing where the quote
-    /// may not be shown.
+    /// The post this one quotes, as a note of its own through the same source, so opening it
+    /// works with the network off. Nothing where the quote may not be shown.
     public var quotedNote: Note? {
         quote?.post?.note(through: source)
     }

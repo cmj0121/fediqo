@@ -191,7 +191,7 @@ struct ThreadAroundTests {
         #expect(session.conversations.standing(of: item.id) == .unasked, "folded once, like every host")
     }
 
-    @Test("An answer this device already holds is refreshed on the way past; one it never held is not admitted")
+    @Test("An answer this device already holds is refreshed on the way past; one it never held is held now, an item like any other")
     func heldRowsOnly() async throws {
         let (session, _, item) = await shell([
             Self.threadPath: Self.context(ancestors: [], descendants: [
@@ -205,11 +205,11 @@ struct ThreadAroundTests {
         await session.conversations.open(item, in: session)
 
         #expect(session.notes.first { $0.id.hasSuffix("/10") }?.body == "an edited reply")
-        #expect(!session.notes.contains { $0.id.hasSuffix("/11") }, "a reply never held stays out of All")
+        #expect(session.notes.contains { $0.id.hasSuffix("/11") }, "a reply never held stands in All once read")
         #expect(
             session.conversations.conversation(around: item).descendants.map(\.item.body)
                 == ["an edited reply", "never held"],
-            "both are read in the thread; only one of them is a row"
+            "both are read in the thread, and both are rows"
         )
     }
 }

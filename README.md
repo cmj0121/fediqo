@@ -303,9 +303,18 @@ who wrote it, who boosted it, its text, its hashtags, its source, and its catego
 their English or translated names and by list and board names. `*` stands for any run of
 characters, including none, and `?` for exactly one. Every other character stands for itself:
 there is no regex, operator, field prefix, or quoting. Case, and full-width against
-half-width, do not change what is found. Only posts this device holds are searched, and no
-source is asked. What is found is in time order. Clearing the field returns to the timeline
-as it was.
+half-width, do not change what is found. As you type, the posts this device holds are
+searched. Return also asks the sources of the timeline in front that can be searched. What is
+found is in time order. Clearing the field returns to the timeline.
+
+Everything this device holds stands in its timelines. What a search brought back, what was
+read under a hashtag, the answers read when a post was opened, and a post another one quotes
+are posts like any other: each stands in All at the time it was posted, and stays there after
+the search is cleared or the post is closed. None of them came through a category of its
+source, so a timeline whose rules name a category — one made of Home alone, say — does not
+show them; a rule on a source, an author, a keyword or a field shows the ones it matches. A
+forum topic's replies are parts of their topic: they are read inside it, and are no row of a
+timeline.
 
 Preferences can set a latest date. Every timeline — All, Trends, yours, and a search — then
 shows nothing posted after 23:59:59 of that day, in this device's time zone, and the timeline
@@ -340,9 +349,8 @@ opened from is centred and still selected.
 ### What this device holds
 
 The Usage page is tabbed by purpose: Sources, Time, Keep, and Copies. Tab rotates them.
-Sources holds the totals, each source's figures and its Clear; posts held without arriving
-through a timeline — a search's finds, a conversation's answers, a topic's replies — are
-counted, and said to be held apart from the timelines. Time holds the week or month
+Sources holds the totals, each source's figures and its Clear: one figure of posts for each
+source, counting everything held from it, a forum topic's replies included. Time holds the week or month
 breakdown. Keep holds the two limits, Posts you keep, Let go by dates, and What the limits let go. Copies
 holds the pictures this device is keeping, and the drop that takes them. Clear takes a
 server's cached copies and its sign-in, and keeps its posts. Preferences keeps what you
@@ -409,7 +417,8 @@ write the number down says that it does not say.
 
 #### The two limits
 
-Keep posts holds only the latest months; Room is what this device gives the index and its
+Keep posts holds only the latest months — and with them a post you keep, and an older post
+that one still held quotes, which stays in All until the post quoting it goes; Room is what this device gives the index and its
 picture copies together. Side by side, and whichever is reached first acts. Past the room,
 picture copies go first, oldest first — they come back when read again — and only then the
 oldest posts, from every source. A limit never set lets nothing go, and every source stays

@@ -15,13 +15,9 @@ public enum HeldPeriod: String, CaseIterable, Sendable {
 
 /// What this device holds, counted: in total, by source, and by week or month (#7).
 ///
-/// **Counted over everything the store holds, and the rows no timeline shows are said apart**
-/// (#194). A search's finds, a conversation's answers, a forum topic's replies and a quoted post
-/// are held aside (`Holding.aside`) and written down like any other row, so `posts` counts them
-/// with the rest — the one figure an export, a drop or a limit is measured against — and `aside`
-/// says how many of them there are, so a reader can see what accumulated without a timeline
-/// bringing it. `notes` is therefore the store's whole holding, arrived and aside together; a
-/// count made from `all()` alone would lie by exactly what `aside()` holds.
+/// **Counted over everything the store holds** (#194, #296): every item, and every kept reply of
+/// a forum topic. One figure — the one an export, a drop or a limit is measured against — and
+/// nothing counted apart, because nothing is held apart.
 ///
 /// **Counted in one pass per figure, over notes already read out of the store.** A readout drawn
 /// on every body pass must not filter the whole index once per source row, so the notes are
@@ -33,15 +29,11 @@ public struct Holdings: Equatable, Sendable {
         public let posts: Int
     }
 
-    /// Every post held, those held aside included.
+    /// Every post held.
     public let posts: Int
-    /// How many of `posts` are held aside, and no timeline shows.
-    public let aside: Int
-    /// Posts held from each source, by folded host, aside ones included. A host holding none is
+    /// Posts held from each source, by folded host. A host holding none is
     /// absent.
     public let bySource: [String: Int]
-    /// Of `bySource`, those held aside. A host holding none aside is absent.
-    public let asideBySource: [String: Int]
     /// How many earlier wordings of changed posts are held with them (#286): part of what this
     /// device holds, and so part of what it says it holds.
     public let earlier: Int
@@ -78,9 +70,6 @@ public struct Holdings: Equatable, Sendable {
     public init(notes: [Note], per period: HeldPeriod, calendar: Calendar = .current) {
         posts = notes.count
         bySource = Dictionary(grouping: notes, by: \.source.host).mapValues(\.count)
-        let apart = notes.filter { $0.holding == .aside }
-        aside = apart.count
-        asideBySource = Dictionary(grouping: apart, by: \.source.host).mapValues(\.count)
         earlier = notes.reduce(0) { $0 + $1.earlier.count }
         let keeping = notes.filter(\.kept)
         kept = Kept(posts: keeping.count, bytes: keeping.reduce(0) { $0 + $1.wordBytes })
@@ -112,11 +101,6 @@ public struct Holdings: Equatable, Sendable {
     /// How many of `kept(host:).posts` stay kept through another source's copy.
     public func keptElsewhere(host: String) -> Int {
         keptElsewhereBySource[host.lowercased()] ?? 0
-    }
-
-    /// How many of `posts(host:)` are held aside from the timelines.
-    public func aside(host: String) -> Int {
-        asideBySource[host.lowercased()] ?? 0
     }
 }
 

@@ -1909,8 +1909,9 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
         "discuz:\(host.lowercased()):\(tid):post:"
     }
 
-    /// This reply as the store keeps it — **held aside by whoever lands it**, since a reply read
-    /// in a thread is not a row a timeline grew by (#175).
+    /// This reply as the store keeps it — **a part of its topic and not an item** (#175, #296):
+    /// told by its id (`Note.isTopicReply`), handed over by `ItemStore.replies()`, and a row of
+    /// no timeline.
     ///
     /// A `Note` is the store's one shape, and a reply is not a thread, so what a reply has that a
     /// row does not is carried in `Note.opening`: its words and quotation as the opening post's
@@ -1935,6 +1936,9 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
             opening: isWithheld ? nil : ForumOpening(reply: self)
         )
     }
+
+    /// What every kept reply's id begins with, whatever its forum.
+    static let heldScheme = "discuz:"
 
     /// A reply the store kept, read back — or nothing where `note` is not one.
     ///
@@ -2795,5 +2799,21 @@ extension NSRegularExpression {
             else { return nil }
             return String(text[found])
         }
+    }
+}
+
+extension Note {
+    /// Whether this row is a reply of a forum topic, kept so the topic reads with the network
+    /// off (#177) — **a part of a topic, and not an item** (#296). An item has a publish time
+    /// that is its source's own word and can be opened as itself; a reply is kept under the
+    /// moment it was read where its page gave no date, and opens nowhere but inside its topic.
+    /// So no timeline draws one and no search finds one, by what it is: `ItemStore.all()` leaves
+    /// them out and `ItemStore.replies()` hands them over.
+    ///
+    /// Told by its source's kind and the id `DiscuzPost.asNote` gave it. **Both**: an id is a
+    /// source's own word, so a server of another kind sending one of this shape for a post of its
+    /// own would otherwise have that post left out of All and of every search.
+    public var isTopicReply: Bool {
+        source.kind == .discuz && id.hasPrefix(DiscuzPost.heldScheme) && DiscuzPost(held: self) != nil
     }
 }

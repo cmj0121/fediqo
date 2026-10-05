@@ -75,10 +75,10 @@ struct RevisionStoreTests {
     private static func at(_ minutes: Double) -> Date { origin.addingTimeInterval(minutes * 60) }
 
     /// A post as its source hands it over, `edited` minutes after it was published or never.
-    private static func copy(_ id: String, _ body: String, edited: Double? = nil, holding: Holding = .arrived) -> Note {
+    private static func copy(_ id: String, _ body: String, edited: Double? = nil) -> Note {
         Note(
             id: id, source: mastodon, author: "Ada", handle: "@ada", body: body, postedAt: origin,
-            categories: [.public], spoiler: "", statusID: id, holding: holding, editedAt: edited.map(at)
+            categories: [.public], spoiler: "", statusID: id, editedAt: edited.map(at)
         )
     }
 
@@ -117,12 +117,11 @@ struct RevisionStoreTests {
         #expect(opened.notes.allSatisfy { $0.body == "as written" })
         #expect(opened.notes.map(\.kept) == [false, true, false], "what was kept is still kept")
         #expect(opened.notes.map(\.bookmarked) == [nil, true, false], "and what the source said of a bookmark")
-        #expect(opened.notes.map(\.holding) == [.arrived, .arrived, .aside])
         let migrations = try DatabaseQueue(path: index.path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
         }
         #expect(migrations == [
-            "v1-index", "v10-references", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions", "v9-language",
+            "v1-index", "v10-references", "v11-one-holding", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions", "v9-language",
         ])
     }
 

@@ -137,14 +137,13 @@ struct ReferenceStoreTests {
         #expect(opened.notes.allSatisfy { $0.refs == Reference.derived(reply: $0.reply, quote: $0.quote) })
         #expect(opened.notes[1].reply == Reply(handle: "@bob@two.example", inReplyToId: "41"))
         #expect(opened.notes[2].quote?.post?.body == "quoted" && opened.notes[4].boostedBy == "Bob")
-        #expect(opened.notes.map(\.holding) == [.arrived, .arrived, .arrived, .arrived, .arrived, .aside])
         #expect(opened.notes.map(\.kept) == [false, false, false, false, false, true])
         let migrations = try DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid")
         }
         #expect(migrations == [
             "v1-index", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions",
-            "v9-language", "v10-references",
+            "v9-language", "v10-references", "v11-one-holding",
         ])
     }
 
@@ -355,7 +354,7 @@ struct ReferenceStoreTests {
         try writer.finish()
 
         try await onto.packager().readBack(url, key: .password("password"), replacing: false) { _ in }
-        let now = await onto.store.all() + (await onto.store.aside())
+        let now = await onto.store.all()
         #expect(now.count == 6)
         #expect(now.first { $0.id == "2" }?.refs == [Reference(kind: .answers, statusID: "41", handle: "@bob@two.example")])
         #expect(now.allSatisfy { !$0.refsDue })

@@ -27,12 +27,12 @@ import SwiftUI
 // nobody started it; the next wait simply asks again.
 //
 // **The fourth is a search's** (#176): Return in the search field asks the sources of the timeline
-// in front that can be searched for posts matching its words. What they send is held aside —
-// found by a search, drawn by no timeline — and the search, which reads the store and nothing
-// else, renews as it lands. A new search ends the last one's ask; closing the search ends it too.
+// in front that can be searched for posts matching its words. What they send is held as items
+// (#296) — through no category, standing in All from then on — and the search, which reads the
+// store and nothing else, renews as it lands. A new search ends the last one's ask; closing the search ends it too.
 //
 // **The fifth is a hashtag's** (#124): a tag pressed asks the sources of the timeline in front that
-// keep tags — a Mastodon, a Discourse with tagging on (#197) — for their posts under it, held aside
+// keep tags — a Mastodon, a Discourse with tagging on (#197) — for their posts under it, held
 // as a search's are. It is said on the tag's own page, where the answer would be, and not in the
 // toast; leaving the page ends it, and switching timeline under it asks the new one's sources.
 
@@ -259,7 +259,7 @@ final class ShellReload {
     }
 
     /// Return in the search field: `pattern`'s words asked of the sources of `query` that can be
-    /// searched, each landing — held aside — as it answers, so what this device held is shown at
+    /// searched, each landing — an item, through no category — as it answers, so what this device held is shown at
     /// once and what a source finds joins it (#176). Ends the last search's ask first: the reader
     /// has moved on from it. Nothing asked where the pattern has no words or no source can be
     /// searched, and the reach still says which were not asked.
@@ -397,7 +397,7 @@ final class ShellReload {
     }
 
     /// A tag pressed: the sources of `query` that keep tags asked for their posts under `tag`,
-    /// each landing — held aside — as it answers, so what this device held is on the page at once
+    /// each landing — an item, through no category — as it answers, so what this device held is on the page at once
     /// and what they send joins it (#124). Which are asked is `TagReach.of`'s (#197), and a forum
     /// that answers that it keeps no tags is said to. Ends the last tag's ask first.
     func tag(_ tag: PostTag, timeline query: TimelineQuery, in session: ShellSession) async {
@@ -452,7 +452,7 @@ final class ShellReload {
         tagAsk = nil
     }
 
-    /// One source asked for its posts under `tag`, what it sent held aside and remembered as sent
+    /// One source asked for its posts under `tag`, what it sent held and remembered as sent
     /// under it. A forum's topics land as the rows its front page draws, under the same ids, so a
     /// topic on both is one row.
     private func under(_ tag: PostTag, on host: String, in session: ShellSession) async -> Tagged {
@@ -474,7 +474,7 @@ final class ShellReload {
                 notes = try await MastodonTag(http: http, host: host).posts(under: tag, source: stamp)
             }
             try Task.checkCancellation()
-            await session.store.hold(notes, ifSourceHere: host)
+            await session.store.ingest(notes, ifSourceHere: host)
             sentUnderTag[HeldUnderTag.folded(tag), default: []].formUnion(notes.map(\.key))
             return .answered
         } catch MastodonAuthError.signedOut {
@@ -493,7 +493,7 @@ final class ShellReload {
         reach = nil
     }
 
-    /// One source searched for `words`, what it found held aside. Whether it answered.
+    /// One source searched for `words`, what it found held, each an item. Whether it answered.
     private func found(_ words: String, on host: String, in session: ShellSession) async -> Found {
         guard let source = session.sources.first(where: { $0.host == host }),
               let door = session.mastodon.authorized(host: host, within: deadline, for: .search)
@@ -504,7 +504,7 @@ final class ShellReload {
                 try await MastodonSearch(door: door).statuses(matching: words, source: stamp)
             }
             try Task.checkCancellation()
-            await session.store.hold(notes, ifSourceHere: host)
+            await session.store.ingest(notes, ifSourceHere: host)
             return .answered
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: host)
@@ -665,8 +665,9 @@ final class ShellReload {
     ///
     /// A Discuz! thread's opening post and replies are the forum page's, held by `ForumPosts`,
     /// whose pane draws them. A Mastodon post is read again, then its context, and a Discourse
-    /// topic from its own page; both replace only rows already held (`ItemStore.refresh`), so an
-    /// edited post shows its new words and a post this device never held does not arrive in All.
+    /// topic from its own page; the post itself replaces only a row already held
+    /// (`ItemStore.refresh`), so an edited post shows its new words, and the answers around it are
+    /// the conversation's read, which holds each as an item (`ShellConversations.read`, #296).
     func thread(_ item: DummyItem, in session: ShellSession) async {
         guard !asking.contains(.thread), session.editing == nil else { return }
         // Ended with its source, should that be removed while it reads (#221).
@@ -999,7 +1000,8 @@ final class ShellReload {
         // a home of its own: the pane reads it, holds it and says for itself when it could not be
         // had, and a second copy of the request living here would put the same page on the wire
         // twice for one press of `r`. What that read landed in the store — held rows refreshed,
-        // nothing admitted — it still lands; see `ShellConversations.read`.
+        // answers never held taken in as items (#296) — it still lands; see
+        // `ShellConversations.read`.
         return .read
     }
 

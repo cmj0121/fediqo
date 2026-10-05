@@ -52,15 +52,15 @@ public actor ItemStore {
     /// new in it. Starts at 0 for any store, a relaunched one included. **A count recounted is
     /// the one change it does not move** (#208): that is drawn now and written with the next.
     public private(set) var revision = 0
-    /// Counts the changes to what `all()` draws, which is fewer than `revision`'s (#175): a
-    /// source's boards restated, or a post held aside, is a change a save writes and no timeline
-    /// shows. A reader that has adopted `all()` at this count has nothing new to adopt.
+    /// Counts the changes to what `all()` hands over, which is fewer than `revision`'s (#175): a
+    /// source's boards restated, or a forum topic's reply kept, is a change a save writes and no
+    /// timeline shows. A reader that has adopted `all()` at this count has nothing new to adopt.
     public private(set) var drawn = 0
-    /// Counts the changes to what `aside()` hands over (#176): a row held aside arriving, changing
-    /// or going, or widening into one a timeline draws. A reader that has adopted `aside()` at
-    /// this count has nothing new to adopt — so a landing only the timelines see does not make a
-    /// search read every row held aside again.
-    public private(set) var asideRevision = 0
+    /// Counts the changes to what `replies()` hands over: a forum topic's reply kept, changed or
+    /// gone. A reader that has adopted `replies()` at this count has nothing new to adopt — so a
+    /// timeline landing, which is most changes, does not make the count of what is held read
+    /// every kept reply again, and a page of a topic read does not replace every row of All.
+    public private(set) var repliesRevision = 0
     /// Everyone listening for a change. See `changes()`.
     private var listeners: [UUID: AsyncStream<Int>.Continuation] = [:]
 
@@ -94,17 +94,17 @@ public actor ItemStore {
 
     /// Something here changed: the revision moves and everyone listening is told. **The one place
     /// either happens**, so a call that tells a saver it changed cannot forget to tell a screen.
-    /// `shown` says whether it changed what `all()` draws too, and moves `drawn` where it did;
-    /// `aside` the same of what `aside()` hands over, and `asideRevision`. **Both said at every
-    /// call**, so a change added later has to answer for the rows held aside rather than fall
-    /// silent about them by default.
+    /// `shown` says whether it changed what `all()` hands over too, and moves `drawn` where it
+    /// did; `replies` the same of what `replies()` hands over, and `repliesRevision`. **Both said
+    /// at every call**, so a change added later has to answer for a topic's kept replies rather
+    /// than fall silent about them by default.
     ///
     /// `kept` false is a change nothing need write down (#208): the screens are told and renewed,
     /// and the revision a saver reads stays where it is, so no save is made for it alone.
-    private func changed(shown: Bool, aside: Bool, kept: Bool = true) {
+    private func changed(shown: Bool, replies: Bool, kept: Bool = true) {
         if kept { revision += 1 }
         if shown { drawn += 1 }
-        if aside { asideRevision += 1 }
+        if replies { repliesRevision += 1 }
         for listener in listeners.values { listener.yield(revision) }
     }
 
@@ -173,7 +173,7 @@ public actor ItemStore {
             arrivals += 1
         }
         sourcesWatcher?(sourceList.map(\.host))
-        changed(shown: true, aside: true)
+        changed(shown: true, replies: true)
     }
 
     /// Whether `note` is inside the reader's keep window.
@@ -197,7 +197,7 @@ public actor ItemStore {
         if sourceList.contains(where: { $0.host == source.host }) { return }
         sourceList.append(source)
         sourcesWatcher?(sourceList.map(\.host))
-        changed(shown: false, aside: false)
+        changed(shown: false, replies: false)
     }
 
     /// Restates which boards a source is subscribed to, where that source is here.
@@ -219,7 +219,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: boards, lists: existing.lists
         )
-        changed(shown: false, aside: false)
+        changed(shown: false, replies: false)
     }
 
     /// Restates which Mastodon lists a source reads — a choice, or the same lists relabelled with
@@ -232,7 +232,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
         )
-        changed(shown: false, aside: false)
+        changed(shown: false, replies: false)
     }
 
     /// Gives the lists a source reads **now** the names in `names`, by id. Only relabels: a list
@@ -247,7 +247,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
         )
-        changed(shown: false, aside: false)
+        changed(shown: false, replies: false)
     }
 
     /// `ingest(_:)`, only while `host` is still a source here — in the same step, so a source
@@ -256,21 +256,6 @@ public actor ItemStore {
         let host = host.lowercased()
         guard sourceList.contains(where: { $0.host == host }) else { return }
         ingest(incoming)
-    }
-
-    /// Takes in posts this device went and fetched for one place — a search, a thread, a
-    /// hashtag — **held aside**: `note(_:)` hands each over and a save writes it, and `all()` never
-    /// draws it (#175). `ingest(_:ifSourceHere:)` in every other respect, the one way such a post
-    /// gets in, so no caller spells `Holding` for itself.
-    ///
-    /// A post already here as one a timeline brought stays one: holding only ever widens.
-    /// Each copy is handed on as it came, `Note.asked` with it (#291) — never made anew.
-    public func hold(_ incoming: [Note], ifSourceHere host: String) {
-        ingest(incoming.map { note in
-            var aside = note
-            aside.holding = .aside
-            return aside
-        }, ifSourceHere: host)
     }
 
     /// Takes notes in. The same item through one source stays one row: the first copy wins and
@@ -287,7 +272,7 @@ public actor ItemStore {
     /// reading it, every minute, for nothing. `refresh`, `keep` and `setRetention` already only
     /// speak when something really moved; this is the fourth.
     ///
-    /// **A post that quotes another brings the quoted post with it, held aside** (#214): opening
+    /// **A post that quotes another brings the quoted post with it, as an item of its own** (#214): opening
     /// the quote finds it here with the network off, and no timeline draws it for having been
     /// quoted. One place, so every way a post gets in — a timeline, a search, a thread — does it.
     ///
@@ -319,12 +304,11 @@ public actor ItemStore {
         var moved = false
         var recounted = false
         var shown = false
-        var aside = false
+        var replies = false
         for note in incoming {
             let key = note.key
             if let existing = notes[key] {
                 let categories = existing.categories.union(note.categories)
-                let holding = existing.holding.widened(by: note.holding)
                 let listed = existing.listed.later(note.listed)
                 // What the held copy never said, this one may (#208): a row kept before its
                 // audience was written down takes it from the next timeline that brings it.
@@ -338,20 +322,18 @@ public actor ItemStore {
                 if note.isLater(than: existing) { merged = merged.revised(by: note, was: existing) }
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.
-                let kept = categories != existing.categories || holding != existing.holding
+                let kept = categories != existing.categories
                     || listed != existing.listed || existing.goneSince != nil || merged != existing
                 // The counts this copy states are the source's figure now (#208), and a later
                 // figure than the one held.
                 merged.counts = note.counts.filled(from: existing.counts)
                 guard kept || merged.counts != existing.counts else { continue }
                 merged.categories = categories
-                merged.holding = holding
                 merged.listed = listed
                 merged.goneSince = nil
                 notes[key] = merged
-                shown = shown || holding == .arrived
-                // Held aside before: it changed there, or it widened out of there.
-                aside = aside || existing.holding == .aside
+                shown = shown || !merged.isTopicReply
+                replies = replies || merged.isTopicReply
                 if kept { moved = true } else { recounted = true }
             } else {
                 var note = note
@@ -359,8 +341,8 @@ public actor ItemStore {
                 notes[key] = note
                 arrival[key] = arrivals
                 arrivals += 1
-                shown = shown || note.holding == .arrived
-                aside = aside || note.holding == .aside
+                shown = shown || !note.isTopicReply
+                replies = replies || note.isTopicReply
                 moved = true
             }
         }
@@ -369,9 +351,9 @@ public actor ItemStore {
         // every-minute write this function exists not to make; the next change that is kept
         // carries the figures to disk with it.
         if moved {
-            changed(shown: shown, aside: aside)
+            changed(shown: shown, replies: replies)
         } else if recounted {
-            changed(shown: shown, aside: aside, kept: false)
+            changed(shown: shown, replies: replies, kept: false)
         }
     }
 
@@ -398,7 +380,7 @@ public actor ItemStore {
         guard sourceList.contains(where: { $0.host == host }) else { return false }
         var moved = false
         var shown = false
-        var aside = false
+        var replies = false
         var held: [Note] = []
         for note in incoming where note.source.host == host {
             guard let existing = notes[note.key] else { continue }
@@ -424,11 +406,11 @@ public actor ItemStore {
             guard refreshed != existing else { continue }
             notes[note.key] = refreshed
             moved = true
-            shown = shown || refreshed.holding == .arrived
-            aside = aside || refreshed.holding == .aside
+            shown = shown || !refreshed.isTopicReply
+            replies = replies || refreshed.isTopicReply
         }
-        if moved { changed(shown: shown, aside: aside) }
-        // The posts these quote, held aside as `ingest` holds them (#214): a quote read again may
+        if moved { changed(shown: shown, replies: replies) }
+        // The posts these quote, taken in as `ingest` takes them (#214): a quote read again may
         // name one this device has not held yet.
         let quoted = held.compactMap(\.quotedNote)
         let before = revision
@@ -464,26 +446,26 @@ public actor ItemStore {
     @discardableResult
     public func keep(_ openings: [NoteKey: ForumOpening], shown: Bool = false) -> Bool {
         var moved = false
-        var aside = false
+        var replies = false
         for (key, opening) in openings {
             guard let held = notes[key], held.opening != opening,
                   sourceList.contains(where: { $0.host == key.host })
             else { continue }
             notes[key] = held.with(opening: opening)
             moved = true
-            aside = aside || held.holding == .aside
+            replies = replies || held.isTopicReply
         }
         // Written down, and not a change to what is drawn: the screen draws an opening from the
         // forum's own cache as it is read, and replacing every row for each one kept as the reader
         // scrolls is what #154 set out not to do. Only a later change to what All shows carries
         // it onto the screen's rows — unless the caller says the screen draws it from here.
-        if moved { changed(shown: shown, aside: aside) }
+        if moved { changed(shown: shown, replies: replies) }
         return moved
     }
 
     /// The anchor a timeline is read on from (#201): the newest id a read of `category` from
     /// `host` listed a post under, of a post its source has not said is gone. A post the reader
-    /// wrote, or one held aside, was listed by no read, and is never it.
+    /// wrote, or one a search or a thread brought, was listed by no read, and is never it.
     public func newestListedID(host raw: String, category: Category) -> String? {
         let host = raw.lowercased()
         return notes.values
@@ -497,7 +479,7 @@ public actor ItemStore {
     public func held(host raw: String, category: Category) -> Set<NoteKey> {
         let host = raw.lowercased()
         return Set(notes.values.filter {
-            $0.source.host == host && $0.holding == .arrived && $0.categories.contains(category)
+            $0.source.host == host && $0.categories.contains(category)
         }.map(\.key))
     }
 
@@ -528,7 +510,7 @@ public actor ItemStore {
             notes[key]?.gaps = gaps
             moved = true
         }
-        if moved { changed(shown: true, aside: false) }
+        if moved { changed(shown: true, replies: false) }
     }
 
     /// Where posts may be missing below `key` in `category`, as reading down from it needs it
@@ -550,7 +532,7 @@ public actor ItemStore {
               let listed = gap.from ?? marked.listed[category]
         else { return nil }
         let timeline = notes.values.filter {
-            $0.key != key && $0.source.host == key.host && $0.holding == .arrived && $0.categories.contains(category)
+            $0.key != key && $0.source.host == key.host && $0.categories.contains(category)
         }
         let listedBelow = timeline.filter { note in
             note.listed[category].map { StatusID.later(listed, than: $0) } == true
@@ -603,7 +585,7 @@ public actor ItemStore {
         }
         // One of each kind per timeline per post: a place said there before gives way to this one.
         if let place { notes[carrier]?.gaps.update(with: place) }
-        changed(shown: true, aside: false)
+        changed(shown: true, replies: false)
     }
 
     /// Lets go of one server: the source, the boards the reader picked on it, and the notes it
@@ -636,7 +618,7 @@ public actor ItemStore {
         saidByHost[host] = nil
         sourcesWatcher?(sourceList.map(\.host))
         if keepingPosts {
-            changed(shown: false, aside: false)
+            changed(shown: false, replies: false)
             return
         }
         let going = notes.values.filter { $0.key.host == host && !$0.kept }
@@ -644,7 +626,7 @@ public actor ItemStore {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
-        changed(shown: true, aside: going.contains { $0.holding == .aside })
+        changed(shown: true, replies: going.contains { $0.isTopicReply })
     }
 
     public func sources() -> [Source] {
@@ -667,7 +649,7 @@ public actor ItemStore {
         // once per source for nothing a reader could tell apart. The screens are told, so the
         // page says the newer moment this run; the index keeps the older until a word changes.
         let sameWord = before.map { $0.said(at: moment) == stamped } ?? false
-        changed(shown: false, aside: false, kept: !sameWord)
+        changed(shown: false, replies: false, kept: !sameWord)
     }
 
     /// Whether `profile` is a word worth keeping: said at a moment, and of a kind this app can
@@ -693,7 +675,7 @@ public actor ItemStore {
     public func forgetSaid(host raw: String) {
         let host = raw.lowercased()
         guard saidByHost.removeValue(forKey: host) != nil else { return }
-        changed(shown: false, aside: false)
+        changed(shown: false, replies: false)
     }
 
     /// Keeps only the latest `months` months as of `now` from here on, or everything where
@@ -707,39 +689,29 @@ public actor ItemStore {
 
     /// `setRetention`, saying which sources the posts went from as well as how many (#251) — what
     /// the months limit writes into its account. **A kept post stays whatever its age** (#284),
-    /// where a timeline drew it or aside as it was, and is counted in nothing that went.
+    /// and is counted in nothing that went.
     public func letGoBeyond(months: Int?, from now: Date = Date(), calendar: Calendar = .current) -> WentByLimit {
         retention = KeepPolicy.cutoff(keepingMonths: months, from: now, calendar: calendar)
         guard let retention else { return .none }
         let before = notes.count
-        let asideBefore = Set(notes.filter { $0.value.holding == .aside }.keys)
-        // A quoted post a kept post quotes stays, as `ingest` keeps it (#214) — held aside from
-        // here, where a timeline had brought it: the timeline's reach has passed it, the quote's
-        // has not.
+        // A quoted post a kept post quotes stays, as `ingest` keeps it (#214): the window's reach
+        // has passed it, the quote's has not.
         let quoted = Set(notes.values.filter { $0.kept || $0.postedAt >= retention }.compactMap(\.quotedKey))
-        var demoted = false
         var kept: [NoteKey: Note] = [:]
         var gone: Set<String> = []
+        var replies = false
         for (key, note) in notes {
-            if note.kept || note.postedAt >= retention {
+            if note.kept || note.postedAt >= retention || quoted.contains(key) {
                 kept[key] = note
-            } else if quoted.contains(key) {
-                var aside = note
-                if aside.holding != .aside {
-                    aside.holding = .aside
-                    demoted = true
-                }
-                kept[key] = aside
             } else {
                 gone.insert(key.host)
+                replies = replies || note.isTopicReply
             }
         }
         notes = kept
-        if notes.count != before || demoted {
+        if notes.count != before {
             arrival = arrival.filter { notes[$0.key] != nil }
-            // Which rows are aside, not how many: a cut and a demotion in one pass can leave the
-            // count where it was while the rows themselves changed.
-            changed(shown: true, aside: Set(notes.filter { $0.value.holding == .aside }.keys) != asideBefore)
+            changed(shown: true, replies: replies)
         }
         return WentByLimit(posts: before - notes.count, sources: gone.sorted())
     }
@@ -747,8 +719,8 @@ public actor ItemStore {
     /// Lets go of the `count` oldest posts held — the room limit's step past the picture copies
     /// (#249). Returns how many went and from which sources.
     ///
-    /// **Oldest by when they were posted, across every source, rows held aside included**: the
-    /// room is this device's and not one source's, and a search's find held aside weighs what a
+    /// **Oldest by when they were posted, across every source, a topic's kept replies included**: the
+    /// room is this device's and not one source's, and a kept reply weighs what a
     /// timeline's post does. Two posted in the same second go in the order they arrived. A post
     /// another held post quotes stays whatever its age, as the keep window keeps it (#214): it
     /// goes once the post quoting it has. **A kept post is never one of them** (#284): the oldest
@@ -768,7 +740,7 @@ public actor ItemStore {
             notes[note.key] = nil
             self.arrival[note.key] = nil
         }
-        changed(shown: going.contains { $0.holding == .arrived }, aside: going.contains { $0.holding == .aside })
+        changed(shown: going.contains { !$0.isTopicReply }, replies: going.contains { $0.isTopicReply })
         return WentByLimit(posts: going.count, sources: Set(going.map(\.key.host)).sorted())
     }
 
@@ -787,7 +759,7 @@ public actor ItemStore {
     }
 
     /// How many rows were posted inside `span` and, where `host` is given, came through that host
-    /// — arrived and aside alike (#248). What a press to let a span go would take, so the question
+    /// — items and a topic's kept replies alike (#248). What a press to let a span go would take, so the question
     /// before it names the true count: a kept post is not counted, since the press leaves it (#284).
     public func count(span: Range<Date>, host raw: String? = nil) -> Int {
         let host = raw?.lowercased()
@@ -815,7 +787,7 @@ public actor ItemStore {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
-        changed(shown: going.contains { $0.holding == .arrived }, aside: going.contains { $0.holding == .aside })
+        changed(shown: going.contains { !$0.isTopicReply }, replies: going.contains { $0.isTopicReply })
         return going.count
     }
 
@@ -841,28 +813,28 @@ public actor ItemStore {
         return (sourceList, ordered, said, revision)
     }
 
-    /// Every row a timeline may show, newest first — and **never one held aside** (#175).
+    /// Every item this device holds, newest first (#296): whatever brought it — a timeline, a
+    /// search, a read under a tag, a thread opened, a quote — it is an item like any other, and
+    /// every timeline whose rules let it through shows it. What it arrived through is its
+    /// categories, and one that arrived through none is shown by no rule on a category.
     ///
-    /// This device can hold a post no timeline shows: one found by a search, one read inside a
-    /// thread, one brought under a hashtag. It is here, `note(_:)` hands it over, and a save
-    /// writes it; what it is not is a row All grew by. Everything that feeds All reads this, so
-    /// the distinction is made once and honoured everywhere rather than remembered by each caller.
+    /// **Never a forum topic's kept reply** (`Note.isTopicReply`): that is a part of a topic and
+    /// not an item, and is handed over by `replies()`.
     public func all() -> [Note] {
         let arrival = self.arrival
-        return notes.values.filter { $0.holding == .arrived }
+        return notes.values.filter { !$0.isTopicReply }
             .sorted { Self.storeOrder($0, $1, arrival) }
     }
 
-    /// Every row held aside, newest first — what `all()` leaves out, and nothing it draws.
-    ///
-    /// **For the one place that reads past a timeline** (#176): a search finds what this device
-    /// holds, and what a search brought back is held aside so All does not grow by it. Nothing
-    /// else draws these; a search still passes them through the rules of the timeline in front.
-    public func aside() -> [Note] {
+    /// Every kept reply of a forum topic, newest first — what `all()` leaves out. For the count
+    /// of what this device holds, which they are part of; nothing draws them but their topic,
+    /// which reads its own through `held(host:idPrefix:)`.
+    public func replies() -> [Note] {
         let arrival = self.arrival
-        return notes.values.filter { $0.holding == .aside }
+        return notes.values.filter(\.isTopicReply)
             .sorted { Self.storeOrder($0, $1, arrival) }
     }
+
 
     /// Lets go of one row — a post its author took back (#109). Silent where it is not held.
     ///
@@ -883,7 +855,7 @@ public actor ItemStore {
             notes[key] = nil
             arrival[key] = nil
         }
-        changed(shown: gone.holding == .arrived, aside: gone.holding == .aside)
+        changed(shown: !gone.isTopicReply, replies: gone.isTopicReply)
     }
 
     /// Takes back what a signed-in reader's reads said they had done to `host`'s posts — boosted,
@@ -912,15 +884,15 @@ public actor ItemStore {
             swept[host] = moment
         }
         var shown = false
-        var aside = false
+        var replies = false
         for (key, note) in notes where gone(key.host) {
             guard note.boosted != nil || note.favourited != nil || note.bookmarked != nil else { continue }
             notes[key] = note.withoutReaderMarks()
-            shown = shown || note.holding == .arrived
-            aside = aside || note.holding == .aside
+            shown = shown || !note.isTopicReply
+            replies = replies || note.isTopicReply
         }
-        guard shown || aside else { return false }
-        changed(shown: shown, aside: aside)
+        guard shown || replies else { return false }
+        changed(shown: shown, replies: replies)
         return true
     }
 
@@ -936,7 +908,7 @@ public actor ItemStore {
         guard var held = notes[key], held.kept != kept else { return false }
         held.kept = kept
         notes[key] = held
-        changed(shown: held.holding == .arrived, aside: held.holding == .aside)
+        changed(shown: !held.isTopicReply, replies: held.isTopicReply)
         return true
     }
 
@@ -955,7 +927,7 @@ public actor ItemStore {
             note.kept = false
             notes[note.key] = note
         }
-        changed(shown: keeping.contains { $0.holding == .arrived }, aside: keeping.contains { $0.holding == .aside })
+        changed(shown: keeping.contains { !$0.isTopicReply }, replies: keeping.contains { $0.isTopicReply })
         return keeping.count
     }
 
@@ -989,7 +961,7 @@ public actor ItemStore {
         else { return false }
         held.goneSince = moment
         notes[key] = held
-        changed(shown: held.holding == .arrived, aside: held.holding == .aside)
+        changed(shown: !held.isTopicReply, replies: held.isTopicReply)
         return true
     }
 
@@ -1016,7 +988,7 @@ public actor ItemStore {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
-        changed(shown: going.contains { $0.holding == .arrived }, aside: going.contains { $0.holding == .aside })
+        changed(shown: going.contains { !$0.isTopicReply }, replies: going.contains { $0.isTopicReply })
         return going.count
     }
 
@@ -1035,7 +1007,7 @@ public actor ItemStore {
     @discardableResult
     public func letSettledGo(markedBy cutoff: Date? = nil) -> Int {
         var went = 0
-        var aside = false
+        var replies = false
         for (key, note) in notes {
             let going = note.gaps.filter { gap in
                 guard gap.kind == .settled else { return false }
@@ -1045,9 +1017,9 @@ public actor ItemStore {
             guard !going.isEmpty else { continue }
             notes[key]?.gaps.subtract(going)
             went += going.count
-            aside = aside || note.holding == .aside
+            replies = replies || note.isTopicReply
         }
-        if went > 0 { changed(shown: true, aside: aside) }
+        if went > 0 { changed(shown: true, replies: replies) }
         return went
     }
 
@@ -1069,7 +1041,7 @@ public actor ItemStore {
         return found
     }
 
-    /// Every row held from `host` whose id starts `idPrefix` — **aside ones included**, which is
+    /// Every row held from `host` whose id starts `idPrefix` — **a topic's kept replies included**, which is
     /// the point: a thread read to its end (#177) is read back from here, answers and all, and
     /// `all()` would hand over none of them. In the order they arrived; a caller that means
     /// another order says so.

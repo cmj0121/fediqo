@@ -609,7 +609,7 @@ final class ForumPosts {
     /// from it because a page and the first read can be in the air for one topic at once.
     @ObservationIgnored private var clearedPages: Set<Key> = []
 
-    /// Where what a page brought is landed — **the store, held aside and saved** — and what it
+    /// Where what a page brought is landed — **the store, as the topic's kept replies, and saved** — and what it
     /// hands back is every reply of that topic the store now holds, in reading order. Set by the
     /// session; nothing where there is none, which is a test's, and then this run's own copy is
     /// the whole of it.

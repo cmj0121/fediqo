@@ -313,8 +313,8 @@ extension EnvironmentValues {
 }
 
 extension ShellSession {
-    /// The row the post `item` quotes, where this device holds it (#214): the quoted post held
-    /// aside with it, or — for a quote that came as an id alone, a level down — the post this
+    /// The row the post `item` quotes, where this device holds it (#214): the quoted post taken
+    /// in with it, or — for a quote that came as an id alone, a level down — the post this
     /// source gave that id, where it is held at all. Nothing where the quote may not be shown.
     func quotedRow(of item: DummyItem) -> String? {
         if let id = item.quotedRowID { return heldNote(id) == nil ? nil : id }
@@ -323,7 +323,7 @@ extension ShellSession {
         }
         let host = item.source.host
         let matches = { (note: Note) in note.source.host == host && note.statusID == statusID }
-        return (notes.first(where: matches) ?? aside.first(where: matches))?.key.rowID
+        return notes.first(where: matches)?.key.rowID
     }
 }
 

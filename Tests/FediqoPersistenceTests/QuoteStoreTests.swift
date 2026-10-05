@@ -55,8 +55,7 @@ struct QuoteStoreTests {
         #expect(byID["2"]?.quote == accepted)
         #expect(byID["3"]?.quote == revoked)
         #expect(byID["4"]?.quote == nil)
-        // The quoted post itself, held aside, opens with the network off.
-        #expect(byID["1"]?.holding == .aside)
+        // The quoted post itself, an item of its own, opens with the network off.
         #expect(byID["1"]?.body == "Under the cover")
         #expect(byID["1"]?.quote == Quote(state: .accepted, statusID: "0"))
     }

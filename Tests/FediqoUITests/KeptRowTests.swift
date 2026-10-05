@@ -122,7 +122,7 @@ struct KeptRowTests {
         let act = try #require(await room.session.keepWithinRoom(at: Self.origin))
 
         #expect(act.posts > 0)
-        let left = room.session.notes + room.session.aside
+        let left = room.session.notes
         #expect(left.contains { $0.id == "kept" && $0.kept }, "the limit took a kept post")
         #expect(left.count == 61 - act.posts, "the account counts what went, and the kept post did not")
         #expect(room.session.limitAccount.first?.posts == act.posts)

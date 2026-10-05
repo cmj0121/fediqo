@@ -211,31 +211,6 @@ public enum Category: Hashable, Sendable {
     case board(id: String)
 }
 
-/// How a row came to be held, and so whether a timeline may show it (#175).
-///
-/// **Holding a post is not the same as it arriving.** A post a source handed over as part of a
-/// timeline it serves arrived, and All draws it. A post this device went and fetched for one
-/// place — a search hit, an answer read inside a thread, a post brought under a hashtag — is held
-/// so it can be read where it was found, and All does not grow because a search was made. #90 said
-/// this in passing about a thread's answers; here it is a fact of the store, said once, so the
-/// tasks that need it do not each invent their own.
-///
-/// **It only ever widens.** A row held aside that later arrives through a timeline is a row that
-/// arrived, and nothing takes that back — `Note.categories`' rule, for its reason: what a copy
-/// arrived through is a fact about it, and a later read that did not come through a timeline is
-/// not that fact going away.
-public enum Holding: String, Sendable, Hashable {
-    /// It arrived through a read of a source's timeline. Every timeline may show it.
-    case arrived
-    /// This device holds it, and no timeline shows it.
-    case aside
-
-    /// The wider of the two.
-    func widened(by other: Holding) -> Holding {
-        self == .arrived || other == .arrived ? .arrived : .aside
-    }
-}
-
 public enum Audience: String, Sendable, Hashable, CaseIterable {
     case everyone
     case unlisted
@@ -554,7 +529,7 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// **Unlike every other fact here, a later timeline copy's figure wins** — a count is only
     /// ever the source's latest, and the first copy's would be days stale by the end of the
     /// keep-for window. A count the later copy does not state keeps the one held. A `var` for
-    /// `holding`'s reason: the store sets it on a row it already holds, and draws the new figure
+    /// `categories`' reason: the store sets it on a row it already holds, and draws the new figure
     /// without writing the store down for it alone (`ItemStore.ingest`).
     public var counts: Counts
     /// The id the server this copy came through gives the status, where it is a microblog's —
@@ -571,11 +546,6 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// arrives here (`ForumOpening.init?(_:)`). It goes when the row goes — a Remove, or the
     /// reader's keep-for window — and stays when a Clear keeps the row.
     public let opening: ForumOpening?
-    /// Whether a timeline may show this row, or whether this device only holds it (#175).
-    ///
-    /// **A `var`, as `categories` is, and for its reason**: the store widens it where the same
-    /// post arrives a second time through a timeline, and that is the one way it moves.
-    public var holding: Holding
     /// When a read of this one post heard its source say it no longer has it (#179), or nothing
     /// while the source has said no such thing.
     ///
@@ -585,13 +555,13 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// (#109) is let go, not marked: `ItemStore.forget` is that path, and it sets this only on a
     /// post they keep (#284), which stays.
     ///
-    /// A `var` for `holding`'s reason: the store sets it on a row it already holds, and a read
+    /// A `var` for `categories`' reason: the store sets it on a row it already holds, and a read
     /// that finds the post again takes it off.
     public var goneSince: Date?
     /// Where a timeline this post arrived through is not whole next to it (#201): newer posts
     /// that remain above it, or posts that may be missing below it. Empty on nearly every post.
     ///
-    /// A `var` for `holding`'s reason: the store sets it on a row it already holds, as a read
+    /// A `var` for `categories`' reason: the store sets it on a row it already holds, as a read
     /// lands. Kept with the row, so it goes when the row goes and outlives a relaunch with it.
     public var gaps: Set<TimelineGap>
     /// The id each timeline listed this post under when a read of that timeline brought it — a
@@ -599,7 +569,7 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// thing that moves where: a post the reader wrote, a search's find or a thread's answer was
     /// listed by no timeline, and so is never read on from.
     ///
-    /// A `var` for `holding`'s reason: the store grows it as the same post is listed again.
+    /// A `var` for `categories`' reason: the store grows it as the same post is listed again.
     public var listed: [Category: String]
     /// The post this one quotes, as its source said (#214), or nothing where it quotes none or
     /// the source has no such idea. Kept with the row, so the quoted post shows offline.
@@ -611,7 +581,7 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// one, so no read sets it or takes it off: a copy that arrives again, and a post read again,
     /// leave it as it was. Only `ItemStore.setKept` moves it.
     ///
-    /// A `var` for `holding`'s reason: the store sets it on a row it already holds.
+    /// A `var` for `categories`' reason: the store sets it on a row it already holds.
     public var kept: Bool
     /// When its source says the post was last changed after it was published (#286), or nothing
     /// where it says it never was — and on a source that says no such thing at all.
@@ -655,7 +625,7 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// **This device's own, as `kept` is.** No source says it and no read moves it: a copy that
     /// arrives again, and a post read again, leave it as it was. Nothing sets it yet.
     ///
-    /// A `var` for `holding`'s reason: the store sets it on a row it already holds.
+    /// A `var` for `categories`' reason: the store sets it on a row it already holds.
     public var refsDue: Bool
     /// When the read that brought this copy was sent (#291), or `unsaid`. **A fact about the
     /// copy on its way in, not about the post**: the store reads it as the copy lands and keeps
@@ -688,7 +658,6 @@ public struct Note: Identifiable, Hashable, Sendable {
         counts: Counts = Counts(),
         statusID: String? = nil,
         opening: ForumOpening? = nil,
-        holding: Holding = .arrived,
         goneSince: Date? = nil,
         gaps: Set<TimelineGap> = [],
         listed: [Category: String] = [:],
@@ -727,7 +696,6 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.counts = counts
         self.statusID = statusID
         self.opening = opening
-        self.holding = holding
         self.goneSince = goneSince
         self.gaps = gaps
         self.listed = listed
@@ -816,7 +784,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             audience: audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url,
             counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
-            holding: holding, goneSince: goneSince, gaps: gaps, listed: listed, quote: quote,
+            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote,
             kept: kept, editedAt: editedAt, earlier: earlier, language: language, refsDue: refsDue
         )
     }
@@ -839,7 +807,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             avatarURL: later.avatarURL ?? avatarURL, attachments: later.attachments,
             sensitive: later.sensitive ?? sensitive, spoiler: later.spoiler ?? spoiler,
             emojis: later.emojis, url: url, counts: counts, statusID: statusID, opening: opening,
-            holding: holding, goneSince: goneSince, gaps: gaps, listed: listed,
+            goneSince: goneSince, gaps: gaps, listed: listed,
             quote: source.kind.saysQuotes
                 ? later.quote.flatMap { Quote.later($0, over: quote) }
                 : Quote.later(later.quote, over: quote),
@@ -883,10 +851,6 @@ public struct Note: Identifiable, Hashable, Sendable {
             // A read of the row that says nothing of its opening post — a board listing, which
             // never does — leaves the one this device read where it is (#154).
             opening: opening ?? held.opening,
-            // Where the row is held does not move on a read again (#175): a post read again is
-            // not a post a timeline brought, so a row held aside stays aside and one in All stays
-            // there. Only `ItemStore.ingest` widens it.
-            holding: held.holding,
             // **No mark survives a read that found the post** (#179): the source has just handed
             // it over, which is the one thing a post gone from it cannot be.
             goneSince: nil,
@@ -950,7 +914,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             audience: audience ?? other.audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive ?? other.sensitive, spoiler: spoiler ?? other.spoiler,
             emojis: emojis, url: url, counts: counts,
-            statusID: statusID ?? other.statusID, opening: opening, holding: holding,
+            statusID: statusID ?? other.statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
             // The later copy's quote wins, as its counts do (#214) — see `Quote.later`.
             quote: Quote.later(other.quote, over: quote),
@@ -969,7 +933,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: nil,
             favourited: nil, bookmarked: nil, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
-            url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
+            url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
             editedAt: editedAt, earlier: earlier, language: language, refsDue: refsDue
         )
@@ -983,7 +947,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
             favourited: favourited, bookmarked: bookmarked, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
-            url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
+            url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
             editedAt: editedAt, earlier: earlier, language: language, refsDue: refsDue
         )

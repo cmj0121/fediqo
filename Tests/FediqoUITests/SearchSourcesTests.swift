@@ -71,7 +71,7 @@ struct SearchSourcesTests {
 
     private func searching(_ pattern: String, in session: ShellSession) async -> ShellSearch {
         let search = ShellSearch()
-        search.open(from: nil, over: session.searchable)
+        search.open(from: nil, over: session.notes)
         await search.indexed()
         search.text = pattern
         search.settle(pattern)
@@ -84,7 +84,7 @@ struct SearchSourcesTests {
 
     // MARK: - Acceptance
 
-    @Test("What the sources in front sent shows among the results, held aside, and All does not grow")
+    @Test("What the sources in front sent shows among the results and stands in All, and clearing the search leaves it there")
     func reachesTheSources() async throws {
         let server = Searchable([Self.one: Self.found])
         let session = try await shell(server)
@@ -98,11 +98,46 @@ struct SearchSourcesTests {
         #expect(query.contains(URLQueryItem(name: "type", value: "statuses")))
 
         #expect(found(search, in: session) == [Self.local.key.rowID, Self.foundKey.rowID])
-        #expect(await session.store.note(Self.foundKey)?.holding == .aside, "the store's answer, held aside")
-        #expect(!session.notes.contains { $0.key == Self.foundKey }, "All did not grow by it")
-        #expect(session.timelineItems(latest: nil).count == 1)
+        #expect(await session.store.note(Self.foundKey)?.categories.isEmpty == true, "the store's answer, through no category")
+        #expect(session.notes.contains { $0.key == Self.foundKey }, "an item like any other")
+        #expect(session.timelineItems(latest: nil).count == 2, "All grew by what the search brought")
         #expect(session.reload.searchFailed.isEmpty)
         #expect(session.reload.line == nil)
+
+        // The search cleared: what it brought stays where it stands.
+        search.text = ""
+        search.settle("")
+        session.reload.endSearch()
+        #expect(session.timelineItems(latest: nil).map(\.id).contains(Self.foundKey.rowID))
+        #expect(await session.store.all().contains { $0.key == Self.foundKey })
+    }
+
+    /// The rows the timeline made of `rules` draws, with that timeline in front.
+    private func drawn(_ rules: [Rule?], in session: ShellSession) -> Set<String> {
+        let timeline = TimelineDefinition(name: "T", rules: rules.compactMap { $0 })
+        session.written = [timeline]
+        session.timelineID = .written(timeline.id)
+        defer { session.timelineID = .all }
+        return Set(session.timelineItems(latest: nil).map(\.id))
+    }
+
+    @Test("What a search brought stands in All at the time it was posted; a timeline made of a category alone does not show it, and one whose rule is its source, its author or a word in it does")
+    func whatASearchBroughtGoesThroughTheRulesThatLetItThrough() async throws {
+        let session = try await shell(Searchable([Self.one: Self.found]))
+        await session.reload.search("cats", timeline: .all, in: session)
+        session.reload.endSearch()
+        let found = Self.foundKey.rowID, local = Self.local.key.rowID
+        let sources = session.sources
+
+        let all = session.timelineItems(latest: nil)
+        #expect(all.map(\.id) == [found, local], "newest first, by when each was posted")
+        #expect(all.first?.postedAt == ISO8601DateFormatter().date(from: "2024-02-07T00:00:00Z"), "the source's time for it, not the search's")
+
+        #expect(drawn([.category(.home, in: .every, sources: sources)], in: session).isEmpty, "it came through no category: not Home")
+        #expect(drawn([.category(.public, in: .every, sources: sources)], in: session) == [local], "and not Public")
+        #expect(drawn([.source(Self.one)], in: session) == [found, local])
+        #expect(drawn([.author("ada@\(Self.one)", in: .every, sources: sources)], in: session) == [found, local])
+        #expect(drawn([.keyword("wire", in: .every)], in: session) == [found])
     }
 
     @Test("Which sources were asked is said, and that the rest cannot be searched and were not")
@@ -147,7 +182,7 @@ struct SearchSourcesTests {
         await offline.reloadFromStore()
         let search = await searching("cats", in: offline)
         #expect(found(search, in: offline) == [Self.local.key.rowID, Self.foundKey.rowID])
-        #expect(!offline.notes.contains { $0.key == Self.foundKey }, "still held aside, not in All")
+        #expect(offline.notes.contains { $0.key == Self.foundKey }, "and it stands in All, as it did before the relaunch")
     }
 
     @Test("While on its way it says so and what was held shows; a source that failed says so, the others land")
@@ -195,7 +230,7 @@ struct SearchSourcesTests {
         session.commit(draft)
         session.timelineID = .written(draft.id)
         let fromMine = await searching("cats", in: session)
-        #expect(found(fromMine, in: session) == [Self.foundKey.rowID], "a keyword rule reads what was held aside")
+        #expect(found(fromMine, in: session) == [Self.foundKey.rowID], "a keyword rule reads what the search brought")
     }
 
     @Test("Closing the search ends its ask: nothing it had not brought lands, and what it said goes")
@@ -319,20 +354,20 @@ struct SearchSourcesTests {
         #expect(session.reload.reach?.asked == [Self.one], "the last search's line, untouched")
     }
 
-    @Test("Letting go of a gone row held aside moves what is counted aside")
-    func goneAsideIsCounted() async {
+    @Test("Marking a row a search brought as gone, and letting it go, each move what the timelines draw")
+    func aGoneFindIsDrawn() async {
         let store = ItemStore()
         let source = Source(host: Self.one, kind: .mastodon)
         await store.add(source)
         let aside = Note(id: "aside", source: source, author: "Ada", handle: "@ada@\(Self.one)", body: "x",
                          postedAt: Date(timeIntervalSince1970: 0), categories: [])
-        await store.hold([aside], ifSourceHere: Self.one)
-        let held = await store.asideRevision
+        await store.ingest([aside], ifSourceHere: Self.one)
+        let drawn = await store.drawn
         #expect(await store.markGone(aside.key))
-        #expect(await store.asideRevision == held + 1, "marked: the row held aside changed")
+        #expect(await store.drawn == drawn + 1, "marked: its row changed")
         #expect(await store.letGoneGo() == 1)
-        #expect(await store.asideRevision == held + 2, "let go: the row held aside went")
-        #expect(await store.aside().isEmpty)
+        #expect(await store.drawn == drawn + 2, "let go: its row went")
+        #expect(await store.all().isEmpty)
     }
 
     @Test("A token that may not search is said as a sign-in to make again, not as silence")
@@ -347,28 +382,41 @@ struct SearchSourcesTests {
         #expect(session.reload.line == nil)
     }
 
-    @Test("What is held aside is counted apart: a landing only the timelines see does not move it")
-    func asideIsCountedApart() async {
+    @Test("A forum topic's kept replies are counted apart from the items: a landing only the timelines see moves neither their count nor is moved by theirs")
+    func repliesAreCountedApart() async {
         let store = ItemStore()
         let source = Source(host: Self.one, kind: .mastodon)
+        let forum = Source(host: "forum.example", kind: .discuz)
         await store.add(source)
+        await store.add(forum)
         func note(_ id: String) -> Note {
             Note(id: id, source: source, author: "Ada", handle: "@ada@\(Self.one)", body: id,
                  postedAt: Date(timeIntervalSince1970: 0), categories: [])
         }
+        func reply(_ pid: Int) -> Note {
+            DiscuzPost(pid: pid, tid: 7, author: "p", handle: "", body: "r\(pid)")
+                .asNote(host: forum.host, read: Date(timeIntervalSince1970: 0))
+        }
         await store.ingest([note("drawn")])
-        #expect(await store.asideRevision == 0)
-        await store.hold([note("aside")], ifSourceHere: Self.one)
-        #expect(await store.asideRevision == 1)
-        await store.hold([note("aside")], ifSourceHere: Self.one)
-        #expect(await store.asideRevision == 1, "the same again changed nothing")
-        await store.ingest([note("aside")])
-        #expect(await store.asideRevision == 2, "widened out of aside")
-        await store.hold([note("gone")], ifSourceHere: Self.one)
-        await store.forget(note("gone").key)
-        #expect(await store.asideRevision == 4)
+        #expect(await store.repliesRevision == 0)
+        // What a search brought is an item: it moves what is drawn, and no reply's count.
+        let drawn = await store.drawn
+        await store.ingest([note("found")], ifSourceHere: Self.one)
+        #expect(await store.drawn == drawn + 1)
+        #expect(await store.repliesRevision == 0)
+
+        await store.ingest([reply(2)], ifSourceHere: forum.host)
+        #expect(await store.repliesRevision == 1)
+        #expect(await store.drawn == drawn + 1, "a page of a topic read replaces no row of All")
+        await store.ingest([reply(2)], ifSourceHere: forum.host)
+        #expect(await store.repliesRevision == 1, "the same again changed nothing")
+        await store.ingest([reply(3)], ifSourceHere: forum.host)
+        await store.forget(reply(3).key)
+        #expect(await store.repliesRevision == 3)
         await store.ingest([note("more")])
-        #expect(await store.asideRevision == 4)
+        #expect(await store.repliesRevision == 3)
+        #expect(await store.all().map(\.id).sorted() == ["drawn", "found", "more"])
+        #expect(await store.replies().map(\.id) == [reply(2).id])
     }
 }
 

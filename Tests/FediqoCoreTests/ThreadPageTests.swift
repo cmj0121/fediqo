@@ -119,7 +119,7 @@ struct ThreadPageTests {
         #expect(DiscuzPost(held: thread) == nil)
     }
 
-    @Test("The store hands back what it holds aside, by host and prefix, where All does not")
+    @Test("The store hands back a topic's kept replies, by host and prefix, where All does not")
     func theStoreHandsBackWhatItHoldsAside() async {
         let store = ItemStore()
         let forum = Source(host: Self.host, kind: .discuz)
@@ -130,11 +130,12 @@ struct ThreadPageTests {
         }
         let elsewhere = DiscuzPost(pid: 9, tid: Self.tid + 1, author: "p", handle: "", body: "x")
             .asNote(host: Self.host, read: read)
-        await store.hold(replies + [elsewhere], ifSourceHere: Self.host)
+        await store.ingest(replies + [elsewhere], ifSourceHere: Self.host)
 
         let held = await store.held(host: Self.host, idPrefix: DiscuzPost.heldPrefix(host: Self.host, tid: Self.tid))
         #expect(held.map(\.id) == replies.map(\.id), "this topic's, in the order they arrived")
-        #expect(held.allSatisfy { $0.holding == .aside })
-        #expect(await store.all().isEmpty, "a reply read in a thread is not a row All grew by")
+        #expect(held.allSatisfy { $0.isTopicReply })
+        #expect(await store.all().isEmpty, "a topic's kept reply is a part of the topic, and not an item All grew by")
+        #expect(await store.replies().count == 4)
     }
 }

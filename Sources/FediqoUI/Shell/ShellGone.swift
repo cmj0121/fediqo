@@ -50,7 +50,7 @@ extension ShellSession {
         return await letGoneGo(markedBy: cutoff)
     }
 
-    /// What is marked gone from its source, held aside or not — the posts, and the places whose
+    /// What is marked gone from its source, a forum topic's reply included — the posts, and the places whose
     /// source no longer has what lay there (#204). What the press asks about before it lets go.
     func goneHeld() async -> WentGone {
         WentGone(posts: await store.goneCount(), places: await store.settledCount())

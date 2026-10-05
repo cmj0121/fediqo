@@ -13,12 +13,12 @@ struct KeptHoldingsTests {
 
     private static func post(
         _ id: Int, _ source: Source = one, body: String = "hello", kept: Bool = false, title: String? = nil,
-        spoiler: String? = nil, earlier: [Wording] = [], holding: Holding = .arrived
+        spoiler: String? = nil, earlier: [Wording] = []
     ) -> Note {
         Note(
             id: "https://\(source.host)/\(id)", source: source, author: "Ada", handle: "@ada", body: body,
             title: title, postedAt: origin.addingTimeInterval(Double(id) * 86_400), categories: [.public],
-            spoiler: spoiler, statusID: "\(id)", holding: holding, kept: kept,
+            spoiler: spoiler, statusID: "\(id)", kept: kept,
             editedAt: earlier.isEmpty ? nil : origin, earlier: earlier
         )
     }
@@ -33,16 +33,16 @@ struct KeptHoldingsTests {
     func countedBySource() async {
         let notes = [
             Self.post(1, kept: true), Self.post(2, kept: true), Self.post(3),
-            Self.post(4, Self.two, kept: true), Self.post(5, Self.two, holding: .aside),
+            Self.post(4, Self.two, kept: true), Self.post(5, Self.two),
         ]
         let store = Self.store(notes)
-        var holdings = Holdings(notes: await store.all() + (await store.aside()), per: .month)
+        var holdings = Holdings(notes: await store.all(), per: .month)
         #expect(holdings.kept.posts == 3)
         #expect(holdings.kept(host: "ONE.example").posts == 2 && holdings.kept(host: Self.two.host).posts == 1)
         #expect(holdings.kept(host: "nobody.example") == .none)
 
         await store.remove(host: Self.one.host)
-        holdings = Holdings(notes: await store.all() + (await store.aside()), per: .month)
+        holdings = Holdings(notes: await store.all(), per: .month)
         #expect(holdings.posts(host: Self.one.host) == 2, "the premise: only its kept posts stayed")
         #expect(holdings.kept(host: Self.one.host).posts == 2, "a removed source's kept posts are not counted under its name")
         #expect(holdings.keptBySource.keys.sorted() == [Self.one.host, Self.two.host])
@@ -108,18 +108,18 @@ struct KeptHoldingsTests {
         #expect(await store.all().map(\.key.host) == [Self.two.host])
     }
 
-    @Test("Stopping keeping all reaches every source, one removed and one held aside included; the oldest then go for room like any others")
+    @Test("Stopping keeping all reaches every source, one removed included; the oldest then go for room like any others")
     func stopKeepingAll() async {
         let store = Self.store([
             Self.post(1, kept: true), Self.post(2, Self.two, kept: true),
-            Self.post(3, Self.two, kept: true, holding: .aside), Self.post(4),
+            Self.post(3, Self.two, kept: true), Self.post(4),
         ])
         await store.remove(host: Self.one.host)
-        #expect(await store.all().map(\.key.host).sorted() == [Self.one.host, Self.two.host], "the premise: the removed source's kept post stayed")
+        #expect(Set(await store.all().map(\.key.host)) == [Self.one.host, Self.two.host], "the premise: the removed source's kept post stayed")
         #expect(await store.holdsWhatRoomMayLetGo() == false, "the premise: everything left is kept")
 
         #expect(await store.stopKeeping() == 3)
-        let left = await store.all() + (await store.aside())
+        let left = await store.all()
         #expect(left.allSatisfy { !$0.kept })
         #expect(await store.holdsWhatRoomMayLetGo())
         #expect(await store.letGoOldest(count: 3).posts == 3)

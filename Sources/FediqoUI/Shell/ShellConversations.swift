@@ -9,14 +9,13 @@ import Observation
 // Return on, so it is asked for the moment the pane opens and nothing is asked of the reader
 // twice — and since #198 a forum topic's first page is too, and both are asked again on the wait.
 //
-// **Nothing here reaches the store's list of rows.** What comes back is drawn, and what comes
-// back for a row this device already holds is handed to `ItemStore.refresh`, which replaces held
-// rows and admits none — so an answer this device never held is read in the thread and does not
-// turn up in All afterwards. That property is `ShellReload`'s and is stated in its doc; this unit
-// took over the request and keeps it.
+// **What comes back is held.** Until #296 an answer this device never held was read in the
+// thread and kept apart from every timeline; now each one is an item and stands in All.
 //
-// **Since #177 what comes back lands in the store first, held aside** — written down and saved,
-// and still never a row All grew by (#175). So a thread read once is there with the network off:
+// **Since #177 what comes back lands in the store first** — written down and saved — **and since
+// #296 each answer read is an item like any other**: it stands in All at the time it was posted,
+// through no category, so a timeline made of Home alone does not show it and one whose rule is an
+// author or a word it matches does. So a thread read once is there with the network off:
 // a read that finds nobody answering draws what this device holds around the post, and says at
 // the foot that the rest did not arrive. And a thread the source handed back only part of is read
 // further as the reader nears its foot, one ask at a time, until the source has nothing more.
@@ -318,8 +317,8 @@ final class ShellConversations {
 
     /// The note behind a row drawn in a conversation, where one of the loaded halves holds it.
     ///
-    /// **An answer read in a thread is not a row `session.notes` holds** — it is held aside, see
-    /// this file's header — so an act
+    /// **Asked of the thread, not of `session.notes`.** An answer read lands in the store (see
+    /// this file's header) and the session adopts it a turn later, so an act
     /// pressed on one has to find its note here, or the mark under it would be a control that is
     /// drawn and does nothing.
     func note(_ rowID: String) -> Note? {
@@ -529,8 +528,8 @@ final class ShellConversations {
                 throw error
             }
             try Task.checkCancellation()
-            // **Into the store first, held aside** (#177): every post of the thread is written
-            // down and saved, and none of them is a row All grew by. Held rows that appear in it
+            // **Into the store first** (#177): every post of the thread is written down and
+            // saved, each an item that stands in All (#296). Held rows that appear in it
             // are refreshed on the way past — an answer this device already has shows its new
             // words in the timeline too.
             //
@@ -709,7 +708,7 @@ final class ShellConversations {
         }
     }
 
-    /// Posts read in a thread, into the store **held aside** and saved, and those already held
+    /// Posts read in a thread, into the store as items (#296) and saved, and those already held
     /// refreshed on the way past. Whether a held row changed, so a caller adopts only then.
     ///
     /// **And each post as the store now holds it** (`Landed.held`), which is what a thread draws
@@ -718,7 +717,7 @@ final class ShellConversations {
     /// way into a thread, so no caller lays in the wire's copy and draws a kept post as not kept.
     private static func land(_ notes: [Note], host: String, in session: ShellSession) async -> Landed {
         guard !notes.isEmpty else { return Landed(changed: false, copies: [:]) }
-        await session.store.hold(notes, ifSourceHere: host)
+        await session.store.ingest(notes, ifSourceHere: host)
         let changed = await session.store.refresh(notes, ifSourceHere: host)
         await session.persist?()
         return Landed(changed: changed, copies: await session.store.notes(notes.map(\.key)))

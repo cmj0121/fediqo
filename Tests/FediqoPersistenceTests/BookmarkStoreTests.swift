@@ -71,12 +71,12 @@ struct BookmarkStoreTests {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
 
-    private static func note(_ id: String, bookmarked: Bool?, holding: Holding = .arrived) -> Note {
-        let base = PackagerFixture.note(id, holding: holding)
+    private static func note(_ id: String, bookmarked: Bool?) -> Note {
+        let base = PackagerFixture.note(id)
         return Note(
             id: base.id, source: base.source, author: base.author, handle: base.handle, body: base.body,
             postedAt: base.postedAt, categories: base.categories, bookmarked: bookmarked,
-            attachments: base.attachments, holding: holding
+            attachments: base.attachments
         )
     }
 
@@ -100,11 +100,10 @@ struct BookmarkStoreTests {
         #expect(opened.notes.allSatisfy { $0.bookmarked == nil }, "nothing is no, and nothing was said")
         #expect(opened.notes.map(\.kept) == [false, true, false], "what was kept is still kept")
         #expect(opened.notes.allSatisfy { $0.favourited == true }, "and what the source said before is still said")
-        #expect(opened.notes.map(\.holding) == [.arrived, .arrived, .aside])
         let migrations = try DatabaseQueue(path: index.path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
         }
-        #expect(migrations == ["v1-index", "v10-references", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions", "v9-language"])
+        #expect(migrations == ["v1-index", "v10-references", "v11-one-holding", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions", "v9-language"])
     }
 
     @Test("What a source says of a bookmark in a carried-forward store is there after a save and a reopen")
@@ -152,7 +151,7 @@ struct BookmarkStoreTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let notes = [
             Self.note("1", bookmarked: true), Self.note("2", bookmarked: false),
-            Self.note("3", bookmarked: nil), Self.note("4", bookmarked: true, holding: .aside),
+            Self.note("3", bookmarked: nil), Self.note("4", bookmarked: true),
         ]
         try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: notes)
 

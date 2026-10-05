@@ -11,7 +11,7 @@ import SwiftUI
 /// the copies on disk, so what the limit is held to is what the person sees. Past it, the
 /// picture copies go first, oldest written first, because they come back when a picture is read
 /// again; only where every copy gone still leaves the store over do posts go, oldest posted first
-/// across every source, rows held aside included (`ItemStore.letGoOldest`).
+/// across every source, a forum topic's kept replies included (`ItemStore.letGoOldest`).
 ///
 /// **Judged round by round on what the rows weigh, not on the file** (`weighStore`). A deleted
 /// row leaves its pages in the file until the index is rebuilt, so the file's size cannot say

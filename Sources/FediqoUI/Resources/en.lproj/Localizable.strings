@@ -497,7 +497,6 @@
 "prefs.held.posts.one" = "%d post";
 "prefs.cache.pictures.one" = "%d picture";
 "prefs.held.total" = "All sources";
-"prefs.held.aside" = "Held apart from the timelines";
 "prefs.held.earlier" = "What changed posts said before";
 "prefs.held.earlier.count" = "%d wordings";
 "prefs.held.earlier.count.one" = "%d wording";
@@ -513,7 +512,7 @@
 "prefs.keep.forever" = "Forever";
 "prefs.keep.shorten.title" = "Keep only the latest %d months?";
 "prefs.keep.shorten.title.one" = "Keep only the latest %d month?";
-"prefs.keep.shorten.detail" = "Posts older than that go from this device now, and any read later are not kept. Every source stays joined. A longer window, or Forever, drops nothing. A post you keep stays.";
+"prefs.keep.shorten.detail" = "Posts older than that go from this device now, and any read later are not kept. Every source stays joined. A longer window, or Forever, drops nothing. A post you keep stays, and so does an older post that one still held quotes: it goes when that one does.";
 "prefs.keep.shorten.line" = "Older posts go from this device now.";
 "prefs.keep.months" = "Latest %d months";
 "prefs.keep.months.one" = "Latest %d month";
@@ -1000,7 +999,7 @@
 
 /* Two limits on the store, and the account of what they let go (#249, #251) */
 "prefs.keep.line" = "Two limits, side by side; whichever is reached first acts.";
-"prefs.keep.help" = "Keep posts holds only the latest months: older posts go now, and any read later are not kept. Room is what this device gives the index and its picture copies together, measured as Time and Copies measure them. Past the room, picture copies go first, oldest first — they come back when read again — and only then the oldest posts, from every source. A limit never set lets nothing go, and every source stays joined.";
+"prefs.keep.help" = "Keep posts holds only the latest months: older posts go now, and any read later are not kept — but for a post you keep, and an older post that one still held quotes, which stays and is shown until that one goes. Room is what this device gives the index and its picture copies together, measured as Time and Copies measure them. Past the room, picture copies go first, oldest first — they come back when read again — and only then the oldest posts, from every source. A limit never set lets nothing go, and every source stays joined.";
 "prefs.room" = "Room";
 "prefs.room.none" = "No limit";
 "prefs.room.figure" = "%1$@ index · %2$@ picture copies";

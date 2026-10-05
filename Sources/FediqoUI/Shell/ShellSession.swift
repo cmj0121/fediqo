@@ -344,44 +344,18 @@ final class ShellSession {
             textIndexIsCurrent = false
             notesRevision += 1
             heldRevision += 1
-            searchTextIsCurrent = false
         }
     }
 
-    /// Every post this device holds aside (#175) — what a search brought back, a thread's answers
-    /// — which no timeline draws. **Read by the search alone** (#176): a search finds what this
-    /// device holds, and holding a search's finds aside is what keeps All from growing by them.
-    private(set) var aside: [Note] = [] {
-        didSet {
-            heldRevision += 1
-            searchTextIsCurrent = false
-        }
-    }
-    /// Bumped as `notes` or `aside` is assigned: what a search's answer is kept against.
+    /// Bumped as `notes` is assigned: what a search's answer is kept against.
     private(set) var heldRevision = 0
 
-    /// Every post held aside, **a forum topic's replies included** — what `aside` leaves out for
-    /// the search's sake (#177), counted here all the same (#194): the device holds them, and what
-    /// the device says it holds is measured against them. Read by the count alone.
-    private(set) var heldAside: [Note] = [] {
+    /// Every kept reply of a forum topic (`Note.isTopicReply`): a part of a topic and not an
+    /// item, so no timeline and no search reads it, and counted all the same (#194) — the device
+    /// holds them, and what it says it holds is measured against them. Read by the count alone.
+    private(set) var heldReplies: [Note] = [] {
         didSet { recount() }
     }
-
-    /// Everything a search reads: what the timelines draw, and what is held aside.
-    var searchable: [Note] { aside.isEmpty ? notes : notes + aside }
-
-    /// `textIndex` over `searchable`, for a search through a timeline whose rules read text. The
-    /// same as it where nothing is held aside, which is most of the time.
-    var searchTextIndex: TextIndex {
-        guard !aside.isEmpty else { return textIndex }
-        if !searchTextIsCurrent {
-            builtSearchText = TextIndex(searchable, reusing: builtSearchText ?? builtTextIndex)
-            searchTextIsCurrent = true
-        }
-        return builtSearchText ?? TextIndex([])
-    }
-    @ObservationIgnored private var builtSearchText: TextIndex?
-    @ObservationIgnored private var searchTextIsCurrent = false
 
     /// The row at the top of the stream, as the reader last left it scrolled (#110).
     ///
@@ -403,28 +377,19 @@ final class ShellSession {
     /// compared to it, so walking past a note builds nothing; the row is built once, for the one
     /// note that matched.
     ///
-    /// **A row held aside too** (#176, #124, #178): a search's find, a post under a tag or an
-    /// answer read in a thread is a row a reader presses like any other, and the conversation it
-    /// opens is looked up here — `heldNote(_:)`'s one rule, so the row a press opens and the note
-    /// its marks act on are found the same way.
+    /// **Whatever brought it** (#176, #124, #178, #296): a search's find, a post under a tag or an
+    /// answer read in a thread is an item like any other, and the conversation it opens is looked
+    /// up here — `heldNote(_:)`'s one rule, so the row a press opens and the note its marks act on
+    /// are found the same way.
     func held(_ rowID: String) -> DummyItem? {
         heldNote(rowID).map(DummyItem.init)
     }
 
-    /// The store row one row id stands for: in `notes`, and **in what is held aside too** (#178).
-    /// See `held(_:)`.
-    ///
-    /// A search hit the sources sent (#176) and an answer read in a thread (#177) are held aside
-    /// and drawn where they were found, and a press on one opens the conversation around it and
-    /// acts on it — which is this lookup. Found in `notes` only, the press opened nothing: the
-    /// pane drew the page under it, and the marks under the post acted on nothing. **Nothing here
-    /// puts a row in All**: `notes` stays what `ItemStore.all()` draws, and a row found here keeps
-    /// where it is held through every read and act, `Note.refreshed(over:)`'s rule. What `aside`
-    /// leaves out — a forum topic's kept replies, which are not threads — is not found here either.
+    /// The item one row id stands for, among every item this device holds (`notes`). See
+    /// `held(_:)`. A forum topic's kept replies, which are not items, are not found here.
     func heldNote(_ rowID: String) -> Note? {
         guard let key = NoteKey(rowID: rowID) else { return nil }
-        let matches = { (note: Note) in note.source.host == key.host && note.id == key.id }
-        return notes.first(where: matches) ?? aside.first(where: matches)
+        return notes.first { $0.source.host == key.host && $0.id == key.id }
     }
 
     /// The note behind a row, wherever this run holds it: a store row, or an answer read in an
@@ -433,7 +398,7 @@ final class ShellSession {
         heldNote(rowID) ?? conversations.note(rowID)
     }
 
-    /// Everything this device holds, counted (#7): `notes` and `heldAside` together (#194), so the
+    /// Everything this device holds, counted (#7): `notes` and `heldReplies` together (#194), so the
     /// figure is the store's and not a timeline's. Rebuilt where either is assigned or the
     /// breakdown switches between week and month, never on a redraw.
     private(set) var holdings = Holdings(notes: [], per: .month)
@@ -443,25 +408,22 @@ final class ShellSession {
         didSet { recount() }
     }
 
-    /// Set while `notes` and `heldAside` are assigned together, so one adopt counts once.
+    /// Set while `notes` and `heldReplies` are assigned together, so one adopt counts once.
     @ObservationIgnored private var recountHeld = false
 
     private func recount() {
         guard !recountHeld else { return }
-        holdings = Holdings(notes: notes + heldAside, per: heldPeriod)
+        holdings = Holdings(notes: notes + heldReplies, per: heldPeriod)
     }
 
     /// Both halves of what is held assigned in one breath, nil where one did not move, and the
     /// count rebuilt once for the pair rather than once an assignment. No await inside, so
     /// nothing else on this actor sees the count held back.
-    private func adoptHeld(notes drawn: [Note]?, aside held: [Note]?) {
-        guard drawn != nil || held != nil else { return }
+    private func adoptHeld(notes items: [Note]?, replies: [Note]?) {
+        guard items != nil || replies != nil else { return }
         recountHeld = true
-        if let drawn { notes = drawn }
-        if let held {
-            heldAside = held
-            aside = held.filter { DiscuzPost(held: $0) == nil }
-        }
+        if let items { notes = items }
+        if let replies { heldReplies = replies }
         recountHeld = false
         recount()
     }
@@ -2351,27 +2313,25 @@ final class ShellSession {
     /// watched, the boards each forum is read for, the holdings counted and the text index
     /// dropped — and every view reading the session redraws on an assignment, so a reload that
     /// changed nothing used to pay for all of it. The notes are compared by the store's count of
-    /// what `all()` draws rather than row by row: unchanged since the last adopt, and nothing here
-    /// has assigned `notes` since either, they are what the store holds. **That count and not the
-    /// revision** (#175), so a post held aside — written down, drawn nowhere — replaces nothing.
+    /// what `all()` hands over rather than row by row: unchanged since the last adopt, and nothing
+    /// here has assigned `notes` since either, they are what the store holds. **That count and
+    /// not the revision** (#175), so a topic's reply kept — written down, drawn nowhere but in
+    /// its topic — replaces nothing.
     private func adopt() async {
         // Before anything is read: what an ended sign-in's reader had done to its posts (#285).
         await forgetReaderMarksDue()
         await adoptSources()
-        let asideRevision = await store.asideRevision
+        let repliesRevision = await store.repliesRevision
         let drawn = await store.drawn
         let all = adopted?.store != drawn || adopted?.notes != notesRevision ? await store.all() : nil
-        // What is held aside has a count of its own, as what is drawn has, so a landing only
-        // the timelines see neither reads it again nor redraws a search (#176).
-        //
-        // **A forum topic's kept replies are not among the search's** (#177): each is a post of a
-        // thread, not a thread, and a search drawing one would draw it as a row that opens
-        // nowhere. A microblog answer is a post in its own right, and stays. All of them are
-        // counted (#194): `adoptHeld` hands the count every row and the search the rest.
-        let held = adoptedAside != asideRevision ? await store.aside() : nil
-        adoptHeld(notes: all, aside: held)
+        // A forum topic's kept replies have a count of their own, as the items have, so a
+        // timeline's landing does not read them again and a page of a topic read replaces no
+        // row of All. They are counted (#194) and nothing else: each is a post of a thread, not
+        // a thread, and a search drawing one would draw a row that opens nowhere (#177).
+        let replies = adoptedReplies != repliesRevision ? await store.replies() : nil
+        adoptHeld(notes: all, replies: replies)
         if all != nil { adopted = (store: drawn, notes: notesRevision) }
-        if held != nil { adoptedAside = asideRevision }
+        if replies != nil { adoptedReplies = repliesRevision }
         if heldRevision != renewedConversations {
             renewConversation()
             renewedConversations = heldRevision
@@ -2392,12 +2352,11 @@ final class ShellSession {
         guard !wanted.isEmpty else { return }
         var held: [NoteKey: Note] = [:]
         for note in notes where wanted.contains(note.key) { held[note.key] = note }
-        for note in aside where wanted.contains(note.key) { held[note.key] = note }
         conversations.renew(front.id, from: held)
     }
 
-    /// The store's `asideRevision` as the last adopt read what is held aside.
-    @ObservationIgnored private var adoptedAside: Int?
+    /// The store's `repliesRevision` as the last adopt read the topics' kept replies.
+    @ObservationIgnored private var adoptedReplies: Int?
 
     /// The store's `drawn` and `notesRevision` as the last adopt left them. Read in a hop before
     /// the notes, so a write landing between the two is adopted again next time, never missed.
@@ -2644,11 +2603,11 @@ final class ShellSession {
     func keep(months: Int?, from now: Date = Date()) async -> Int {
         let went = await store.letGoBeyond(months: months, from: now)
         guard went.posts > 0 else { return 0 }
-        // The window cuts what is held aside too, and the count says so at once (#194).
+        // The window cuts a topic's kept replies too, and the count says so at once (#194).
         let all = await store.all()
-        let held = await store.aside()
-        adoptHeld(notes: all, aside: held)
-        adoptedAside = await store.asideRevision
+        let replies = await store.replies()
+        adoptHeld(notes: all, replies: replies)
+        adoptedReplies = await store.repliesRevision
         await persist?()
         try? await compactStore?()
         await readStoreBytes()
@@ -2686,10 +2645,10 @@ final class ShellSession {
         await persist?()
     }
 
-    /// One page of a topic's replies, landed in the store **held aside** and saved, and the topic
-    /// as the store now holds it (#177).
+    /// One page of a topic's replies, landed in the store as that topic's kept replies and saved,
+    /// and the topic as the store now holds it (#177).
     ///
-    /// Aside, because a reply read in a thread is not a row All grew by (#175). A reply already
+    /// Parts of the topic, and not items (`Note.isTopicReply`): no timeline grows by them. A reply already
     /// held takes the words just read — **never the forum's notice over them**, #154's rule for an
     /// opening post, so a guest's read of a page does not undo what a member's read kept.
     ///
@@ -2707,7 +2666,7 @@ final class ShellSession {
             let id = DiscuzPost.heldPrefix(host: host, tid: tid) + String(reply.pid)
             return reply.asNote(host: host, read: first[id] ?? read)
         }
-        await store.hold(notes, ifSourceHere: host)
+        await store.ingest(notes, ifSourceHere: host)
         await store.refresh(notes.filter { $0.opening != nil }, ifSourceHere: host)
         await persist?()
         return await keptReplies(host: host, tid: tid)

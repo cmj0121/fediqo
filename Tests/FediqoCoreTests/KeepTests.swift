@@ -16,13 +16,13 @@ struct KeepTests {
     }
 
     private func note(
-        _ id: String, daysAgo: Double = 1, from source: Source? = nil, holding: Holding = .arrived,
+        _ id: String, daysAgo: Double = 1, from source: Source? = nil,
         kept: Bool = false, quote: Quote? = nil
     ) -> Note {
         Note(
             id: id, source: source ?? alpha, author: "Ada", handle: "@ada@alpha.test", body: "hello \(id)",
             postedAt: origin.addingTimeInterval(-daysAgo * 86_400), categories: [.public],
-            statusID: id, holding: holding, quote: quote, kept: kept
+            statusID: id, quote: quote, kept: kept
         )
     }
 
@@ -49,15 +49,15 @@ struct KeepTests {
         #expect(await store.revision == before.0 + 1)
     }
 
-    @Test("A post not held is not kept into being; one held aside is kept without moving All")
+    @Test("A post not held is not kept into being; one a search brought is kept like any other, and its row draws it")
     func keepsOnlyWhatIsHeld() async {
-        let store = ItemStore(sources: [alpha], notes: [note("aside", holding: .aside)])
+        let store = ItemStore(sources: [alpha], notes: [note("aside")])
         #expect(await !store.setKept(true, for: key("9")))
         #expect(await store.note(key("9")) == nil)
-        let counts = (await store.drawn, await store.asideRevision)
+        let counts = (await store.drawn, await store.repliesRevision)
         #expect(await store.setKept(true, for: key("aside")))
-        #expect(await store.drawn == counts.0)
-        #expect(await store.asideRevision == counts.1 + 1)
+        #expect(await store.drawn == counts.0 + 1)
+        #expect(await store.repliesRevision == counts.1, "no topic's reply moved")
     }
 
     @Test("No read takes the mark off: the same post landing again, and the post read again, leave it kept")
@@ -73,7 +73,7 @@ struct KeepTests {
         #expect(await store.note(key("1"))?.kept == true)
     }
 
-    @Test("An opening post kept with a row, and the row found again by a search and held aside, leave it kept")
+    @Test("An opening post kept with a row, and the row found again by a search, leave it kept")
     func openingAndHoldLeaveItKept() async {
         let store = ItemStore(sources: [alpha], notes: [note("1")])
         await store.setKept(true, for: key("1"))
@@ -83,15 +83,14 @@ struct KeepTests {
         #expect(await store.note(key("1"))?.opening?.words == "the opening")
         #expect(note("1", kept: true).with(opening: ForumOpening(words: "x")).kept)
 
-        await store.hold([note("1")], ifSourceHere: alpha.host)
+        await store.ingest([note("1")], ifSourceHere: alpha.host)
         #expect(await store.note(key("1"))?.kept == true)
-        #expect(await store.note(key("1"))?.holding == .arrived, "and holding only ever widens")
     }
 
-    @Test("A kept row held aside that a timeline then brings is drawn, still kept")
+    @Test("A kept row a search brought that a timeline then brings is drawn, still kept")
     func keptAsideWidens() async {
         let store = ItemStore(sources: [alpha], notes: [])
-        await store.hold([note("1")], ifSourceHere: alpha.host)
+        await store.ingest([note("1")], ifSourceHere: alpha.host)
         await store.setKept(true, for: key("1"))
         await store.ingest([note("1")], ifSourceHere: alpha.host)
         #expect(await store.all().map(\.kept) == [true])
@@ -111,7 +110,7 @@ struct KeepTests {
     @Test("Letting go by dates across the day a kept post was posted leaves it and takes the others, and the count beforehand is the others")
     func spanLeavesKept() async {
         let store = ItemStore(sources: [alpha, beta], notes: [
-            note("kept"), note("other"), note("aside", holding: .aside), note("beta", from: beta),
+            note("kept"), note("other"), note("aside"), note("beta", from: beta),
             note("outside", daysAgo: 9),
         ])
         await store.setKept(true, for: key("kept"))
@@ -131,7 +130,7 @@ struct KeepTests {
     func monthsLeavesKept() async {
         let store = ItemStore(sources: [alpha, beta], notes: [
             note("kept", daysAgo: 400), note("old", daysAgo: 400, from: beta),
-            note("kept-aside", daysAgo: 500, holding: .aside), note("new", daysAgo: 1),
+            note("kept-aside", daysAgo: 500), note("new", daysAgo: 1),
         ])
         await store.setKept(true, for: key("kept"))
         await store.setKept(true, for: key("kept-aside"))
@@ -140,8 +139,7 @@ struct KeepTests {
 
         #expect(went == WentByLimit(posts: 1, sources: ["beta.test"]), "the account names the one that went")
         #expect(await ids(store) == ["kept", "kept-aside", "new"])
-        #expect(await store.all().map(\.id) == ["new", "kept"], "still in its timelines")
-        #expect(await store.aside().map(\.id) == ["kept-aside"], "and one held aside is still aside")
+        #expect(await store.all().map(\.id) == ["new", "kept", "kept-aside"], "each still in its timelines")
     }
 
     @Test("A kept post older than the window still takes what its source says of it, and nothing old comes in beside it")
@@ -196,7 +194,7 @@ struct KeepTests {
     @Test("A kept post whose source is removed with its posts stays, still naming that source; the rest of the host goes")
     func removalLeavesKept() async {
         let store = ItemStore(sources: [alpha, beta], notes: [
-            note("kept"), note("other"), note("aside", holding: .aside), note("beta", from: beta),
+            note("kept"), note("other"), note("aside"), note("beta", from: beta),
         ])
         await store.setKept(true, for: key("kept"))
 

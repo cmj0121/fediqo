@@ -7,7 +7,7 @@ import Foundation
 /// that keeps them for its members still answers.
 ///
 /// What comes back arrives through no category — a tag is not one of the source's timelines — and
-/// is for the store to hold aside, so no timeline grows by it.
+/// is held through none: an item that stands in All, and in no timeline made of a category (#296).
 public struct MastodonTag: Sendable {
     private enum Door: Sendable {
         case unsigned(any HTTPClient)

@@ -47,7 +47,7 @@ extension ShellSession {
     func stopKeeping(host: String?) async -> StoppedKeeping {
         let folded = host?.lowercased()
         let elsewhere = folded.map(holdings.keptElsewhere(host:)) ?? 0
-        let keys = (notes + heldAside).filter { $0.kept && (folded == nil || $0.key.host == folded) }.map(\.key)
+        let keys = (notes + heldReplies).filter { $0.kept && (folded == nil || $0.key.host == folded) }.map(\.key)
         let stopped = await store.stopKeeping(host: host)
         guard stopped > 0 else { return StoppedKeeping() }
         for held in await store.notes(keys).values { conversations.replace(held) }

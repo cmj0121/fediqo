@@ -39,7 +39,7 @@ struct RoomLimitTests {
         #expect(room.session.limitAccount == [act])
     }
 
-    @Test("Still over with every copy gone, the oldest posts go, oldest first across sources, aside included, until it fits")
+    @Test("Still over with every copy gone, the oldest posts go, oldest first across sources, whichever read brought them, until it fits")
     func oldestPostsGo() async throws {
         let dir = LimitRoom.scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -55,10 +55,9 @@ struct RoomLimitTests {
         #expect(act.copies == 1)
         #expect(act.posts > 0)
         #expect(act.sources == ["alpha.test", "beta.test"])
-        let left = room.session.notes + room.session.aside
+        let left = room.session.notes
         #expect(left.count == 60 - act.posts)
         #expect(room.session.holdings.posts == left.count, "Usage's count disagrees with what went")
-        #expect(room.session.holdings.aside == 0, "the oldest row, held aside, should have gone first")
         let oldestLeft = try #require(left.map(\.postedAt).min())
         #expect(oldestLeft > origin.addingTimeInterval(-Double(act.posts) * 86_400), "a newer post went before an older one")
         #expect(room.index <= limit, "the index still weighs more than the room")

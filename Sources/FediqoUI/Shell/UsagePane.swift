@@ -236,14 +236,11 @@ struct UsagePane: View {
             }
             .pickerStyle(.segmented)
             // All sources first, in the rows' own shape; where it says none, no stretch follows.
-            // Everything held, aside rows included (#194), and what it all weighs on disk.
+            // Everything held (#194), and what it all weighs on disk.
             stretch(
                 Text(L10n.t("prefs.held.total")).shellFont(.name).foregroundStyle(ShellChrome.ink(colorScheme)),
                 figure: Self.totalLine(holdings.posts, onDisk: session.storeBytes)
             )
-            if holdings.aside > 0 {
-                stretch(reading(Text(L10n.t("prefs.held.aside"))), figure: Self.postsLine(holdings.aside))
-            }
             // What changed posts said before (#286): held with them, so counted with them.
             if let earlier = Self.earlierFigure(holdings.earlier) {
                 stretch(reading(Text(L10n.t("prefs.held.earlier"))), figure: earlier)
@@ -384,16 +381,10 @@ struct UsagePane: View {
         return postsLine(count) + " · " + String(format: L10n.t("prefs.held.disk"), size(onDisk))
     }
 
-    /// "3 held apart from the timelines", or nothing where none is (#194): what a source holds
-    /// that no timeline shows, said beside its count.
     /// How many earlier wordings of changed posts are held, as a figure — or nothing where none
     /// are, so a device that never saw a post change draws no line about it.
     static func earlierFigure(_ count: Int, language: DummyLanguage? = nil) -> String? {
         count == 0 ? nil : L10n.count("prefs.held.earlier.count", count, language: language)
-    }
-
-    static func asideLine(_ count: Int) -> String? {
-        count == 0 ? nil : L10n.t("prefs.held.aside") + " · " + postsLine(count)
     }
 
     /// A week by the day it starts, a month by its name, both in the shell's language.

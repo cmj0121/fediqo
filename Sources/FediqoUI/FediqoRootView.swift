@@ -1014,7 +1014,7 @@ public struct FediqoRootView: View {
         if search.isOpen {
             search.focus()
         } else {
-            search.open(from: selectedItemID, over: session.searchable)
+            search.open(from: selectedItemID, over: session.notes)
             selectedItemID = nil
         }
         return true

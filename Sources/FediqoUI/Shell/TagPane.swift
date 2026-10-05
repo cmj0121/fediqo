@@ -5,9 +5,9 @@ import SwiftUI
 //
 // #123 drew a tag as a pill and deliberately gave it no press, because there was nothing for one
 // to open. This version has it: a tag is a query of the store like every other screen, so what it
-// opens is the posts already here that carry it — those every timeline draws and those held aside
-// alike — and a source of the timeline in front that can be asked for more under it is asked, and
-// what it brings is held aside in the store first (`ShellReload.tag`). What is drawn is never a
+// opens is the posts already here that carry it, and a source of the timeline in front that can be
+// asked for more under it is asked, and what it brings lands in the store first, an item like any
+// other (`ShellReload.tag`, #296). What is drawn is never a
 // source's answer read straight off the wire.
 
 /// Where a press on a hashtag in a post's words goes: the root's walk, handed down once as the

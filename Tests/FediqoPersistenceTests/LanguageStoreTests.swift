@@ -73,11 +73,11 @@ struct LanguageStoreTests {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
 
-    private static func note(_ id: String, language: String?, holding: Holding = .arrived) -> Note {
+    private static func note(_ id: String, language: String?) -> Note {
         Note(
             id: id, source: mastodon, author: "Ada", handle: "@ada", body: "hello \(id)",
             postedAt: PackagerFixture.origin, categories: [.public], audience: .everyone, sensitive: false,
-            spoiler: "", holding: holding, language: language
+            spoiler: "", language: language
         )
     }
 
@@ -105,12 +105,11 @@ struct LanguageStoreTests {
         #expect(opened.notes.map(\.kept) == [false, true, false])
         #expect(opened.notes.map(\.bookmarked) == [nil, true, false])
         #expect(opened.notes[1].earlier.map(\.body) == ["before"] && opened.notes[1].editedAt != nil)
-        #expect(opened.notes.map(\.holding) == [.arrived, .arrived, .aside])
         let migrations = try DatabaseQueue(path: index.path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
         }
         #expect(migrations == [
-            "v1-index", "v10-references", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions",
+            "v1-index", "v10-references", "v11-one-holding", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions",
             "v9-language",
         ])
     }
@@ -157,7 +156,7 @@ struct LanguageStoreTests {
     func survivesARelaunch() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let notes = [Self.note("1", language: "ja"), Self.note("2", language: nil), Self.note("3", language: "zh-TW", holding: .aside)]
+        let notes = [Self.note("1", language: "ja"), Self.note("2", language: nil), Self.note("3", language: "zh-TW")]
         try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: notes)
 
         let opened = StoreFile.open(at: dir)

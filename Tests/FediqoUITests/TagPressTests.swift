@@ -67,7 +67,7 @@ struct TagPressTests {
         #expect(session.heldPosts(under: PostTag("#nothing")!, latest: nil).isEmpty)
     }
 
-    @Test("A forum reply kept for its thread is not on a tag's page; a microblog answer held aside is")
+    @Test("A forum reply kept for its thread is not on a tag's page; a microblog answer read in a thread is")
     func keptForumReplyIsNotUnderTheTag() async {
         let session = await shell(FixtureHTTP([:]))
         let reply = Note(
@@ -76,8 +76,8 @@ struct TagPressTests {
             postedAt: Date(timeIntervalSince1970: 50), categories: []
         )
         #expect(DiscuzPost(held: reply) != nil, "the premise: a reply kept for its thread")
-        await session.store.hold([reply], ifSourceHere: Self.forum)
-        await session.store.hold([Self.note("8", "an answer, #swift", categories: [])], ifSourceHere: Self.one)
+        await session.store.ingest([reply], ifSourceHere: Self.forum)
+        await session.store.ingest([Self.note("8", "an answer, #swift", categories: [])], ifSourceHere: Self.one)
         await session.reloadFromStore()
         #expect(await session.store.note(reply.key) != nil, "held on this device")
         let ids = session.heldPosts(under: Self.swift, latest: nil).map(\.id)
@@ -85,7 +85,7 @@ struct TagPressTests {
         #expect(ids.contains(Self.note("8", "").key.rowID))
     }
 
-    @Test("A press asks the Mastodon of the timeline in front; what it sends is held aside, and the page renews")
+    @Test("A press asks the Mastodon of the timeline in front; what it sends is held as items that stand in All, and the page renews")
     func asksAndRenews() async throws {
         let http = FixtureHTTP([Self.tagAddress: Self.underTag])
         let session = await shell(http)
@@ -97,9 +97,9 @@ struct TagPressTests {
         #expect(session.reload.tagAsk?.reach.asked == [Self.one])
         #expect(await spun { session.heldPosts(under: Self.swift, latest: nil).count == 2 }, "renewed with no press")
         #expect(session.heldPosts(under: Self.swift, latest: nil).first?.id == Self.fromTheWire.rowID)
-        #expect(await session.store.note(Self.fromTheWire)?.holding == .aside, "the store's answer, held aside")
-        #expect(!session.notes.contains { $0.key == Self.fromTheWire }, "All did not grow")
-        #expect(session.held(Self.fromTheWire.rowID) != nil, "a row held aside still opens its conversation")
+        #expect(await session.store.note(Self.fromTheWire)?.categories.isEmpty == true, "the store's answer, through no category")
+        #expect(await spun { session.notes.contains { $0.key == Self.fromTheWire } }, "All grew by what the tag brought")
+        #expect(session.held(Self.fromTheWire.rowID) != nil, "and it opens its conversation")
         #expect(session.reload.tagFailed.isEmpty)
         #expect(!session.reload.running, "said on the tag's page, not in the toast")
     }

@@ -337,7 +337,7 @@ struct ReadOnTests {
         #expect(await store.newestListedID(host: Self.host, category: .list(id: "7")) == nil)
         _ = await store.markGone(Self.key(10))
         #expect(await store.newestListedID(host: Self.host, category: .public) == "9")
-        await store.hold([Self.note(20, listed: false)], ifSourceHere: Self.host)
+        await store.ingest([Self.note(20, listed: false)], ifSourceHere: Self.host)
         #expect(await store.newestListedID(host: Self.host, category: .public) == "9")
     }
 

@@ -500,7 +500,7 @@ private var migrator: DatabaseMigrator {
     // makes it refuse the store instead, which is `CategoryRow`'s rule reaching a second marker.
     migrator.registerMigration("v3-holding") { db in
         try db.alter(table: "note") { t in
-            t.add(column: "holding", .text).notNull().defaults(to: Holding.arrived.rawValue)
+            t.add(column: "holding", .text).notNull().defaults(to: "arrived")
         }
     }
     // When a read of one post heard its source say it no longer has it (#179), or NULL. Every row
@@ -658,6 +658,23 @@ private var migrator: DatabaseMigrator {
             try update.execute(arguments: [written, row["rowid"] as Int64])
         }
     }
+    // One way of holding (#296): everything this device holds is an item and stands in its
+    // timelines, so the column that said which rows were held apart from them goes. Dropped, not
+    // left: nothing remains in the file that means "held apart" — no value to be honoured by a
+    // build that still reads it, and none to be mistaken for a fact later.
+    //
+    // Every row is kept. One that was held apart is, from here, a row like any other; a forum
+    // topic's kept reply is told by its own id (`Note.isTopicReply`), as it always could be.
+    //
+    // **A migration id for `v3-holding`'s reason, turned round.** A build that knows the column
+    // would write `aside` into it again for what a search or a thread brought, and this build
+    // would then show in All what that build meant to hold apart — or, opening this store, it
+    // would find no column and fail. The id makes it refuse the store instead.
+    migrator.registerMigration("v11-one-holding") { db in
+        try db.alter(table: "note") { t in
+            t.drop(column: "holding")
+        }
+    }
     return migrator
 }
 
@@ -807,7 +824,7 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
     /// load — and the load fails closed — rather than coming back as a source with no boards.
     var boards: [SubscriptionRow]
     /// What this source last said about itself (#188), or nothing where it has not been heard.
-    /// A column behind its own migration id, for `holding`'s reason: an older build must refuse
+    /// A column behind its own migration id, for the reason given on `NoteRecord.kept`: an older build must refuse
     /// this store rather than save it back without every word.
     var said: SaidRow?
     /// When `said` was said. Nothing where `said` is nothing.
@@ -1227,17 +1244,15 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var categories: [CategoryRow]
     /// A `facts` that is not JSON throws when the row is fetched, so the load fails closed.
     var facts: NoteFacts
-    /// `Note.holding` (#175). A column rather than a field in `facts`, and with a migration id
-    /// behind it, because an older build must refuse this store rather than show a row nobody
-    /// read from a timeline in All.
-    var holding: String
-    /// `Note.goneSince` (#179). A column behind its own migration id, for `holding`'s reason.
+    /// `Note.goneSince` (#179). A column behind its own migration id, for the reason given on `kept`.
     var gone_at: Date?
-    /// `Note.kept` (#284). A column behind its own migration id, for `holding`'s reason.
+    /// `Note.kept` (#284). **A column behind its own migration id**, as every column added after
+    /// the first is: a build that does not know the column must refuse the store, because its
+    /// first save would write each row back without it — and what the column said would be gone.
     var kept: Bool
-    /// `Note.bookmarked` (#285). A column behind its own migration id, for `holding`'s reason.
+    /// `Note.bookmarked` (#285). A column behind its own migration id, for the reason given on `kept`.
     var bookmarked: Bool?
-    /// `Note.editedAt` (#286). A column behind its own migration id, for `holding`'s reason.
+    /// `Note.editedAt` (#286). A column behind its own migration id, for the reason given on `kept`.
     var edited_at: Date?
     /// `Note.earlier` (#286) as a JSON array of `WordingRow`, or nothing where the row holds
     /// none. With `edited_at`'s id.
@@ -1247,10 +1262,10 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     /// has lost what it said before and is whole in every other way, and setting the reader's
     /// whole store aside for that would cost them far more than the cell held.
     var earlier: String?
-    /// `Note.language` (#287). A column behind its own migration id, for `holding`'s reason.
+    /// `Note.language` (#287). A column behind its own migration id, for the reason given on `kept`.
     var language: String?
     /// `Note.refs` (#290, #293) as a JSON array of `ReferenceRow`. A column behind its own
-    /// migration id, for `holding`'s reason. Kept as text and read leniently: `ReferenceRow`.
+    /// migration id, for the reason given on `kept`. Kept as text and read leniently: `ReferenceRow`.
     var refs: String?
     /// `Note.refsDue` (#293). With `refs`' id.
     var refs_due: Bool
@@ -1259,7 +1274,6 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         host = note.source.host
         id = note.id
         posted_at = note.postedAt
-        holding = note.holding.rawValue
         gone_at = note.goneSince
         kept = note.kept
         bookmarked = note.bookmarked
@@ -1343,10 +1357,6 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             counts: facts.counts?.counts ?? Counts(),
             statusID: facts.statusID,
             opening: facts.opening?.opening,
-            // A spelling this build does not know cannot reach here — the migration id makes an
-            // older store's rows carry the default and a newer store be refused outright — so the
-            // fallback is the one every row written before this column had.
-            holding: Holding(rawValue: holding) ?? .arrived,
             goneSince: gone_at,
             gaps: Set(facts.gaps?.compactMap(\.gap) ?? []),
             listed: Dictionary(

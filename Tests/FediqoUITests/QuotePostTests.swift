@@ -49,11 +49,11 @@ struct QuotePostTests {
 
     // MARK: - Held, and shown with the network off
 
-    @Test("With nothing on the network, the quoted post is held aside, opens, and All does not grow")
-    func offlineAndAside() async throws {
+    @Test("With nothing on the network, the quoted post is held as an item of its own, stands in All, and opens")
+    func offlineAndHeld() async throws {
         let note = Self.quoting("2", quote: Quote(state: .accepted, post: Self.quoted("1")))
         let session = await shell([note])
-        #expect(session.notes.map(\.key) == [note.key], "All is the quoting post alone")
+        #expect(Set(session.notes.map(\.key)) == [note.key, try #require(note.quotedKey)], "All holds the quoting post and the one it quotes")
         let item = try #require(session.held(note.key.rowID))
         #expect(item.quote?.post?.body == "The first post, by Ada")
         let target = try #require(session.quotedRow(of: item))

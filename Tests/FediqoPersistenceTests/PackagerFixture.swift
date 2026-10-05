@@ -72,21 +72,20 @@ enum PackagerFixture {
     }
 
     static func note(
-        _ id: String, source: Source = mastodon, holding: Holding = .arrived, body: String? = nil
+        _ id: String, source: Source = mastodon, body: String? = nil
     ) -> Note {
         Note(
             id: id, source: source, author: "Ada", handle: "@ada", body: body ?? "hello \(id)", postedAt: origin,
-            categories: [.public], attachments: [Attachment(kind: .image, url: URL(string: "https://cdn.example/\(id).jpg"))],
-            holding: holding
+            categories: [.public], attachments: [Attachment(kind: .image, url: URL(string: "https://cdn.example/\(id).jpg"))]
         )
     }
 
-    /// A device holding two sources, three posts (one aside), two timelines, a preference, a
+    /// A device holding two sources, three posts, two timelines, a preference, a
     /// token, an app registration and a forum password, and two picture copies.
     static func populated() async throws -> PackagerDevice {
         let device = try await PackagerDevice(
             sources: [mastodon, forum],
-            notes: [note("1"), note("2", source: forum), note("3", holding: .aside)]
+            notes: [note("1"), note("2", source: forum), note("3")]
         )
         device.defaults.set(Data("{\"version\":2,\"timelines\":[{\"id\":\"a\",\"name\":\"A\",\"rules\":[]},{\"id\":\"b\",\"name\":\"B\",\"rules\":[]}]}".utf8), forKey: "fediqo.timelines")
         device.defaults.set("zh-TW", forKey: "fediqo.dummy.language")

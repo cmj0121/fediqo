@@ -163,8 +163,6 @@ struct StoreTests {
         await store.ingest([kept], ifSourceHere: forum.host)
         #expect(await store.sources().map(\.host) == [source.host, forum.host])
         #expect(await store.all().map(\.id) == ["kept"], "a row was doubled")
-        #expect(await store.all().first?.holding == .arrived)
-        #expect(await store.aside().isEmpty)
     }
 
     @Test("Removing a source without keeping its posts takes them, as it always did")

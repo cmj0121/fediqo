@@ -71,8 +71,8 @@ struct KeptStoreTests {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     }
 
-    private static func note(_ id: String, kept: Bool = false, holding: Holding = .arrived) -> Note {
-        var note = PackagerFixture.note(id, holding: holding)
+    private static func note(_ id: String, kept: Bool = false) -> Note {
+        var note = PackagerFixture.note(id)
         note.kept = kept
         return note
     }
@@ -95,13 +95,12 @@ struct KeptStoreTests {
         #expect(opened.sources == [Self.mastodon])
         #expect(opened.notes.map(\.id) == ["1", "2", "3", "4"], "in the order they were written")
         #expect(opened.notes.allSatisfy { !$0.kept }, "nobody kept a post before there was keeping")
-        #expect(opened.notes.map(\.holding) == [.arrived, .aside, .arrived, .arrived])
         #expect(opened.notes.map { $0.goneSince != nil } == [false, false, true, false])
         #expect(opened.notes.last?.source == Source(host: "left.example", kind: .mastodon))
         let migrations = try DatabaseQueue(path: index.path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY identifier")
         }
-        #expect(migrations == ["v1-index", "v10-references", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions", "v9-language"])
+        #expect(migrations == ["v1-index", "v10-references", "v11-one-holding", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions", "v9-language"])
     }
 
     @Test("A post kept in a carried-forward store is still kept after a save and a reopen, and no other is")
@@ -142,11 +141,11 @@ struct KeptStoreTests {
 
     // MARK: - A relaunch
 
-    @Test("Quit and open again: what was kept is still kept, held aside or not, and what was un-kept is not")
+    @Test("Quit and open again: what was kept is still kept, whichever read brought it, and what was un-kept is not")
     func survivesARelaunch() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let notes = [Self.note("1", kept: true), Self.note("2"), Self.note("3", kept: true, holding: .aside)]
+        let notes = [Self.note("1", kept: true), Self.note("2"), Self.note("3", kept: true)]
         try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: notes)
 
         let opened = StoreFile.open(at: dir)
@@ -184,7 +183,7 @@ struct KeptStoreTests {
     func ridesThePackage() async throws {
         let from = try await Device(
             sources: [Self.mastodon],
-            notes: [Self.note("1", kept: true), Self.note("2"), Self.note("3", kept: true, holding: .aside)]
+            notes: [Self.note("1", kept: true), Self.note("2"), Self.note("3", kept: true)]
         )
         let onto = try await Device()
         let url = PackagerFixture.package()

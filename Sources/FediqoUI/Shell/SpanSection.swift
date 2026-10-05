@@ -163,7 +163,7 @@ struct SpanAsk: Equatable {
 
 extension ShellSession {
     /// How many posts `span` holds from `host`, or from every host where nil — what the press
-    /// would let go (#248), read off the store so the rows held aside are counted too.
+    /// would let go (#248), read off the store so a forum topic's kept replies are counted too.
     func spanHeld(_ span: Range<Date>, host: String?) async -> Int {
         await store.count(span: span, host: host)
     }

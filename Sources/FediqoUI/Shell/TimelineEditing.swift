@@ -157,8 +157,8 @@ extension ShellSession {
         return items
     }
 
-    /// What this device holds under one hashtag, newest first — every timeline's rows and what
-    /// is held aside alike (#124) — kept until either changes, for `heldPosts(of:)`'s reason.
+    /// What this device holds under one hashtag, newest first — every item, whichever read
+    /// brought it (#124, #296) — kept until they change, for `heldPosts(of:)`'s reason.
     ///
     /// **Through the rules of the timeline in front** (#197), as a search's results are (#145):
     /// a tag's page is a search for a tag, and shows only what that timeline lets through — up to
@@ -173,7 +173,7 @@ extension ShellSession {
         )
         if let drawnTag, drawnTag.key == key { return drawnTag.items }
         let shown = CompiledTimeline(definition, sources: [])
-            .shown(searchable, definition.readsText ? searchTextIndex : TextIndex([]))
+            .shown(notes, definition.readsText ? textIndex : TextIndex([]))
         let found = HeldUnderTag.held(under: tag, in: shown, sent: sent)
         let items = DummyItem.merged(latest?.shown(found) ?? found, here: hosts)
         drawnTag = HeldTag(key: key, items: items)
@@ -199,14 +199,14 @@ extension ShellSession {
     /// it; two readers each spelling the timeline, the notes and the text index out for
     /// themselves would be two answers to "what did the search find" that could come apart.
     ///
-    /// **What is held aside too** (#176): what a search brought back from the sources is held
-    /// aside so All does not grow by it, and is found here — through the same rules — with the
-    /// network on or off.
+    /// **What a search brought back too** (#176, #296): it is an item like any other — it stands
+    /// in All, and stays there when the search is cleared — and is found here, through the same
+    /// rules, with the network on or off.
     func searched(_ search: ShellSearch, latest: LatestDate?) -> [DummyItem]? {
         search.items(
             in: definition(of: currentTimeline),
-            text: searchTextIndex,
-            from: searchable,
+            text: textIndex,
+            from: notes,
             revision: heldRevision,
             sources: sources,
             latest: latest

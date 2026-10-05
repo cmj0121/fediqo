@@ -90,17 +90,6 @@ struct StoreFileTests {
         #expect(try file.load().said == [said])
     }
 
-    @Test("A post held aside is still held aside after a relaunch, and one that arrived still arrived")
-    func holdingSurvivesRelaunch() async throws {
-        let file = try StoreFile(database: DatabaseQueue())
-        var found = note(id: "2")
-        found.holding = .aside
-        try await file.save(sources: [mastodon], notes: [note(id: "1"), found])
-        let loaded = try file.load().notes
-        #expect(loaded.first { $0.id == "1" }?.holding == .arrived)
-        #expect(loaded.first { $0.id == "2" }?.holding == .aside)
-    }
-
     /// #201: where a timeline was not whole is said at its place after a relaunch too — a post
     /// may be missing below one row, and newer remain above another, each of its own timeline.
     @Test("Where a timeline is not whole survives a relaunch, and a row that said nothing still says nothing")
@@ -149,14 +138,13 @@ struct StoreFileTests {
             pid: 72, tid: 5, floor: 22, author: "muyu", handle: "@muyu@forum.example",
             body: "没有日期", page: 3
         )
-        var notes = [dated, undated].map { $0.asNote(host: forum.host, read: read) }
-        for index in notes.indices { notes[index].holding = .aside }
+        let notes = [dated, undated].map { $0.asNote(host: forum.host, read: read) }
         try await file.save(sources: [forum], notes: notes)
 
         let back = try file.load().notes.compactMap(DiscuzPost.init(held:)).sorted { $0.pid < $1.pid }
         #expect(back == [dated, undated], "floor, date, quotation and page, each as read")
         #expect(back[1].postedAt == nil, "a reply the page gave no date to is not given the read's")
-        #expect(try file.load().notes.allSatisfy { $0.holding == .aside })
+        #expect(try file.load().notes.allSatisfy { $0.isTopicReply }, "each still a part of its topic, and no item")
     }
 
     @Test("A post marked gone from its source is still marked, from the same moment, after a relaunch")
