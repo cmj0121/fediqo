@@ -12,17 +12,31 @@ There is no Fediqo server.
 
 ## The concept
 
-| Noun     | What it is                                             | What it is not        |
-| -------- | ------------------------------------------------------ | --------------------- |
-| source   | a server or account you read; protocol stays behind    | a protocol page       |
-| rule     | what this timeline lets through; a hide names its rule | a mute list           |
-| timeline | one query of this device's store, in time order        | a network's home page |
-| item     | a `note` or a `thread`                                 | a row of one protocol |
+| Noun     | What it is                                                         | What it is not        |
+| -------- | ------------------------------------------------------------------ | --------------------- |
+| source   | anything that hands over items with a time, and can be asked again | a protocol page       |
+| item     | the smallest thing with a publish time                             | a row of one protocol |
+| filter   | the rules a timeline lets items through by; a hide names its rule  | a mute list           |
+| timeline | inputs and a filter, laid flat in publish order                    | a network's home page |
+
+A source can be as unlike another as it wants — an account on a network, a forum, a feed, a
+web page split over numbered pages. It is a source when every item it hands over has its own
+publish time, to the day at least, and an ID that stays the same, and when it can be asked for
+what is newer. A timeline's input is a source or another timeline, so a new timeline is an
+existing one with a filter put on it.
+
+[`docs/concept.md`](docs/concept.md) is the whole of it: the item and its ID, fields,
+revisions, what you can do to an item, and how one is let go.
+
+The concept is where Fediqo is going, and Using it, below, is what this checkout does today.
+Today a Mastodon host or a Discuz forum can be joined. Keep, bookmark, revisions, the deleted
+mark before a purge, a source's own fields in a rule, and a timeline built on another timeline
+are not here yet.
 
 ## How it works
 
 ```text
-  sources (any open protocol)
+  sources (anything that gives its items a time)
            │
            ▼
      your device, and nothing else
@@ -77,9 +91,10 @@ arrived and what you see is a rule you wrote.
 
 ## What it is not
 
-- not a race to speak every network
-- not a reader of RSS, YouTube and blogs
-- not a client for X, Instagram or Facebook — only protocols anyone can implement and host
+- not a ranker — nothing is scored or re-ordered
+- not a reader of what has no time: a book's chapters, a manual's pages
+- not a way past anything a source does to keep a program from reading it
+- there is no Fediqo server
 
 ## How it is built
 

@@ -14,15 +14,26 @@ Fediqo 是你的時間軸。你加入來源，寫下規則，讀一條依時間�
 
 | 名詞 | 是什麼 | 不是什麼 |
 | --- | --- | --- |
-| source | 你在讀的伺服器或帳號——協定在它後面 | 不是協定頁 |
-| rule | 這條 timeline 讓什麼進來；藏的能指名 | 不是靜音清單 |
-| timeline | 對這台裝置上 store 的一條 query | 不是某個網路的首頁 |
-| item | 一則 `note` 或一則 `thread` | 不是單一協定的一列 |
+| source | 交得出帶時間的 item、而且能再被問一次的任何來源 | 不是協定頁 |
+| item | 帶有發布時間的最小單位 | 不是單一協定的一列 |
+| filter | 一條 timeline 讓 item 進來所依的規則；藏的能指名 | 不是靜音清單 |
+| timeline | 輸入加一個 filter，依發布時間攤平排開 | 不是某個網路的首頁 |
+
+來源彼此可以要多不像就多不像——某個網路上的帳號、一個論壇、一份 feed、一個分成好幾頁的網頁。
+只要它交出的每個 item 都有自己的發布時間（至少到日）、有一個不會變的 ID，而且問得到更新的，它就是 source。
+timeline 的輸入是來源，或另一條 timeline；所以新的 timeline 就是一條既有的 timeline 加上一個 filter。
+
+[`docs/concept.zh-TW.md`](docs/concept.zh-TW.md) 是全部：item 與它的 ID、欄位、revision、
+你能對 item 做什麼，以及怎麼放下一個 item。
+
+概念是 Fediqo 要去的地方；下面的「怎麼用」是這份 checkout 今天做得到的。
+今天可以加入 Mastodon 主機或 Discuz 論壇。keep、bookmark、revision、清除之前的已刪除標記、
+在規則裡使用來源自己的欄位，以及建在另一條 timeline 上的 timeline，都還不在這裡。
 
 ## 怎麼運作
 
 ```text
-  sources (any open protocol)
+  sources (anything that gives its items a time)
            │
            ▼
      your device, and nothing else
@@ -65,9 +76,10 @@ store 是你的，可以帶走，也可以放下。它離開的方式有兩種�
 
 ## 它不是什麼
 
-- 不是把每個網路都接上的競賽
-- 不是 RSS、YouTube 與部落格的閱讀器
-- 不是 X、Instagram 或 Facebook 的客戶端——只接任何人都能實作、都能自架的協定
+- 不是排名器——不評分，也不重排
+- 不是沒有時間的東西的閱讀器：書的章節、手冊的頁面
+- 不是繞過來源為了不讓程式讀取所做的任何事的方法
+- 沒有 Fediqo 伺服器
 
 ## 怎麼做出來的
 
