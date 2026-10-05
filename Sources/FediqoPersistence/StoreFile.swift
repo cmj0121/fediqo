@@ -334,6 +334,13 @@ public struct StoreFile: Sendable {
         }
     }
 
+    /// Takes the mark that its references are still to be asked for off every row (#293): what
+    /// a read back does to the store a package carried before that store becomes this device's
+    /// (`ItemStore.replace`), on the file itself where the file is moved into place as it is.
+    func settleReferences() throws {
+        try db.writeWithoutTransaction { db in try db.execute(sql: "UPDATE note SET refs_due = 0 WHERE refs_due") }
+    }
+
     /// How many rows the index holds as kept (#284), asked of the table and not of the notes read
     /// out of it: what a read back checks a package's header against (#294), so it is every row
     /// the file carries, whether or not this build can draw it.
@@ -574,7 +581,139 @@ private var migrator: DatabaseMigrator {
             t.add(column: "language", .text)
         }
     }
+    // What a row refers to (#290, #293), and whether that has been asked for.
+    //
+    // `refs` is a JSON array of `ReferenceRow`: for each, its kind and whichever of the target's
+    // ID and its source's own id for it the source said, with whom an answer is to and where a
+    // quote stands. Every row already held is given the references its reply and its quote
+    // state, in this migration's transaction, so that from here on the column is where a row's
+    // references are read from.
+    //
+    // **A row whose facts will not read is left with no references written, and the migration
+    // goes on.** It is not this step's to judge the store: a cell that is not text, or not the
+    // JSON a row's facts are, is found by `load()` as it was before this step — which is what
+    // decides whether the store is damaged — and a row that `load()` takes after all is read
+    // leniently (`ReferenceRow.references`). A migration that threw here would be a stricter
+    // and an earlier judge than the load, and since #295 a store judged damaged is deleted.
+    //
+    // `refs_due` is whether a row's references are still to be asked for (`Note.refsDue`), and
+    // is **false for every row already held**: what an item refers to is asked for once, when
+    // the item first arrives, and these arrived before there was any asking. So the first launch
+    // of a build that loads does not go and fetch for every post on the device at once.
+    //
+    // **A migration id for `v3-holding`'s reason.** An older build's first save would write
+    // every row back without either column's value — a row whose references were still to be
+    // asked for would never have them asked — and, once a reblog is an item whose only content
+    // is its reference, without the one thing that row says.
+    //
+    // **Frozen code**, as `v2-categories` is: it reads the facts by the names they were written
+    // under and spells the references itself, so a later change to the live records cannot
+    // change what this step did to a v9 store.
+    migrator.registerMigration("v10-references") { db in
+        struct V9Facts: Decodable {
+            struct Reply: Decodable {
+                var handle: String?
+                var inReplyToId: String?
+            }
+            struct Quote: Decodable {
+                struct Post: Decodable { var id: String }
+                var state: String
+                var statusID: String?
+                var post: Post?
+            }
+            var reply: Reply?
+            var quote: Quote?
+        }
+        struct V10Reference: Encodable {
+            var kind: String
+            var id: String?
+            var statusID: String?
+            var handle: String?
+            var state: String?
+        }
+        try db.alter(table: "note") { t in
+            t.add(column: "refs", .text)
+            t.add(column: "refs_due", .boolean).notNull().defaults(to: false)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let update = try db.makeStatement(sql: "UPDATE note SET refs = ? WHERE rowid = ?")
+        let rows = try Row.fetchAll(db, sql: "SELECT rowid AS rowid, facts AS facts FROM note")
+        for row in rows {
+            // Asked for as a value and turned into text here, so a cell that is not text is
+            // nothing rather than a trap.
+            guard let text = String.fromDatabaseValue(row["facts"] as DatabaseValue),
+                  let facts = try? JSONDecoder().decode(V9Facts.self, from: Data(text.utf8))
+            else { continue }
+            var references: [V10Reference] = []
+            if let reply = facts.reply {
+                references.append(V10Reference(kind: "answers", statusID: reply.inReplyToId, handle: reply.handle))
+            }
+            if let quote = facts.quote {
+                references.append(V10Reference(
+                    kind: "quotes", id: quote.post?.id, statusID: quote.statusID, state: quote.state
+                ))
+            }
+            let written = String(decoding: try encoder.encode(references), as: UTF8.self)
+            try update.execute(arguments: [written, row["rowid"] as Int64])
+        }
+    }
     return migrator
+}
+
+/// One `Reference` as `note.refs` writes it, a JSON array of these in the order the item holds
+/// them. The kind and a quote's state are in the spellings Core gives them; a name the source
+/// did not say is left out.
+///
+/// **A new kind is a new migration** (`Reference`): this build reads only the kinds it knows.
+private struct ReferenceRow: Codable {
+    var kind: String
+    var id: String?
+    var statusID: String?
+    var handle: String?
+    var state: String?
+
+    init(_ reference: Reference) {
+        kind = reference.kind.rawValue
+        id = reference.id
+        statusID = reference.statusID
+        handle = reference.handle
+        state = reference.state?.rawValue
+    }
+
+    /// The most text a cell of references is read from: far past what `Reference.most` of them
+    /// at `Reference.longest` each could spell, and a bound on what a carried store can make
+    /// this device parse for one row.
+    static let longestCell = 64 * 1024
+
+    /// `references` as the cell's text. Keys in one order, so one set is always written one way.
+    static func text(_ references: [Reference]) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = (try? encoder.encode(references.map(ReferenceRow.init))) ?? Data("[]".utf8)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The references a cell holds — or nothing where it holds none this build can read: no
+    /// cell, one too long, one that is not this JSON, or one naming a kind this build does not
+    /// know. **Read leniently, as `earlier` is and for its reason**: a row whose references will
+    /// not read is whole in every other way, and still says what it answers and quotes in its
+    /// facts, so it is given those (`Reference.derived`) rather than the reader's whole store
+    /// being set aside for one cell.
+    static func references(_ text: String?) -> [Reference]? {
+        guard let text, text.utf8.count <= longestCell,
+              let rows = try? JSONDecoder().decode([ReferenceRow].self, from: Data(text.utf8))
+        else { return nil }
+        var references: [Reference] = []
+        for row in rows {
+            guard let kind = Reference.Kind(rawValue: row.kind) else { return nil }
+            references.append(Reference(
+                kind: kind, id: row.id, statusID: row.statusID, handle: row.handle,
+                state: kind == .quotes ? Quote.State(wire: row.state) : nil
+            ))
+        }
+        return references
+    }
 }
 
 /// One category as it is written into `note.categories`, a JSON array of these sorted by kind
@@ -1110,6 +1249,11 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var earlier: String?
     /// `Note.language` (#287). A column behind its own migration id, for `holding`'s reason.
     var language: String?
+    /// `Note.refs` (#290, #293) as a JSON array of `ReferenceRow`. A column behind its own
+    /// migration id, for `holding`'s reason. Kept as text and read leniently: `ReferenceRow`.
+    var refs: String?
+    /// `Note.refsDue` (#293). With `refs`' id.
+    var refs_due: Bool
 
     init(_ note: Note) {
         host = note.source.host
@@ -1122,6 +1266,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         edited_at = note.editedAt
         earlier = WordingRow.text(note.earlier)
         language = note.language
+        refs = ReferenceRow.text(note.refs)
+        refs_due = note.refsDue
         categories = note.categories.map(CategoryRow.init).sorted()
         facts = NoteFacts(
             author: note.author,
@@ -1212,7 +1358,10 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             editedAt: edited_at,
             // Held to the bounds every kept wording is held to, whoever wrote the cell.
             earlier: Wording.bounded(WordingRow.wordings(earlier)),
-            language: language
+            language: language,
+            // Nothing readable in the cell is the references its reply and quote state.
+            refs: ReferenceRow.references(refs),
+            refsDue: refs_due
         )
     }
 }

@@ -827,6 +827,10 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             guard staged.index != nil, staged.settings != nil, staged.secrets != nil else { throw PackageRefusal.altered }
             do {
                 let index = try StoreFile(at: incoming)
+                // No row of a store read back still owes a load (`ItemStore.replace`): taken off
+                // in the staged file, which may be moved into place as it stands, and so off
+                // what is read out of it for the store in memory and the index this run holds.
+                try index.settleReferences()
                 contents = try index.load()
                 kept = try index.keptCount()
                 // Read, and so one this build may write: where this run has no file of its own

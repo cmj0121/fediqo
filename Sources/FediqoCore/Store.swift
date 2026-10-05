@@ -141,7 +141,17 @@ public actor ItemStore {
     /// adopt it, with the same rules `init(sources:notes:)` keeps. The keep window stays the
     /// reader's and is applied to what comes in; every screen is told, and the watcher of the
     /// sources hears the new list.
-    public func replace(sources: [Source], notes incoming: [Note], said: [SourceProfile] = []) {
+    ///
+    /// **No row comes in still owing a load** (`Note.refsDue`, #293). What another device had
+    /// yet to ask its sources for is not this device's to ask: a store that arrived with every
+    /// row marked would otherwise be a request a row to the person's own servers, set off by
+    /// whoever made the package.
+    public func replace(sources: [Source], notes arriving: [Note], said: [SourceProfile] = []) {
+        let incoming = arriving.map { note in
+            var settled = note
+            settled.refsDue = false
+            return settled
+        }
         sourceList = []
         for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
             sourceList.append(source)

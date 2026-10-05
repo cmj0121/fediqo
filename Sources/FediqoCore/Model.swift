@@ -635,6 +635,28 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// (#287), or nothing where the source said none — which is not a language, and matches no
     /// rule on one.
     public let language: String?
+    /// What this item refers to (#290, #293): each another item on the same source, with the
+    /// kind of reference it is. Held to `Reference.bounded`.
+    ///
+    /// **Beside `reply` and `quote`, and saying what they say.** Until those two are removed the
+    /// references are worked out from them wherever a note is made without being told otherwise
+    /// (`Reference.derived`), so the two cannot come to disagree: a note made anew from another
+    /// takes the references its own `reply` and `quote` state.
+    public let refs: [Reference]
+    /// Whether what this item refers to is still to be asked for (#293). It is asked for once,
+    /// when the item first arrives: the store marks the arrival, and takes the mark off when the
+    /// asking is done. A target let go afterwards stays let go — the mark is off, and it is a
+    /// fact about this item, so nothing of a purged target is kept to remember it by.
+    ///
+    /// **Off is the rest state**: for an item whose references were asked for, for one that
+    /// refers to nothing, and for every item held before there was any asking — so a store
+    /// carried forward owes no loads, and nothing made by hand does.
+    ///
+    /// **This device's own, as `kept` is.** No source says it and no read moves it: a copy that
+    /// arrives again, and a post read again, leave it as it was. Nothing sets it yet.
+    ///
+    /// A `var` for `holding`'s reason: the store sets it on a row it already holds.
+    public var refsDue: Bool
     /// When the read that brought this copy was sent (#291), or `unsaid`. **A fact about the
     /// copy on its way in, not about the post**: the store reads it as the copy lands and keeps
     /// none of it, and every note made from another starts again from `unsaid`.
@@ -674,8 +696,12 @@ public struct Note: Identifiable, Hashable, Sendable {
         kept: Bool = false,
         editedAt: Date? = nil,
         earlier: [Wording] = [],
-        language: String? = nil
+        language: String? = nil,
+        refs: [Reference]? = nil,
+        refsDue: Bool = false
     ) {
+        self.refs = Reference.bounded(refs ?? Reference.derived(reply: reply, quote: quote))
+        self.refsDue = refsDue
         self.id = id
         self.source = source
         self.author = author
@@ -791,7 +817,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url,
             counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
             holding: holding, goneSince: goneSince, gaps: gaps, listed: listed, quote: quote,
-            kept: kept, editedAt: editedAt, earlier: earlier, language: language
+            kept: kept, editedAt: editedAt, earlier: earlier, language: language, refsDue: refsDue
         )
     }
 
@@ -820,7 +846,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             kept: kept, editedAt: later.editedAt, earlier: later.earlier(after: was),
             // The language the post says it is in **now**, nothing included: a post changed to
             // state none no longer matches a rule on the one it used to state.
-            language: later.language
+            language: later.language, refsDue: refsDue
         )
     }
 
@@ -880,7 +906,9 @@ public struct Note: Identifiable, Hashable, Sendable {
             // A read of the post itself is the whole of what its source says of it now, so the
             // language is this copy's even where it states none — unlike the reader's marks,
             // which a signed-out read leaves unsaid rather than says no to.
-            language: language
+            language: language,
+            // This device's own, which no read says anything about (#293).
+            refsDue: held.refsDue
         )
     }
 
@@ -926,7 +954,8 @@ public struct Note: Identifiable, Hashable, Sendable {
             goneSince: goneSince, gaps: gaps, listed: listed,
             // The later copy's quote wins, as its counts do (#214) — see `Quote.later`.
             quote: Quote.later(other.quote, over: quote),
-            kept: kept, editedAt: editedAt, earlier: earlier, language: language ?? other.language
+            kept: kept, editedAt: editedAt, earlier: earlier, language: language ?? other.language,
+            refsDue: refsDue
         )
     }
 
@@ -942,7 +971,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
             goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language
+            editedAt: editedAt, earlier: earlier, language: language, refsDue: refsDue
         )
     }
 
@@ -956,7 +985,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
             goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
-            editedAt: editedAt, earlier: earlier, language: language
+            editedAt: editedAt, earlier: earlier, language: language, refsDue: refsDue
         )
     }
 }

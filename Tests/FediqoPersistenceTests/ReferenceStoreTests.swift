@@ -1,0 +1,363 @@
+import CryptoKit
+import FediqoCore
+import Foundation
+import GRDB
+import Testing
+@testable import FediqoPersistence
+
+/// What an item refers to, and whether that is still to be asked for (#290, #293), on disk:
+/// written with its row, read back by a relaunch, carried by the package, and behind a migration
+/// id of its own so a build that knows nothing of them refuses the store.
+///
+/// The older store is made the way the build before made it — its migrator's ids and the tables
+/// as they stood after `v9-language`, frozen here, with rows inserted as raw SQL — so no live
+/// record type decides what the old file looked like.
+@Suite("What an item refers to, on disk")
+struct ReferenceStoreTests {
+    typealias Device = PackagerFixture.PackagerDevice
+    private static let mastodon = PackagerFixture.mastodon
+
+    /// Everything the build before this knew: nine ids, and the tables as `v9-language` left them.
+    private static var v9Migrator: DatabaseMigrator {
+        var migrator = DatabaseMigrator()
+        migrator.registerMigration("v1-index") { db in
+            try db.create(table: "source") { t in
+                t.primaryKey("host", .text)
+                t.column("kind", .text).notNull()
+                t.column("boards", .text).notNull()
+                t.column("said", .text)
+                t.column("said_at", .datetime)
+            }
+            try db.create(table: "note") { t in
+                t.column("host", .text).notNull()
+                t.column("id", .text).notNull()
+                t.primaryKey(["host", "id"])
+                t.column("posted_at", .datetime).notNull()
+                t.column("categories", .text).notNull()
+                t.column("facts", .text).notNull()
+                t.column("holding", .text).notNull().defaults(to: "arrived")
+                t.column("gone_at", .datetime)
+                t.column("kept", .boolean).notNull().defaults(to: false)
+                t.column("bookmarked", .boolean)
+                t.column("edited_at", .datetime)
+                t.column("earlier", .text)
+                t.column("language", .text)
+            }
+        }
+        for id in ["v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions", "v9-language"] {
+            migrator.registerMigration(id) { _ in }
+        }
+        return migrator
+    }
+
+    /// The facts of a row as the build before wrote them, with whatever else it says.
+    private static func facts(_ extra: String = "") -> String {
+        #"{"attachments":[],"author":"Ada","body":"as written","emojis":[],"handle":"@ada","kind":"mastodon"\#(extra)}"#
+    }
+
+    private static let quotedPost = #"{"attachments":[],"author":"Cy","body":"quoted","emojis":[],"handle":"@cy","id":"https://one.example/q7","postedAt":700000000,"statusID":"77"}"#
+
+    /// A store the build before wrote: a post, an answer, a post quoting one it holds a copy of,
+    /// a quote still waiting, one that arrived as a boost, and one held aside that answers and quotes.
+    private static let rows: [String] = [
+        #"INSERT INTO source (host, kind, boards) VALUES ('one.example', 'mastodon', '[]')"#,
+        row("1", facts()),
+        row("2", facts(#","reply":{"handle":"@bob@two.example","inReplyToId":"41"}"#)),
+        row("3", facts(#","quote":{"post":\#(quotedPost),"state":"accepted","statusID":"77"}"#)),
+        row("4", facts(#","quote":{"state":"pending"}"#)),
+        row("5", facts(#","boostedBy":"Bob","boosterHandle":"@bob@one.example""#)),
+        row("6", facts(#","reply":{},"quote":{"state":"accepted","statusID":"88"}"#), holding: "aside", kept: 1),
+    ]
+
+    private static func row(_ id: String, _ facts: String, holding: String = "arrived", kept: Int = 0) -> String {
+        #"INSERT INTO note VALUES ('one.example', '\#(id)', '2026-09-16 12:00:0\#(id).000', '[{"kind":"home"}]', '\#(facts)', '\#(holding)', NULL, \#(kept), NULL, NULL, NULL, NULL)"#
+    }
+
+    private func v9Store(_ statements: [String] = rows) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let queue = try DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path)
+        try Self.v9Migrator.migrate(queue)
+        try queue.write { db in
+            for sql in statements { try db.execute(sql: sql) }
+        }
+        try queue.close()
+        return dir
+    }
+
+    private func scratch() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    private func cells(_ dir: URL) throws -> [String: (refs: String?, due: Bool?)] {
+        try DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).read { db in
+            var out: [String: (String?, Bool?)] = [:]
+            for row in try Row.fetchAll(db, sql: "SELECT id, refs, refs_due FROM note") {
+                out[row["id"]] = (row["refs"], row["refs_due"])
+            }
+            return out
+        }
+    }
+
+    private static func note(
+        _ id: String, reply: Reply? = nil, quote: Quote? = nil, refs: [Reference]? = nil, refsDue: Bool = false,
+        kept: Bool = false
+    ) -> Note {
+        Note(
+            id: id, source: mastodon, author: "Ada", handle: "@ada", body: "hello \(id)",
+            postedAt: PackagerFixture.origin.addingTimeInterval(Double(id.count)), categories: [.home], reply: reply,
+            spoiler: "", quote: quote, kept: kept, refs: refs, refsDue: refsDue
+        )
+    }
+
+    // MARK: - An older store
+
+    @Test("The store of the build before opens in place with every post as it was, each given the references its reply and quote state, and none of them owed a load")
+    func carriedForward() throws {
+        let dir = try v9Store()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let listed = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+
+        let opened = StoreFile.open(at: dir)
+
+        #expect(opened.file != nil && opened.setAside == nil && !opened.storeIsNewer && opened.trouble == nil)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted() == listed)
+        #expect(opened.notes.map(\.id) == ["1", "2", "3", "4", "5", "6"], "in the order they were written")
+        #expect(opened.notes.map(\.refs) == [
+            [],
+            [Reference(kind: .answers, statusID: "41", handle: "@bob@two.example")],
+            [Reference(kind: .quotes, id: "https://one.example/q7", statusID: "77", state: .accepted)],
+            [Reference(kind: .quotes, state: .pending)],
+            [],
+            [Reference(kind: .answers), Reference(kind: .quotes, statusID: "88", state: .accepted)],
+        ])
+        #expect(opened.notes.allSatisfy { !$0.refsDue }, "a post held before there was any asking owes none")
+        #expect(opened.notes.allSatisfy { !$0.isReblog }, "and one that arrived as a boost is still the post")
+        // And everything else a row said is as it was.
+        #expect(opened.notes.allSatisfy { $0.refs == Reference.derived(reply: $0.reply, quote: $0.quote) })
+        #expect(opened.notes[1].reply == Reply(handle: "@bob@two.example", inReplyToId: "41"))
+        #expect(opened.notes[2].quote?.post?.body == "quoted" && opened.notes[4].boostedBy == "Bob")
+        #expect(opened.notes.map(\.holding) == [.arrived, .arrived, .arrived, .arrived, .arrived, .aside])
+        #expect(opened.notes.map(\.kept) == [false, false, false, false, false, true])
+        let migrations = try DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).read { db in
+            try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid")
+        }
+        #expect(migrations == [
+            "v1-index", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions",
+            "v9-language", "v10-references",
+        ])
+    }
+
+    @Test("What the migration wrote into each row is this text and no other: the format is the file's, and a later build reads these")
+    func theCells() throws {
+        let dir = try v9Store()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let opened = StoreFile.open(at: dir)
+        try opened.file?.db.close()
+        let cells = try cells(dir)
+        #expect(cells["1"]?.refs == "[]")
+        #expect(cells["2"]?.refs == #"[{"handle":"@bob@two.example","kind":"answers","statusID":"41"}]"#)
+        #expect(cells["3"]?.refs == #"[{"id":"https:\/\/one.example\/q7","kind":"quotes","state":"accepted","statusID":"77"}]"#)
+        #expect(cells["4"]?.refs == #"[{"kind":"quotes","state":"pending"}]"#)
+        #expect(cells["5"]?.refs == "[]")
+        #expect(cells["6"]?.refs == #"[{"kind":"answers"},{"kind":"quotes","state":"accepted","statusID":"88"}]"#)
+        #expect(cells.values.allSatisfy { $0.due == false })
+    }
+
+    @Test("A save by this build writes each row's references the way the migration did, so a carried row and a saved one are one format")
+    func savedAsMigrated() async throws {
+        let dir = try v9Store()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let opened = StoreFile.open(at: dir)
+        let migrated = try cells(dir).mapValues(\.refs)
+        try await #require(opened.file).save(sources: opened.sources, notes: opened.notes)
+        #expect(try cells(dir).mapValues(\.refs) == migrated)
+        #expect(StoreFile.open(at: dir).notes == opened.notes)
+    }
+
+    /// What `StoreFile.open` made of a store of the build before holding the rows of `rows`
+    /// and one more whose facts are `bad`, opened by that build's own reading and by this one's.
+    private func judged(_ bad: String) throws -> (StoreFile.Opened, URL) {
+        let dir = try v9Store()
+        let raw = try DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path)
+        try raw.write { db in
+            try db.execute(sql: "INSERT INTO note VALUES ('one.example', '7', '2026-09-16 12:00:07.000', '[]', \(bad), 'arrived', NULL, 0, NULL, NULL, NULL, NULL)")
+        }
+        try raw.close()
+        return (StoreFile.open(at: dir), dir)
+    }
+
+    @Test(
+        "A row whose facts are not text, or not the JSON a row's facts are, does not stop the migration or trap it: every other row is carried, that one is given nothing, and the load judges the store as it did before this step",
+        arguments: ["X'FFFE80FF'", "'not what a row is'", "''", "'[1,2,3]'", "NULL_AS_TEXT"]
+    )
+    func aRowThatWillNotRead(_ cell: String) throws {
+        let bad = cell == "NULL_AS_TEXT" ? "'null'" : cell
+        let (opened, dir) = try judged(bad)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // The migration ran to its end whatever the row was: the store that could not be read
+        // was put aside by the load, with the migration's work in it.
+        let judgedFile = opened.setAside ?? dir.appendingPathComponent("index.sqlite")
+        let queue = try DatabaseQueue(path: judgedFile.path)
+        let migrated = try queue.read { db in
+            try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations").contains("v10-references")
+        }
+        #expect(migrated, "the migration stopped at a row it could not read")
+        let cells = try queue.read { db in
+            try Row.fetchAll(db, sql: "SELECT id, refs FROM note ORDER BY id").map { ($0["id"] as String, $0["refs"] as String?) }
+        }
+        #expect(cells.first { $0.0 == "2" }?.1 == #"[{"handle":"@bob@two.example","kind":"answers","statusID":"41"}]"#, "the rows it could read are carried")
+        #expect(cells.first { $0.0 == "7" }?.1 == nil, "and the one it could not is left with nothing written")
+        try queue.close()
+
+        // What the load made of a store with that row is what it made of it before this step:
+        // such a row has never loaded, so the store is damaged and put aside — by the load.
+        #expect(opened.setAside != nil && opened.trouble == .damaged(replacedBy: .empty))
+    }
+
+    @Test("The build before sees a store this build opened as newer, and reads it on disk unchanged")
+    func olderBuildRefusesIt() throws {
+        let dir = try v9Store()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let index = dir.appendingPathComponent("index.sqlite")
+        let opened = StoreFile.open(at: dir)
+        try opened.file?.db.close()
+        let before = try Data(contentsOf: index)
+
+        var readOnly = Configuration()
+        readOnly.readonly = true
+        let superseded = try DatabaseQueue(path: index.path, configuration: readOnly).read(Self.v9Migrator.hasBeenSuperseded)
+
+        #expect(superseded)
+        #expect(try Data(contentsOf: index) == before)
+    }
+
+    // MARK: - A relaunch
+
+    @Test("Quit and open again: each item refers to what it referred to, and one whose references are still to be asked for still says so")
+    func survivesARelaunch() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let reblog = [Reference(kind: .reblogs, id: "https://one.example/9", statusID: "9")]
+        let notes = [
+            Self.note("1"),
+            Self.note("22", reply: Reply(handle: "@bob", inReplyToId: "41"), refsDue: true),
+            Self.note("333", refs: reblog, refsDue: true, kept: true),
+            Self.note("4444", quote: Quote(state: .rejected)),
+        ]
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: notes)
+
+        let opened = StoreFile.open(at: dir)
+
+        #expect(opened.notes == notes)
+        #expect(opened.notes.map(\.refsDue) == [false, true, true, false])
+        #expect(opened.notes[2].refs == reblog && opened.notes[2].isReblog, "a reference no reply or quote states is the row's own")
+        let cells = try cells(dir)
+        #expect(cells["333"]?.refs == #"[{"id":"https:\/\/one.example\/9","kind":"reblogs","statusID":"9"}]"#)
+        #expect(cells["333"]?.due == true && cells["1"]?.due == false)
+    }
+
+    @Test(
+        "A references cell that will not read is the row's reply and quote again: the row is whole, the store is not put aside, and nothing of the cell is kept",
+        arguments: [
+            "not json", "{}", #"[{"kind":"marries","id":"x"}]"#, #"[{"id":"x"}]"#, "",
+            "[" + String(repeating: #"{"kind":"quotes","id":"x"},"#, count: 4_000) + #"{"kind":"quotes"}]"#,
+        ]
+    )
+    func aCellThatWillNotRead(_ cell: String) async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let answer = Self.note("1", reply: Reply(handle: "@bob", inReplyToId: "41"))
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: [answer, Self.note("22")])
+        let index = dir.appendingPathComponent("index.sqlite")
+        try await DatabaseQueue(path: index.path).write { db in
+            try db.execute(sql: "UPDATE note SET refs = ?", arguments: [cell])
+        }
+
+        let opened = StoreFile.open(at: dir)
+
+        #expect(opened.setAside == nil && opened.file != nil && opened.trouble == nil)
+        #expect(opened.notes == [answer, Self.note("22")])
+    }
+
+    @Test("A cell that reads but says more than an item may hold, or names longer than a name is, is held to the bounds every item is")
+    func aCellPastTheBounds() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: [Self.note("1"), Self.note("22")])
+        let many = "[" + (0 ..< 40).map { #"{"kind":"quotes","id":"https://one.example/\#($0)"}"# }.joined(separator: ",") + "]"
+        let long = #"[{"kind":"answers","statusID":"\#(String(repeating: "x", count: 5_000))"},{"kind":"answers","statusID":"41"}]"#
+        try await DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).write { db in
+            try db.execute(sql: "UPDATE note SET refs = ? WHERE id = '1'", arguments: [many])
+            try db.execute(sql: "UPDATE note SET refs = ? WHERE id = '22'", arguments: [long])
+        }
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.notes[0].refs.count == Reference.most)
+        #expect(opened.notes[1].refs == [Reference(kind: .answers, statusID: "41")])
+    }
+
+    // MARK: - Taken away, and moved nearby
+
+    @Test(
+        "Taken away and read back — by a file's password, and by a key handed over as a move nearby is; onto a device with a store open, and onto one where the package's index is moved into place — each item's references came with it, and no row arrives still owing a load",
+        arguments: [PackageKey.password("password"), .direct(SymmetricKey(data: Data(repeating: 7, count: 32)))], [false, true]
+    )
+    func ridesThePackage(_ key: PackageKey, movedIntoPlace: Bool) async throws {
+        let reblog = [Reference(kind: .reblogs, id: "https://one.example/9")]
+        let notes = [
+            Self.note("1", reply: Reply(handle: "@bob", inReplyToId: "41"), refsDue: true),
+            Self.note("22", refs: reblog, refsDue: true),
+            Self.note("333"),
+        ]
+        let from = try await Device(sources: [Self.mastodon], notes: notes)
+        let onto = try await Device(noFile: movedIntoPlace)
+        let url = PackagerFixture.package()
+        defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
+        try await from.packager().takeAway(to: url, key: key, pictures: false) { _ in }
+        #expect(StoreFile.open(at: from.directory).notes.filter(\.refsDue).count == 2, "the premise: the package's store has rows still due")
+
+        try await onto.packager().readBack(url, key: key, replacing: false) { _ in }
+
+        let arrived = await onto.store.all().sorted { $0.id.count < $1.id.count }
+        #expect(arrived.map(\.refs) == notes.map(\.refs))
+        #expect(arrived.allSatisfy { !$0.refsDue }, "what another device still owed came to be asked for here")
+        // And on disk, before any save of this run's: the next launch owes none either.
+        let cells = try cells(onto.directory)
+        #expect(cells.count == 3 && cells.values.allSatisfy { $0.due == false }, "the index read back still says its rows are due")
+        #expect(cells["22"]?.refs == #"[{"id":"https:\/\/one.example\/9","kind":"reblogs"}]"#)
+    }
+
+    @Test("A package the build before took away is read back by this one, its rows carried forward as an opened store's are")
+    func anOlderPackage() async throws {
+        let old = try v9Store()
+        let onto = try await Device()
+        let url = PackagerFixture.package()
+        defer { try? FileManager.default.removeItem(at: old); onto.remove(); try? FileManager.default.removeItem(at: url) }
+        let index = try Data(contentsOf: old.appendingPathComponent("index.sqlite"))
+        let settings = try PropertyListSerialization.data(fromPropertyList: [String: Any](), format: .binary, options: 0)
+        let summary = PackageSummary(
+            sources: [.init(host: Self.mastodon.host, kind: .mastodon)], posts: 6, timelines: 0,
+            takenAt: PackagerFixture.origin, withPictures: false, bytes: index.count + settings.count,
+            hasSecrets: false, device: "an older build", appVersion: "0.0.9", entryCount: 3
+        )
+        let writer = try PackageWriter(to: url, key: .password("password"), summary: summary, rounds: 1000)
+        for (kind, name, data) in [
+            (PackageFormat.Entry.Kind.store, "index.sqlite", index), (.settings, "settings", settings), (.secrets, "secrets", Data()),
+        ] {
+            var offset = 0
+            try writer.add(kind, name: name, bytes: data.count) { most in
+                guard offset < data.count else { return nil }
+                let end = min(data.count, offset + most)
+                defer { offset = end }
+                return data[offset..<end]
+            }
+        }
+        try writer.finish()
+
+        try await onto.packager().readBack(url, key: .password("password"), replacing: false) { _ in }
+        let now = await onto.store.all() + (await onto.store.aside())
+        #expect(now.count == 6)
+        #expect(now.first { $0.id == "2" }?.refs == [Reference(kind: .answers, statusID: "41", handle: "@bob@two.example")])
+        #expect(now.allSatisfy { !$0.refsDue })
+    }
+}
