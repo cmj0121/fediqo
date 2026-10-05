@@ -29,9 +29,9 @@ existing one with a filter put on it.
 revisions, what you can do to an item, and how one is let go.
 
 The concept is where Fediqo is going, and Using it, below, is what this checkout does today.
-Today a Mastodon host or a Discuz forum can be joined. Bookmark, revisions, the deleted mark
-before a purge, a source's own fields in a rule, and a timeline built on another timeline are
-not here yet.
+Today a Mastodon host or a Discuz forum can be joined. Revisions, the deleted mark before a
+purge, a source's own fields in a rule, and a timeline built on another timeline are not here
+yet.
 
 ## How it works
 
@@ -189,8 +189,8 @@ choose a forum's boards. Home is always read once you are signed in.
 A Mastodon source can be signed in to from its row on Account, so its Home and your lists can
 be read. Before the server's page opens, Fediqo asks which sign-in you want, and says which
 part is which: reading alone, or reading and writing. Reading brings in your Home and your
-lists. Writing lets you post, reply, boost and favourite from Fediqo, and take any of them
-back — and nothing else: Fediqo never asks to follow anybody, change your profile, or touch
+lists. Writing lets you post, reply, boost, favourite and bookmark from Fediqo, and take any of
+them back — and nothing else: Fediqo never asks to follow anybody, change your profile, or touch
 your filters. Choosing reading alone asks for exactly what Fediqo asked for before it could
 write at all, so refusing the writing part changes nothing about reading. Signing in again is
 how you change your answer.
@@ -200,6 +200,23 @@ nothing with it. Account says so, names the source, and puts the choice there be
 press asks the same question, without signing you out first. Cancel on the server's page and
 the sign-in you already had is still the one in use. What you already agreed to is never
 widened behind your back.
+
+If you signed in to read and write before Fediqo could bookmark, that sign-in posts, replies,
+boosts and favourites exactly as it did; only bookmarking waits. The bookmark under a post
+there says it has to be asked for, and Account names the source: one press on either asks, on
+a page that names bookmarks, without signing you out first. A server that has no bookmarks to
+grant leaves you signed in to read and write, and the bookmark is not offered there.
+
+A bookmark is kept at the source. The mark under a post is what its source last said — filled
+where it holds your bookmark, and never filled by a press that did not land — so it reads the
+same in any other app, and after a relaunch. A press the source turns away says so and leaves
+the mark as it was; press again to try again. Keeping a post is another thing, and this
+device's own: see Keeping a post, below.
+
+What a source says you boosted, favourited and bookmarked is yours as its signed-in reader, and
+goes when that sign-in does: signing out, a server ending the sign-in, Clear, Remove, or another
+account signing in on that source leaves its posts here saying nothing of any of the three,
+until a signed-in read says so again.
 
 Every row on Account says what may be done on that source — read, read and write, or read only
 where the protocol has no writing in Fediqo at all, which is every forum. What it says is the

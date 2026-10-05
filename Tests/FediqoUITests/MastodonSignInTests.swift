@@ -14,6 +14,10 @@ private actor MastodonServer: HTTPSender {
         /// with one string for every exchange, a token revoked and a token kept are the same
         /// bytes and no test can say which went.
         case issuesToken
+        /// A server that does not know the bookmark scope and says so where an app is registered
+        /// (#285): a 422 naming the scopes for a registration that asks for it, and a
+        /// registration for any other.
+        case refusesBookmarkApps
     }
 
     private let routes: [String: Outcome]
@@ -51,6 +55,15 @@ private actor MastodonServer: HTTPSender {
             return (
                 Data(#"{"access_token":"tok-\#(122 + issued)"}"#.utf8), Self.answered(url, 200)
             )
+        case .refusesBookmarkApps:
+            let form = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+            guard form.contains("write%3Abookmarks") else {
+                return (Data(#"{"client_id":"cid","client_secret":"csecret"}"#.utf8), Self.answered(url, 200))
+            }
+            return (
+                Data(#"{"error":"Validation failed: Scopes doesn't match configured on the server."}"#.utf8),
+                Self.answered(url, 422)
+            )
         case .fail:
             throw URLError(.notConnectedToInternet)
         }
@@ -75,8 +88,8 @@ private actor MastodonServer: HTTPSender {
 @MainActor
 private final class Page: OAuthBrowser {
     /// `refusesSearch` answers `invalid_scope` to a page asking for `read:search`, and approves
-    /// any other.
-    enum Answer { case approve, close, invalidScope, refusesSearch }
+    /// any other; `refusesBookmarks` does the same for `write:bookmarks` (#285).
+    enum Answer { case approve, close, invalidScope, refusesSearch, refusesBookmarks }
 
     private let answer: Answer
     private let gate: Gate?
@@ -101,6 +114,10 @@ private final class Page: OAuthBrowser {
             return URL(string: "fediqo://oauth?error=invalid_scope&state=\(state)")!
         }
         if answer == .refusesSearch { return URL(string: "fediqo://oauth?code=c&state=\(state)")! }
+        if answer == .refusesBookmarks {
+            let error = scope.contains("write:bookmarks") ? "error=invalid_scope" : "code=c"
+            return URL(string: "fediqo://oauth?\(error)&state=\(state)")!
+        }
         guard answer == .approve else { throw MastodonSignInError.cancelled }
         return URL(string: "fediqo://oauth?code=c&state=\(state)")!
     }
@@ -159,7 +176,9 @@ struct MastodonSignInTests {
         let page = Page()
         await session.signIn(host: host, through: page)
         #expect(page.opened == 1)
-        #expect(try tokens.token(host: host) == token(host, scopes: MastodonOAuth.reading))
+        // What it was given, and what it asked for (#285), written down beside it.
+        #expect(try tokens.token(host: host)
+            == token(host, scopes: MastodonOAuth.reading).recorded(asked: MastodonOAuth.reading))
         #expect(session.isSignedIn(host: host))
         #expect(session.mastodon.signedInHosts == [host])
         #expect(await server.paths == [
@@ -762,6 +781,343 @@ struct MastodonSignInTests {
         }
         #expect(ShellSession.signInFailureKey(.http(503)) == "account.mastodon.failed.unreachable")
     }
+
+    // MARK: - Bookmarks (#285)
+
+    /// What a sign-in to read and act asked for before bookmarks were.
+    private static let before = "read:statuses read:lists read:accounts read:search write:statuses write:favourites"
+
+    /// A post of somebody else's, held from `host`, drawn as a row.
+    private func post(in session: ShellSession) async -> DummyItem {
+        let note = Note(
+            id: "https://social.example/users/ada/statuses/9", source: Source(host: host, kind: .mastodon),
+            author: "Ada", handle: "@ada@social.example", body: "hello",
+            postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home], statusID: "9"
+        )
+        await session.store.ingest([note])
+        await session.reloadFromStore()
+        return DummyItem(note)
+    }
+
+    @Test("A sign-in to read and act asks for bookmarks on the page itself; a sign-in to read asks for exactly what it asked")
+    func whatTheServersPageIsAskedFor() async throws {
+        let (session, _, tokens) = await shell()
+        let acting = Page()
+        await session.signIn(host: host, through: acting, writing: true)
+        #expect(acting.scopes == [Self.before + " write:bookmarks"])
+        #expect(try tokens.token(host: host)?.grant == .writing)
+        #expect(session.mastodon.bookmarks(host: host) == .allowed)
+        #expect(session.acts(on: await post(in: session)).offers(.bookmark))
+
+        let reading = Page()
+        await session.signIn(host: host, through: reading, writing: false)
+        #expect(reading.scopes == ["read:statuses read:lists read:accounts read:search"])
+        #expect(session.mastodon.bookmarks(host: host) == .unavailable)
+        let acts = session.acts(on: await post(in: session))
+        #expect(!acts.offers(.bookmark) && !acts.asks(.bookmark) && acts.refused == .notSignedIn)
+    }
+
+    /// **The line this task must not cross**: a sign-in made before bookmarks were asked for is
+    /// not read-only now. Everything it did, it does; bookmarking alone waits to be allowed.
+    @Test("A sign-in from before still writes everything it wrote; bookmark alone asks, in place, and one yes allows it")
+    func anEarlierSignInIsAskedInPlace() async throws {
+        let (session, server, tokens) = await shell()
+        try tokens.save(MastodonToken(
+            host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret", scopes: Self.before
+        ))
+        try tokens.save(MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: Self.before))
+        session.mastodon.refresh()
+        let row = await post(in: session)
+
+        #expect(session.mastodon.grants[host] == .writing)
+        #expect(self.row(session, host).writing == .writes, "an earlier sign-in reads as read-only")
+        var acts = session.acts(on: row)
+        #expect(acts.offered == [.boost, .favourite, .answer])
+        #expect(acts.asks(.bookmark))
+        #expect(session.mastodon.bookmarks(host: host) == .unasked)
+        #expect(AccountPane.askedForBookmarks(session.sources, in: session.mastodon) == [host])
+        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon).isEmpty, "it is not asked the older question")
+
+        // The mark's press sends nothing and signs nobody out: it only puts the question.
+        await session.toggle(.bookmark, on: row)
+        #expect(session.askToBookmark(row))
+        #expect(session.bookmarkAsk == host)
+        #expect(session.isSignedIn(host: host))
+        #expect(await server.paths.isEmpty, "the server heard about a question nobody has answered")
+
+        // Answered no, or the server's page closed: everything is as it was.
+        session.cancelBookmarkAsk()
+        #expect(session.bookmarkAsk == nil)
+        await session.allowBookmarks(host: host, through: Page(.close))
+        #expect(try tokens.token(host: host)?.accessToken == "tok-old")
+        #expect(self.row(session, host).writing == .writes)
+        #expect(session.acts(on: row).asks(.bookmark), "and it may still be asked")
+        #expect(await server.revoked.isEmpty)
+
+        // Answered yes: a page that names bookmarks, on a registration made for them; the new
+        // sign-in replaces the old one here and revokes it there.
+        let page = Page()
+        await session.allowBookmarks(host: host, through: page)
+        #expect(page.scopes == [Self.before + " write:bookmarks"])
+        #expect(try tokens.app(host: host)?.scopes == Self.before + " write:bookmarks")
+        #expect(try tokens.token(host: host)?.accessToken == "tok-123")
+        #expect(await server.revoked == ["tok-old"])
+        #expect(session.mastodon.grants[host] == .writing)
+        #expect(session.mastodon.bookmarks(host: host) == .allowed)
+        acts = session.acts(on: row)
+        #expect(acts.offered == [.boost, .favourite, .answer, .bookmark] && acts.asking.isEmpty, "asked more than once")
+        #expect(!session.askToBookmark(row))
+        #expect(AccountPane.askedForBookmarks(session.sources, in: session.mastodon).isEmpty)
+    }
+
+    /// Every registration an earlier build made for acting leaves bookmarks out. Started on, the
+    /// page would never name them, and the reader would be asked for ever.
+    @Test("Asked to allow bookmarks, a registration made before they were asked for is made again, and the page names them")
+    func anEarlierRegistrationIsNotStartedOn() async throws {
+        let (session, server, tokens) = await shell()
+        try tokens.save(MastodonToken(
+            host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret", scopes: Self.before
+        ))
+        try tokens.save(MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: Self.before))
+        session.mastodon.refresh()
+
+        let page = Page()
+        await session.allowBookmarks(host: host, through: page)
+
+        #expect(page.scopes == [Self.before + " write:bookmarks"])
+        #expect(await server.paths.filter { $0 == "/api/v1/apps" }.count == 1)
+        #expect(session.mastodon.bookmarks(host: host) == .allowed)
+    }
+
+    @Test("A server with no bookmark scope leaves a working read-and-write sign-in, and the row stops asking")
+    func aServerWithoutBookmarks() async throws {
+        let (session, _, tokens) = await shell()
+        let page = Page(.refusesBookmarks)
+        await session.signIn(host: host, through: page, writing: true)
+
+        let without = "read:statuses read:lists read:accounts write:statuses write:favourites"
+        #expect(page.scopes == [Self.before + " write:bookmarks", without + " write:bookmarks", Self.before])
+        #expect(try tokens.token(host: host)?.scopes == Self.before)
+        #expect(try tokens.app(host: host)?.scopes == Self.before)
+        #expect(session.mastodon.grants[host] == .writing)
+        #expect(row(session, host).writing == .writes)
+        #expect(session.rowRefusal == nil, "the fallback was reported as a failure")
+        #expect(session.mastodon.bookmarks(host: host) == .unavailable)
+        let acts = session.acts(on: await post(in: session))
+        #expect(acts.offered == [.boost, .favourite, .answer] && acts.asking.isEmpty)
+        #expect(AccountPane.askedForBookmarks(session.sources, in: session.mastodon).isEmpty)
+
+        // Signing out forgets that it was asked, with everything else of the sign-in.
+        await session.signOut(host: host)
+        #expect(session.mastodon.bookmarks(host: host) == .unavailable)
+        #expect(session.mastodon.bookmarksRefused.isEmpty)
+    }
+
+    @Test("A server that refuses the registration itself for the bookmark scope still signs in to read and write, on one page")
+    func aServerRefusingTheRegistration() async throws {
+        let (session, server, tokens) = await shell(["/api/v1/apps": .refusesBookmarkApps])
+        let page = Page()
+        await session.signIn(host: host, through: page, writing: true)
+
+        #expect(page.scopes == [Self.before], "a page was opened for a registration the server refused")
+        #expect(await server.paths.filter { $0 == "/api/v1/apps" }.count == 3)
+        #expect(session.rowRefusal == nil, "read and write failed outright where it worked before")
+        #expect(try tokens.token(host: host)?.scopes == Self.before)
+        #expect(row(session, host).writing == .writes)
+        #expect(session.mastodon.bookmarks(host: host) == .unavailable)
+
+        // A server that is merely failing is not refusing a scope: nothing falls, and it says so.
+        let (failing, down, _) = await shell(["/api/v1/apps": .json("{}", status: 503)])
+        await failing.signIn(host: host, through: Page(), writing: true)
+        #expect(await down.paths == ["/api/v1/apps"])
+        #expect(failing.rowRefusal?.key == "account.mastodon.failed.unreachable")
+    }
+
+    @Test("Asked and not given is written down beside the sign-in: after a relaunch the row and Account still do not offer to ask, and a later sign-in may")
+    func askedAndRefusedOutlivesARelaunch() async throws {
+        let (session, server, tokens) = await shell()
+        await session.signIn(host: host, through: Page(.refusesBookmarks), writing: true)
+        #expect(try tokens.token(host: host)?.asked == Self.before + " write:bookmarks")
+        #expect(try tokens.token(host: host)?.scopes == Self.before)
+
+        // A relaunch: nothing of this run but what the token store holds.
+        let relaunched = ShellSession(
+            http: FixtureHTTP(), store: session.store, mastodon: MastodonSessions(tokens: tokens, sender: server)
+        )
+        relaunched.sources = await relaunched.store.sources()
+        #expect(relaunched.mastodon.grants[host] == .writing)
+        #expect(relaunched.mastodon.bookmarks(host: host) == .unavailable, "asked again after a relaunch")
+        #expect(AccountPane.askedForBookmarks(relaunched.sources, in: relaunched.mastodon).isEmpty)
+        let row = await post(in: relaunched)
+        #expect(!relaunched.acts(on: row).asks(.bookmark) && !relaunched.askToBookmark(row))
+        let before = await server.paths.count
+        await relaunched.allowBookmarks(host: host, through: Page())
+        #expect(await server.paths.count == before, "a source that has answered was asked again")
+
+        // An ordinary sign-in is a new question, and a server that has since learnt the scope says yes.
+        await relaunched.signIn(host: host, through: Page(), writing: true)
+        #expect(relaunched.mastodon.bookmarks(host: host) == .allowed)
+    }
+
+    @Test("A source cleared while its page is up is not registered with again, and no further page opens")
+    func clearedBetweenRungs() async throws {
+        let (session, server, tokens) = await shell()
+        let gate = Gate()
+        let page = Page(.invalidScope, gate: gate)
+        let pressing = Task { await session.signIn(host: host, through: page, writing: true) }
+        #expect(await spun { page.opened == 1 })
+        await session.mastodon.signOut(host: host, forgettingApp: true)
+        await gate.open()
+        await pressing.value
+
+        #expect(page.opened == 1, "another page was opened on a source the reader let go of")
+        #expect(await server.paths.filter { $0 == "/api/v1/apps" }.count == 1)
+        #expect(try tokens.app(host: host) == nil)
+        #expect(session.rowRefusal == nil)
+    }
+
+    @Test("A new token that cannot be kept leaves the sign-in the reader had: put back where the save took it, and revoked only where that fails too")
+    func aFailedSaveKeepsTheEarlierSignIn() async throws {
+        let old = MastodonToken(host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret", scopes: Self.before)
+        for restorable in [true, false] {
+            let held = MemoryMastodonTokens()
+            try held.save(old)
+            let tokens = FailingSaveTokens(held, failing: restorable ? 1 : 2)
+            let server = MastodonServer(tokens: held)
+            let session = ShellSession(
+                http: FixtureHTTP(), store: ItemStore(), mastodon: MastodonSessions(tokens: tokens, sender: server)
+            )
+            await session.store.add(Source(host: host, kind: .mastodon))
+            session.sources = await session.store.sources()
+
+            await session.allowBookmarks(host: host, through: Page())
+
+            #expect(session.rowRefusal?.key == "account.bookmarks.failed")
+            if restorable {
+                #expect(try held.token(host: host) == old, "a press that signs nobody out signed the reader out")
+                #expect(session.isSignedIn(host: host))
+                #expect(row(session, host).writing == .writes)
+                #expect(await server.revoked == ["tok-123"], "only the token that could not be kept is revoked")
+            } else {
+                #expect(try held.token(host: host) == nil)
+                #expect(!session.isSignedIn(host: host))
+                #expect(await server.revoked == ["tok-123", "tok-old"], "a token this device lost is still live at the server")
+            }
+        }
+    }
+
+    @Test("Signed out while a token that could not be kept is being revoked: the reader stays signed out, and the sign-in they had is revoked")
+    func signedOutWhileAFailedSaveSettles() async throws {
+        let old = MastodonToken(host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret", scopes: Self.before)
+        let held = MemoryMastodonTokens()
+        try held.save(old)
+        let gate = Gate()
+        let server = HeldRevoke(MastodonServer(tokens: held), gate: gate)
+        let session = ShellSession(
+            http: FixtureHTTP(), store: ItemStore(),
+            mastodon: MastodonSessions(tokens: FailingSaveTokens(held, failing: 1), sender: server)
+        )
+        await session.store.add(Source(host: host, kind: .mastodon))
+        session.sources = await session.store.sources()
+
+        let pressing = Task { await session.allowBookmarks(host: host, through: Page()) }
+        #expect(await spun { await server.holding })
+        // The new token's revoke is on the wire; the reader signs out meanwhile.
+        #expect(session.isSignedIn(host: host), "the earlier sign-in was not put back before the wait")
+        await session.signOut(host: host)
+        await gate.open()
+        await pressing.value
+
+        #expect(try held.token(host: host) == nil, "signed in again after signing out")
+        #expect(!session.isSignedIn(host: host))
+        #expect(await server.revoked.sorted() == ["tok-123", "tok-old"], "the sign-in they had is still live at the server")
+    }
+
+    @Test("Where asking for bookmarks fails, the row says bookmarks were not allowed, and the sign-in still writes")
+    func aFailedAskSaysWhatIsTrue() async throws {
+        let (session, _, tokens) = await shell()
+        try tokens.save(MastodonToken(
+            host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret", scopes: Self.before
+        ))
+        session.mastodon.refresh()
+
+        await session.allowBookmarks(host: host, through: Page(.invalidScope))
+
+        #expect(session.rowRefusal?.host == host && session.rowRefusal?.key == "account.bookmarks.failed")
+        #expect(session.rowRefusal?.key != ShellSession.signInFailureKey(.invalidScope), "it said the sign-in failed")
+        #expect(session.toast != nil)
+        #expect(try tokens.token(host: host)?.accessToken == "tok-old")
+        #expect(row(session, host).writing == .writes)
+        for language in [DummyLanguage.english, .taiwanese] {
+            for key in ["account.bookmarks.failed", "account.bookmarks.unavailable", "account.sources.bookmarks.again.choose"] {
+                #expect(L10n.t(key, language: language) != key, "\(key) is not written in \(language)")
+            }
+        }
+    }
+
+    @Test("Allowing bookmarks asks nothing of a sign-in that is not one to ask: signed out, reading only, or already allowed")
+    func onlyAnEarlierActingSignInIsAsked() async throws {
+        for scopes in [nil, MastodonOAuth.reading, Self.before + " write:bookmarks"] as [String?] {
+            let (session, server, tokens) = await shell()
+            if let scopes {
+                try tokens.save(MastodonToken(host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret", scopes: scopes))
+            }
+            session.mastodon.refresh()
+            session.bookmarkAsk = host
+            let page = Page()
+
+            await session.allowBookmarks(host: host, through: page)
+
+            #expect(page.opened == 0, "a page was opened for \(scopes ?? "no sign-in")")
+            #expect(await server.paths.isEmpty)
+            #expect(session.bookmarkAsk == nil)
+            #expect(try tokens.token(host: host)?.scopes == scopes, "a press about bookmarks changed what a sign-in may do")
+            AccountPane(session: session).askBookmarks(host)
+            #expect(session.bookmarkAsk == nil)
+        }
+    }
+
+    @Test("Account's bookmark sentence puts the bookmark question itself: one press, and never the read-or-write choice")
+    func accountAsksTheBookmarkQuestion() async throws {
+        let (session, server, tokens) = await shell()
+        try tokens.save(MastodonToken(
+            host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret", scopes: Self.before
+        ))
+        session.mastodon.refresh()
+
+        AccountPane(session: session).askBookmarks(host)
+
+        #expect(session.bookmarkAsk == host)
+        #expect(session.signInChoice == nil, "the reader was offered a way to narrow the sign-in")
+        #expect(await server.paths.isEmpty)
+        #expect(try tokens.token(host: host)?.accessToken == "tok-old")
+    }
+
+    @Test("A server that grants writing and leaves bookmarks out of its answer is not asked again either")
+    func aServerGrantingLess() async throws {
+        let (session, _, _) = await shell([
+            "/oauth/token": .json(#"{"access_token":"tok-123","scope":"\#(Self.before)"}"#),
+        ])
+        await session.signIn(host: host, through: Page(), writing: true)
+        #expect(session.mastodon.grants[host] == .writing)
+        #expect(session.mastodon.bookmarks(host: host) == .unavailable)
+    }
+
+    @Test("Before the server's page opens, both questions say bookmarks are part of what is asked", arguments: [DummyLanguage.english, .taiwanese])
+    func theQuestionsSayBookmarks(language: DummyLanguage) {
+        let word = language == .english ? "bookmark" : "書籤"
+        let signIn = ShellQuestion.signIn(host: host, language: language)
+        #expect(signIn.line.contains(word), "\(signIn.line)")
+        #expect(signIn.help?.contains(word) == true)
+        let again = ShellQuestion.bookmarks(host: host, language: language)
+        #expect(again.title.contains(host) && again.line.contains(word))
+        #expect(again.help?.contains(host) == true)
+        #expect(!again.warns, "nothing is lost by asking")
+        for key in ["account.sources.bookmarks.again", "account.sources.bookmarks.again.line", "item.act.ask", "item.act.unbookmark"] {
+            #expect(L10n.t(key, language: language) != key, "\(key) is not written in \(language)")
+        }
+    }
+
 }
 
 /// A token store whose Keychain will not delete a token by host.
@@ -776,4 +1132,58 @@ private final class StuckTokens: MastodonTokenStore, @unchecked Sendable {
     func app(host: String) throws -> MastodonApp? { try held.app(host: host) }
     func save(_ app: MastodonApp) throws { try held.save(app) }
     func forgetApp(host: String) throws { try held.forgetApp(host: host) }
+}
+
+/// A token store whose `save` of a token deletes the one held and then fails to add — the
+/// Keychain's delete-then-add, failing at the add — for the first `failing` saves.
+private final class FailingSaveTokens: MastodonTokenStore, @unchecked Sendable {
+    private let held: MemoryMastodonTokens
+    private var failing: Int
+
+    init(_ held: MemoryMastodonTokens, failing: Int) {
+        self.held = held
+        self.failing = failing
+    }
+
+    func token(host: String) throws -> MastodonToken? { try held.token(host: host) }
+    func save(_ token: MastodonToken) throws {
+        guard failing > 0 else { return try held.save(token) }
+        failing -= 1
+        try held.forget(host: token.host)
+        throw ForumCredentialError.keychain(-25_308)
+    }
+    func forget(host: String) throws { try held.forget(host: host) }
+    func forget(_ token: MastodonToken) throws -> Bool { try held.forget(token) }
+    func grants() throws -> [String: MastodonGrant] { try held.grants() }
+    func bookmarking() throws -> Set<String> { try held.bookmarking() }
+    func bookmarksRefused() throws -> Set<String> { try held.bookmarksRefused() }
+    func app(host: String) throws -> MastodonApp? { try held.app(host: host) }
+    func save(_ app: MastodonApp) throws { try held.save(app) }
+    func forgetApp(host: String) throws { try held.forgetApp(host: host) }
+}
+
+
+/// A server whose first answer to a revoke waits at a gate, so a test can act while it is out.
+private actor HeldRevoke: HTTPSender {
+    private let server: MastodonServer
+    private let gate: Gate
+    private var held = false
+    /// Whether a revoke is waiting at the gate.
+    private(set) var holding = false
+
+    init(_ server: MastodonServer, gate: Gate) {
+        self.server = server
+        self.gate = gate
+    }
+
+    var revoked: [String] { get async { await server.revoked } }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        if request.url?.path == "/oauth/revoke", !held {
+            held = true
+            holding = true
+            await gate.wait()
+        }
+        return try await server.send(request)
+    }
 }

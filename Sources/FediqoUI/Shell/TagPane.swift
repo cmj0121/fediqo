@@ -116,7 +116,6 @@ struct TagPane: View {
     var catalogueSettled: Bool = false
     let posts: ForumPosts
     @Binding var selectedID: String?
-    var marks: (DummyItem) -> Binding<DummyMarks>
     var acting: (DummyItem) -> ItemActing = { _ in ItemActing() }
     @Binding var decks: ShellDecks
     let playback: ShellPlayback
@@ -287,7 +286,6 @@ struct TagPane: View {
             catalogues: catalogues,
             catalogueSettled: catalogueSettled,
             posts: posts,
-            marks: marks(item),
             acting: acting(item),
             selected: item.id == selectedID,
             top: decks.top(of: item.id, of: item.attachments.count),

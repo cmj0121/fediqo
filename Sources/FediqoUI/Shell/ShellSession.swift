@@ -160,6 +160,12 @@ final class ShellSession {
     /// source held here would be one that goes stale. **Not `signingIn`**, which is the forum
     /// sign-in already running in a web view — this is a question, and nothing is running.
     var signInChoice: String?
+    /// The source whose sign-in is being asked to allow bookmarks, where one is (#285). Observed,
+    /// and the question is presented from it; a press on a row's mark writes it.
+    var bookmarkAsk: String?
+    /// Whether the rows of every source nobody is signed in to have been checked once this run
+    /// for what an earlier reader left on them (`forgetReaderMarksDue`).
+    @ObservationIgnored var readerMarksSwept = false
 
     /// Which stage of adding a source the reader is being shown, or nothing.
     ///
@@ -886,10 +892,22 @@ final class ShellSession {
     /// act — because they are the same two answers from the same door, and a second reading of
     /// them is how two writes come to tell a reader different things about one sign-in. Any
     /// other failure says nothing about the sign-in.
-    private func writeFailed(_ error: any Error, host: String) {
+    ///
+    /// **A bookmark turned away with a 403 is bookmarks refused there** (#285), and nothing more:
+    /// for the rest of this run the mark is not offered on that source's rows, every other act
+    /// it offers stays, and the reader is told, here and on the source's row. `sent` is the token
+    /// the request went with, so a refusal about a sign-in since replaced is not laid on the new.
+    private func writeFailed(
+        _ error: any Error, host: String, bookmarkSentWith sent: MastodonToken? = nil
+    ) {
         switch error as? MastodonAuthError {
         case .signedOut?: mastodon.endedByServer(host: host)
-        case .http(403)?: mastodon.refusedWrite(host: host)
+        case .http(403)?:
+            guard let sent else { return mastodon.refusedWrite(host: host) }
+            mastodon.refusedBookmark(host: host, sentWith: sent)
+            guard mastodon.bookmarkTurnedAway.contains(host.lowercased()) else { return }
+            if isAdded(host) { rowRefusal = (host: host.lowercased(), key: "account.bookmarks.refused") }
+            showToast(L10n.t("account.bookmarks.refused"))
         default: break
         }
     }
@@ -918,10 +936,20 @@ final class ShellSession {
 
     /// The row's acts out of each copy's own, in the row's order — `acts(on:)` over copies
     /// whose acts are already worked out.
+    ///
+    /// What some copy's sign-in must be asked again for (#285) is asked on the row too, unless
+    /// another copy already offers it: an act a press can do is done, not asked about.
     private static func acts(from each: [PostActs]) -> PostActs {
         let offered = each.reduce(into: Set<PostAct>()) { $0.formUnion($1.offered) }
-        guard offered.isEmpty else { return PostActs(offered: offered) }
+        let asking = each.reduce(into: Set<PostAct>()) { $0.formUnion($1.asking) }
+        guard offered.isEmpty else { return PostActs(offered: offered, asking: asking) }
         return each.first { $0.refused != nil } ?? .none
+    }
+
+    /// The copy behind `item` whose sign-in must be asked again before `act` is offered (#285),
+    /// or nothing where no copy's is — `actingCopy`'s order, for the question instead of the act.
+    func askingCopy(of item: DummyItem, for act: PostAct) -> DummyItem? {
+        item.copies.first { ownActs(on: $0).asks(act) }
     }
 
     /// The copy behind `item` that `act` goes through, or nothing where no copy offers it (#136).
@@ -968,7 +996,8 @@ final class ShellSession {
             mastodon.writing(host: copy.source.host, kind: kind),
             nameable: copy.statusID != nil,
             mine: isMine(copy),
-            gone: copy.goneSince != nil
+            gone: copy.goneSince != nil,
+            bookmarks: mastodon.bookmarks(host: copy.source.host)
         )
     }
 
@@ -1060,13 +1089,19 @@ final class ShellSession {
     /// Nothing is written down about the press landing: the store takes the server's answer, and
     /// what the row draws afterwards is that. A refusal leaves the post exactly as it was and
     /// leaves a failure the same press clears by trying again.
+    ///
+    /// A bookmark (#285) is the third: put at the source or taken off it, by what the source
+    /// last said of it.
     func toggle(_ act: PostAct, on item: DummyItem) async {
-        guard act == .boost || act == .favourite else { return }
+        guard act == .boost || act == .favourite || act == .bookmark else { return }
         await perform(act, on: item) { door, note in
             let write = MastodonWrite(door: door, store: self.store)
-            return act == .boost
-                ? try await write.boost(note, on: note.boosted != true)
-                : try await write.favourite(note, on: note.favourited != true)
+            switch act {
+            case .boost: return try await write.boost(note, on: note.boosted != true)
+            case .favourite: return try await write.favourite(note, on: note.favourited != true)
+            case .bookmark: return try await write.bookmark(note, on: note.bookmarked != true)
+            case .answer, .withdraw: return note
+            }
         }
     }
 
@@ -1109,7 +1144,7 @@ final class ShellSession {
             await adopt()
             await persist?()
         } catch {
-            writeFailed(error, host: host)
+            writeFailed(error, host: host, bookmarkSentWith: act == .bookmark ? door.token : nil)
             acts.failed(copy.id, act)
         }
     }
@@ -2320,6 +2355,8 @@ final class ShellSession {
     /// has assigned `notes` since either, they are what the store holds. **That count and not the
     /// revision** (#175), so a post held aside — written down, drawn nowhere — replaces nothing.
     private func adopt() async {
+        // Before anything is read: what an ended sign-in's reader had done to its posts (#285).
+        await forgetReaderMarksDue()
         await adoptSources()
         let asideRevision = await store.asideRevision
         let drawn = await store.drawn
@@ -2568,6 +2605,8 @@ final class ShellSession {
         // drops nothing that Home or a list brought in.
         // The app registration goes with it, so nothing of the sign-in is left.
         await mastodon.signOut(host: host, forgettingApp: true)
+        // The reader's marks go with the sign-in, at once and on disk (#285), as a sign-out's do.
+        await forgetReaderMarksDue()
         jar.forget(host: host, keeping: sources.map(\.host))
         // **The rows stay (#7).** Clear drops this source's copies — pictures in memory and on
         // disk, emoji, first posts, the sign-in — and not its place in the index: every row still
@@ -2730,6 +2769,9 @@ final class ShellSession {
         if kind(of: host) == .mastodon {
             stopReadingAsYou(host: host)
             await mastodon.signOut(host: host)
+            // What the source said this reader did to its posts goes with the sign-in, now and
+            // on disk (#285) — before anything can take the store away with it still said.
+            await reloadFromStore()
         } else {
             await forums.forget(host: host.lowercased())
         }
@@ -2760,9 +2802,11 @@ final class ShellSession {
             return
         }
         if rowRefusal?.host == host { rowRefusal = nil }
-        guard let failure = await mastodon.signIn(
-            host: host, through: browser, writing: writing
-        ) else {
+        let failure = await mastodon.signIn(host: host, through: browser, writing: writing)
+        // **Before the first read as whoever signed in** (#285): what the source said an earlier
+        // reader did is let go of first, so what it now says of this one is not taken with it.
+        await forgetReaderMarksDue()
+        guard let failure else {
             if mastodon.isSignedIn(host: host) { await readAsYou(host: host) }
             return
         }

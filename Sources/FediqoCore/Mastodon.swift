@@ -358,6 +358,9 @@ struct StatusDTO: Decodable, Sendable {
     /// Whether the account this was fetched as has favourited it (#107). Absent on an unsigned
     /// read, as `reblogged` is.
     let favourited: Bool?
+    /// Whether the account this was fetched as has bookmarked it (#285). Absent on an unsigned
+    /// read, as `reblogged` is.
+    let bookmarked: Bool?
     let mediaAttachments: [MediaAttachment]?
     /// Whether the author covered it, and the line they covered it with. Optional because a
     /// server that did not send them has told us nothing, which is not the same as telling us
@@ -547,6 +550,7 @@ struct StatusDTO: Decodable, Sendable {
             // one value, because `subject` is `self`.
             boosted: subject.reblogged,
             favourited: subject.favourited,
+            bookmarked: subject.bookmarked,
             audience: Self.audience(subject.visibility),
             avatarURL: Host.fetchableURL(subject.account.avatar),
             attachments: subject.mediaAttachments?.compactMap { $0.asAttachment } ?? [],

@@ -329,6 +329,18 @@ private var migrator: DatabaseMigrator {
             t.add(column: "kept", .boolean).notNull().defaults(to: false)
         }
     }
+    // Whether the reader has bookmarked a row at its source, as the source last said (#285), or
+    // NULL where it never said. Every row already stored is one no source was heard about, so
+    // the NULL each takes is the truth.
+    //
+    // **A migration id for `v3-holding`'s reason.** An older build's first save would write
+    // every row back without what the source said, and a relaunch under this build would draw
+    // posts bookmarked at their source as not bookmarked. The id makes it refuse the store.
+    migrator.registerMigration("v7-bookmarked") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "bookmarked", .boolean)
+        }
+    }
     return migrator
 }
 
@@ -811,6 +823,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var gone_at: Date?
     /// `Note.kept` (#284). A column behind its own migration id, for `holding`'s reason.
     var kept: Bool
+    /// `Note.bookmarked` (#285). A column behind its own migration id, for `holding`'s reason.
+    var bookmarked: Bool?
 
     init(_ note: Note) {
         host = note.source.host
@@ -819,6 +833,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
         holding = note.holding.rawValue
         gone_at = note.goneSince
         kept = note.kept
+        bookmarked = note.bookmarked
         categories = note.categories.map(CategoryRow.init).sorted()
         facts = NoteFacts(
             author: note.author,
@@ -883,6 +898,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             boosterHandle: facts.boosterHandle,
             boosted: facts.boosted,
             favourited: facts.favourited,
+            bookmarked: bookmarked,
             audience: facts.audience.flatMap(Audience.init(rawValue:)),
             avatarURL: facts.avatarURL,
             attachments: facts.attachments.map(\.attachment),

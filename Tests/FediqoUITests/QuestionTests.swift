@@ -20,6 +20,7 @@ struct QuestionTests {
             ShellQuestion.remove(host: "a.example", boards: 0, postsStay: true, language: language),
             ShellQuestion.remove(host: "a.example", boards: 3, postsStay: true, language: language),
             ShellQuestion.signIn(host: "a.example", language: language),
+            ShellQuestion.bookmarks(host: "a.example", language: language),
             ShellQuestion.dropCopies(language: language),
             ShellQuestion.shorten(months: 6, language: language),
             ShellQuestion.shorten(months: 1, language: language),

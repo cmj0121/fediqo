@@ -128,6 +128,14 @@ public struct MastodonWrite: Sendable {
         await store.forget(note.key)
     }
 
+    /// Bookmarks `note` at this source, or takes the bookmark off (#285) — `favourite`'s shape,
+    /// one function for both directions. The mark is the source's: what comes back is what it
+    /// now says, and nothing is written down about the press.
+    @discardableResult
+    public func bookmark(_ note: Note, on: Bool) async throws -> Note {
+        try await act(on: note, path: on ? "bookmark" : "unbookmark")
+    }
+
     /// One act on one status, and what the server says the post looks like afterwards.
     ///
     /// **The answer goes through `refresh` and never `ingest`.** The reader is acting on a post

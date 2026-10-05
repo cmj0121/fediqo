@@ -187,7 +187,7 @@ struct CarryFlow: ViewModifier {
     private func gave(_ password: String) {
         guard let session, let carrier = session.carrier, let ask = session.carry.ask else { return }
         switch ask {
-        case .set: session.carry.set(password: password, with: carrier) { await session.persist?() }
+        case .set: session.carry.set(password: password, with: carrier) { await session.saveForCarry() }
         case .open: session.carry.open(password: password, with: carrier)
         }
     }

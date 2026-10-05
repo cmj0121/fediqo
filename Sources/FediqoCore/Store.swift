@@ -800,6 +800,37 @@ public actor ItemStore {
         changed(shown: gone.holding == .arrived, aside: gone.holding == .aside)
     }
 
+    /// Takes back what a signed-in reader's reads said they had done to `host`'s posts — boosted,
+    /// favourited, bookmarked (#285) — so each row says what a post no such read brought says:
+    /// nothing. For a sign-in that has ended, or been replaced by another account's: those words
+    /// were that reader's, and left here they would be told to the next one, whose first press
+    /// would undo an act they never made. The posts stay; what this device keeps of its own
+    /// (`kept`) is untouched. Returns whether any row changed, so a caller writes only then.
+    @discardableResult
+    public func forgetReaderMarks(host raw: String) -> Bool {
+        forgetReaderMarks { $0 == raw.lowercased() }
+    }
+
+    /// `forgetReaderMarks(host:)` for every host not among `hosts` — the ones still signed in to.
+    @discardableResult
+    public func forgetReaderMarks(keeping hosts: Set<String>) -> Bool {
+        forgetReaderMarks { !hosts.contains($0) }
+    }
+
+    private func forgetReaderMarks(where gone: (String) -> Bool) -> Bool {
+        var shown = false
+        var aside = false
+        for (key, note) in notes where gone(key.host) {
+            guard note.boosted != nil || note.favourited != nil || note.bookmarked != nil else { continue }
+            notes[key] = note.withoutReaderMarks()
+            shown = shown || note.holding == .arrived
+            aside = aside || note.holding == .aside
+        }
+        guard shown || aside else { return false }
+        changed(shown: shown, aside: aside)
+        return true
+    }
+
     /// Keeps one row, or un-keeps it (#284) — the person's own mark, sent nowhere. Silent where
     /// the row is not held, and where it already is as asked; returns whether anything changed,
     /// so a caller writes it down only then. The row's source need not be here: a kept post

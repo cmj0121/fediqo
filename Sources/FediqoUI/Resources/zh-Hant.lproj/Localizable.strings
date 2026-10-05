@@ -307,13 +307,17 @@
 "item.act.answer" = "回應";
 "item.act.quote" = "引用";
 "item.act.favourite" = "收藏";
-"item.act.bookmark" = "書籤";
+"item.act.bookmark" = "加書籤";
+"item.act.unbookmark" = "取消書籤";
+"item.act.ask" = "%@：要先再問一次這個登入";
+"item.bookmark.ask.title" = "請 %@ 允許書籤？";
+"item.bookmark.ask.line" = "它的頁面會再問一次你已允許的，並加上書籤。";
+"item.bookmark.ask.detail" = "你在 Fediqo 能加書籤之前就登入了 %@。它自己的頁面會打開，再問一次這個登入已經有的——讀取、發文、回覆、轉發、收藏——並加上書籤。不會先登出：關掉那一頁，一切都和原來一樣。";
+"item.bookmark.ask.confirm" = "詢問";
 "item.act.keep" = "留下";
 "item.act.unkeep" = "不再留下";
 "item.act.more" = "更多";
 "item.toast.quote" = "引用會開啟編輯器。這次工作階段還不行。";
-"item.toast.bookmark.on" = "已加書籤，dummy。";
-"item.toast.bookmark.off" = "已取消書籤。";
 "item.toast.kept.on" = "已留在這台機器上。";
 "item.toast.kept.off" = "不再留下。";
 "item.toast.more" = "更多仍是 dummy。";
@@ -674,12 +678,18 @@
 "account.sources.writing.again"  = "Fediqo 現在登入時會連「寫」一起要求。%@ 是在那之前登入的：在那裡讀到的和以前完全一樣，Fediqo 什麼也不寫。不用先登出，在下面選就好。";
 "account.sources.writing.again.line" = "%@ 在 Fediqo 開始要求「寫」之前就登入了。";
 "account.sources.writing.again.choose" = "選擇 %@ 可以做什麼";
+"account.sources.bookmarks.again" = "現在你登入要讀寫時，Fediqo 也會要求書籤。%@ 在那之前就登入了：那裡的讀與寫都和原來一樣，只有書籤還等著。在下面選擇，不必先登出。";
+"account.sources.bookmarks.again.line" = "%@ 在 Fediqo 要求書籤之前就登入了。";
+"account.sources.bookmarks.again.choose" = "請 %@ 允許書籤";
+"account.bookmarks.failed" = "書籤沒有被允許。那裡其他的一切都和原來一樣。";
+"account.bookmarks.unavailable" = "那個來源沒有書籤可以允許。其他的一切都和原來一樣。";
+"account.bookmarks.refused" = "那個來源擋下了書籤。在你再登入它之前，那裡不提供書籤；其他的一切都和原來一樣。";
 /* The choice itself, put before the server's own page opens. */
 "account.signin.ask.title"       = "登入 %@？";
-"account.signin.ask.detail"      = "讀會把你的首頁與你的列表帶進來。寫讓你在 Fediqo 裡發文、回覆、轉發、收藏，也可以把它們收回。兩種選擇讀到的都一樣，而且你隨時可以登出。";
+"account.signin.ask.detail"      = "讀會把你的首頁與你的列表帶進來。寫讓你在 Fediqo 裡發文、回覆、轉發、收藏、加書籤，也可以把它們收回。兩種選擇讀到的都一樣，而且你隨時可以登出。";
 "account.signin.ask.read"        = "登入來讀";
 "account.signin.ask.write"       = "登入來讀與寫";
-"account.signin.ask.line" = "選擇 Fediqo 只讀，或也以你的身分寫。";
+"account.signin.ask.line" = "選擇 Fediqo 只讀，或也以你的身分寫與加書籤。";
 
 "account.source.boards"          = "%1$d 個版塊：%2$@";
 "account.source.unread"          = "讀不到它的自我介紹。";

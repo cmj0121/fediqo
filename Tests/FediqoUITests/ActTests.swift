@@ -378,8 +378,8 @@ struct ActTests {
     func noLocalFavourites() async throws {
         let (session, _) = try await shell(scopes: writing, holding: note(boosted: false, favourited: true))
         #expect(try row(session).favourited == true)
-        #expect(DummyMarks() == DummyMarks(bookmarked: false, kept: false),
-                "the device-local marks no longer carry a favourite")
+        #expect(DummyMarks() == DummyMarks(kept: false),
+                "the device-local marks no longer carry a favourite, nor a bookmark (#285)")
     }
 
     // MARK: - An answer read inside a conversation

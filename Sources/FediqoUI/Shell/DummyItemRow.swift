@@ -20,7 +20,6 @@ struct DummyItemRow: View {
     /// the same object by construction, and a preview or a test wired to its own cache would
     /// otherwise press one and draw the other.
     let posts: ForumPosts
-    @Binding var marks: DummyMarks
     /// This row's share of #54's acts: what the post offers, where each offered act has got to,
     /// and the presses themselves (#106).
     ///
@@ -1237,17 +1236,46 @@ struct DummyItemRow: View {
 
     @ViewBuilder
     private var keep: some View {
-        mark(marks.bookmarked ? "bookmark.fill" : "bookmark",
-             label: "item.act.bookmark", on: marks.bookmarked) {
-            marks.bookmarked.toggle()
-            onToast(L10n.t(marks.bookmarked ? "item.toast.bookmark.on" : "item.toast.bookmark.off"))
-        }
-        // The marks that keep a post stand a little apart from the ones that pass it on.
-        .layoutValue(key: MarkGap.self, value: ShellSpace.room)
+        bookmarkMark
+            // The marks that keep a post stand a little apart from the ones that pass it on.
+            .layoutValue(key: MarkGap.self, value: ShellSpace.room)
         keptMark
+            // And the keep mark opens that group where no bookmark is offered before it.
+            .layoutValue(key: MarkGap.self, value: drawsBookmark ? nil : ShellSpace.room)
         actMark(.withdraw)
         mark("ellipsis", label: "item.act.more", on: false) {
             onToast(L10n.t("item.toast.more"))
+        }
+    }
+
+    /// Whether the asking bookmark mark is drawn: the act must be asked for, and there is
+    /// somewhere for the press to go.
+    private var asksBookmark: Bool { acting.acts.asks(.bookmark) && acting.ask != nil }
+
+    /// Whether `bookmarkMark` draws anything at all — read off the same two conditions it draws
+    /// by, so the gap that opens the group goes to whichever mark really is its first.
+    private var drawsBookmark: Bool {
+        asksBookmark || (acting.acts.offers(.bookmark) && acting.perform != nil)
+    }
+
+    /// The bookmark mark (#285): `actMark`'s where the sign-in may bookmark, and where it was made
+    /// before bookmarks were asked for, a mark that says so and asks — one press puts the
+    /// question, and nothing is sent until the reader has answered it on the source's own page.
+    /// Absent everywhere else, as every act the post does not offer is.
+    ///
+    /// **Never filled on a press**: filled is what the source last said, so nothing looks
+    /// bookmarked that its source does not hold.
+    @ViewBuilder
+    private var bookmarkMark: some View {
+        if asksBookmark, let ask = acting.ask {
+            let label = ItemActs.askLine(.bookmark)
+            DummyMarkButton(symbol: "bookmark.slash", count: nil, label: label, on: false,
+                            quiet: !reading, glyph: glyph, countWidth: countBox, touch: touch) {
+                ask(.bookmark)
+            }
+            .modifier(ProbedMark(label: label, probe: probe))
+        } else {
+            actMark(.bookmark)
         }
     }
 

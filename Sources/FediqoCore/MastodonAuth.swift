@@ -97,37 +97,70 @@ public struct MastodonOAuth: Sendable {
     /// a sign-in that refuses the writing part is byte-for-byte the sign-in this app made before
     /// this existed.
     public static let writing = "write:statuses write:favourites"
+    /// What bookmarking needs (#285), and no more: a bookmark put on a post at its source, and
+    /// taken off it. **Apart from `writing` and not a third word in it**, because `writes(_:)`
+    /// asks for every word of that, and a sign-in made before this existed — which posts, boosts
+    /// and favourites exactly as it did — would then read as one that cannot write at all.
+    ///
+    /// Asked for with the writing part and never without it: reading alone asks for what it
+    /// always asked.
+    public static let bookmarking = "write:bookmarks"
 
     /// The whole of what one sign-in asks for: reading, and the writing part after it where the
-    /// reader agreed to it.
+    /// reader agreed to it — with bookmarking after that, unless `bookmarks` is false, which is
+    /// the rung a server that refuses the bookmark scope is asked on, and what a sign-in to act
+    /// asked for before #285.
     ///
-    /// **Reading first and writing last, always in this order**, because the string is also what a
-    /// registration records and what `known(writing:)` compares against — two spellings of one ask
-    /// would register twice for one choice.
-    public static func scopes(reading: String = reading, writing wanted: Bool) -> String {
-        wanted ? "\(reading) \(Self.writing)" : reading
+    /// **Reading first, writing next, bookmarking last, always in this order**, because the string
+    /// is also what a registration records and what `known(writing:)` compares against — two
+    /// spellings of one ask would register twice for one choice.
+    public static func scopes(
+        reading: String = reading, writing wanted: Bool, bookmarks: Bool = true
+    ) -> String {
+        guard wanted else { return reading }
+        return bookmarks ? "\(reading) \(Self.writing) \(bookmarking)" : "\(reading) \(Self.writing)"
     }
 
-    /// The ladder one answer is asked on: what a sign-in registers for, and what it falls back to
-    /// where the server refuses `read:search` (decision 32).
+    /// The ladder one answer is asked on, widest first: what a sign-in registers for, and what it
+    /// falls back to, a rung at a time, where the server answers `invalid_scope`.
     ///
-    /// **One owner for both rungs.** `MastodonSessions.signIn` needs them in order and needs to
+    /// Reading has decision 32's two rungs: with `read:search`, and without. Reading and acting
+    /// has four (#285): those two with bookmarking, then the same two without it — so a server
+    /// that has no bookmark scope leaves the reader with the read-and-write sign-in they asked
+    /// for, which is what such a sign-in was before bookmarks were asked for at all. Nothing the
+    /// callback carries says which word was refused, so the rungs are tried in order.
+    ///
+    /// **One owner for every rung.** `MastodonSessions.signIn` needs them in order and needs to
     /// know which registrations it may reuse, and those were two derivations of one ladder in two
-    /// files — true together only by inspection. `known(writing:)` is this, as a set.
-    public static func registrations(writing wanted: Bool) -> (wide: String, narrow: String) {
-        (scopes(writing: wanted), scopes(reading: readingWithoutSearch, writing: wanted))
+    /// files — true together only by inspection. `known(writing:)` is read off this.
+    public static func ladder(writing wanted: Bool) -> [String] {
+        let readings = [reading, readingWithoutSearch]
+        guard wanted else { return readings }
+        return readings.map { scopes(reading: $0, writing: true) }
+            + readings.map { scopes(reading: $0, writing: true, bookmarks: false) }
     }
 
-    /// The registrations this build may reuse for a sign-in that wants `writing`, or not.
+    /// The registrations this build may start a sign-in on that wants `writing`, or not: the
+    /// rungs of its ladder that ask for everything the answer asks for but `read:search`.
     ///
     /// **It is per writing choice and not one list of everything.** A registration made for
     /// reading alone cannot carry a page that asks to write — the server answers `invalid_scope` —
     /// so a reader who signs in again to add writing must register again. The two rungs inside one
     /// choice are decision 32's: a host that refused `read:search` keeps its narrower registration
     /// rather than registering afresh every time.
+    ///
+    /// **A registration made for acting without bookmarks is not one of them** (#285), though it
+    /// is a rung: a sign-in started on it would never ask for bookmarks, and a reader asked to
+    /// allow them would be sent to a page that does not mention them. It is reached only by
+    /// falling to it, within one sign-in.
     public static func known(writing wanted: Bool) -> Set<String> {
-        let ladder = registrations(writing: wanted)
-        return [ladder.wide, ladder.narrow]
+        Set(ladder(writing: wanted).filter { !wanted || bookmarks($0) })
+    }
+
+    /// Whether a scope string bought bookmarking — read scope by scope, as `writes(_:)` is.
+    public static func bookmarks(_ scopes: String?) -> Bool {
+        guard let scopes else { return false }
+        return scopes.split(separator: " ").contains(Substring(bookmarking))
     }
 
     /// Whether a scope string bought the writing part.
@@ -185,9 +218,13 @@ public struct MastodonOAuth: Sendable {
             // did not.** A server may issue a narrower grant than it was asked for, and a row
             // reading back the asked string would say "read and write" about a token that cannot
             // write — the row's job is to say what may be done on the source, not what this
-            // device intended. It cannot widen what the reader agreed to: the page they answered
-            // asked for `scopes` and a server cannot grant past it.
-            scopes: issued.scope.flatMap { $0.isEmpty ? nil : $0 } ?? scopes
+            // device intended.
+            //
+            // **And never more than was asked**: only the words of its answer that the page
+            // asked for are written down (`Self.granted`). A server naming a scope the reader
+            // was never shown cannot make this device think it holds it.
+            scopes: Self.granted(issued.scope, of: scopes),
+            asked: scopes
         )
         do {
             try await verify(token)
@@ -198,7 +235,21 @@ public struct MastodonOAuth: Sendable {
         return token
     }
 
+    /// What a sign-in that asked for `asked` is written down as holding, from the server's own
+    /// word about it: the scopes it named that were asked for, in the order they were asked, or
+    /// all of `asked` where it named none — RFC 6749 lets the word out only when the grant is
+    /// exactly the request. A narrower answer narrows; nothing in it can widen.
+    static func granted(_ echo: String?, of asked: String) -> String {
+        guard let echo, !echo.isEmpty else { return asked }
+        let named = Set(echo.split(separator: " "))
+        return asked.split(separator: " ").filter(named.contains).joined(separator: " ")
+    }
+
     /// This app, registered on the server with the callback and `scopes`, which it records.
+    ///
+    /// **A server that refuses the registration for its scopes** — a 4xx whose own `error` says
+    /// so — is `invalidScope`, as its page answering `invalid_scope` is, so a sign-in falls a
+    /// rung either way. Any other refusal, and every failure that names no scope, is what it was.
     public func register(scopes: String = MastodonOAuth.reading) async throws -> MastodonApp {
         struct Registered: Decodable {
             let client_id: String
@@ -236,10 +287,15 @@ public struct MastodonOAuth: Sendable {
         else { throw MastodonSignInError.unreadable }
         let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
+        // **The state before anything the answer says**, a refusal included: RFC 6749 §4.1.2.1
+        // has the server send it back on an error as on a code, and an `error=` that does not
+        // carry this attempt's state is not this attempt's answer. Acted on unchecked, anything
+        // able to open this app's callback could walk a sign-in down its ladder — a registration
+        // and a page for each rung.
+        guard value("state") == state else { throw MastodonSignInError.stateMismatch }
         if let error = value("error") {
             throw error == "invalid_scope" ? MastodonSignInError.invalidScope : MastodonSignInError.denied
         }
-        guard value("state") == state else { throw MastodonSignInError.stateMismatch }
         guard let code = value("code"), !code.isEmpty else { throw MastodonSignInError.unreadable }
         return code
     }
@@ -300,8 +356,15 @@ public struct MastodonOAuth: Sendable {
         }
         let (body, response) = try await send(request)
         guard (200..<300).contains(response.statusCode) else {
-            if (try? JSONDecoder().decode(Refusal.self, from: body))?.error == "invalid_client" {
-                throw MastodonSignInError.clientRejected
+            let refusal = (try? JSONDecoder().decode(Refusal.self, from: body))?.error
+            if refusal == "invalid_client" { throw MastodonSignInError.clientRejected }
+            // The server's own word that it is the scopes it will not have: `invalid_scope` at
+            // the token, and a registration it refuses for them. Only a 4xx that says so — a
+            // failed connection, a 5xx, or a refusal about anything else stays what it was.
+            if (400..<500).contains(response.statusCode), let refusal,
+               refusal.lowercased().contains("scope")
+            {
+                throw MastodonSignInError.invalidScope
             }
             throw MastodonSignInError.http(response.statusCode)
         }

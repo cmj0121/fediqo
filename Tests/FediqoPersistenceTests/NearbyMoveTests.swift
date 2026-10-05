@@ -150,6 +150,24 @@ struct NearbyMoveTests {
         #expect(try StoreFile(at: pair.onto.directory).load().notes.map(\.kept) == [true, false])
     }
 
+    @Test("What a source said of a bookmark moves with the store, in memory and on disk")
+    func bookmarkedMoves() async throws {
+        let plain = PackagerFixture.note("1")
+        let marked = Note(
+            id: plain.id, source: plain.source, author: plain.author, handle: plain.handle, body: plain.body,
+            postedAt: plain.postedAt, categories: plain.categories, bookmarked: true
+        )
+        let pair = Pair(
+            from: try await Device(sources: [PackagerFixture.mastodon], notes: [marked, PackagerFixture.note("2")]),
+            onto: try await Device()
+        )
+        defer { pair.remove() }
+        _ = await moveWhole(pair, pictures: false)
+
+        #expect(await pair.onto.store.snapshot().notes.map(\.bookmarked) == [true, nil])
+        #expect(try StoreFile(at: pair.onto.directory).load().notes.map(\.bookmarked) == [true, nil])
+    }
+
     @Test("A receiver holding a store is asked to replace, and replaces only on that yes")
     func replaces() async throws {
         let other = Source(host: "other.example", kind: .mastodon)

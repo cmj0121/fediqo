@@ -271,7 +271,7 @@ struct NearbyFlow: ViewModifier {
                 session.nearby.markMismatched()
                 return
             }
-            session.nearby.markMatched(with: carrier, link: link, device: session.deviceName) { await session.persist?() }
+            session.nearby.markMatched(with: carrier, link: link, device: session.deviceName) { await session.saveForCarry() }
         case .asking: session.nearby.answer(id == ShellQuestion.yes)
         default: session.nearby.dismiss()
         }

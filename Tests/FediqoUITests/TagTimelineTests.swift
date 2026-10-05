@@ -357,7 +357,7 @@ struct TagTimelineTests {
             let pane = TagPane(
                 tag: Self.swift, items: [], reach: reach,
                 catalogues: EmojiCatalogueStore(), posts: ForumPosts(http: FixtureHTTP([:])),
-                selectedID: .constant(nil), marks: { _ in .constant(DummyMarks()) },
+                selectedID: .constant(nil),
                 decks: .constant(ShellDecks()), playback: ShellPlayback(),
                 onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { _ in },
                 onRetry: {}, jumpToTop: 0, onToast: { _ in }, onBack: {}

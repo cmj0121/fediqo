@@ -309,12 +309,16 @@
 "item.act.quote" = "Quote";
 "item.act.favourite" = "Favourite";
 "item.act.bookmark" = "Bookmark";
+"item.act.unbookmark" = "Take the bookmark off";
+"item.act.ask" = "%@: this sign-in must be asked again first";
+"item.bookmark.ask.title" = "Ask %@ to allow bookmarks?";
+"item.bookmark.ask.line" = "Its page asks again for what you allowed, and for bookmarks.";
+"item.bookmark.ask.detail" = "You signed in to %@ before Fediqo could bookmark. Its own page opens and asks for what this sign-in already has — reading, posting, replying, boosting and favouriting — and for bookmarks as well. Nothing is signed out first: close the page and everything stays as it is.";
+"item.bookmark.ask.confirm" = "Ask";
 "item.act.keep" = "Keep";
 "item.act.unkeep" = "Stop keeping";
 "item.act.more" = "More";
 "item.toast.quote" = "A quote opens the composer. Not this session.";
-"item.toast.bookmark.on" = "Bookmarked, dummy.";
-"item.toast.bookmark.off" = "Bookmark cleared.";
 "item.toast.kept.on" = "Kept on this device.";
 "item.toast.kept.off" = "No longer kept.";
 "item.toast.more" = "More stays dummy.";
@@ -695,12 +699,18 @@
 "account.sources.writing.again"  = "Fediqo now asks to write as well as read when you sign in. %@ signed in before it did: reading there is exactly as it was, and Fediqo writes nothing. Choose below, without signing out first.";
 "account.sources.writing.again.line" = "%@ signed in before Fediqo asked to write.";
 "account.sources.writing.again.choose" = "Choose what %@ may do";
+"account.sources.bookmarks.again" = "Fediqo now asks for bookmarks when you sign in to read and write. %@ signed in before it did: reading and writing there are exactly as they were, and only bookmarking waits. Choose below, without signing out first.";
+"account.sources.bookmarks.again.line" = "%@ signed in before Fediqo asked for bookmarks.";
+"account.sources.bookmarks.again.choose" = "Ask %@ to allow bookmarks";
+"account.bookmarks.failed" = "Bookmarks were not allowed. Everything else there works as it did.";
+"account.bookmarks.unavailable" = "That source has no bookmarks to allow. Everything else works as it did.";
+"account.bookmarks.refused" = "That source turned the bookmark away. Bookmarks are not offered there until you sign in to it again; everything else works as it did.";
 /* The choice itself, put before the server's own page opens. */
 "account.signin.ask.title"       = "Sign in to %@?";
-"account.signin.ask.detail"      = "Reading brings in your Home and your lists. Writing lets you post, reply, boost and favourite from Fediqo, and take any of them back. Reading is the same whichever you choose, and you can sign out at any time.";
+"account.signin.ask.detail"      = "Reading brings in your Home and your lists. Writing lets you post, reply, boost, favourite and bookmark from Fediqo, and take any of them back. Reading is the same whichever you choose, and you can sign out at any time.";
 "account.signin.ask.read"        = "Sign in to read";
 "account.signin.ask.write"       = "Sign in to read and write";
-"account.signin.ask.line" = "Choose whether Fediqo only reads, or also writes as you.";
+"account.signin.ask.line" = "Choose whether Fediqo only reads, or also writes and bookmarks as you.";
 
 "account.source.boards"          = "%1$d boards: %2$@";
 "account.source.unread"          = "Its description could not be read.";

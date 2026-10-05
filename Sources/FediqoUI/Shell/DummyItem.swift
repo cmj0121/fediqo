@@ -70,20 +70,17 @@ public struct DummyCounts: Hashable, Sendable {
 
 /// What this device has done to a dummy item, and kept to itself.
 ///
-/// **The favourite left this type with #107.** It was a list kept in Fediqo that nobody else could
-/// see and no other app agreed with; it is now `DummyItem.favourited`, which is what the source
-/// says. What is left here is what really is this device's own: a bookmark, which is a different
-/// thing on a source that has both and is not #107's, and what the reader chose to keep.
+/// **The favourite left this type with #107, and the bookmark with #285.** Each was a mark kept
+/// in Fediqo that nobody else could see and no other app agreed with; they are now
+/// `DummyItem.favourited` and `DummyItem.bookmarked`, which are what the source says. What is
+/// left here is what really is this device's own: what the reader chose to keep.
 ///
 /// **`kept` is the store's word** (#284): `Note.kept`, carried on the item, and moved only by
-/// `ShellSession.setKept`. A row reads it off its item (`DummyItem.kept`) and never off a pane's
-/// own copy of these marks, which holds the bookmark and nothing else that is true.
+/// `ShellSession.setKept`.
 public struct DummyMarks: Hashable, Sendable {
-    public var bookmarked: Bool
     public var kept: Bool
 
-    public init(bookmarked: Bool = false, kept: Bool = false) {
-        self.bookmarked = bookmarked
+    public init(kept: Bool = false) {
         self.kept = kept
     }
 }
@@ -128,6 +125,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// Whether the reader has favourited it, as the source said — `Note.favourited`, in `boosted`'s
     /// shape and for its reasons (#107).
     public var favourited: Bool?
+    /// Whether the reader has bookmarked it, as the source said — `Note.bookmarked`, in
+    /// `boosted`'s shape and for its reasons (#285).
+    public var bookmarked: Bool?
     public let audience: DummyAudience?
     /// The author's picture, where the source sent an address for one.
     public let avatarURL: URL?
@@ -389,6 +389,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         boostedBy = note.boostedBy
         boosted = note.boosted
         favourited = note.favourited
+        bookmarked = note.bookmarked
         statusID = note.statusID
         audience = note.audience.map(DummyAudience.init)
         avatarURL = note.avatarURL ?? blog?.avatarURL

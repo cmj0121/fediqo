@@ -38,7 +38,6 @@ struct DummyThreadPane: View {
     /// (#213). The read after it is the sign-in's.
     var onSignIn: () -> Void = {}
     @Binding var selectedID: String?
-    var marks: (DummyItem) -> Binding<DummyMarks>
     /// Each row's share of #54's acts, asked of the pane above rather than worked out here: the
     /// session holds what decides them and this pane has no session. See `ItemActing`.
     var acting: (DummyItem) -> ItemActing = { _ in ItemActing() }
@@ -230,7 +229,6 @@ struct DummyThreadPane: View {
             catalogues: catalogues,
             catalogueSettled: catalogueSettled,
             posts: posts,
-            marks: marks(item),
             acting: acting(item),
             selected: item.id == selectedID,
             // **Every row in this pane, not only the root.** The pane is the place a post is read

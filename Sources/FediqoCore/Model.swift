@@ -468,6 +468,12 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// favourite is a note to the author and to oneself, and a list of them this device kept on
     /// its own would be a list no other app agrees with.
     public let favourited: Bool?
+    /// Whether the reader this copy was fetched as has bookmarked it, as the source said (#285).
+    ///
+    /// `favourited`'s shape, for its reasons: nothing is a source that never said, which is every
+    /// unsigned read, and it is the server's answer that is kept rather than a press. A bookmark
+    /// is the source's to hold; what this device holds of its own is `kept`.
+    public let bookmarked: Bool?
     /// Who the post was written for, as the source said (#208), or nothing where it never said —
     /// every forum post, and a row kept before 0.5.0 wrote this down until a read says it again.
     ///
@@ -570,6 +576,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         boosterHandle: String? = nil,
         boosted: Bool? = nil,
         favourited: Bool? = nil,
+        bookmarked: Bool? = nil,
         audience: Audience? = nil,
         avatarURL: URL? = nil,
         attachments: [Attachment] = [],
@@ -601,6 +608,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.boosterHandle = boosterHandle
         self.boosted = boosted
         self.favourited = favourited
+        self.bookmarked = bookmarked
         self.audience = audience
         self.avatarURL = avatarURL
         self.attachments = attachments
@@ -623,7 +631,7 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// now — text, cover, attachments, counts — with the categories the held copy arrived through
     /// kept (and grown), its booster kept, and its board where this read names none.
     ///
-    /// **`boosted` and `favourited` fall back to what was held, rather than being overwritten with
+    /// **`boosted`, `favourited` and `bookmarked` fall back to what was held, rather than being overwritten with
     /// nothing.** A
     /// re-read made signed out — the public timeline, a thread asked of a host with no token —
     /// carries no such field, and letting that silence replace a yes the same server gave an hour
@@ -638,6 +646,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             boostedBy: held.boostedBy, boosterHandle: held.boosterHandle,
             boosted: boosted ?? held.boosted,
             favourited: favourited ?? held.favourited,
+            bookmarked: bookmarked ?? held.bookmarked,
             // Who it was for, whether it is covered and with what, and each count: what this read
             // left unsaid is what was held (#208), for `boosted`'s reason. A Mastodon source
             // always sends its cover line, empty where there is none, so a nil spoiler here is a
@@ -679,7 +688,8 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// too; not the opening post, which no listing carries (#154). A title, the post's address
     /// and its author's picture are not here either: a source that has them sent them with the
     /// first copy, and one that did not has none to send. Nor the counts, where the later copy
-    /// wins rather than fills (`counts`).
+    /// wins rather than fills (`counts`) — and nor what the reader has done to the post, where the
+    /// later copy's word wins wherever it says one (#285).
     ///
     /// **A quote filled in brings its words with it** (#214). A row held before this device read
     /// quotes was read with the quote spelled into its words as an `RE:` address; the copy that
@@ -691,7 +701,12 @@ public struct Note: Identifiable, Hashable, Sendable {
             body: quoteArrives ? other.body : body, title: title,
             board: board ?? other.board, postedAt: postedAt, categories: categories, reply: reply,
             boostedBy: boostedBy, boosterHandle: boosterHandle,
-            boosted: boosted ?? other.boosted, favourited: favourited ?? other.favourited,
+            // **What the reader has done to it is the source's latest word** (#285), as its
+            // counts are: where the later copy says, it wins, so a boost, a favourite or a
+            // bookmark taken off elsewhere reads as off after an ordinary reload. Where it says
+            // nothing — a read made signed out — what was held stands.
+            boosted: other.boosted ?? boosted, favourited: other.favourited ?? favourited,
+            bookmarked: other.bookmarked ?? bookmarked,
             audience: audience ?? other.audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive ?? other.sensitive, spoiler: spoiler ?? other.spoiler,
             emojis: emojis, url: url, counts: counts,
@@ -703,13 +718,28 @@ public struct Note: Identifiable, Hashable, Sendable {
         )
     }
 
+    /// This note with nothing said of what the reader has done to it (#285): not boosted, not
+    /// favourited, not bookmarked, and not the opposite either — the state of a post no signed-in
+    /// read has brought. What a row goes back to when the sign-in those words were said to ends.
+    func withoutReaderMarks() -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board, postedAt: postedAt, categories: categories, reply: reply,
+            boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: nil,
+            favourited: nil, bookmarked: nil, audience: audience, avatarURL: avatarURL,
+            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
+            url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
+            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept
+        )
+    }
+
     /// This note with its opening post as just read. Everything else is as it was.
     public func with(opening: ForumOpening) -> Note {
         Note(
             id: id, source: source, author: author, handle: handle, body: body, title: title,
             board: board, postedAt: postedAt, categories: categories, reply: reply,
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
-            favourited: favourited, audience: audience, avatarURL: avatarURL,
+            favourited: favourited, bookmarked: bookmarked, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
             url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
             goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept

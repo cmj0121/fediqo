@@ -201,8 +201,7 @@ struct QuotePostTests {
     // MARK: - The row is still one height
 
     private static func height(_ item: DummyItem, inFull: Bool = false) -> CGFloat {
-        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
-                               marks: .constant(DummyMarks()), inFull: inFull, onToast: { _ in })
+        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), inFull: inFull, onToast: { _ in })
             .frame(width: 720)
         let host = NSHostingView(rootView: row)
         host.layoutSubtreeIfNeeded()

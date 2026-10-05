@@ -63,7 +63,6 @@ struct TimelinePane: View {
     var ways: TimelineWays
     /// While open, its results are the list and the timeline waits under it (#32).
     var search: ShellSearch?
-    @State private var marks: [String: DummyMarks] = [:]
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
     /// again. Per host and not one counter for the pane: see `waitForCatalogues`.
     @State private var settledHosts: Set<String> = []
@@ -119,7 +118,6 @@ struct TimelinePane: View {
                     catalogueSettled: settledHosts.contains(person.host),
                     posts: session.posts,
                     selectedID: $selectedID,
-                    marks: markBinding,
                     // A row here opens the conversation it belongs to (#122), so the answer mark
                     // does what it does on the timeline: it opens that conversation first.
                     acting: acting,
@@ -148,7 +146,6 @@ struct TimelinePane: View {
                     catalogueSettled: false,
                     posts: session.posts,
                     selectedID: $selectedID,
-                    marks: markBinding,
                     acting: acting,
                     decks: $decks,
                     playback: playback,
@@ -189,7 +186,6 @@ struct TimelinePane: View {
                         onUnlockBlog: { password in Task { await session.blogs.unlock(opened, password: password) } },
                         onSignIn: { Task { await session.signIn(host: opened.source.host) } },
                         selectedID: $selectedID,
-                        marks: markBinding,
                         // Inside the conversation the answer mark opens the answer (#108).
                         acting: { acting($0, inside: opened) },
                         decks: $decks,
@@ -430,7 +426,6 @@ struct TimelinePane: View {
                             catalogues: session.emoji,
                             catalogueSettled: settledHosts.contains(item.source.host),
                             posts: session.posts,
-                            marks: markBinding(item),
                             acting: acting(item),
                             selected: item.id == selectedID,
                             top: decks.top(of: item.id, of: item.attachments.count),
@@ -544,7 +539,7 @@ struct TimelinePane: View {
         var acting = session.acting(on: item)
         acting.perform = { act in
             switch act {
-            case .boost, .favourite:
+            case .boost, .favourite, .bookmark:
                 Task { await session.toggle(act, on: item) }
             case .answer:
                 if let root {
@@ -558,14 +553,8 @@ struct TimelinePane: View {
         }
         // What `y` does (#284), and it says so itself: one act, one outcome, whichever asked.
         acting.keep = { Task { await session.toggleKept(item) } }
+        acting.ask = { _ in session.askToBookmark(item) }
         return acting
-    }
-
-    private func markBinding(_ item: DummyItem) -> Binding<DummyMarks> {
-        Binding(
-            get: { marks[item.id] ?? item.marks },
-            set: { marks[item.id] = $0 }
-        )
     }
 
     private func showToast(_ text: String) {

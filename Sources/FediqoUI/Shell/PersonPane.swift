@@ -41,7 +41,6 @@ struct PersonPane: View {
     var catalogueSettled: Bool = false
     let posts: ForumPosts
     @Binding var selectedID: String?
-    var marks: (DummyItem) -> Binding<DummyMarks>
     /// Each row's share of #54's acts, asked of the pane above rather than worked out here: the
     /// session holds what decides them and this pane has no session. See `ItemActing`.
     var acting: (DummyItem) -> ItemActing = { _ in ItemActing() }
@@ -208,7 +207,6 @@ struct PersonPane: View {
             catalogues: catalogues,
             catalogueSettled: catalogueSettled,
             posts: posts,
-            marks: marks(item),
             acting: acting(item),
             selected: item.id == selectedID,
             top: decks.top(of: item.id, of: item.attachments.count),

@@ -46,6 +46,10 @@ struct ItemActing {
     /// be on its way or to fail. Nothing where the list cannot act, and then the press changes
     /// nothing.
     var keep: (() -> Void)?
+    /// The press on a mark whose act the sign-in must be asked again for (#285) — bookmarking,
+    /// on a sign-in made before it was asked for. It raises the question and sends nothing.
+    /// Nothing where the list cannot act, and then no such mark is drawn.
+    var ask: ((PostAct) -> Void)?
 }
 
 /// What one act's mark draws on one row — `ItemActs.mark`'s answer.
@@ -91,6 +95,8 @@ enum ItemActs {
         case .answer: return "arrowshape.turn.up.left"
         // Never "done": a post taken back is not on the row to be drawn.
         case .withdraw: return "trash"
+        // The star's shape (#285): filled where the source says it is bookmarked.
+        case .bookmark: return done ? "bookmark.fill" : "bookmark"
         }
     }
 
@@ -105,6 +111,8 @@ enum ItemActs {
             return L10n.t(done ? "item.act.unfavourite" : "item.act.favourite", language: language)
         case .answer: return L10n.t("item.act.answer", language: language)
         case .withdraw: return L10n.t("item.act.withdraw", language: language)
+        case .bookmark:
+            return L10n.t(done ? "item.act.unbookmark" : "item.act.bookmark", language: language)
         }
     }
 
@@ -133,6 +141,14 @@ enum ItemActs {
         }
     }
 
+    /// What a mark says where its act has to be allowed first (#285): the act, and that asking
+    /// the source again is what a press does. One sentence for the pointer and for VoiceOver.
+    static func askLine(_ act: PostAct, language: DummyLanguage? = nil) -> String {
+        String(
+            format: L10n.t("item.act.ask", language: language), name(act, done: false, language: language)
+        )
+    }
+
     /// Everything one act's mark draws on one row: its glyph, whether it is done, the count
     /// beside it and the sentence a pointer and VoiceOver are given.
     ///
@@ -150,6 +166,8 @@ enum ItemActs {
         case .favourite: (copy.favourited == true, copy.counts.favourites)
         case .answer: (false, copy.counts.replies)
         case .withdraw: (false, nil)
+        // What the source the act goes through last said (#285); a source counts no bookmarks.
+        case .bookmark: (copy.bookmarked == true, nil)
         }
         let host = item.otherCopies.isEmpty ? nil : copy.source.host
         return ItemMark(

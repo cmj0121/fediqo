@@ -252,7 +252,6 @@ struct TouchTests {
         // `onOpen` carries the post, which is what keeps the root off a state read.
         _ = DummyItemRow(
             item: Self.post, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
-            marks: .constant(DummyMarks()),
             onOpen: {}, onView: {}, onTurn: {}, onToast: { _ in }
         )
         // The header's two, which cannot be handed a press without the answer that goes with it.

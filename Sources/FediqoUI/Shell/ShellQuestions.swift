@@ -93,6 +93,20 @@ enum ShellQuestion {
         )
     }
 
+    /// Bookmarks, asked of a sign-in that already reads and acts (#285). Not a loss: what the
+    /// sign-in does today it goes on doing, and the source's own page asks again before anything
+    /// is granted. The line says what the page will ask for, bookmarks among it.
+    static func bookmarks(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "bookmark",
+            title: String(format: L10n.t("item.bookmark.ask.title", language: language), host),
+            line: L10n.t("item.bookmark.ask.line", language: language),
+            help: String(format: L10n.t("item.bookmark.ask.detail", language: language), host),
+            choices: [.init(yes, L10n.t("item.bookmark.ask.confirm", language: language), role: .keyed)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     static let signInRead = "read"
     static let signInWrite = "write"
 
