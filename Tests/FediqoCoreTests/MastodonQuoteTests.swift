@@ -9,7 +9,7 @@ struct MastodonQuoteTests {
 
     private func note(_ json: String) throws -> Note {
         try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
-            .asNote(source: source, category: .public)
+            .asNote(source: source, category: .public, sent: .now())
     }
 
     // MARK: - Each state, as a server sent it
@@ -367,7 +367,7 @@ struct MastodonQuoteTests {
     @Test("The reader's quote post decodes whole: accepted, the quoted post, and no RE: line")
     func g0vDecodes() throws {
         let note = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(MastodonQuoteCaptures.g0v.utf8))
-            .asNote(source: g0v, category: .home)
+            .asNote(source: g0v, category: .home, sent: .now())
         let quote = try #require(note.quote)
         #expect(quote.state == .accepted)
         #expect(quote.post?.statusID == "117277361887436248")
@@ -396,9 +396,9 @@ struct MastodonQuoteTests {
     @Test("A row held before quotes were read takes them from a read of the post itself")
     func heldBeforeIsFilledByAReadAgain() throws {
         let old = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(heldBefore.utf8))
-            .asNote(source: g0v, categories: [])
+            .asNote(source: g0v, categories: [], sent: .now())
         let now = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(MastodonQuoteCaptures.g0v.utf8))
-            .asNote(source: g0v, categories: [])
+            .asNote(source: g0v, categories: [], sent: .now())
         let refreshed = now.refreshed(over: old)
         #expect(refreshed.quote?.state == .accepted)
         #expect(!refreshed.body.hasPrefix("RE:"))

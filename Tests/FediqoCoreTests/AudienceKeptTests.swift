@@ -28,7 +28,7 @@ struct AudienceKeptTests {
             body: "hello", board: board, postedAt: origin, categories: [.home],
             boosted: boosted, favourited: favourited, audience: audience, sensitive: sensitive,
             spoiler: spoiler, counts: counts, statusID: statusID, holding: holding
-        )
+        ).readNow()
     }
 
     @Test("A row kept without its audience takes it from the next timeline that brings it, and is drawn anew")

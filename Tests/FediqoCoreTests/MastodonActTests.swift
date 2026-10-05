@@ -40,7 +40,7 @@ struct MastodonActTests {
 
     private func held(_ json: String) throws -> Note {
         try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
-            .asNote(source: source, category: .home)
+            .asNote(source: source, category: .home, sent: .now())
     }
 
     private func actor(
@@ -261,7 +261,7 @@ struct MastodonActTests {
             _ = try await write.post("yes", visibility: .everyone, answering: bare)
         }
         let elsewhere = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(Self.status().utf8))
-            .asNote(source: Source(host: "other.example", kind: .mastodon), category: .home)
+            .asNote(source: Source(host: "other.example", kind: .mastodon), category: .home, sent: .now())
         await #expect(throws: MastodonWriteError.unfindable) {
             _ = try await write.post("yes", visibility: .everyone, answering: elsewhere)
         }

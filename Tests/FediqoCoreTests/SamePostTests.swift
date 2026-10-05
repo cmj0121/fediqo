@@ -204,7 +204,7 @@ struct SamePostTests {
 
     private func note(_ json: String, from source: Source) throws -> Note {
         try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
-            .asNote(source: source, category: .public)
+            .asNote(source: source, category: .public, sent: .now())
     }
 
     /// One status, in the fields this suite turns on. `uri` is the fact; `id` is what the

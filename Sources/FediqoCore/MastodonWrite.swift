@@ -72,9 +72,10 @@ public struct MastodonWrite: Sendable {
             }
             form.append(("in_reply_to_id", id))
         }
+        let sent = ReadMoment.now()
         let data = try await door.post(path: "/api/v1/statuses", form: form)
         guard let note = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
-            .asNote(source: source, categories: Self.categories(for: visibility))
+            .asNote(source: source, categories: Self.categories(for: visibility), sent: sent)
         else {
             throw MastodonWriteError.unreadable
         }
@@ -91,7 +92,7 @@ public struct MastodonWrite: Sendable {
     /// the same thing either way.
     @discardableResult
     public func boost(_ note: Note, on: Bool) async throws -> Note {
-        try await act(on: note, path: on ? "reblog" : "unreblog")
+        try await act(.boosted, on: note, path: on ? "reblog" : "unreblog")
     }
 
     /// Favourites `note` on this source, or takes the favourite back (#107) — `boost`'s shape, one
@@ -99,7 +100,7 @@ public struct MastodonWrite: Sendable {
     /// rather than a carrying-onward.
     @discardableResult
     public func favourite(_ note: Note, on: Bool) async throws -> Note {
-        try await act(on: note, path: on ? "favourite" : "unfavourite")
+        try await act(.favourited, on: note, path: on ? "favourite" : "unfavourite")
     }
 
     /// Takes back a post the reader wrote (#109), and lets go of the row once the source has.
@@ -133,7 +134,7 @@ public struct MastodonWrite: Sendable {
     /// now says, and nothing is written down about the press.
     @discardableResult
     public func bookmark(_ note: Note, on: Bool) async throws -> Note {
-        try await act(on: note, path: on ? "bookmark" : "unbookmark")
+        try await act(.bookmarked, on: note, path: on ? "bookmark" : "unbookmark")
     }
 
     /// One act on one status, and what the server says the post looks like afterwards.
@@ -151,21 +152,25 @@ public struct MastodonWrite: Sendable {
     /// store does not hold — an answer read in an open conversation, which #90 keeps out of the
     /// store's rows — is laid over the copy the caller handed in by the same rule, so the two
     /// kinds of row come back shaped alike.
-    private func act(on note: Note, path: String) async throws -> Note {
+    ///
+    /// **The store is told which mark the answer is for** (#291). A status says all three, and
+    /// only the one this act moved is certainly its latest word: see `ItemStore.refresh`.
+    private func act(_ mark: ReaderMark, on note: Note, path: String) async throws -> Note {
         guard await store.sources().contains(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
         }
         guard let id = note.statusID, ListSubscription.isPathSegment(id) else {
             throw MastodonWriteError.unfindable
         }
+        let sent = ReadMoment.now()
         let data = try await door.post(path: "/api/v1/statuses/\(id)/\(path)", form: [])
         guard let answered = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
-            .asNote(source: note.source, categories: note.categories)
+            .asNote(source: note.source, categories: note.categories, sent: sent)
         else {
             throw MastodonWriteError.unreadable
         }
         try Task.checkCancellation()
-        await store.refresh([answered], ifSourceHere: host, acted: true)
+        await store.refresh([answered], ifSourceHere: host, acted: mark)
         return await store.note(answered.key) ?? answered.refreshed(over: note)
     }
 }

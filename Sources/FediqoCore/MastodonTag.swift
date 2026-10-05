@@ -36,6 +36,7 @@ public struct MastodonTag: Sendable {
     public func posts(under tag: PostTag, source: Source) async throws -> [Note] {
         let path = try Self.path(under: tag, host: host)
         let query = [URLQueryItem(name: "limit", value: "40")]
+        let sent = ReadMoment.now()
         let data: Data
         switch door {
         case .signedIn(let door):
@@ -51,7 +52,7 @@ public struct MastodonTag: Sendable {
             data = body
         }
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data)
-            .map { $0.asNote(source: source, categories: []) }
+            .map { $0.asNote(source: source, categories: [], sent: sent) }
     }
 
     /// The tag's timeline, as a path whose last segment is the name and nothing else (#124).

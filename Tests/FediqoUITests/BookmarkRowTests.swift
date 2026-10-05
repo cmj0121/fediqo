@@ -39,7 +39,7 @@ struct BookmarkRowTests {
             author: "Ada", handle: "@ada@social.example", body: "hello",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home],
             favourited: favourited, bookmarked: bookmarked, statusID: "9"
-        )
+        ).readNow()
     }
 
     private func shell(

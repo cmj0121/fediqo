@@ -52,7 +52,7 @@ struct QuoteHeldBeforeTests {
     private static func heldBefore() throws -> Note {
         let json = status.replacingOccurrences(of: #""quote": {"#, with: #""not_a_quote": {"#)
         return try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
-            .asNote(source: Source(host: host, kind: .mastodon), category: .home)
+            .asNote(source: Source(host: host, kind: .mastodon), category: .home, sent: .now())
     }
 
     private func shell(_ old: Note, post: String = status) async -> (ShellSession, ItemStore, FixtureHTTP) {
@@ -122,7 +122,7 @@ struct QuoteHeldBeforeTests {
     @Test("Opening any other thread reads its conversation alone, as before")
     func openingAnOrdinaryPostReadsNoMore() async throws {
         let plain = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(Self.status.utf8))
-            .asNote(source: Source(host: Self.host, kind: .mastodon), category: .home)
+            .asNote(source: Source(host: Self.host, kind: .mastodon), category: .home, sent: .now())
         #expect(!ShellReload.heldBeforeQuotes(plain), "a post read with its quote")
         let (session, _, http) = await shell(plain)
         await session.reload.opened(try #require(session.held(plain.key.rowID)), in: session)

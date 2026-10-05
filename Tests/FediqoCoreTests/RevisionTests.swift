@@ -49,7 +49,7 @@ struct RevisionTests {
     @Test("When a status was last edited is read off it; one never edited, and a server that says nothing, say nothing")
     func theSourcesWord() throws {
         func note(_ json: String) throws -> Note {
-            try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8)).asNote(source: source, category: .home)
+            try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8)).asNote(source: source, category: .home, sent: .now())
         }
         let edited = try note(Self.status("now", editedAt: "2024-06-02T10:00:00.000Z"))
         #expect(edited.editedAt == ISO8601DateFormatter().date(from: "2024-06-02T10:00:00Z"))
@@ -197,7 +197,7 @@ struct RevisionTests {
                 id: "9", source: source, author: "Ada", handle: "@ada@social.example", body: body,
                 postedAt: posted, categories: [.home], boosted: said, favourited: said, bookmarked: said,
                 spoiler: "", counts: Counts(favourites: favourites), statusID: "9", editedAt: edited.map(at)
-            )
+            ).readNow()
         }
         // The row as the source answered the reader's own press, after its last change.
         let store = await store([marked("two", edited: 20, said: true, favourites: 5)])
@@ -217,7 +217,7 @@ struct RevisionTests {
         #expect(row.bookmarked == true && row.counts.favourites == 11)
 
         // The source's answer to an act the reader has just made always lands, whatever its age.
-        await store.refresh([marked("one", edited: 10, said: false, favourites: 12)], ifSourceHere: source.host, acted: true)
+        await store.refresh([marked("one", edited: 10, said: false, favourites: 12)], ifSourceHere: source.host, acted: .bookmarked)
         row = try await self.row(store)
         #expect(row.bookmarked == false && row.favourited == false && row.boosted == false, "the answer to the reader's own press was dropped")
         #expect(row.body == "two" && row.earlier.isEmpty, "and it still changed no word")
@@ -238,7 +238,7 @@ struct RevisionTests {
 
         func note(_ words: String, editedAt: String?) throws -> Note {
             try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(Self.status(words, editedAt: editedAt).utf8))
-                .asNote(source: source, category: .home)
+                .asNote(source: source, category: .home, sent: .now())
         }
         let plain = try note("as written", editedAt: nil)
         let hostile = try note("hostile", editedAt: "2999-01-01T00:00:00.000Z")
@@ -277,11 +277,11 @@ struct RevisionTests {
         let bad = Self.status("fine otherwise", editedAt: "the day before yesterday")
         let page = "[\(Self.status("first")),\(bad),\(Self.status("third", editedAt: "2024-06-02T10:00:00.000Z"))]"
         let notes = try MastodonJSON.decoder.decode([StatusDTO].self, from: Data(page.utf8))
-            .map { $0.asNote(source: source, category: .home) }
+            .map { $0.asNote(source: source, category: .home, sent: .now()) }
         #expect(notes.map(\.body) == ["first", "fine otherwise", "third"], "one status took its page with it")
         #expect(notes.map { $0.editedAt != nil } == [false, false, true])
         let number = Self.status("x").replacingOccurrences(of: #""edited_at":null"#, with: #""edited_at":12345"#)
-        #expect(try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(number.utf8)).asNote(source: source, category: .home).editedAt == nil)
+        #expect(try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(number.utf8)).asNote(source: source, category: .home, sent: .now()).editedAt == nil)
     }
 
     @Test("What a post said before is bounded by weight as by count, the oldest going first, whoever hands the list over")

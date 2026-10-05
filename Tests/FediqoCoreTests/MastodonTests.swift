@@ -610,7 +610,7 @@ struct MastodonTests {
 
     private static func note(_ json: String) throws -> Note {
         let dto = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
-        return dto.asNote(source: Source(host: "first.example", kind: .mastodon), category: .public)
+        return dto.asNote(source: Source(host: "first.example", kind: .mastodon), category: .public, sent: .now())
     }
 
     /// The smallest status a decoder will take, with one more key spliced in. For the cases

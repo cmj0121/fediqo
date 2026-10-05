@@ -236,6 +236,11 @@ same in any other app, and after a relaunch. A press the source turns away says 
 the mark as it was; press again to try again. Keeping a post is another thing, and this
 device's own: see Keeping a post, below.
 
+What you just did to a post is not undone by a reload that was already on its way. Boost,
+favourite or bookmark a post — or take one back — while a timeline is still loading, and the
+mark stays as the source answered your press when that timeline lands. The next reload you ask
+for is the source's word again: a mark taken off in another app reads as off.
+
 What a source says you boosted, favourited and bookmarked is yours as its signed-in reader, and
 goes when that sign-in does: signing out, a server ending the sign-in, Clear, Remove, or another
 account signing in on that source leaves its posts here saying nothing of any of the three,

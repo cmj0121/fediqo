@@ -48,7 +48,7 @@ struct MergedRowActTests {
             author: "Ada", handle: handle, body: "hello",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home],
             boosted: boosted, favourited: favourited, statusID: statusID
-        )
+        ).readNow()
     }
 
     /// A shell holding `copies` in the order given, signed in with writing on `signed`, having

@@ -95,7 +95,7 @@ struct FieldRuleTests {
              "content":"<p>x</p>","visibility":"public"\(language),
              "account":{"username":"ada","acct":"ada","display_name":"Ada"}}
             """
-            return try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8)).asNote(source: Self.mastodon, category: .home)
+            return try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8)).asNote(source: Self.mastodon, category: .home, sent: .now())
         }
         #expect(try note(#","language":"ja""#).language == "ja")
         #expect(try note(#","language":"zh-TW""#).language == "zh-tw")
@@ -127,7 +127,7 @@ struct FieldRuleTests {
              "content":"<p>x</p>","visibility":"public","language":"\(language)",
              "account":{"username":"ada","acct":"ada","display_name":"Ada"}}
             """
-            return try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8)).asNote(source: Self.mastodon, category: .home)
+            return try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8)).asNote(source: Self.mastodon, category: .home, sent: .now())
         }
         #expect(try note(String(repeating: "j", count: 100_000)).language == nil, "a megabyte of language was kept on the row")
         #expect(try note("ja\\u0007").language == nil)

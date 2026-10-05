@@ -27,7 +27,7 @@ struct BookmarkTests {
 
     private func held(_ json: String) throws -> Note {
         try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
-            .asNote(source: source, category: .home)
+            .asNote(source: source, category: .home, sent: .now())
     }
 
     private func actor(

@@ -73,6 +73,7 @@ struct ScreenAuditTests {
             boosted: false, statusID: "9"
         )
         aside.holding = .aside
+        aside.asked = .now()
         let store = ItemStore()
         await store.add(Source(host: host, kind: .mastodon))
         await store.ingest([aside])

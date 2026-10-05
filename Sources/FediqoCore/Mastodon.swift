@@ -215,12 +215,13 @@ public struct MastodonClient: Sendable {
         ) else {
             throw MastodonRequestError.invalidURL
         }
+        let sent = ReadMoment.now()
         let (data, response) = try await http.data(from: url)
         guard (200..<300).contains(response.statusCode) else {
             throw MastodonRequestError.http(response.statusCode)
         }
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
-            $0.listed(source: source, category: category)
+            $0.listed(source: source, category: category, sent: sent)
         }
     }
 }
@@ -442,7 +443,7 @@ struct StatusDTO: Decodable, Sendable {
             let quoted = quotedStatus?.value
             return Quote(
                 state: Quote.State(wire: state),
-                post: quoted.map { QuotedPost($0.asNote(source: source, categories: [])) },
+                post: quoted.map { QuotedPost($0.unstamped(source: source, categories: [])) },
                 statusID: quoted?.id ?? quotedStatusId
             )
         }
@@ -539,17 +540,30 @@ struct StatusDTO: Decodable, Sendable {
 
     /// This status as a timeline listed it (#201): the post, carrying the id the listing gave it
     /// — a boost's own — as that timeline's.
-    func listed(source: Source, category: Category) -> Listed {
-        var note = asNote(source: source, category: category)
+    func listed(source: Source, category: Category, sent: ReadMoment) -> Listed {
+        var note = asNote(source: source, category: category, sent: sent)
         note.listed = [category: id]
         return (id, note)
     }
 
-    func asNote(source: Source, category: Category) -> Note {
-        asNote(source: source, categories: [category])
+    func asNote(source: Source, category: Category, sent: ReadMoment) -> Note {
+        asNote(source: source, categories: [category], sent: sent)
     }
 
-    func asNote(source: Source, categories: Set<Category>) -> Note {
+    /// This status as a note, and **when the read that brought it was sent** (#291) — taken
+    /// before the request went out, by whoever sent it. Asked for by name and never defaulted:
+    /// a status is the one thing that says what the reader did to a post, so every way one
+    /// becomes a note says how old that word is, and a new way cannot forget to. The note must
+    /// reach the store as this returns it: one made anew from it has lost the moment.
+    func asNote(source: Source, categories: Set<Category>, sent: ReadMoment) -> Note {
+        var note = unstamped(source: source, categories: categories)
+        note.asked = sent
+        return note
+    }
+
+    /// `asNote` without the moment: the post a status quotes, which is cut to what a row draws
+    /// of it (`QuotedPost`) — and that is nothing of what the reader did to it.
+    fileprivate func unstamped(source: Source, categories: Set<Category>) -> Note {
         let subject = reblog?.value ?? self
         let quote = subject.quote(source: source)
         // Named once, so the name the row draws and the pictures that name is written in

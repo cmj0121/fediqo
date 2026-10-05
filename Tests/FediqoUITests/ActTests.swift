@@ -97,7 +97,7 @@ struct ActTests {
             author: "Ada", handle: "@ada@social.example", body: "hello",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home],
             boosted: boosted, favourited: favourited, statusID: statusID
-        )
+        ).readNow()
     }
 
     private func shell(
@@ -450,7 +450,7 @@ struct ActTests {
                 author: "Ada", handle: "@ada@origin.example", body: "hello",
                 postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home],
                 boosted: false, statusID: statusID
-            )
+            ).readNow()
         }
         for host in ["a.example", "b.example"] { await store.add(Source(host: host, kind: .mastodon)) }
         await store.ingest([copy(on: "b.example", "222"), copy(on: "a.example", "111")])

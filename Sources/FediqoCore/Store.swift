@@ -31,6 +31,19 @@ public actor ItemStore {
     /// run's, and the answer they give is.
     private var arrival: [NoteKey: Int] = [:]
     private var arrivals = 0
+    /// Where in the run's order the reader's own act on each post last landed (#291): the answer
+    /// to a favourite, a boost or a bookmark, put or taken back. A copy of that post sent before
+    /// it (`Note.asked`) leaves what the row says the reader did.
+    ///
+    /// **For the run, and never written down**: a relaunch has no read on its way, so there is
+    /// nothing left for a place to be compared with. A post acted on is marked for as long as the
+    /// run lasts, its row gone or not — one number a post, for the posts one reader pressed.
+    private var acted: [NoteKey: UInt64] = [:]
+    /// Where in the run's order the reader's marks were last taken off each host's posts
+    /// (`forgetReaderMarks`): a sign-in there ended, or became somebody else's. A copy from that
+    /// host sent before it was read as the reader who has gone, and says nothing of this one —
+    /// on every post of the host, acted on or not (#291). For the run, as `acted` is.
+    private var swept: [String: UInt64] = [:]
     /// The oldest a note may be posted and still be held, or nil to keep everything forever —
     /// the default. The reader's drop by time (#7), held here so every way in obeys it.
     private(set) var retention: Date?
@@ -241,6 +254,7 @@ public actor ItemStore {
     /// gets in, so no caller spells `Holding` for itself.
     ///
     /// A post already here as one a timeline brought stays one: holding only ever widens.
+    /// Each copy is handed on as it came, `Note.asked` with it (#291) — never made anew.
     public func hold(_ incoming: [Note], ifSourceHere host: String) {
         ingest(incoming.map { note in
             var aside = note
@@ -280,6 +294,16 @@ public actor ItemStore {
         guard !incoming.isEmpty else { return }
         // A copy of a row the person keeps is taken in whatever its age (#284): the row is here
         // past the window, and what its source says of it now is still news about it.
+        // Nothing but a convention carries `Note.asked` from where a status is read to here
+        // (#291), so a debug build checks it: a copy that says what the reader did says when it
+        // was sent. A release build takes such a copy as `outrun` says — for the older.
+        assert(
+            incoming.allSatisfy { note in
+                !note.source.kind.saysReaderMarks || note.asked.place != nil
+                    || (note.boosted == nil && note.favourited == nil && note.bookmarked == nil)
+            },
+            "a copy saying what the reader did reached the store without when it was sent"
+        )
         let admitted = exempt ? incoming : incoming.filter { withinRetention($0) || notes[$0.key]?.kept == true }
         let incoming = admitted + admitted.compactMap(\.quotedNote)
         var moved = false
@@ -294,7 +318,9 @@ public actor ItemStore {
                 let listed = existing.listed.later(note.listed)
                 // What the held copy never said, this one may (#208): a row kept before its
                 // audience was written down takes it from the next timeline that brings it.
-                var merged = existing.filled(from: note)
+                // …except what it says the reader did, where it was sent before their own act on
+                // the post landed (#291): a reload on its way when they pressed.
+                var merged = existing.filled(from: note, marksStand: outrun(note))
                 // **Its source has changed it since this row was read** (#286): the row says what
                 // the post says now, where it stood, and keeps what it said. A copy that is the
                 // older of the two — a read still on its way when a later one landed — changes no
@@ -318,6 +344,8 @@ public actor ItemStore {
                 aside = aside || existing.holding == .aside
                 if kept { moved = true } else { recounted = true }
             } else {
+                var note = note
+                note.asked = .unsaid
                 notes[key] = note
                 arrival[key] = arrivals
                 arrivals += 1
@@ -348,8 +376,14 @@ public actor ItemStore {
     /// counts still land. What it says the reader did lands only where `acted` — the source's own
     /// answer to an act the reader has just made (`MastodonWrite`), which must never be lost to a
     /// row that looks newer, and which no stale timeline or thread read is.
+    ///
+    /// **And `acted` marks the post as acted on, from this moment** (#291): a read sent before it
+    /// — of a timeline, the post or its thread — still lands, and says nothing of what the reader
+    /// did that this answer has not said more lately. Only an answer that arrives marks anything:
+    /// an act the source turned away never reaches here. `acted` names the mark the act moved:
+    /// that one is taken whatever the answer's age, and the other two as any copy's are.
     @discardableResult
-    public func refresh(_ incoming: [Note], ifSourceHere host: String, acted: Bool = false) -> Bool {
+    public func refresh(_ incoming: [Note], ifSourceHere host: String, acted: ReaderMark? = nil) -> Bool {
         let host = host.lowercased()
         guard sourceList.contains(where: { $0.host == host }) else { return false }
         var moved = false
@@ -360,9 +394,23 @@ public actor ItemStore {
             guard let existing = notes[note.key] else { continue }
             let stale = note.isEarlier(than: existing)
             if !stale { held.append(note) }
+            // **An answer is the latest word on its own act, and on nothing else for certain**
+            // (#291). It says all three marks, and two acts on one post can be out at once: the
+            // answer to the second was sent before the first one's landed, and may say the old
+            // word for it. So the act's own mark is always taken, and the other two only where
+            // this copy is not the older — which is all a read's copy is ever taken for.
+            let older = outrun(note)
+            let own: Set<ReaderMark> = acted.map { [$0] } ?? []
+            // …and every read sent before this moment is older than the answer — marked whether
+            // or not the answer changes the row, since a read that already said as much changes
+            // nothing about which of the two is the later. After `older` is read: the answer is
+            // not older than itself.
+            if acted != nil { self.acted[note.key] = ReadMoment.now().place }
             // The same words read again are not a change (#175): a thread re-read with nothing
             // edited in it neither writes the store down again nor renews a screen.
-            let refreshed = stale ? existing.restated(by: note, acted: acted) : note.refreshed(over: existing)
+            let refreshed = stale
+                ? existing.restated(by: note, taking: acted == nil || older ? own : Set(ReaderMark.allCases))
+                : note.refreshed(over: existing, taking: older ? own : Set(ReaderMark.allCases))
             guard refreshed != existing else { continue }
             notes[note.key] = refreshed
             moved = true
@@ -376,6 +424,23 @@ public actor ItemStore {
         let before = revision
         if !quoted.isEmpty { admit(quoted, exempt: true) }
         return moved || revision != before
+    }
+
+    /// Whether the reader's own act on this post landed after the read that brought `copy` was
+    /// sent (#291), so that what the copy says they did is older than what the row says.
+    ///
+    /// **A copy that cannot say when it was sent is taken for one sent before**, on a post the
+    /// reader has acted on and nowhere else: their own act is the surer word, and a copy that
+    /// lost its moment on the way in must not be able to undo it. Every read of a source that
+    /// says what the reader did says when it was sent (`StatusDTO.asNote`).
+    ///
+    /// **And so is a copy sent before a sign-in to its host ended** (`swept`), on any post of
+    /// that host: it was read as a reader who has gone, and its marks are theirs.
+    private func outrun(_ copy: Note) -> Bool {
+        let key = copy.key
+        guard let landed = [acted[key], swept[key.host]].compactMap({ $0 }).max() else { return false }
+        guard let sent = copy.asked.place else { return true }
+        return sent < landed
     }
 
     /// Keeps a forum row's opening post as just read, with the row (#154). Only for rows held,
@@ -829,6 +894,13 @@ public actor ItemStore {
     }
 
     private func forgetReaderMarks(where gone: (String) -> Bool) -> Bool {
+        // From here on a read sent before this moment says nothing of the reader (#291): one
+        // still on the wire was asked as whoever has just gone. Marked for every host this
+        // names, a row with a mark on it or not — the read on its way may bring the first.
+        let moment = ReadMoment.now().place
+        for host in Set(sourceList.map(\.host)).union(notes.keys.map(\.host)) where gone(host) {
+            swept[host] = moment
+        }
         var shown = false
         var aside = false
         for (key, note) in notes where gone(key.host) {

@@ -186,11 +186,12 @@ public struct MastodonAccount: Sendable {
     private func listed(
         _ path: String, source: Source, category: Category, query: [URLQueryItem]
     ) async throws -> [Listed] {
+        let sent = ReadMoment.now()
         let data = try await reading(category).get(
             path: path, query: [URLQueryItem(name: "limit", value: String(MastodonReadOn.limit))] + query
         )
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
-            $0.listed(source: source, category: category)
+            $0.listed(source: source, category: category, sent: sent)
         }
     }
 

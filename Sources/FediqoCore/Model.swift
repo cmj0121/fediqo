@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// A protocol a host might speak. Unknown is a name, not a silence.
 public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
@@ -48,6 +49,9 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
     /// Whether a post read from a source of this kind says whether it quotes one (#214): a read
     /// that says nothing of a quote is then a post with none, not a source that never said.
     public var saysQuotes: Bool { self == .mastodon }
+
+    /// Whether a source of this kind says what its signed-in reader has done to a post (#285).
+    public var saysReaderMarks: Bool { self == .mastodon }
 
     public var hasTimelines: Bool {
         switch self {
@@ -403,6 +407,55 @@ public struct Attachment: Sendable, Hashable {
     public var isEmpty: Bool { displayURL == nil }
 }
 
+/// When the read that brought a copy of a post was sent, as a place in the order this run's
+/// reads and the reader's own acts happened in (#291) — or nothing, where a copy cannot say.
+///
+/// **What tells a read already on its way from one asked afterwards.** A post never edited
+/// carries no moment of its own to order two copies by (`Note.editedAt`), so a timeline asked
+/// before the reader favourited a post and landing after the source answered would put the mark
+/// back to what it was. The store marks the post with the next place as the act's answer lands
+/// (`ItemStore.refresh(_:ifSourceHere:acted:)`), and a copy sent before that place says nothing of
+/// what the reader did that the row does not say more lately.
+///
+/// **Counted, not clocked**, for `ItemStore.arrival`'s reason: the order two things happened in
+/// is the only thing asked, and a clock can say two of them happened at once. One count for the
+/// whole run rather than one per store, because a read is sent by a client that holds no store;
+/// two stores that share the count each still see their own reads and acts in a true order.
+///
+/// **For the run, and never written down.** A relaunch has no read on its way.
+///
+/// **No part of what a note is.** Two copies that say the same things are the same note whenever
+/// each was asked for, so every `ReadMoment` equals every other and hashes to nothing: a row
+/// compared with a later copy of itself does not look changed by when the copy was sent.
+public struct ReadMoment: Hashable, Sendable {
+    /// The place in the run's order, or nothing where this copy cannot say when it was sent.
+    public let place: UInt64?
+
+    /// A copy that cannot say when it was sent: one made by hand, read back from disk, or from a
+    /// source whose posts say nothing of the reader. **Never taken for one sent just now** — on a
+    /// post the reader has acted on, it says nothing of what they did.
+    public static let unsaid = ReadMoment(place: nil)
+
+    private static let places = Mutex<UInt64>(0)
+
+    /// The next place in the run's order: later than every one handed out before it. What a read
+    /// takes as it is sent, and what the store marks a post with as an act's answer lands.
+    public static func now() -> ReadMoment {
+        ReadMoment(place: places.withLock { count in
+            count += 1
+            return count
+        })
+    }
+
+    public static func == (_: ReadMoment, _: ReadMoment) -> Bool { true }
+    public func hash(into _: inout Hasher) {}
+}
+
+/// One of the three things a source says its signed-in reader has done to a post (#285).
+public enum ReaderMark: Hashable, Sendable, CaseIterable {
+    case boosted, favourited, bookmarked
+}
+
 /// A note this device has stored. Its categories remember what it arrived through.
 public struct Note: Identifiable, Hashable, Sendable {
     public let id: String
@@ -582,6 +635,10 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// (#287), or nothing where the source said none — which is not a language, and matches no
     /// rule on one.
     public let language: String?
+    /// When the read that brought this copy was sent (#291), or `unsaid`. **A fact about the
+    /// copy on its way in, not about the post**: the store reads it as the copy lands and keeps
+    /// none of it, and every note made from another starts again from `unsaid`.
+    public var asked: ReadMoment = .unsaid
 
     public init(
         id: String,
@@ -713,15 +770,16 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// it says the reader did is taken only where `acted` — the source's answer to an act the
     /// reader has just made, which is the latest word there is on that whatever the copy's age.
     /// A timeline's or a thread's stale copy says nothing of the reader this row does not say
-    /// more lately.
-    func restated(by stale: Note, acted: Bool) -> Note {
+    /// more lately. `taking` is which of the three the copy's word is taken for: none for a read,
+    /// and for an answer the act's own mark and whichever others it is not older on (#291).
+    func restated(by stale: Note, taking: Set<ReaderMark>) -> Note {
         Note(
             id: id, source: source, author: author, handle: handle, body: body, title: title,
             board: board, postedAt: postedAt, categories: categories, reply: reply,
             boostedBy: boostedBy, boosterHandle: boosterHandle,
-            boosted: acted ? stale.boosted ?? boosted : boosted,
-            favourited: acted ? stale.favourited ?? favourited : favourited,
-            bookmarked: acted ? stale.bookmarked ?? bookmarked : bookmarked,
+            boosted: taking.contains(.boosted) ? stale.boosted ?? boosted : boosted,
+            favourited: taking.contains(.favourited) ? stale.favourited ?? favourited : favourited,
+            bookmarked: taking.contains(.bookmarked) ? stale.bookmarked ?? bookmarked : bookmarked,
             audience: audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url,
             counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
@@ -770,15 +828,17 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// ago would draw the post as unboosted because nobody asked, which is the one thing #106
     /// says the mark must never do. A read made as the reader always says something, so it always
     /// wins.
-    func refreshed(over held: Note) -> Note {
+    func refreshed(over held: Note, taking: Set<ReaderMark> = Set(ReaderMark.allCases)) -> Note {
         Note(
             id: id, source: source, author: author, handle: handle, body: body, title: title,
             board: board ?? held.board, postedAt: postedAt,
             categories: held.categories.union(categories), reply: reply,
             boostedBy: held.boostedBy, boosterHandle: held.boosterHandle,
-            boosted: boosted ?? held.boosted,
-            favourited: favourited ?? held.favourited,
-            bookmarked: bookmarked ?? held.bookmarked,
+            // A mark not among `taking` is one this copy is older on (#291): it was sent before
+            // the reader's own act on the post landed, or before a sign-in there ended.
+            boosted: taking.contains(.boosted) ? boosted ?? held.boosted : held.boosted,
+            favourited: taking.contains(.favourited) ? favourited ?? held.favourited : held.favourited,
+            bookmarked: taking.contains(.bookmarked) ? bookmarked ?? held.bookmarked : held.bookmarked,
             // Who it was for, whether it is covered and with what, and each count: what this read
             // left unsaid is what was held (#208), for `boosted`'s reason. A Mastodon source
             // always sends its cover line, empty where there is none, so a nil spoiler here is a
@@ -833,12 +893,13 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// **A quote filled in brings its words with it** (#214). A row held before this device read
     /// quotes was read with the quote spelled into its words as an `RE:` address; the copy that
     /// says the quote has its words without it. Keeping the held words would draw the quote twice.
-    func filled(from other: Note) -> Note {
+    func filled(from other: Note, marksStand: Bool = false) -> Note {
         let quoteArrives = quote == nil && other.quote != nil
         // A copy its source's own word says was read before this one (#286) says nothing of the
         // reader that this row does not say more lately: a reload still on its way when the
-        // reader pressed, landing after the source answered the press.
-        let stale = other.isEarlier(than: self)
+        // reader pressed, landing after the source answered the press. And so one the store
+        // knows was sent before the reader's act landed (#291), which is `marksStand`.
+        let stale = marksStand || other.isEarlier(than: self)
         return Note(
             id: id, source: source, author: author, handle: handle,
             body: quoteArrives ? other.body : body, title: title,
