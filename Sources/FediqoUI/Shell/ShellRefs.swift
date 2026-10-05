@@ -23,7 +23,8 @@ import Foundation
 final class ShellRefs {
     /// How many loads one landing asks one source for without the reader reaching for them.
     ///
-    /// **Ten.** At the pace a source's loads keep that is a couple of minutes of asking; the
+    /// **Ten.** A bound on what one arrival costs a source with nobody reaching, and not on how
+    /// long it takes: at the pace a source's loads keep it is half a minute of asking. The
     /// shortest wait between two timeline reads is a minute, so the line does not grow without
     /// the reader scrolling, and `LoadLimits.queued` bounds it where they do.
     static let eager = 10

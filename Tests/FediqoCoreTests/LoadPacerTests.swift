@@ -176,6 +176,8 @@ actor LoadWire {
 @Suite("A source's loads wait their turn")
 struct LoadPacerTests {
     private static let host = "one.example"
+    /// The pace as the limits state it, so no test here says the figure but the one that is about it.
+    private static let pace = LoadLimits().interval
 
     /// A pacer on a clock the test turns, a wire to ask, and a hang guard already armed.
     ///
@@ -241,11 +243,13 @@ struct LoadPacerTests {
         return nil
     }
 
-    @Test("The limits are drawn from how a timeline is asked: one at a time, five a minute at the most, one stretch waiting, a try no longer than any read is given")
+    @Test("The limits: one at a time, three seconds apart — a third of what a Mastodon allows by default — one stretch waiting, a try no longer than any read is given")
     func theLimits() {
         let limits = LoadLimits()
         #expect(limits.inFlight == 1)
-        #expect(limits.interval == 12 && 60 / limits.interval == Double(MastodonReadOn.bound))
+        #expect(limits.interval == 3)
+        // Twenty a minute is a hundred in five: a third of a Mastodon's default 300.
+        #expect(5 * 60 / limits.interval == 300 / 3)
         #expect(limits.queued == MastodonReadOn.limit)
         #expect(limits.attempts == 3 && limits.failures == 5 && limits.backoff == 30 && limits.longestPause == 900)
         #expect(limits.perRun == 600 && limits.reserve == 0.25 && limits.deadline == 30)
@@ -259,18 +263,18 @@ struct LoadPacerTests {
         var ends: [LoadTicket] = []
         for id in ["a", "b", "c"] { ends.append(try await asking(pacer, wire, id)) }
         await wire.asked(1)
-        await clock.sleeping(for: 12)
+        await clock.sleeping(for: Self.pace)
         #expect(await wire.ids == ["a"], "the first has nothing to wait for; the second waits")
-        clock.advance(by: 11)
+        clock.advance(by: Self.pace - 1)
         #expect(await wire.ids == ["a"])
-        #expect(clock.wakes == [1], "eleven seconds is not the pace, and nothing of the first try is left on the clock")
+        #expect(clock.wakes == [1], "a second short is not the pace, and nothing of the first try is left on the clock")
         clock.advance(by: 1)
         await wire.asked(2)
-        await clock.sleeping(for: 12)
-        clock.advance(by: 12)
+        await clock.sleeping(for: Self.pace)
+        clock.advance(by: Self.pace)
         await wire.asked(3)
         #expect(await wire.ids == ["a", "b", "c"])
-        #expect(await wire.times == [0, 12, 24])
+        #expect(await wire.times == [0, Self.pace, 2 * Self.pace])
         for end in ends { #expect(await end.end() == .done) }
         #expect(await pacer.standing(host: Self.host).tried == 3)
     }
@@ -294,11 +298,11 @@ struct LoadPacerTests {
         let (pacer, clock, wire) = made()
         let ends = [try await asking(pacer, wire, "a"), try await asking(pacer, wire, "b")]
         await wire.asked(1)
-        await clock.sleeping(for: 12)
+        await clock.sleeping(for: Self.pace)
         clock.setDateBack(by: 86_400)
-        clock.advance(by: 12)
+        clock.advance(by: Self.pace)
         for end in ends { #expect(await end.end() == .done) }
-        #expect(await wire.times == [0, 12])
+        #expect(await wire.times == [0, Self.pace])
     }
 
     @Test("One load of a source is on the wire at a time: while it is, no amount of time starts the next")
@@ -364,7 +368,7 @@ struct LoadPacerTests {
         await wire.script("a", [.failed, .failed, .answered()])
         let first = try await asking(pacer, wire, "a"), second = try await asking(pacer, wire, "b")
         // a: three tries, thirty then sixty seconds apart; b: the fourth.
-        for (asked, wait) in [(1, 30.0), (2, 60), (3, 12)] {
+        for (asked, wait) in [(1, 30.0), (2, 60), (3, Self.pace)] {
             await wire.asked(asked)
             await clock.sleeping(for: wait)
             // One try made and two loads waiting leave room for one more; two made, none.
@@ -459,11 +463,11 @@ struct LoadPacerTests {
         #expect(await wire.ids == ["a"], "a quarter left: the rest is the reader's own reads'")
         clock.advance(by: 1)
         await wire.asked(2)
-        await clock.sleeping(for: 12)
-        #expect(clock.wakes == [12], "plenty left: the pace, and nothing longer")
-        clock.advance(by: 12)
+        await clock.sleeping(for: Self.pace)
+        #expect(clock.wakes == [Self.pace], "plenty left: the pace, and nothing longer")
+        clock.advance(by: Self.pace)
         for end in ends { #expect(await end.end() == .done) }
-        #expect(await wire.times == [0, 200, 212])
+        #expect(await wire.times == [0, 200, 200 + Self.pace])
     }
 
     @Test("An allowance all but spent that renews further off than a load waits rests the source for the run: the answer that said so is taken, and nothing more is asked")
@@ -578,7 +582,7 @@ struct LoadPacerTests {
         let (pacer, clock, wire) = made()
         let ends = [try await asking(pacer, wire, "a"), try await asking(pacer, wire, "b")]
         await wire.asked(1)
-        await clock.sleeping(for: 12)
+        await clock.sleeping(for: Self.pace)
         await pacer.letGo(host: Self.host)
         #expect(await ends[0].end() == .done)
         #expect(await ends[1].end() == .letGo)
@@ -600,7 +604,7 @@ struct LoadPacerTests {
         #expect(await !pacer.withdraw(host: Self.host, id: "b"))
         #expect(await !pacer.withdraw(host: Self.host, id: "nobody"))
         #expect(await pacer.standing(host: Self.host).waiting == 1)
-        clock.advance(by: 12)
+        clock.advance(by: Self.pace)
         await wire.release("a")
         #expect(await first.end() == .done)
         #expect(await third.end() == .done)
@@ -636,13 +640,13 @@ struct LoadPacerTests {
         #expect(await pacer.standing(host: Self.host).waiting == 3, "moved, not added")
         await wire.release("a")
         for asked in 2...4 {
-            await clock.sleeping(for: 12)
-            clock.advance(by: 12)
+            await clock.sleeping(for: Self.pace)
+            clock.advance(by: Self.pace)
             await wire.asked(asked)
         }
         for end in ends { #expect(await end.end() == .done) }
         #expect(await wire.ids == ["a", "d", "b", "c"])
-        #expect(await wire.times == [0, 12, 24, 36], "going first is not going faster")
+        #expect(await wire.times == [0, Self.pace, 2 * Self.pace, 3 * Self.pace], "going first is not going faster")
     }
 
     @Test("The system's clock for the pacer counts seconds that only pass, and a wait until a moment already past returns at once")

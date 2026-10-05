@@ -51,12 +51,11 @@ public struct SystemPacerClock: PacerClock {
 
 /// The bounds one source's loads are held to.
 ///
-/// **Drawn from how a timeline is asked**, which is the line #293 sets: a source "is not asked
-/// faster than it is for timelines". One read of one timeline asks at most
-/// `MastodonReadOn.bound` stretches, and the shortest wait between reads is a minute — five
-/// requests a minute is the most a timeline is ever asked. So loads start no closer than
-/// `interval` apart, one at a time: five a minute at the very most, and one-twelfth of what a
-/// Mastodon allows a reader (300 requests in five minutes).
+/// **Three seconds between two loads starting, one at a time** — the person's figure (#293).
+/// That is about twenty a minute at the very most: a hundred in five minutes, a third of what
+/// a Mastodon allows a reader by default (300 requests in five minutes), so two thirds are
+/// left for what the reader asks for themselves. And where a source states its allowance,
+/// loads stop of themselves once a quarter or less of it is left (`reserve`), until it renews.
 ///
 /// **What putting other reads behind this would take**: a timeline read is several requests the
 /// reader is waiting on, in order, with a deadline and a line of its own on screen — it would
@@ -67,7 +66,7 @@ public struct LoadLimits: Sendable, Equatable {
     public var inFlight = 1
     /// **A bound on how often a try starts**: the least time, in seconds, between two tries of
     /// one source starting — a first try or a later one alike. The one figure the pace is.
-    public var interval: TimeInterval = 60 / Double(MastodonReadOn.bound)
+    public var interval: TimeInterval = 3
     /// **A bound on loads waiting**: how many of one source's may wait their turn. One
     /// stretch's worth: a full line means the next is not taken, and whoever asked keeps it.
     public var queued = MastodonReadOn.limit
@@ -90,9 +89,10 @@ public struct LoadLimits: Sendable, Equatable {
     /// renewed — so loads never spend what the reader's own reads would need.
     public var reserve = 0.25
     /// **A bound on requests, not on loads**: how many tries of one source may start in one run
-    /// of the app, every try of every load counted. At the pace above that is two hours of
-    /// asking without a pause, which no run's arriving items honestly need; it is the ceiling
-    /// on what a source can be made to answer by what it sends.
+    /// of the app, every try of every load counted. At the pace above that is half an hour of
+    /// asking without a pause — and a count, not a time: it is the ceiling on what a source can
+    /// be made to answer by what it sends, whatever the pace, so a faster pace reaches it sooner
+    /// and does not raise it.
     public var perRun = 600
 
     public init() {}

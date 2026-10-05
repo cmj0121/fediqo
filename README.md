@@ -354,7 +354,7 @@ row, and asked again at the next launch. Each of these reads is listed with the 
 Requests this run, is made only of your own source — as you, where you are signed in to it,
 and never unsigned in your place: when a sign-in ends, what your own timelines there still
 had to read this way is dropped with it — and waits its turn: a source is asked for one at a time,
-no more than five a minute, and less where it says to slow down. One arrival asks a source
+no closer than three seconds apart, and further apart where it says to slow down. One arrival asks a source
 for at most ten such posts; the rest are read when their rows come near the screen. A post
 read this way is a post like any other, and stays for as long as the post that refers to it.
 
