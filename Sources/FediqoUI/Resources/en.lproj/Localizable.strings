@@ -264,7 +264,13 @@
 "item.replyingTo" = "Reply to %@";
 "item.boostedBy" = "Reblogged by %@";
 "item.arrivedAsReblogBy" = "Arrived as a reblog by %@";
-"item.reblog.unheld" = "Reblogged a post no longer held here";
+"item.reblog.unheld" = "Reblogged a post this device no longer holds.";
+"item.reblog.onItsWay" = "Reblogged a post that is on its way.";
+"item.reblog.undone" = "Reblogged by %@, since taken back";
+"item.reblog.spoken" = "%1$@, %2$@";
+"item.act.onPost" = "%1$@ — the post by %2$@";
+"item.act.keep.reblog" = "Keep this reblog";
+"item.act.unkeep.reblog" = "Stop keeping this reblog";
 "item.visibility.everyone" = "Public";
 "item.visibility.unlisted" = "Unlisted";
 "item.visibility.followers" = "Followers";

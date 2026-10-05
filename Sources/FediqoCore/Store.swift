@@ -116,7 +116,21 @@ public actor ItemStore {
     /// app that does not open. So the rules `add` and `ingest` keep hold here too: one source per
     /// host, the first one winning as `add` has it, and one row per `NoteKey`, the later copy
     /// winning outright — a snapshot is one moment written once, not two reads to merge.
-    public init(sources: [Source], notes incoming: [Note], said: [SourceProfile] = []) {
+    ///
+    /// **No row comes in still owing a load** (`Note.refsDue`, #293), as none does through
+    /// `replace`. Nothing asks for what an item refers to yet, so a mark read from a file would
+    /// never be taken off: a reblog whose post is not held would say its post is on its way for
+    /// good. **The step that builds the asking (U6) is where this changes** — a launch then
+    /// keeps what the last run still owed and asks for it. `keepingWhatIsOwed` is that door,
+    /// open today only to a test that needs a row that owes.
+    public init(
+        sources: [Source], notes arriving: [Note], said: [SourceProfile] = [], keepingWhatIsOwed: Bool = false
+    ) {
+        let incoming = keepingWhatIsOwed ? arriving : arriving.map { note in
+            var settled = note
+            settled.refsDue = false
+            return settled
+        }
         for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
             sourceList.append(source)
         }

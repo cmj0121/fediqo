@@ -55,6 +55,18 @@ public struct DummyPerson: Identifiable, Hashable, Sendable {
     /// **Nothing rather than an empty person**, which is what makes "a row with no author offers
     /// no press" a fact rather than a habit: there is no value to open, so no call site can be
     /// written that opens one.
+    /// Whoever made `note`, as a person to open: a reblog's reblogger (#290), whose row draws
+    /// somebody else's post and so cannot be asked through `init(_: DummyItem)`.
+    init?(making note: Note) {
+        let handle = note.handle.isEmpty ? nil : note.handle
+        guard !note.author.isEmpty || handle != nil else { return nil }
+        host = note.source.host
+        name = note.author
+        self.handle = handle
+        avatarURL = note.avatarURL
+        emojis = note.emojis
+    }
+
     public init?(_ item: DummyItem) {
         let handle = (item.handle?.isEmpty == true) ? nil : item.handle
         guard !item.author.isEmpty || handle != nil else { return nil }

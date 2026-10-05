@@ -170,11 +170,17 @@ enum ItemActs {
         case .bookmark: (copy.bookmarked == true, nil)
         }
         let host = item.otherCopies.isEmpty ? nil : copy.source.host
+        var said = spoken(act, done: done, standing: standing, through: host, language: language)
+        // **On a reblog's row the mark says whose post it goes to** (#290): the row is headed by
+        // who reblogged, and a press here reaches the post and never the reblog.
+        if item.isReblog {
+            said = String(format: L10n.t("item.act.onPost", language: language), said, copy.author)
+        }
         return ItemMark(
             symbol: symbol(act, done: done, standing: standing),
             done: done,
             count: count,
-            spoken: spoken(act, done: done, standing: standing, through: host, language: language)
+            spoken: said
         )
     }
 

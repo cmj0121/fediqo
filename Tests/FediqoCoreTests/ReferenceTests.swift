@@ -166,7 +166,7 @@ struct ReferenceTests {
     @Test("Whether an item's references are still to be asked for is this device's own: no reload, no reading again, no later copy and no mark taken off moves it")
     func dueIsThisDevicesOwn() async {
         #expect(Self.note().refsDue == false, "off is the rest state")
-        let store = ItemStore(sources: [Self.source], notes: [Self.note(refsDue: true)])
+        let store = ItemStore(sources: [Self.source], notes: [Self.note(refsDue: true)], keepingWhatIsOwed: true)
         func due() async -> Bool? { await store.all().first?.refsDue }
 
         await store.ingest([Self.note(body: "hello", refsDue: false)], ifSourceHere: Self.source.host)
@@ -190,8 +190,8 @@ struct ReferenceTests {
 
     @Test("A store read back brings no row still owing a load: what another device had yet to ask for is not this device's to ask")
     func aStoreReadBackOwesNothing() async {
-        let store = ItemStore(sources: [Self.source], notes: [Self.note("0", refsDue: true)])
-        #expect(await store.all().first?.refsDue == true, "the premise: a store opened at launch keeps what it owes")
+        let store = ItemStore(sources: [Self.source], notes: [Self.note("0", refsDue: true)], keepingWhatIsOwed: true)
+        #expect(await store.all().first?.refsDue == true, "the premise: a row that owes")
         let reblog = [Reference(kind: .reblogs, id: "https://one.example/9")]
         await store.replace(sources: [Self.source], notes: [
             Self.note("1", reply: Reply(inReplyToId: "41"), refsDue: true), Self.note("2", refs: reblog, refsDue: true), Self.note("3"),
@@ -199,6 +199,17 @@ struct ReferenceTests {
         let now = await store.all()
         #expect(now.count == 3 && now.allSatisfy { !$0.refsDue })
         #expect(now.first { $0.statusID == "2" }?.refs == reblog, "and nothing else of the row is touched")
+    }
+
+    @Test("A store opened at launch brings no row still owing a load: nothing asks for what an item refers to yet, so nothing would ever take the mark off")
+    func aLaunchOwesNothing() async {
+        let reblog = Note(
+            id: "r", source: Self.source, author: "Bob", handle: "@bob", body: "", postedAt: Self.origin,
+            categories: [.home], refs: [Reference(kind: .reblogs, id: "https://one.example/9")], refsDue: true
+        )
+        let store = ItemStore(sources: [Self.source], notes: [Self.note("0", refsDue: true), reblog])
+        #expect(await store.all().allSatisfy { !$0.refsDue })
+        #expect(await store.all().first { $0.isReblog }?.refs == reblog.refs, "and nothing else of the row is touched")
     }
 
     @Test("Two notes that differ only in what they refer to, or in whether that is still to be asked for, are not the same note")

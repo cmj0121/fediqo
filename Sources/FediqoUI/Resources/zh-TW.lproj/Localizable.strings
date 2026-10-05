@@ -263,7 +263,13 @@
 "item.replyingTo" = "回覆 %@";
 "item.boostedBy" = "由 %@ 轉發";
 "item.arrivedAsReblogBy" = "因 %@ 的轉發而到來";
-"item.reblog.unheld" = "轉發了一則這裡已不再留著的貼文";
+"item.reblog.unheld" = "轉發了一則這台裝置已不再留著的貼文。";
+"item.reblog.onItsWay" = "轉發了一則還在路上的貼文。";
+"item.reblog.undone" = "由 %@ 轉發，之後已收回";
+"item.reblog.spoken" = "%1$@，%2$@";
+"item.act.onPost" = "%1$@——%2$@ 的貼文";
+"item.act.keep.reblog" = "留下這則轉發";
+"item.act.unkeep.reblog" = "不再留下這則轉發";
 "item.visibility.everyone" = "公開";
 "item.visibility.unlisted" = "不公開列出";
 "item.visibility.followers" = "追隨者";

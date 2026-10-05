@@ -309,12 +309,18 @@ half-width, do not change what is found. As you type, the posts this device hold
 searched. Return also asks the sources of the timeline in front that can be searched. What is
 found is in time order. Clearing the field returns to the timeline.
 
-A reblog is a row of its own. It stands at the time of the reblog and says who reblogged; the
-post it reblogs stands at the time it was published, as it does where it arrived with no
-reblog. Both rows show in a timeline whose rules let both through, and reading again moves
-neither. The reblog's row shows the post as this device holds it — or says the post is no
-longer held — and what you press on it is done to the post: favourite, reblog, bookmark and
-answer go to the post, and opening the row opens the post. Keeping the row keeps the reblog,
+A reblog is a row of its own. Its first line says who reblogged and, at its far end, when —
+the time the row stands at. Under it is the post itself: its author's face and name, and
+beside them when the post was published. Pressing who reblogged opens their page; pressing the
+face or the name opens the author's. The post it reblogs also stands on its own at the time it
+was published, as it does where it arrived with no reblog. Both rows show in a timeline whose
+rules let both through, and reading again moves
+neither. The reblog's row shows the post as this device holds it — covered where its author covered
+it, marked where its source changed or deleted it — or says the post is no longer held, and
+then the row is the reblog alone. A reblog its source says was taken back says so on its first
+line. What you press on the row is done to the post, and each mark is named for whose post it
+goes to: favourite, reblog, bookmark and
+answer go to the post, and opening the row opens the post. Keeping the row keeps the reblog — the keep mark is named for it —
 and the post it shows stays for as long as the reblog is kept, whatever else is let go — a
 post you take back, or one its source says is gone, stays too, marked as gone from its source. A
 rule on an author is asked of who reblogged — and a Hide on a person also hides what others

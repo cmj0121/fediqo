@@ -215,7 +215,27 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public private(set) var reblogged: [DummyItem] = []
     /// Whether this is a reblog of a post no longer held here: the row says who reblogged and
     /// when, and that the post is not here, and draws nothing of a post.
-    public var reblogUnheld: Bool { isReblog && reblogged.isEmpty }
+    public var reblogUnheld: Bool { isReblog && reblogged.isEmpty && !reblogOnItsWay }
+    /// Whether this is a reblog whose post is not here yet and has been asked for (#293): the
+    /// reblog still owes the one load an item is given when it first arrives (`Note.refsDue`).
+    /// The row says the post is on its way, in the place it will stand. Nothing sets that mark
+    /// on a reblog until loading is built; the row is drawn for it already.
+    public private(set) var reblogOnItsWay = false
+    /// Who reblogged, as a person to open — the reblog's own maker, whose page a press on the
+    /// row's first line opens. Nothing on anything but a reblog.
+    public private(set) var reblogger: DummyPerson?
+    /// When the post this row draws was published: the post's own time. The same as `postedAt`
+    /// on every row but a reblog's, where `postedAt` is when it was reblogged — the time the row
+    /// stands at — and this is the time its header says, beside the author it belongs to.
+    public private(set) var publishedAt: Date = .distantPast
+    /// Whether the post this row draws is marked gone from its source (#179): the row's own
+    /// mark, and on a reblog the mark of the post it reblogs — a fact about the words shown.
+    public var postGone: Bool {
+        isReblog ? (reblogged.first?.goneEverywhere ?? false) : goneEverywhere
+    }
+    /// Whether this reblog was taken back at its source: the reblog itself is marked gone,
+    /// whatever became of the post. The first line says so; the post is drawn as it is held.
+    public var reblogUndone: Bool { isReblog && goneEverywhere }
     /// Whether this row is a post held from before a reblog was an item of its own, which
     /// arrived as a reblog by `boostedBy` (#290): it stands at its own publish time and says so,
     /// until a timeline brings that reblog again.
@@ -418,6 +438,8 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public init(_ note: Note) {
         self.init(content: note, as: note)
         isReblog = note.isReblog
+        reblogOnItsWay = note.isReblog && note.refsDue
+        reblogger = note.isReblog ? DummyPerson(making: note) : nil
     }
 
     /// One stored note drawn as a row, with the post it reblogs where it is a reblog and that
@@ -430,6 +452,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         self.init(content: target, as: note)
         isReblog = true
         reblogged = [DummyItem(target)]
+        reblogger = DummyPerson(making: note)
     }
 
     /// `content` drawn as a row that is `identity`'s: the same note for every row but a reblog's,
@@ -455,6 +478,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         boardKey = nil
         boardText = note.board
         postedAt = reblog ? identity.postedAt : blog?.postedAt ?? note.postedAt
+        publishedAt = blog?.postedAt ?? note.postedAt
         workRelated = false
         answering = Self.answering(note.reply)
         boostedBy = reblog ? identity.author : note.boostedBy
@@ -615,14 +639,17 @@ extension DummyConversation {
         var depths: [String: Int] = [:]
         if let rootID { depths[rootID] = 0 }
         var entries: [DummyThreadEntry] = []
-        for note in descendants where note.key.rowID != root.id {
+        // A reblog is in no thread (#290): it answers nothing. None reaches here — a thread's
+        // reads are of posts — and one that did would be drawn with no post, as a reblog made
+        // from one note alone is (`init(_:)`), so it is left out rather than drawn wrong.
+        for note in descendants where note.key.rowID != root.id && !note.isReblog {
             let parent = note.reply?.inReplyToId.flatMap { depths[$0] }
             let depth = (parent ?? 0) + 1
             if let id = note.statusID { depths[id] = depth }
             entries.append(DummyThreadEntry(item: DummyItem(note), depth: depth))
         }
         return DummyConversation(
-            ancestors: ancestors.filter { $0.key.rowID != root.id }.map(DummyItem.init),
+            ancestors: ancestors.filter { $0.key.rowID != root.id && !$0.isReblog }.map(DummyItem.init),
             post: root,
             descendants: entries
         )

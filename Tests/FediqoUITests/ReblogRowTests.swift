@@ -89,8 +89,9 @@ struct ReblogRowTests {
             #expect(row.isReblog && row.reblogUnheld)
             #expect(row.author == "Bob" && row.body.isEmpty && row.postedAt == Self.reblogged)
             #expect(row.statusID == nil && row.reblogged.isEmpty && row.actCopies.isEmpty)
-            #expect(DummyItemRow.reblogLine(row, language: .english) == "Reblogged a post no longer held here")
-            #expect(DummyItemRow.reblogLine(row, language: .taiwanese) == "轉發了一則這裡已不再留著的貼文")
+            #expect(DummyItemRow.reblogLine(row, language: .english) == nil, "the row is the reblog alone: it has no first line")
+            #expect(DummyItemRow.reblogNotice(row, language: .english) == "Reblogged a post this device no longer holds.")
+            #expect(DummyItemRow.reblogNotice(row, language: .taiwanese) == "轉發了一則這台裝置已不再留著的貼文。")
         }
     }
 
@@ -326,6 +327,20 @@ struct ReblogRowTests {
         #expect(unheld.reblogUnheld && unheld.body.isEmpty && unheld.attachments.isEmpty && unheld.spoiler == nil)
         #expect(unheld.favourited == nil && unheld.counts == DummyCounts() && unheld.statusID == nil)
         #expect(DummyItem(claimed, reblogging: post).body == "hello about cats")
+    }
+
+    @Test("A reblog is in no thread: one handed in among a post's answers, or among what it answers, is left out, never drawn as a reblog of nothing")
+    func aReblogIsInNoThread() {
+        let answer = Note(
+            id: "https://social.example/users/cyd/statuses/10", source: source, author: "Cyd", handle: "@cyd@social.example",
+            body: "an answer", postedAt: Self.published, categories: [], reply: Reply(inReplyToId: "9"), statusID: "10"
+        )
+        let thread = DummyConversation.around(
+            DummyItem(post), rootID: "9", ancestors: [reblog, answer], descendants: [answer, reblog]
+        )
+        #expect(thread.ancestors.map(\.id) == [answer.key.rowID])
+        #expect(thread.descendants.map(\.item.id) == [answer.key.rowID])
+        #expect(thread.inOrder.allSatisfy { !$0.isReblog })
     }
 
     @Test("Opening the reblog's row opens the post it reblogs; a post opens itself")
