@@ -51,13 +51,25 @@ public struct MastodonClient: Sendable {
         }
     }
 
-    public func trending(source: Source) async throws -> [Note] {
-        try await statuses(
+    /// How many trending posts one ask brings: a stretch of what is rising.
+    public static let trendsStretch = 20
+
+    /// What is rising on this source: one stretch of its trending posts, `offset` posts into the
+    /// list — the top of it where 0 (#288).
+    ///
+    /// **By how far into the list, not by a post**: a ranking has no "older than", and a source
+    /// pages it by an offset. It gives as far down as it chooses to and no further; a stretch
+    /// shorter than was asked for, or empty, is its "no more". The list moves between two asks,
+    /// so a post may come twice or be skipped — which the store settles, holding one row per
+    /// post, and which nothing here tries to repair.
+    public func trending(source: Source, offset: Int = 0) async throws -> [Note] {
+        try await listed(
             path: "/api/v1/trends/statuses",
-            limit: 20,
+            limit: Self.trendsStretch,
+            query: offset > 0 ? [URLQueryItem(name: "offset", value: String(offset))] : [],
             source: source,
             category: .trends
-        )
+        ).map(\.note)
     }
 
     /// Every shortcode this server has registered, folded the way a status's own list is.

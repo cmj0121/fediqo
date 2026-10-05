@@ -127,6 +127,7 @@
 "timeline.reload.failed" = "無法重新載入 %@。";
 "timeline.reload.unspoken" = "%1$@ 現在自稱是 %2$@，Fediqo 讀不了。它先前帶來的東西仍然都在。";
 "timeline.reload.stopped" = "已停止重新載入。";
+"timeline.trends.end" = "%@ 沒有更多趨勢貼文了。重新載入可以從頭再讀。";
 "timeline.gap.more" = "這裡還有來自 %@ 的貼文，捲到或按下這裡就會讀取。";
 "timeline.gap.missing" = "這裡可能缺少來自 %@ 的貼文，捲到或按下這裡就會往下讀到已有的貼文。";
 "timeline.gap.settled" = "%1$@：來源 %2$@ 已不再有這裡原本的貼文。";

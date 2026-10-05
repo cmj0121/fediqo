@@ -397,12 +397,15 @@ struct ListMoreTests {
         #expect(session.notes.first { $0.statusID == "2" }?.categories == [.home])
     }
 
-    @Test("A timeline asks only its own sources' own reads: Trends has no next stretch")
+    /// Trends read on since #288 (`TrendsReadOnTests`): what a timeline asks is still only its
+    /// own sources' own reads — the Mastodon's trending list, and never its public timeline or
+    /// the forum's board, which the Trends timeline does not read.
+    @Test("A timeline asks only its own sources' own reads: Trends asks what is rising, and nothing else")
     func onlyItsOwn() async {
-        let http = FixtureHTTP([:])
+        let http = FixtureHTTP([Self.trends: Self.page()])
         let session = await shell(http)
         await session.reload.more(.trends, in: session)
-        #expect(await http.requested.isEmpty)
+        #expect(await http.requested.map(\.absoluteString) == [Self.trends])
         #expect(!session.reload.running)
     }
 

@@ -127,6 +127,7 @@
 "timeline.reload.failed" = "Could not reload %@.";
 "timeline.reload.unspoken" = "%1$@ now answers as %2$@, which Fediqo does not read. What it brought here is still here.";
 "timeline.reload.stopped" = "Reload stopped.";
+"timeline.trends.end" = "%@ has no more trending posts to give. Reload to read from the top again.";
 "timeline.gap.more" = "More posts from %@ belong here. Reaching this reads them.";
 "timeline.gap.missing" = "Posts from %@ may be missing here. Reaching this reads down to what is held.";
 "timeline.gap.settled" = "%1$@: %2$@ no longer has the posts that lay here.";

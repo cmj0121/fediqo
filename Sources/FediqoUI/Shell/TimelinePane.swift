@@ -472,6 +472,9 @@ struct TimelinePane: View {
                                 .frame(height: ShellSpace.hair)
                         }
                     }
+                    // Which sources have no more of what is rising to give (#288). A search's
+                    // results are not a timeline, and end nowhere a source chose.
+                    if !searching { TrendsEndFoot(timeline: timeline, session: session) }
                 }
                 .scrollTargetLayout()
             }

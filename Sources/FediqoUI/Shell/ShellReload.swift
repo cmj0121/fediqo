@@ -113,6 +113,16 @@ final class ShellReload {
     @ObservationIgnored var deadline: Duration = .seconds(30)
     /// Where each stretch a listing reads toward its end has got to (#87).
     @ObservationIgnored var stretches = ShellStretches()
+    /// The sources whose trending list has been read to its end this run (#288) — what the
+    /// timeline's foot draws. `stretches`' own fact, kept here where a view can watch it, and
+    /// written only by `noteTrendsEnded`.
+    private(set) var trendsEnded: Set<String> = []
+
+    /// The foot's copy of which sources have no more of what is rising, brought up to date.
+    func noteTrendsEnded() {
+        let ended = Set(stretches.trendsEnded.map(\.host))
+        if ended != trendsEnded { trendsEnded = ended }
+    }
     /// Places reached while another ask for more was out, each read on as that one ends (#201).
     @ObservationIgnored var pendingReadOn = PendingReadOn()
     /// The hosts each running read of many sources — `r`'s, the wait's — is reading (#201).
@@ -1013,16 +1023,38 @@ final class ShellReload {
             }
             // Read on from the newest post held of it, not its newest stretch alone (#201).
             let publicRead = { await self.readOnPublic(client(.public), stamp: stamp, in: session) }
-            let trendsRead = { try await client(.trends).trending(source: stamp) }
+            // The top of what is rising. **Read by the reader's own reload, reading on starts
+            // from under it again** (#288) — and only then: the wait reads the same top every
+            // round, and starting over for it would fetch again what is held, ask again a source
+            // that had said it has no more, and say so again, every round. **And only once what
+            // it brought is in**: a reload stopped between the answer and the landing leaves
+            // reading on where it was, rather than under a top that never arrived.
+            let trendsCome = { () async -> Bool in
+                do {
+                    let notes = try await client(.trends).trending(source: stamp)
+                    try Task.checkCancellation()
+                    await session.store.ingest(notes, ifSourceHere: host)
+                    if revisits {
+                        self.stretches.readTrendsTop(
+                            Stretch(host: host, category: .trends), brought: Set(notes.map(\.key)),
+                            of: MastodonClient.trendsStretch
+                        )
+                        self.noteTrendsEnded()
+                    }
+                    return true
+                } catch {
+                    return Cancellation.happened(error)
+                }
+            }
             var read: Bool
             if let categories {
                 read = true
                 if categories.contains(.public) { read = await publicRead() && read }
-                if categories.contains(.trends) { read = await land(host, in: session, trendsRead) && read }
+                if categories.contains(.trends) { read = await trendsCome() && read }
             } else {
                 // The join's rule: a server with no trends still has a timeline, and the reverse.
                 let publicCame = await publicRead()
-                let trendsCame = await land(host, in: session, trendsRead)
+                let trendsCame = await trendsCome()
                 read = publicCame || trendsCame
             }
             return await readAsYou(source, for: categories, in: session) && read

@@ -284,6 +284,15 @@ open, `r` reloads that post and its thread, from any source, and not the timelin
 Pressing `r` again while a reload runs does not start a second one; Esc stops it. A source that fails says
 so, and the others still land. The selected post stays selected.
 
+Reading toward the end of a timeline asks its sources for the next stretch, with no key
+pressed. On Trends that is the next stretch of what is rising on each Mastodon source: what
+arrives carries the trends category and stands at its publish time like every other post —
+nothing here ranks it. A source that has no more to give is named at the foot of the timeline
+for as long as that is so, and is not asked again until `r` reads from the top; the wait
+reading the same sources between times changes none of that. One that fails says so, the
+others still land, and it is asked again. A forum's trends are its ranking lists, which have no next. A timeline that does not
+ask for trends by name reads on through time only.
+
 `/` opens one search field. Its pattern is matched anywhere in every field a post is known by:
 who wrote it, who boosted it, its text, its hashtags, its source, and its categories, by
 their English or translated names and by list and board names. `*` stands for any run of
