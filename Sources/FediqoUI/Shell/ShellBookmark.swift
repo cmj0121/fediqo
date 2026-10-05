@@ -78,6 +78,16 @@ extension ShellSession {
         var moved = false
         for host in mastodon.takeReadersChanged().sorted() {
             if await store.forgetReaderMarks(host: host) { moved = true }
+            // The reader of this source changed (#293). Gone — signed out, or ended by the
+            // server — its line of loads is dropped, as the reader's own sign-out drops it.
+            // Signed in — again, or as somebody new — the source is asked again from the start.
+            if mastodon.isSignedIn(host: host) {
+                await loads.readmit(host: host)
+                await store.unstall(host: host)
+            } else {
+                await loads.letGo(host: host)
+                refs.letGo(host: host)
+            }
         }
         // Only once who is signed in could be read: a locked Keychain is not everybody leaving.
         if !readerMarksSwept, mastodon.grantsKnown {

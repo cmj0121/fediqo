@@ -341,6 +341,23 @@ where it was and says it arrived as a reblog by that person, until a timeline br
 reblog again; from then the reblog is the row that timeline shows, and the post is shown by
 it only where it also arrives on its own.
 
+What a post refers to is read for it. When a post first arrives and the post it answers is
+not on this device — or a post it quotes that did not come with it — Fediqo asks the source
+that brought it for that one post, without your asking. The post that arrived is shown at
+once, and the line that names what it answers, or the quote, says that post is on its way
+until it has come. It is asked for once: read again, the post asks for nothing more, and a
+loaded post let go later is not brought back. Only the post referred to directly is read,
+never what that post refers to in turn. A post its source says no longer exists is not asked
+for again, and the line says it is gone at its source; a post that was read this way and
+later let go says it is no longer held; a read that fails is tried twice more, then left for this run and said so on the
+row, and asked again at the next launch. Each of these reads is listed with the others under
+Requests this run, is made only of your own source — as you, where you are signed in to it,
+and never unsigned in your place: when a sign-in ends, what your own timelines there still
+had to read this way is dropped with it — and waits its turn: a source is asked for one at a time,
+no more than five a minute, and less where it says to slow down. One arrival asks a source
+for at most ten such posts; the rest are read when their rows come near the screen. A post
+read this way is a post like any other, and stays for as long as the post that refers to it.
+
 Everything this device holds stands in its timelines. What a search brought back, what was
 read under a hashtag, the answers read when a post was opened, and a post another one quotes
 are posts like any other: each stands in All at the time it was posted, and stays there after

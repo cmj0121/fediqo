@@ -88,6 +88,19 @@ final class SourceWork {
         /// Pictures and emoji come by the dozen as a timeline scrolls; a row each would be a list
         /// nobody could read. They are one line per host, with a count.
         var gathers: Bool { self == .picture || self == .emoji }
+
+        /// Whether this is a read or an act of a source's own API, whose answer is the source
+        /// speaking about itself — what it says of how often it may be asked is heard (#293).
+        /// Everything else reaches wherever a post, a page or a directory points.
+        var isOfTheSource: Bool {
+            switch self {
+            case .timeline, .conversation, .lists, .search, .write, .reference, .signInCheck: true
+            case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
+                 .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
+                 .nearbyMove:
+                false
+            }
+        }
     }
 
     /// What one piece of work reads, by the name the reader knows it by. The built-ins are held
@@ -160,6 +173,8 @@ final class SourceWork {
     private struct Held: Sendable {
         var running: [Int: Running] = [:]
         var next = 0
+        /// Who is told what a source said about how often it may be asked (#293). See `hears`.
+        var hears: (@Sendable (_ host: String, _ answer: HTTPURLResponse) async -> Void)?
         /// Acts written since the last copy onto the main actor, oldest first. Only these: the
         /// record itself is the main actor's (`log`), so nothing under this lock grows with the
         /// run and a request's way out never copies it.
@@ -197,6 +212,29 @@ final class SourceWork {
     /// Starts a piece of work on `host` and writes it to the run's record under `source` — the
     /// source that pointed there, where the host is not that source's own (a picture, an emoji on
     /// another host). Nil where the host is the source.
+    /// Sets who is told what a source the person added said about how often it may be asked:
+    /// a 429, and the rate headers where an answer carries them (#293). **The one place every
+    /// answer passes** — a timeline read, a thread, an act, a load alike — so what any of them
+    /// hears holds the source's loads back, and no caller has to remember to say.
+    ///
+    /// Told before the answer is handed back, so by the time a read returns, what it heard has
+    /// been said: nothing is left on its way for a load to slip past.
+    nonisolated func hears(_ told: (@Sendable (_ host: String, _ answer: HTTPURLResponse) async -> Void)?) {
+        held.withLock { $0.hears = told }
+    }
+
+    /// One answer, as it came back. Only a source's own, and only where it says something.
+    nonisolated func heard(_ response: HTTPURLResponse, from host: String) async {
+        // Read by whoever is told, against the clock they wait by; here only whether there is
+        // anything to read, so an ordinary answer costs a status and three header lookups.
+        guard response.statusCode == 429
+            || ["Retry-After", "X-RateLimit-Remaining", "X-RateLimit-Reset"].contains(where: { response.value(forHTTPHeaderField: $0) != nil })
+        else { return }
+        let folded = Self.fold(host)
+        let told = held.withLock { held in held.added?.contains(folded) == true ? held.hears : nil }
+        await told?(folded, response)
+    }
+
     nonisolated func begin(
         host: String, for purpose: Purpose, name: Name? = nil, source: String? = nil,
         allowedBy: Allowance.ID? = nil
@@ -595,7 +633,17 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
             host: host, for: purpose, name: name, source: source, allowedBy: admission.allowedBy
         )
         defer { work.end(token) }
-        return try await Outward.$admitted.withValue(true) { try await body() }
+        let answer = try await Outward.$admitted.withValue(true) { try await body() }
+        // **Only the source's own word about itself is heard** (#293): an answer to a read of
+        // the source's own API, from the source's own host. Not a picture, an emoji or a page —
+        // fetched from wherever a post points — and not an answer that came back from another
+        // host: a read that carries no sign-in follows a redirect off its origin
+        // (`URLSessionClient.mayFollow`), and where it lands is not the source speaking.
+        if source == nil, purpose.isOfTheSource, case .source = admission,
+           answer.1.url?.host().map(SourceWork.fold) == SourceWork.fold(host) {
+            await work.heard(answer.1, from: host)
+        }
+        return answer
     }
 }
 

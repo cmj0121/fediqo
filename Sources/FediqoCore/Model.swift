@@ -632,6 +632,20 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// copy on its way in, not about the post**: the store reads it as the copy lands and keeps
     /// none of it, and every note made from another starts again from `unsaid`.
     public var asked: ReadMoment = .unsaid
+    /// Whether the load this item owes was given up for this run (#293): tried as often as a
+    /// load is, or its source given up. **Of this run only, and never written down**: the store
+    /// says it as it hands the note out, a launch starts with none, and `refsDue` — which is
+    /// written — is what a later run asks again by.
+    public var refsStalled = false
+    /// Which kinds of post this item refers to are named and not held (#293): loaded for it —
+    /// or come with it — and since let go. **Said by the store as it hands the note out**, from
+    /// what it holds at that moment, and never written down: it is a fact about the store, and
+    /// the reference's name is all the item keeps.
+    public var refsUnheld: Set<Reference.Kind> = []
+    /// Which kinds of post this item refers to were asked for this run and came back as nothing
+    /// to keep (#293) while the item still owes another load: not asked again this run, and
+    /// not on their way. Said by the store as it hands the note out; of this run only.
+    public var refsTried: Set<Reference.Kind> = []
 
     public init(
         id: String,
@@ -991,6 +1005,21 @@ public struct Note: Identifiable, Hashable, Sendable {
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
             editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
+        )
+    }
+
+    /// This note referring by `references` — what a load found the names of (#293). Everything
+    /// else is as it was.
+    func referring(by references: [Reference]) -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board, postedAt: postedAt, categories: categories, reply: reply,
+            boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
+            favourited: favourited, bookmarked: bookmarked, audience: audience, avatarURL: avatarURL,
+            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
+            url: url, counts: counts, statusID: statusID, opening: opening,
+            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote, kept: kept,
+            editedAt: editedAt, earlier: earlier, language: language, refs: references, refsDue: refsDue
         )
     }
 

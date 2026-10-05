@@ -748,6 +748,10 @@ struct KeepsTopRow: ViewModifier {
     func body(content: Content) -> some View {
         content.onScrollTargetVisibilityChange(idType: String.self) { visible in
             session.scrolledTop = visible.first
+            // What the rows on screen still owe goes first in its source's line (#293).
+            // Only rows that owe: a screen of rows that owe nothing asks nothing of anybody.
+            let owing = visible.filter(session.owingRows.contains)
+            if !owing.isEmpty { Task { await session.refs.near(owing, in: session) } }
         }
     }
 }

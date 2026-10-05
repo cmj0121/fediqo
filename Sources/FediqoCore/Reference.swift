@@ -32,14 +32,26 @@ public struct Reference: Hashable, Sendable {
     /// Where a quote stands (`Quote.state`). Nothing on other kinds.
     public let state: Quote.State?
 
+    /// Whether the target's source said it no longer exists when it was asked for (#293): gone,
+    /// which is said where the reference is shown and never asked about again. A fact of this
+    /// item's reference, learned once; nothing of the target is kept to remember it by.
+    public let gone: Bool
+
     public init(
-        kind: Kind, id: String? = nil, statusID: String? = nil, handle: String? = nil, state: Quote.State? = nil
+        kind: Kind, id: String? = nil, statusID: String? = nil, handle: String? = nil, state: Quote.State? = nil,
+        gone: Bool = false
     ) {
         self.kind = kind
         self.id = id
         self.statusID = statusID
         self.handle = kind == .answers ? handle : nil
         self.state = kind == .quotes ? state : nil
+        self.gone = gone
+    }
+
+    /// This reference with its target named, or said to be gone.
+    func settled(id: String? = nil, gone: Bool = false) -> Reference {
+        Reference(kind: kind, id: id ?? self.id, statusID: statusID, handle: handle, state: state, gone: gone || self.gone)
     }
 
     /// How many references an item may carry. A status says at most one of each kind; this is
@@ -86,9 +98,25 @@ extension Reference {
     /// `held` that they cannot state** — a reblog's. Each place a note is rebuilt from another
     /// names its references this way, so one that `reply` and `quote` cannot re-derive survives a
     /// reload, a read again, a revision and the reader-marks sweep.
+    ///
+    /// **And the target's name, where a load found it** (#293). What an item answers is named by
+    /// its source's own id until the post itself has been read; once it has, the reference
+    /// carries the post's `Note.id` too, and that is not in `reply` to be worked out again. So a
+    /// reference `held` had named is still named, where it is still the same reference.
     public static func carried(_ held: [Reference], reply: Reply?, quote: Quote?) -> [Reference] {
-        derived(reply: reply, quote: quote) + held.filter { $0.kind == .reblogs }
+        derived(reply: reply, quote: quote).map { fresh in
+            guard fresh.id == nil, let statusID = fresh.statusID,
+                  let known = held.first(where: { $0.kind == fresh.kind && $0.statusID == statusID && ($0.id != nil || $0.gone) })
+            else { return fresh }
+            return fresh.settled(id: known.id, gone: known.gone)
+        } + held.filter { $0.kind == .reblogs }
     }
+}
+
+extension ProtocolKind {
+    /// Whether what an item of this kind of source refers to is loaded for it (#293). A
+    /// Mastodon's, and no other's: #293 is about no other source.
+    public var loadsReferences: Bool { self == .mastodon }
 }
 
 extension Reply {
@@ -134,7 +162,38 @@ extension Note {
 
     /// The items held for as long as this one is, whatever their own age: the post it quotes
     /// (#214) and the post it reblogs (#290). What the limits leave while this item stays.
-    var heldWith: [NoteKey] { [quotedKey, reblogKey].compactMap { $0 } }
+    ///
+    /// **And the post it answers, once that post was loaded for it** (#293): the reference then
+    /// names it, and a post fetched because this item arrived is not let go from under it.
+    var heldWith: [NoteKey] {
+        var keys = [quotedKey, reblogKey].compactMap { $0 }
+        for reference in refs where reference.kind != .reblogs {
+            if let id = reference.id { keys.append(NoteKey(host: source.host, id: id)) }
+        }
+        return keys
+    }
+
+    /// What this item would have loaded for it (#293): the source's own id of each post it
+    /// refers to that could be asked for by that id — the post it answers, and a post it quotes
+    /// that did not come with it. **Never a reblog's target**: that comes in the reblog's own
+    /// payload or not at all, and a reference to it is not a thing to ask for.
+    ///
+    /// **Only what could be asked for.** A reference already named or said to be gone is
+    /// settled. And an id that is no path segment — which is all a request for one post can be
+    /// made of — is nothing to ask for, so such a reference owes nothing: it is left out here,
+    /// at the door, and never takes a place in a source's line.
+    public var askable: [(kind: Reference.Kind, statusID: String)] {
+        refs.compactMap { reference in
+            guard let statusID = reference.statusID, reference.id == nil, !reference.gone,
+                  ListSubscription.isPathSegment(statusID)
+            else { return nil }
+            switch reference.kind {
+            case .answers: return (.answers, statusID)
+            case .quotes: return reference.state == .accepted ? (.quotes, statusID) : nil
+            case .reblogs: return nil
+            }
+        }
+    }
 
     /// Whether this row, held from before a reblog was an item of its own, says it arrived as
     /// the reblog `reblog` is: by the same person, as far as the row wrote down who.

@@ -89,6 +89,14 @@ final class ShellSession {
     /// asking, and so held to a pace per source. Letting a source go — removed, cleared, signed
     /// out — drops what waits in its line. A test hands in one with a clock it turns.
     @ObservationIgnored var loads = LoadPacer()
+    /// What this session has asked its sources for of what items owe (#293).
+    @ObservationIgnored let refs = ShellRefs()
+    /// Whether this run asks for what items refer to at all. Not where the store was not read
+    /// at launch (#295): a run that holds nothing it may write asks for nothing nobody pressed
+    /// for. Set once by the app (`loadsStartWith`); a test sets its own.
+    @ObservationIgnored var startsLoads = ShellSession.loadsStartWith
+    /// What a new session's `startsLoads` is: whether this launch read its store.
+    static var loadsStartWith = true
     /// What the system's shared stores keep of a source, dropped as it is signed out of or
     /// removed (#221). The system's own; a test hands in its own jar.
     @ObservationIgnored var jar = SystemJar()
@@ -306,6 +314,16 @@ final class ShellSession {
         }
         return builtTextIndex ?? TextIndex([])
     }
+    /// The rows that still owe a load and were not given up on (#293), by row id: what the
+    /// list asks before it tells the loader a row is near, so a screen of rows that owe nothing
+    /// — nearly every screen — asks the store nothing.
+    var owingRows: Set<String> {
+        if let builtOwingRows { return builtOwingRows }
+        let built = Set(notes.lazy.filter { $0.refsDue && !$0.refsStalled }.map(\.key.rowID))
+        builtOwingRows = built
+        return built
+    }
+    @ObservationIgnored private var builtOwingRows: Set<String>?
     @ObservationIgnored private var builtTextIndex: TextIndex?
     @ObservationIgnored private(set) var textIndexIsCurrent = false
 
@@ -361,6 +379,7 @@ final class ShellSession {
             recount()
             textIndexIsCurrent = false
             builtReblogTargets = nil
+            builtOwingRows = nil
             notesRevision += 1
             heldRevision += 1
         }
@@ -2385,6 +2404,11 @@ final class ShellSession {
             renewedConversations = heldRevision
         }
         rebuildQueries()
+        // What the newest arrivals owe is asked for, and what was asked for rows since let go
+        // is taken back (#293). Only where the items changed. **Started here and not waited
+        // for**: adopting is what every landing and every press waits on, and asking a source's
+        // line for a load is not part of having adopted.
+        if all != nil { refs.landing(in: self) }
     }
 
     /// `heldRevision` as the open conversations last drew from what is held.
@@ -2579,6 +2603,7 @@ final class ShellSession {
         // Remove, which clears. At this function's first await and not before it: everything
         // above must have happened before anything can run between.
         await loads.letGo(host: host)
+        refs.forget(host: host)
         await emoji.forget(host: host)
         emojis.forget(host: host)
         if keepingRows { pictures.letGo(host: host) } else { pictures.forget(host: host) }
@@ -2780,6 +2805,7 @@ final class ShellSession {
         if kind(of: host) == .mastodon {
             stopReadingAsYou(host: host)
             await loads.letGo(host: host)
+            refs.letGo(host: host)
             await mastodon.signOut(host: host)
             // What the source said this reader did to its posts goes with the sign-in, now and
             // on disk (#285) — before anything can take the store away with it still said.

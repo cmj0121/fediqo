@@ -266,6 +266,14 @@
 "item.isReply" = "A reply";
 "item.replyingTo" = "Reply to %@";
 "item.boostedBy" = "Reblogged by %@";
+"item.reply.onItsWay" = "%@ — that post is on its way";
+"item.reply.stalled" = "%@ — that post could not be read for now";
+"quote.short.onItsWay" = "quoted post on its way";
+"quote.short.stalled" = "quoted post not read for now";
+"quote.short.gone" = "quoted post gone at its source";
+"quote.short.unheld" = "quoted post no longer held";
+"item.reply.gone" = "%@ — that post is gone at its source";
+"item.reply.unheld" = "%@ — that post is no longer held";
 "item.arrivedAsReblogBy" = "Arrived as a reblog by %@";
 "item.reblog.unheld" = "Reblogged a post this device no longer holds.";
 "item.reblog.onItsWay" = "Reblogged a post that is on its way.";

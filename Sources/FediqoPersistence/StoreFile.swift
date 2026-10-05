@@ -689,6 +689,12 @@ private struct ReferenceRow: Codable {
     var statusID: String?
     var handle: String?
     var state: String?
+    /// `Reference.gone` (#293): written only where true, so every cell written before it — and
+    /// every reference that is not gone — is the text it always was. **A key, and no migration**:
+    /// this reader takes a cell with keys it does not know and ignores them, so a build from
+    /// before this key reads such a cell as the same references, not gone. (No such build opens
+    /// this store — it is past `v11-one-holding` — but the cell would not stop one.)
+    var gone: Bool?
 
     init(_ reference: Reference) {
         kind = reference.kind.rawValue
@@ -696,6 +702,7 @@ private struct ReferenceRow: Codable {
         statusID = reference.statusID
         handle = reference.handle
         state = reference.state?.rawValue
+        gone = reference.gone ? true : nil
     }
 
     /// The most text a cell of references is read from: far past what `Reference.most` of them
@@ -726,7 +733,7 @@ private struct ReferenceRow: Codable {
             guard let kind = Reference.Kind(rawValue: row.kind) else { return nil }
             references.append(Reference(
                 kind: kind, id: row.id, statusID: row.statusID, handle: row.handle,
-                state: kind == .quotes ? Quote.State(wire: row.state) : nil
+                state: kind == .quotes ? Quote.State(wire: row.state) : nil, gone: row.gone == true
             ))
         }
         return references

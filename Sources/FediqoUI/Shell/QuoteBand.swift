@@ -71,9 +71,46 @@ struct QuoteBand: View {
 
     /// What the decorator says: who is quoted, or in a few words why the quote cannot be shown.
     /// **No `default:`**, for `sentence`'s reason.
-    static func decorator(_ quote: Quote, language: DummyLanguage? = nil) -> String {
+    /// Where the load of a quoted post that did not come with its quote stands (#293).
+    enum Loading: Equatable {
+        case onItsWay
+        /// Given up for this run.
+        case stalled
+        /// Asked for, and its source said there is no such post.
+        case gone
+        /// It was here and has since been let go.
+        case unheld
+
+        /// Of `item`'s quote, or nothing where there is nothing of the kind to say.
+        init?(_ item: DummyItem) {
+            if item.owes.contains(.quotes) {
+                self = item.owesStalled ? .stalled : .onItsWay
+            } else if item.refsGone.contains(.quotes) {
+                self = .gone
+            } else if item.refsUnheld.contains(.quotes) {
+                self = .unheld
+            } else {
+                return nil
+            }
+        }
+
+        var key: String {
+            switch self {
+            case .onItsWay: "quote.short.onItsWay"
+            case .stalled: "quote.short.stalled"
+            case .gone: "quote.short.gone"
+            case .unheld: "quote.short.unheld"
+            }
+        }
+    }
+
+    static func decorator(_ quote: Quote, loading: Loading? = nil, language: DummyLanguage? = nil) -> String {
         if let post = quote.post {
             return String(format: L10n.t("quote.decorator", language: language), post.handle)
+        }
+        // Accepted, not here in full, and asked for: say that, and not that it came as an id.
+        if quote.state == .accepted, let loading {
+            return L10n.t(loading.key, language: language)
         }
         let key: String
         switch quote.state {
@@ -120,12 +157,14 @@ struct QuoteMark: View {
     var lifted: Bool = false
     /// Whether the quoting post is covered, which covers what it quotes too.
     var covered: Bool = false
+    /// Where the load of the quoted post stands, where one is owed (#293).
+    var loading: QuoteBand.Loading?
     var onOpen: (() -> Void)?
 
     var body: some View {
         HStack(spacing: ShellSpace.tight) {
             Image(systemName: "quote.opening")
-            Text(QuoteBand.decorator(quote))
+            Text(QuoteBand.decorator(quote, loading: loading))
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(QuoteBand.spokenMark(quote, lifted: lifted, covered: covered))

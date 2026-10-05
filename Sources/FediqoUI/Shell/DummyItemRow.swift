@@ -413,7 +413,9 @@ struct DummyItemRow: View {
             if !item.isReblog, let line = Self.reblogLine(item) { boosted(line) }
             // Beside the booster, on the same one line (#214): a boost of a quote is one line.
             if let quote = item.quote {
-                QuoteMark(quote: quote, lifted: quoteLifted, covered: covered, onOpen: openQuote)
+                QuoteMark(
+                    quote: quote, lifted: quoteLifted, covered: covered, loading: QuoteBand.Loading(item), onOpen: openQuote
+                )
             }
             if let moment = Self.reblogTime(item) {
                 Spacer(minLength: ShellSpace.snug)
@@ -449,6 +451,30 @@ struct DummyItemRow: View {
         guard let who = item.boostedBy else { return nil }
         let key = item.isReblog ? (item.reblogUndone ? "item.reblog.undone" : "item.boostedBy") : "item.arrivedAsReblogBy"
         return String(format: L10n.t(key, language: language), who)
+    }
+
+    /// What a row says of the post it answers: whom, where its source named them — and, while
+    /// that post is being loaded for it (#293), that it is on its way; or, where the load was
+    /// given up for this run, that it could not be read for now. Once the post is held, or was
+    /// never to be loaded, the line is the plain one it has always been.
+    static func replyLine(_ item: DummyItem, language: DummyLanguage? = nil) -> String {
+        let plain: String = switch item.answering {
+        case .handle(let handle): String(format: L10n.t("item.replyingTo", language: language), handle)
+        default: L10n.t("item.isReply", language: language)
+        }
+        let key: String
+        if item.owes.contains(.answers) {
+            key = item.owesStalled ? "item.reply.stalled" : "item.reply.onItsWay"
+        } else if item.refsGone.contains(.answers) {
+            // Asked for once, and its source said there is no such post.
+            key = "item.reply.gone"
+        } else if item.refsUnheld.contains(.answers) {
+            // It was here — loaded for this post — and has since been let go.
+            key = "item.reply.unheld"
+        } else {
+            return plain
+        }
+        return String(format: L10n.t(key, language: language), plain)
     }
 
     /// What a reblog's row says in the place of a post it cannot show (#290, #293): that the post
@@ -504,12 +530,7 @@ struct DummyItemRow: View {
     private var answered: some View {
         HStack(spacing: ShellSpace.tight) {
             Image(systemName: "arrowshape.turn.up.left")
-            switch item.answering {
-            case .handle(let handle):
-                Text(String(format: L10n.t("item.replyingTo"), handle))
-            default:
-                Text(L10n.t("item.isReply"))
-            }
+            Text(Self.replyLine(item))
         }
     }
 

@@ -221,6 +221,18 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// The row says the post is on its way, in the place it will stand. Nothing sets that mark
     /// on a reblog until loading is built; the row is drawn for it already.
     public private(set) var reblogOnItsWay = false
+    /// Which of the posts this row's post refers to are still to come (#293): loads it owes that
+    /// have not ended — what it answers, what it quotes. Empty on a row that owes nothing, which
+    /// is nearly every row. The places that show those posts say they are on their way.
+    public private(set) var owes: Set<Reference.Kind> = []
+    /// Whether those loads were given up for this run: the places say so instead, and a later
+    /// run asks again.
+    public private(set) var owesStalled = false
+    /// Which of the posts it refers to its source said are gone (#293), and which were here and
+    /// are no longer held. The places that would show them say so.
+    public private(set) var refsGone: Set<Reference.Kind> = []
+    public private(set) var refsUnheld: Set<Reference.Kind> = []
+
     /// Who reblogged, as a person to open — the reblog's own maker, whose page a press on the
     /// row's first line opens. Nothing on anything but a reblog.
     public private(set) var reblogger: DummyPerson?
@@ -440,6 +452,12 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         isReblog = note.isReblog
         reblogOnItsWay = note.isReblog && note.refsDue
         reblogger = note.isReblog ? DummyPerson(making: note) : nil
+        // Less what was asked for this run and came back as nothing to keep: that is not on
+        // its way, and its place says only what it always said.
+        owes = note.refsDue ? Set(note.askable.map(\.kind)).subtracting(note.refsTried) : []
+        owesStalled = note.refsStalled
+        refsGone = Set(note.refs.filter(\.gone).map(\.kind))
+        refsUnheld = note.refsUnheld
     }
 
     /// One stored note drawn as a row, with the post it reblogs where it is a reblog and that

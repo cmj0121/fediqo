@@ -163,23 +163,29 @@ struct ReferenceTests {
         #expect(held?.refs == Reference.derived(reply: held?.reply, quote: held?.quote))
     }
 
-    @Test("Whether an item's references are still to be asked for is this device's own: no reload, no reading again, no later copy and no mark taken off moves it")
+    @Test("Whether an item's references are still to be asked for is this device's own: no reload, no reading again, no later copy and no keeping moves it; the sign-in it arrived through ending drops it")
     func dueIsThisDevicesOwn() async {
         #expect(Self.note().refsDue == false, "off is the rest state")
-        let store = ItemStore(sources: [Self.source], notes: [Self.note(refsDue: true)], keepingWhatIsOwed: true)
+        // A row that truly owes: it answers a post this device does not hold. One that could
+        // owe nothing has the mark taken off at launch (#293).
+        let owes = Reply(inReplyToId: "41")
+        let store = ItemStore(sources: [Self.source], notes: [Self.note(reply: owes, refsDue: true)])
         func due() async -> Bool? { await store.all().first?.refsDue }
 
-        await store.ingest([Self.note(body: "hello", refsDue: false)], ifSourceHere: Self.source.host)
+        await store.ingest([Self.note(body: "hello", reply: owes, refsDue: false)], ifSourceHere: Self.source.host)
         #expect(await due() == true, "a reload's copy took it off")
-        await store.refresh([Self.note(body: "edited", refsDue: false)], ifSourceHere: Self.source.host)
+        await store.refresh([Self.note(body: "edited", reply: owes, refsDue: false)], ifSourceHere: Self.source.host)
         #expect(await due() == true, "reading the post again took it off")
-        await store.ingest([Self.note(body: "later", refsDue: false, editedAt: Self.origin.addingTimeInterval(60))], ifSourceHere: Self.source.host)
+        await store.ingest([Self.note(body: "later", reply: owes, refsDue: false, editedAt: Self.origin.addingTimeInterval(60))], ifSourceHere: Self.source.host)
         #expect(await due() == true, "a later copy took it off")
-        await store.refresh([Self.note(body: "stale", refsDue: false)], ifSourceHere: Self.source.host)
+        await store.refresh([Self.note(body: "stale", reply: owes, refsDue: false)], ifSourceHere: Self.source.host)
         #expect(await due() == true, "an earlier copy took it off")
-        #expect(await store.forgetReaderMarks(host: Self.source.host) == false)
         await store.setKept(true, for: NoteKey(host: Self.source.host, id: "https://one.example/1"))
         #expect(await due() == true)
+        // One thing does: the sign-in this item arrived through ending (#293). What a reader's
+        // own timeline left owing is dropped with their marks, and not asked for in their absence.
+        #expect(await store.forgetReaderMarks(host: Self.source.host))
+        #expect(await due() == false)
 
         // And the other way: a copy that says it is due does not make a held one so.
         let settled = ItemStore(sources: [Self.source], notes: [Self.note()])
@@ -190,7 +196,7 @@ struct ReferenceTests {
 
     @Test("A store read back brings no row still owing a load: what another device had yet to ask for is not this device's to ask")
     func aStoreReadBackOwesNothing() async {
-        let store = ItemStore(sources: [Self.source], notes: [Self.note("0", refsDue: true)], keepingWhatIsOwed: true)
+        let store = ItemStore(sources: [Self.source], notes: [Self.note("0", reply: Reply(inReplyToId: "41"), refsDue: true)])
         #expect(await store.all().first?.refsDue == true, "the premise: a row that owes")
         let reblog = [Reference(kind: .reblogs, id: "https://one.example/9")]
         await store.replace(sources: [Self.source], notes: [
@@ -201,15 +207,18 @@ struct ReferenceTests {
         #expect(now.first { $0.statusID == "2" }?.refs == reblog, "and nothing else of the row is touched")
     }
 
-    @Test("A store opened at launch brings no row still owing a load: nothing asks for what an item refers to yet, so nothing would ever take the mark off")
-    func aLaunchOwesNothing() async {
+    @Test("A store opened at launch keeps what its rows still owe and could still ask for; a row that says it owes and has nothing to ask for — a reblog, a post that refers to nothing — has the mark taken off")
+    func aLaunchKeepsWhatIsOwed() async {
         let reblog = Note(
             id: "r", source: Self.source, author: "Bob", handle: "@bob", body: "", postedAt: Self.origin,
             categories: [.home], refs: [Reference(kind: .reblogs, id: "https://one.example/9")], refsDue: true
         )
-        let store = ItemStore(sources: [Self.source], notes: [Self.note("0", refsDue: true), reblog])
-        #expect(await store.all().allSatisfy { !$0.refsDue })
-        #expect(await store.all().first { $0.isReblog }?.refs == reblog.refs, "and nothing else of the row is touched")
+        let store = ItemStore(sources: [Self.source], notes: [
+            Self.note("0", reply: Reply(inReplyToId: "41"), refsDue: true), Self.note("1", refsDue: true), reblog,
+        ])
+        #expect(Set(await store.all().filter { $0.refsDue }.map(\.id)) == ["https://one.example/0"])
+        #expect(await store.all().allSatisfy { !$0.refsStalled }, "and nothing is given up for a run that has only begun")
+        #expect(await store.all().first { $0.isReblog }?.refs == reblog.refs, "nothing else of the row is touched")
     }
 
     @Test("Two notes that differ only in what they refer to, or in whether that is still to be asked for, are not the same note")

@@ -379,6 +379,44 @@ struct ReferenceStoreTests {
         #expect(await onto.store.all().first { $0.id == "kept-reblog" }?.kept == true)
     }
 
+    @Test("That a referred post is gone at its source is written in the references cell as one more key, only where it is so, and read back; a cell with a key this build does not know reads as the references it has")
+    func goneInTheCell() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let gone = [Reference(kind: .answers, statusID: "41", handle: "@bob", gone: true)]
+        let notes = [
+            Self.note("1", reply: Reply(handle: "@bob", inReplyToId: "41"), refs: gone),
+            Self.note("22", reply: Reply(handle: "@bob", inReplyToId: "42")),
+        ]
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: notes)
+        let written = try cells(dir)
+        #expect(written["1"]?.refs == #"[{"gone":true,"handle":"@bob","kind":"answers","statusID":"41"}]"#)
+        #expect(written["22"]?.refs == #"[{"handle":"@bob","kind":"answers","statusID":"42"}]"#, "a reference that is not gone is the text it always was")
+        #expect(StoreFile.open(at: dir).notes == notes)
+
+        // The post turns up after all: read at launch beside it, the reference is named, and a
+        // save writes the cell without the key.
+        let found = Note(
+            id: "p41", source: Self.mastodon, author: "Bob", handle: "@bob", body: "here after all",
+            postedAt: PackagerFixture.origin, categories: [.public], statusID: "41"
+        )
+        let store = ItemStore(sources: [Self.mastodon], notes: notes + [found])
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: await store.snapshot().notes)
+        #expect(try cells(dir)["1"]?.refs == #"[{"handle":"@bob","id":"p41","kind":"answers","statusID":"41"}]"#)
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: notes)
+
+        // A key from a build to come: ignored, and the references it sits among are read.
+        try await DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).write { db in
+            try db.execute(sql: #"UPDATE note SET refs = '[{"handle":"@bob","kind":"answers","statusID":"42","seen":7,"later":{"a":1}}]' WHERE id = '22'"#)
+            try db.execute(sql: #"UPDATE note SET refs = '[{"gone":"yes","kind":"answers","statusID":"41"}]' WHERE id = '1'"#)
+        }
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.trouble == nil && opened.setAside == nil)
+        #expect(opened.notes.first { $0.id == "22" }?.refs == [Reference(kind: .answers, statusID: "42", handle: "@bob")])
+        // A `gone` that is no yes-or-no is a cell that will not read: the row is its reply again, not gone.
+        #expect(opened.notes.first { $0.id == "1" }?.refs == [Reference(kind: .answers, statusID: "41", handle: "@bob")])
+    }
+
     @Test("A cell that reads but says more than an item may hold, or names longer than a name is, is held to the bounds every item is")
     func aCellPastTheBounds() async throws {
         let dir = scratch()

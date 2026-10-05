@@ -265,6 +265,14 @@
 "item.isReply" = "一則回覆";
 "item.replyingTo" = "回覆 %@";
 "item.boostedBy" = "由 %@ 轉發";
+"item.reply.onItsWay" = "%@——那則貼文還在路上";
+"item.reply.stalled" = "%@——那則貼文暫時讀不到";
+"quote.short.onItsWay" = "引用的貼文還在路上";
+"quote.short.stalled" = "引用的貼文暫時讀不到";
+"quote.short.gone" = "引用的貼文已從來源消失";
+"quote.short.unheld" = "引用的貼文已不再留著";
+"item.reply.gone" = "%@——那則貼文已從來源消失";
+"item.reply.unheld" = "%@——那則貼文已不再留著";
 "item.arrivedAsReblogBy" = "因 %@ 的轉發而到來";
 "item.reblog.unheld" = "轉發了一則這台裝置已不再留著的貼文。";
 "item.reblog.onItsWay" = "轉發了一則還在路上的貼文。";

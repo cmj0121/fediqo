@@ -117,20 +117,10 @@ public actor ItemStore {
     /// host, the first one winning as `add` has it, and one row per `NoteKey`, the later copy
     /// winning outright — a snapshot is one moment written once, not two reads to merge.
     ///
-    /// **No row comes in still owing a load** (`Note.refsDue`, #293), as none does through
-    /// `replace`. Nothing asks for what an item refers to yet, so a mark read from a file would
-    /// never be taken off: a reblog whose post is not held would say its post is on its way for
-    /// good. **The step that builds the asking (U6) is where this changes** — a launch then
-    /// keeps what the last run still owed and asks for it. `keepingWhatIsOwed` is that door,
-    /// open today only to a test that needs a row that owes.
-    public init(
-        sources: [Source], notes arriving: [Note], said: [SourceProfile] = [], keepingWhatIsOwed: Bool = false
-    ) {
-        let incoming = keepingWhatIsOwed ? arriving : arriving.map { note in
-            var settled = note
-            settled.refsDue = false
-            return settled
-        }
+    /// **A row that still owes a load comes in still owing it** (`Note.refsDue`, #293): the last
+    /// run did not get to it, and this one asks for it — within the pace every load keeps
+    /// (`LoadPacer`). Only a store laid in whole from elsewhere owes nothing (`replace`).
+    public init(sources: [Source], notes incoming: [Note], said: [SourceProfile] = []) {
         for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
             sourceList.append(source)
         }
@@ -148,6 +138,10 @@ public actor ItemStore {
             arrival[note.key] = arrivals
             arrivals += 1
         }
+        // What the file says is owed is settled against what the file holds (#293): a post
+        // waited for that is here is named and no longer owed, and a row that could never have
+        // owed — a reblog, one with nothing to ask for — does not go on saying it does.
+        Self.settleOwing(in: &notes, of: nil)
     }
 
     /// Everything here replaced by `sources` and `notes` in one hop — what a read back leaves
@@ -305,7 +299,7 @@ public actor ItemStore {
 
     /// `ingest(_:)`'s landing. `exempt` takes `incoming` in whatever its age: the posts a post
     /// read again quotes (#214), which the keep window does not cut while it quotes them.
-    private func admit(_ incoming: [Note], exempt: Bool) {
+    private func admit(_ incoming: [Note], exempt: Bool, owing: Bool = true) {
         guard !incoming.isEmpty else { return }
         // A copy of a row the person keeps is taken in whatever its age (#284): the row is here
         // past the window, and what its source says of it now is still news about it.
@@ -337,12 +331,18 @@ public actor ItemStore {
             guard withinRetention(note) || notes[note.key]?.kept == true else { return false }
             return !(orphaned.contains(note.key) && note.categories.isEmpty && notes[note.key] == nil)
         }
-        let incoming = admitted + admitted.compactMap(\.quotedNote)
+        // **What an item refers to and brought with it is taken in with it** (#214, #293): the
+        // post a post quotes, where its source sent that post along — at no request. It is an
+        // item like any other from here, and one taken in this way owes no load of its own:
+        // what is loaded for an item is the item's direct target and nothing further.
+        let brought = admitted.compactMap(\.quotedNote)
+        let incoming = admitted + brought
+        var arrived: [NoteKey] = []
         var moved = false
         var recounted = false
         var shown = false
         var replies = false
-        for note in incoming {
+        for (place, note) in incoming.enumerated() {
             let key = note.key
             if let existing = notes[key] {
                 // **A row does not change what it is** (#290). A reblog and a post are never one
@@ -380,7 +380,10 @@ public actor ItemStore {
             } else {
                 var note = note
                 note.asked = .unsaid
+                // Never a load a copy brought in with it, from a file or another device.
+                note.refsDue = false
                 notes[key] = note
+                if owing, place < admitted.count { arrived.append(key) }
                 arrival[key] = arrivals
                 arrivals += 1
                 shown = shown || !note.isTopicReply
@@ -416,6 +419,30 @@ public actor ItemStore {
             }
             notes[key] = plain
             notes[reblog.key] = held
+            moved = true
+            shown = true
+        }
+        // **An item that has just arrived owes a load where something it refers to is not held**
+        // (#293) — judged once, here, after the whole landing is in, so a post and the one it
+        // answers arriving together owe nothing. Only an item's first arrival: one held already,
+        // read again, asks for nothing more, and a target let go later is not asked for again.
+        if !arrived.isEmpty {
+            // The post a reblog in this landing reblogs came with it, as a quoted post does: it
+            // is what an item refers to, and owes nothing — unless it also arrived on its own.
+            let carried = Set(admitted.compactMap(\.reblogKey))
+            for key in arrived {
+                // Every arrival that refers to a post by its source's id is looked at once: the
+                // settling below names what is held and leaves owing only what is not.
+                guard let note = notes[key], note.source.kind.loadsReferences,
+                      !(carried.contains(key) && note.categories.isEmpty), !note.askable.isEmpty
+                else { continue }
+                notes[key]?.refsDue = true
+            }
+        }
+        // **And what was owed before is settled on sight** (#293): a post some held item was
+        // waiting for may be among what just landed — brought by a timeline, a thread, another
+        // item's load — and that item then owes nothing and names it, whoever fetched it.
+        if settleOwing(of: Set(incoming.map(\.key.host))) {
             moved = true
             shown = true
         }
@@ -490,7 +517,8 @@ public actor ItemStore {
         // name one this device has not held yet.
         let quoted = held.compactMap(\.quotedNote)
         let before = revision
-        if !quoted.isEmpty { admit(quoted, exempt: true) }
+        // Brought by the post that quotes them, and so owing no load of their own (#293).
+        if !quoted.isEmpty { admit(quoted, exempt: true, owing: false) }
         return moved || revision != before
     }
 
@@ -932,8 +960,259 @@ public actor ItemStore {
     /// not an item, and is handed over by `replies()`.
     public func all() -> [Note] {
         let arrival = self.arrival
+        let stalled = self.stalled
         return notes.values.filter { !$0.isTopicReply }
+            .map { note in
+                // Named and not held: asked of what is held now, for the few items that name
+                // anything — one lookup a name, and nothing for an item that names none.
+                var unheld: Set<Reference.Kind> = []
+                for reference in note.refs where reference.kind != .reblogs {
+                    if let id = reference.id, notes[NoteKey(host: note.key.host, id: id)] == nil { unheld.insert(reference.kind) }
+                }
+                let stalls = !stalled.isEmpty && stalled.contains(note.key)
+                let tried = refused.isEmpty ? nil : refused[note.key]
+                guard stalls || !unheld.isEmpty || tried != nil else { return note }
+                var said = note
+                said.refsStalled = stalls
+                said.refsUnheld = unheld
+                if let tried {
+                    said.refsTried = Set(note.refs.filter { $0.statusID.map(tried.contains) == true }.map(\.kind))
+                }
+                return said
+            }
             .sorted { Self.storeOrder($0, $1, arrival) }
+    }
+
+    // MARK: - What an item refers to, loaded (#293)
+
+    /// The items whose load was given up for this run. Of this run only: never written down.
+    private var stalled: Set<NoteKey> = []
+    /// What was asked for an item this run and came back as nothing to keep — not the post
+    /// asked for, or an answer that is no word on it — by item, as the source's ids asked. Not
+    /// asked again this run: the item may still owe another load, and without this the one
+    /// that was refused would be asked for again each time its row came near. Of this run only.
+    private var refused: [NoteKey: Set<String>] = [:]
+
+    /// The name of every post among `notes` held from each of `hosts`, by its source's own id.
+    private static func named(in notes: [NoteKey: Note], of hosts: Set<String>) -> [String: [String: String]] {
+        var names: [String: [String: String]] = [:]
+        for note in notes.values where hosts.contains(note.key.host) && !note.isReblog {
+            if let id = note.statusID { names[note.key.host, default: [:]][id] = note.id }
+        }
+        return names
+    }
+
+    /// Settles what the items of `hosts` owe against what is held now (#293): a reference whose
+    /// post is held is given that post's name, however the post came to be here — a timeline
+    /// brought it later, a thread was read, another item's load fetched it — and an item with
+    /// nothing left that could be asked for owes nothing. That last is also what takes the mark
+    /// off anything that could never have owed: a reblog, an item whose references name nothing
+    /// askable, a row a file says owes and cannot.
+    ///
+    /// **A post said to be gone that is held after all is not gone**: the reference is named
+    /// and the word comes off, whichever way the post arrived.
+    ///
+    /// **Only items that owe, or say a post is gone, are looked at**: one pass to find them — and where there are none,
+    /// which is nearly always, that pass is all — then one pass over their hosts' items for the
+    /// names. Returns the items that changed.
+    @discardableResult
+    private static func settleOwing(in notes: inout [NoteKey: Note], of hosts: Set<String>?) -> [NoteKey] {
+        // Items that owe — and items that say a post is gone: said once, on one answer, and
+        // taken back where the post turns up after all.
+        let owing = notes.values.filter {
+            ($0.refsDue || $0.refs.contains(where: \.gone)) && (hosts?.contains($0.key.host) ?? true)
+        }
+        guard !owing.isEmpty else { return [] }
+        let names = named(in: notes, of: Set(owing.map(\.key.host)))
+        var moved: [NoteKey] = []
+        for note in owing {
+            let held = names[note.key.host] ?? [:]
+            let settled = note.refs.map { reference -> Reference in
+                guard reference.kind != .reblogs, reference.id == nil,
+                      let statusID = reference.statusID, let id = held[statusID]
+                else { return reference }
+                // Held, so named — and no longer gone, whatever its source once answered.
+                return Reference(
+                    kind: reference.kind, id: id, statusID: statusID, handle: reference.handle, state: reference.state
+                )
+            }
+            var now = settled == note.refs ? note : note.referring(by: settled)
+            if now.askable.isEmpty { now.refsDue = false }
+            guard now != note else { continue }
+            notes[note.key] = now
+            moved.append(note.key)
+        }
+        return moved
+    }
+
+    /// `settleOwing(in:of:)` over what this store holds. Whether any row changed.
+    @discardableResult
+    private func settleOwing(of hosts: Set<String>? = nil) -> Bool {
+        let moved = Self.settleOwing(in: &notes, of: hosts)
+        for key in moved where notes[key]?.refsDue == false {
+            stalled.remove(key)
+            refused[key] = nil
+        }
+        // An item left owing only what was already tried and refused owes nothing more: the
+        // mark comes off, as it does where the one thing an item owed is refused.
+        var cleared = false
+        for (key, tried) in refused where hosts?.contains(key.host) ?? true {
+            guard let note = notes[key] else {
+                refused[key] = nil
+                continue
+            }
+            guard note.refsDue, note.askable.allSatisfy({ tried.contains($0.statusID) }) else { continue }
+            notes[key]?.refsDue = false
+            refused[key] = nil
+            cleared = true
+        }
+        return !moved.isEmpty || cleared
+    }
+
+    /// One load an item owes: the item, and the source's own id of the post to ask for.
+    public struct Owed: Sendable, Equatable {
+        public let item: NoteKey
+        public let kind: Reference.Kind
+        public let statusID: String
+        /// Whether the item may have arrived only because somebody was signed in — through
+        /// anything but a public timeline. What an unsigned read says of the post such an item
+        /// refers to is not the source's word on it: a post its reader could see may answer
+        /// "no such post" to nobody in particular.
+        public let asReader: Bool
+
+        public init(item: NoteKey, kind: Reference.Kind, statusID: String, asReader: Bool = false) {
+            self.item = item
+            self.kind = kind
+            self.statusID = statusID
+            self.asReader = asReader
+        }
+    }
+
+    /// What the items held from `host` still owe, newest item first, less what was given up for
+    /// this run — or only what `items` owe, where given, which looks at those items alone.
+    /// Nothing where `host` is not a source here. **Each is one post to ask the item's own
+    /// source for, by that source's id for it**: never another host, and never an address.
+    public func owed(host raw: String, among items: Set<NoteKey>? = nil) -> [Owed] {
+        let host = raw.lowercased()
+        guard sourceList.contains(where: { $0.host == host }) else { return [] }
+        let candidates: [Note] = items.map { $0.compactMap { notes[$0] } } ?? Array(notes.values)
+        let arrival = self.arrival
+        return candidates
+            .filter { $0.refsDue && $0.key.host == host && !stalled.contains($0.key) }
+            .sorted { Self.storeOrder($0, $1, arrival) }
+            .flatMap { note in
+                note.askable.filter { refused[note.key]?.contains($0.statusID) != true }.map {
+                    Owed(item: note.key, kind: $0.kind, statusID: $0.statusID, asReader: Self.arrivedAsReader(note))
+                }
+            }
+    }
+
+    /// Whether `note` may have reached this device only because somebody was signed in: it
+    /// arrived through no timeline anybody can read. **Told by what it did arrive through** —
+    /// the public timeline or what is rising there, which an unsigned read brings. Everything
+    /// else is taken for the reader's: Home and a list, and also what arrived through no
+    /// category at all — a search, a thread, a hashtag's read — since those are made as the
+    /// reader where they are signed in, can bring posts only their followers see, and nothing
+    /// on the item says which door it came through.
+    private static func arrivedAsReader(_ note: Note) -> Bool {
+        !note.categories.contains { category in
+            switch category {
+            case .public, .trends: true
+            case .home, .list, .board: false
+            }
+        }
+    }
+
+    /// How one load ended, as whoever made the request reports it.
+    public enum Loaded: Sendable {
+        /// The source handed the post over.
+        case held(Note)
+        /// The source says there is no such post (404, 410): gone, said so where the reference
+        /// is shown, and not asked for again.
+        case gone
+        /// The source did not hand the post over to who asked, and that is no word on whether it
+        /// exists — an unsigned read of what a signed-in reader's item refers to. Not asked for
+        /// again, and not said to be gone.
+        case notSaid
+        /// Given up for this run: the item still owes it, and a later run asks again.
+        case stalled
+    }
+
+    /// Takes in what one load brought for `owed`, and settles what the item owes.
+    ///
+    /// **The post loaded is an item like any other** (#296): at its own publish time, through no
+    /// category, and owing no load of its own — what it refers to in turn is not followed. It is
+    /// taken in whatever its age, for the item that refers to it, and stays while that item
+    /// does (`Note.heldWith`): the reference is given the post's name, which is what holds it.
+    ///
+    /// **Only the post that was asked for.** One whose id at its source is not the id asked, one
+    /// stamped with another source, and a reblog are not what the item refers to, and are not
+    /// taken: the source is not believed about a post nobody asked it for.
+    ///
+    /// Nothing where the item is no longer held, or its source no longer here: a load that
+    /// comes back to a row let go of lands nowhere.
+    public func land(_ loaded: Loaded, for owed: Owed) {
+        let key = owed.item
+        guard sourceList.contains(where: { $0.host == key.host }), let item = notes[key] else { return }
+        /// The item's references, with the one that was asked for settled by `change`.
+        func referring(_ change: (Reference) -> Reference) -> [Reference] {
+            item.refs.map { reference in
+                reference.kind == owed.kind && reference.statusID == owed.statusID && reference.id == nil ? change(reference) : reference
+            }
+        }
+        switch loaded {
+        case .stalled:
+            guard stalled.insert(key).inserted else { return }
+            changed(shown: true, replies: false, kept: false)
+            return
+        case .held(let post):
+            guard post.source.host == key.host, post.statusID == owed.statusID, !post.isReblog else {
+                // Not what was asked for: nothing is taken, and it is not asked for again.
+                notes[key] = withoutAsking(item, for: owed)
+                break
+            }
+            var arriving = post
+            arriving.categories = []
+            arriving.listed = [:]
+            arriving.gaps = []
+            admit([arriving], exempt: true, owing: false)
+        case .gone:
+            notes[key] = item.referring(by: referring { $0.settled(gone: true) })
+        case .notSaid:
+            notes[key] = withoutAsking(item, for: owed)
+        }
+        // Whatever came, what is held now decides what is still owed — this item's and every
+        // other's that was waiting on the same post.
+        stalled.remove(key)
+        settleOwing(of: [key.host])
+        changed(shown: true, replies: false)
+    }
+
+    /// `item` no longer owing a load of what `owed` names, with nothing learned of that post:
+    /// the mark comes off where it was the last thing owed, and the reference stays as it was.
+    ///
+    /// **Where the item owes another load too, this one is remembered as tried** (`refused`):
+    /// the mark stays for the other, and the reference that was asked is not asked again this
+    /// run nor said to be on its way.
+    private func withoutAsking(_ item: Note, for owed: Owed) -> Note {
+        var now = item
+        if item.askable.allSatisfy({ $0.statusID == owed.statusID }) {
+            now.refsDue = false
+            refused[item.key] = nil
+        } else {
+            refused[item.key, default: []].insert(owed.statusID)
+        }
+        return now
+    }
+
+    /// Lets every item of `host` whose load was given up be asked for again: the reader asked,
+    /// or signed in again.
+    public func unstall(host raw: String) {
+        let host = raw.lowercased()
+        let before = stalled.count + refused.count
+        stalled = stalled.filter { $0.host != host }
+        refused = refused.filter { $0.key.host != host }
+        if stalled.count + refused.count != before { changed(shown: true, replies: false, kept: false) }
     }
 
     /// Every kept reply of a forum topic, newest first — what `all()` leaves out. For the count
@@ -998,8 +1277,19 @@ public actor ItemStore {
         var shown = false
         var replies = false
         for (key, note) in notes where gone(key.host) {
-            guard note.boosted != nil || note.favourited != nil || note.bookmarked != nil else { continue }
-            notes[key] = note.withoutReaderMarks()
+            // **And what the reader's own timelines left owing goes with them** (#293): an item
+            // that arrived through Home or a list refers to posts that reader could see. Asked
+            // for later, unsigned, in the reader's absence, that would be this device requesting
+            // on its own what only the sign-in they ended was shown — so the debt is dropped
+            // here, at the moment and for the reason their marks are.
+            let owesAsReader = note.refsDue && Self.arrivedAsReader(note)
+            guard owesAsReader || note.boosted != nil || note.favourited != nil || note.bookmarked != nil else { continue }
+            var plain = note.boosted != nil || note.favourited != nil || note.bookmarked != nil ? note.withoutReaderMarks() : note
+            if owesAsReader {
+                plain.refsDue = false
+                stalled.remove(key)
+            }
+            notes[key] = plain
             shown = shown || !note.isTopicReply
             replies = replies || note.isTopicReply
         }

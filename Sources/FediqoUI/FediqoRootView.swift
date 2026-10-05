@@ -143,6 +143,8 @@ public struct FediqoRootView: View {
     public static func onlyToSources(_ hosts: [String], kept store: ItemStore, read: Bool = true) {
         let work = SourceWork.shared
         work.govern(sources: hosts)
+        // A launch that did not read its store asks for nothing nobody pressed for (#293, #295).
+        ShellSession.loadsStartWith = read
         let book = AllowanceBook.shared
         book.launched(with: hosts, read: read)
         let (changes, feed) = AsyncStream<[String]>.makeStream()

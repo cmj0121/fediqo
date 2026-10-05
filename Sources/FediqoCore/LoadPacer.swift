@@ -393,6 +393,40 @@ public actor LoadPacer {
         staff(host)
     }
 
+    /// What some other read of `host` heard the source say about how often it may be asked — a
+    /// timeline read told to slow down, an answer's rate headers. **Loads give way to it**: the
+    /// source's line is left alone until the moment it named, or until its allowance is
+    /// renewed, exactly as if a load had been told. It counts as no failure: nothing of the
+    /// line was asked. A wait longer than a load waits gives the source up for the run.
+    public func heard(host: String, _ answer: HTTPURLResponse) {
+        heard(host: host, slowDown: answer.statusCode == 429, SourceWord(answer, now: clock.wall()))
+    }
+
+    /// `heard(host:_:)`, with the answer already read: whether it said to slow down, and its word.
+    public func heard(host raw: String, slowDown: Bool, _ word: SourceWord?) {
+        let host = raw.lowercased()
+        var line = lines[host] ?? Line()
+        guard !line.givenUp else { return }
+        let now = clock.elapsed()
+        func moment(_ date: Date?) -> TimeInterval? {
+            date.map { now + max(0, $0.timeIntervalSince(clock.wall())) }
+        }
+        var until: TimeInterval?
+        if slowDown {
+            until = moment(word?.retryAfter) ?? moment(word?.reset) ?? now + limits.backoff
+        } else if let word, let remaining = word.remaining, let renewed = moment(word.reset), renewed > now {
+            let floor = word.limit.map { Int((Double($0) * limits.reserve).rounded(.up)) } ?? 1
+            if remaining <= max(1, floor) { until = renewed }
+        }
+        guard let until else { return }
+        if until - now > limits.longestPause {
+            giveUp(&line, host)
+            return
+        }
+        line.quietUntil = max(line.quietUntil ?? until, until)
+        lines[host] = line
+    }
+
     public func standing(host raw: String) -> LoadStanding {
         guard let line = lines[raw.lowercased()] else { return LoadStanding() }
         let quiet = [line.nextStart, line.quietUntil].compactMap { $0 }.max().map { $0 - clock.elapsed() }
