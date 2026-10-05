@@ -223,6 +223,9 @@
 "rule.field.covered" = "Covered by its author";
 "rule.field.covered.phrase.yes" = "posts their author covered";
 "rule.field.covered.phrase.no" = "posts their author did not cover";
+"rule.field.reblog" = "Is a reblog";
+"rule.field.reblog.phrase.yes" = "reblogs";
+"rule.field.reblog.phrase.no" = "everything that is not a reblog";
 "rule.band.field" = "Whose “%@” is any of these";
 "rule.kind.field" = "What a source says";
 "rule.keyword.placeholder" = "A word";

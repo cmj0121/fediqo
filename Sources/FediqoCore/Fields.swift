@@ -27,6 +27,20 @@ public enum FieldType: Hashable, Sendable {
 }
 
 /// One field a kind of source declares: a name that does not change, and its type.
+/// What a field is a fact about (#290), which is what a rule on it is asked of.
+///
+/// **Said by the field's own declaration**, so the one place rules are judged reads it off the
+/// field and names no field: a field added later says which it is where it is declared.
+public enum FieldSubject: Hashable, Sendable {
+    /// What a post says or is — whom it was for, its language, its cover. A reblog has none of
+    /// these of its own, so on a reblog a rule on such a field is asked of the post it reblogs:
+    /// what hides a post hides its reblog.
+    case post
+    /// The item itself, whatever it shows — whether it is a reblog. Asked of the row the rule is
+    /// judging and never of what that row reblogs.
+    case item
+}
+
 public struct SourceField: Hashable, Sendable, Identifiable {
     /// Stable, and what a stored rule names. Never shown as it is.
     public let name: String
@@ -34,9 +48,13 @@ public struct SourceField: Hashable, Sendable, Identifiable {
 
     public var id: String { name }
 
-    public init(name: String, type: FieldType) {
+    /// What it is a fact about, and so what a rule on it is asked of. A post's, unless said.
+    public let about: FieldSubject
+
+    public init(name: String, type: FieldType, about: FieldSubject = .post) {
         self.name = name
         self.type = type
+        self.about = about
     }
 
     /// How far a post was sent: `Audience`'s four, by their own names.
@@ -48,6 +66,11 @@ public struct SourceField: Hashable, Sendable, Identifiable {
     public static let language = SourceField(name: "language", type: .options(fixed: [], open: true))
     /// Whether its author covered it — marked sensitive, or given a line of warning.
     public static let covered = SourceField(name: "covered", type: .flag)
+    /// Whether the item is a reblog (#290): somebody passing a post on, as an item of its own.
+    /// **About the item, not about a post** — the one field here that is — so a rule hiding
+    /// reblogs hides the reblog's row and leaves the row of the post it reblogs where the rules
+    /// let it through, and a rule showing only reblogs shows no post for being reblogged.
+    public static let reblog = SourceField(name: "reblog", type: .flag, about: .item)
 
     /// Every field any kind of source declares, by name: what a rule's value is held to
     /// (`accepts`), whichever of the reader's sources are here.
@@ -129,7 +152,7 @@ extension ProtocolKind {
     public var fields: [SourceField] {
         switch self {
         case .mastodon:
-            [.audience, .language, .covered]
+            [.audience, .language, .covered, .reblog]
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
             .discourse, .discuz, .unknown:
             []
@@ -160,6 +183,10 @@ extension Note {
         case .audience: return audience.map { .option($0.rawValue) }
         case .language: return language.map { .option($0) }
         case .covered: return covered.map { .flag($0) }
+        // Always said, by what the item is: a reblog is one, and everything else is not — a post
+        // held from before a reblog was an item, which arrived as somebody's reblog, included.
+        // It is the post.
+        case .reblog: return .flag(isReblog)
         default: return nil
         }
     }

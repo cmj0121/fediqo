@@ -222,6 +222,9 @@
 "rule.field.covered" = "作者蓋住";
 "rule.field.covered.phrase.yes" = "作者蓋住的貼文";
 "rule.field.covered.phrase.no" = "作者沒有蓋住的貼文";
+"rule.field.reblog" = "是轉發";
+"rule.field.reblog.phrase.yes" = "轉發";
+"rule.field.reblog.phrase.no" = "不是轉發的";
 "rule.band.field" = "「%@」是其中任何一個";
 "rule.kind.field" = "來源說的事";
 "rule.keyword.placeholder" = "一個字詞";

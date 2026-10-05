@@ -358,7 +358,11 @@ public struct CompiledTimeline: Sendable {
             case .category(let category): return note.categories.contains(category)
             // Nothing said is not a value: a post whose source declares no such field, or says
             // nothing for it, matches no rule on it.
-            case .field(let name, let value): return said?.value(of: name) == value
+            // Asked of what the field is about, as its declaration says (`SourceField.about`):
+            // the item itself, or — for a fact about a post — what a reblog reblogs.
+            case .field(let name, let value):
+                let asked = note.source.kind.field(named: name)?.about == .item ? note : said
+                return asked?.value(of: name) == value
             case .handle(let handle):
                 let found = entry ?? index.entry(for: note)
                 entry = found

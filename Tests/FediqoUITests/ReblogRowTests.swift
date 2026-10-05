@@ -167,6 +167,35 @@ struct ReblogRowTests {
         #expect(drawn(.author("bob@social.example", in: .every, effect: .exclude, sources: session.sources)) == [post.key.rowID])
     }
 
+    @Test("A timeline with a rule hiding reblogs shows the post once: the reblog's row goes and the post's own row stays where the rules let it through")
+    func hidingReblogsShowsThePostOnce() async throws {
+        var listed = post
+        listed.categories = [.home]
+        let (session, _) = try await shell(holding: [reblog, listed])
+        func drawn(_ rules: [Rule?]) -> [String] {
+            let timeline = TimelineDefinition(name: "T", rules: rules.compactMap { $0 })
+            session.written = [timeline]
+            session.timelineID = .written(timeline.id)
+            return session.timelineItems(latest: nil).map(\.id)
+        }
+        let home = Rule.category(.home, in: .every, sources: session.sources)
+        #expect(drawn([home]) == [reblog.key.rowID, post.key.rowID], "the premise: both rows pass Home")
+        #expect(drawn([home, .field("reblog", is: .flag(true), in: .every, effect: .exclude)]) == [post.key.rowID])
+        #expect(drawn([.field("reblog", is: .flag(true), in: .every)]) == [reblog.key.rowID])
+        // As the editor names and phrases it, in each language — covered's shape.
+        #expect(RuleText.fieldName("reblog", language: .english) == "Is a reblog")
+        #expect(RuleText.fieldPhrase("reblog", .flag(true), language: .english) == "reblogs")
+        #expect(RuleText.fieldPhrase("reblog", .flag(false), language: .english) == "everything that is not a reblog")
+        #expect(RuleText.fieldName("reblog", language: .taiwanese) == "是轉發")
+        #expect(RuleText.fieldPhrase("reblog", .flag(true), language: .taiwanese) == "轉發")
+        #expect(RuleText.fieldPhrase("reblog", .flag(false), language: .taiwanese) == "不是轉發的")
+        for key in ["rule.field.reblog", "rule.field.reblog.phrase.yes", "rule.field.reblog.phrase.no"] {
+            for language in [DummyLanguage.english, .taiwanese] {
+                #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
+            }
+        }
+    }
+
     @Test("A search finds the reblog by the post's words and by who reblogged")
     func searched() async throws {
         let (session, _) = try await shell(holding: [reblog, post])

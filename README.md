@@ -177,7 +177,7 @@ arrived here, not everything they ever wrote.
 
 ### What one kind of source says
 
-Some things only one kind of source says about a post. A Mastodon says three, and a rule can
+Some things only one kind of source says about a post. A Mastodon says four, and a rule can
 ask each:
 
 | Field                 | Says                                              | A rule asks for        |
@@ -185,6 +185,13 @@ ask each:
 | Sent to               | how far the post was sent                         | one of its audiences   |
 | Language              | the language the post says it is in               | a language held posts say |
 | Covered by its author | whether it was marked sensitive or given a warning | yes, or no            |
+| Is a reblog           | whether the row is somebody's reblog of a post    | yes, or no             |
+
+Is a reblog is asked of the row itself; the other three are asked of the post, and on a
+reblog's row of the post it reblogs. So a Hide on Is a reblog: yes takes the reblogs out and
+leaves each post where it stands on its own, shown once; showing only reblogs shows no post
+for having been reblogged. A post held from before reblogs were rows, which says it arrived
+as a reblog, is a post: it answers no.
 
 The editor offers a field only while one of your sources declares it, and only the values
 those sources can give: every audience, yes and no, and for Language the languages the posts
@@ -326,7 +333,8 @@ post you take back, or one its source says is gone, stays too, marked as gone fr
 rule on an author is asked of who reblogged — and a Hide on a person also hides what others
 reblog of theirs, while showing a person shows what they wrote and what they reblogged; a rule
 on a keyword or a field is asked of the
-post reblogged, so what hides a post hides its reblogs; a rule on a category is asked of the
+post reblogged, so what hides a post hides its reblogs — but for Is a reblog, which is asked
+of the row, so hiding reblogs leaves the post's own row; a rule on a category is asked of the
 reblog, which arrived through the timeline that listed it, while the post it brought arrived
 through none. A post held from before reblogs were rows, which arrived as a reblog, stays
 where it was and says it arrived as a reblog by that person, until a timeline brings that

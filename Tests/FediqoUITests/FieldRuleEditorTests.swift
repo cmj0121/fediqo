@@ -203,9 +203,9 @@ struct FieldRuleEditorTests {
     func offeredOnlyWhereDeclared() {
         #expect(RuleBuilder.fields(in: [Self.forum]).isEmpty)
         #expect(RuleBuilder.fields(in: []).isEmpty)
-        #expect(RuleBuilder.fields(in: [Self.forum, Self.mastodon]).map(\.name) == ["audience", "language", "covered"])
+        #expect(RuleBuilder.fields(in: [Self.forum, Self.mastodon]).map(\.name) == ["audience", "language", "covered", "reblog"])
         let two = [Self.mastodon, Source(host: "second.example", kind: .mastodon)]
-        #expect(RuleBuilder.fields(in: two).map(\.name) == ["audience", "language", "covered"])
+        #expect(RuleBuilder.fields(in: two).map(\.name) == ["audience", "language", "covered", "reblog"])
     }
 
     @Test("Only values the reader's sources can give are offered: every audience, a yes and a no, and the languages held posts say — most posts first, and never a forum's")
@@ -214,6 +214,8 @@ struct FieldRuleEditorTests {
         #expect(RuleBuilder.values(of: .audience, sources: sources, notes: Self.held)
             == Audience.allCases.map { .option($0.rawValue) })
         #expect(RuleBuilder.values(of: .covered, sources: sources, notes: Self.held) == [.flag(true), .flag(false)])
+        #expect(RuleBuilder.values(of: .reblog, sources: sources, notes: Self.held) == [.flag(true), .flag(false)], "offered as covered is: a yes and a no")
+        #expect(RuleBuilder.scopes(for: .field("reblog", .flag(true)), sources: sources) == [.every, .source(host: "m.example")])
         #expect(RuleBuilder.values(of: .language, sources: sources, notes: Self.held) == [.option("ja"), .option("en")],
                 "a language no held Mastodon post says, or one only a forum's post carries, was offered")
         #expect(RuleBuilder.values(of: .language, sources: sources, notes: []).isEmpty)
@@ -237,6 +239,8 @@ struct FieldRuleEditorTests {
         #expect(key("6", fields) == .pickField("language"))
         #expect(key("7", fields) == .pickField("covered"))
         #expect(key("8", fields) == nil)
+        #expect(key("8", fields + ["reblog"]) == .pickField("reblog"), "the fourth field a Mastodon declares takes the next number")
+        #expect(key("9", fields + ["reblog"]) == nil)
         #expect(key("5", []) == nil, "a field was offered where no source declares one")
         #expect(key("0", fields) == nil)
         #expect(EditorAction.strip(for: .kinds, fields: 3).first?.caps == "1–7")

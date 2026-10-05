@@ -706,6 +706,74 @@ struct ReblogItemTests {
         #expect(shown([.field("language", is: .option("en"), in: .every)], [held.reblog]) == [], "nothing held to ask")
     }
 
+    // MARK: - Whether an item is a reblog
+
+    @Test("Every Mastodon item says whether it is a reblog: a reblog yes; a post no, and so a post held from before that arrived as somebody's reblog; an item whose source declares no such field says nothing")
+    func whatEachAnswers() throws {
+        let held = try Self.held()
+        #expect(held.reblog.value(of: "reblog") == .flag(true))
+        #expect(held.post.value(of: "reblog") == .flag(false))
+        #expect(try Self.legacy().value(of: "reblog") == .flag(false), "it is the post")
+        let forum = Source(host: "forum.example", kind: .discourse)
+        let topic = Note(id: "t", source: forum, author: "Eve", handle: "@eve@forum.example", body: "x", postedAt: Self.origin, categories: [])
+        #expect(topic.value(of: "reblog") == nil)
+        // Even a forum row that claims to reblog: its kind of source declares no such field.
+        let odd = Note(id: "o", source: forum, author: "Eve", handle: "", body: "", postedAt: Self.origin, categories: [], refs: [Reference(kind: .reblogs, id: "t")])
+        #expect(odd.isReblog && odd.value(of: "reblog") == nil)
+    }
+
+    @Test("A hide on reblogs takes the reblog's row and leaves the post's own row: the post is shown once; showing only reblogs shows no post for having been reblogged")
+    func hidingAndShowingReblogs() throws {
+        let held = try Self.held()
+        let hide = try #require(Rule.field("reblog", is: .flag(true), in: .every, effect: .exclude))
+        #expect(shown([hide], held.all) == ["7", "8"], "the post reblogged is still there, once, and so is the other")
+        let timeline = CompiledTimeline(TimelineDefinition(name: "t", rules: [hide]), sources: [Self.source])
+        #expect(timeline.verdict(held.reblog, TextIndex(held.all), reblogged: held.post) == .hidden(by: hide.id))
+        #expect(timeline.verdict(held.post, TextIndex(held.all)) == .shown)
+        #expect(shown([.field("reblog", is: .flag(true), in: .every)], held.all) == ["900"])
+        #expect(shown([.field("reblog", is: .flag(false), in: .every)], held.all) == ["7", "8"])
+        #expect(shown([.field("reblog", is: .flag(false), in: .every, effect: .exclude)], held.all) == ["900"])
+        // Asked of the row itself, held post or not.
+        #expect(shown([hide], [held.reblog, held.own]) == ["8"])
+        #expect(shown([.field("reblog", is: .flag(true), in: .every)], [held.reblog]) == ["900"])
+        // A post held from before, which arrived as a reblog, is a post: the hide leaves it.
+        #expect(shown([hide], [try Self.legacy()]) == ["7"])
+    }
+
+    @Test("Whether it is a reblog is asked of the row; every other field is still asked of the post it reblogs — beside each other in one timeline")
+    func theOtherFieldsStillAskThePost() throws {
+        let japanese = try Self.arrival(Self.reblog("901", of: Self.status("8").replacingOccurrences(of: #""language":"en""#, with: #""language":"ja""#)))
+        let english = try Self.held()
+        let all = english.all.filter { $0.statusID != "8" } + [japanese.item, try #require(japanese.reblogged)]
+        #expect(shown([.field("language", is: .option("ja"), in: .every)], all) == ["901", "8"], "the reblog by the language of its post")
+        #expect(shown([.field("language", is: .option("ja"), in: .every), .field("reblog", is: .flag(true), in: .every)], all) == ["901"], "reblogs of posts in Japanese")
+        #expect(shown([.field("language", is: .option("ja"), in: .every), .field("reblog", is: .flag(true), in: .every, effect: .exclude)], all) == ["8"], "posts in Japanese, less their reblogs")
+        #expect(shown([.field("language", is: .option("ja"), in: .every, effect: .exclude)], all) == ["900", "7"])
+    }
+
+    @Test("An item whose source declares no such field neither matches a rule on reblogs nor is hidden by one")
+    func aSourceThatDeclaresNoSuchField() throws {
+        let forum = Source(host: "forum.example", kind: .discourse)
+        let topic = Note(id: "t", source: forum, author: "Eve", handle: "@eve@forum.example", body: "x", postedAt: Self.origin, categories: [], statusID: "t")
+        let held = try Self.held()
+        let all = held.all + [topic]
+        func shownHere(_ rule: Rule?) -> Set<String> {
+            let timeline = CompiledTimeline(TimelineDefinition(name: "t", rules: [rule].compactMap { $0 }), sources: [Self.source, forum])
+            return Set(timeline.shown(all, TextIndex(all)).compactMap(\.statusID))
+        }
+        #expect(shownHere(.field("reblog", is: .flag(true), in: .every, effect: .exclude)) == ["7", "8", "t"], "not hidden")
+        #expect(shownHere(.field("reblog", is: .flag(false), in: .every, effect: .exclude)) == ["900", "t"], "nor by the other answer")
+        #expect(shownHere(.field("reblog", is: .flag(false), in: .every)) == ["7", "8"], "and matched by neither")
+        #expect(shownHere(.field("reblog", is: .flag(true), in: .every)) == ["900"])
+    }
+
+    @Test("A rule on reblogs is made for a yes or a no and nothing else, and is stored in the shape every field rule is")
+    func theRule() {
+        #expect(Rule.field("reblog", is: .flag(true), in: .every)?.kind == .field(name: "reblog", is: .flag(true), in: .every))
+        #expect(Rule.field("reblog", is: .option("yes"), in: .every) == nil)
+        #expect(Rule.field("reblog", is: .flag(true), in: .source(host: Self.host)) != nil)
+    }
+
     @Test("The text index is each note's own: a reblog's rules are right when its post lands, changes and goes, with the index reused across each")
     func indexIsRightAsThingsMove() throws {
         let held = try Self.held()

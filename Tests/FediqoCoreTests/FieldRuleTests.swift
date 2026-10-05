@@ -52,7 +52,9 @@ struct FieldRuleTests {
 
     @Test("A Mastodon declares how far a post was sent, its language and whether it was covered, each with its type; no other kind declares any")
     func whatAKindDeclares() {
-        #expect(ProtocolKind.mastodon.fields.map(\.name) == ["audience", "language", "covered"])
+        #expect(ProtocolKind.mastodon.fields.map(\.name) == ["audience", "language", "covered", "reblog"])
+        #expect(ProtocolKind.mastodon.fields.map(\.about) == [.post, .post, .post, .item], "each says what it is a fact about; whether an item is a reblog is the one about the item")
+        #expect(SourceField.reblog.type == .flag)
         #expect(SourceField.audience.type == .options(fixed: ["everyone", "unlisted", "followers", "mentioned"], open: false))
         #expect(SourceField.language.type == .options(fixed: [], open: true), "any language there is")
         #expect(SourceField.covered.type == .flag)
@@ -60,7 +62,7 @@ struct FieldRuleTests {
             #expect(kind.fields.isEmpty)
             #expect(kind.field(named: "audience") == nil)
         }
-        #expect(Set(ProtocolKind.mastodon.fields.map(\.name)).count == 3, "a name is one field")
+        #expect(Set(ProtocolKind.mastodon.fields.map(\.name)).count == 4, "a name is one field")
     }
 
     @Test("A note answers for a field its source's kind declares; one the source said nothing of, or of another kind, answers nothing")
@@ -197,7 +199,7 @@ struct FieldRuleTests {
         for bad in ["ja jp", "日本語", String(repeating: "a", count: 36), "ja\n"] {
             #expect(Rule.field("language", is: .option(bad), in: .every) == nil, "\(bad.debugDescription) is no language")
         }
-        #expect(SourceField.declared.keys.sorted() == ["audience", "covered", "language"])
+        #expect(SourceField.declared.keys.sorted() == ["audience", "covered", "language", "reblog"])
         #expect(SourceField.audience.accepts(.option("followers")) && !SourceField.audience.accepts(.option("x")))
         #expect(SourceField.covered.accepts(.flag(false)) && !SourceField.covered.accepts(.option("no")))
         // A field no kind of source declares is not judged: a later build may declare it.
