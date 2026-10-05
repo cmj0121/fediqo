@@ -18,8 +18,70 @@ public struct StoreFile: Sendable {
         // first save would then empty tables this build only half understands.
         if try database.read(migrator.hasBeenSuperseded) { throw Newer() }
         db = database
+        // Before anything is written, a migration's rewriting of rows included.
+        try db.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA secure_delete = ON") }
         try migrator.migrate(db)
     }
+
+    /// **What this device lets go is not left readable in its index** (#292).
+    ///
+    /// SQLite frees a deleted row's pages for the next insert and, left to itself, leaves what
+    /// was written on them where it was: a save with fewer rows than the last would keep the
+    /// words of every post let go — and each earlier wording its author took away (#286) — in
+    /// the file's free pages until something happened to be written over them. `secure_delete`
+    /// set to `ON` has SQLite write zeroes over everything it frees, as it frees it, in the same
+    /// transaction as the save that let the rows go. Set on the one connection a `DatabaseQueue`
+    /// has, and asked for by name: the system's own default is `FAST`, which zeroes only inside
+    /// pages it was writing anyway and leaves the free ones.
+    ///
+    /// **The index is the one file.** It keeps a rollback journal and never a write-ahead log
+    /// (`isNewer`), and the journal — which holds each replaced page as it was — is deleted as
+    /// the save commits, so nothing lies beside the index once a save has returned or the store
+    /// has closed. A run killed mid-save leaves its journal, and the rows it was letting go are
+    /// then still held: the next open rolls the save back and deletes it.
+    ///
+    /// **What this does not reach**, and does not claim to: what the file system keeps of a file
+    /// that was deleted or cut short — the journal, a rebuild's temporary copy, the tail of an
+    /// index made smaller, an index a read back replaced. That is the system's, beneath this
+    /// app's files. **Nor a store set aside because it could not be opened**, which is kept as
+    /// it was found (`dropWhatWasReplaced`): nothing let go afterwards reaches it.
+    ///
+    /// A store written by a build before this one may already hold such words in its free
+    /// pages, where zeroing what is freed from now on would never reach: `scrub()` rebuilds such
+    /// a file whole.
+    ///
+    /// **Asked only once the store has been read** — by `open(at:now:)`, and where a package's
+    /// index is read back — and never by `init`: an index that cannot be read is never written
+    /// over, and a rebuild is a write of every page.
+    ///
+    /// **Whenever the file has free pages, and the first time whatever it has.** A build before
+    /// this one frees pages without zeroing them, and may do so again after this build has had
+    /// the store — a person going back a version and forward again — so a mark that the file was
+    /// once rebuilt cannot be the whole of the question. Free pages can be asked for, and a
+    /// store with any is rebuilt. The ones this build frees are zeroed already, so after a save
+    /// that let a good deal go the next open rebuilds for nothing: a fifth of a second at fifty
+    /// thousand posts, at launch, before any limit has measured the file. The mark is kept for
+    /// the first open alone, when an older file with no page free is rebuilt regardless — what
+    /// such a build left inside its pages is not this one's to vouch for.
+    ///
+    /// A rebuild copies the rows held and nothing else into a file made afresh. Marked only once
+    /// it has happened: one that failed — a full disk — is tried again at the next open, and the
+    /// store is used either way, since what is held is as readable as it was.
+    func scrub() {
+        let (version, free) = (try? db.read { db in
+            (try Int.fetchOne(db, sql: "PRAGMA user_version") ?? 0, try Int.fetchOne(db, sql: "PRAGMA freelist_count") ?? 0)
+        }) ?? (0, 1)
+        guard version < Self.scrubbed || free > 0 else { return }
+        try? db.writeWithoutTransaction { db in
+            try db.execute(sql: "VACUUM")
+            try db.execute(sql: "PRAGMA user_version = \(Self.scrubbed)")
+        }
+    }
+
+    /// The index's `user_version` once this build has rebuilt it. **A number in the file's
+    /// header and not a migration**: the tables are as they were, so a build before this one
+    /// still opens the store — a migration id would have made it refuse to.
+    static let scrubbed = 1
 
     /// The index records a migration this build does not know: a newer build wrote it.
     struct Newer: Error {}
@@ -38,6 +100,21 @@ public struct StoreFile: Sendable {
         readOnly.readonly = true
         guard let probe = try? DatabaseQueue(path: path, configuration: readOnly) else { return false }
         return (try? probe.read(migrator.hasBeenSuperseded)) ?? false
+    }
+
+    /// Whether the index standing at `path` holds nothing — no source and no post — or `nil`
+    /// where that cannot be asked. Asked on a read-only connection, so asking changes nothing.
+    static func holdsNothing(indexAt path: String) -> Bool? {
+        var readOnly = Configuration()
+        readOnly.readonly = true
+        guard let probe = try? DatabaseQueue(path: path, configuration: readOnly) else { return nil }
+        return try? probe.read { db in
+            let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'")
+            for table in ["source", "note"] where tables.contains(table) {
+                if try Int.fetchOne(db, sql: "SELECT count(*) FROM \(table)") ?? 0 > 0 { return false }
+            }
+            return true
+        }
     }
 
     /// What a launch found on disk: the file to write back to, if there is one to trust, and
@@ -85,9 +162,15 @@ public struct StoreFile: Sendable {
     ///
     /// The decision lives here rather than in the app so it can be tested against a real file.
     public static func open(at directory: URL, now: Date = Date()) -> Opened {
+        // A read back's old index is aside here, neither replaced nor put back (#292): the store
+        // this device held is that one, and no index is opened or made beside it. The run reads
+        // nothing and saves nothing, and the next launch tries to settle it again.
+        if StorePackager.hasUnsettledReadBack(in: directory) { return Opened(file: nil) }
         do {
             let file = try StoreFile(at: directory)
             let snapshot = try file.load()
+            // Read, and so not about to be set aside: only now is it rewritten (#292).
+            file.scrub()
             return Opened(file: file, sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said)
         } catch is Newer {
             return Opened(file: nil, storeIsNewer: true)
@@ -128,7 +211,8 @@ public struct StoreFile: Sendable {
     /// row's pages for the next insert, so a save with fewer rows weighs what the last one did
     /// until the file is rebuilt — and a limit judged by `bytesOnDisk()` would never see the
     /// posts it let go of. Asked only after a limit acted, never on the ordinary save: it
-    /// rewrites the whole index.
+    /// rewrites the whole index. **Room, and nothing else**: what the rows let go said is already
+    /// gone from those pages by the save that freed them (`scrub`).
     public func compact() async throws {
         try await db.writeWithoutTransaction { db in try db.execute(sql: "VACUUM") }
     }
@@ -146,7 +230,7 @@ public struct StoreFile: Sendable {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime, .withFractionalSeconds, .withTimeZone]
         let random = UUID().uuidString.prefix(8).lowercased()
-        let base = "index-unreadable-\(formatter.string(from: now))-\(random)"
+        let base = "\(unreadablePrefix)\(formatter.string(from: now))-\(random)"
         let aside = directory.appendingPathComponent(base + ".sqlite")
         try manager.moveItem(at: index, to: aside)
         for suffix in sidecars {
@@ -218,7 +302,44 @@ public struct StoreFile: Sendable {
                 try NoteRecord(note).insert(db)
             }
         }
+        // Only here, the write having returned: a save that threw has replaced nothing.
+        dropWhatWasReplaced()
     }
+
+    /// Deletes the index a read back replaced, where a run was killed before clearing it away
+    /// (#292): an `incoming-aside-…` folder whose marker says replaced, beside this index.
+    ///
+    /// **A store that was replaced must not outlive the store that replaced it.** Such a copy
+    /// holds every post that store held, and nothing this device lets go afterwards reaches it.
+    /// A launch's sweep drops it already (`StorePackager.settleHalfCommits`); this is the same
+    /// rule where a save comes first.
+    ///
+    /// **Only one that was replaced.** An aside whose marker does not say so is the store this
+    /// device held and the only copy of it, and nothing a save may take.
+    ///
+    /// **Not a store set aside because it could not be opened** (`index-unreadable-…`). `open`
+    /// sets one aside for any failure to open or read that is not a newer build's store — a
+    /// file busy under another copy of the app, a disk full during a migration — so it may be a
+    /// good store on a bad day, and it is kept, untouched. Nothing this device lets go afterwards
+    /// reaches it; what becomes of it is not this function's to decide.
+    ///
+    /// Deleting is unlinking; what the file system keeps beneath is the system's, as above.
+    private func dropWhatWasReplaced() {
+        let path = db.path
+        guard path != ":memory:", !path.isEmpty else { return }
+        let folder = URL(fileURLWithPath: path).deletingLastPathComponent()
+        let manager = FileManager.default
+        for name in (try? manager.contentsOfDirectory(atPath: folder.path)) ?? []
+        where name.hasPrefix(Self.readBackAsidePrefix) {
+            let kept = folder.appendingPathComponent(name)
+            if StorePackager.wasReplaced(kept, in: folder) { try? manager.removeItem(at: kept) }
+        }
+    }
+
+    /// What a store set aside as unreadable, and the folder a read back moves the index it is
+    /// replacing into, are named by.
+    static let unreadablePrefix = "index-unreadable-"
+    static let readBackAsidePrefix = "incoming-aside-"
 }
 
 private var migrator: DatabaseMigrator {

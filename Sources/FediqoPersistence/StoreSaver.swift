@@ -85,11 +85,16 @@ public actor StoreSaver {
         return try await task.value
     }
 
-    /// What a launch's sweep found of a read back killed between moving the old index aside
-    /// and finishing (#247): said here, where the index's log is, and only as a count.
-    public static func reportHalfCommits(_ count: Int) {
-        guard count > 0 else { return }
-        log.notice("Found \(count, privacy: .public) read back(s) that did not finish; the old index is kept aside")
+    /// What a launch's sweep found of a read back killed after moving the old index aside and
+    /// before the new one was in its place (#247): how many had the old index put back, and how
+    /// many could not be settled — said here, where the index's log is, and only as counts.
+    public static func reportHalfCommits(putBack: Int, unsettled: Int) {
+        if putBack > 0 {
+            log.notice("Found \(putBack, privacy: .public) read back(s) that did not finish; the index is put back as it was")
+        }
+        if unsettled > 0 {
+            log.error("Found \(unsettled, privacy: .public) read back(s) that did not finish and could not be settled; no index is opened this run")
+        }
     }
 
     /// Writes what the store holds now, after every save asked for before this one.

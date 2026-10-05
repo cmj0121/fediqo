@@ -353,6 +353,15 @@ What a source says about itself — its name, its figures, how long a post may b
 this device with the source. After a relaunch, with or without a network, its page shows what
 it last said and when, and asks again behind it. Something new replaces what was kept.
 
+What this device lets go is gone from its store, not only from the screen. When a post goes —
+dropped by you, by a limit, with its source, or taken back by its author — its words, and any
+earlier wording kept with it, are written over in the store's file by the save that follows,
+and a store an earlier version left such words in is rid of them the first time this version
+opens it. A store that a read back replaced is not kept either. There is one exception: a
+store that could not be opened is set aside as it was found and kept, untouched, and nothing
+you let go afterwards reaches it. Beyond that, what the system keeps beneath a file is the
+system's, and a package you took away earlier still holds what it held.
+
 #### Keeping a post
 
 Any post can be kept: the box under it, on its row and where it is opened, or `y` on the

@@ -46,6 +46,29 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// The index on disk was written by a newer build and this run left it alone: a read back
     /// must not write over it.
     private let storeIsNewer: Bool
+    /// Told as a read back's commit passes each point a run killed there would leave on disk.
+    /// Nothing in the app sets it: a test does, to copy the folder as it stands at that point.
+    var witness: (@Sendable (CommitPoint) -> Void)?
+
+    /// Where a read back that moves its index into place can be stopped, and what is then on
+    /// disk (`settleHalfCommits`).
+    enum CommitPoint: Sendable {
+        /// The package's index is staged and proven; nothing of this device's has moved.
+        case staged
+        /// The old index is aside, with its marker saying so; the new one is not in place.
+        case movedAside
+        /// The marker says the new index is on its way in; it has not been moved yet.
+        case replacing
+        /// The new index is in place and the marker still says it is on its way in.
+        case movedIn
+        /// The new index is in place and the marker says the old one was replaced.
+        case replaced
+        /// A later step refused: the marker says the commit is being undone; the new index is
+        /// still in place.
+        case undoing
+        /// Being undone, the new index taken out and the old one not yet back.
+        case undoneGap
+    }
 
     /// `directory` is where the index lives; `file` is the index as this run opened it, or nil
     /// where this run has none to write (then the staged index is moved into place instead).
@@ -88,25 +111,156 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             }
         }
         sweep(temporary, prefix: "takeaway-")
-        // What a commit put aside is the old index until the commit finished. Its marker is
-        // written before the move and taken away only once every step held, so an aside with
-        // the marker still there is a read back killed midway: kept, and said.
-        var halfCommits = 0
+        // A read back killed midway is settled first, one way or the other, so that the index
+        // this run opens is either the one this device held or the one the package brought —
+        // never an empty one made in the gap between them. Only then does what is left of a
+        // staging go: by now nothing under `incoming-` without a marker is the only copy of
+        // anything.
+        let settled = settleHalfCommits(in: directory)
         let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
         for name in names where name.hasPrefix("incoming-") {
             let folder = directory.appendingPathComponent(name)
-            if manager.fileExists(atPath: folder.appendingPathComponent(committingMarker).path) {
-                halfCommits += 1
-                continue
-            }
+            // One that could not be settled keeps its marker, and is kept: see `settleHalfCommits`.
+            if manager.fileExists(atPath: folder.appendingPathComponent(committingMarker).path) { continue }
             try? manager.removeItem(at: folder)
         }
-        StoreSaver.reportHalfCommits(halfCommits)
+        StoreSaver.reportHalfCommits(putBack: settled.putBack, unsettled: settled.unsettled)
         if let media { sweep(media.deletingLastPathComponent(), prefix: "media-aside-") }
     }
 
-    /// The file in an `incoming-aside-*` folder that says its commit has not finished.
+    /// The file in an `incoming-aside-*` folder that says its commit has not finished, and how
+    /// far it got: empty while the old index is moved aside, `replacingMark` from just before
+    /// the package's index is moved in, `replacedMark` once it is in place, and `undoingMark`
+    /// once a later step refused and the commit is being taken back.
     static let committingMarker = ".committing"
+    /// What the marker holds from just before the new index is moved to where the old one was,
+    /// until it says `replacedMark`: an index in place, if there is one, is the package's, and
+    /// the commit did not get as far as saying so.
+    static let replacingMark = Data("replacing".utf8)
+    /// What the marker holds once the new index is where the old one was.
+    static let replacedMark = Data("replaced".utf8)
+    /// What the marker holds from the moment a commit that had replaced the index is undone:
+    /// the index in place, if there is one, is the package's and on its way out.
+    static let undoingMark = Data("undoing".utf8)
+
+    /// Whether the old index in `aside` was replaced — the package's index is in its place —
+    /// rather than only moved out of the way.
+    ///
+    /// **The marker's word, and an index standing where the old one was** (`directory`). The
+    /// marker alone is not enough: one that says replaced beside no index at all is a commit
+    /// whose new index has gone again, and the aside is then the only store there is. And an
+    /// index found in place is not enough without the marker: any run that opened this folder
+    /// in between would have made one.
+    static func wasReplaced(_ aside: URL, in directory: URL) -> Bool {
+        (try? Data(contentsOf: aside.appendingPathComponent(committingMarker))) == replacedMark
+            && FileManager.default.fileExists(atPath: directory.appendingPathComponent(indexName).path)
+    }
+
+    /// Whether `directory` holds a read back's old index that is neither replaced nor put back:
+    /// an aside with its marker that `settleHalfCommits` has not settled — not asked yet, or
+    /// could not. **While there is one, no index is opened or made here** (`StoreFile.open`):
+    /// the store this device held is aside, and a fresh index made beside it would collect what
+    /// a run reads only to be thrown away, or stand in the old one's way, the day it is put back.
+    static func hasUnsettledReadBack(in directory: URL) -> Bool {
+        let manager = FileManager.default
+        let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
+        return names.contains { name in
+            guard name.hasPrefix(StoreFile.readBackAsidePrefix) else { return false }
+            let aside = directory.appendingPathComponent(name)
+            return manager.fileExists(atPath: aside.appendingPathComponent(committingMarker).path)
+                && !wasReplaced(aside, in: directory)
+        }
+    }
+
+    /// Settles every read back a run was killed in the middle of (#247, #292), before any index
+    /// is opened: how many were put back as they were, and how many could not be settled.
+    ///
+    /// A commit that moves its index into place passes these points a kill can leave on disk:
+    ///
+    /// - **Staged**, nothing moved. There is no aside; the staging is swept like any other.
+    /// - **The old index aside, the new one not in place** — the marker is there and empty.
+    ///   *The read back did not happen.* The old index is moved back to where it was, with what
+    ///   SQLite kept beside it. The device is as it was.
+    /// - **The new index on its way in** — the marker says `replacingMark`. The index in place,
+    ///   if it got there, is the package's, and the commit never said it had replaced anything:
+    ///   it goes, and the old one is moved back. The read back is asked again.
+    /// - **The new index in place** — the marker says `replacedMark` and an index stands there.
+    ///   The package's index is the store, and the old one, replaced, is dropped with its marker.
+    /// - **Being undone** — a later step refused, and the marker says `undoingMark`. The index in
+    ///   place, if it is still there, is the package's and was on its way out: it goes, and the
+    ///   old one is moved back.
+    ///
+    /// So a kill between the new index landing and the marker saying replaced is the third, by
+    /// the marker's own word, and not an empty marker beside an index with rows in it — which
+    /// only ever means an index some other run made. That is the side to err on.
+    ///
+    /// **Nothing here, and nothing after it, deletes an old index that was not replaced** — and
+    /// replaced means the marker says so *and* an index stands in its place. A marker saying
+    /// replaced beside no index is put back like any other.
+    ///
+    /// **An index standing in the old one's place goes only if it holds nothing**, where the
+    /// marker is empty — where it says the index in place is the package's, it goes whatever it
+    /// holds: an index a run made for want of one, with no source and no post in it.
+    /// One that holds anything is somebody's reading, and which of the two is the store is not
+    /// this function's to guess — both are kept, nothing is changed, and it is counted as
+    /// unsettled. So is an aside the system would not let be moved back.
+    ///
+    /// **While one is unsettled this run has no index at all** (`hasUnsettledReadBack`), and
+    /// every launch tries again.
+    ///
+    /// **Put back so that a second kill costs nothing.** What stands in the old index's place
+    /// goes first; then what SQLite kept beside the old index comes back; the index itself comes
+    /// back last. Until that last move the aside still holds the index, so a launch that finds
+    /// it half done does the rest — and what is already back beside the gap is the old index's,
+    /// and is left.
+    static func settleHalfCommits(in directory: URL) -> (putBack: Int, unsettled: Int) {
+        let manager = FileManager.default
+        var putBack = 0
+        var unsettled = 0
+        let target = directory.appendingPathComponent(indexName)
+        let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
+        for name in names.sorted() where name.hasPrefix(StoreFile.readBackAsidePrefix) {
+            let aside = directory.appendingPathComponent(name)
+            let marker = aside.appendingPathComponent(committingMarker)
+            guard manager.fileExists(atPath: marker.path) else { continue }
+            if wasReplaced(aside, in: directory) {
+                try? manager.removeItem(at: aside)
+                continue
+            }
+            guard manager.fileExists(atPath: aside.appendingPathComponent(indexName).path) else {
+                // The marker was written and the index never left, or is already back: there
+                // is nothing to put back.
+                try? manager.removeItem(at: aside)
+                continue
+            }
+            // Whether the marker says whose the index in place is: the package's, on its way in
+            // or on its way out.
+            let word = try? Data(contentsOf: marker)
+            let thePackages = word == replacingMark || word == undoingMark
+            if manager.fileExists(atPath: target.path), !thePackages, StoreFile.holdsNothing(indexAt: target.path) != true {
+                unsettled += 1
+                continue
+            }
+            do {
+                if manager.fileExists(atPath: target.path) {
+                    for suffix in [""] + StoreFile.sidecars {
+                        let stands = directory.appendingPathComponent(indexName + suffix)
+                        if manager.fileExists(atPath: stands.path) { try manager.removeItem(at: stands) }
+                    }
+                }
+                for suffix in StoreFile.sidecars + [""] {
+                    let kept = aside.appendingPathComponent(indexName + suffix)
+                    guard manager.fileExists(atPath: kept.path) else { continue }
+                    try manager.moveItem(at: kept, to: directory.appendingPathComponent(indexName + suffix))
+                }
+                try manager.removeItem(at: aside)
+                putBack += 1
+            } catch {
+                unsettled += 1
+            }
+        }
+        return (putBack, unsettled)
+    }
 
     /// What the volume under `url` has free for what matters.
     public static func volumeFree(_ url: URL) -> Int {
@@ -546,7 +700,12 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         if summary.contents == .whole {
             guard staged.index != nil, staged.settings != nil, staged.secrets != nil else { throw PackageRefusal.altered }
             do {
-                contents = try StoreFile(at: incoming).load()
+                let index = try StoreFile(at: incoming)
+                contents = try index.load()
+                // Read, and so one this build may write: where this run has no file of its own
+                // the staged index is moved in as it stands, and it is not left holding words a
+                // build before this one freed without zeroing (#292).
+                index.scrub()
                 // The profile entries are the words as taken away; the index's rows are the same
                 // words, and where a package carried entries they are what is read back.
                 if !staged.said.isEmpty { contents?.said = staged.said }
@@ -590,6 +749,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 undo.append(Undo(name: "secrets") { try unfile(secrets, previous: previous) })
             }
             guard let contents else { return }
+            witness?(.staged)
             let index = try await commitIndex(contents, staged: staged)
             undo.append(Undo(name: "index", run: index.undo))
             settle.append(index.settle)
@@ -631,11 +791,12 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         guard let index = staged.index else { return ({}, {}) }
         let manager = FileManager.default
         let target = directory.appendingPathComponent(Self.indexName)
-        let aside = directory.appendingPathComponent("incoming-aside-\(UUID().uuidString)", isDirectory: true)
+        let aside = directory.appendingPathComponent("\(StoreFile.readBackAsidePrefix)\(UUID().uuidString)", isDirectory: true)
         try manager.createDirectory(at: aside, withIntermediateDirectories: true)
-        // The marker first: while it is there, what is in this folder is the old index and the
-        // launch sweep keeps it. It goes only once every step of the commit held.
-        try Data().write(to: aside.appendingPathComponent(Self.committingMarker))
+        // The marker first, and empty: while it is there and says no more, what is in this
+        // folder is the old index, not replaced, and a launch puts it back (`settleHalfCommits`).
+        let marker = aside.appendingPathComponent(Self.committingMarker)
+        try Data().write(to: marker)
         var moved: [(from: URL, to: URL)] = []
         for suffix in [""] + StoreFile.sidecars {
             let file = directory.appendingPathComponent(Self.indexName + suffix)
@@ -644,16 +805,39 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             try manager.moveItem(at: file, to: kept)
             moved.append((kept, file))
         }
+        witness?(.movedAside)
         do {
+            // Said before it is done: from here an index in place is the package's, whether or
+            // not the commit lives to say it replaced the old one.
+            try Self.replacingMark.write(to: marker, options: .atomic)
+            witness?(.replacing)
             try manager.moveItem(at: index, to: target)
+            witness?(.movedIn)
+            // Only now is the old index replaced, and the marker says so — whole or not at all,
+            // so a kill here leaves it saying what it said. One that cannot be written leaves the
+            // old index to be put back by a launch, which is the side to err on.
+            try Self.replacedMark.write(to: marker, options: .atomic)
         } catch {
+            try? manager.removeItem(at: target)
             for (kept, file) in moved { try? manager.moveItem(at: kept, to: file) }
             try? manager.removeItem(at: aside)
             throw error
         }
+        witness?(.replaced)
+        let witness = self.witness
         let undo: () async throws -> Void = {
-            try? manager.removeItem(at: target)
-            for (kept, file) in moved { try manager.moveItem(at: kept, to: file) }
+            // The marker first, whole or not at all: from here the index in place is on its way
+            // out and the aside is the store again. Taken out before the marker said so, a kill
+            // would leave an aside marked replaced beside no index.
+            try Self.undoingMark.write(to: marker, options: .atomic)
+            witness?(.undoing)
+            // Refused, the undo stops here with nothing moved: what SQLite kept beside the old
+            // index must not come back to lie beside the package's.
+            if manager.fileExists(atPath: target.path) { try manager.removeItem(at: target) }
+            witness?(.undoneGap)
+            // The index itself last, as `settleHalfCommits` puts one back: while the aside still
+            // holds it, a launch that finds this half done does the rest.
+            for (kept, file) in moved.reversed() { try manager.moveItem(at: kept, to: file) }
             try? manager.removeItem(at: aside)
         }
         let settle: () -> Void = {
