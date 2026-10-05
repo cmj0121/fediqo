@@ -1107,20 +1107,36 @@ public actor ItemStore {
             }
     }
 
-    /// Whether `note` may have reached this device only because somebody was signed in: it
-    /// arrived through no timeline anybody can read. **Told by what it did arrive through** —
-    /// the public timeline or what is rising there, which an unsigned read brings. Everything
-    /// else is taken for the reader's: Home and a list, and also what arrived through no
-    /// category at all — a search, a thread, a hashtag's read — since those are made as the
-    /// reader where they are signed in, can bring posts only their followers see, and nothing
-    /// on the item says which door it came through.
+    /// Whether `note` reached this device by a read made as the reader — **a fact about a
+    /// signed read, and the one place it is told** (#293). What such an item refers to is the
+    /// reader's to ask for: never asked unsigned in their place, an unsigned "no such post"
+    /// about it is not the source's word, and what it still owes goes when their sign-in ends.
+    ///
+    /// **Told by what the item itself carries**, since nothing else outlasts the read:
+    /// - Through the public timeline or what is rising there: not the reader's. An unsigned read
+    ///   brings those, whoever was signed in.
+    /// - Through Home or a list: the reader's. Nobody else has those timelines.
+    /// - Through no category — a search, a thread, a hashtag's read — it is the reader's only
+    ///   where the copy says what the reader did to the post (`boosted`, `favourited`,
+    ///   `bookmarked`, as yes or as no). A source says those to a signed read and to no other,
+    ///   so an item without them was read unsigned: on a source nobody is signed in to, nothing
+    ///   arrived as the reader, what it refers to may be asked unsigned, and an unsigned "no
+    ///   such post" is that source's word.
+    ///
+    /// **Written down with the item, and let go with the sign-in.** Those marks are kept in the
+    /// store, so a launch knows it of a row from the last run; and the sweep that takes them
+    /// off when a sign-in ends (`forgetReaderMarks`) drops such an item's debt in the same step,
+    /// so no row is left owing as a reader nobody can name.
     private static func arrivedAsReader(_ note: Note) -> Bool {
-        !note.categories.contains { category in
+        var through = false
+        for category in note.categories {
             switch category {
-            case .public, .trends: true
-            case .home, .list, .board: false
+            case .public, .trends: return false
+            case .home, .list: through = true
+            case .board: break
             }
         }
+        return through || note.boosted != nil || note.favourited != nil || note.bookmarked != nil
     }
 
     /// How one load ended, as whoever made the request reports it.
@@ -1277,8 +1293,8 @@ public actor ItemStore {
         var shown = false
         var replies = false
         for (key, note) in notes where gone(key.host) {
-            // **And what the reader's own timelines left owing goes with them** (#293): an item
-            // that arrived through Home or a list refers to posts that reader could see. Asked
+            // **And what the reader's own reads left owing goes with them** (#293): an item that
+            // arrived by a signed read (`arrivedAsReader`) refers to posts that reader could see. Asked
             // for later, unsigned, in the reader's absence, that would be this device requesting
             // on its own what only the sign-in they ended was shown — so the debt is dropped
             // here, at the moment and for the reason their marks are.

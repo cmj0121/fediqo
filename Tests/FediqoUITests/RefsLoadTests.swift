@@ -239,6 +239,62 @@ struct RefsLoadTests {
         #expect(await http.paths.isEmpty)
     }
 
+    /// An answer as a search, a thread or a hashtag's read brings one: through no category.
+    /// `signed` is whether the read was made as the reader — a source then says what the
+    /// reader did to the post, here that they have not favourited it.
+    private func found(_ id: String, to parent: String, signed: Bool) -> Note {
+        Note(
+            id: "https://social.example/users/ada/statuses/\(id)", source: source, author: "Ada",
+            handle: "@ada@social.example", body: "an answer", postedAt: Self.origin, categories: [],
+            reply: Reply(handle: "@bob@social.example", inReplyToId: parent), favourited: signed ? false : nil, statusID: id
+        ).readNow()
+    }
+
+    @Test("On a source nobody is signed in to, what a thread or a search brought did not arrive as the reader: the posts its answers refer to are asked unsigned, the row stops saying on its way, and an unsigned 'no such post' is that source's word")
+    func unsignedReadsAreNobodys() async throws {
+        let http = FixtureHTTP(["/api/v1/statuses/1": .text(Self.status("1")), "/api/v1/statuses/3": .text("{}", status: 404)])
+        let (session, _, _) = try await shell(unsigned: http)
+        await land([found("2", to: "1", signed: false), found("4", to: "3", signed: false)], in: session)
+        #expect(Set(await http.paths) == ["/api/v1/statuses/1", "/api/v1/statuses/3"])
+        #expect(session.notes.contains { $0.statusID == "1" })
+        #expect(DummyItemRow.replyLine(try row("2", in: session), language: .english) == "Reply to @bob@social.example")
+        #expect(DummyItemRow.replyLine(try row("4", in: session), language: .english) == "Reply to @bob@social.example — that post is gone at its source")
+    }
+
+    @Test("Signed in, what a search brought is the reader's: asked as the reader, and what it still owes goes when the sign-in ends, with nothing asked unsigned")
+    func signedReadsAreTheReaders() async throws {
+        let http = FixtureHTTP(["/api/v1/statuses/1": .text(Self.status("1"))])
+        let (session, server, tokens) = try await shell(unsigned: http, signed: [:])
+        await land([found("2", to: "1", signed: true)], in: session)
+        let asReader = await server.paths
+        #expect(!asReader.isEmpty && Set(asReader) == ["/api/v1/statuses/1"], "asked as the reader")
+        #expect(session.notes.first { $0.statusID == "2" }?.refsDue == true, "the premise: it did not come, and is still owed")
+        try tokens.forget(host: host)
+        session.mastodon.refresh()
+        await land([], in: session)
+        #expect(session.notes.first { $0.statusID == "2" }?.refsDue == false, "the reader's debt went with the sign-in")
+        #expect(await http.paths.isEmpty)
+    }
+
+    @Test("A launch with nobody signed in: what a signed read left owing is dropped and never asked; what an unsigned read left owing is asked, unsigned")
+    func aLaunchKnowsWhichReadsWereSigned() async throws {
+        let http = FixtureHTTP(["/api/v1/statuses/1": .text(Self.status("1")), "/api/v1/statuses/3": .text(Self.status("3"))])
+        var signed = found("2", to: "1", signed: true), unsigned = found("4", to: "3", signed: false)
+        signed.refsDue = true
+        unsigned.refsDue = true
+        let work = SourceWork()
+        work.govern(sources: [host])
+        let session = ShellSession(http: http, store: ItemStore(sources: [source], notes: [signed, unsigned]))
+        session.work = work
+        session.loads = LoadPacer(limits: Self.unpaced, clock: StillClock())
+        await session.reloadFromStore()
+        await session.refs.settled()
+        await session.reloadFromStore()
+        #expect(await http.paths == ["/api/v1/statuses/3"])
+        #expect(session.notes.first { $0.statusID == "2" }?.refsDue == false)
+        #expect(session.notes.contains { $0.statusID == "3" })
+    }
+
     // MARK: - Gone, and failing
 
     @Test("A post that no longer exists is not held and not asked for again, and the reply's row says it is gone at its source", arguments: [404, 410])

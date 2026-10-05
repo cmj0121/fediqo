@@ -372,17 +372,25 @@ struct ReferenceLoadTests {
         }
     }
 
-    @Test("Only what a public timeline brought is taken for anybody's to read: an item that came through Home, a list, or no category at all — a search, a thread, a hashtag — is the reader's, its debt goes when the sign-in ends, and an unsigned answer about it is not the source's word")
+    @Test("Arrived as the reader is a fact about a signed read: Home and a list are the reader's; what a public timeline brought is anybody's, whoever read it; and what came through no category — a search, a thread, a hashtag — is the reader's only where the copy says what the reader did, which a source says to a signed read alone. The reader's debts go when the sign-in ends, and nobody else's do")
     func whatIsTheReaders() async {
-        let cases: [(Set<FediqoCore.Category>, Bool)] = [
-            ([.public], false), ([.trends], false), ([.home, .public], false),
-            ([.home], true), ([.list(id: "7")], true), ([], true),
+        // Categories, whether the copy says what the reader did (as a signed read's does, yes or no), and whose it is.
+        let cases: [(Set<FediqoCore.Category>, Bool?, Bool)] = [
+            ([.public], nil, false), ([.trends], nil, false), ([.home, .public], false, false), ([.public], true, false),
+            ([.home], nil, true), ([.list(id: "7")], nil, true), ([.home], false, true),
+            ([], nil, false), ([], false, true), ([], true, true),
         ]
-        for (categories, readers) in cases {
-            let store = await store([Self.post("2", answering: "1", categories: categories)])
-            #expect(await store.owed(host: Self.host).first?.asReader == readers, "\(categories)")
+        for (categories, said, readers) in cases {
+            let plain = Self.post("2", answering: "1", categories: categories)
+            var note = Note(
+                id: plain.id, source: plain.source, author: plain.author, handle: plain.handle, body: plain.body,
+                postedAt: plain.postedAt, categories: categories, reply: plain.reply, favourited: said, statusID: "2"
+            )
+            note.asked = .now()
+            let store = await store([note])
+            #expect(await store.owed(host: Self.host).first?.asReader == readers, "\(categories) \(String(describing: said))")
             _ = await store.forgetReaderMarks(host: Self.host)
-            #expect(await store.owed(host: Self.host).isEmpty == readers, "\(categories)")
+            #expect(await store.owed(host: Self.host).isEmpty == readers, "\(categories) \(String(describing: said))")
         }
     }
 
