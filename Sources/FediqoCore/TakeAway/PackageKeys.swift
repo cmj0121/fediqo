@@ -85,6 +85,13 @@ public enum PackageFault: Error, Sendable, Equatable {
     /// The index on this device was written by a newer build and this run left it as found; a
     /// read back would write over what that build holds, so it is refused.
     case indexIsNewer
+    /// This run did not open the store on this device — it is in use, out of reach, or one of
+    /// two a read back left (#295) — and a read back would move it aside and put the package's
+    /// in its place. Refused, as a newer build's is.
+    case storeNotOpened
+    /// This run holds none of what this device holds — its store did not open, or is a newer
+    /// build's — so there is nothing to take away, and an empty package is not written.
+    case nothingToTake
     /// The package's store could not be read back as a store, though every tag held.
     case unreadableStore
     /// A step of the commit refused, and putting an earlier step back refused too: the device

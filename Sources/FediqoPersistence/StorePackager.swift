@@ -46,6 +46,10 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// The index on disk was written by a newer build and this run left it alone: a read back
     /// must not write over it.
     private let storeIsNewer: Bool
+    /// This run did not open the store on disk — in use, out of reach, or one of two (#295). A
+    /// read back that would replace it is refused, as a newer build's is, and a take-away has
+    /// nothing to take.
+    private let storeNotOpened: Bool
     /// Told as a read back's commit passes each point a run killed there would leave on disk.
     /// Nothing in the app sets it: a test does, to copy the folder as it stands at that point.
     var witness: (@Sendable (CommitPoint) -> Void)?
@@ -77,7 +81,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         directory: URL, file: StoreFile?, store: ItemStore, media: MediaCache?,
         tokens: any MastodonTokenStore, credentials: any ForumCredentialStore,
         defaults: UserDefaults, device: String, appVersion: String, storeIsNewer: Bool = false,
-        saver: StoreSaver? = nil,
+        storeNotOpened: Bool = false, saver: StoreSaver? = nil,
         freeSpace: @escaping @Sendable (URL) -> Int = StorePackager.volumeFree,
         rounds: UInt32 = PackageFormat.rounds
     ) {
@@ -85,6 +89,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         self.file = file
         self.saver = saver
         self.storeIsNewer = storeIsNewer
+        self.storeNotOpened = storeNotOpened
         self.store = store
         self.media = media
         self.tokens = tokens
@@ -143,6 +148,17 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// the index in place, if there is one, is the package's and on its way out.
     static let undoingMark = Data("undoing".utf8)
 
+    /// What the marker holds once the person has chosen against the store in its folder (#295):
+    /// of two stores a read back left, this is the one that is not the store. It is never put
+    /// back, it stands in nobody's way, and it goes once the chosen one has opened and saved
+    /// (`StoreFile.dropWhatWasReplaced`).
+    static let displacedMark = Data("displaced".utf8)
+
+    /// Whether `aside` holds a store the person chose against.
+    static func wasDisplaced(_ aside: URL) -> Bool {
+        (try? Data(contentsOf: aside.appendingPathComponent(committingMarker))) == displacedMark
+    }
+
     /// Whether the old index in `aside` was replaced — the package's index is in its place —
     /// rather than only moved out of the way.
     ///
@@ -168,8 +184,95 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             guard name.hasPrefix(StoreFile.readBackAsidePrefix) else { return false }
             let aside = directory.appendingPathComponent(name)
             return manager.fileExists(atPath: aside.appendingPathComponent(committingMarker).path)
-                && !wasReplaced(aside, in: directory)
+                && !wasReplaced(aside, in: directory) && !wasDisplaced(aside)
         }
+    }
+
+    /// The first aside in `directory` that is neither replaced, displaced nor put back.
+    private static func unsettledAside(in directory: URL) -> URL? {
+        let manager = FileManager.default
+        let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
+        return names.sorted().lazy.filter { $0.hasPrefix(StoreFile.readBackAsidePrefix) }
+            .map { directory.appendingPathComponent($0) }
+            .first { aside in
+                manager.fileExists(atPath: aside.appendingPathComponent(committingMarker).path)
+                    && !wasReplaced(aside, in: directory) && !wasDisplaced(aside)
+            }
+    }
+
+    /// What an unsettled read back in `directory` is to the person (#295), or nothing where
+    /// there is none: two stores to choose between, where an index stands in the old one's
+    /// place — with what can be said of each without opening it to write — and otherwise a
+    /// store that could not be put back.
+    static func unsettledReadBack(in directory: URL) -> StoreTrouble? {
+        guard let aside = unsettledAside(in: directory) else { return nil }
+        let inPlace = directory.appendingPathComponent(indexName)
+        guard FileManager.default.fileExists(atPath: inPlace.path) else { return .unreachable(.readBackInterrupted) }
+        return .twoStores(
+            inPlace: StoreGlance.of(indexAt: inPlace),
+            setAside: StoreGlance.of(indexAt: aside.appendingPathComponent(indexName))
+        )
+    }
+
+    /// Which of two stores a read back left is the store.
+    public enum Choice: Sendable {
+        /// The one where the store belongs.
+        case keepInPlace
+        /// The one the read back moved out of the way.
+        case putBack
+    }
+
+    /// The person's choice between two stores (#295), written down in `directory`.
+    ///
+    /// **The store not chosen is not deleted here**, and not by the next launch either: it is
+    /// marked displaced, and goes only after the chosen one has opened and saved
+    /// (`StoreFile.dropWhatWasReplaced`). Should the chosen one turn out damaged, it comes back
+    /// (`reinstateDisplaced`).
+    ///
+    /// - **Keep the one in place**: the aside's marker is rewritten, whole or not at all, to say
+    ///   displaced. Nothing moves.
+    /// - **Put back the one set aside**: the one in place is moved into an aside of its own,
+    ///   marked displaced before anything moves — what SQLite kept beside it first, the index
+    ///   last, so that the aside holds the index only once it holds all of it. Then the old one
+    ///   is put back the way a launch puts one back (`settleHalfCommits`), there being nothing
+    ///   in its place now. A step that fails leaves a state a launch settles or asks about again.
+    public static func choose(_ choice: Choice, in directory: URL) {
+        let manager = FileManager.default
+        guard let aside = unsettledAside(in: directory) else { return }
+        switch choice {
+        case .keepInPlace:
+            try? displacedMark.write(to: aside.appendingPathComponent(committingMarker), options: .atomic)
+        case .putBack:
+            let other = directory.appendingPathComponent("\(StoreFile.readBackAsidePrefix)\(UUID().uuidString)", isDirectory: true)
+            do {
+                try manager.createDirectory(at: other, withIntermediateDirectories: true)
+                try displacedMark.write(to: other.appendingPathComponent(committingMarker))
+                for suffix in StoreFile.sidecars + [""] {
+                    let stands = directory.appendingPathComponent(indexName + suffix)
+                    guard manager.fileExists(atPath: stands.path) else { continue }
+                    try manager.moveItem(at: stands, to: other.appendingPathComponent(indexName + suffix))
+                }
+            } catch {
+                return
+            }
+            _ = settleHalfCommits(in: directory)
+        }
+    }
+
+    /// Makes a store the person chose against the store to put back again (#295), where there is
+    /// one: its marker goes back to saying only that it was moved out of the way. Asked when the
+    /// store they chose instead proves damaged, before anything is made in its place. Whether
+    /// there was one.
+    static func reinstateDisplaced(in directory: URL) -> Bool {
+        let manager = FileManager.default
+        let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
+        for name in names.sorted() where name.hasPrefix(StoreFile.readBackAsidePrefix) {
+            let aside = directory.appendingPathComponent(name)
+            guard wasDisplaced(aside), manager.fileExists(atPath: aside.appendingPathComponent(indexName).path) else { continue }
+            guard (try? Data().write(to: aside.appendingPathComponent(committingMarker), options: .atomic)) != nil else { continue }
+            return true
+        }
+        return false
     }
 
     /// Settles every read back a run was killed in the middle of (#247, #292), before any index
@@ -225,6 +328,23 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             guard manager.fileExists(atPath: marker.path) else { continue }
             if wasReplaced(aside, in: directory) {
                 try? manager.removeItem(at: aside)
+                continue
+            }
+            if wasDisplaced(aside) {
+                // A store the person chose against (#295): kept, untouched, until the one they
+                // chose has opened and saved. One that never came to hold its index — a choice
+                // cut short while the index in place was being moved in — hands back what it
+                // took from beside that index and goes; the choice is then asked again.
+                if !manager.fileExists(atPath: aside.appendingPathComponent(indexName).path) {
+                    for suffix in StoreFile.sidecars {
+                        let taken = aside.appendingPathComponent(indexName + suffix)
+                        let home = directory.appendingPathComponent(indexName + suffix)
+                        if manager.fileExists(atPath: taken.path), !manager.fileExists(atPath: home.path) {
+                            try? manager.moveItem(at: taken, to: home)
+                        }
+                    }
+                    try? manager.removeItem(at: aside)
+                }
                 continue
             }
             guard manager.fileExists(atPath: aside.appendingPathComponent(indexName).path) else {
@@ -325,6 +445,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         to url: URL, key: PackageKey, pictures: Bool, contents: PackageSummary.Contents,
         progress: @escaping @Sendable (PackageProgress) -> Void
     ) async throws {
+        // A run that did not open this device's store holds none of it: what it would take away
+        // is an empty store under this device's name, which is not what the person asked for.
+        if storeNotOpened || storeIsNewer { throw PackageFault.nothingToTake }
         if case .password(let password) = key {
             if password.isEmpty { throw PackageFault.emptyPassword }
             if password.count < PackageFormat.minPasswordCount { throw PackageFault.shortPassword }
@@ -631,6 +754,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         let reader = try PackageReader(at: url)
         let summary = try reader.open(with: key)
         if storeIsNewer, summary.contents == .whole { throw PackageFault.indexIsNewer }
+        if storeNotOpened, summary.contents == .whole { throw PackageFault.storeNotOpened }
         let held = await holdsStore()
         if held, !replacing, summary.contents == .whole { throw PackageFault.alreadyHeld }
         // Twice the package: the staging, and what is moved into place beside what was there

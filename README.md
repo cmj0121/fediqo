@@ -357,10 +357,26 @@ What this device lets go is gone from its store, not only from the screen. When 
 dropped by you, by a limit, with its source, or taken back by its author — its words, and any
 earlier wording kept with it, are written over in the store's file by the save that follows,
 and a store an earlier version left such words in is rid of them the first time this version
-opens it. A store that a read back replaced is not kept either. There is one exception: a
-store that could not be opened is set aside as it was found and kept, untouched, and nothing
-you let go afterwards reaches it. Beyond that, what the system keeps beneath a file is the
-system's, and a package you took away earlier still holds what it held.
+opens it. A store that a read back replaced is not kept either, and nor is one that was put
+aside because it was damaged: it is deleted once you have been told of it and what took its
+place has been saved. Beyond that, what the system keeps beneath a file is the system's, and a
+package you took away earlier still holds what it held.
+
+When the store cannot be opened, Fediqo says why at the first thing you see, and what it does
+depends on the reason. If the store is only out of reach — another copy of Fediqo is using it,
+the device has no room left, its folder cannot be read or written — nothing on disk is changed
+and nothing takes its place: Fediqo opens without it and saves nothing that time, so what you
+do in that run is not kept, and the same store opens once the cause has passed. In such a run
+nothing is swept by the list of sources either — picture copies and forum sign-ins stay as
+they were — and a read back that would replace the store is refused, as is a take-away, which
+would have nothing to take. If the store is damaged, it is put aside and an empty one takes
+its place; the notice says so, and that the damaged one will be deleted. It is deleted once
+you have pressed I understand on that notice and the new store has been saved, and there is no
+getting it back after that. Put the notice down any other way, or quit before reading it, and
+the damaged one is kept and the notice is shown again. If a read back was interrupted and left
+two stores, Fediqo opens neither and asks which to keep, saying how many posts each holds and
+when it was last written; the other is deleted only after the one you chose has opened and
+been saved, and if the one you chose proves damaged the other is put back.
 
 #### Keeping a post
 

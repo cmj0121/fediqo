@@ -70,6 +70,13 @@ public struct FediqoRootView: View {
     /// Told when the reader dismisses that notice, so a window opened later does not raise it
     /// again: each window is its own root view with its own state.
     private let storeNoticeSeen: (@MainActor () -> Void)?
+    /// Up once at launch when the store did not simply open (#295): it could not be opened, it
+    /// was damaged and put aside, or a read back left two. Without it the reader sees an empty
+    /// app, or a run that saves nothing, and nothing to say why.
+    @State private var storeTrouble: StoreTrouble?
+    /// Told what the reader answered to that notice — that they were told, or which of two
+    /// stores they chose — so what waits on their answer can go ahead.
+    private let storeTroubleAnswered: (@MainActor (StoreTroubleAnswer) -> Void)?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -98,6 +105,8 @@ public struct FediqoRootView: View {
         limits: (any LimitAccountStore)? = nil,
         storeIsNewer: Bool = false,
         storeNoticeSeen: (@MainActor () -> Void)? = nil,
+        storeTrouble: StoreTrouble? = nil,
+        storeTroubleAnswered: (@MainActor (StoreTroubleAnswer) -> Void)? = nil,
         carrier: (any StoreCarrier)? = nil,
         nearby: (any NearbyLink)? = nil,
         deviceName: String = ""
@@ -117,6 +126,8 @@ public struct FediqoRootView: View {
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)
         self.storeNoticeSeen = storeNoticeSeen
+        _storeTrouble = State(initialValue: storeTrouble)
+        self.storeTroubleAnswered = storeTroubleAnswered
     }
 
     /// From here on, nothing leaves for a host that is not one of `hosts` — the sources the person
@@ -151,11 +162,23 @@ public struct FediqoRootView: View {
     /// servers the reader still reads. Queued ahead of every picture a row can ask for, so the
     /// sweep never races a copy being written for a server just added. What is left is then
     /// trimmed to the cap (#7), so a cap lowered by a new build holds from its first launch.
-    public static func keepPictures(in copies: any MediaCopies, for hosts: [String]) {
+    ///
+    /// **Only where `hosts` is the list the person has** (`read`, #295). A run whose store could
+    /// not be opened holds no sources, and dropping the copies of every host not among none
+    /// would take every picture on the device while the notice says nothing was changed: the
+    /// copies are then handed over as they are, neither swept nor trimmed, and still drawn from.
+    public static func keepPictures(in copies: any MediaCopies, for hosts: [String], read: Bool = true) {
+        ShellPictures.shared.disk = keptPictures(in: copies, for: hosts, read: read)
+    }
+
+    /// `keepPictures`' work, apart from where its result is put.
+    static func keptPictures(in copies: any MediaCopies, for hosts: [String], read: Bool) -> DiskCopies {
         let disk = DiskCopies(copies)
-        disk.keepOnly(hosts: hosts)
-        disk.trim()
-        ShellPictures.shared.disk = disk
+        if read {
+            disk.keepOnly(hosts: hosts)
+            disk.trim()
+        }
+        return disk
     }
 
     private var availability: ShellAvailability { session.availability }
@@ -357,6 +380,7 @@ public struct FediqoRootView: View {
             .modifier(EndedSignInNotice(session: session))
             .modifier(ActivitySheet(session: session))
             .modifier(StoreNewerNotice(shown: $storeIsNewer, seen: storeNoticeSeen))
+            .modifier(StoreTroubleNotice(trouble: $storeTrouble, answered: storeTroubleAnswered))
             .overlay {
                 if showingShortcuts {
                     ShortcutGuide(tab: $shortcutTab) { showingShortcuts = false }
@@ -1867,6 +1891,26 @@ private struct EndedSignInNotice: ViewModifier {
             get: { session.mastodon.ended.isEmpty ? nil : session.mastodon.ended },
             set: { if $0 == nil { session.mastodon.endedSeen() } }
         )
+    }
+}
+
+/// The store did not simply open (#295): said at the first thing the person sees.
+///
+/// **Only a press on the notice answers it.** Being told of a damaged store is its own button,
+/// and choosing between two stores is theirs; the sheet going away any other way — Escape, a
+/// swipe, the system taking it down, another presenter winning, the view replaced while the app
+/// is still launching — answers nothing, and the notice is shown again at the next launch. What
+/// waits on being told is a deletion that cannot be taken back.
+///
+/// A modifier of its own, so the root view's chain gains one line and no closure of its own.
+private struct StoreTroubleNotice: ViewModifier {
+    @Binding var trouble: StoreTrouble?
+    let answered: (@MainActor (StoreTroubleAnswer) -> Void)?
+
+    func body(content: Content) -> some View {
+        content.shellConfirm($trouble, question: { ShellQuestion.storeTrouble($0) }) { _, id in
+            if let answer = ShellQuestion.storeTroubleChose(id) { answered?(answer) }
+        }
     }
 }
 

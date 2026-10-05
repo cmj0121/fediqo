@@ -113,6 +113,14 @@ public actor StoreSaver {
         try await task.value
     }
 
+    /// `save()`, written whether or not the store has changed since the last write (#295): what
+    /// a save does besides writing rows — dropping a store put aside, once the person has been
+    /// told — has to be able to happen in a run where nothing new arrives.
+    public func resave() async throws {
+        written = nil
+        try await save()
+    }
+
     /// `save()`, but answered by `deadline` whatever the write is doing: a write that hangs — a
     /// locked file, a disk that stopped answering — must not turn a quit into one that never
     /// happens. Past the deadline the write is left running and the caller goes on.

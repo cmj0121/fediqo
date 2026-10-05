@@ -315,6 +315,90 @@ enum ShellQuestion {
         )
     }
 
+    // MARK: - A store that did not open (#295)
+
+    /// The ids the store notices answer with.
+    static let keepInPlace = "keepInPlace"
+    static let putBack = "putBack"
+    static let told = "told"
+
+    /// What went wrong with this device's store at launch, said at the first thing the person
+    /// sees: that it could not be opened; that it was damaged, something took its place and the
+    /// damaged one will be deleted for good; or that a read back was interrupted and there are
+    /// two stores to choose between.
+    ///
+    /// **A damaged store's notice has a press of its own**, and only that press is the person
+    /// having been told: what waits on it is a deletion, and a sheet goes away for many reasons
+    /// that are not somebody reading it. Put down any other way, it is shown again.
+    ///
+    /// **Of two stores, the one in place can always be kept** — keeping it moves nothing, and
+    /// one that then proves damaged brings the other back. The one set aside is offered only
+    /// where it could be glanced at. Either choice is a loss, and is drawn as one.
+    static func storeTrouble(_ trouble: StoreTrouble, language: DummyLanguage? = nil) -> ShellConfirmation {
+        func said(_ key: String) -> String { L10n.t(key, language: language) }
+        switch trouble {
+        case .unreachable(let why):
+            let key = switch why {
+            case .inUse: "store.unreachable.inUse"
+            case .noRoom: "store.unreachable.noRoom"
+            case .outOfReach: "store.unreachable.outOfReach"
+            case .readBackInterrupted: "store.unreachable.readBack"
+            case .putAsideOnly: "store.unreachable.putAside"
+            case .otherComesBack: "store.unreachable.otherBack"
+            }
+            return ShellConfirmation(
+                symbol: "exclamationmark.triangle", title: said("store.unreachable.title"),
+                line: said(key + ".line"), help: said(key + ".detail"),
+                choices: [], cancel: said("store.newer.ok")
+            )
+        case .damaged(let replacedBy):
+            let key = replacedBy == .empty ? "store.damaged" : "store.damaged.other"
+            return ShellConfirmation(
+                symbol: "exclamationmark.triangle", title: said("store.damaged.title"),
+                line: said(key + ".line"), help: said(key + ".detail"),
+                choices: [.init(told, said("store.damaged.told"), role: .destructive)],
+                cancel: said("store.damaged.later")
+            )
+        case .twoStores(let inPlace, let setAside):
+            var choices = [ShellConfirmation.Choice(keepInPlace, said("store.two.keep"), role: .destructive)]
+            if setAside.posts != nil { choices.append(.init(putBack, said("store.two.back"), role: .destructive)) }
+            let neither = inPlace.posts == nil && setAside.posts == nil
+            return ShellConfirmation(
+                symbol: "exclamationmark.triangle", title: said("store.two.title"),
+                line: said(neither ? "store.two.line.neither" : "store.two.line"),
+                help: String(
+                    format: said(neither ? "store.two.detail.neither" : "store.two.detail"),
+                    glance(inPlace, language: language), glance(setAside, language: language)
+                ),
+                choices: choices, cancel: said("store.two.later")
+            )
+        }
+    }
+
+    /// "12 posts, last written 5 Oct 2026 at 14:02" — what can be said of a store without
+    /// opening it to write, and that it cannot be read where it would not say.
+    static func glance(_ glance: StoreGlance, language: DummyLanguage? = nil) -> String {
+        let posts = glance.posts.map { $0 == 0
+            ? L10n.t("prefs.held.posts.none", language: language)
+            : L10n.count("prefs.held.posts", $0, language: language)
+        } ?? L10n.t("store.glance.unread", language: language)
+        guard let written = glance.written else { return posts }
+        let when = written.formatted(
+            Date.FormatStyle(date: .abbreviated, time: .shortened).locale(L10n.locale(language))
+        )
+        return String(format: L10n.t("store.glance", language: language), posts, when)
+    }
+
+    /// What a press on a store notice answers. Putting one down answers nothing.
+    static func storeTroubleChose(_ id: String) -> StoreTroubleAnswer? {
+        switch id {
+        case told: .told
+        case keepInPlace: .keepInPlace
+        case putBack: .putBack
+        default: nil
+        }
+    }
+
     // MARK: - Taking away and reading back (#247, #252)
 
     static let withPictures = "with"
@@ -393,6 +477,12 @@ enum ShellQuestion {
             line = String(format: L10n.t(key + ".line", language: language), PackageFormat.minPasswordCount)
         case .indexIsNewer:
             key = "carry.refused.indexNewer"
+            line = L10n.t(key + ".line", language: language)
+        case .storeNotOpened:
+            key = "carry.refused.storeNotOpened"
+            line = L10n.t(key + ".line", language: language)
+        case .nothingToTake:
+            key = "carry.refused.nothingToTake"
             line = L10n.t(key + ".line", language: language)
         case .unwound(let steps):
             key = "carry.refused.unwound"
@@ -496,6 +586,10 @@ enum ShellQuestion {
             return carryRefused(.package(inner), language: language)
         case .noRoom(let needed, let free):
             return carryRefused(.noRoom(needed: needed, free: free), language: language)
+        case .storeNotOpened:
+            return carryRefused(.storeNotOpened, language: language)
+        case .nothingToTake:
+            return carryRefused(.nothingToTake, language: language)
         case .notAllowed, .wrongCode, .refusedThere, .lost, .malformed, .unsure, .guessing, .timedOut:
             key = "nearby.refused.\(refusal)"
             line = L10n.t(key + ".line", language: language)

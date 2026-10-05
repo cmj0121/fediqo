@@ -51,6 +51,10 @@ final class ShellCarry {
         case emptyPassword
         case shortPassword
         case indexIsNewer
+        /// This run did not open this device's store, and a read back would replace it (#295).
+        case storeNotOpened
+        /// This run did not open this device's store, so there is nothing to take away.
+        case nothingToTake
         /// A step refused and an earlier one could not be put back: neither as it was nor as
         /// the package says, and which.
         case unwound([String])
@@ -64,6 +68,8 @@ final class ShellCarry {
             case PackageFault.emptyPassword: self = .emptyPassword
             case PackageFault.shortPassword: self = .shortPassword
             case PackageFault.indexIsNewer: self = .indexIsNewer
+            case PackageFault.storeNotOpened: self = .storeNotOpened
+            case PackageFault.nothingToTake: self = .nothingToTake
             case PackageFault.unwound(let steps): self = .unwound(steps)
             default: self = .other(error.localizedDescription)
             }

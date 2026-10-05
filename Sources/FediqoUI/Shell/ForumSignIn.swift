@@ -233,6 +233,13 @@ public final class ForumSessions {
     @ObservationIgnored private var madeStore: WKWebsiteDataStore?
     /// The launch's sweep of a store an earlier run left, while it runs (`sweepAtLaunch`).
     @ObservationIgnored private(set) var sweeping: Task<Void, Never>?
+    /// Whether the list of sources this run was handed is the list the person has (#295). It is
+    /// not where the store could not be opened, or was a newer build's, or was damaged and
+    /// replaced this launch: the run then holds no sources at all, and **a sweep that keeps only
+    /// the sources' sign-ins would take every one of them** while the notice says nothing was
+    /// changed. So where this is false nothing here is swept by that list, at launch or at the
+    /// run's end. Set once, at launch, before either.
+    @ObservationIgnored public var sourcesRead = true
     @ObservationIgnored private var watcher: CookieWatcher?
     /// The forums among the reader's sources: the hosts `reachedHosts` is asked about.
     @ObservationIgnored private var forumHosts: Set<String> = []
@@ -785,7 +792,7 @@ public final class ForumSessions {
     /// doing, so a store that stops answering cannot hold a quit up. A store never opened this run
     /// holds nothing this run put there, and is left unopened.
     public func leaveNothing(keeping hosts: [String], within limit: Duration) async {
-        guard let madeStore else { return }
+        guard sourcesRead, let madeStore else { return }
         await Self.bounded(limit) { await ForumWebEngine.sweep(madeStore, keeping: hosts) }
     }
 
@@ -803,7 +810,7 @@ public final class ForumSessions {
     /// that crashed, or that only ever went to the background, left all of it. Relaunched
     /// sign-ins wait for it, so nothing is swept out from under one.
     public func sweepAtLaunch(keeping hosts: [String], onDisk: Bool, within limit: Duration) {
-        guard onDisk else { return }
+        guard sourcesRead, onDisk else { return }
         let store = dataStore
         // Bounded like a quit's: a WebKit that stops answering holds the forum's reads up for
         // `limit` at most, not for the run.

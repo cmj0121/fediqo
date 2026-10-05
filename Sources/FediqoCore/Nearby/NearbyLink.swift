@@ -83,6 +83,10 @@ public enum NearbyRefusal: Error, Sendable, Equatable {
     case package(PackageRefusal)
     /// Not enough room here for the package and its staging, with the numbers.
     case noRoom(needed: Int, free: Int)
+    /// This device's store did not open in this run, and holding a store would replace it (#295).
+    case storeNotOpened
+    /// This device's store did not open in this run, so it has nothing to move.
+    case nothingToTake
     /// Something else refused, said as itself.
     case other(String)
 
@@ -91,6 +95,8 @@ public enum NearbyRefusal: Error, Sendable, Equatable {
         case let refusal as NearbyRefusal: self = refusal
         case let refusal as PackageRefusal: self = .package(refusal)
         case PackageFault.noRoom(let needed, let free): self = .noRoom(needed: needed, free: free)
+        case PackageFault.storeNotOpened: self = .storeNotOpened
+        case PackageFault.nothingToTake: self = .nothingToTake
         case is CancellationError: self = .lost
         default: self = .other(error.localizedDescription)
         }
