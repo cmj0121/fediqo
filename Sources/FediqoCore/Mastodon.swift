@@ -422,9 +422,10 @@ struct StatusDTO: Decodable, Sendable {
         }
     }
 
-    /// The quote this status states, or nothing — including a `quote` that names no state, which
-    /// is no quote this app can say anything about (and whose `RE:` line is then kept).
-    func quote(source: Source) -> Quote? {
+    /// The quote this status states — its reference, and the quoted post where the source
+    /// handed it over and it may be shown — or nothing: including a `quote` that names no state,
+    /// which is no quote this app can say anything about (and whose `RE:` line is then kept).
+    func quoted(source: Source) -> (reference: Reference, post: Note?)? {
         quote?.value?.asQuote(source: source)
     }
 
@@ -435,17 +436,24 @@ struct StatusDTO: Decodable, Sendable {
         let quotedStatus: Box<StatusDTO>?
         let quotedStatusId: String?
 
-        /// What a note keeps of it. The quoted status is read the way any status is, through
-        /// the same source, and cut to what a row draws of it (`QuotedPost`). Nothing where no
-        /// state was said.
-        func asQuote(source: Source) -> Quote? {
+        /// What a note keeps of it — **its reference, and nothing of the quoted post** (#293):
+        /// the state, and where the quote may be shown which post, by its name where the
+        /// source handed it over and by the source's own id for it. Nothing where no state was
+        /// said.
+        ///
+        /// **And the quoted post beside it, as an item of its own**, where the state is one
+        /// that may be shown and the source sent it: read the way any status is, through the
+        /// same source and no category, and cut to what a quote shows of one (`QuotedPost`) —
+        /// which is nothing of what the reader did to it. Its own quote is its id alone, a
+        /// level down and no further.
+        func asQuote(source: Source) -> (reference: Reference, post: Note?)? {
             guard state != nil else { return nil }
-            let quoted = quotedStatus?.value
-            return Quote(
-                state: Quote.State(wire: state),
-                post: quoted.map { QuotedPost($0.unstamped(source: source, categories: [])) },
-                statusID: quoted?.id ?? quotedStatusId
-            )
+            let stands = Quote.State(wire: state)
+            let post = stands == .accepted
+                ? quotedStatus?.value.map { QuotedPost($0.unstamped(source: source, categories: [])).note(through: source) }
+                : nil
+            let reference = Reference.quotes(stands, id: post?.id, statusID: quotedStatus?.value?.id ?? quotedStatusId)
+            return (reference, post)
         }
     }
 
@@ -630,9 +638,9 @@ struct StatusDTO: Decodable, Sendable {
     /// This status as the post it is, reading nothing through a reblog it may carry.
     fileprivate func post(source: Source, categories: Set<Category>) -> Note {
         let subject = self
-        let quote = subject.quote(source: source)
+        let quote = subject.quoted(source: source)
         let host = source.host
-        return Note(
+        var note = Note(
             // The name the post was minted under, where this server sent one — the fact two
             // servers carrying one status both state, and the whole of what #113 merges on.
             // Where it sent none, a name this device made up: `Note.inventedID` mints it and is
@@ -649,7 +657,6 @@ struct StatusDTO: Decodable, Sendable {
             ),
             postedAt: subject.createdAt,
             categories: categories,
-            reply: Self.reply(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),
             // **The post's own flag and never a reblog's**: what a reader means by "have I boosted
             // this" is about the post, and a reblog's own `reblogged` is about the reblog.
             boosted: subject.reblogged,
@@ -677,10 +684,17 @@ struct StatusDTO: Decodable, Sendable {
             ),
             // The post's own id on this server: what the row is.
             statusID: subject.id,
-            quote: quote,
             editedAt: Self.edited(subject.editedAt?.value, posted: subject.createdAt, now: Date()),
-            language: subject.language?.value
+            language: subject.language?.value,
+            // What it refers to, as the status says it: the post it answers, the post it quotes.
+            refs: [
+                Self.answers(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),
+                quote?.reference,
+            ].compactMap { $0 }
         )
+        // The quoted post came in the same payload: handed to the store beside this one.
+        note.brought = quote?.post.map { [$0] } ?? []
+        return note
     }
 
     /// How far ahead of this device's clock a source's edit moment may be: a clock a few minutes
@@ -712,12 +726,11 @@ struct StatusDTO: Decodable, Sendable {
         acct.contains("@") ? "@\(acct)" : "@\(acct)@\(host)"
     }
 
-    private static func reply(inReplyToId: String?, mentions: [Mention]?, host: String) -> Reply? {
+    /// The post a status answers, by its source's own id for it, and whom it is to where the
+    /// status mentions somebody. Nothing for a status that answers nothing.
+    private static func answers(inReplyToId: String?, mentions: [Mention]?, host: String) -> Reference? {
         guard let inReplyToId else { return nil }
-        if let acct = mentions?.first?.acct {
-            return Reply(handle: handle(acct, host: host), inReplyToId: inReplyToId)
-        }
-        return Reply(handle: nil, inReplyToId: inReplyToId)
+        return .answers(inReplyToId, to: (mentions?.first?.acct).map { handle($0, host: host) })
     }
 
     private static func audience(_ visibility: String?) -> Audience? {

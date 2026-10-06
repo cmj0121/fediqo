@@ -108,8 +108,9 @@ public struct DummyPerson: Identifiable, Hashable, Sendable {
     /// here once, at its own publish time: the reblog is the other person's.
     public static func held(of person: DummyPerson, in notes: [Note]) -> [DummyItem] {
         let theirs = notes.filter(person.wrote)
-        let targets = ReblogTargets(theirs.contains(where: \.isReblog) ? notes : [])
-        return theirs.sorted { $0.postedAt > $1.postedAt }
-            .map { DummyItem($0, reblogging: targets.target(of: $0)) }
+        // What a reblog of theirs reblogs, and what a post of theirs quotes, are other items.
+        let refers = theirs.contains { $0.isReblog || $0.quotedKey != nil }
+        let targets = ReblogTargets(refers ? notes : [])
+        return theirs.sorted { $0.postedAt > $1.postedAt }.map { DummyItem($0, among: targets) }
     }
 }

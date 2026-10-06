@@ -30,6 +30,10 @@ public struct Opened: Equatable, Sendable {
     /// The held reblogs of it, the newest first. **In no thread**: a reblog answers nothing.
     public var reblogs: [Note] = []
 
+    /// The post each row here quotes, where it is held — by the quoting row's key. What a row's
+    /// quote is drawn from (#293): the quoting post keeps only its reference.
+    public var quoted: [NoteKey: Note] = [:]
+
     public init() {}
 
     /// Whether nothing held belongs with the item.
@@ -110,6 +114,9 @@ public struct Opened: Equatable, Sendable {
         }
         opened.quoting = oldestFirst(quotes.filter { !seen.contains($0.key) })
         opened.reblogs.sort { ($0.postedAt, $0.id) > ($1.postedAt, $1.id) }
+        for row in opened.rows + [root] {
+            if let key = row.quotedKey, let post = byKey[key], post.key != row.key { opened.quoted[row.key] = post }
+        }
         return opened
     }
 

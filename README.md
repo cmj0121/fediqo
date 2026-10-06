@@ -367,6 +367,11 @@ had to read this way is dropped with it — and waits its turn: a source is aske
 no closer than three seconds apart, and further apart where it says to slow down. One arrival asks a source
 for at most ten such posts; the rest are read when their rows come near the screen. A post
 read this way is a post like any other, and stays for as long as the post that refers to it.
+A quote is drawn from the quoted post as this device holds it: it shows what this device
+last read of that post — the post changed at its source is shown changed once the quoting
+post, or the post itself, is read again, and keeps what it said before. From this version a
+quote no longer carries a copy of the post it quotes, so a quote whose post this device does
+not hold shows none of that post's words and says it is no longer held.
 
 Opening a post shows what belongs with it, from what this device holds. Above it stands the
 post it answers, and the post that one answers, as far up as the posts held go; nothing is

@@ -130,7 +130,13 @@ public actor ItemStore {
         for profile in said where Self.isWord(profile) && hosts.contains(profile.host) {
             saidByHost[profile.host] = profile
         }
-        notes = Dictionary(incoming.map { ($0.key, $0) }, uniquingKeysWith: { _, new in new })
+        notes = Dictionary(incoming.map { note in
+            // A row holds nothing of another post (`Note.brought`): what a snapshot's rows
+            // refer to is among its rows, or is not held.
+            var row = note
+            row.brought = []
+            return (row.key, row)
+        }, uniquingKeysWith: { _, new in new })
         // The order the rows are handed over is the order they arrived in: the run that wrote
         // this snapshot wrote them oldest first. A row named twice keeps the first mention's
         // place, the way `ingest` keeps a row's place when it is met again.
@@ -186,6 +192,7 @@ public actor ItemStore {
         let incoming = arriving.map { note in
             var settled = note
             settled.refsDue = false
+            settled.brought = []
             return settled
         }
         sourceList = []
@@ -363,7 +370,7 @@ public actor ItemStore {
         // post a post quotes, where its source sent that post along — at no request. It is an
         // item like any other from here, and one taken in this way owes no load of its own:
         // what is loaded for an item is the item's direct target and nothing further.
-        let brought = admitted.compactMap(\.quotedNote)
+        let brought = admitted.flatMap(\.brought)
         // Its topic as held, or as this same landing brings it.
         let landing = Dictionary((admitted + brought).map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         let incoming = (admitted + brought).map { Self.throughItsBoard($0, in: notes, or: landing) }
@@ -415,6 +422,8 @@ public actor ItemStore {
             } else {
                 var note = note
                 note.asked = .unsaid
+                // What came with it is taken in beside it, above, and is no part of the row.
+                note.brought = []
                 // Never a load a copy brought in with it, from a file or another device.
                 note.refsDue = false
                 notes[key] = note
@@ -567,7 +576,7 @@ public actor ItemStore {
         if moved { changed(shown: shown, replies: replies) }
         // The posts these quote, taken in as `ingest` takes them (#214): a quote read again may
         // name one this device has not held yet.
-        let quoted = held.compactMap(\.quotedNote)
+        let quoted = held.flatMap(\.brought)
         let before = revision
         // Brought by the post that quotes them, and so owing no load of their own (#293).
         if !quoted.isEmpty { admit(quoted, exempt: true, owing: false) }

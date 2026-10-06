@@ -182,8 +182,10 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let emojis: [CustomEmoji]
     public let counts: DummyCounts
     public let marks: DummyMarks
-    /// The post this one quotes (#214) — `Note.quote`, carried so every place a row is drawn
-    /// draws the quote the same way. Nothing on a post that quotes none, which is most.
+    /// The post this one quotes (#214), carried so every place a row is drawn draws the quote
+    /// the same way: where the quote stands, as the post's reference says (`Note.quote`), and
+    /// **the quoted post as this device holds it**, where whoever built the row had it to hand
+    /// (`init(_:among:)`, `quoting(_:)`). Nothing on a post that quotes none, which is most.
     public var quote: Quote?
     /// The row the quoted post is, where the quote came with the post in full: what opening the
     /// quote walks to. Nothing where it may not be shown, or came as an id alone.
@@ -423,9 +425,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// that moment, as it would be for any row redrawn under a new key, and never otherwise.
     init(merging copies: [Note], here: Set<String>? = nil, targets: ReblogTargets = ReblogTargets([])) {
         let lead = here.flatMap { here in copies.firstIndex { here.contains($0.source.host) } } ?? 0
-        self.init(copies[lead], reblogging: targets.target(of: copies[lead]))
+        self.init(copies[lead], among: targets)
         otherCopies = copies.enumerated().filter { $0.offset != lead }
-            .map { DummyItem($0.element, reblogging: targets.target(of: $0.element)) }
+            .map { DummyItem($0.element, among: targets) }
     }
 
     /// Notes, in the order they are to be drawn, as rows: one per post, however many sources
@@ -458,6 +460,33 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         owesStalled = note.refsStalled
         refsGone = Set(note.refs.filter(\.gone).map(\.kind))
         refsUnheld = note.refsUnheld
+    }
+
+    /// One stored note drawn as a row among what is held (`targets`): with the post it reblogs
+    /// where it is a reblog (#290), and with the post that it — or the post it reblogs — quotes
+    /// (#293), each where it is held.
+    public init(_ note: Note, among targets: ReblogTargets) {
+        let target = targets.target(of: note)
+        self.init(note, reblogging: target)
+        // What is drawn is the post reblogged, where this is a reblog showing one; a reblog
+        // with no post to show draws no quote.
+        guard let content = isReblog ? (reblogged.isEmpty ? nil : target) : note else { return }
+        let quoted = targets.quoted(by: content)
+        self = quoting(quoted)
+        reblogged = reblogged.map { $0.quoting(quoted) }
+    }
+
+    /// This row with the post it quotes as `quoted` — that post's own item, read as what a
+    /// quote shows of one. As it was where the row quotes nothing that may be shown, where
+    /// `quoted` is nothing, and where it is not a post of this row's own source.
+    public func quoting(_ quoted: Note?) -> DummyItem {
+        guard let quote, quote.state == .accepted, let quoted, !quoted.isReblog,
+              quoted.source.host == source.host
+        else { return self }
+        var row = self
+        row.quote = Quote(state: .accepted, post: QuotedPost(quoted), statusID: quote.statusID)
+        row.quotedRowID = quoted.key.rowID
+        return row
     }
 
     /// One stored note drawn as a row, with the post it reblogs where it is a reblog and that
@@ -660,7 +689,7 @@ extension DummyConversation {
     /// row's parent is the row above, and its line is the plain one.
     static func opened(_ root: DummyItem, _ opened: Opened) -> DummyConversation {
         var conversation = around(
-            root, rootID: root.statusID, ancestors: opened.above, descendants: opened.below
+            root, rootID: root.statusID, ancestors: opened.above, descendants: opened.below, quoted: opened.quoted
         )
         let first = conversation.ancestors.first ?? root
         if let missing = QuoteBand.Loading(answeredBy: first) {
@@ -688,7 +717,8 @@ extension DummyConversation {
             )
             conversation.missing = missing
         }
-        conversation.quoting = opened.quoting.filter { $0.key.rowID != root.id }.map(DummyItem.init)
+        conversation.quoting = opened.quoting.filter { $0.key.rowID != root.id }
+            .map { DummyItem($0).quoting(opened.quoted[$0.key]) }
         var seen: Set<String> = []
         // A reblog since taken back at its source is not somebody reblogging it now.
         conversation.rebloggers = opened.reblogs.filter { $0.goneSince == nil }.compactMap { reblog in
@@ -740,8 +770,11 @@ extension DummyConversation {
     /// at the first generation and look like a server that sends flat threads. Nothing where it
     /// could not be known, and then every answer does stand at the first generation, which is the
     /// honest fallback rather than an accident.
+    ///
+    /// `quoted` is the post each row quotes, where it is held, by the quoting row's key
+    /// (`Opened.quoted`): what its quote is drawn from.
     public static func around(
-        _ root: DummyItem, rootID: String?, ancestors: [Note], descendants: [Note]
+        _ root: DummyItem, rootID: String?, ancestors: [Note], descendants: [Note], quoted: [NoteKey: Note] = [:]
     ) -> DummyConversation {
         var depths: [String: Int] = [:]
         if let rootID { depths[rootID] = 0 }
@@ -753,10 +786,11 @@ extension DummyConversation {
             let parent = note.reply?.inReplyToId.flatMap { depths[$0] }
             let depth = (parent ?? 0) + 1
             if let id = note.statusID { depths[id] = depth }
-            entries.append(DummyThreadEntry(item: DummyItem(note), depth: depth))
+            entries.append(DummyThreadEntry(item: DummyItem(note).quoting(quoted[note.key]), depth: depth))
         }
         return DummyConversation(
-            ancestors: ancestors.filter { $0.key.rowID != root.id && !$0.isReblog }.map(DummyItem.init),
+            ancestors: ancestors.filter { $0.key.rowID != root.id && !$0.isReblog }
+                .map { DummyItem($0).quoting(quoted[$0.key]) },
             post: root,
             descendants: entries
         )

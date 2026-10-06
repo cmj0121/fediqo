@@ -420,7 +420,7 @@ final class ShellSession {
     /// up here — `heldNote(_:)`'s one rule, so the row a press opens and the note its marks act on
     /// are found the same way.
     func held(_ rowID: String) -> DummyItem? {
-        heldNote(rowID).map { DummyItem($0, reblogging: reblogTargets.target(of: $0)) }
+        heldNote(rowID).map { DummyItem($0, among: reblogTargets) }
     }
 
     /// The post `note` reblogs, where it is a reblog and this device holds that post (#290):

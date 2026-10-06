@@ -177,8 +177,9 @@ struct MastodonQuoteTests {
             id: quoting.id, source: source, author: quoting.author, handle: quoting.handle,
             body: quoting.body, postedAt: quoting.postedAt, categories: [.public]
         )
-        #expect(bare.filled(from: quoting).quote == quoting.quote)
-        #expect(quoting.filled(from: bare).quote == quoting.quote, "the held quote stays")
+        // What a row keeps of its quote is its reference (#293): the state and which post.
+        #expect(bare.filled(from: quoting).refs == quoting.refs && quoting.quotedKey != nil)
+        #expect(quoting.filled(from: bare).refs == quoting.refs, "the held quote stays")
         let revoked = try note(MastodonQuoteCaptures.revoked)
         let taken = Note(
             id: quoting.id, source: source, author: quoting.author, handle: quoting.handle,
@@ -193,17 +194,29 @@ struct MastodonQuoteTests {
             id: quoting.id, source: forum, author: "", handle: "", body: "", postedAt: quoting.postedAt,
             categories: [], quote: quoting.quote
         )
-        #expect(never.refreshed(over: heldThere).quote == quoting.quote, "a source that never says one leaves it")
+        #expect(never.refreshed(over: heldThere).refs == quoting.refs, "a source that never says one leaves it")
     }
 
     // MARK: - A later copy's quote
 
     /// The store's row of `key`, after `copies` came in one after the other.
     private func held(after copies: [Note]) async throws -> Note {
+        try #require(await holding(after: copies).note(copies[0].key))
+    }
+
+    /// The store, after `copies` came in one after the other.
+    private func holding(after copies: [Note]) async -> ItemStore {
         let store = ItemStore()
         await store.add(source)
         for copy in copies { await store.ingest([copy]) }
-        return try #require(await store.note(copies[0].key))
+        return store
+    }
+
+    /// The post `key`'s row quotes, as the store holds it: the quoted post's own item, which
+    /// is what a quote is drawn from (#293).
+    private func quoted(by key: NoteKey, in store: ItemStore) async -> Note? {
+        guard let row = await store.note(key), let quoted = row.quotedKey else { return nil }
+        return await store.note(quoted)
     }
 
     @Test("A quote taken back since: the later copy's state wins, and nothing of the quoted post is kept")
@@ -235,9 +248,10 @@ struct MastodonQuoteTests {
             body: accepted.body, postedAt: accepted.postedAt, categories: [.public],
             quote: Quote(state: .pending)
         )
-        let row = try await held(after: [pending, accepted])
-        #expect(row.quote == accepted.quote)
-        #expect(row.quote?.post != nil)
+        let store = await holding(after: [pending, accepted])
+        let row = try #require(await store.note(accepted.key))
+        #expect(row.refs == accepted.refs && row.quote?.state == .accepted)
+        #expect(await quoted(by: accepted.key, in: store) != nil, "and the quoted post is held, to draw it from")
     }
 
     @Test("A post held as a quote's id alone takes the quoted post from its own full copy, and keeps it")
@@ -247,11 +261,66 @@ struct MastodonQuoteTests {
         #expect(bob.quote?.post == nil && bob.quote?.statusID != nil, "the premise")
         let bobFull = try note(MastodonQuoteCaptures.accepted)
         #expect(bob.key == bobFull.key)
-        let filled = try await held(after: [bob, bobFull])
-        #expect(filled.quote?.post?.body == "The first post, by Ada")
+        let filled = await holding(after: [bob, bobFull])
+        #expect(await quoted(by: bob.key, in: filled)?.body == "The first post, by Ada")
         // And the id alone, arriving again after the full copy, does not take the post away.
-        let kept = try await held(after: [bobFull, bob])
-        #expect(kept.quote?.post?.body == "The first post, by Ada")
+        let kept = await holding(after: [bobFull, bob])
+        #expect(await quoted(by: bob.key, in: kept)?.body == "The first post, by Ada")
+    }
+
+    @Test("The quoting post read again after the quoted post was changed at its source: the copy that comes beside it says the change, so the quoted item says the new words and keeps what it said before — whichever way the read is taken in")
+    func theQuotedPostWasEdited() async throws {
+        // The capture says no language; the quoted post says one here, and another once changed.
+        let said = MastodonQuoteCaptures.accepted
+            .replacingOccurrences(of: #""quoted_status": {"#, with: #""quoted_status": {"language": "en","#)
+        let before = try note(said)
+        let quotedKey = try #require(before.quotedKey)
+        let changed = said
+            .replacingOccurrences(of: "The first post, by Ada", with: "The first post, corrected")
+            .replacingOccurrences(of: #""language": "en""#, with: #""language": "ja", "edited_at": "2026-09-24T00:00:00.000Z""#)
+        let after = try note(changed)
+        #expect(after.brought.first?.body == "The first post, corrected" && after.brought.first?.editedAt != nil, "the premise")
+        #expect(before.brought.first?.editedAt == nil && before.brought.first?.language == "en" && after.brought.first?.language == "ja")
+
+        for way in ["taken in", "read again"] {
+            let store = await holding(after: [before])
+            #expect(await store.note(quotedKey)?.body == "The first post, by Ada")
+            if way == "taken in" {
+                await store.ingest([after])
+            } else {
+                _ = await store.refresh([after], ifSourceHere: source.host)
+            }
+            let quoted = try #require(await store.note(quotedKey), "\(way)")
+            #expect(quoted.body == "The first post, corrected", "\(way): the quote is drawn from this, and shows the new words")
+            #expect(quoted.earlier.map(\.body) == ["The first post, by Ada"], "\(way): and what it said is kept")
+            #expect(quoted.editedAt == after.brought.first?.editedAt)
+            #expect(quoted.language == "ja", "\(way): and the language it says it is in now, not none")
+            // The same again changes nothing more.
+            let drawn = await store.drawn
+            await store.ingest([after])
+            #expect(await store.drawn == drawn, "\(way)")
+            #expect(await store.note(quotedKey)?.earlier.count == 1)
+        }
+    }
+
+    @Test("A quote that may not be shown names no post as it is decoded, whatever the status sent beside its state", arguments: [
+        MastodonQuoteCaptures.pending, MastodonQuoteCaptures.rejected, MastodonQuoteCaptures.revoked, MastodonQuoteCaptures.deleted,
+        MastodonQuoteCaptures.unauthorized, MastodonQuoteCaptures.mutedAccount, MastodonQuoteCaptures.blockedAccount,
+    ])
+    func hiddenNamesNothing(capture: String) throws {
+        // Beside the state, the id of the post withheld — which is not kept.
+        let withID = capture.replacingOccurrences(of: #""quote": {"#, with: #""quote": {"quoted_status_id": "117322969977080442","#)
+        #expect(withID != capture, "the premise: an id is sent beside the state")
+        for json in [capture, withID] {
+            let decoded = try note(json)
+            for copy in [decoded] + decoded.brought {
+                for reference in copy.refs where reference.kind == .quotes && reference.state != .accepted {
+                    #expect(reference.id == nil && reference.statusID == nil)
+                }
+            }
+            #expect(decoded.refs.contains { $0.kind == .quotes } || decoded.brought.contains { $0.refs.contains { $0.kind == .quotes } }, "the premise: a quote is decoded")
+        }
+        #expect(Reference.quotes(.pending, id: "x", statusID: "7") == Reference.quotes(.pending))
     }
 
     // MARK: - Kept whatever its age

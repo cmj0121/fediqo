@@ -153,14 +153,17 @@ public struct TextIndex: Sendable {
     }
 }
 
-/// The post each reblog among some notes reblogs, looked up among those same notes (#290).
+/// The post each reblog among some notes reblogs, looked up among those same notes (#290) — and
+/// the post each quoting post among them quotes (#293), which a row draws from the post's own
+/// item, the quoting post keeping nothing of it but its reference.
 ///
 /// **Built once wherever the held notes are replaced, and handed to everything that asks** —
 /// a timeline's rules, a search, the rows — so no evaluation walks everything held to build its
 /// own. Over the notes handed in: a reference is a name within one source, so what a reblog
 /// reblogs is the note held under that name from that source, or nothing. A reblog is never
-/// another reblog's target. **Only what some reblog names is kept**: two passes over the notes
-/// and a table the size of the reblogs, never one the size of the store.
+/// another reblog's target, nor what a post quotes. **Only what some reblog or quote names is
+/// kept**: two passes over the notes and a table the size of those, never one the size of the
+/// store.
 public struct ReblogTargets: Sendable {
     private let byKey: [NoteKey: Note]
 
@@ -182,7 +185,10 @@ public struct ReblogTargets: Sendable {
         }
         if !notes.isEmpty { Self.counting?.add() }
         var named: Set<NoteKey> = []
-        for note in notes { if let key = note.reblogKey { named.insert(key) } }
+        for note in notes {
+            if let key = note.reblogKey { named.insert(key) }
+            if let key = note.quotedKey { named.insert(key) }
+        }
         guard !named.isEmpty else {
             byKey = [:]
             return
@@ -199,5 +205,11 @@ public struct ReblogTargets: Sendable {
     /// The post `note` reblogs, where it is a reblog and that post is among the notes.
     public func target(of note: Note) -> Note? {
         note.reblogKey.flatMap { byKey[$0] }
+    }
+
+    /// The post `note` quotes, where its quote names one and that post is among the notes. The
+    /// name is looked up within `note`'s own source, whatever host it spells.
+    public func quoted(by note: Note) -> Note? {
+        note.quotedKey.flatMap { byKey[$0] }
     }
 }

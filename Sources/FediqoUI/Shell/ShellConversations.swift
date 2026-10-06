@@ -266,6 +266,8 @@ final class ShellConversations {
     private func keep(_ read: [Note], notHeldIn landed: Landed, under id: String) {
         for note in read where landed.copies[note.key] == nil && !note.isReblog {
             brought[id, default: [:]][note.key] = note
+            // And the post it quotes, which came with it and went nowhere without it.
+            for quoted in note.brought { brought[id, default: [:]][quoted.key] = quoted }
         }
     }
 

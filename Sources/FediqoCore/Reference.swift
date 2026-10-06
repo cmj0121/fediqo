@@ -42,11 +42,15 @@ public struct Reference: Hashable, Sendable {
         gone: Bool = false
     ) {
         self.kind = kind
-        self.id = id
-        self.statusID = statusID
         self.handle = kind == .answers ? handle : nil
         self.state = kind == .quotes ? state : nil
         self.gone = gone
+        // **A quote that may not be shown names nothing** (#214): the reader is told which state
+        // it is, and nothing of the quoted post is kept — not even which post — whatever a
+        // source sent beside the state.
+        let hidden = kind == .quotes && state != nil && state != .accepted
+        self.id = hidden ? nil : id
+        self.statusID = hidden ? nil : statusID
     }
 
     /// This reference with its target named, or said to be gone.
@@ -74,42 +78,81 @@ public struct Reference: Hashable, Sendable {
         }
         return kept
     }
-
-    /// What an item's `reply` and `quote` say it refers to — the two an item says today.
-    ///
-    /// **A reblog is not among them.** That an item reblogs another is said by nothing but its
-    /// reference (#290) — a reblog has no `reply` or `quote` to say it with — so it is carried
-    /// from note to note by name (`carried`), and never worked out again.
-    public static func derived(reply: Reply?, quote: Quote?) -> [Reference] {
-        var references: [Reference] = []
-        if let reply {
-            references.append(Reference(kind: .answers, statusID: reply.inReplyToId, handle: reply.handle))
-        }
-        if let quote {
-            references.append(Reference(kind: .quotes, id: quote.post?.id, statusID: quote.statusID, state: quote.state))
-        }
-        return references
-    }
 }
 
 extension Reference {
-    /// The references a note made anew from one that held `held` carries, where the new note's
-    /// `reply` and `quote` are these (#290): what those two state, and **every reference of
-    /// `held` that they cannot state** — a reblog's. Each place a note is rebuilt from another
-    /// names its references this way, so one that `reply` and `quote` cannot re-derive survives a
-    /// reload, a read again, a revision and the reader-marks sweep.
+    /// The post an item answers, as its source named it: by the source's own id for it, and
+    /// whom the answer is to where the source said. What a status that answers one is given.
+    public static func answers(_ statusID: String?, to handle: String? = nil) -> Reference {
+        Reference(kind: .answers, statusID: statusID, handle: handle)
+    }
+
+    /// The post an item quotes, as its source said (#214): where the quote stands, and — only
+    /// where it may be shown — which post, by its `Note.id` where the source handed the post
+    /// over and by the source's own id for it.
+    public static func quotes(_ state: Quote.State, id: String? = nil, statusID: String? = nil) -> Reference {
+        Reference(kind: .quotes, id: id, statusID: statusID, state: state)
+    }
+
+    /// The references a note made anew from another carries (#290, #293): `answers` and `quotes`
+    /// as whoever makes it says them — which copy's word each is, is theirs to say — and
+    /// **every reference of `held` that no later copy can say again**: a reblog's.
     ///
     /// **And the target's name, where a load found it** (#293). What an item answers is named by
     /// its source's own id until the post itself has been read; once it has, the reference
-    /// carries the post's `Note.id` too, and that is not in `reply` to be worked out again. So a
-    /// reference `held` had named is still named, where it is still the same reference.
-    public static func carried(_ held: [Reference], reply: Reply?, quote: Quote?) -> [Reference] {
-        derived(reply: reply, quote: quote).map { fresh in
+    /// carries the post's `Note.id` too, and no copy off the wire says that. So a reference
+    /// `held` had named, or had learned was gone, is still so where it is still the same
+    /// reference.
+    static func rebuilt(answers: Reference?, quotes: Reference?, from held: [Reference]) -> [Reference] {
+        [answers, quotes].compactMap { $0 }.map { fresh in
             guard fresh.id == nil, let statusID = fresh.statusID,
                   let known = held.first(where: { $0.kind == fresh.kind && $0.statusID == statusID && ($0.id != nil || $0.gone) })
             else { return fresh }
             return fresh.settled(id: known.id, gone: known.gone)
         } + held.filter { $0.kind == .reblogs }
+    }
+
+    /// The quote a later copy of the same post states, laid over the one held (#214).
+    ///
+    /// **The later copy wins**, as a count does: a quote's state is the source's latest word on
+    /// it, so a quote taken back, deleted, blocked or muted since is that — naming nothing —
+    /// and one pending is accepted when the source says so. A copy that says nothing of a quote
+    /// leaves the held one. **The one exception is the same quote said again**: accepted both
+    /// times, of the same post, where the later copy came as an id alone (the quoted post's own
+    /// copy) — the name the held one had is kept rather than lost.
+    static func laterQuote(_ later: Reference?, over held: Reference?) -> Reference? {
+        guard let later else { return held }
+        guard let held, later.state == .accepted, held.state == .accepted,
+              later.statusID == nil || held.statusID == nil || later.statusID == held.statusID
+        else { return later }
+        return Reference(
+            kind: .quotes, id: later.id ?? held.id, statusID: later.statusID ?? held.statusID,
+            state: .accepted, gone: later.gone
+        )
+    }
+}
+
+extension Note {
+    /// What this item answers, as its reference says it, or nothing.
+    var answersReference: Reference? { refs.first { $0.kind == .answers } }
+    /// What this item quotes, as its reference says it, or nothing.
+    var quotesReference: Reference? { refs.first { $0.kind == .quotes } }
+
+    /// That this item answers another, and whom and which post where its source named them —
+    /// **read off its reference, and nowhere kept** (#293). Nothing where it answers nothing.
+    public var reply: Reply? { answersReference.flatMap(Reply.init) }
+
+    /// This item's quote of another post — where it stands, and which post where it may be
+    /// shown — **read off its reference, and nowhere kept** (#214, #293). Nothing of the quoted
+    /// post is on a held item: that is the post's own item's (`quotedKey`), and a row draws it
+    /// from there.
+    ///
+    /// **A copy on its way in has the quoted post to hand** (`brought`), and says it here: the
+    /// status and the post it quotes are one payload until the store has taken each in.
+    public var quote: Quote? {
+        guard let quote = quotesReference.flatMap(Quote.init) else { return nil }
+        guard let key = quotedKey, let post = brought.first(where: { $0.key == key }) else { return quote }
+        return Quote(state: quote.state, post: QuotedPost(post), statusID: quote.statusID)
     }
 }
 
@@ -166,7 +209,7 @@ extension Note {
     /// **And the post it answers, once that post was loaded for it** (#293): the reference then
     /// names it, and a post fetched because this item arrived is not let go from under it.
     var heldWith: [NoteKey] {
-        var keys = [quotedKey, reblogKey].compactMap { $0 }
+        var keys = [reblogKey].compactMap { $0 }
         for reference in refs where reference.kind != .reblogs {
             if let id = reference.id { keys.append(NoteKey(host: source.host, id: id)) }
         }

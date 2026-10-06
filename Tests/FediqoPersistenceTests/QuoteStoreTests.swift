@@ -52,7 +52,12 @@ struct QuoteStoreTests {
         )
         let opened = StoreFile.open(at: dir)
         let byID = Dictionary(uniqueKeysWithValues: opened.notes.map { ($0.statusID, $0) })
-        #expect(byID["2"]?.quote == accepted)
+        // The quoting row keeps where its quote stands and which post (#293) — and nothing of
+        // that post, which comes back as the item it is, with everything a quote shows of one.
+        #expect(byID["2"]?.refs == [.quotes(.accepted, id: quoted.id, statusID: quoted.statusID)])
+        #expect(byID["2"]?.quote == Quote(state: .accepted, statusID: quoted.statusID))
+        #expect(byID["2"]?.quotedKey == held.key)
+        #expect(byID["1"].map(QuotedPost.init) == quoted, "its cover, what it carries and its own quote")
         #expect(byID["3"]?.quote == revoked)
         #expect(byID["4"]?.quote == nil)
         // The quoted post itself, an item of its own, opens with the network off.

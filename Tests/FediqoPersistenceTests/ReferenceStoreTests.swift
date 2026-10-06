@@ -134,16 +134,20 @@ struct ReferenceStoreTests {
         #expect(opened.notes.allSatisfy { !$0.refsDue }, "a post held before there was any asking owes none")
         #expect(opened.notes.allSatisfy { !$0.isReblog }, "and one that arrived as a boost is still the post")
         // And everything else a row said is as it was.
-        #expect(opened.notes.allSatisfy { $0.refs == Reference.derived(reply: $0.reply, quote: $0.quote) })
         #expect(opened.notes[1].reply == Reply(handle: "@bob@two.example", inReplyToId: "41"))
-        #expect(opened.notes[2].quote?.post?.body == "quoted" && opened.notes[4].boostedBy == "Bob")
+        // What it quotes is its reference's to say (#293): where the quote stands and which post.
+        // The copy of the quoted post the row once carried is not: that post is its own item,
+        // and this store holds none, so the row names it and nothing draws it.
+        #expect(opened.notes[2].quote == Quote(state: .accepted, statusID: "77"))
+        #expect(opened.notes[2].quotedKey == NoteKey(host: "one.example", id: "https://one.example/q7"))
+        #expect(opened.notes[4].boostedBy == "Bob")
         #expect(opened.notes.map(\.kept) == [false, false, false, false, false, true])
         let migrations = try DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).read { db in
             try String.fetchAll(db, sql: "SELECT identifier FROM grdb_migrations ORDER BY rowid")
         }
         #expect(migrations == [
             "v1-index", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions",
-            "v9-language", "v10-references", "v11-one-holding",
+            "v9-language", "v10-references", "v11-one-holding", "v12-references-only",
         ])
     }
 
@@ -257,9 +261,9 @@ struct ReferenceStoreTests {
     }
 
     @Test(
-        "A references cell that will not read is the row's reply and quote again: the row is whole, the store is not put aside, and nothing of the cell is kept",
+        "A references cell that will not read costs the row its references and nothing else: the store is not put aside, a post that says something stays — a kept one too — referring to nothing, and nothing of the cell is kept",
         arguments: [
-            "not json", "{}", #"[{"kind":"marries","id":"x"}]"#, #"[{"id":"x"}]"#, "",
+            "not json", "{}", #"[{"kind":"marries","id":"x"}]"#, #"[{"id":"x"}]"#, "", "7", #"["answers"]"#,
             "[" + String(repeating: #"{"kind":"quotes","id":"x"},"#, count: 4_000) + #"{"kind":"quotes"}]"#,
         ]
     )
@@ -267,7 +271,11 @@ struct ReferenceStoreTests {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let answer = Self.note("1", reply: Reply(handle: "@bob", inReplyToId: "41"))
-        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: [answer, Self.note("22")])
+        let quoting = Note(
+            id: "3", source: Self.mastodon, author: "Ada", handle: "@ada", body: "look", postedAt: PackagerFixture.origin,
+            categories: [.home], kept: true, refs: [.quotes(.accepted, id: "22", statusID: "22")]
+        )
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: [answer, Self.note("22"), quoting])
         let index = dir.appendingPathComponent("index.sqlite")
         try await DatabaseQueue(path: index.path).write { db in
             try db.execute(sql: "UPDATE note SET refs = ?", arguments: [cell])
@@ -276,7 +284,73 @@ struct ReferenceStoreTests {
         let opened = StoreFile.open(at: dir)
 
         #expect(opened.setAside == nil && opened.file != nil && opened.trouble == nil)
-        #expect(opened.notes == [answer, Self.note("22")])
+        #expect(opened.notes.map(\.id) == ["1", "22", "3"], "every post is still here")
+        #expect(opened.notes.map(\.body) == [answer.body, Self.note("22").body, "look"])
+        #expect(opened.notes.allSatisfy { $0.refs.isEmpty }, "there is nothing else to read what it referred to from")
+        #expect(opened.notes[0].reply == nil && opened.notes[2].quote == nil)
+        #expect(opened.notes[2].kept, "and what the person keeps is kept")
+        // Saved again, the cell is the references the row has: none.
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: opened.notes)
+        #expect(try cells(dir)["1"]?.refs == "[]")
+    }
+
+    @Test("A cell is read one reference at a time: an entry that names no kind, or a kind this build does not know, or is no object, is left out alone and the references beside it stand; a name that is not text is no name")
+    func oneReferenceAtATime() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: [Self.note("1"), Self.note("22")])
+        let mixed = #"[{"kind":"marries","id":"x"},{"kind":"answers","statusID":"41","handle":"@bob"},7,{"id":"y"},{"kind":"quotes","state":"accepted","id":"q","statusID":77}]"#
+        try await DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).write { db in
+            try db.execute(sql: "UPDATE note SET refs = ? WHERE id = '1'", arguments: [mixed])
+        }
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.trouble == nil && opened.setAside == nil && opened.notes.count == 2)
+        #expect(opened.notes.first { $0.id == "1" }?.refs == [
+            Reference(kind: .answers, statusID: "41", handle: "@bob"), .quotes(.accepted, id: "q"),
+        ])
+    }
+
+    @Test("A post whose whole content is its quote — no words of its own — stays for as long as that reference reads, whatever else in its cell did not, and so does an answer with no words; with nothing read of the cell it is no item", arguments: [
+        (#"[{"kind":"quotes","state":"accepted","id":"22","statusID":"22"},{"kind":"marries"}]"#, true),
+        (#"[7,{"kind":"answers","statusID":"41"}]"#, true),
+        (#"[{"kind":"marries"}]"#, false), ("not json", false),
+    ])
+    func aRowThatIsOnlyItsReference(cell: String, stays: Bool) async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let wordless = Note(
+            id: "3", source: Self.mastodon, author: "Ada", handle: "@ada", body: "", postedAt: PackagerFixture.origin,
+            categories: [.home], statusID: "3", kept: true, refs: [.quotes(.accepted, id: "22", statusID: "22")]
+        )
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: [Self.note("22"), wordless])
+        try await DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).write { db in
+            try db.execute(sql: "UPDATE note SET refs = ? WHERE id = '3'", arguments: [cell])
+        }
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.trouble == nil && opened.setAside == nil)
+        #expect(opened.notes.map(\.id) == (stays ? ["22", "3"] : ["22"]))
+        #expect(opened.notes.first { $0.id == "3" }?.kept != false, "kept, where it stays")
+    }
+
+    @Test("A row that says nothing — no words, title, cover, picture or opening post — whose reference will not read is no item and is left out, kept or not; one whose reblog reference did read stays, whatever else in its cell did not", arguments: [
+        ("not json", false), (#"[{"kind":"marries","id":"x"}]"#, false), ("[]", true),
+        (#"[{"kind":"reblogs","id":"https://one.example/9","statusID":"9"},{"kind":"marries"}]"#, true),
+    ])
+    func aRowWithNothingToShow(cell: String, stays: Bool) async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let reblog = Note(
+            id: "333", source: Self.mastodon, author: "Bob", handle: "@bob", body: "", postedAt: PackagerFixture.origin,
+            categories: [.home], statusID: "900", kept: true,
+            refs: [Reference(kind: .reblogs, id: "https://one.example/9", statusID: "9")]
+        )
+        try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: [Self.note("1"), reblog])
+        try await DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).write { db in
+            try db.execute(sql: "UPDATE note SET refs = ? WHERE id = '333'", arguments: [cell])
+        }
+        let opened = StoreFile.open(at: dir)
+        #expect(opened.trouble == nil && opened.setAside == nil, "the store is read either way")
+        #expect(opened.notes.map(\.id) == (stays ? ["1", "333"] : ["1"]))
     }
 
     @Test("A row on disk that says it reblogs another and also holds words, a cover, counts and a reader's mark opens as a reblog with none of them — and is written back that way")
@@ -413,8 +487,8 @@ struct ReferenceStoreTests {
         let opened = StoreFile.open(at: dir)
         #expect(opened.trouble == nil && opened.setAside == nil)
         #expect(opened.notes.first { $0.id == "22" }?.refs == [Reference(kind: .answers, statusID: "42", handle: "@bob")])
-        // A `gone` that is no yes-or-no is a cell that will not read: the row is its reply again, not gone.
-        #expect(opened.notes.first { $0.id == "1" }?.refs == [Reference(kind: .answers, statusID: "41", handle: "@bob")])
+        // A `gone` that is no yes-or-no is not a yes: the reference stands as the cell says it, not gone.
+        #expect(opened.notes.first { $0.id == "1" }?.refs == [Reference(kind: .answers, statusID: "41")])
     }
 
     @Test("A cell that reads but says more than an item may hold, or names longer than a name is, is held to the bounds every item is")
@@ -422,7 +496,7 @@ struct ReferenceStoreTests {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         try await StoreFile(at: dir).save(sources: [Self.mastodon], notes: [Self.note("1"), Self.note("22")])
-        let many = "[" + (0 ..< 40).map { #"{"kind":"quotes","id":"https://one.example/\#($0)"}"# }.joined(separator: ",") + "]"
+        let many = "[" + (0 ..< 40).map { #"{"kind":"quotes","state":"accepted","id":"https://one.example/\#($0)"}"# }.joined(separator: ",") + "]"
         let long = #"[{"kind":"answers","statusID":"\#(String(repeating: "x", count: 5_000))"},{"kind":"answers","statusID":"41"}]"#
         try await DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path).write { db in
             try db.execute(sql: "UPDATE note SET refs = ? WHERE id = '1'", arguments: [many])

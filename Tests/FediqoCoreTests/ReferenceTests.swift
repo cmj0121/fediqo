@@ -83,7 +83,7 @@ struct ReferenceTests {
     @Test("What a status says it answers and quotes is on the note as references, and they are the ones its reply and quote state")
     func offTheWire() throws {
         let read = try Self.read(Self.status(#","in_reply_to_id":"41","mentions":[{"id":"3","acct":"bob@two.example","username":"bob"}]"#))
-        #expect(read.refs == Reference.derived(reply: read.reply, quote: read.quote))
+        #expect(read.refs == [.answers("41", to: read.reply?.handle)] && read.reply?.handle != nil)
         #expect(read.refs.first?.kind == .answers && read.refs.first?.statusID == "41")
         #expect(try Self.read(Self.status("")).refs.isEmpty)
         #expect(try Self.read(Self.status("")).refsDue == false, "nothing is asked for yet")
@@ -95,7 +95,7 @@ struct ReferenceTests {
     func bothWays() {
         let reply = Reply(handle: "@bob@two.example", inReplyToId: "41")
         let quote = Quote(state: .accepted, post: Self.quoted("7"), statusID: "77")
-        let refs = Reference.derived(reply: reply, quote: quote)
+        let refs = Note.references(reply: reply, quote: quote)
         #expect(Reply(refs[0]) == reply)
         #expect(Quote(refs[1]) == Quote(state: .accepted, statusID: "77"))
         #expect(Quote(refs[1])?.post == nil)
@@ -103,7 +103,7 @@ struct ReferenceTests {
         #expect(Reply(Reference(kind: .reblogs, id: "x")) == nil)
         for state in Quote.State.allCases {
             let shell = Quote(state: state)
-            #expect(Quote(Reference.derived(reply: nil, quote: shell)[0]) == shell)
+            #expect(Quote(Note.references(reply: nil, quote: shell)[0]) == shell)
         }
     }
 
@@ -153,14 +153,15 @@ struct ReferenceTests {
         await store.refresh([Self.note(reply: Reply(inReplyToId: "41"), quote: quote)], ifSourceHere: Self.source.host)
         var held = await store.all().first
         #expect(held?.refs.map(\.kind) == [.answers, .quotes])
-        #expect(held?.refs == Reference.derived(reply: held?.reply, quote: held?.quote))
+        #expect(held?.refs == Note.references(reply: Reply(inReplyToId: "41"), quote: quote))
+        #expect(held?.reply == Reply(inReplyToId: "41") && held?.quote == Quote(state: .accepted, statusID: "77"), "and what it answers and quotes is read off them")
 
         // A reload's copy fills in what the held one never said, and the references follow.
         let plain = ItemStore(sources: [Self.source], notes: [Self.note()])
         await plain.ingest([Self.note(quote: quote)], ifSourceHere: Self.source.host)
         held = await plain.all().first
         #expect(held?.refs.map(\.kind) == [.quotes])
-        #expect(held?.refs == Reference.derived(reply: held?.reply, quote: held?.quote))
+        #expect(held?.refs == Note.references(reply: nil, quote: quote))
     }
 
     @Test("Whether an item's references are still to be asked for is this device's own: no reload, no reading again, no later copy and no keeping moves it; the sign-in it arrived through ending drops it")
@@ -228,5 +229,91 @@ struct ReferenceTests {
         #expect(Self.note(reply: Reply(inReplyToId: "41")) == Self.note(
             reply: Reply(inReplyToId: "41"), refs: [Reference(kind: .answers, statusID: "41")]
         ))
+    }
+
+    // MARK: - The one word (#293)
+
+    @Test("What an item answers and quotes is read off its references and kept nowhere else: a note made with references says the reply and the quote they say, one made with none says neither, and a forum topic's reply says it answers and names nobody")
+    func readOffTheReferences() {
+        let made = Note(
+            id: "https://one.example/1", source: Self.source, author: "Ada", handle: "@ada", body: "hello",
+            postedAt: Self.origin, categories: [.home],
+            refs: [.answers("41", to: "@bob@two.example"), .quotes(.accepted, id: "https://one.example/q7", statusID: "77")]
+        )
+        #expect(made.reply == Reply(handle: "@bob@two.example", inReplyToId: "41"))
+        #expect(made.quote == Quote(state: .accepted, statusID: "77"))
+        #expect(made.quotedKey == NoteKey(host: "one.example", id: "https://one.example/q7"))
+        #expect(made.heldWith == [NoteKey(host: "one.example", id: "https://one.example/q7")], "the quoted post stays for as long as this does")
+        let plain = Note(id: "x", source: Self.source, author: "a", handle: "@a", body: "b", postedAt: Self.origin, categories: [])
+        #expect(plain.refs.isEmpty && plain.reply == nil && plain.quote == nil && plain.quotedKey == nil)
+        // A quote that may not be shown names nothing, whatever it was handed.
+        let hidden = Reference(kind: .quotes, id: "https://one.example/q7", statusID: "77", state: .revoked)
+        #expect(hidden == .quotes(.revoked) && hidden.id == nil && hidden.statusID == nil)
+        #expect(Reference.quotes(.accepted, id: "i", statusID: "s").id == "i")
+    }
+
+    @Test("A status says what it refers to as references, and the post it quotes comes beside it as an item of its own — which the store takes in, keeping nothing of it on the quoting row")
+    func theQuotedPostComesBeside() async throws {
+        let quoting = try Self.read(MastodonQuoteCaptures.accepted)
+        let reference = try #require(quoting.refs.first)
+        #expect(quoting.refs.count == 1 && reference.kind == .quotes && reference.state == .accepted)
+        let beside = try #require(quoting.brought.first)
+        #expect(quoting.brought.count == 1 && reference.id == beside.id && reference.statusID == beside.statusID)
+        #expect(beside.categories.isEmpty && beside.brought.isEmpty, "through no category, and one level")
+        #expect(beside.boosted == nil && beside.favourited == nil && beside.bookmarked == nil, "nothing of what the reader did to it")
+
+        for way in ["taken in", "read again", "a snapshot", "laid in whole"] {
+            let store: ItemStore
+            switch way {
+            case "taken in":
+                store = ItemStore(sources: [quoting.source], notes: [])
+                await store.ingest([quoting], ifSourceHere: quoting.source.host)
+            case "read again":
+                var bare = Note(
+                    id: quoting.id, source: quoting.source, author: quoting.author, handle: quoting.handle,
+                    body: quoting.body, postedAt: quoting.postedAt, categories: [.home], statusID: quoting.statusID
+                )
+                bare.asked = .now()
+                store = ItemStore(sources: [quoting.source], notes: [bare])
+                _ = await store.refresh([quoting], ifSourceHere: quoting.source.host)
+            case "a snapshot":
+                store = ItemStore(sources: [quoting.source], notes: [quoting])
+            default:
+                store = ItemStore(sources: [quoting.source], notes: [])
+                await store.replace(sources: [quoting.source], notes: [quoting])
+            }
+            let row = try #require(await store.note(quoting.key), "\(way)")
+            #expect(row.brought.isEmpty && row.quote?.post == nil, "\(way): the row holds nothing of another post")
+            #expect(row.refs == quoting.refs, "\(way)")
+            // What a read brings beside a status is taken in; a snapshot holds only its rows.
+            let held = await store.note(beside.key)
+            #expect((held != nil) == (way == "taken in" || way == "read again"), "\(way)")
+        }
+    }
+
+    @Test("A note made anew from another keeps the name a load found and the word that a post is gone, where it is still the same reference; a different post answered or quoted starts afresh; a later quote of the same post keeps its name")
+    func rebuilt() {
+        let named = Reference(kind: .answers, id: "p41", statusID: "41", handle: "@bob")
+        let gone = Reference(kind: .quotes, statusID: "7", state: .accepted, gone: true)
+        #expect(Reference.rebuilt(answers: .answers("41", to: "@bob"), quotes: .quotes(.accepted, statusID: "7"), from: [named, gone]) == [named, gone])
+        #expect(Reference.rebuilt(answers: .answers("42"), quotes: .quotes(.accepted, statusID: "8"), from: [named, gone])
+            == [.answers("42"), .quotes(.accepted, statusID: "8")])
+        #expect(Reference.rebuilt(answers: nil, quotes: nil, from: [named, gone]).isEmpty, "what no copy says any more is not kept")
+
+        // Whose word what it answers is: a read of the post says it afresh, a copy that only
+        // fills in what the held one never said does not — "not a reply" is an answer.
+        let answering = Self.note(refs: [.answers("41")]), other = Self.note(refs: [.answers("42")]), none = Self.note(refs: [])
+        #expect(other.refreshed(over: answering).refs == [.answers("42")])
+        #expect(none.refreshed(over: answering).refs.isEmpty)
+        #expect(answering.filled(from: other).refs == [.answers("41")])
+        #expect(none.filled(from: other).refs.isEmpty)
+
+        let held = Reference.quotes(.accepted, id: "q7", statusID: "7")
+        #expect(Reference.laterQuote(nil, over: held) == held, "a copy that says nothing of a quote leaves it")
+        #expect(Reference.laterQuote(.quotes(.accepted, statusID: "7"), over: held) == held, "said again as an id alone, it keeps its name")
+        #expect(Reference.laterQuote(.quotes(.accepted), over: held) == held)
+        #expect(Reference.laterQuote(.quotes(.accepted, id: "q8", statusID: "8"), over: held) == .quotes(.accepted, id: "q8", statusID: "8"))
+        #expect(Reference.laterQuote(.quotes(.revoked), over: held) == .quotes(.revoked), "taken back: it names nothing")
+        #expect(Reference.laterQuote(held, over: .quotes(.pending)) == held)
     }
 }

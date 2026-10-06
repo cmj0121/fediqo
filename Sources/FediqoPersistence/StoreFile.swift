@@ -676,6 +676,90 @@ private var migrator: DatabaseMigrator {
             t.drop(column: "holding")
         }
     }
+    // References are the one place a row says what it refers to (#293): what a row's facts said
+    // of the post it answers and the post it quotes — and the copy of the quoted post kept
+    // inside them — goes, and `refs` is all there is.
+    //
+    // **First every row's references are made whole from its facts, for the last time.** Since
+    // `v10-references` each row's `refs` has said what its `reply` and `quote` said, and every
+    // save since has written both from the one note. This step checks rather than trusts: a
+    // row whose cell does not name the post its facts say it answers, or the quote they say it
+    // makes — a cell that is missing, that will not read, or that a save from some path wrote
+    // short — is given what the facts say. A reference the cell already has is left exactly as
+    // it is: it may carry a name a load found, or the word that the post is gone, which the
+    // facts never knew. **Only then are `reply` and `quote` taken out of the facts.**
+    //
+    // **The quoted post's copy goes with them, and is not made into a row.** Since quotes were
+    // read the quoted post has been taken in as an item of its own beside the post that quotes
+    // it, and kept for as long as that post is; the reference names it. Where it is no longer
+    // held — the person let it go, or its source said it was gone — the copy was the one place
+    // its words still stood after that, and from here the quote says the post is no longer
+    // held, which is true.
+    //
+    // **A row whose facts will not read is left as it is, and the migration goes on**, for
+    // `v10-references`' reason: `load()` is what judges a store, and since #295 a store judged
+    // damaged is deleted.
+    //
+    // **A migration id for `v3-holding`'s reason.** A build from before reads what a row
+    // answers and quotes back into its facts from nothing, and would write every reply and
+    // every quote back as neither — and it draws a quote from the copy, which is no longer
+    // there. The id makes it refuse the store instead.
+    //
+    // **Frozen code**: it reads the facts and the references by the names they were written
+    // under, as text, and names no live type.
+    migrator.registerMigration("v12-references-only") { db in
+        let rows = try Row.fetchAll(db, sql: "SELECT rowid AS rowid, facts AS facts, refs AS refs FROM note")
+        let setRefs = try db.makeStatement(sql: "UPDATE note SET refs = ? WHERE rowid = ?")
+        // **Only where the database itself reads the cell as JSON text.** The row was chosen
+        // by this code's reading of its facts, and the removal is done by SQLite's: where the
+        // two disagree about one cell — facts kept as a blob, text the two parse differently —
+        // the statement changes nothing rather than failing the step, and the store with it.
+        // A row left with the two keys is harmless: nothing reads them, and the next save of
+        // the row writes its facts without them.
+        let strip = try db.makeStatement(sql: """
+            UPDATE note SET facts = json_remove(facts, '$.reply', '$.quote')
+            WHERE rowid = ? AND typeof(facts) = 'text' AND json_valid(facts)
+            """)
+        for row in rows {
+            guard let text = String.fromDatabaseValue(row["facts"] as DatabaseValue),
+                  let facts = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any]
+            else { continue }
+            let reply = facts["reply"] as? [String: Any]
+            let quote = facts["quote"] as? [String: Any]
+            guard facts["reply"] != nil || facts["quote"] != nil else { continue }
+            // What the cell holds: each entry of it that is an object. A cell that is no list
+            // holds none, and an entry that is no object is not carried over where the cell is
+            // written again — it named nothing any build could read.
+            var references = (String.fromDatabaseValue(row["refs"] as DatabaseValue)
+                .flatMap { (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [Any] } ?? [])
+                .compactMap { $0 as? [String: Any] }
+            var grew = false
+            if let reply, !references.contains(where: { $0["kind"] as? String == "answers" }) {
+                var answers: [String: Any] = ["kind": "answers"]
+                if let id = reply["inReplyToId"] as? String { answers["statusID"] = id }
+                if let handle = reply["handle"] as? String { answers["handle"] = handle }
+                references.insert(answers, at: 0)
+                grew = true
+            }
+            if let quote, let state = quote["state"] as? String,
+               !references.contains(where: { $0["kind"] as? String == "quotes" }) {
+                var quotes: [String: Any] = ["kind": "quotes", "state": state]
+                if state == "accepted" {
+                    let post = quote["post"] as? [String: Any]
+                    if let id = post?["id"] as? String { quotes["id"] = id }
+                    if let id = (quote["statusID"] as? String) ?? (post?["statusID"] as? String) { quotes["statusID"] = id }
+                }
+                references.append(quotes)
+                grew = true
+            }
+            let rowid = row["rowid"] as Int64
+            if grew {
+                let written = try JSONSerialization.data(withJSONObject: references, options: [.sortedKeys])
+                try setRefs.execute(arguments: [String(decoding: written, as: UTF8.self), rowid])
+            }
+            try strip.execute(arguments: [rowid])
+        }
+    }
     return migrator
 }
 
@@ -719,25 +803,38 @@ private struct ReferenceRow: Codable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// The references a cell holds — or nothing where it holds none this build can read: no
-    /// cell, one too long, one that is not this JSON, or one naming a kind this build does not
-    /// know. **Read leniently, as `earlier` is and for its reason**: a row whose references will
-    /// not read is whole in every other way, and still says what it answers and quotes in its
-    /// facts, so it is given those (`Reference.derived`) rather than the reader's whole store
-    /// being set aside for one cell.
-    static func references(_ text: String?) -> [Reference]? {
+    /// The references a cell holds, and whether all of it read.
+    ///
+    /// **Nothing else says what a row refers to** (#293), so what will not read here is lost to
+    /// the row — and a row is never lost to the store for it. Read as leniently as that allows:
+    /// - **One reference at a time.** An entry that is no object, names no kind, or names a kind
+    ///   this build does not know, is left out alone; the entries beside it stand. (A kind this
+    ///   build does not know is a newer build's, whose store this one refuses whole by its
+    ///   migration id — met here it is damage, and costs only itself.)
+    /// - **A name that is not text is no name**, and `gone` that is not a yes is not gone: the
+    ///   reference stands without it. A key this build does not know is ignored.
+    /// - **No cell, one too long, or one that is no list, is no references** — and `whole` is
+    ///   false, as it is where any entry was left out, so `NoteRow.note(from:)` can tell a row
+    ///   that refers to nothing from one whose references were lost.
+    static func references(_ text: String?) -> (references: [Reference], whole: Bool) {
         guard let text, text.utf8.count <= longestCell,
-              let rows = try? JSONDecoder().decode([ReferenceRow].self, from: Data(text.utf8))
-        else { return nil }
+              let rows = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [Any]
+        else { return ([], false) }
         var references: [Reference] = []
+        var whole = true
         for row in rows {
-            guard let kind = Reference.Kind(rawValue: row.kind) else { return nil }
+            guard let row = row as? [String: Any], let kind = (row["kind"] as? String).flatMap(Reference.Kind.init(rawValue:)) else {
+                whole = false
+                continue
+            }
             references.append(Reference(
-                kind: kind, id: row.id, statusID: row.statusID, handle: row.handle,
-                state: kind == .quotes ? Quote.State(wire: row.state) : nil, gone: row.gone == true
+                kind: kind, id: row["id"] as? String, statusID: row["statusID"] as? String,
+                handle: row["handle"] as? String,
+                state: kind == .quotes ? Quote.State(wire: row["state"] as? String) : nil,
+                gone: row["gone"] as? Bool == true
             ))
         }
-        return references
+        return (references, whole)
     }
 }
 
@@ -927,8 +1024,9 @@ private struct NoteFacts: Codable {
     var body: String
     var title: String?
     var board: String?
-    /// `nil` is not a reply; a `ReplyRow` with no handle is a reply whose parent was never named.
-    var reply: ReplyRow?
+    /// `Note.boostedBy`: who reblogged it, on a row that arrived as a reblog before a reblog was
+    /// an item of its own (#290). **Written by nothing new**: no read sets it. Kept and written
+    /// back only so that row goes on saying how it arrived, until it is converted or let go.
     var boostedBy: String?
     /// Absent in a row written before 0.2.0 learned it, which reads as no booster. See
     /// `Note.boosterHandle`.
@@ -975,84 +1073,12 @@ private struct NoteFacts: Codable {
     /// `Note.counts` (#208), or nothing where the source counted nothing. Additive and optional
     /// for `boosted`'s reasons: a row written before reads as counted by nobody.
     var counts: CountsRow?
-    /// `Note.quote` (#214): the post this row quotes, what a row draws of it, so it shows with
-    /// the network off. Additive and optional for `boosted`'s reasons: a row written before reads
-    /// as one that quotes nothing until a read says otherwise, and an older build ignores the key.
-    var quote: QuoteRow?
     /// `Note.source.kind` (#250), so a note kept after its source was removed still knows what
     /// kind of server it was read through: `load()` has no source row to take that from. Written
     /// on every row and read only where the host has no source row. Additive and optional for
     /// `boosted`'s reasons: a row written before reads as none, and such a row always has a
     /// source row, since nothing before this kept a note past its source.
     var kind: String?
-}
-
-/// `Quote` as `NoteFacts` writes it: the state in the source's spelling, and the quoted post.
-private struct QuoteRow: Codable {
-    var state: String
-    var statusID: String?
-    var post: QuotedRow?
-
-    init(_ quote: Quote) {
-        state = quote.state.rawValue
-        statusID = quote.statusID
-        post = quote.post.map(QuotedRow.init)
-    }
-
-    var quote: Quote {
-        Quote(state: Quote.State(wire: state), post: post?.post, statusID: statusID)
-    }
-}
-
-/// `QuotedPost` as `NoteFacts` writes it: every fact a row draws, and its own quote as a state
-/// and an id — one level, as it was read.
-private struct QuotedRow: Codable {
-    var id: String
-    var statusID: String?
-    var author: String
-    var handle: String
-    var body: String
-    var postedAt: Date
-    var avatarURL: URL?
-    var attachments: [AttachmentRow]
-    var sensitive: Bool?
-    var spoiler: String?
-    var emojis: [EmojiRow]
-    var url: URL?
-    var audience: String?
-    var reply: ReplyRow?
-    var quotingState: String?
-    var quotingStatusID: String?
-
-    init(_ post: QuotedPost) {
-        id = post.id
-        statusID = post.statusID
-        author = post.author
-        handle = post.handle
-        body = post.body
-        postedAt = post.postedAt
-        avatarURL = post.avatarURL
-        attachments = post.attachments.map(AttachmentRow.init)
-        sensitive = post.sensitive
-        spoiler = post.spoiler
-        emojis = post.emojis.map(EmojiRow.init)
-        url = post.url
-        audience = post.audience?.rawValue
-        reply = post.reply.map { ReplyRow(handle: $0.handle, inReplyToId: $0.inReplyToId) }
-        quotingState = post.quoting?.state.rawValue
-        quotingStatusID = post.quoting?.statusID
-    }
-
-    var post: QuotedPost {
-        QuotedPost(
-            id: id, statusID: statusID, author: author, handle: handle, body: body,
-            postedAt: postedAt, avatarURL: avatarURL, attachments: attachments.map(\.attachment),
-            sensitive: sensitive, spoiler: spoiler, emojis: emojis.map(\.emoji), url: url,
-            audience: audience.flatMap(Audience.init(rawValue:)),
-            reply: reply.map { Reply(handle: $0.handle, inReplyToId: $0.inReplyToId) },
-            quoting: quotingState.map { NestedQuote(state: Quote.State(wire: $0), statusID: quotingStatusID) }
-        )
-    }
 }
 
 /// `Counts` as `NoteFacts` writes it.
@@ -1189,13 +1215,6 @@ private struct WordingRow: Codable {
     }
 }
 
-private struct ReplyRow: Codable {
-    var handle: String?
-    /// Absent in a row written before 0.4.0 learned it, which reads as a reply whose parent was
-    /// never named — the same thing `handle` says about who. See `Note.boosterHandle`.
-    var inReplyToId: String?
-}
-
 /// One attachment as `NoteFacts` writes it: every field, so what a row drew before a relaunch
 /// — the alt text, the shape it reserved — is what it draws after.
 private struct AttachmentRow: Codable {
@@ -1272,8 +1291,9 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var earlier: String?
     /// `Note.language` (#287). A column behind its own migration id, for the reason given on `kept`.
     var language: String?
-    /// `Note.refs` (#290, #293) as a JSON array of `ReferenceRow`. A column behind its own
-    /// migration id, for the reason given on `kept`. Kept as text and read leniently: `ReferenceRow`.
+    /// `Note.refs` (#290, #293) as a JSON array of `ReferenceRow`: **all a row says of what it
+    /// refers to**. A column behind its own migration id, for the reason given on `kept`. Kept
+    /// as text and read leniently: `ReferenceRow`.
     var refs: String?
     /// `Note.refsDue` (#293). With `refs`' id.
     var refs_due: Bool
@@ -1297,7 +1317,6 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             body: note.body,
             title: note.title,
             board: note.board,
-            reply: note.reply.map { ReplyRow(handle: $0.handle, inReplyToId: $0.inReplyToId) },
             boostedBy: note.boostedBy,
             boosterHandle: note.boosterHandle,
             sensitive: note.sensitive,
@@ -1316,7 +1335,6 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
                 .sorted { $0.category < $1.category },
             audience: note.audience?.rawValue,
             counts: CountsRow(note.counts),
-            quote: note.quote.map(QuoteRow.init),
             kind: note.source.kind.rawValue
         )
     }
@@ -1339,18 +1357,33 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     /// is a fact about it, and filling in `.public` for none would put it somewhere it was never
     /// read from.
     ///
-    /// **Nothing for a row that is no item** (#290): one whose references will not read and that
-    /// holds no words, no title, no cover, no picture, no reply, no quote and no opening post. A
-    /// reblog is exactly such a row but for its reference, so one whose cell is damaged, too long
-    /// or names a kind this build does not know would otherwise open as an empty post by whoever
-    /// reblogged — under the reblog's name, with the reblog's own id as an id to send. It is left
-    /// out of the load instead, as a note whose host is gone is: the store is read and never set
-    /// aside for it, and since a save writes the rows held, the next one writes the file without
-    /// it. Nothing a reader could see is lost: the row had nothing to show and nothing to name.
+    /// **What a row refers to is its `refs`, and nothing else** (#293). Where that cell will not
+    /// read, in whole or in part (`ReferenceRow.references`), the row is judged by what is left
+    /// of it — and the store is read either way, never set aside for one cell:
+    ///
+    /// - **A row that says something is a post, and stays**: it has words, a title, a cover, a
+    ///   picture or an opening post, and loads referring to whatever of its references did
+    ///   read. A reply whose reference was lost is drawn as a post that answers nothing, and a
+    ///   quoting post as one that quotes nothing, until its source's next word on it — a read
+    ///   of the post, or a change to it — says so again. That is a loss, and a quiet one; the
+    ///   other choice is to drop the post, words and all, a kept one included, for want of a
+    ///   line above it.
+    /// - **A row that says nothing is no item, and is left out**: no words, title, cover,
+    ///   picture or opening post, **and no reference that read**. A post whose whole content is
+    ///   its quote — no words once the quote's own line is taken off — says something for as
+    ///   long as that reference reads, whatever else in its cell did not; so does an answer.
+    ///   A reblog is exactly such a row but for its reference (#290),
+    ///   so one whose reference was lost would otherwise open as an empty post by whoever
+    ///   reblogged — under the reblog's name, with the reblog's own id as an id to send. Kept
+    ///   or not: there is nothing of it to keep. Since a save writes the rows held, the next
+    ///   one writes the file without it.
+    /// - **A forum topic's reply says what it answers by its id** (`Note.init`), whatever its
+    ///   cell says.
     func note(from source: Source) -> Note? {
-        let references = ReferenceRow.references(refs)
-        if references == nil, facts.body.isEmpty, (facts.title ?? "").isEmpty, (facts.spoiler ?? "").isEmpty,
-           facts.attachments.isEmpty, facts.reply == nil, facts.quote == nil, facts.opening == nil {
+        let (references, whole) = ReferenceRow.references(refs)
+        if !whole, references.isEmpty,
+           facts.body.isEmpty, (facts.title ?? "").isEmpty, (facts.spoiler ?? "").isEmpty,
+           facts.attachments.isEmpty, facts.opening == nil {
             return nil
         }
         return Note(
@@ -1363,7 +1396,6 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             board: facts.board,
             postedAt: posted_at,
             categories: Set(categories.compactMap(\.category)),
-            reply: facts.reply.map { Reply(handle: $0.handle, inReplyToId: $0.inReplyToId) },
             boostedBy: facts.boostedBy,
             boosterHandle: facts.boosterHandle,
             boosted: facts.boosted,
@@ -1385,14 +1417,12 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
                 (facts.listed ?? []).compactMap { row in row.category.category.map { ($0, row.id) } },
                 uniquingKeysWith: { a, _ in a }
             ),
-            quote: facts.quote?.quote,
             kept: kept,
             editedAt: edited_at,
             // Held to the bounds every kept wording is held to, whoever wrote the cell.
             earlier: Wording.bounded(WordingRow.wordings(earlier)),
             language: language,
-            // Nothing readable in the cell is the references its reply and quote state.
-            refs: ReferenceRow.references(refs),
+            refs: references,
             refsDue: refs_due
         )
     }

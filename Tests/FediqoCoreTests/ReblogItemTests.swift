@@ -556,13 +556,13 @@ struct ReblogItemTests {
         #expect(await store.note(post.key)?.isReblog == false)
     }
 
-    @Test("A read again of a reblog that says nothing of what it reblogs leaves it reblogging what it did; a reply and a quote are still re-derived beside it")
-    func carriedBesideWhatIsDerived() {
+    @Test("A read again of a reblog that says nothing of what it reblogs leaves it reblogging what it did; what it answers and quotes are as whoever rebuilds it says, beside it")
+    func carriedBesideWhatIsSaid() {
         let reference = Reference(kind: .reblogs, id: "x")
-        #expect(Reference.carried([reference], reply: nil, quote: nil) == [reference])
-        #expect(Reference.carried([Reference(kind: .answers, statusID: "1"), reference], reply: Reply(inReplyToId: "2"), quote: nil)
+        #expect(Reference.rebuilt(answers: nil, quotes: nil, from: [reference]) == [reference])
+        #expect(Reference.rebuilt(answers: .answers("2"), quotes: nil, from: [Reference(kind: .answers, statusID: "1"), reference])
             == [Reference(kind: .answers, statusID: "2"), reference])
-        #expect(Reference.carried([Reference(kind: .quotes, state: .pending)], reply: nil, quote: nil).isEmpty)
+        #expect(Reference.rebuilt(answers: nil, quotes: nil, from: [Reference(kind: .quotes, state: .pending)]).isEmpty)
     }
 
     // MARK: - Held from before
