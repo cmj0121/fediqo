@@ -390,8 +390,13 @@ are posts like any other: each stands in All at the time it was posted, and stay
 the search is cleared or the post is closed. None of them came through a category of its
 source, so a timeline whose rules name a category — one made of Home alone, say — does not
 show them; a rule on a source, an author, a keyword or a field shows the ones it matches. A
-forum topic's replies are parts of their topic: they are read inside it, and are no row of a
-timeline.
+forum topic's replies are read when you open the topic. A reply the forum dates is then a
+post like any other: it stands in All at the time the forum gave it — never the time it was
+read — and in a timeline whose rules let it through, among them a rule on its topic's board;
+a search finds it; and pressing it opens its topic with that reply lit and in view. A reply
+the forum gives no date for is in no timeline and no search, since nothing but the moment it
+was read could place it: it stays part of its topic, read there and counted with everything
+held. A topic stays for as long as a reply of it is held.
 
 Preferences can set a latest date. Every timeline — All, Trends, yours, and a search — then
 shows nothing posted after 23:59:59 of that day, in this device's time zone, and the timeline

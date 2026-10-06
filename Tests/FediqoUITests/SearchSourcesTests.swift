@@ -382,7 +382,7 @@ struct SearchSourcesTests {
         #expect(session.reload.line == nil)
     }
 
-    @Test("A forum topic's kept replies are counted apart from the items: a landing only the timelines see moves neither their count nor is moved by theirs")
+    @Test("A forum topic's kept replies its forum gave no date are counted apart from the items: a landing only the timelines see moves neither their count nor is moved by theirs")
     func repliesAreCountedApart() async {
         let store = ItemStore()
         let source = Source(host: Self.one, kind: .mastodon)

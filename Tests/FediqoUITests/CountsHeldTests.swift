@@ -18,7 +18,8 @@ struct CountsHeldTests {
              postedAt: now.addingTimeInterval(-daysAgo * 86_400), categories: [.public])
     }
 
-    /// A forum topic's reply as the store keeps it (#177): a post the search leaves out.
+    /// A forum topic's reply as the store keeps one its forum gave no date (#177, #297): a post
+    /// the search leaves out.
     private static func reply(_ pid: Int) -> Note {
         note("discuz:forum.test:7:post:\(pid)", from: forum)
     }
@@ -41,7 +42,7 @@ struct CountsHeldTests {
         #expect(session.holdings.posts(host: Self.alpha.host) == 1)
     }
 
-    @Test("A forum topic's reply is counted, and is no item: no timeline and no search reads it")
+    @Test("A forum topic's reply its forum gave no date is counted, and is no item: no timeline and no search reads it")
     func forumRepliesAreCounted() async {
         let session = ShellSession(http: FixtureHTTP(), store: await Self.held())
         await session.reloadFromStore()

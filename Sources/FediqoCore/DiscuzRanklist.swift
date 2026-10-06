@@ -276,8 +276,8 @@ struct DiscuzRankedThread: Equatable, Sendable {
     /// **The same row as the board's own**, and only more of it: `DiscuzThread.asNote` spells
     /// the id, so a thread ranked and also read through its board is one row in the store,
     /// which gains `.trends` beside the board it is in.
-    func asNote(source: Source, host: String) -> Note {
-        var note = thread.asNote(source: source, host: host, board: nil, boardID: fid.map(String.init))
+    func asNote(source: Source, host: String, read: Date = Date()) -> Note {
+        var note = thread.asNote(source: source, host: host, board: nil, boardID: fid.map(String.init), read: read)
         note.categories.insert(.trends)
         return note
     }
@@ -302,7 +302,7 @@ struct DiscuzRankedBlog: Equatable, Sendable {
     /// What the list wrote of it. The forum's own cut, ellipsis and all.
     let excerpt: String
 
-    func asNote(source: Source, host: String) -> Note {
+    func asNote(source: Source, host: String, read: Date = Date()) -> Note {
         Note(
             id: DiscuzRankedBlog.noteID(host: host, id: id),
             source: source,
@@ -315,7 +315,8 @@ struct DiscuzRankedBlog: Equatable, Sendable {
             body: excerpt,
             title: title,
             board: nil,
-            postedAt: postedAt ?? .distantPast,
+            // Never later than the read that brought it (`DiscuzDate.bounded`).
+            postedAt: DiscuzDate.bounded(postedAt, by: read) ?? .distantPast,
             categories: [.trends],
             url: Self.address(host: host, uid: uid, id: id)
         )

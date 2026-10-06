@@ -173,6 +173,13 @@ struct DummyThreadPane: View {
                     // A tick later: a lazy stack just built has not laid out the row to scroll to.
                     Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
                 }
+                // **A reply opened from a timeline is brought into view once its topic's replies
+                // are drawn** (#297): they are read from this device, or off the page, a moment
+                // after the pane is, so the pane's own appearance is too early to find it.
+                .onChange(of: replyInView) { _, id in
+                    guard let id else { return }
+                    Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
+                }
                 .onChange(of: selectedID) { _, id in
                     guard let id else { return }
                     withAnimation(.easeInOut(duration: 0.18)) {
@@ -311,6 +318,25 @@ struct DummyThreadPane: View {
         .id(item.id)
     }
 
+    /// The id a forum reply's row is drawn under: the reply's own row in the store, which is
+    /// what a timeline's row of it is keyed by.
+    static func rowID(of reply: DiscuzPost, in thread: ForumThreadRef) -> String {
+        NoteKey(host: thread.host, id: DiscuzPost.heldPrefix(host: thread.host, tid: thread.tid) + String(reply.pid)).rowID
+    }
+
+    /// The reply the lamp is on, where it is one of `replies` drawn under `thread` — what the
+    /// pane brings into view. Nothing while the reply is not drawn yet, and nothing for a lamp
+    /// on anything else.
+    static func replyInView(selected: String?, of thread: ForumThreadRef?, among replies: [DiscuzPost]) -> String? {
+        guard let selected, let thread else { return nil }
+        return replies.contains { rowID(of: $0, in: thread) == selected } ? selected : nil
+    }
+
+    private var replyInView: String? {
+        guard let thread, case .loaded(let replies) = posts.standing(of: thread) else { return nil }
+        return Self.replyInView(selected: selectedID, of: thread, among: replies)
+    }
+
     // MARK: - The rest of the topic — D31
 
     /// The thread this pane is standing on, where it is a Discuz! one there is more of to read.
@@ -394,7 +420,17 @@ struct DummyThreadPane: View {
                     .shellFont(.name)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 ForEach(replies) { reply in
+                    // Under the id the reply's own row has in a timeline (#297), so the reply a
+                    // reader pressed there is the one found, lit and brought into view here.
+                    let id = Self.rowID(of: reply, in: thread)
                     ForumReplyRow(post: reply, host: thread.host)
+                        .background(
+                            id == selectedID ? ShellChrome.floatFill(colorScheme) : .clear,
+                            in: RoundedRectangle(cornerRadius: 4)
+                        )
+                        .accessibilityAddTraits(id == selectedID ? .isSelected : [])
+                        .modifier(ProbedPlace(part: .row(id), probe: probe))
+                        .id(id)
                 }
                 // The topic read to its end, a page at a time, below every reply already drawn.
                 if let further = posts.further(of: thread) {

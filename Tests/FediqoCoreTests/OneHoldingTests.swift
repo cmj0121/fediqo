@@ -41,7 +41,7 @@ struct OneHoldingTests {
         #expect(await store.repliesRevision == replies, "and nothing a topic's page reads moved")
     }
 
-    @Test("A forum topic's reply is a part of its topic: never in All, handed over as a reply, and it moves the replies' count and not what All draws")
+    @Test("A forum topic's reply its forum gave no date is a part of its topic: never in All, handed over as a reply, and it moves the replies' count and not what All draws")
     func aTopicReplyIsNoItem() async {
         let store = ItemStore(sources: [source, forum], notes: [note("1", categories: [.home])])
         let drawn = await store.drawn, replies = await store.repliesRevision

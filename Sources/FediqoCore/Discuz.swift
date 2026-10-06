@@ -1411,7 +1411,9 @@ struct DiscuzThread: Equatable, Sendable {
     let postedAt: Date?
     let replies: Int?
 
-    func asNote(source: Source, host: String, board heading: String?, boardID: String? = nil) -> Note {
+    func asNote(
+        source: Source, host: String, board heading: String?, boardID: String? = nil, read: Date = Date()
+    ) -> Note {
         Note(
             // Prefixed and host-qualified, as Discourse's are: a forum's thread numbers, another
             // forum's thread numbers and a microblog's status ids all share one store, and `82`
@@ -1439,7 +1441,8 @@ struct DiscuzThread: Equatable, Sendable {
             // the row's *first* person-cell, which is the thread's author; the last cell's date
             // belongs to whoever answered most recently and would date somebody's question by a
             // stranger's reply.
-            postedAt: postedAt ?? .distantPast,
+            // Never later than the read that brought it (`DiscuzDate.bounded`).
+            postedAt: DiscuzDate.bounded(postedAt, by: read) ?? .distantPast,
             categories: boardID.map { [.board(id: $0)] } ?? [],
             // Discuz! puts no avatar in a thread table. It can be *guessed* at
             // `uc_server/avatar.php?uid=…`, and that guess is wrong on any install that moved or
@@ -1909,9 +1912,13 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
         "discuz:\(host.lowercased()):\(tid):post:"
     }
 
-    /// This reply as the store keeps it — **a part of its topic and not an item** (#175, #296):
-    /// told by its id (`Note.isTopicReply`), handed over by `ItemStore.replies()`, and a row of
-    /// no timeline.
+    /// This reply as the store keeps it (#175, #296, #297). **Where the forum dated it, it is an
+    /// item like any other**: its own publish time, its own ID, its source, standing in every
+    /// timeline whose rules let it through. **Where the forum gave no date it is a part of its
+    /// topic and not an item** (`Note.isPartOfTopic`): handed over by `ItemStore.replies()`, and
+    /// a row of no timeline. Either way it is told as a reply by its id (`Note.isTopicReply`),
+    /// answers its topic (`Note.init` says so, off that id), and is read back where the topic
+    /// is opened.
     ///
     /// A `Note` is the store's one shape, and a reply is not a thread, so what a reply has that a
     /// row does not is carried in `Note.opening`: its words and quotation as the opening post's
@@ -1922,23 +1929,64 @@ public struct DiscuzPost: Identifiable, Hashable, Sendable {
     /// mobile template usually does not: a note has to have one, and the moment it was read is
     /// the one that keeps it inside the reader's keep-for window for as long as they read the
     /// thread. The reply's own answer — none — is `opening.postedAt`, and that is what is drawn.
+    ///
+    /// **Whether the forum said when is `opening.postedAt`, and never read off `postedAt`**,
+    /// which has a moment either way. A reply the forum withheld carries no opening, so nothing
+    /// on it says whether its time was the forum's: it is a part of its topic, whatever the
+    /// page said.
+    ///
+    /// **And the forum's date is never later than `read`** (`DiscuzDate.bounded`): held to it
+    /// here, where the reply becomes a row, in the row's time and in the reply's own date alike.
     public func asNote(host raw: String, read: Date) -> Note {
         let host = raw.lowercased()
+        let posted = DiscuzDate.bounded(postedAt, by: read)
+        let reply = posted == postedAt ? self : DiscuzPost(
+            pid: pid, tid: tid, floor: floor, author: author, handle: handle, postedAt: posted,
+            body: body, quoted: quoted, isWithheld: isWithheld, avatarURL: avatarURL, page: page
+        )
         return Note(
             id: Self.heldPrefix(host: host, tid: tid) + String(pid),
             source: Source(host: host, kind: .discuz),
             author: author,
             handle: handle,
             body: body,
-            postedAt: postedAt ?? read,
+            postedAt: posted ?? read,
             categories: [],
             url: url(onHost: host),
-            opening: isWithheld ? nil : ForumOpening(reply: self)
+            opening: isWithheld ? nil : ForumOpening(reply: reply)
+        )
+    }
+
+    /// This reply with the date kept for it from an earlier read, where there is one — **a
+    /// publish time, once kept, does not move**. So the forum's word is not lost to a later page
+    /// that leaves it out, and a date held to the moment of the read that first brought it
+    /// (`DiscuzDate.bounded`) is not moved on by each read after. Where nothing was kept, the
+    /// date is this read's.
+    public func dated(_ earlier: Date?) -> DiscuzPost {
+        guard let earlier, earlier != postedAt else { return self }
+        return DiscuzPost(
+            pid: pid, tid: tid, floor: floor, author: author, handle: handle, postedAt: earlier,
+            body: body, quoted: quoted, isWithheld: isWithheld, avatarURL: avatarURL, page: page
         )
     }
 
     /// What every kept reply's id begins with, whatever its forum.
     static let heldScheme = "discuz:"
+
+    /// The id of the topic a row with `id`, held from `source`, is a reply of — the topic's own
+    /// row, `discuz:<host>:<tid>` — or nothing where the row is no reply of a forum topic.
+    /// **Read off the reply's id, which names its topic**, so a row kept before a reply said
+    /// what it answers says it too.
+    static func topicID(ofReply id: String, from source: Source) -> String? {
+        guard source.kind == .discuz else { return nil }
+        let prefix = "discuz:\(source.host):"
+        guard id.hasPrefix(prefix) else { return nil }
+        let parts = id.dropFirst(prefix.count).split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[1] == "post",
+              let tid = Int(parts[0]), let pid = Int(parts[2]), tid > 0, pid > 0
+        else { return nil }
+        return prefix + String(tid)
+    }
 
     /// A reply the store kept, read back — or nothing where `note` is not one.
     ///
@@ -2712,7 +2760,19 @@ extension DiscuzMarkup {
 /// different amount for every reader and untestable; and a forum row is drawn with a date, not a
 /// clock time, so the error is invisible except at a midnight. Said out loud here rather than
 /// discovered in a bug report.
+///
+/// **Bounded from one side** (`bounded`): a post cannot have been published after the moment it
+/// was read, so a date that reads later than that — a forum ahead of UTC, minutes after a post
+/// was written — is held to the read's moment where the row becomes a note. A forum behind UTC
+/// still reads late by its offset, and nothing here can tell.
 enum DiscuzDate {
+    /// `date`, or the moment of the read that brought it where the date is later than that.
+    /// Applied once, at the door (`DiscuzThread.asNote`, `DiscuzPost.asNote`, a ranked blog's):
+    /// a time already kept is not passed through here again.
+    static func bounded(_ date: Date?, by read: Date) -> Date? {
+        date.map { min($0, read) }
+    }
+
     /// Every date shape a Discuz! page writes — `2026-9-15`, `2026-06-08 16:45`, seconds or not,
     /// a space or a no-break space before the clock — for each page's own `Patterns` to compile.
     /// One spelling, so the thread table, the index, a thread's page and the ranking lists cannot
@@ -2803,17 +2863,36 @@ extension NSRegularExpression {
 }
 
 extension Note {
-    /// Whether this row is a reply of a forum topic, kept so the topic reads with the network
-    /// off (#177) — **a part of a topic, and not an item** (#296). An item has a publish time
-    /// that is its source's own word and can be opened as itself; a reply is kept under the
-    /// moment it was read where its page gave no date, and opens nowhere but inside its topic.
-    /// So no timeline draws one and no search finds one, by what it is: `ItemStore.all()` leaves
-    /// them out and `ItemStore.replies()` hands them over.
+    /// Whether this row is a reply of a forum topic (#177): kept under its topic's number, read
+    /// back where the topic is opened, and answering that topic.
     ///
     /// Told by its source's kind and the id `DiscuzPost.asNote` gave it. **Both**: an id is a
     /// source's own word, so a server of another kind sending one of this shape for a post of its
-    /// own would otherwise have that post left out of All and of every search.
+    /// own would otherwise be taken for a forum's reply.
     public var isTopicReply: Bool {
-        source.kind == .discuz && id.hasPrefix(DiscuzPost.heldScheme) && DiscuzPost(held: self) != nil
+        DiscuzPost.topicID(ofReply: id, from: source) != nil
+    }
+
+    /// The topic this reply answers, as the store keys it, or nothing for anything but a reply
+    /// of a forum topic.
+    public var topicKey: NoteKey? {
+        DiscuzPost.topicID(ofReply: id, from: source).map { NoteKey(host: source.host, id: $0) }
+    }
+
+    /// Whether this row is a reply its forum gave no date for — **a part of its topic, and not
+    /// an item** (#296, #297). An item has a publish time that is its source's own word; such a
+    /// reply is kept under the moment it was read, and nothing but that moment could place it.
+    /// So no timeline draws one and no search finds one: `ItemStore.all()` leaves them out and
+    /// `ItemStore.replies()` hands them over. It is held, counted, and read where its topic is
+    /// opened.
+    ///
+    /// **A reply the forum dated is an item like any other** — it stands in All at the time the
+    /// forum gave it — and is not one of these.
+    ///
+    /// **Told by what the row carries of the forum's own word**: `opening.postedAt`, the date
+    /// the reply's page gave it, kept with the row since replies were kept and nothing where
+    /// the page gave none. Never by `postedAt`, which holds a moment either way.
+    public var isPartOfTopic: Bool {
+        isTopicReply && opening?.postedAt == nil
     }
 }

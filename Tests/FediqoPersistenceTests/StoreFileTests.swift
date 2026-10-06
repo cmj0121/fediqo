@@ -144,7 +144,11 @@ struct StoreFileTests {
         let back = try file.load().notes.compactMap(DiscuzPost.init(held:)).sorted { $0.pid < $1.pid }
         #expect(back == [dated, undated], "floor, date, quotation and page, each as read")
         #expect(back[1].postedAt == nil, "a reply the page gave no date to is not given the read's")
-        #expect(try file.load().notes.allSatisfy { $0.isTopicReply }, "each still a part of its topic, and no item")
+        let loaded = try file.load().notes.sorted { $0.id < $1.id }
+        #expect(loaded.allSatisfy { $0.isTopicReply }, "each still a reply of its topic")
+        // Which of them is an item is what the file has always carried: the reply's own date (#297).
+        #expect(loaded.map(\.isPartOfTopic) == [false, true], "the one the forum dated is an item; the other a part of its topic")
+        #expect(loaded.allSatisfy { $0.refs == [Reference(kind: .answers, id: "discuz:forum.example:5")] })
     }
 
     @Test("A post marked gone from its source is still marked, from the same moment, after a relaunch")

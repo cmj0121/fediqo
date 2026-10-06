@@ -693,7 +693,11 @@ public struct Note: Identifiable, Hashable, Sendable {
         // a reblog's own, and a row kept as a post under that id would be one an act could be
         // sent with; the words let go are a post's, which its source still has under the
         // post's own name.
-        let bounded = Reference.bounded(refs ?? Reference.derived(reply: reply, quote: quote))
+        // **A reply of a forum topic answers its topic** (#297), wherever the note is made: its
+        // id names the topic, so the reference is read off it — one kept before a reply said
+        // what it answers says it too, and a copy rebuilt from another cannot lose it.
+        let answered = DiscuzPost.topicID(ofReply: id, from: source).map { [Reference(kind: .answers, id: $0)] }
+        let bounded = Reference.bounded(answered ?? refs ?? Reference.derived(reply: reply, quote: quote))
         let reblogs = bounded.first { $0.kind == .reblogs }
         let post = reblogs == nil
         self.refs = reblogs.map { [$0] } ?? bounded

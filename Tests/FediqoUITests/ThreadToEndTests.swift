@@ -94,7 +94,7 @@ struct ThreadToEndTests {
                 "each page asked of the forum once, at its own address")
     }
 
-    @Test("Each page of a forum topic lands in the store first, as parts of the topic, and no timeline grows by it")
+    @Test("Each page of a forum topic lands in the store first; where the page gives its replies no date they are parts of the topic, and no timeline grows by them")
     func eachPageLandsInTheStore() async {
         let session = await forumShell(FixtureHTTP(Self.threePages))
         await session.posts.fetchReplies(Self.ref)

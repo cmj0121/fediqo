@@ -498,7 +498,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         postedAt = reblog ? identity.postedAt : blog?.postedAt ?? note.postedAt
         publishedAt = blog?.postedAt ?? note.postedAt
         workRelated = false
-        answering = Self.answering(note.reply)
+        // What it answers is its reference's to say (#293): a forum topic's reply says it by
+        // that alone, and names nobody.
+        answering = note.reply == nil && note.refs.contains { $0.kind == .answers } ? .somebody : Self.answering(note.reply)
         boostedBy = reblog ? identity.author : note.boostedBy
         boosted = note.boosted
         favourited = note.favourited

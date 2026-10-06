@@ -142,6 +142,34 @@ public actor ItemStore {
         // waited for that is here is named and no longer owed, and a row that could never have
         // owed — a reblog, one with nothing to ask for — does not go on saying it does.
         Self.settleOwing(in: &notes, of: nil)
+        // A reply kept before replies were items says what board it came through (#297).
+        for (key, note) in notes where note.source.kind == .discuz {
+            let through = Self.throughItsBoard(note, in: notes)
+            if through.categories != note.categories { notes[key] = through }
+        }
+    }
+
+    /// `note` as it arrived, **through its topic's board where it is a forum's dated reply**
+    /// (#297): a reply is read off its topic's page, and the topic is in a board, so a rule on
+    /// that board shows the reply as it shows the topic. Only a board — a topic the ranking
+    /// lists named arrived as Trends, and its replies did not. Anything else is as it was; so
+    /// is a reply whose topic is not held, which then says no board until it is read again
+    /// beside one. A topic that gains a board later passes it on then (`admit`).
+    /// The boards among `categories`, and nothing else.
+    private static func boards(of categories: Set<Category>) -> Set<Category> {
+        categories.filter { category in
+            if case .board = category { return true }
+            return false
+        }
+    }
+
+    private static func throughItsBoard(_ note: Note, in notes: [NoteKey: Note], or landing: [NoteKey: Note] = [:]) -> Note {
+        guard let topic = note.topicKey, !note.isPartOfTopic, let held = notes[topic] ?? landing[topic] else { return note }
+        let boards = Self.boards(of: held.categories)
+        guard !boards.isSubset(of: note.categories) else { return note }
+        var through = note
+        through.categories.formUnion(boards)
+        return through
     }
 
     /// Everything here replaced by `sources` and `notes` in one hop — what a read back leaves
@@ -336,8 +364,12 @@ public actor ItemStore {
         // item like any other from here, and one taken in this way owes no load of its own:
         // what is loaded for an item is the item's direct target and nothing further.
         let brought = admitted.compactMap(\.quotedNote)
-        let incoming = admitted + brought
+        // Its topic as held, or as this same landing brings it.
+        let landing = Dictionary((admitted + brought).map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        let incoming = (admitted + brought).map { Self.throughItsBoard($0, in: notes, or: landing) }
         var arrived: [NoteKey] = []
+        // Forum topics this landing showed to be in a board they were not held under (#297).
+        var boarded: Set<NoteKey> = []
         var moved = false
         var recounted = false
         var shown = false
@@ -374,8 +406,11 @@ public actor ItemStore {
                 merged.listed = listed
                 merged.goneSince = nil
                 notes[key] = merged
-                shown = shown || !merged.isTopicReply
-                replies = replies || merged.isTopicReply
+                if existing.source.kind == .discuz, Self.boards(of: categories) != Self.boards(of: existing.categories) {
+                    boarded.insert(key)
+                }
+                shown = shown || !merged.isPartOfTopic
+                replies = replies || merged.isPartOfTopic
                 if kept { moved = true } else { recounted = true }
             } else {
                 var note = note
@@ -386,8 +421,8 @@ public actor ItemStore {
                 if owing, place < admitted.count { arrived.append(key) }
                 arrival[key] = arrivals
                 arrivals += 1
-                shown = shown || !note.isTopicReply
-                replies = replies || note.isTopicReply
+                shown = shown || !note.isPartOfTopic
+                replies = replies || note.isPartOfTopic
                 moved = true
             }
         }
@@ -421,6 +456,20 @@ public actor ItemStore {
             notes[reblog.key] = held
             moved = true
             shown = true
+        }
+        // **A topic found in a board passes it to the replies of it already held** (#297): they
+        // were read off its page before the topic was known to be in that board, and a timeline
+        // of that board would otherwise show the topic without replies All shows. Only where a
+        // topic's boards grew, which is rare: one pass over that forum's rows then.
+        if !boarded.isEmpty {
+            for (key, note) in notes where note.source.kind == .discuz {
+                guard let topic = note.topicKey, boarded.contains(topic) else { continue }
+                let through = Self.throughItsBoard(note, in: notes)
+                guard through.categories != note.categories else { continue }
+                notes[key] = through
+                moved = true
+                shown = true
+            }
         }
         // **An item that has just arrived owes a load where something it refers to is not held**
         // (#293) — judged once, here, after the whole landing is in, so a post and the one it
@@ -509,8 +558,11 @@ public actor ItemStore {
             guard refreshed != existing else { continue }
             notes[note.key] = refreshed
             moved = true
-            shown = shown || !refreshed.isTopicReply
-            replies = replies || refreshed.isTopicReply
+            // A reply its forum has now dated stops being a part and starts being an item
+            // (#297): both lists moved. Only here — a copy taken in beside a held row leaves
+            // the row's own date as it was, and this is what lays the later read over it.
+            shown = shown || !refreshed.isPartOfTopic
+            replies = replies || refreshed.isPartOfTopic || existing.isPartOfTopic
         }
         if moved { changed(shown: shown, replies: replies) }
         // The posts these quote, taken in as `ingest` takes them (#214): a quote read again may
@@ -557,7 +609,7 @@ public actor ItemStore {
             else { continue }
             notes[key] = held.with(opening: opening)
             moved = true
-            replies = replies || held.isTopicReply
+            replies = replies || held.isPartOfTopic
         }
         // Written down, and not a change to what is drawn: the screen draws an opening from the
         // forum's own cache as it is read, and replacing every row for each one kept as the reader
@@ -733,7 +785,7 @@ public actor ItemStore {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
-        changed(shown: true, replies: going.contains { $0.isTopicReply })
+        changed(shown: true, replies: going.contains { $0.isPartOfTopic })
     }
 
     public func sources() -> [Source] {
@@ -813,7 +865,7 @@ public actor ItemStore {
                 kept[key] = note
             } else {
                 gone.insert(key.host)
-                replies = replies || note.isTopicReply
+                replies = replies || note.isPartOfTopic
             }
         }
         notes = kept
@@ -841,7 +893,7 @@ public actor ItemStore {
             notes[note.key] = nil
             self.arrival[note.key] = nil
         }
-        changed(shown: going.contains { !$0.isTopicReply }, replies: going.contains { $0.isTopicReply })
+        changed(shown: going.contains { !$0.isPartOfTopic }, replies: going.contains { $0.isPartOfTopic })
         return WentByLimit(posts: going.count, sources: Set(going.map(\.key.host)).sorted())
     }
 
@@ -924,7 +976,7 @@ public actor ItemStore {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
-        changed(shown: going.contains { !$0.isTopicReply }, replies: going.contains { $0.isTopicReply })
+        changed(shown: going.contains { !$0.isPartOfTopic }, replies: going.contains { $0.isPartOfTopic })
         return going.count
     }
 
@@ -956,12 +1008,13 @@ public actor ItemStore {
     /// every timeline whose rules let it through shows it. What it arrived through is its
     /// categories, and one that arrived through none is shown by no rule on a category.
     ///
-    /// **Never a forum topic's kept reply** (`Note.isTopicReply`): that is a part of a topic and
-    /// not an item, and is handed over by `replies()`.
+    /// **Never a forum topic's reply its forum gave no date** (`Note.isPartOfTopic`): that is a
+    /// part of a topic and not an item, and is handed over by `replies()`. A reply the forum
+    /// dated is an item, and is here (#297).
     public func all() -> [Note] {
         let arrival = self.arrival
         let stalled = self.stalled
-        return notes.values.filter { !$0.isTopicReply }
+        return notes.values.filter { !$0.isPartOfTopic }
             .map { note in
                 // Named and not held: asked of what is held now, for the few items that name
                 // anything — one lookup a name, and nothing for an item that names none.
@@ -1231,12 +1284,12 @@ public actor ItemStore {
         if stalled.count + refused.count != before { changed(shown: true, replies: false, kept: false) }
     }
 
-    /// Every kept reply of a forum topic, newest first — what `all()` leaves out. For the count
+    /// Every kept reply of a forum topic that its forum gave no date, newest first — what `all()` leaves out. For the count
     /// of what this device holds, which they are part of; nothing draws them but their topic,
     /// which reads its own through `held(host:idPrefix:)`.
     public func replies() -> [Note] {
         let arrival = self.arrival
-        return notes.values.filter(\.isTopicReply)
+        return notes.values.filter(\.isPartOfTopic)
             .sorted { Self.storeOrder($0, $1, arrival) }
     }
 
@@ -1262,7 +1315,7 @@ public actor ItemStore {
             notes[key] = nil
             arrival[key] = nil
         }
-        changed(shown: !gone.isTopicReply, replies: gone.isTopicReply)
+        changed(shown: !gone.isPartOfTopic, replies: gone.isPartOfTopic)
     }
 
     /// Takes back what a signed-in reader's reads said they had done to `host`'s posts — boosted,
@@ -1306,8 +1359,8 @@ public actor ItemStore {
                 stalled.remove(key)
             }
             notes[key] = plain
-            shown = shown || !note.isTopicReply
-            replies = replies || note.isTopicReply
+            shown = shown || !note.isPartOfTopic
+            replies = replies || note.isPartOfTopic
         }
         guard shown || replies else { return false }
         changed(shown: shown, replies: replies)
@@ -1326,7 +1379,7 @@ public actor ItemStore {
         guard var held = notes[key], held.kept != kept else { return false }
         held.kept = kept
         notes[key] = held
-        changed(shown: !held.isTopicReply, replies: held.isTopicReply)
+        changed(shown: !held.isPartOfTopic, replies: held.isPartOfTopic)
         return true
     }
 
@@ -1345,7 +1398,7 @@ public actor ItemStore {
             note.kept = false
             notes[note.key] = note
         }
-        changed(shown: keeping.contains { !$0.isTopicReply }, replies: keeping.contains { $0.isTopicReply })
+        changed(shown: keeping.contains { !$0.isPartOfTopic }, replies: keeping.contains { $0.isPartOfTopic })
         return keeping.count
     }
 
@@ -1379,7 +1432,7 @@ public actor ItemStore {
         else { return false }
         held.goneSince = moment
         notes[key] = held
-        changed(shown: !held.isTopicReply, replies: held.isTopicReply)
+        changed(shown: !held.isPartOfTopic, replies: held.isPartOfTopic)
         return true
     }
 
@@ -1408,7 +1461,7 @@ public actor ItemStore {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
-        changed(shown: going.contains { !$0.isTopicReply }, replies: going.contains { $0.isTopicReply })
+        changed(shown: going.contains { !$0.isPartOfTopic }, replies: going.contains { $0.isPartOfTopic })
         return going.count
     }
 
@@ -1437,7 +1490,7 @@ public actor ItemStore {
             guard !going.isEmpty else { continue }
             notes[key]?.gaps.subtract(going)
             went += going.count
-            replies = replies || note.isTopicReply
+            replies = replies || note.isPartOfTopic
         }
         if went > 0 { changed(shown: true, replies: replies) }
         return went

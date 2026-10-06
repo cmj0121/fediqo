@@ -664,7 +664,8 @@ private var migrator: DatabaseMigrator {
     // build that still reads it, and none to be mistaken for a fact later.
     //
     // Every row is kept. One that was held apart is, from here, a row like any other; a forum
-    // topic's kept reply is told by its own id (`Note.isTopicReply`), as it always could be.
+    // topic's kept reply is told by its own id (`Note.isTopicReply`), as it always could be — and
+    // whether its forum dated it by the date kept with it since replies were kept (#297).
     //
     // **A migration id for `v3-holding`'s reason, turned round.** A build that knows the column
     // would write `aside` into it again for what a search or a thread brought, and this build

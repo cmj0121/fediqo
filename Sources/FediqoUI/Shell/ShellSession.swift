@@ -388,7 +388,7 @@ final class ShellSession {
     /// Bumped as `notes` is assigned: what a search's answer is kept against.
     private(set) var heldRevision = 0
 
-    /// Every kept reply of a forum topic (`Note.isTopicReply`): a part of a topic and not an
+    /// Every kept reply of a forum topic its forum gave no date (`Note.isPartOfTopic`): a part of a topic and not an
     /// item, so no timeline and no search reads it, and counted all the same (#194) — the device
     /// holds them, and what it says it holds is measured against them. Read by the count alone.
     private(set) var heldReplies: [Note] = [] {
@@ -432,13 +432,21 @@ final class ShellSession {
     /// The row a press to open `rowID` opens (#290): the row itself, or — for a reblog — the
     /// post it reblogs. Nothing for a reblog whose post this device does not hold: there is no
     /// conversation around a reblog, and nothing of the post to open.
+    ///
+    /// **And for a forum topic's reply, its topic** (#297): a reply is read where its topic is,
+    /// and the pane brings it into view (`DummyThreadPane.replyInView`). Nothing where the topic
+    /// is not held — there is no page to open it on. A reply is only ever read off an opened
+    /// topic, so its topic was held when it arrived: "no longer held" is true of one whose
+    /// topic has gone.
     func rowOpened(by rowID: String) -> String? {
-        guard let note = heldNote(rowID), note.isReblog else { return rowID }
+        guard let note = heldNote(rowID) else { return rowID }
+        if let topic = note.topicKey { return heldNote(topic.rowID).map(\.key.rowID) }
+        guard note.isReblog else { return rowID }
         return reblogged(by: note)?.key.rowID
     }
 
     /// The item one row id stands for, among every item this device holds (`notes`). See
-    /// `held(_:)`. A forum topic's kept replies, which are not items, are not found here.
+    /// `held(_:)`. A forum topic's replies its forum gave no date, which are not items, are not found here.
     func heldNote(_ rowID: String) -> Note? {
         guard let key = NoteKey(rowID: rowID) else { return nil }
         return notes.first { $0.source.host == key.host && $0.id == key.id }
@@ -2391,10 +2399,10 @@ final class ShellSession {
         let repliesRevision = await store.repliesRevision
         let drawn = await store.drawn
         let all = adopted?.store != drawn || adopted?.notes != notesRevision ? await store.all() : nil
-        // A forum topic's kept replies have a count of their own, as the items have, so a
-        // timeline's landing does not read them again and a page of a topic read replaces no
-        // row of All. They are counted (#194) and nothing else: each is a post of a thread, not
-        // a thread, and a search drawing one would draw a row that opens nowhere (#177).
+        // A forum topic's replies its forum gave no date have a count of their own, as the items
+        // have, so a timeline's landing does not read them again. They are counted (#194) and
+        // nothing else: nothing but the moment each was read could place it (#297). A reply the
+        // forum dated is an item, and is among `all`.
         let replies = adoptedReplies != repliesRevision ? await store.replies() : nil
         adoptHeld(notes: all, replies: replies)
         if all != nil { adopted = (store: drawn, notes: notesRevision) }
@@ -2721,23 +2729,27 @@ final class ShellSession {
     /// One page of a topic's replies, landed in the store as that topic's kept replies and saved,
     /// and the topic as the store now holds it (#177).
     ///
-    /// Parts of the topic, and not items (`Note.isTopicReply`): no timeline grows by them. A reply already
+    /// **A reply the forum dates is an item** (#297): it stands in All at the time the forum
+    /// gave it, through its topic's board. One the forum gave no date is a part of the topic
+    /// and not an item (`Note.isPartOfTopic`): no timeline grows by it. A reply already
     /// held takes the words just read — **never the forum's notice over them**, #154's rule for an
     /// opening post, so a guest's read of a page does not undo what a member's read kept.
     ///
     /// **A reply the page gave no date keeps the one it was first kept with.** Stamped with each
     /// read's moment, every re-read would move the row, write the whole store down again, and keep
-    /// it inside the reader's keep-for window for ever.
+    /// it inside the reader's keep-for window for ever. **And one the forum dated on an earlier
+    /// read keeps that date** where this read's page gave none, so an item does not stop being
+    /// one because a template left its date out.
     func land(_ replies: [DiscuzPost], host: String, tid: Int) async -> [DiscuzPost] {
         let read = Date()
         let first = Dictionary(
             await store.held(host: host, idPrefix: DiscuzPost.heldPrefix(host: host, tid: tid))
-                .map { ($0.id, $0.postedAt) },
+                .map { ($0.id, (kept: $0.postedAt, said: $0.opening?.postedAt)) },
             uniquingKeysWith: { first, _ in first }
         )
         let notes = replies.map { reply in
             let id = DiscuzPost.heldPrefix(host: host, tid: tid) + String(reply.pid)
-            return reply.asNote(host: host, read: first[id] ?? read)
+            return reply.dated(first[id]?.said).asNote(host: host, read: first[id]?.kept ?? read)
         }
         await store.ingest(notes, ifSourceHere: host)
         await store.refresh(notes.filter { $0.opening != nil }, ifSourceHere: host)

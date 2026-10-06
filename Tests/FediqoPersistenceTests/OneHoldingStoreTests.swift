@@ -67,12 +67,18 @@ struct OneHoldingStoreTests {
 
     /// A reply of a forum topic as a row's cells: written by this build's own save, whose facts
     /// the build before wrote the same way, and read out to be put into the older file.
-    private static func replyCells() async throws -> (id: String, postedAt: String, categories: String, facts: String) {
+    ///
+    /// `dated` is whether the forum's page gave the reply a date: the row then carries it as the
+    /// reply's own (`ForumOpening.postedAt`), as it has since replies were kept; otherwise the
+    /// row's time is only the moment it was read, a day later.
+    private static func replyCells(
+        pid: Int, dated: Bool
+    ) async throws -> (id: String, postedAt: String, categories: String, facts: String) {
         let file = try StoreFile(database: DatabaseQueue())
         let reply = DiscuzPost(
-            pid: 71, tid: 5, floor: 21, author: "linlu", handle: "@linlu@forum.example",
-            postedAt: PackagerFixture.origin, body: "a reply", page: 3
-        ).asNote(host: forum.host, read: PackagerFixture.origin)
+            pid: pid, tid: 5, floor: 21, author: "linlu", handle: "@linlu@forum.example",
+            postedAt: dated ? PackagerFixture.origin : nil, body: dated ? "a dated reply" : "a reply with no date", page: 3
+        ).asNote(host: forum.host, read: PackagerFixture.origin.addingTimeInterval(86_400))
         try await file.save(sources: [forum], notes: [reply])
         return try await file.db.read { db in
             let row = try #require(try Row.fetchOne(db, sql: "SELECT id, CAST(posted_at AS TEXT) AS at, categories, facts FROM note"))
@@ -81,12 +87,12 @@ struct OneHoldingStoreTests {
     }
 
     /// A store the build before wrote: a post that came through Home, and — each held apart —
-    /// what a search brought, an answer read in a thread that the person keeps, and a reply of a
-    /// forum topic.
+    /// what a search brought, an answer read in a thread that the person keeps, and two replies
+    /// of a forum topic: one its forum dated, one it gave no date.
     private func v10Store() async throws -> URL {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let reply = try await Self.replyCells()
+        let replies = [try await Self.replyCells(pid: 71, dated: true), try await Self.replyCells(pid: 72, dated: false)]
         let queue = try DatabaseQueue(path: dir.appendingPathComponent("index.sqlite").path)
         try Self.v10Migrator.migrate(queue)
         try await queue.write { db in
@@ -95,10 +101,12 @@ struct OneHoldingStoreTests {
             try db.execute(sql: Self.row("1", categories: #"[{"kind":"home"}]"#, holding: "arrived"))
             try db.execute(sql: Self.row("2", categories: "[]", holding: "aside"))
             try db.execute(sql: Self.row("3", categories: "[]", holding: "aside", kept: 1))
-            try db.execute(
-                sql: "INSERT INTO note (host, id, posted_at, categories, facts, holding, refs) VALUES ('forum.example', ?, ?, ?, ?, 'aside', '[]')",
-                arguments: [reply.id, reply.postedAt, reply.categories, reply.facts]
-            )
+            for reply in replies {
+                try db.execute(
+                    sql: "INSERT INTO note (host, id, posted_at, categories, facts, holding, refs) VALUES ('forum.example', ?, ?, ?, ?, 'aside', '[]')",
+                    arguments: [reply.id, reply.postedAt, reply.categories, reply.facts]
+                )
+            }
         }
         try queue.close()
         return dir
@@ -123,7 +131,7 @@ struct OneHoldingStoreTests {
 
     // MARK: - An older store
 
-    @Test("The store of the build before opens in place with every row it held: what it held apart stands in All at its own time, kept as it was, and nothing is lost")
+    @Test("The store of the build before opens in place with every row it held: what it held apart stands in All at its own time, kept as it was — a forum's reply too, where the forum dated it — and nothing is lost")
     func carriedForward() async throws {
         let dir = try await v10Store()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -133,17 +141,31 @@ struct OneHoldingStoreTests {
 
         #expect(opened.file != nil && opened.setAside == nil && !opened.storeIsNewer && opened.trouble == nil)
         #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted() == listed)
-        #expect(opened.notes.count == 4, "every row, held apart or not")
+        #expect(opened.notes.count == 5, "every row, held apart or not")
         let store = ItemStore(sources: opened.sources, notes: opened.notes)
-        let all = await store.all().sorted { $0.id < $1.id }
+        let everything = await store.all()
+        let all = everything.filter { $0.source.host == Self.mastodon.host }.sorted { $0.id < $1.id }
         #expect(all.map(\.id) == ["1", "2", "3"], "what was held apart stands in All")
         #expect(all.map(\.body) == ["post 1", "post 2", "post 3"])
         #expect(all.map(\.kept) == [false, false, true])
         #expect(all.map(\.categories) == [[.home], [], []], "through no category, as they came")
         let origin = try #require(all.first).postedAt
         #expect(all.map { $0.postedAt.timeIntervalSince(origin) } == [0, 1, 2], "each at its own time")
+        // The reply the forum dated is an item (#297): in All, at the forum's time and not the
+        // moment it was read, answering its topic — told from the other by what the row has
+        // carried since replies were kept, with no cell added to say so.
+        let dated = try #require(everything.first { $0.source.host == Self.forum.host })
+        #expect(everything.count == 4 && dated.body == "a dated reply")
+        #expect(dated.postedAt == PackagerFixture.origin && dated.opening?.postedAt == PackagerFixture.origin)
+        #expect(dated.refs == [Reference(kind: .answers, id: "discuz:forum.example:5")])
+        // The one it gave no date is still its topic's, and in no timeline.
         let replies = await store.replies()
-        #expect(replies.count == 1 && DiscuzPost(held: replies[0])?.body == "a reply", "a forum topic's reply is still that topic's")
+        #expect(replies.count == 1 && DiscuzPost(held: replies[0])?.body == "a reply with no date")
+        #expect(replies.first?.opening?.postedAt == nil)
+        // Both are read back where the topic is opened, and each is counted once.
+        let ofTopic = await store.held(host: Self.forum.host, idPrefix: DiscuzPost.heldPrefix(host: Self.forum.host, tid: 5))
+        #expect(ofTopic.compactMap(DiscuzPost.init(held:)).map(\.pid).sorted() == [71, 72])
+        #expect(everything.count + replies.count == opened.notes.count)
     }
 
     @Test("Nothing in the file says a row is held apart afterwards: the column is gone, and so is every value it held")
@@ -217,7 +239,7 @@ struct OneHoldingStoreTests {
         let settings = try PropertyListSerialization.data(fromPropertyList: [String: Any](), format: .binary, options: 0)
         let summary = PackageSummary(
             sources: [.init(host: Self.mastodon.host, kind: .mastodon), .init(host: Self.forum.host, kind: .discuz)],
-            posts: 4, timelines: 0, takenAt: PackagerFixture.origin, withPictures: false,
+            posts: 5, timelines: 0, takenAt: PackagerFixture.origin, withPictures: false,
             bytes: index.count + settings.count, hasSecrets: false, device: "an older build", appVersion: "0.0.9",
             entryCount: 3
         )
@@ -237,12 +259,12 @@ struct OneHoldingStoreTests {
 
         try await onto.packager().readBack(url, key: key, replacing: false) { _ in }
 
-        #expect(await onto.store.all().map(\.id).sorted() == ["1", "2", "3"])
+        #expect(await onto.store.all().map(\.id).sorted() == ["1", "2", "3", "discuz:forum.example:5:post:71"])
         #expect(await onto.store.all().first { $0.id == "3" }?.kept == true)
         #expect(await onto.store.replies().count == 1)
         // And on disk, where the next launch reads: the same, with no column left to say otherwise.
         #expect(try !columns(onto.directory.appendingPathComponent("index.sqlite")).contains("holding"))
-        #expect(StoreFile.open(at: onto.directory).notes.count == 4)
+        #expect(StoreFile.open(at: onto.directory).notes.count == 5)
     }
 
     @Test("This build's own package carries what a search brought as the item it is")
