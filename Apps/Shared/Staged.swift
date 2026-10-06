@@ -22,6 +22,8 @@ import UIKit
 /// What a picture is of is said by three more variables:
 ///
 ///     FEDIQO_STAGED_SCREEN   timeline | post | compose | preferences | notice | link | signin
+///                            | named | lost | list — a timeline of the person's own in front, and the list of them
+///     FEDIQO_STAGED_TIMELINES 1 — the person has written three timelines of their own
 ///                            | cut | returned | emptied — the list scrolled and switched, with what it reports written over it
 ///     FEDIQO_STAGED_KEYBOARD 1 — stands as a device with a keyboard attached; without it, as one with none
 ///     FEDIQO_STAGED_WIDTH    320 — the window made that many points wide, where the screen is wider
@@ -59,6 +61,12 @@ enum Staged {
         // is of a phone with one attached. `FEDIQO_STAGED_KEYBOARD=1` keeps the one reported.
         staged.noKeyboard = ProcessInfo.processInfo.environment["FEDIQO_STAGED_KEYBOARD"] != "1"
         staged.scroll = { down in StagedScroll.scroll(down) }
+        // Timelines of the person's own, for a phone's pictures (#304). Asked for, and not in
+        // every picture: the iPad's are laid beside ones taken before there were any.
+        if ProcessInfo.processInfo.environment["FEDIQO_STAGED_TIMELINES"] == "1" {
+            // Written, and then the first of them all in front again: writing one puts it in front.
+            staged.steps.insert(contentsOf: [.timelines, .go(0)], at: 0)
+        }
         return staged
     }
 
@@ -69,6 +77,11 @@ enum Staged {
         // The three a picture is evidence of (#303): the top row a third off the screen; a
         // timeline left a few rows down for another with posts and come back to; and the same
         // through a timeline with none.
+        // The timeline's own head (#304): one of the person's own in front, with a long name;
+        // one that lost its source; and the list of them all, up.
+        case "named": ShellStaged(place: .timeline, steps: [.go(2)])
+        case "lost": ShellStaged(place: .timeline, steps: [.go(3)])
+        case "list": ShellStaged(place: .timeline, steps: [.go(2), .list])
         case "cut": ShellStaged(place: .timeline, steps: [.scroll(90)], reports: true)
         case "returned": ShellStaged(place: .timeline, steps: [.scroll(700), .trends, .all], reports: true)
         case "emptied": ShellStaged(place: .timeline, steps: [.scroll(700), .empty, .all], reports: true)

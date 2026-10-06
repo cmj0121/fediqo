@@ -1282,13 +1282,32 @@ public struct FediqoRootView: View {
         case .all: session.timelineID = .all
         case .trends: session.timelineID = .trends
         case .empty:
-            if session.written.isEmpty, let nobody = Rule.author("@nobody@nowhere.example", in: .every, sources: []) {
-                var draft = TimelineDraft(new: 1)
+            if !session.written.contains(where: { $0.name == "Nobody" }),
+               let nobody = Rule.author("@nobody@nowhere.example", in: .every, sources: []) {
+                var draft = TimelineDraft(new: session.written.count + 1)
                 draft.name = "Nobody"
                 draft.rules = [nobody]
+                draft.position = session.written.count
                 session.commit(draft)
             }
-            if let made = session.written.first { session.timelineID = .written(made.id) }
+            if let made = session.written.first(where: { $0.name == "Nobody" }) { session.timelineID = .written(made.id) }
+        case .timelines:
+            let host = session.sources.first?.host ?? ""
+            let written: [(String, Rule?)] = [
+                ("A timeline with a rather long name, to see where a long name goes", Rule.author("@ada@\(host)", in: .every, sources: [])),
+                ("From a source that left", Rule.source("gone.example")),
+                ("Lin", Rule.author("@lin@\(host)", in: .every, sources: [])),
+            ]
+            for (name, rule) in written {
+                guard let rule else { continue }
+                var draft = TimelineDraft(new: session.written.count + 1)
+                draft.name = name
+                draft.rules = [rule]
+                draft.position = session.written.count
+                session.commit(draft)
+            }
+        case .go(let index): session.goToTimeline(at: index)
+        case .list: session.timelineListShown = true
         }
     }
 

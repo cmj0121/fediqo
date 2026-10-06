@@ -150,6 +150,11 @@
 "shortcut.edit" = "寫或改這條時間軸";
 "timeline.edit.title" = "編輯時間軸";
 "timeline.new.title" = "新時間軸";
+"timeline.list.title" = "時間軸";
+"timeline.list.hint" = "列出每一條時間軸";
+"timeline.list.hint.missing" = "這裡有規則已不在。列出每一條時間軸";
+"timeline.edit.fixed.narrow" = "「全部」和「趨勢」不能編輯。要加你自己的時間軸，按這條時間軸的名稱，再選「新時間軸」。";
+"timeline.position" = "第 %d 條，共 %d 條";
 "editor.tab.rules" = "規則";
 "editor.tab.timeline" = "時間軸";
 "timeline.edit.fixed" = "「全部」和「趨勢」不能編輯。要加你自己的時間軸，按 +，或用 Tab 移到 + 再按 e。";

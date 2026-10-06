@@ -302,6 +302,13 @@ final class ShellSession {
     @ObservationIgnored let timelineStore: WrittenTimelineStore?
     /// The timeline editor, where it is open. Edits apply on Done (Decision 21).
     var editing: TimelineDraft?
+    /// Whether the list of every timeline is up, on a narrow page (#304).
+    var timelineListShown = false
+    /// What was pressed in that list and is done once the list has gone (`TimelineList.Act`).
+    @ObservationIgnored var timelineListPressed: TimelineList.Act?
+    /// Whether the narrow head — the one name, with the list behind it — is what is drawn at
+    /// the top of the timelines now. Past observation: it is read when something is pressed.
+    @ObservationIgnored var timelineHeadShown = false
     /// A sentence the timeline shows for a moment.
     var toast: ShellToast?
     /// Every held note's folded text, built the first time something reads text after `notes`

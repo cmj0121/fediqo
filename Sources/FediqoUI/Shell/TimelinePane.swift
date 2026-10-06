@@ -73,6 +73,7 @@ struct TimelinePane: View {
     /// Nothing here but a finger (#303): the list marks the post being read as it scrolls, one
     /// press opens a row, and the selection is neither drawn nor followed. See `ShellReadingMark`.
     @Environment(\.shellTouch) private var touch
+    @Environment(\.shellLayout) private var shellLayout
     /// Counted up each time a timeline returned to has a post to put back at the top (#303).
     /// The list answers the count and not the switch: a list drawn afresh — a return through a
     /// timeline with no posts — is not there to hear the switch, and is there for this.
@@ -677,21 +678,34 @@ struct TimelinePane: View {
     /// press, not a Tab stop: Tab rotates All, Trends and yours. The names scroll so a
     /// narrow window or a larger text size does not squeeze them; the rule keeps its own
     /// width on the trailing edge.
+    ///
+    /// **On a narrow page it is the one timeline in front, by name** (#304): its rules and where
+    /// it stands under the name, and every other timeline behind a press on it. See
+    /// `TimelineNarrowHead`.
     private var header: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
+            if shellLayout == .narrow, !session.queries.isEmpty {
+                TimelineNarrowHead(session: session) {
+                    searchMark
+                    reloadMark
+                }
+            } else {
             HStack(alignment: .center, spacing: ShellSpace.step) {
-                if !session.queries.isEmpty { addPill }
+                if !session.queries.isEmpty { addPill.modifier(FingerTall()) }
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal) {
                         HStack(spacing: ShellSpace.tight) {
                             ForEach(session.queries) { query in
                                 queryPill(query)
+                                    .modifier(FingerTall())
                                     .id(query.id)
                             }
                         }
                         .padding(.vertical, ShellSpace.hair)
+                        .modifier(FingerRoom())
                     }
                     .scrollIndicators(.never)
+                    .modifier(FingerRoom(given: false))
                     .onChange(of: session.timelineID) { _, query in
                         guard let query else { return }
                         withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(query.id) }
@@ -706,6 +720,7 @@ struct TimelinePane: View {
                 }
                 searchMark
                 reloadMark
+            }
             }
             if session.timelinesUnreadable {
                 Text(L10n.t("timeline.unreadable.line"))
@@ -743,7 +758,7 @@ struct TimelinePane: View {
             accessory: missing ? "circle.dashed" : nil,
             hint: missing ? L10n.t("timeline.pill.missing.hint") : nil
         ) {
-            session.timelineID = query
+            session.goToTimeline(query)
         }
         .simultaneousGesture(
             TapGesture(count: 2).onEnded { session.editTimeline(query) }
@@ -891,6 +906,70 @@ struct HoldsPlace: ViewModifier {
             )
             guard let top = held else { return }
             proxy.scrollTo(top, anchor: .top)
+        }
+    }
+}
+
+/// A name in the row of timelines made a finger tall to press, on an iPhone or iPad, **without
+/// being drawn any taller** (#304): the press reaches above and below the pill, and the row is
+/// as high as it was. Nothing on a Mac, where a pointer is exact.
+///
+/// Upright only. `ShellTouchFloor` reaches every way, and the names stand a few points apart:
+/// sideways, one name's press would lie over the next.
+struct FingerTall: ViewModifier {
+    /// What the reach is worked out from: 11 points each way. **Not more, and measured.** The
+    /// row that scrolls the names is given this room and takes it back (`FingerRoom`), and with
+    /// 13 the names stood half a point lower on an iPad at the smallest text — the row had
+    /// become taller than the marks beside it. So a name at the default text and above is a
+    /// finger tall with its reach, and at the smallest text it is three points short of one.
+    static let drawn: CGFloat = 22
+    static var reach: CGFloat { ShellTouchFloor.spill(drawn: drawn) }
+
+    /// Whether the reach is given here: on an iPhone or iPad. A test says so for itself, to
+    /// measure on a Mac what the reach does to the row's height — which is nothing.
+    static var onThisDevice: Bool {
+        #if os(iOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    var applies = FingerTall.onThisDevice
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if applies {
+            // A shape past the pill's own upper and lower edges. Nothing is padded: what is
+            // drawn, and where, is what it was.
+            content.contentShape(Reached(reach: Self.reach))
+        } else {
+            content
+        }
+    }
+}
+
+/// A rectangle reaching past its own top and bottom, and no wider than it is.
+struct Reached: Shape {
+    let reach: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        Path(rect.insetBy(dx: 0, dy: -reach))
+    }
+}
+
+/// Room for that reach inside the row that scrolls the names, which would otherwise cut a press
+/// off at its own edge: given to what scrolls, and taken back from the row, so nothing moves.
+struct FingerRoom: ViewModifier {
+    var given = true
+    var applies = FingerTall.onThisDevice
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if applies {
+            content.padding(.vertical, given ? FingerTall.reach : -FingerTall.reach)
+        } else {
+            content
         }
     }
 }

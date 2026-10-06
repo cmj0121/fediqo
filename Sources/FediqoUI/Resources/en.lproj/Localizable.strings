@@ -150,6 +150,11 @@
 "shortcut.edit" = "Write or change this timeline";
 "timeline.edit.title" = "Edit timeline";
 "timeline.new.title" = "New timeline";
+"timeline.list.title" = "Timelines";
+"timeline.list.hint" = "Lists every timeline";
+"timeline.list.hint.missing" = "A rule here is missing. Lists every timeline";
+"timeline.edit.fixed.narrow" = "All and Trends can't be edited. To add your own timeline, press this timeline's name and choose New timeline.";
+"timeline.position" = "%d of %d";
 "editor.tab.rules" = "Rules";
 "editor.tab.timeline" = "Timeline";
 "timeline.edit.fixed" = "All and Trends can't be edited. To add your own timeline, press + — or Tab to it and press e.";

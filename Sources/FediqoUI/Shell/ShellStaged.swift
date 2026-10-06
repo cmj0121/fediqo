@@ -47,6 +47,13 @@ public struct ShellStaged: Sendable {
         case trends
         /// A timeline of the person's own that no post is under.
         case empty
+        /// Timelines of the person's own, written as they would have written them: one with a
+        /// long name, one whose rule names a source that is not here, and one more.
+        case timelines
+        /// The timeline at this place among them all, from nought, put in front.
+        case go(Int)
+        /// The list of every timeline, up.
+        case list
     }
 
     /// Whether the launch stands as a device with no keyboard: a simulator reports the keyboard
