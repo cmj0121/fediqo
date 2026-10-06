@@ -99,8 +99,16 @@ unless edited.text.include?("fediqo298seed edited")
 end
 first = Status.where(account: writer_account, reblog_of_id: nil).order(:id).first
 reblog = Status.where(account: other, reblog_of_id: first.id).first || ReblogService.new.call(other, first)
+# **A home is kept only for somebody who has signed in lately**: this server pushes nothing to
+# the home of a person it has not seen (`FeedManager#push_to_home`), and on a server just made
+# the writer has never been seen. So they are marked as signed in first — which may start the
+# rebuilding of their home that no worker here will ever finish, so that is marked finished.
+user.update_sign_in!(new_sign_in: true) unless user.signed_in_recently?
+HomeFeed.new(writer_account).regeneration_finished! if HomeFeed.new(writer_account).regenerating?
 [plain, edited, reblog].each do |status|
-  FeedManager.instance.push_to_home(writer_account, status)
+  FeedManager.instance.push_to_home(writer_account, status) ||
+    FeedManager.instance.redis.zscore(FeedManager.instance.key(:home, writer_account.id), status.id) ||
+    raise("the seed could not put status #{status.id} in the writer's home")
   FeedManager.instance.push_to_list(list, status)
 end
 trend = StatusTrend.find_or_initialize_by(status_id: edited.id)
