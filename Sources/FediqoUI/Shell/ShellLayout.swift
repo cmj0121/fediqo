@@ -145,3 +145,56 @@ extension View {
     /// See `ClearsFloatingCorner`.
     func clearsFloatingCorner() -> some View { modifier(ClearsFloatingCorner()) }
 }
+
+/// The least a sheet's content asks to be, where asking decides anything (#302).
+///
+/// **On a Mac a sheet is as large as what is in it**, so a floor is what stops one opening as a
+/// sliver. **On an iPhone and an iPad the system sizes the sheet** and the content is laid out
+/// in what it is given: a floor there changes nothing where it is met and, where the screen is
+/// narrower than it, lays the content out wider than the sheet with both edges cut off.
+enum ShellSheetFloor {
+    /// Whether a sheet here is sized by what is in it.
+    static var sizedByContent: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// The floor to hold, or nothing where the sheet is not the content's to size.
+    static func held(_ floor: CGSize, sizedByContent: Bool = ShellSheetFloor.sizedByContent) -> CGSize? {
+        sizedByContent ? floor : nil
+    }
+}
+
+extension View {
+    /// Holds a sheet's content to no less than this, on a Mac. See `ShellSheetFloor`.
+    func shellSheetFloor(width: CGFloat, height: CGFloat) -> some View {
+        let held = ShellSheetFloor.held(CGSize(width: width, height: height))
+        return frame(minWidth: held?.width, minHeight: held?.height)
+    }
+}
+
+extension View {
+    /// Lifts what stands at the foot of a page over the corner the compose button floats in,
+    /// where it floats (#302). `already` is the room the view keeps under itself anyway.
+    func standsOverFloatingCorner(by already: CGFloat = 0) -> some View {
+        modifier(StandsOverFloatingCorner(already: already))
+    }
+}
+
+/// How far a view at the foot of a page is lifted: the corner's height less the room it already
+/// keeps, and nothing where no button floats — a wide page, a reader who may not write.
+struct StandsOverFloatingCorner: ViewModifier {
+    let already: CGFloat
+    @Environment(\.shellFloatingCorner) private var corner
+
+    static func lift(corner: CGSize, already: CGFloat) -> CGFloat {
+        max(0, corner.height - already)
+    }
+
+    func body(content: Content) -> some View {
+        content.padding(.bottom, Self.lift(corner: corner, already: already))
+    }
+}

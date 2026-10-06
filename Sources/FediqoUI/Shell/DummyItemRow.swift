@@ -134,6 +134,10 @@ struct DummyItemRow: View {
     /// avatar, the thumbnail and every mark stayed exactly where they were, so at the
     /// largest size a row was big text wrapped around small furniture.
     @ShellMetric(relativeTo: .body) private var avatarSide: CGFloat = Box.avatar
+    /// The room a name is sure of on a narrow page, and the least a handle is drawn in (#302).
+    /// Scaled with the words: a name's first few letters are wider at a larger size.
+    @ShellMetric(relativeTo: .body) private var nameRoom: CGFloat = HeadFit.nameRoom
+    @ShellMetric(relativeTo: .caption) private var handleRoom: CGFloat = HeadFit.handleRoom
     @ShellMetric(relativeTo: .body) private var thumbSide: CGFloat = Box.thumb
     /// The box the audience mark stands in. Tied to the mark's own role rather than to the
     /// caption beside it, so the box and the glyph in it climb together — `ShellMetric`'s
@@ -550,13 +554,33 @@ struct DummyItemRow: View {
     /// a post is a person the reader can open; where it came through and when are facts about the
     /// post, and a press on the host that opened somebody would be the row answering a question
     /// nobody asked.
+    ///
+    /// **On a narrow page the line sheds what it has no room for, whole** (#302). The fittings
+    /// that never give way — the face, the marks, the age — are together wider than a small
+    /// phone at the largest text, and a line wider than the screen makes the whole row wider:
+    /// the words under it then wrap at a width nobody can see the end of. So the line is tried
+    /// as `HeadFit` lists it and the first that fits is drawn; on a wide page it is the one line
+    /// it always was.
+    @ViewBuilder
     private func headline(_ written: Written) -> some View {
-        HStack(alignment: .center, spacing: ShellSpace.snug) {
+        if narrow {
+            ViewThatFits(in: .horizontal) {
+                ForEach(HeadFit.ladder, id: \.self) { head(written, fit: $0) }
+            }
+        } else {
+            head(written, fit: nil)
+        }
+    }
+
+    /// The line as `fit` says, or as a wide page draws it where there is no `fit`.
+    private func head(_ written: Written, fit: HeadFit?) -> some View {
+        let gap = fit?.close == true ? ShellSpace.tight : ShellSpace.snug
+        return HStack(alignment: .center, spacing: gap) {
             pressingPerson(avatar)
-            pressingPerson(names(written))
+            pressingPerson(names(written, fit: fit))
                 .modifier(ProbedMeta(part: .names, probe: probe))
-            Spacer(minLength: ShellSpace.snug)
-            meta
+            Spacer(minLength: gap)
+            meta(fit, gap: gap)
         }
     }
 
@@ -568,39 +592,85 @@ struct DummyItemRow: View {
     /// drawn by `EmojiText`, which sets the role's own font — `.name` and `.meta` are the two
     /// tokens these lines were already drawn in. Everything else here still comes from outside:
     /// a colour, a line limit and where the truncation falls are facts about this column.
-    private func names(_ written: Written) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-            EmojiText(item.author, emojis: written.name, host: host, role: .name)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-                .lineLimit(1)
-                .layoutPriority(1)
-            if let handle = item.handle {
-                EmojiText(handle, emojis: written.handle, host: host, role: .meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .layoutPriority(0)
+    ///
+    /// **On a narrow page a rung says whether the handle is drawn** (#302, `HeadFit`). Where it
+    /// is, the name is whole beside it — a rung with the handle is tried for size at every letter
+    /// of the name, so the handle is given up before a letter of the name is — and the handle
+    /// has `handleRoom` or more, shortened in its middle. Where it is not, the name has every
+    /// point there is and is tried at no more than `nameRoom`, so a long name does not rule out
+    /// a line it would have been cut short on anyway.
+    ///
+    /// **A handle not drawn is still said** (`spokenNames`): two accounts of one name are told
+    /// apart by it, and a listener is not the one who ran out of room.
+    @ViewBuilder
+    private func names(_ written: Written, fit: HeadFit?) -> some View {
+        if let fit, !(fit.drawsHandle && item.handle != nil) {
+            LeastIdeal(cap: fit.terse ? nameRoom * HeadFit.leastName : nameRoom) {
+                nameLine(written)
+                    .accessibilityLabel(Self.spokenNames(item))
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+                nameLine(written)
+                if fit != nil {
+                    LeastIdeal(cap: handleRoom) { handleLine(written) }
+                } else {
+                    handleLine(written)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Who wrote it, as a listener hears it where the line had no room to draw the handle: the
+    /// name and then the handle, as the two are heard where both are drawn.
+    static func spokenNames(_ item: DummyItem) -> String {
+        guard let handle = item.handle, !handle.isEmpty else { return item.author }
+        return item.author.isEmpty ? handle : "\(item.author), \(handle)"
+    }
+
+    private func nameLine(_ written: Written) -> some View {
+        EmojiText(item.author, emojis: written.name, host: host, role: .name)
+            .foregroundStyle(ShellChrome.ink(colorScheme))
+            .lineLimit(1)
+            .modifier(ProbedMeta(part: .name, probe: probe))
+            .layoutPriority(1)
+    }
+
+    @ViewBuilder
+    private func handleLine(_ written: Written) -> some View {
+        if let handle = item.handle {
+            EmojiText(handle, emojis: written.handle, host: host, role: .meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .modifier(ProbedMeta(part: .handle, probe: probe))
+                .layoutPriority(0)
+        }
     }
 
     /// Nothing in here is pinned to a width any more, but nothing may overflow
     /// either: the host gives way first and truncates, and the age — the one reading
     /// that is useless half-drawn — keeps its own size and its place at the end.
-    private var meta: some View {
-        HStack(spacing: ShellSpace.snug) {
-            sourcePill
+    ///
+    /// **On a narrow page the host is whole or it is its first letter** (#302, `HeadFit`): a
+    /// pill cut down to its two round ends is a shape that says nothing.
+    private func meta(_ fit: HeadFit?, gap: CGFloat = ShellSpace.snug) -> some View {
+        let terse = fit?.terse == true || self.terse
+        return HStack(spacing: gap) {
+            sourcePill(fit)
+                .fixedSize(horizontal: fit != nil, vertical: false)
                 .layoutPriority(0)
                 .modifier(ProbedMeta(part: .source, probe: probe))
-            leftMark
+            leftMark(terse: terse)
                 .modifier(ProbedMeta(part: .left, probe: probe))
-            goneMark
+            goneMark(terse: terse)
                 .modifier(ProbedMeta(part: .gone, probe: probe))
-            changedMark
+            changedMark(terse: terse)
                 .modifier(ProbedMeta(part: .changed, probe: probe))
             visibility
-            postedAgo
+            postedAgo(short: fit?.shortAge == true)
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
                 .modifier(ProbedMeta(part: .age, probe: probe))
@@ -662,9 +732,11 @@ struct DummyItemRow: View {
         .frame(width: avatarSide, height: avatarSide)
     }
 
-    private var postedAgo: some View {
+    private func postedAgo(short: Bool) -> some View {
         // The post's own time (#290): on a reblog's row, when it was reblogged is on the line above.
-        Text(Self.headerTime(item), format: .relative(presentation: .numeric, unitsStyle: .abbreviated))
+        // **Said shorter on a narrow line that has no room for it** (#302, `HeadFit`) — "2m ago"
+        // for "2 min. ago" — and never cut: an age half-drawn is no age.
+        Text(Self.headerTime(item), format: .relative(presentation: .numeric, unitsStyle: short ? .narrow : .abbreviated))
             .shellFont(.reading)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .lineLimit(1)
@@ -732,7 +804,7 @@ struct DummyItemRow: View {
     /// It keeps its size for the age's reason: half of "deleted" is not a word. The glyph beside
     /// it is out of the accessibility tree; the word is what a listener hears, inside the row.
     @ViewBuilder
-    private var goneMark: some View {
+    private func goneMark(terse: Bool) -> some View {
         // The post's mark (#290): on a reblog's row, of the post it shows.
         if item.postGone {
             HStack(spacing: ShellSpace.tight) {
@@ -760,7 +832,7 @@ struct DummyItemRow: View {
     /// says only that what it says is not what it first said. When, and what it said before, are
     /// where the post is opened.
     @ViewBuilder
-    private var changedMark: some View {
+    private func changedMark(terse: Bool) -> some View {
         if let editedAt = item.editedAt {
             HStack(spacing: ShellSpace.tight) {
                 Image(systemName: "pencil")
@@ -818,7 +890,7 @@ struct DummyItemRow: View {
     /// server go. Ink dimmed like the pill's, so the mark reads as a note about the pill and not
     /// as a second headline, in light and dark alike.
     @ViewBuilder
-    private var leftMark: some View {
+    private func leftMark(terse: Bool) -> some View {
         if Self.sourceLeft(item, here: sourcesHere) {
             HStack(spacing: ShellSpace.tight) {
                 Image(systemName: "minus.circle")
@@ -878,8 +950,29 @@ struct DummyItemRow: View {
     /// **No width and no `fixedSize`, deliberately.** The pill hugs the host it names, so a
     /// short one is not stretched to a size it has nothing to put in, and a long one gives way
     /// before the age does — which is what `layoutPriority(0)` on the meta line says.
-    private var sourcePill: some View {
-        Text(Self.drawnSource(item))
+    ///
+    /// **On a narrow page it says what its rung has room for** (#302, `HeadFit.Pill`): the host,
+    /// its first letter, or — on the last rung, and for a host with no letter to say — nothing
+    /// is drawn at all, never the pill's own room with nothing in it.
+    @ViewBuilder
+    private func sourcePill(_ fit: HeadFit?) -> some View {
+        if let said = Self.pillSays(item, fit: fit) {
+            pill(said)
+        }
+    }
+
+    /// What the pill says on `fit`, or nothing where no pill is drawn. A wide page (`nil`) says
+    /// what it always did.
+    static func pillSays(_ item: DummyItem, fit: HeadFit?) -> String? {
+        switch fit?.pill {
+        case nil, .host?: drawnSource(item)
+        case .initial?: HeadFit.initial(of: item.source.host)
+        case .absent?: nil
+        }
+    }
+
+    private func pill(_ said: String) -> some View {
+        Text(said)
             .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
@@ -1892,6 +1985,11 @@ private struct DummyMarkButton: View {
                 face(count: nil, side: glyph * 0.75, floor: 0, countFloor: 0)
                 face(count: nil, side: glyph * 0.5, floor: 0, countFloor: 0)
             }
+            // **As wide as it is offered**, so a mark that gave something up still stands in its
+            // share of the line (#302): a press has the share to land on, and the marks keep
+            // apart instead of closing up at the line's leading end. A line with room offers a
+            // mark its own width, and this is then that.
+            .frame(maxWidth: .infinity, alignment: .leading)
             .frame(minHeight: touch)
             .contentShape(Rectangle())
         }
@@ -1959,6 +2057,8 @@ final class RowBandProbe {
 /// The parts of a row's header line a test reads the places of.
 enum RowMetaPart: Hashable {
     case names, source, left, gone, changed, age
+    /// The author's name and handle, each alone; the handle only where it is drawn.
+    case name, handle
     /// On a reblog's first line: who reblogged, and when.
     case reblogger, reblogAge
     /// Where a reblog with no post to show says where the post is.
@@ -2023,5 +2123,99 @@ private struct ProbedMark: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// What a row's header line draws on a narrow page, most first (#302). The first that fits is
+/// drawn, and the last is drawn where none does.
+///
+/// The face, the name, who may read it, the marks and the age are on every one. **Neither the
+/// name nor the age is cut before the handle has gone**: a rung that draws the handle is tried
+/// with the name whole. What gives way, in order:
+///
+/// 1. the source's host, to its first letter — the handle beside the name already says the host;
+/// 2. the age's words, to their shortest ("2m ago");
+/// 3. the handle, and with it the line is tried again from the whole host down;
+/// 4. the words beside the marks, which stand as their glyphs alone;
+/// 5. and last, where even that is wider than the page — a row with every mark at the largest
+///    text — the pill altogether and half of every gap, so the line cannot be wider than the row.
+enum HeadFit: Hashable, CaseIterable, Sendable {
+    case whole
+    case initialled
+    case brief
+    case unhandled
+    case plain
+    case bare
+    case gaunt
+
+    static let ladder: [HeadFit] = [.whole, .initialled, .brief, .unhandled, .plain, .bare, .gaunt]
+
+    /// What the source's pill says.
+    enum Pill: Hashable, Sendable {
+        case host
+        case initial
+        case absent
+    }
+
+    /// Whether the handle is drawn beside the name.
+    var drawsHandle: Bool { self == .whole || self == .initialled || self == .brief }
+
+    var pill: Pill {
+        switch self {
+        case .whole, .unhandled: .host
+        case .initialled, .brief, .plain, .bare: .initial
+        case .gaunt: .absent
+        }
+    }
+
+    /// Whether the age is said in its shortest words.
+    var shortAge: Bool { self == .brief || self == .plain || self == .bare || self == .gaunt }
+
+    /// Whether the marks are their glyphs alone whatever their number.
+    var terse: Bool { self == .bare || self == .gaunt }
+
+    /// Whether the gaps between the parts are closed to half.
+    var close: Bool { self == .gaunt }
+
+    /// What the pill says of `host` where it cannot say all of it: its first letter, or nothing
+    /// for a host with none — and then no pill is drawn. The whole host is still what is heard
+    /// and what a pointer resting on the pill is told.
+    static func initial(of host: String) -> String? {
+        host.first.map { String($0) }
+    }
+
+    /// The room a name is sure of before anything else on the line is given up for it, at the
+    /// default text size: a short name whole, a long one enough to be recognised by.
+    static let nameRoom: CGFloat = 72
+    /// How much of that room the rungs that have given up everything else still hold out for:
+    /// a third, which is a few letters — so the last of them is reached only by a line that
+    /// truly has no room, and not by one that merely has little.
+    static let leastName: CGFloat = 1 / 3
+    /// The least a handle is drawn in, at the default text size: its first letters, the cut,
+    /// and the end of its host.
+    static let handleRoom: CGFloat = 64
+}
+
+/// A view that asks for no more than `cap` across when it is asked what it would like, and is
+/// otherwise exactly itself.
+///
+/// For a line that truncates. What it would like is every letter, so anything that tries it for
+/// size — `ViewThatFits` — finds a long one never fits, though it would have been drawn cut
+/// short and whole. Capped, it is tried at the room it is sure of.
+struct LeastIdeal: Layout {
+    var cap: CGFloat
+
+    /// What is asked for across: the view's own wish, up to the cap.
+    static func across(_ own: CGFloat, cap: CGFloat) -> CGFloat { min(own, cap) }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let view = subviews.first else { return .zero }
+        let size = view.sizeThatFits(proposal)
+        guard proposal.width == nil else { return size }
+        return CGSize(width: Self.across(size.width, cap: cap), height: size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
     }
 }

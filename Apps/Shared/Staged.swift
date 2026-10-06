@@ -21,7 +21,7 @@ import UIKit
 ///
 /// What a picture is of is said by three more variables:
 ///
-///     FEDIQO_STAGED_SCREEN   timeline | post | compose | preferences
+///     FEDIQO_STAGED_SCREEN   timeline | post | compose | preferences | notice | link | signin
 ///     FEDIQO_STAGED_WIDTH    320 — the window made that many points wide, where the screen is wider
 ///
 /// and the text size and language by the app's own preferences, handed over as launch arguments
@@ -56,6 +56,11 @@ enum Staged {
         case "post": ShellStaged(place: .timeline, opens: NoteKey(host: host, id: opened).rowID)
         case "compose": ShellStaged(place: .timeline, composing: true)
         case "preferences": ShellStaged(place: .preferences)
+        case "notice": ShellStaged(place: .timeline, says: notice)
+        // Both are somebody's page, and there is nobody: the name is one no server answers to,
+        // so the picture is of this app's own frame around a page that did not arrive.
+        case "link": ShellStaged(place: .timeline, reads: URL(string: "https://\(host)/a/page/read/out/of/a/post"))
+        case "signin": ShellStaged(place: .timeline, signsIn: "forum.\(host)")
         default: ShellStaged(place: .timeline)
         }
     }
@@ -64,6 +69,10 @@ enum Staged {
     private static var width: CGFloat? {
         Double(ProcessInfo.processInfo.environment["FEDIQO_STAGED_WIDTH"] ?? "").flatMap { $0 > 0 ? CGFloat($0) : nil }
     }
+
+    /// A sentence longer than one line of a phone, to see where a long notice goes.
+    private static let notice =
+        "\(host) and a-rather-long-subdomain.\(host) did not answer, so this timeline shows what this device already holds; it will ask again in a minute."
 
     // MARK: - The posts
 

@@ -258,7 +258,9 @@ public struct FediqoRootView: View {
                 if let landing = launch.settle(availability, standingOn: place) {
                     place = landing
                 }
-                if let staged { Task { await arrive(at: staged) } }
+                // Ended with this view's own task, so a window closed stops saying its notice.
+                let arriving = staged.map { staged in Task { await arrive(at: staged) } }
+                defer { arriving?.cancel() }
                 // Last, because it does not return: from here every landing renews what is in
                 // front, with no key pressed (#175).
                 await session.followStore()
@@ -1246,9 +1248,18 @@ public struct FediqoRootView: View {
     /// a picture a third of a second and a reader nothing, since no reader's launch comes here.
     private func arrive(at staged: ShellStaged) async {
         if let wanted = staged.place { place = availability.placing(place, as: wanted) }
-        try? await Task.sleep(for: .milliseconds(300))
+        guard (try? await Task.sleep(for: .milliseconds(300))) != nil else { return }
         if let row = staged.opens { _ = openThread(row) }
         if staged.composing, availability.canCompose { composing = true }
+        if let url = staged.reads { _ = linkReader.open(url) }
+        if let host = staged.signsIn { session.signingIn = ForumSignInRequest(host: host, stop: .noCredential) }
+        // Said again before it goes, for as long as the launch lasts.
+        if let says = staged.says {
+            for tick in 1... {
+                session.toast = ShellToast(tick: -tick, text: says)
+                guard (try? await Task.sleep(for: .seconds(1))) != nil else { return }
+            }
+        }
     }
 
     /// `Return`: the conversation around the post the lamp is on.

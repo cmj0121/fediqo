@@ -811,6 +811,10 @@
 
 /* Pressing a row. Decision 31: the row opens what that server says about itself. */
 "account.source.open"             = "%@ 怎麼介紹自己";
+"account.source.more" = "這個來源的其他動作";
+"account.source.more.said" = "這個來源的其他動作。它有話要說";
+"account.source.state.trouble" = "需要看一下";
+"account.source.state.waiting" = "等待中";
 "account.source.open.hint"        = "打開這個來源怎麼介紹自己。";
 
 /* The detail: the same evidence, and the three sentences a preview says that are false here. */

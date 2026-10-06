@@ -230,6 +230,8 @@ struct TimelinePane: View {
             if let banner {
                 TimelineToastBanner(toast: banner, work: session.work, reading: session.reload.reading)
                     .padding(.bottom, ShellSpace.pad)
+                    // Over the compose button where it floats, never under it (#302).
+                    .standsOverFloatingCorner(by: ShellSpace.pad)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }

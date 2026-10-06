@@ -33,11 +33,26 @@ struct ShellTabs<Tab: ShellTab>: View {
         self.onSelect = onSelect
     }
 
+    /// Which ends of a scrolled row have more beyond them. See `ShellTabsMore`.
+    @State private var more = ShellTabsMore(leading: false, trailing: true)
+
     var body: some View {
         ViewThatFits(in: .horizontal) {
             row
+            // **A row that scrolls says so** (#302): the end with more beyond it fades out, so a
+            // pill cut by the edge of the page reads as one that goes on rather than one that
+            // was cut. An end with nothing beyond it is drawn whole.
             ScrollView(.horizontal) { row }
                 .scrollIndicators(.never)
+                .onScrollGeometryChange(for: ShellTabsMore.self) { geometry in
+                    ShellTabsMore(
+                        offset: geometry.contentOffset.x, across: geometry.containerSize.width,
+                        content: geometry.contentSize.width
+                    )
+                } action: { _, now in
+                    more = now
+                }
+                .mask(ShellTabsFade(more: more))
         }
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isTabBar)
@@ -124,3 +139,44 @@ struct ShellTabPill: View {
 }
 
 extension DummyShortcutGroup: ShellTab {}
+
+/// Which ends of a row scrolled sideways have more beyond them.
+struct ShellTabsMore: Hashable, Sendable {
+    var leading: Bool
+    var trailing: Bool
+
+    init(leading: Bool, trailing: Bool) {
+        self.leading = leading
+        self.trailing = trailing
+    }
+
+    /// Read off where the row stands: `offset` in from its start, in a page `across` wide, over
+    /// a row `content` wide. A point of slack either way, so a row at rest at an end is at it.
+    init(offset: CGFloat, across: CGFloat, content: CGFloat) {
+        leading = offset > 1
+        trailing = offset + across < content - 1
+    }
+}
+
+/// What a scrolled row is drawn through: whole in the middle, fading out over `reach` at each
+/// end that has more beyond it.
+private struct ShellTabsFade: View {
+    let more: ShellTabsMore
+    private let reach: CGFloat = ShellSpace.room
+
+    var body: some View {
+        HStack(spacing: 0) {
+            edge(more.leading, from: .leading)
+            Color.black
+            edge(more.trailing, from: .trailing)
+        }
+    }
+
+    private func edge(_ fades: Bool, from end: UnitPoint) -> some View {
+        LinearGradient(
+            colors: [fades ? .clear : .black, .black],
+            startPoint: end, endPoint: end == .leading ? .trailing : .leading
+        )
+        .frame(width: reach)
+    }
+}

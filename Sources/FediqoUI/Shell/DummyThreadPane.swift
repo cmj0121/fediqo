@@ -90,15 +90,10 @@ struct DummyThreadPane: View {
         let lead = conversation.lead
         let above = lead + conversation.ancestors.count
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: ShellSpace.snug) {
-                ShellBackButton("thread.back", action: onBack)
-                Text(L10n.t(blog == nil ? "thread.title" : "blog.title"))
-                    .shellFont(.pane)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                Spacer()
-                outward
-                ShellKeyHint("thread.leaveHint")
-            }
+            ThreadHeadLine(
+                title: L10n.t(blog == nil ? "thread.title" : "blog.title"), onBack: onBack,
+                wayOut: root.outwardURL.map { (root.outwardName, $0) }
+            )
             .padding(.horizontal, ShellSpace.pad)
             .padding(.vertical, ShellSpace.snug)
 
@@ -253,22 +248,6 @@ struct DummyThreadPane: View {
     /// **No button at all where the address does not pass**, rather than a disabled one. A
     /// control the reader cannot press is a question about this app; nothing is the honest answer
     /// to "this post named nowhere to go".
-    @ViewBuilder
-    private var outward: some View {
-        if let url = root.outwardURL {
-            Button {
-                openURL(url)
-            } label: {
-                Label(root.outwardName, systemImage: "arrow.up.forward.app")
-                    .shellFont(.meta, weight: .medium)
-                    .lineLimit(1)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(ShellChrome.selectInk(colorScheme))
-            .help(String(format: L10n.t("thread.open.hint"), url.absoluteString))
-            .accessibilityHint(Text(L10n.t("thread.open.leaves")))
-        }
-    }
 
     /// One post of the conversation, `depth` steps in — `DummyConversation.depth(of:)`'s answer,
     /// read off the post's place rather than looked up by id.
@@ -1310,5 +1289,110 @@ private struct ProbedPlace: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// The head of an opened post: the way back, what the page is, the way out to the post's own
+/// page, and the key that leaves.
+///
+/// **On a wide page it is the one line it always was.** On a narrow one (#302) every part is as
+/// wide as its words, so the line is tried as `ThreadHead` lists it and the first that fits is
+/// drawn: the hint about a key goes first, then the words beside the way out, which stays as its
+/// glyph — whole, or with less on it, never squeezed.
+struct ThreadHeadLine: View {
+    let title: String
+    let onBack: () -> Void
+    /// The post's own page and what the press to it is called, where it has one to go to.
+    let wayOut: (name: String, url: URL)?
+
+    @Environment(\.shellLayout) private var shellLayout
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        if let ladder = ThreadHead.fits(on: shellLayout) {
+            ViewThatFits(in: .horizontal) {
+                ForEach(ladder, id: \.self) { fitted($0) }
+            }
+        } else {
+            HStack(spacing: ShellSpace.snug) {
+                ShellBackButton("thread.back", action: onBack)
+                Text(title)
+                    .shellFont(.pane)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                Spacer()
+                outward(named: true, whole: false)
+                ShellKeyHint("thread.leaveHint")
+            }
+        }
+    }
+
+    private func fitted(_ fit: ThreadHead) -> some View {
+        HStack(spacing: ShellSpace.snug) {
+            ShellBackButton("thread.back", action: onBack)
+            Text(title)
+                .shellFont(.pane)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            Spacer()
+            outward(named: fit.namesWayOut, whole: true)
+            if fit.hintsKey { ShellKeyHint("thread.leaveHint") }
+        }
+    }
+
+    /// `whole` holds the label to its own width, which a rung tried for size needs and the wide
+    /// page's line never had.
+    @ViewBuilder
+    private func outward(named: Bool, whole: Bool) -> some View {
+        if let wayOut {
+            Button {
+                openURL(wayOut.url)
+            } label: {
+                Label(wayOut.name, systemImage: "arrow.up.forward.app")
+                    .shellFont(.meta, weight: .medium)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: whole, vertical: false)
+                    .modifier(GlyphAlone(alone: !named, name: wayOut.name))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(ShellChrome.selectInk(colorScheme))
+            .help(String(format: L10n.t("thread.open.hint"), wayOut.url.absoluteString))
+            .accessibilityHint(Text(L10n.t("thread.open.leaves")))
+        }
+    }
+}
+
+/// What the head of an opened post draws on a narrow page, most first (#302): the first that
+/// fits is drawn, and the last where none does. Back and the title are on every one.
+enum ThreadHead: Hashable, CaseIterable, Sendable {
+    /// Everything the line holds.
+    case whole
+    /// Without the hint about a key: the way back it names is the button at the line's start.
+    case unhinted
+    /// And the way out as its glyph alone, still named to VoiceOver and to a pointer.
+    case glyphs
+
+    static let ladder: [ThreadHead] = [.whole, .unhinted, .glyphs]
+
+    /// The rungs tried on `layout`, or nothing where the line is not fitted at all: a wide page
+    /// draws the one line it always did.
+    static func fits(on layout: ShellLayout) -> [ThreadHead]? {
+        layout == .narrow ? ladder : nil
+    }
+
+    var hintsKey: Bool { self == .whole }
+    var namesWayOut: Bool { self != .glyphs }
+}
+
+/// A label drawn as its glyph alone, where a line has no room for its words — and still named
+/// by them to VoiceOver, which the glyph alone would not be.
+private struct GlyphAlone: ViewModifier {
+    let alone: Bool
+    let name: String
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if alone { content.labelStyle(.iconOnly).accessibilityLabel(name) } else { content }
     }
 }

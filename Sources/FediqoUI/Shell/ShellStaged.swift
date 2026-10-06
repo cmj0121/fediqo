@@ -1,3 +1,5 @@
+import Foundation
+
 /// Where a launch is put with nothing pressed: a place, a post opened on it, the composer over it.
 ///
 /// **For a picture, and for nothing a reader does.** `scripts/shots.sh` photographs the app and
@@ -16,10 +18,23 @@ public struct ShellStaged: Hashable, Sendable {
     public var opens: String?
     /// Whether the composer is up, where the reader may write.
     public var composing: Bool
+    /// A sentence said at the foot of the timeline, and kept there: a notice is gone in two
+    /// seconds, which is before a picture is taken.
+    public var says: String?
+    /// The page read out of a post's words, as a press on its hyperlink would open it.
+    public var reads: URL?
+    /// The forum whose sign-in is asked for, as a read that needed one would ask.
+    public var signsIn: String?
 
-    public init(place: ShellPlace? = nil, opens: String? = nil, composing: Bool = false) {
+    public init(
+        place: ShellPlace? = nil, opens: String? = nil, composing: Bool = false, says: String? = nil,
+        reads: URL? = nil, signsIn: String? = nil
+    ) {
         self.place = place
         self.opens = opens
         self.composing = composing
+        self.says = says
+        self.reads = reads
+        self.signsIn = signsIn
     }
 }

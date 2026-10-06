@@ -96,28 +96,66 @@ struct ComposerSheet: View {
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             } else if !offered.isEmpty {
-                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
-                    Picker(L10n.t("compose.source"), selection: $session.composeHost) {
-                        ForEach(offered, id: \.host) { source in
-                            Text(source.host).tag(Optional(source.host))
-                        }
-                    }
-                    .shellFont(.meta)
-                    .accessibilityLabel(L10n.t("compose.source"))
-                    Picker(L10n.t("compose.visibility"), selection: $session.composeAudience) {
-                        ForEach(Audience.allCases, id: \.self) { audience in
-                            Text(L10n.t(Self.visibilityKey(audience))).tag(audience)
-                        }
-                    }
-                    .shellFont(.meta)
-                    .accessibilityLabel(L10n.t("compose.visibility"))
-                }
+                ComposeChoices(session: session, offered: offered)
                 .pickerStyle(.menu)
                 .disabled(sending)
             }
         }
         .onAppear { session.prepareCompose() }
         .task(id: session.composeHost) { await session.refreshPostLimit() }
+    }
+}
+
+/// Where a post goes and who may read it: the two choices above the composer's editor.
+///
+/// **Side by side where both are whole, and one over the other where they are not** (#302). On
+/// a narrow phone the two together are wider than the sheet, and a menu squeezed there breaks
+/// its host in the middle of a word. A Mac's sheet is a fixed 600 points, and an iPad's has
+/// room: both draw them as they did.
+private struct ComposeChoices: View {
+    @Bindable var session: ShellSession
+    let offered: [Source]
+
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
+
+    var body: some View {
+        #if os(iOS)
+        if sizeClass == .compact {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) { choices }
+                    .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: ShellSpace.tight) { choices }
+            }
+        } else {
+            row
+        }
+        #else
+        row
+        #endif
+    }
+
+    private var row: some View {
+        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) { choices }
+    }
+
+    @ViewBuilder
+    private var choices: some View {
+        Picker(L10n.t("compose.source"), selection: $session.composeHost) {
+            ForEach(offered, id: \.host) { source in
+                Text(source.host).tag(Optional(source.host))
+            }
+        }
+        .shellFont(.meta)
+        .accessibilityLabel(L10n.t("compose.source"))
+        Picker(L10n.t("compose.visibility"), selection: $session.composeAudience) {
+            ForEach(Audience.allCases, id: \.self) { audience in
+                Text(L10n.t(ComposerSheet.visibilityKey(audience))).tag(audience)
+            }
+        }
+        .shellFont(.meta)
+        .accessibilityLabel(L10n.t("compose.visibility"))
     }
 }
 
@@ -176,6 +214,10 @@ struct WritingSheet<Above: View>: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var compact: Bool { sizeClass == .compact }
+    #endif
     @State private var sending = false
     @State private var failed: String?
 
@@ -234,10 +276,13 @@ struct WritingSheet<Above: View>: View {
                 }
             }
         }
+        // **No floor where the page is compact** (#302): a phone's sheet is the screen's width
+        // and this fills it. The floor there was wider than every phone, so Cancel, the send
+        // and the pickers stood outside the sheet. An iPad with room keeps the floor it had.
         #if os(macOS)
         .frame(width: 600, height: height)
         #else
-        .frame(minWidth: 600, minHeight: height)
+        .frame(minWidth: WritingRoom.floor(600, compact: compact), minHeight: WritingRoom.floor(height, compact: compact))
         #endif
         .interactiveDismissDisabled(!ComposerSheet.canDismiss(sending: sending))
     }
@@ -279,5 +324,14 @@ private struct HiddenIndicators: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// The least a sheet for writing asks to be on an iPhone or an iPad (#302): what it always asked
+/// where the page has room, and nothing where it is compact — there the sheet is the screen's
+/// width, and a floor wider than the screen lays the sheet's contents out past both its edges.
+enum WritingRoom {
+    static func floor(_ asked: CGFloat, compact: Bool) -> CGFloat? {
+        compact ? nil : asked
     }
 }

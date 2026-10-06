@@ -835,6 +835,10 @@
 
 /* Pressing a row. Decision 31: the row opens what that server says about itself. */
 "account.source.open"             = "What %@ says about itself";
+"account.source.more" = "More for this source";
+"account.source.more.said" = "More for this source. It has something to say";
+"account.source.state.trouble" = "needs a look";
+"account.source.state.waiting" = "waiting";
 "account.source.open.hint"        = "Opens what this server says about itself.";
 
 /* The detail: the same evidence, and the three sentences a preview says that are false here. */

@@ -329,7 +329,9 @@ widths() {
 #
 # The phone as it stands is the third, and an iPad the fourth: the one arrangement here that
 # writes every timeline's name in a row, which a phone at any width does not.
-PHONE_SCREENS=(timeline post compose preferences)
+# `SHOTS_SCREENS="compose notice"` takes those alone, for looking at one screen while it is worked on.
+# shellcheck disable=SC2206
+PHONE_SCREENS=(${SHOTS_SCREENS:-timeline post compose preferences notice link signin})
 PHONE_WIDTHS=(320 375 whole)
 PHONE_SCALES=(smallest default largest)
 
@@ -400,7 +402,9 @@ phone() {
     make -C Apps ios >/dev/null
     [ -d "$IOS_APP" ] || { echo >&2 "shots: no iOS app at $IOS_APP"; return 1; }
 
-    rm -rf "$out"; mkdir -p "$out"
+    # A run of every screen starts from nothing; a run of some replaces those and keeps the rest.
+    [ -n "${SHOTS_SCREENS:-}" ] || rm -rf "$out"
+    mkdir -p "$out"
     stage "$handset" 3 "$out" "${PHONE_WIDTHS[@]}"
     stage "$tablet" 2 "$out" whole
 
