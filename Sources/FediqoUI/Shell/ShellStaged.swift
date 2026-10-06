@@ -61,6 +61,8 @@ public struct ShellStaged: Sendable {
         /// Every timeline as one never visited: writing them above put each in front in turn,
         /// which no person did.
         case unvisited
+        /// The reload mark pressed, as `r` presses it (#307).
+        case reload
         /// One timeline on, or back: what a swipe does once it is let go (#305).
         case next
         case previous
@@ -138,7 +140,7 @@ struct StagedMenus: View {
                     let _ = acting.ask = { _ in }
                     VStack(alignment: .leading, spacing: ShellSpace.tight) {
                         Text(item.author).shellFont(.name, weight: .semibold)
-                        ForEach(ItemActs.head(for: item, here: here), id: \.self) { line in
+                        ForEach(ItemActs.head(for: item, here: here, refused: acting.acts.refused), id: \.self) { line in
                             Text(line).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
                         }
                         ShellRule()

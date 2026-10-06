@@ -99,6 +99,7 @@
 "shortcut.tag" = "Open a hashtag of the post: what this device holds under it";
 "shortcut.quote" = "Open the post this one quotes";
 "shortcut.reload" = "Reload this timeline, or the open thread";
+"timeline.reload.stop" = "Stop reloading";
 "shortcut.dismiss" = "Close what is in front, or unfocus";
 "shortcut.search" = "Search the posts this device holds";
 

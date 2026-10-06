@@ -145,9 +145,55 @@ final class ShellReadingMark {
         mark(row)
     }
 
+    /// Where a pull to read again has got to (#307). A pull is made with the list at rest at
+    /// its top, and what it brings is wanted there: the newest posts shown, not held off above
+    /// the post that was first.
+    enum Pull: Equatable, Sendable {
+        case none
+        /// Pulled, and its read still running; `landed` once what it brought has been shown.
+        case running(landed: Bool)
+        /// Its read ended with nothing shown yet: the next landing is still its own, unless
+        /// the person moves the list first.
+        case ended
+    }
+
+    private(set) var pull = Pull.none
+
+    /// The list was pulled.
+    func pulled() { pull = .running(landed: false) }
+
+    /// The pull's read ended.
+    func pullSettled() { pull = Self.settled(pull) }
+
+    /// Posts landed. Says whether the list shows the newest of them at its top — a pull's — or
+    /// holds the place it was read at, as every other landing does.
+    func landing() -> Bool {
+        let shows = Self.showsNewest(pull)
+        pull = Self.landed(pull)
+        return shows
+    }
+
+    nonisolated static func showsNewest(_ pull: Pull) -> Bool { pull != .none }
+
+    nonisolated static func landed(_ pull: Pull) -> Pull {
+        switch pull {
+        case .none, .ended: .none
+        case .running: .running(landed: true)
+        }
+    }
+
+    nonisolated static func settled(_ pull: Pull) -> Pull {
+        switch pull {
+        case .running(landed: false): .ended
+        case .none, .ended, .running(landed: true): .none
+        }
+    }
+
     /// The person moved the list by hand: what was kept gives way to what is on screen.
     func scrolledByHand() {
         used = true
+        // A pull whose read has ended and brought nothing yet is over once the list is moved.
+        if pull == .ended { pull = .none }
         guard kept != nil else { return }
         kept = nil
         remark()

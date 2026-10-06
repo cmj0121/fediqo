@@ -81,6 +81,8 @@ struct TimelinePane: View {
     /// The list answers the count and not the switch: a list drawn afresh — a return through a
     /// timeline with no posts — is not there to hear the switch, and is there for this.
     @State private var returns = 0
+    /// When the reload mark was last pressed to begin a reload (#307). See `reloadMark`.
+    @State private var reloadPressed: Date?
 
     private var timeline: TimelineQuery { session.currentTimeline }
 
@@ -210,6 +212,12 @@ struct TimelinePane: View {
                         onToast: showToast,
                         onBack: onBack
                     )
+                    // Pulled down, the conversation is read again as `r` reads it there (#307):
+                    // the pull reaches the pane's own list from here.
+                    .modifier(PullsToReload(
+                        offered: { ReloadMark.pulls(canReload: ways.canReload, searching: false) },
+                        reload: ways.onReload, settled: { await session.reload.settled(.thread) }
+                    ))
                     // One pane per thread, so going back from a nested one draws its parent
                     // afresh.
                     .id(opened.id)
@@ -562,10 +570,23 @@ struct TimelinePane: View {
             // The list slid sideways by a swipe stays inside its own pane (#305): not over the
             // rail beside it on a wide page.
             .modifier(HoldsSlide(holds: touch))
+            // Pulled down from its top, the list is read again as the reload mark reads it
+            // (#307) — the same press, by the same function — wherever that mark is offered.
+            .modifier(PullsToReload(
+                offered: { ReloadMark.pulls(canReload: ways.canReload, searching: searching) },
+                reload: {
+                    session.readingMark.pulled()
+                    ways.onReload()
+                },
+                settled: {
+                    await session.reload.settled(.timeline)
+                    session.readingMark.pullSettled()
+                }
+            ))
             // The end of the list stops short of whatever floats over the page (#112).
             .clearsFloatingCorner()
             .modifier(KeepsTopRow(session: session))
-            .modifier(HoldsPlace(session: session, proxy: proxy, touch: touch))
+            .modifier(HoldsPlace(session: session, proxy: proxy, touch: touch, first: items.first?.id))
             // The rows the mark may be among, said when they change and not on every pass (#303).
             .onChange(of: items.map(\.id), initial: true) { _, ids in
                 session.readingMark.list(Set(ids), of: timeline.id)
@@ -831,10 +852,30 @@ struct TimelinePane: View {
     /// `r`'s mark. Stays the mark while a reload runs: a plate here would be a second
     /// loading animation, and blinking the control out from under the finger that pressed
     /// it is the thing decision 4 refuses. A press then still does nothing (`r` already).
+    ///
+    /// **While a reload the reader pressed for runs, the mark is Stop** (#307), and a press
+    /// stops it exactly as `Escape` does — `ShellReload.stop`, the one function. A control in
+    /// the place of the one just pressed, never a gap: it is Stop for as long as there is
+    /// something to stop and the reload mark again the moment there is not. For a pointer as
+    /// for a finger.
+    ///
+    /// **One button whose glyph and name change**, and not two that take turns: VoiceOver stays
+    /// on it as it flips, and the header does not shift. **And a press on Stop within
+    /// `ReloadMark.settle` of the press that began the reload is not heard**: a second press of
+    /// a quick double would otherwise cancel what the first had just started.
     @ViewBuilder
     private var reloadMark: some View {
-        if ways.canReload {
-            ShellIconButton("arrow.clockwise", name: "shortcut.reload", action: ways.onReload)
+        if let shown = ReloadMark.shown(canReload: ways.canReload, stoppable: session.reload.stoppable) {
+            ShellIconButton(shown.symbol, name: shown.name) {
+                switch shown {
+                case .reload:
+                    reloadPressed = Date()
+                    ways.onReload()
+                case .stop:
+                    guard ReloadMark.stops(at: Date(), pressedAt: reloadPressed) else { return }
+                    session.reload.stop()
+                }
+            }
         }
     }
 
@@ -933,9 +974,18 @@ struct HoldsPlace: ViewModifier {
     let session: ShellSession
     let proxy: ScrollViewProxy
     var touch = false
+    /// The newest post of the list in front: what a pull's landing puts at the top (#307).
+    var first: String?
 
     func body(content: Content) -> some View {
         content.onChange(of: session.notesRevision) { _, _ in
+            // **What a pull brought is shown** — the list was at rest at its top, and holding
+            // the post that was first would leave the new ones out of sight above it, a pull
+            // that looked as though it did nothing. Any other landing holds the place.
+            if session.readingMark.landing() {
+                if let first { proxy.scrollTo(first, anchor: .top) }
+                return
+            }
             let held = ShellReadingMark.heldAtTop(
                 top: session.scrolledTop, marked: session.readingMark.id, touch: touch
             )
@@ -1116,5 +1166,86 @@ struct ScrollsToNeighbour: ViewModifier {
         #else
         content
         #endif
+    }
+}
+
+/// What the reload mark is, and whether the list can be pulled to do the same (#307).
+enum ReloadMark: Equatable, Sendable {
+    case reload
+    case stop
+
+    /// Nothing where a reload is not offered; Stop while one the reader pressed for runs; the
+    /// reload mark otherwise.
+    static func shown(canReload: Bool, stoppable: Bool) -> ReloadMark? {
+        guard canReload else { return nil }
+        return stoppable ? .stop : .reload
+    }
+
+    var symbol: String {
+        switch self {
+        case .reload: "arrow.clockwise"
+        case .stop: "stop.circle"
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .reload: "shortcut.reload"
+        case .stop: "timeline.reload.stop"
+        }
+    }
+
+    /// How long after the press that began a reload a press on Stop is not heard.
+    static let settle: TimeInterval = 0.4
+
+    /// Whether a press on Stop at `now` stops: not within `settle` of the press on this mark
+    /// that began the reload. One begun any other way — a key, a pull — is stopped at once.
+    static func stops(at now: Date, pressedAt: Date?) -> Bool {
+        guard let pressedAt else { return true }
+        return now.timeIntervalSince(pressedAt) >= settle
+    }
+
+    /// Whether pulling the list down reads it again: exactly where the mark is offered, and
+    /// never over a search's results, which are not a timeline to read again.
+    static func pulls(canReload: Bool, searching: Bool) -> Bool {
+        canReload && !searching
+    }
+}
+
+/// The pull itself, on an iPhone or iPad. Nothing on a Mac, which has no such gesture.
+///
+/// **Always there, and asked at the pull whether it does anything.** Put on and taken off as a
+/// reload came and went from being offered — under a picture, the keys' guide, a search — it
+/// made the list another list each time, drawn afresh from its start. So it is one modifier
+/// for the list's whole life, and where no reload is offered a pull's spinner comes and goes
+/// at once. Under anything drawn over the list it cannot be pulled at all.
+///
+/// A pull is the press: it calls what the mark and `r` call, which already takes a second press
+/// of the same read and does nothing. The spinner then stays for as long as `settled` waits,
+/// and goes when it returns — or when the list does, which cancels the wait.
+struct PullsToReload: ViewModifier {
+    let offered: () -> Bool
+    let reload: () -> Void
+    let settled: () async -> Void
+    /// Whether the pull is put on at all: on an iPhone or iPad. A test says so for itself.
+    var applies = FingerTall.onThisDevice
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if applies {
+            content.refreshable { await Self.pull(offered: offered(), reload: reload, settled: settled) }
+        } else {
+            content
+        }
+    }
+
+    /// One pull: nothing where a reload is not offered; else the press, and then the wait.
+    static func pull(offered: Bool, reload: () -> Void, settled: () async -> Void) async {
+        guard offered else { return }
+        reload()
+        // The press starts its read on the next turn; the wait must not look before it has.
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(50))
+        await settled()
     }
 }

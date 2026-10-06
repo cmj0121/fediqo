@@ -123,7 +123,7 @@ struct RowMenuTests {
         #expect(drawn == [.act(.answer), .act(.boost), .quote, .act(.favourite), .act(.bookmark), .keep, .more])
         #expect(!kinds(item, Self.writes).contains(.quote) && !kinds(item, Self.writes).contains(.more))
         let nowhere = ItemActing(acts: PostActs(offered: Set(PostAct.allCases)))
-        #expect(kinds(item, nowhere) == [.keep], "a mark with no press behind it is not drawn, and is not offered")
+        #expect(kinds(item, nowhere).isEmpty, "a mark with no press behind it is not offered")
     }
 
     @Test("The marks that keep a post stand apart from the ones that pass it on: the bookmark opens the group, and keeping does where there is no bookmark")
@@ -142,7 +142,7 @@ struct RowMenuTests {
     func theHeadOfAPlainPost() {
         let item = DummyItem(Self.note())
         #expect(ItemActs.head(for: item, here: [Self.host]) == [
-            DummyItemRow.exact(Self.posted), DummyItemRow.spokenAudience(.everyone), Self.host,
+            "Ada, @ada@m.example", DummyItemRow.exact(Self.posted), DummyItemRow.spokenAudience(.everyone), Self.host,
         ])
     }
 
@@ -169,10 +169,30 @@ struct RowMenuTests {
         )
         let item = DummyItem(reblog, reblogging: post)
         let head = ItemActs.head(for: item, here: [Self.host])
-        #expect(head.first == DummyItemRow.spokenReblog(item))
+        #expect(head.first == DummyItemRow.spokenNames(item), "who wrote the post, by name and whole handle")
+        #expect(head[1] == DummyItemRow.spokenReblog(item))
         #expect(head.contains(DummyItemRow.exact(DummyItemRow.headerTime(item))), "and the post's own time after it")
         let forum = DummyItem(Self.note(source: Source(host: "forum.example", kind: .discuz), audience: nil))
-        #expect(ItemActs.head(for: forum, here: ["forum.example"]).count == 2, "the time and the source")
+        #expect(ItemActs.head(for: forum, here: ["forum.example"]).count == 3, "who, the time and the source")
+    }
+
+    @Test("Where no act is offered the head ends with why, in the sentence the row says under itself; where acts are offered it says nothing of the kind")
+    func theHeadSaysWhyNot() {
+        let item = DummyItem(Self.note())
+        #expect(ItemActs.head(for: item, here: [Self.host], refused: .notSignedIn).last == ItemActs.refusalLine(.notSignedIn))
+        #expect(ItemActs.head(for: item, here: [Self.host], refused: .turnedAway).last == ItemActs.refusalLine(.turnedAway))
+        #expect(ItemActs.head(for: item, here: [Self.host], refused: nil).last == Self.host)
+        #expect(ItemActs.head(for: item, here: [Self.host], refused: .notSignedIn, language: .taiwanese).last == ItemActs.refusalLine(.notSignedIn, language: .taiwanese))
+    }
+
+    @Test("Nothing in the menu is a press that does nothing: with nowhere for keeping to go it is not offered, though its mark is drawn; and taking back is marked as taking away")
+    func noIdleEntry() {
+        let item = DummyItem(Self.note())
+        let noKeep = ItemActing(acts: PostActs(offered: [.answer]), perform: { _ in })
+        #expect(kinds(item, noKeep) == [.act(.answer)])
+        #expect(ItemActs.marks(on: item, acting: noKeep).map(\.kind).contains(.keep), "the mark is still on the row")
+        let own = ItemActs.menu(on: item, acting: Self.own)
+        #expect(own.filter(\.destroys).map(\.kind) == [.act(.withdraw)])
     }
 
     @Test("The head is in the language asked for")
@@ -226,6 +246,17 @@ struct RowMenuTests {
             #expect(onTheRow.subtracting(idle) == offered, "\(name): the row draws \(onTheRow.sorted()), the menu offers \(offered.sorted())")
             #expect(onTheRow.isSuperset(of: idle), "\(name): the two idle marks are still drawn")
         }
+    }
+
+    @Test("A row drawn and never pressed builds no head: what the menu says is worked out when a menu is raised")
+    func noHeadUntilAMenu() {
+        let before = ItemActs.headsBuilt
+        for index in 0 ..< 6 {
+            _ = drawn(DummyItem(Self.note("\(index)")), Self.writes)
+        }
+        #expect(ItemActs.headsBuilt == before, "\(ItemActs.headsBuilt - before) heads were built for six rows nobody pressed")
+        _ = ItemActs.head(for: DummyItem(Self.note()), here: nil)
+        #expect(ItemActs.headsBuilt == before + 1, "the count does count")
     }
 
     @Test("A press in the menu does what the mark does: each act reaches the row's own press, with the act it names")

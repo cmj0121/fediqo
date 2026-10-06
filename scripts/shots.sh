@@ -331,7 +331,7 @@ widths() {
 # writes every timeline's name in a row, which a phone at any width does not.
 # `SHOTS_SCREENS="compose notice"` takes those alone, for looking at one screen while it is worked on.
 # shellcheck disable=SC2206
-PHONE_SCREENS=(${SHOTS_SCREENS:-timeline post compose preferences notice link signin cut returned emptied named lost list swiped ended fresh menu})
+PHONE_SCREENS=(${SHOTS_SCREENS:-timeline post compose preferences notice link signin cut returned emptied named lost list swiped ended fresh menu loading})
 PHONE_WIDTHS=(320 375 whole)
 PHONE_SCALES=(smallest default largest)
 

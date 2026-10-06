@@ -240,6 +240,10 @@ struct RowMark: Identifiable, Equatable {
     /// on the row, where a gap would be noticed, and are not offered in a menu.
     var acts: Bool { kind != .quote && kind != .more }
 
+    /// Whether a press takes something away for good: said as such where a menu can say it.
+    /// It asks first all the same.
+    var destroys: Bool { kind == .act(.withdraw) }
+
     /// Whether this is the bookmark, asked for or not.
     var isBookmark: Bool { kind == .act(.bookmark) || kind == .ask(.bookmark) }
 }
@@ -275,9 +279,13 @@ extension ItemActs {
         return all.compactMap { $0 }
     }
 
-    /// What the row's menu offers: every mark that does something.
+    /// What the row's menu offers: every mark that does something. **Nothing in a menu is a
+    /// press that does nothing**, so keeping is offered only where the list has somewhere for
+    /// it to go — its mark is drawn on every row all the same, to keep the line one line.
     static func menu(on item: DummyItem, acting: ItemActing, language: DummyLanguage? = nil) -> [RowMark] {
-        marks(on: item, acting: acting, language: language).filter(\.acts)
+        marks(on: item, acting: acting, language: language).filter { mark in
+            mark.acts && (mark.kind != .keep || acting.keep != nil)
+        }
     }
 
     /// The gap a mark asks for before it: the marks that keep a post stand a little apart from
@@ -288,12 +296,24 @@ extension ItemActs {
         return nil
     }
 
+    /// How many heads have been built: a count a test reads, to hold that a row drawn and
+    /// never pressed builds none.
+    nonisolated(unsafe) static var headsBuilt = 0
+
     /// What heads the row's menu (#306): what a pointer resting on the row's parts is told, for
     /// a reader with no pointer to rest — **in the words those parts already say**. Who
     /// reblogged it and when; exactly when it was published; who may read it; that it was
     /// changed, is gone at its source, or that its source has left; and the source.
-    static func head(for item: DummyItem, here: Set<String>?, language: DummyLanguage? = nil) -> [String] {
-        var lines: [String] = []
+    ///
+    /// **Who wrote it first, by name and whole handle** — a narrow row draws the handle only
+    /// where it has room (#302), and this is where a finger finds it. **And last, why no act is
+    /// offered where none is** (`refused`), in the sentence the row says under itself, so a
+    /// menu with only keeping in it says why.
+    static func head(
+        for item: DummyItem, here: Set<String>?, refused: PostActRefusal? = nil, language: DummyLanguage? = nil
+    ) -> [String] {
+        headsBuilt += 1
+        var lines: [String] = [DummyItemRow.spokenNames(item)]
         if let reblog = DummyItemRow.spokenReblog(item, language: language) {
             lines.append(reblog)
         } else if let arrived = DummyItemRow.reblogLine(item, language: language) {
@@ -307,6 +327,7 @@ extension ItemActs {
         if item.postGone { lines.append(L10n.t("item.gone.detail", language: language)) }
         if DummyItemRow.sourceLeft(item, here: here) { lines.append(L10n.t("item.left.detail", language: language)) }
         lines.append(DummyItemRow.spokenSource(item, language: language))
+        if let refused { lines.append(refusalLine(refused, language: language)) }
         return lines
     }
 }

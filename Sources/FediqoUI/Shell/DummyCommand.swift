@@ -432,6 +432,8 @@ public enum DummyTouch: String, Hashable, Sendable, CaseIterable {
     case hold
     /// The finger on the list itself.
     case scroll
+    /// The list pulled down from its top.
+    case pull
     /// Some of what this key does is reachable and some of it is not.
     ///
     /// The answer for a key that is several jobs at once, where writing either `.press` or
@@ -494,6 +496,9 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
     /// How this line is done with no keyboard (#33). Named on every line, so a key added later
     /// cannot be added without an answer. See `DummyTouch`.
     public let touch: DummyTouch
+    /// A second way under a finger, where there is one beside `touch` (#307): the list pulled
+    /// down for `r`, the Stop the reload mark becomes for the part of `Escape` that stops one.
+    public var also: DummyTouch? = nil
 
     public var id: String { name }
     public var detail: String { L10n.t("shortcut.\(name)") }
@@ -546,7 +551,9 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // The quote under the post's words, pressed (#214).
         DummyShortcut(group: .read, keys: ["o"], name: "quote", commands: [.openQuote], touch: .press),
         DummyShortcut(group: .read, keys: ["/"], name: "search", commands: [.search], touch: .press),
-        DummyShortcut(group: .read, keys: ["r"], name: "reload", commands: [.reload], touch: .press),
+        // The mark in the header, pressed — and the list pulled down from its top (#307), which
+        // does what the press does and is offered wherever the mark is.
+        DummyShortcut(group: .read, keys: ["r"], name: "reload", commands: [.reload], touch: .press, also: .pull),
 
         // MARK: Act — what the reader does to a post, or writes
 
@@ -581,7 +588,11 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // close mark. What it does that none of them do is stop a running reload and put the lamp
         // out, and neither of those has a touch path: hence `.partly` rather than `.press`, which
         // would be this list claiming a way in that is not drawn anywhere.
-        DummyShortcut(group: .app, keys: ["Escape"], name: "dismiss", commands: [.dismiss], touch: .partly),
+        //
+        // **Stopping a reload has one now** (#307): the reload mark is Stop while one runs, and
+        // that is `also`. Putting the lamp out still has none — and under a finger there is no
+        // lamp to put out (#303) — so the line stays `.partly`.
+        DummyShortcut(group: .app, keys: ["Escape"], name: "dismiss", commands: [.dismiss], touch: .partly, also: .press),
         DummyShortcut(group: .app, keys: ["⌘R"], name: "landing",
                       commands: [.replayLanding], touch: .keysOnly),
     ]

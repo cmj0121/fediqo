@@ -99,6 +99,7 @@
 "shortcut.tag" = "打開這篇的主題標籤：這台裝置上在它底下的貼文";
 "shortcut.quote" = "打開這則貼文引用的貼文";
 "shortcut.reload" = "重新載入這條時間軸，或打開的討論串";
+"timeline.reload.stop" = "停止重新載入";
 "shortcut.dismiss" = "關掉眼前的東西，或取消選取";
 "shortcut.search" = "搜尋這台裝置上的貼文";
 

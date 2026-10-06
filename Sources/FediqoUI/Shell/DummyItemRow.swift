@@ -253,12 +253,7 @@ struct DummyItemRow: View {
             .onHover { hovering = $0 }
             // Pressed and held — or the pointer's other button — the row offers what its marks
             // do, under what its parts tell a resting pointer (#306).
-            .modifier(RowMenu(
-                head: ItemActs.head(for: item, here: sourcesHere),
-                marks: ItemActs.menu(on: item, acting: acting),
-                press: press,
-                outward: item.outwardName, url: item.outwardURL
-            ))
+            .modifier(RowMenu(item: item, acting: acting, here: sourcesHere, press: press))
             .accessibilityElement(children: .contain)
             .task(id: Asked(item: item, settled: catalogueSettled)) { await resolve() }
     }
@@ -1851,38 +1846,51 @@ extension View {
 /// **The head is lines that cannot be pressed** — the exact time, who may read it, that it was
 /// changed — in a section of their own, so they read as what the post is and not as acts.
 struct RowMenu: ViewModifier {
-    let head: [String]
-    let marks: [RowMark]
+    let item: DummyItem
+    let acting: ItemActing
+    let here: Set<String>?
     let press: (RowMark.Kind) -> Void
-    let outward: String
-    let url: URL?
-
-    @Environment(\.openURL) private var openURL
 
     func body(content: Content) -> some View {
         content.contextMenu {
-            Section {
-                ForEach(head, id: \.self) { line in
-                    Text(line)
+            RowMenuItems(item: item, acting: acting, here: here, press: press)
+        }
+    }
+}
+
+/// What the menu holds, **worked out when the menu is drawn and not when the row is**: a view of
+/// its own, whose body nothing asks for until a menu is raised, so a row scrolled past builds
+/// neither the head nor a second list of its marks.
+private struct RowMenuItems: View {
+    let item: DummyItem
+    let acting: ItemActing
+    let here: Set<String>?
+    let press: (RowMark.Kind) -> Void
+
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Section {
+            ForEach(ItemActs.head(for: item, here: here, refused: acting.acts.refused), id: \.self) { line in
+                Text(line)
+            }
+        }
+        Section {
+            ForEach(ItemActs.menu(on: item, acting: acting)) { mark in
+                Button(role: mark.destroys ? .destructive : nil) {
+                    press(mark.kind)
+                } label: {
+                    Label(mark.label, systemImage: mark.symbol)
                 }
             }
+        }
+        // The one door out, checked as `WayOut` checks it.
+        if let url = WayOut.checked(item.outwardURL) {
             Section {
-                ForEach(marks) { mark in
-                    Button {
-                        press(mark.kind)
-                    } label: {
-                        Label(mark.label, systemImage: mark.symbol)
-                    }
-                }
-            }
-            // The one door out, checked as `WayOut` checks it.
-            if let url = WayOut.checked(url) {
-                Section {
-                    Button {
-                        openURL(url)
-                    } label: {
-                        Label(outward, systemImage: "arrow.up.forward.app")
-                    }
+                Button {
+                    openURL(url)
+                } label: {
+                    Label(item.outwardName, systemImage: "arrow.up.forward.app")
                 }
             }
         }

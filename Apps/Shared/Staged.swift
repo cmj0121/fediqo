@@ -91,6 +91,9 @@ enum Staged {
         // Rising posts are the last of All and all of Trends: All is scrolled to its end, among
         // them, and Trends — never visited, and long enough to scroll — is come to.
         case "fresh": ShellStaged(place: .timeline, steps: [.scroll(100_000), .trends], reports: true)
+        // A reload that does not end, so the mark is Stop for the picture (#307): `StagedHTTP`
+        // holds what this screen asks for.
+        case "loading": ShellStaged(place: .timeline, steps: [.reload])
         case "menu": ShellStaged(place: .timeline, menus: true)
         case "cut": ShellStaged(place: .timeline, steps: [.scroll(90)], reports: true)
         case "returned": ShellStaged(place: .timeline, steps: [.scroll(700), .trends, .all], reports: true)
@@ -207,6 +210,10 @@ private struct StagedHTTP: HTTPClient, HTTPSender {
         let path = url.path
         if path.hasSuffix("/context") { return answer(url, #"{"ancestors":[],"descendants":[]}"#) }
         if path.contains("/timelines/") || path.contains("/trends/") || path.hasSuffix("/notifications") {
+            // Held, for the one picture of a reload still running; cancelled, it throws.
+            if ProcessInfo.processInfo.environment["FEDIQO_STAGED_SCREEN"] == "loading" {
+                try await Task.sleep(for: .seconds(120))
+            }
             return answer(url, "[]")
         }
         return answer(url, "{}", status: 404)
