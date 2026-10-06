@@ -27,7 +27,7 @@ struct EditorFlow: Equatable {
 
     /// Whether the stage in front has a field of its own the keyboard belongs in.
     var wantsField: Bool {
-        stage == .form(.author) || stage == .form(.keyword)
+        stage == .form(.author) || stage == .form(.keyword) || (stage == .form(.field) && adding.takesHandle)
     }
 
     /// The rule being changed, as it was kept.
@@ -65,6 +65,12 @@ struct EditorFlow: Equatable {
     mutating func pickKind(_ tag: RuleKind.Tag) {
         adding = RuleDraft(tag)
         stage = .form(tag)
+    }
+
+    /// A field picked from the kinds (#287): its form, with its values to pick from.
+    mutating func pickField(_ field: SourceField) {
+        adding = RuleDraft(field: field)
+        stage = .form(.field)
     }
 
     /// `j` or `k`, bringing the rules in front where they were not.

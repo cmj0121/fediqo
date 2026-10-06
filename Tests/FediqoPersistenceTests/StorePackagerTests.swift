@@ -16,9 +16,9 @@ struct StorePackagerTests {
     private static let forum = PackagerFixture.forum
 
     private static func note(
-        _ id: String, source: Source = mastodon, holding: Holding = .arrived, body: String? = nil
+        _ id: String, source: Source = mastodon, body: String? = nil
     ) -> Note {
-        PackagerFixture.note(id, source: source, holding: holding, body: body)
+        PackagerFixture.note(id, source: source, body: body)
     }
 
     private static func populated() async throws -> Device { try await PackagerFixture.populated() }
@@ -87,7 +87,6 @@ struct StorePackagerTests {
         let held = await onto.store.snapshot()
         #expect(held.sources == [Self.mastodon, Self.forum])
         #expect(held.notes.map(\.id).sorted() == ["1", "2", "3"])
-        #expect(held.notes.first { $0.id == "3" }?.holding == .aside)
         let reopened = try StoreFile(at: onto.directory).load()
         #expect(reopened.sources == [Self.mastodon, Self.forum])
         #expect(reopened.notes.map(\.id) == ["1", "2", "3"])

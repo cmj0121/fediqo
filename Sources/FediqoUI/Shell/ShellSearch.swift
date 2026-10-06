@@ -6,9 +6,9 @@ import Observation
 ///
 /// **A layer, not a query.** While it is open its results stand in for the stream — `j`, `k` and
 /// Return walk them — and leaving it puts back the timeline and the post selected before it
-/// opened. So does emptying the field. It reads the notes the session holds, those held aside
-/// among them; Return also asks the sources of the timeline in front that can be searched
-/// (`ShellReload.search`), and what they send back is held aside and found here (#176).
+/// opened. So does emptying the field. It reads the notes the session holds;
+/// Return also asks the sources of the timeline in front that can be searched
+/// (`ShellReload.search`), and what they send back is held, an item like any other, and found here (#176, #296).
 ///
 /// **Asked of the timeline in front** (#145). What it finds is what that timeline lets through —
 /// its sources, its categories, its rules, and the latest date — matched against the pattern
@@ -46,7 +46,7 @@ final class ShellSearch {
         let pattern: String
         /// The timeline searched: switching with the search open searches the new one.
         let timeline: TimelineDefinition
-        /// `ShellSession.heldRevision`: bumped whenever the notes or what is held aside are
+        /// `ShellSession.heldRevision`: bumped whenever the notes are
         /// replaced, so comparing it costs nothing however many notes there are.
         let revision: Int
         let sources: [Source]
@@ -236,6 +236,7 @@ final class ShellSearch {
         in timeline: TimelineDefinition,
         text: @autoclosure () -> TextIndex,
         from notes: @autoclosure () -> [Note],
+        targets: @autoclosure () -> ReblogTargets? = nil,
         revision: Int,
         sources: [Source],
         latest: LatestDate?
@@ -246,11 +247,17 @@ final class ShellSearch {
         guard isIndexed else { return [] }
         let key = Key(pattern: pattern, timeline: timeline, revision: revision, sources: sources, latest: latest)
         if let cached, cached.key == key { return cached.items }
-        let shown = CompiledTimeline(timeline, sources: []).shown(notes(), timeline.readsText ? text() : TextIndex([]))
-        let found = search.found(shown, index)
+        let held = notes()
+        // What each reblog reblogs (#290): the session's lookup, or one built here, once for the
+        // rules, the search and the rows.
+        let targets = targets() ?? ReblogTargets(held)
+        let shown = CompiledTimeline(timeline, sources: [])
+            .shown(held, timeline.readsText ? text() : TextIndex([]), targets: targets)
+        // A reblog is found by the words of the post it reblogs, held or shown.
+        let found = search.found(shown, index, targets: targets)
         // One post is one row here as it is on the timeline (#114): a search that drew a merged
         // row twice would be the complaint #10 left for later, arriving through the search field.
-        let items = DummyItem.merged(latest?.shown(found) ?? found, here: Set(sources.map(\.host)))
+        let items = DummyItem.merged(latest?.shown(found) ?? found, here: Set(sources.map(\.host)), targets: targets)
         cached = (key, items)
         return items
     }

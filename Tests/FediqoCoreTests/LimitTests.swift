@@ -10,21 +10,20 @@ struct LimitTests {
     private let beta = Source(host: "beta.test", kind: .mastodon)
 
     private func note(
-        _ id: String, daysAgo: Double, from source: Source, holding: Holding = .arrived, quote: Quote? = nil
+        _ id: String, daysAgo: Double, from source: Source, quote: Quote? = nil
     ) -> Note {
         Note(
             id: id, source: source, author: "Ada", handle: "@ada", body: "hello",
-            postedAt: origin.addingTimeInterval(-daysAgo * 86_400), categories: [.public],
-            holding: holding, quote: quote
+            postedAt: origin.addingTimeInterval(-daysAgo * 86_400), categories: [.public], quote: quote
         )
     }
 
-    @Test("The oldest posts go first, across every source, rows held aside included")
+    @Test("The oldest posts go first, across every source, whatever brought them")
     func oldestGoFirstAcrossSources() async {
         let store = ItemStore(sources: [alpha, beta], notes: [
             note("new-a", daysAgo: 1, from: alpha),
             note("old-b", daysAgo: 30, from: beta),
-            note("aside-a", daysAgo: 40, from: alpha, holding: .aside),
+            note("aside-a", daysAgo: 40, from: alpha),
             note("mid-b", daysAgo: 10, from: beta),
         ])
 
@@ -32,8 +31,7 @@ struct LimitTests {
 
         #expect(went == WentByLimit(posts: 2, sources: ["alpha.test", "beta.test"]))
         let left = await store.snapshot().notes.map(\.id).sorted()
-        #expect(left == ["mid-b", "new-a"], "the aside row and the oldest timeline row went")
-        #expect(await store.aside().isEmpty)
+        #expect(left == ["mid-b", "new-a"], "the two oldest went")
     }
 
     @Test("Two posted in the same second go in the order they arrived")
@@ -49,7 +47,7 @@ struct LimitTests {
     func quotedStays() async {
         let quoted = QuotedPost(id: "quoted", author: "Bob", handle: "@bob", body: "old", postedAt: origin.addingTimeInterval(-99 * 86_400))
         let store = ItemStore(sources: [alpha], notes: [
-            note("quoted", daysAgo: 99, from: alpha, holding: .aside),
+            note("quoted", daysAgo: 99, from: alpha),
             note("quoting", daysAgo: 2, from: alpha, quote: Quote(state: .accepted, post: quoted)),
             note("plain", daysAgo: 50, from: alpha),
         ])

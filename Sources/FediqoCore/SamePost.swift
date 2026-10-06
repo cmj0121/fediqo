@@ -15,10 +15,11 @@ import Foundation
 // since 0.1.0 and #10 keyed a row by the host *beside* it, which is why one post is two rows
 // today; this names the other half of that key.
 //
-// **What a boost carries is the post, not the boost.** `StatusDTO.asNote` already reads a boost
-// through its `reblog`, so the name on a boost's copy is the name of the status it carries. Two
-// people boosting one thing is one post arriving twice, and that falls out of the name rather
-// than being answered a second time here.
+// **A reblog has a name of its own, and so has the post it reblogs** (#290). The post a reblog
+// brings is held under the post's name, so two people reblogging one thing is one post and two
+// reblogs; each reblog is held under the name its own server minted for it, which a second
+// server carrying that reblog copies over as it copies a post's. A reblog and a post are never
+// gathered together, whatever either is named (`SamePost.gathered`).
 //
 // **Two posts that merely read alike are two posts.** Two people who wrote the same sentence
 // were given two names by their servers, and one person who wrote it twice was given two names
@@ -90,19 +91,30 @@ public enum SamePost {
     /// decided one copy at a time, by the name its own source gave it, so shuffling the list
     /// moves the groups about without moving a copy between them — and a third copy arriving
     /// joins the group its name puts it in without disturbing the two already there.
+    ///
+    /// **A reblog gathers with reblogs, and a post with posts** (#290). A reblog has a name of its
+    /// own, which two servers carrying it both state, so the same reblog through two sources is
+    /// one; it is never one with the post it reblogs, whose name is another. And a server that
+    /// names its reblog as some post another source handed over is not believed: the two are
+    /// different things, and stay two rows.
     public static func gathered(_ notes: [Note]) -> [[Note]] {
         var groups: [[Note]] = []
-        var byPost: [PostIdentity: Int] = [:]
+        var byPost: [Named: Int] = [:]
         for note in notes {
             // Read once: `post` is worked out, not stored.
-            let post = note.post
-            guard let post, let at = byPost[post] else {
-                post.map { byPost[$0] = groups.count }
+            let named = note.post.map { Named(post: $0, reblog: note.isReblog) }
+            guard let named, let at = byPost[named] else {
+                named.map { byPost[$0] = groups.count }
                 groups.append([note])
                 continue
             }
             groups[at].append(note)
         }
         return groups
+    }
+
+    private struct Named: Hashable {
+        let post: PostIdentity
+        let reblog: Bool
     }
 }

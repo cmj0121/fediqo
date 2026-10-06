@@ -124,22 +124,20 @@ struct TagTimelineTests {
         #expect(session.reload.tagAsk?.reach.tagless == [Self.board])
         let under = session.heldPosts(under: Self.swift, latest: nil).map(\.id)
         #expect(under.filter { $0 == Self.topicKey.rowID }.count == 1, "once")
-        #expect(session.searchable.filter { $0.key == Self.topicKey }.count == 1, "one row in the store")
-        #expect(await session.store.note(Self.topicKey)?.holding == .arrived, "the front page's own row")
+        #expect(session.notes.filter { $0.key == Self.topicKey }.count == 1, "one row in the store")
         #expect(session.reload.tagFailed.isEmpty)
     }
 
-    @Test("A topic sent only under the tag is held aside, and All does not grow by it")
-    func forumTopicHeldAside() async {
+    @Test("A topic sent only under the tag is an item like any other, and stands in All")
+    func forumTopicStandsInAll() async {
         let http = FixtureHTTP([
             Self.mastodonTag: .text("[]"), Self.forumTag: .text(Self.listing), "/site.json": .text(Self.site),
         ])
         let session = await shell(http)
         await session.reload.tag(Self.swift, timeline: .all, in: session)
         await session.reloadFromStore()
-        #expect(await session.store.note(Self.topicKey)?.holding == .aside)
         #expect(await session.store.note(Self.topicKey)?.board == "Dev", "named as the front page names it")
-        #expect(!session.notes.contains { $0.key == Self.topicKey })
+        #expect(session.notes.contains { $0.key == Self.topicKey })
         #expect(session.heldPosts(under: Self.swift, latest: nil).map(\.id).contains(Self.topicKey.rowID))
     }
 
@@ -327,7 +325,7 @@ struct TagTimelineTests {
             postedAt: Date(timeIntervalSince1970: 1), categories: []
         )
         await session.store.add(Source(host: "two.example", kind: .mastodon))
-        await session.store.hold([other], ifSourceHere: "two.example")
+        await session.store.ingest([other], ifSourceHere: "two.example")
         await session.reloadFromStore()
         session.timelineID = .all
         #expect(session.heldPosts(under: Self.swift, latest: nil).count == 2, "posts 1 and 2, the copy merged")
@@ -357,7 +355,7 @@ struct TagTimelineTests {
             let pane = TagPane(
                 tag: Self.swift, items: [], reach: reach,
                 catalogues: EmojiCatalogueStore(), posts: ForumPosts(http: FixtureHTTP([:])),
-                selectedID: .constant(nil), marks: { _ in .constant(DummyMarks()) },
+                selectedID: .constant(nil),
                 decks: .constant(ShellDecks()), playback: ShellPlayback(),
                 onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { _ in },
                 onRetry: {}, jumpToTop: 0, onToast: { _ in }, onBack: {}

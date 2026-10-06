@@ -31,6 +31,16 @@ import SwiftUI
 // device already holds**: what an earlier run read is still here, and ending there would stop
 // every later run's listing at its second page.
 //
+// **What is rising is read on by how far into it this run has read** (#288). A Mastodon's
+// trending posts are a ranking and not a stretch of time: there is no post to ask before, and the
+// source pages them by an offset. So a Trends stretch remembers how far down the list it has read
+// this run, asks from there, and ends where the source hands over a short stretch or none — its
+// own "no more", said at the timeline's foot for as long as it is so, and not asked past until
+// `r` reads the top again. What arrives carries
+// the trends category and stands at its publish time like every other post; nothing ranks it
+// here. Only a timeline that asks for Trends reads it on, and a forum's ranking lists — its
+// Trends — have no next, as before.
+//
 // **Never the same forum twice at once.** A stranger's forum is asked one page after another; so
 // while `r` or the wait is reading, the forums are left out of an ask for more, and the wait does
 // not start while one is out.
@@ -52,6 +62,14 @@ struct ShellStretches {
     private var lastPage: [Stretch: Set<NoteKey>] = [:]
     /// Forum stretches read to their end.
     private var ended: Set<Stretch> = []
+    /// How far into its source's trending list each Trends stretch has read this run (#288): the
+    /// offset its next ask starts from. Nothing where this run has not read it, which is the top.
+    private var trendsRead: [Stretch: Int] = [:]
+    /// Trends stretches whose source has said it has no more, until `r` reads their top again.
+    private(set) var trendsEnded: Set<Stretch> = []
+    /// The posts each Trends stretch has been handed this run, from the top down — what tells a
+    /// stretch that brought nothing new from one that did.
+    private var trendsSeen: [Stretch: Set<NoteKey>] = [:]
     /// Counts the restarts. A forum page read under an earlier one is about pages that have since
     /// moved along, and is dropped rather than recorded over the restart.
     private(set) var generation = 0
@@ -82,6 +100,42 @@ struct ShellStretches {
         }
     }
 
+    /// The offset a Trends stretch asks next (#288), or nothing where its source has said it has
+    /// no more.
+    func nextTrends(_ stretch: Stretch) -> Int? {
+        trendsEnded.contains(stretch) ? nil : trendsRead[stretch] ?? 0
+    }
+
+    /// One stretch of what is rising read from `offset`, which brought `brought`: the next ask
+    /// starts a whole stretch further down. **Counted in the list's places, never in posts**: the
+    /// list moves between asks, so a post already held may come again — one row all the same —
+    /// and that does not move where the next ask starts.
+    ///
+    /// **The source's end is a stretch shorter than was asked for — or a full one with nothing
+    /// in it this run has not already been handed.** A source that ignores how far in it was
+    /// asked answers every ask with its top again, and would be asked one stretch further down
+    /// for ever; the same posts twice is as far as its list goes. *This run's* asks, not what
+    /// the device holds: an earlier run may have read deeper than this one has yet, and those
+    /// posts being here already is no word from the source that it has no more.
+    ///
+    /// Dropped where the stretch has since been read from its top again or read past this.
+    mutating func readTrends(_ stretch: Stretch, from offset: Int, brought: Set<NoteKey>, of asked: Int) {
+        guard (trendsRead[stretch] ?? 0) == offset, !trendsEnded.contains(stretch) else { return }
+        let fresh = brought.subtracting(trendsSeen[stretch] ?? [])
+        trendsRead[stretch] = offset + asked
+        trendsSeen[stretch, default: []].formUnion(brought)
+        if brought.count < asked || fresh.isEmpty { trendsEnded.insert(stretch) }
+    }
+
+    /// The reader's reload read the top of what is rising on a source: reading on starts from
+    /// under it again, and a source that had said it had no more is asked again — unless the top
+    /// itself came short, which is all there is.
+    mutating func readTrendsTop(_ stretch: Stretch, brought: Set<NoteKey>, of asked: Int) {
+        trendsRead[stretch] = asked
+        trendsSeen[stretch] = brought
+        if brought.count < asked { trendsEnded.insert(stretch) } else { trendsEnded.remove(stretch) }
+    }
+
     /// A forum's newest page was read again, which moves every page under it along. The Mastodon
     /// half is kept: an id says exactly what is older than it, whatever arrived since.
     mutating func restart() {
@@ -104,6 +158,8 @@ extension ShellReload {
             case before(String)
             /// A forum, this many pages past its first.
             case page(Int)
+            /// What is rising on a Mastodon, this many posts into its list (#288).
+            case offset(Int)
         }
     }
 
@@ -121,21 +177,44 @@ extension ShellReload {
         let hosts = due.map(\.stretch.host).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         await run(.more) {
             var unread: Set<String> = []
-            await withTaskGroup(of: (String, Bool).self) { group in
+            await withTaskGroup(of: (String, Asked).self) { group in
                 // One source's stretches one after another — a stranger's forum is not asked in
                 // parallel — and the sources beside each other, each landing as it answers.
                 for host in hosts {
                     let mine = due.filter { $0.stretch.host == host }
                     group.addTask { (host, await self.more(mine, in: session)) }
                 }
-                for await (host, read) in group {
-                    if !read { unread.insert(host) }
-                    await session.reloadFromStore()
+                for await (host, asked) in group {
+                    if !asked.read { unread.insert(host) }
+                    // Only where something may have moved: a source that merely failed left the
+                    // store, and so the listing, exactly as it was.
+                    if asked.touched { await session.reloadFromStore() }
                 }
             }
             guard !Task.isCancelled else { return }
             self.record(hosts.filter(unread.contains), for: .more)
+            // Which sources have no more of what is rising to give, for the timeline's foot (#288).
+            self.noteTrendsEnded()
         }
+    }
+
+    /// The sources of `query` whose trending list has been read to its end, in the order the
+    /// reader holds them — what the Trends timeline's foot names. None for a timeline that does
+    /// not read what is rising, and never a forum, whose ranking lists have no next.
+    func trendsEnded(of query: TimelineQuery, in session: ShellSession) -> [String] {
+        guard !trendsEnded.isEmpty else { return [] }
+        let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources).sourcesToAsk()
+        return asks.filter { $0.categories?.contains(.trends) == true && trendsEnded.contains($0.host) }.map(\.host)
+    }
+
+    /// What the foot says of sources that have no more of what is rising to give, naming each
+    /// and what reads from the top again; nothing where none has said so.
+    static func trendsEndLine(_ hosts: [String], language: DummyLanguage? = nil) -> String? {
+        guard !hosts.isEmpty else { return nil }
+        return String(
+            format: L10n.t("timeline.trends.end", language: language),
+            hosts.formatted(.list(type: .and).locale(L10n.locale(language)))
+        )
     }
 
     /// Every stretch of `query` there is a next of now.
@@ -150,6 +229,11 @@ extension ShellReload {
             return Self.stretches(of: source, for: ask.categories, signedIn: signedIn).compactMap { stretch in
                 switch source.kind {
                 case .mastodon:
+                    // What is rising has no oldest post to ask before: it is asked by how far
+                    // into the list this run has read (#288).
+                    if stretch.category == .trends {
+                        return stretches.nextTrends(stretch).map { Due(stretch: stretch, source: source, cursor: .offset($0)) }
+                    }
                     guard let category = stretch.category,
                           let oldest = Self.oldest(category, of: source.host, in: session.notes),
                           !stretches.hasAsked(stretch, before: oldest)
@@ -165,14 +249,18 @@ extension ShellReload {
         }
     }
 
-    /// The reads of `source` a listing continues: what `r` reads of it, less its Trends — a
-    /// ranking is not a stretch of time, and has no next. Home and lists only where signed in.
+    /// The reads of `source` a listing continues: what `r` reads of it. Home and lists only where
+    /// signed in. **A Mastodon's Trends only where the timeline asks for it by name** (#288): the
+    /// Trends timeline, or one the reader wrote with a rule on it — a listing of everything reads
+    /// on through time, and does not go down a ranking beside it. A forum's Trends are its
+    /// ranking lists, which have no next.
     static func stretches(of source: Source, for categories: Set<FediqoCore.Category>?, signedIn: Bool) -> [Stretch] {
         let host = source.host
         switch source.kind {
         case .mastodon:
             var reads: [FediqoCore.Category] = [.public]
             if signedIn { reads += [.home] + source.lists.map { .list(id: $0.id) } }
+            if categories?.contains(.trends) == true { reads.append(.trends) }
             return reads.filter { categories?.contains($0) ?? true }.map { Stretch(host: host, category: $0) }
         case .discuz:
             if categories == nil, source.boards.isEmpty { return [Stretch(host: host, category: nil)] }
@@ -194,14 +282,25 @@ extension ShellReload {
             .min { $0.count != $1.count ? $0.count < $1.count : $0 < $1 }
     }
 
-    /// One source's stretches, one after another. Whether every one came back.
-    private func more(_ due: [Due], in session: ShellSession) async -> Bool {
+    /// What asking a source for its stretches came to: whether every one came back, and whether
+    /// any of it may have changed what is held or who is signed in — a stretch that landed, or a
+    /// sign-in the source ended — which is when the listing is drawn again.
+    struct Asked: Sendable {
         var read = true
+        var touched = false
+    }
+
+    /// One source's stretches, one after another.
+    private func more(_ due: [Due], in session: ShellSession) async -> Asked {
+        var asked = Asked()
         for one in due {
             guard !Task.isCancelled else { break }
-            read = await more(one, in: session) && read
+            let signedIn = session.mastodon.isSignedIn(host: one.source.host)
+            let read = await more(one, in: session)
+            asked.read = asked.read && read
+            asked.touched = asked.touched || read || signedIn != session.mastodon.isSignedIn(host: one.source.host)
         }
-        return read
+        return asked
     }
 
     /// One stretch, into the store. A reader walking away is not a failure; anything else is, and
@@ -214,6 +313,14 @@ extension ShellReload {
             case .before(let id):
                 try await mastodon(due, before: id, stamp: stamp, in: session)
                 stretches.asked(due.stretch, before: id)
+            case .offset(let offset):
+                let client = session.reach.mastodon(host, for: .timeline, name: .trends, within: deadline)
+                let notes = try await client.trending(source: stamp, offset: offset)
+                try Task.checkCancellation()
+                await session.store.ingest(notes, ifSourceHere: host)
+                stretches.readTrends(
+                    due.stretch, from: offset, brought: Set(notes.map(\.key)), of: MastodonClient.trendsStretch
+                )
             case .page(let page):
                 let generation = stretches.generation
                 let notes: [Note]
@@ -242,7 +349,7 @@ extension ShellReload {
         let host = stamp.host
         switch due.stretch.category {
         case .public?:
-            let client = MastodonClient(http: timed(session.http, for: .timeline, name: .public, in: session), host: host)
+            let client = session.reach.mastodon(host, for: .timeline, name: .public, within: deadline)
             let notes = try await client.publicTimeline(source: stamp, olderThan: id)
             try Task.checkCancellation()
             await session.store.ingest(notes, ifSourceHere: host)
@@ -258,7 +365,7 @@ extension ShellReload {
             default: nil
             }
             let door = session.mastodon.authorized(token: token, within: deadline, for: .timeline, name: name)
-            let account = MastodonAccount(door: door, store: session.store)
+            let account = session.reach.account(door, landingIn: session.store)
             _ = try await asReader(host) { try await account.older(category, than: id) }
         case nil:
             return
@@ -267,25 +374,49 @@ extension ShellReload {
 
     private func forum(_ due: Due, page further: Int, stamp: Source, in session: ShellSession) async throws -> [Note] {
         let host = stamp.host
-        let http = transport(host, in: session)
         switch (stamp.kind, due.stretch.category) {
         case (.discuz, .board(let id)?):
             let board = due.source.boards.first { String($0.fid) == id }
-            let client = DiscuzClient(
-                http: timed(http, for: .timeline, name: board.map { .called($0.name) }, in: session), host: host
+            let client = session.reach.discuz(
+                host, for: .timeline, name: board.map { .called($0.name) }, within: deadline
             )
             guard let fid = Int(id) else { return [] }
             // Discuz! counts its pages from one, so the one past the first is page two.
             return try await client.board(fid, source: stamp, named: board?.name, page: further + 1)
         case (.discuz, nil):
-            let client = DiscuzClient(http: timed(http, for: .timeline, in: session), host: host)
+            let client = session.reach.discuz(host, for: .timeline, within: deadline)
             return try await client.latest(source: stamp, page: further + 1)
         case (.discourse, nil):
             // Discourse counts from nought, so the one past the first is page one.
-            let client = DiscourseClient(http: timed(http, for: .timeline, in: session), host: host)
+            let client = session.reach.discourse(host, for: .timeline, within: deadline)
             return try await client.latest(source: stamp, page: further)
         default:
             return []
+        }
+    }
+}
+
+/// The foot of a timeline that reads what is rising (#288): which of its sources have no more
+/// of it to give, and that a reload reads from the top again. Nothing while none has said so.
+///
+/// **At the foot and not a passing line.** A source's end is true until the next reload, and a
+/// short Trends list reaches it by itself, with nobody watching the bottom of the screen for two
+/// seconds; so it is said where the list ends, for as long as it is so — as a thread says its own
+/// end at its foot (`ThreadFoot`). A failure is still the reload's line: it is news, and passes.
+struct TrendsEndFoot: View {
+    let timeline: TimelineQuery
+    let session: ShellSession
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if let line = ShellReload.trendsEndLine(session.reload.trendsEnded(of: timeline, in: session)) {
+            Text(line)
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.vertical, ShellSpace.snug)
         }
     }
 }

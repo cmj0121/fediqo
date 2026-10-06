@@ -240,7 +240,7 @@ struct MastodonAuthTests {
         // **The scopes it asked for travel with it** (#69). The registration in hand records
         // none — it is one kept before they were written down — so the sign-in falls to the
         // reading pair and the token says so.
-        #expect(token == MastodonFixture.token(scopes: MastodonOAuth.reading))
+        #expect(token == MastodonFixture.token(scopes: MastodonOAuth.reading).recorded(asked: MastodonOAuth.reading))
         #expect(token.grant == .reading)
         #expect(token.app == MastodonFixture.app)
         #expect(await server.paths == ["/oauth/token", "/api/v1/accounts/verify_credentials"])

@@ -253,14 +253,11 @@ final class ForumBlogs {
             // A forum still signing in is waited for, and the reader chosen after — `ForumPosts`'
             // order, so a blog is not read as a guest a moment before the sign-in lands.
             if let forums = self.forums { await forums.settled(host: key.host) }
-            let transport = WatchedHTTP(
-                self.forums?.readTransport(host: key.host, else: self.http) ?? self.http,
-                for: .forumPost, in: self.work
-            )
+            let client = SourceReach(http: self.http, work: self.work, forums: self.forums)
+                .discuz(key.host, for: .forumPost, within: nil)
             let answer: Result<DiscuzBlog, ForumPosts.Absence>
             do {
-                answer = .success(try await DiscuzClient(http: transport, host: key.host)
-                    .blog(uid: address.uid, id: address.id))
+                answer = .success(try await client.blog(uid: address.uid, id: address.id))
             } catch {
                 answer = .failure(ForumPosts.absence(for: error))
             }

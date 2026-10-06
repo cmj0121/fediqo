@@ -31,6 +31,14 @@ final class Launch {
     /// The index was written by a newer build and left alone; the root view says so. Cleared when
     /// the reader dismisses that, so it is said once a launch rather than once a window.
     var storeIsNewer: Bool
+    /// What the person is to be told about the store, where it did not simply open (#295); the
+    /// root view says so. Cleared when they answer, so it is said once a launch.
+    var storeTrouble: StoreTrouble?
+    /// Whether the store this run holds is the one on disk, read whole: not where it could not
+    /// be opened, was a newer build's, or was damaged and replaced this launch. Every sweep that
+    /// keeps "the sources' own" and lets the rest go asks this first (#295): a run with no
+    /// sources to name would otherwise let go of everything.
+    let storeRead: Bool
 
     /// The index is opened and read here, on the main actor, before the first frame. Moving it
     /// off would leave the store empty while the first frame draws, and every save asked for in
@@ -51,12 +59,15 @@ final class Launch {
         // build's, or one that could not be set aside) writes no lines about it either.
         limits = opened.file == nil ? nil : try? LimitAccountFile(directory: StoreFile.applicationSupportDirectory)
         storeIsNewer = opened.storeIsNewer
+        storeTrouble = opened.trouble
+        storeRead = opened.file != nil && opened.setAside == nil
         carrier = StorePackager(
             directory: StoreFile.applicationSupportDirectory, file: opened.file, store: store,
             media: media, tokens: KeychainMastodonTokens(), credentials: KeychainCredentials(),
             defaults: .standard, device: Self.deviceName,
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
-            storeIsNewer: opened.storeIsNewer, saver: saver
+            storeIsNewer: opened.storeIsNewer,
+            storeNotOpened: opened.file == nil && !opened.storeIsNewer, saver: saver
         )
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).
@@ -64,7 +75,9 @@ final class Launch {
             opened.sources.map(\.host), kept: store, read: opened.file != nil && opened.setAside == nil
         )
         // Built on first use only: a reader with no forum never opens the WebKit store.
-        forums = ForumSessions(dataStore: ForumWebsiteData.onDevice())
+        let sessions = ForumSessions(dataStore: ForumWebsiteData.onDevice())
+        sessions.sourcesRead = storeRead
+        forums = sessions
         // Signed in is what the Keychain holds; each server is asked once a launch whether it
         // still honours its token, in the background, and only a 401 signs out.
         mastodon = MastodonSessions(tokens: KeychainMastodonTokens())
@@ -82,7 +95,7 @@ final class Launch {
         forums.signInAgain(hosts: opened.sources.filter { $0.kind == .discuz }.map(\.host))
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
         if let media {
-            FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host))
+            FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host), read: storeRead)
         }
     }
 
@@ -102,6 +115,7 @@ final class Launch {
     func end() async {
         _ = await saver.flush()
         let hosts = await store.sources().map(\.host)
+        // Nothing where this run never read the store: `ForumSessions.sourcesRead`.
         await forums.leaveNothing(keeping: hosts, within: StoreSaver.deadline)
     }
 
@@ -218,6 +232,16 @@ struct FediqoApp: App {
                 limits: Launch.shared.limits,
                 storeIsNewer: Launch.shared.storeIsNewer,
                 storeNoticeSeen: { Launch.shared.storeIsNewer = false },
+                storeTrouble: Launch.shared.storeTrouble,
+                storeTroubleAnswered: { answer in
+                    guard let trouble = Launch.shared.storeTrouble else { return }
+                    Launch.shared.storeTrouble = nil
+                    Task {
+                        await Launch.shared.saver.answered(
+                            answer, to: trouble, in: StoreFile.applicationSupportDirectory
+                        )
+                    }
+                },
                 carrier: Launch.shared.carrier,
                 nearby: NWNearbyLink(), deviceName: Launch.deviceName
             )

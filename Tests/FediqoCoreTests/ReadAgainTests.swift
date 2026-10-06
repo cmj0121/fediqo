@@ -45,13 +45,13 @@ struct ReadAgainTests {
     @Test("A status read from a timeline carries its id on that server, the boosted one's on a boost")
     func statusIDIsKept() throws {
         let plain = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(Self.status("9", "x").utf8))
-        #expect(plain.asNote(source: source, category: .public).statusID == "9")
+        #expect(plain.asNote(source: source, category: .public, sent: .now()).statusID == "9")
         let boost = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data("""
             {"id":"50","created_at":"2024-01-02T00:00:00.000Z","content":"",
              "account":{"username":"bob","acct":"bob","display_name":"Bob"},
              "reblog":\(Self.status("9", "x"))}
             """.utf8))
-        #expect(boost.asNote(source: source, category: .public).statusID == "9")
+        #expect(boost.asNote(source: source, category: .public, sent: .now()).statusID == "9")
     }
 
     @Test("With its id held, the post and its context are asked unsigned, and nothing else")
@@ -154,9 +154,9 @@ struct ReadAgainTests {
         await store.add(source)
         await store.ingest([held(statusID: "9")])
         let edited = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(Self.status("9", "edited", spoiler: "cw").utf8))
-            .asNote(source: source, categories: [])
+            .asNote(source: source, categories: [], sent: .now())
         let reply = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(Self.status("11", "after").utf8))
-            .asNote(source: source, categories: [])
+            .asNote(source: source, categories: [], sent: .now())
         await store.refresh([edited, reply], ifSourceHere: host)
         let notes = await store.all()
         let row = try #require(notes.first { $0.id.hasSuffix("/9") })

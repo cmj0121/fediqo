@@ -85,6 +85,18 @@ final class ShellSession {
     /// reads, joins and writes this session starts are put on it while they run; the caches and
     /// sign-ins it holds carry their own, the same one in the app. A test hands in another.
     @ObservationIgnored var work: SourceWork = .shared
+    /// The line each source's loads wait in (#293): what items refer to, read without anybody
+    /// asking, and so held to a pace per source. Letting a source go — removed, cleared, signed
+    /// out — drops what waits in its line. A test hands in one with a clock it turns.
+    @ObservationIgnored var loads = LoadPacer()
+    /// What this session has asked its sources for of what items owe (#293).
+    @ObservationIgnored let refs = ShellRefs()
+    /// Whether this run asks for what items refer to at all. Not where the store was not read
+    /// at launch (#295): a run that holds nothing it may write asks for nothing nobody pressed
+    /// for. Set once by the app (`loadsStartWith`); a test sets its own.
+    @ObservationIgnored var startsLoads = ShellSession.loadsStartWith
+    /// What a new session's `startsLoads` is: whether this launch read its store.
+    static var loadsStartWith = true
     /// What the system's shared stores keep of a source, dropped as it is signed out of or
     /// removed (#221). The system's own; a test hands in its own jar.
     @ObservationIgnored var jar = SystemJar()
@@ -160,6 +172,12 @@ final class ShellSession {
     /// source held here would be one that goes stale. **Not `signingIn`**, which is the forum
     /// sign-in already running in a web view — this is a question, and nothing is running.
     var signInChoice: String?
+    /// The source whose sign-in is being asked to allow bookmarks, where one is (#285). Observed,
+    /// and the question is presented from it; a press on a row's mark writes it.
+    var bookmarkAsk: String?
+    /// Whether the rows of every source nobody is signed in to have been checked once this run
+    /// for what an earlier reader left on them (`forgetReaderMarksDue`).
+    @ObservationIgnored var readerMarksSwept = false
 
     /// Which stage of adding a source the reader is being shown, or nothing.
     ///
@@ -296,8 +314,32 @@ final class ShellSession {
         }
         return builtTextIndex ?? TextIndex([])
     }
+    /// The rows that still owe a load and were not given up on (#293), by row id: what the
+    /// list asks before it tells the loader a row is near, so a screen of rows that owe nothing
+    /// — nearly every screen — asks the store nothing.
+    var owingRows: Set<String> {
+        if let builtOwingRows { return builtOwingRows }
+        let built = Set(notes.lazy.filter { $0.refsDue && !$0.refsStalled }.map(\.key.rowID))
+        builtOwingRows = built
+        return built
+    }
+    @ObservationIgnored private var builtOwingRows: Set<String>?
     @ObservationIgnored private var builtTextIndex: TextIndex?
     @ObservationIgnored private(set) var textIndexIsCurrent = false
+
+    /// The post each reblog held reblogs (#290), built the first time something asks after
+    /// `notes` changes and handed to every reader of it — a timeline's rules, the search, the
+    /// rows, a row looked up by id — so none of them builds its own over everything held.
+    var reblogTargets: ReblogTargets {
+        if let builtReblogTargets { return builtReblogTargets }
+        let built = ReblogTargets(notes)
+        builtReblogTargets = built
+        reblogTargetsBuilt += 1
+        return built
+    }
+    @ObservationIgnored private var builtReblogTargets: ReblogTargets?
+    /// How many times the lookup was built. For a test to read.
+    @ObservationIgnored private(set) var reblogTargetsBuilt = 0
     /// Bumped each time `notes` is assigned. Observed, so a view that read a cached timeline
     /// still redraws when the notes under it change.
     private(set) var notesRevision = 0
@@ -336,46 +378,22 @@ final class ShellSession {
         didSet {
             recount()
             textIndexIsCurrent = false
+            builtReblogTargets = nil
+            builtOwingRows = nil
             notesRevision += 1
             heldRevision += 1
-            searchTextIsCurrent = false
         }
     }
 
-    /// Every post this device holds aside (#175) — what a search brought back, a thread's answers
-    /// — which no timeline draws. **Read by the search alone** (#176): a search finds what this
-    /// device holds, and holding a search's finds aside is what keeps All from growing by them.
-    private(set) var aside: [Note] = [] {
-        didSet {
-            heldRevision += 1
-            searchTextIsCurrent = false
-        }
-    }
-    /// Bumped as `notes` or `aside` is assigned: what a search's answer is kept against.
+    /// Bumped as `notes` is assigned: what a search's answer is kept against.
     private(set) var heldRevision = 0
 
-    /// Every post held aside, **a forum topic's replies included** — what `aside` leaves out for
-    /// the search's sake (#177), counted here all the same (#194): the device holds them, and what
-    /// the device says it holds is measured against them. Read by the count alone.
-    private(set) var heldAside: [Note] = [] {
+    /// Every kept reply of a forum topic its forum gave no date (`Note.isPartOfTopic`): a part of a topic and not an
+    /// item, so no timeline and no search reads it, and counted all the same (#194) — the device
+    /// holds them, and what it says it holds is measured against them. Read by the count alone.
+    private(set) var heldReplies: [Note] = [] {
         didSet { recount() }
     }
-
-    /// Everything a search reads: what the timelines draw, and what is held aside.
-    var searchable: [Note] { aside.isEmpty ? notes : notes + aside }
-
-    /// `textIndex` over `searchable`, for a search through a timeline whose rules read text. The
-    /// same as it where nothing is held aside, which is most of the time.
-    var searchTextIndex: TextIndex {
-        guard !aside.isEmpty else { return textIndex }
-        if !searchTextIsCurrent {
-            builtSearchText = TextIndex(searchable, reusing: builtSearchText ?? builtTextIndex)
-            searchTextIsCurrent = true
-        }
-        return builtSearchText ?? TextIndex([])
-    }
-    @ObservationIgnored private var builtSearchText: TextIndex?
-    @ObservationIgnored private var searchTextIsCurrent = false
 
     /// The row at the top of the stream, as the reader last left it scrolled (#110).
     ///
@@ -397,28 +415,41 @@ final class ShellSession {
     /// compared to it, so walking past a note builds nothing; the row is built once, for the one
     /// note that matched.
     ///
-    /// **A row held aside too** (#176, #124, #178): a search's find, a post under a tag or an
-    /// answer read in a thread is a row a reader presses like any other, and the conversation it
-    /// opens is looked up here — `heldNote(_:)`'s one rule, so the row a press opens and the note
-    /// its marks act on are found the same way.
+    /// **Whatever brought it** (#176, #124, #178, #296): a search's find, a post under a tag or an
+    /// answer read in a thread is an item like any other, and the conversation it opens is looked
+    /// up here — `heldNote(_:)`'s one rule, so the row a press opens and the note its marks act on
+    /// are found the same way.
     func held(_ rowID: String) -> DummyItem? {
-        heldNote(rowID).map(DummyItem.init)
+        heldNote(rowID).map { DummyItem($0, among: reblogTargets) }
     }
 
-    /// The store row one row id stands for: in `notes`, and **in what is held aside too** (#178).
-    /// See `held(_:)`.
+    /// The post `note` reblogs, where it is a reblog and this device holds that post (#290):
+    /// looked up by the reference's name within the reblog's own source, and nowhere else.
+    func reblogged(by note: Note) -> Note? {
+        reblogTargets.target(of: note)
+    }
+
+    /// The row a press to open `rowID` opens (#290): the row itself, or — for a reblog — the
+    /// post it reblogs. Nothing for a reblog whose post this device does not hold: there is no
+    /// conversation around a reblog, and nothing of the post to open.
     ///
-    /// A search hit the sources sent (#176) and an answer read in a thread (#177) are held aside
-    /// and drawn where they were found, and a press on one opens the conversation around it and
-    /// acts on it — which is this lookup. Found in `notes` only, the press opened nothing: the
-    /// pane drew the page under it, and the marks under the post acted on nothing. **Nothing here
-    /// puts a row in All**: `notes` stays what `ItemStore.all()` draws, and a row found here keeps
-    /// where it is held through every read and act, `Note.refreshed(over:)`'s rule. What `aside`
-    /// leaves out — a forum topic's kept replies, which are not threads — is not found here either.
+    /// **And for a forum topic's reply, its topic** (#297): a reply is read where its topic is,
+    /// and the pane brings it into view (`DummyThreadPane.replyInView`). Nothing where the topic
+    /// is not held — there is no page to open it on. A reply is only ever read off an opened
+    /// topic, so its topic was held when it arrived: "no longer held" is true of one whose
+    /// topic has gone.
+    func rowOpened(by rowID: String) -> String? {
+        guard let note = heldNote(rowID) else { return rowID }
+        if let topic = note.topicKey { return heldNote(topic.rowID).map(\.key.rowID) }
+        guard note.isReblog else { return rowID }
+        return reblogged(by: note)?.key.rowID
+    }
+
+    /// The item one row id stands for, among every item this device holds (`notes`). See
+    /// `held(_:)`. A forum topic's replies its forum gave no date, which are not items, are not found here.
     func heldNote(_ rowID: String) -> Note? {
         guard let key = NoteKey(rowID: rowID) else { return nil }
-        let matches = { (note: Note) in note.source.host == key.host && note.id == key.id }
-        return notes.first(where: matches) ?? aside.first(where: matches)
+        return notes.first { $0.source.host == key.host && $0.id == key.id }
     }
 
     /// The note behind a row, wherever this run holds it: a store row, or an answer read in an
@@ -427,7 +458,7 @@ final class ShellSession {
         heldNote(rowID) ?? conversations.note(rowID)
     }
 
-    /// Everything this device holds, counted (#7): `notes` and `heldAside` together (#194), so the
+    /// Everything this device holds, counted (#7): `notes` and `heldReplies` together (#194), so the
     /// figure is the store's and not a timeline's. Rebuilt where either is assigned or the
     /// breakdown switches between week and month, never on a redraw.
     private(set) var holdings = Holdings(notes: [], per: .month)
@@ -437,25 +468,22 @@ final class ShellSession {
         didSet { recount() }
     }
 
-    /// Set while `notes` and `heldAside` are assigned together, so one adopt counts once.
+    /// Set while `notes` and `heldReplies` are assigned together, so one adopt counts once.
     @ObservationIgnored private var recountHeld = false
 
     private func recount() {
         guard !recountHeld else { return }
-        holdings = Holdings(notes: notes + heldAside, per: heldPeriod)
+        holdings = Holdings(notes: notes + heldReplies, per: heldPeriod)
     }
 
     /// Both halves of what is held assigned in one breath, nil where one did not move, and the
     /// count rebuilt once for the pair rather than once an assignment. No await inside, so
     /// nothing else on this actor sees the count held back.
-    private func adoptHeld(notes drawn: [Note]?, aside held: [Note]?) {
-        guard drawn != nil || held != nil else { return }
+    private func adoptHeld(notes items: [Note]?, replies: [Note]?) {
+        guard items != nil || replies != nil else { return }
         recountHeld = true
-        if let drawn { notes = drawn }
-        if let held {
-            heldAside = held
-            aside = held.filter { DiscuzPost(held: $0) == nil }
-        }
+        if let items { notes = items }
+        if let replies { heldReplies = replies }
         recountHeld = false
         recount()
     }
@@ -492,7 +520,15 @@ final class ShellSession {
     /// The room this device gives the store and the picture copies together (#249), in bytes,
     /// or nil for no limit — the default. `KeepingWithinRoom` hands it in from the preferences;
     /// the store is judged by it at launch, when it changes, and after each landing.
-    var roomBytes: Int?
+    var roomBytes: Int? {
+        didSet { if roomBytes == nil { roomHeldByKept = false } }
+    }
+
+    /// The last room check ended over the room with nothing left it may let go (#284): what the
+    /// person keeps holds the store past it. Drawn under the Room preference and read by nothing
+    /// else: it is what the last check found, and the next asks the store afresh
+    /// (`keepWithinRoom`). False again once a check ends within the room or with a post to go.
+    var roomHeldByKept = false
 
     /// Set while an export or an import of the store runs (#247): the room limit does nothing
     /// meanwhile, so nothing goes out from under a copy being taken or put back. Cleared, the
@@ -821,9 +857,7 @@ final class ShellSession {
         do {
             // The same document the reload reads, and what it says goes to the store too (#188):
             // a source this device kept no word of yet has one from here on.
-            let (_, profile) = try await MastodonClient(
-                http: WatchedHTTP(http, for: .serverCheck, in: work), host: host
-            ).introduction()
+            let (_, profile) = try await reach.mastodon(host, for: .serverCheck, within: nil).introduction()
             postLimits[host] = MastodonWrite.limit(advertised: profile?.statusLimit)
             if let profile {
                 await store.said(profile)
@@ -861,7 +895,7 @@ final class ShellSession {
             throw MastodonWriteError.noSource
         }
         do {
-            _ = try await MastodonWrite(door: door, store: store)
+            _ = try await reach.write(door, landingIn: store)
                 .post(text, visibility: composeAudience)
             composeDraft = ComposerSheet.draftAfterLanding(current: composeDraft, sent: text)
             await adopt()
@@ -878,10 +912,22 @@ final class ShellSession {
     /// act — because they are the same two answers from the same door, and a second reading of
     /// them is how two writes come to tell a reader different things about one sign-in. Any
     /// other failure says nothing about the sign-in.
-    private func writeFailed(_ error: any Error, host: String) {
+    ///
+    /// **A bookmark turned away with a 403 is bookmarks refused there** (#285), and nothing more:
+    /// for the rest of this run the mark is not offered on that source's rows, every other act
+    /// it offers stays, and the reader is told, here and on the source's row. `sent` is the token
+    /// the request went with, so a refusal about a sign-in since replaced is not laid on the new.
+    private func writeFailed(
+        _ error: any Error, host: String, bookmarkSentWith sent: MastodonToken? = nil
+    ) {
         switch error as? MastodonAuthError {
         case .signedOut?: mastodon.endedByServer(host: host)
-        case .http(403)?: mastodon.refusedWrite(host: host)
+        case .http(403)?:
+            guard let sent else { return mastodon.refusedWrite(host: host) }
+            mastodon.refusedBookmark(host: host, sentWith: sent)
+            guard mastodon.bookmarkTurnedAway.contains(host.lowercased()) else { return }
+            if isAdded(host) { rowRefusal = (host: host.lowercased(), key: "account.bookmarks.refused") }
+            showToast(L10n.t("account.bookmarks.refused"))
         default: break
         }
     }
@@ -904,16 +950,41 @@ final class ShellSession {
     /// A post whose host is not a source here offers nothing and says nothing: a fixture, a
     /// preview, a row left over from a Remove. That is `PostActs.none` rather than a refusal,
     /// because there is no source for a sentence to be about.
+    ///
+    /// **A reblog's row offers what the post it reblogs offers, and each act goes to that post**
+    /// (#290): `actCopies` is the post's own row, so the id sent, the door and the standing are
+    /// the post's, and the reblog's own id is on nothing a press can reach. Taking a post back is
+    /// not among them: that is offered on the post's own row.
     func acts(on item: DummyItem) -> PostActs {
-        Self.acts(from: item.copies.map(ownActs(on:)))
+        Self.acts(from: actsByCopy(of: item).map(\.acts))
+    }
+
+    /// Each row an act on `item` can go to, with what it offers there — `item.actCopies`, less
+    /// taking back where `item` is a reblog.
+    private func actsByCopy(of item: DummyItem) -> [(copy: DummyItem, acts: PostActs)] {
+        item.actCopies.map { copy in
+            let own = ownActs(on: copy)
+            guard item.isReblog, own.offers(.withdraw) else { return (copy, own) }
+            return (copy, PostActs(offered: own.offered.subtracting([.withdraw]), refused: own.refused, asking: own.asking))
+        }
     }
 
     /// The row's acts out of each copy's own, in the row's order — `acts(on:)` over copies
     /// whose acts are already worked out.
+    ///
+    /// What some copy's sign-in must be asked again for (#285) is asked on the row too, unless
+    /// another copy already offers it: an act a press can do is done, not asked about.
     private static func acts(from each: [PostActs]) -> PostActs {
         let offered = each.reduce(into: Set<PostAct>()) { $0.formUnion($1.offered) }
-        guard offered.isEmpty else { return PostActs(offered: offered) }
+        let asking = each.reduce(into: Set<PostAct>()) { $0.formUnion($1.asking) }
+        guard offered.isEmpty else { return PostActs(offered: offered, asking: asking) }
         return each.first { $0.refused != nil } ?? .none
+    }
+
+    /// The copy behind `item` whose sign-in must be asked again before `act` is offered (#285),
+    /// or nothing where no copy's is — `actingCopy`'s order, for the question instead of the act.
+    func askingCopy(of item: DummyItem, for act: PostAct) -> DummyItem? {
+        actsByCopy(of: item).first { $0.acts.asks(act) }?.copy
     }
 
     /// The copy behind `item` that `act` goes through, or nothing where no copy offers it (#136).
@@ -927,7 +998,7 @@ final class ShellSession {
     ///
     /// For a row of one this is the row itself or nothing, exactly as before there were copies.
     func actingCopy(of item: DummyItem, for act: PostAct) -> DummyItem? {
-        item.copies.first { ownActs(on: $0).offers(act) }
+        actsByCopy(of: item).first { $0.acts.offers(act) }?.copy
     }
 
     /// A row's share of the acts, everything but the presses: what it offers, the copy each act
@@ -941,7 +1012,7 @@ final class ShellSession {
     /// off them — `acts(on:)` and `actingCopy(of:for:)` asked separately would ask every copy
     /// again for every act.
     func acting(on item: DummyItem) -> ItemActing {
-        let each = item.copies.map { (copy: $0, acts: ownActs(on: $0)) }
+        let each = actsByCopy(of: item)
         var acting = ItemActing(acts: Self.acts(from: each.map(\.acts)))
         for act in PostAct.allCases {
             let copy = each.first { $0.acts.offers(act) }?.copy ?? item
@@ -960,7 +1031,8 @@ final class ShellSession {
             mastodon.writing(host: copy.source.host, kind: kind),
             nameable: copy.statusID != nil,
             mine: isMine(copy),
-            gone: copy.goneSince != nil
+            gone: copy.goneSince != nil,
+            bookmarks: mastodon.bookmarks(host: copy.source.host)
         )
     }
 
@@ -1016,18 +1088,27 @@ final class ShellSession {
     /// every other server to drop it; leaving them here would redraw the row as the next copy and
     /// put back the post the reader just watched go. They are dropped only after the source has
     /// said the post went.
+    ///
+    /// **A copy the person keeps does not go** (#284): it stays in the timeline, in an open thread
+    /// and in the store, marked as gone from its source, until it is un-kept and let go.
     func withdraw(_ item: DummyItem) async {
         withdrawing = nil
         guard let copy = actingCopy(of: item, for: .withdraw) else { return }
         let others = item.copies.filter { $0.id != copy.id }
             .map { NoteKey(host: $0.source.host, id: $0.noteID) }
         await perform(.withdraw, on: item) { door, note in
-            try await MastodonWrite(door: door, store: self.store).withdraw(note)
+            try await self.reach.write(door, landingIn: self.store).withdraw(note)
             for key in [note.key] + others {
                 await self.store.forget(key)
-                self.conversations.drop(key)
+                // A copy the person keeps stays, marked gone from its source (#284): it is laid
+                // into an open thread as it now is, rather than dropped from it.
+                if let stays = await self.store.note(key) {
+                    self.conversations.replace(stays)
+                } else {
+                    self.conversations.drop(key)
+                }
             }
-            return note
+            return await self.store.note(note.key) ?? note
         }
     }
 
@@ -1043,13 +1124,19 @@ final class ShellSession {
     /// Nothing is written down about the press landing: the store takes the server's answer, and
     /// what the row draws afterwards is that. A refusal leaves the post exactly as it was and
     /// leaves a failure the same press clears by trying again.
+    ///
+    /// A bookmark (#285) is the third: put at the source or taken off it, by what the source
+    /// last said of it.
     func toggle(_ act: PostAct, on item: DummyItem) async {
-        guard act == .boost || act == .favourite else { return }
+        guard act == .boost || act == .favourite || act == .bookmark else { return }
         await perform(act, on: item) { door, note in
-            let write = MastodonWrite(door: door, store: self.store)
-            return act == .boost
-                ? try await write.boost(note, on: note.boosted != true)
-                : try await write.favourite(note, on: note.favourited != true)
+            let write = self.reach.write(door, landingIn: self.store)
+            switch act {
+            case .boost: return try await write.boost(note, on: note.boosted != true)
+            case .favourite: return try await write.favourite(note, on: note.favourited != true)
+            case .bookmark: return try await write.bookmark(note, on: note.bookmarked != true)
+            case .answer, .withdraw: return note
+            }
         }
     }
 
@@ -1092,7 +1179,7 @@ final class ShellSession {
             await adopt()
             await persist?()
         } catch {
-            writeFailed(error, host: host)
+            writeFailed(error, host: host, bookmarkSentWith: act == .bookmark ? door.token : nil)
             acts.failed(copy.id, act)
         }
     }
@@ -1163,7 +1250,7 @@ final class ShellSession {
         else { throw MastodonWriteError.noSource }
         let reach = answerReach[item.id] ?? target.start
         do {
-            let note = try await MastodonWrite(door: door, store: store)
+            let note = try await self.reach.write(door, landingIn: store)
                 .post(text, visibility: reach, answering: answered)
             answerDrafts[item.id] = ComposerSheet.draftAfterLanding(
                 current: answerDraft(target), sent: text
@@ -2299,51 +2386,51 @@ final class ShellSession {
     /// watched, the boards each forum is read for, the holdings counted and the text index
     /// dropped — and every view reading the session redraws on an assignment, so a reload that
     /// changed nothing used to pay for all of it. The notes are compared by the store's count of
-    /// what `all()` draws rather than row by row: unchanged since the last adopt, and nothing here
-    /// has assigned `notes` since either, they are what the store holds. **That count and not the
-    /// revision** (#175), so a post held aside — written down, drawn nowhere — replaces nothing.
+    /// what `all()` hands over rather than row by row: unchanged since the last adopt, and nothing
+    /// here has assigned `notes` since either, they are what the store holds. **That count and
+    /// not the revision** (#175), so a topic's reply kept — written down, drawn nowhere but in
+    /// its topic — replaces nothing.
     private func adopt() async {
+        // Before anything is read: what an ended sign-in's reader had done to its posts (#285).
+        await forgetReaderMarksDue()
         await adoptSources()
-        let asideRevision = await store.asideRevision
+        let repliesRevision = await store.repliesRevision
         let drawn = await store.drawn
         let all = adopted?.store != drawn || adopted?.notes != notesRevision ? await store.all() : nil
-        // What is held aside has a count of its own, as what is drawn has, so a landing only
-        // the timelines see neither reads it again nor redraws a search (#176).
-        //
-        // **A forum topic's kept replies are not among the search's** (#177): each is a post of a
-        // thread, not a thread, and a search drawing one would draw it as a row that opens
-        // nowhere. A microblog answer is a post in its own right, and stays. All of them are
-        // counted (#194): `adoptHeld` hands the count every row and the search the rest.
-        let held = adoptedAside != asideRevision ? await store.aside() : nil
-        adoptHeld(notes: all, aside: held)
+        // A forum topic's replies its forum gave no date have a count of their own, as the items
+        // have, so a timeline's landing does not read them again. They are counted (#194) and
+        // nothing else: nothing but the moment each was read could place it (#297). A reply the
+        // forum dated is an item, and is among `all`.
+        let replies = adoptedReplies != repliesRevision ? await store.replies() : nil
+        adoptHeld(notes: all, replies: replies)
         if all != nil { adopted = (store: drawn, notes: notesRevision) }
-        if held != nil { adoptedAside = asideRevision }
+        if replies != nil { adoptedReplies = repliesRevision }
         if heldRevision != renewedConversations {
             renewConversation()
             renewedConversations = heldRevision
         }
         rebuildQueries()
+        // What the newest arrivals owe is asked for, and what was asked for rows since let go
+        // is taken back (#293). Only where the items changed. **Started here and not waited
+        // for**: adopting is what every landing and every press waits on, and asking a source's
+        // line for a load is not part of having adopted.
+        if all != nil { refs.landing(in: self) }
     }
 
     /// `heldRevision` as the open conversations last drew from what is held.
     @ObservationIgnored private var renewedConversations: Int?
 
-    /// The conversation in front drawn again from what this device holds of its posts (#193): the
-    /// store's copy of each, in the thread's own order. Only the thread in front, and only the
-    /// posts it draws are looked for, so an adopt with no thread open walks nothing; a thread left
-    /// is drawn again as it opens (`ShellReload.opened`).
+    /// The conversation in front drawn again from what this device holds (#193, #293): what the
+    /// opened post refers to and what refers to it, among everything held. Only the thread in
+    /// front, so an adopt with no thread open walks nothing; a thread left is drawn again as it
+    /// opens (`ShellReload.opened`).
     func renewConversation() {
-        guard let front = reload.inFront else { return }
-        let wanted = conversations.drawnKeys(around: front.id)
-        guard !wanted.isEmpty else { return }
-        var held: [NoteKey: Note] = [:]
-        for note in notes where wanted.contains(note.key) { held[note.key] = note }
-        for note in aside where wanted.contains(note.key) { held[note.key] = note }
-        conversations.renew(front.id, from: held)
+        guard let front = reload.inFront, let held = note(ofRow: front.id) else { return }
+        conversations.renew(front.id, around: held, among: notes)
     }
 
-    /// The store's `asideRevision` as the last adopt read what is held aside.
-    @ObservationIgnored private var adoptedAside: Int?
+    /// The store's `repliesRevision` as the last adopt read the topics' kept replies.
+    @ObservationIgnored private var adoptedReplies: Int?
 
     /// The store's `drawn` and `notesRevision` as the last adopt left them. Read in a hop before
     /// the notes, so a write landing between the two is adopted again next time, never missed.
@@ -2514,6 +2601,11 @@ final class ShellSession {
         clearing = nil
         // Before the first await: Home posts read before the Clear must not land after it.
         stopReadingAsYou(host: host)
+        // What waits in the source's line of loads goes too (#293) — here for a Clear, and for a
+        // Remove, which clears. At this function's first await and not before it: everything
+        // above must have happened before anything can run between.
+        await loads.letGo(host: host)
+        refs.forget(host: host)
         await emoji.forget(host: host)
         emojis.forget(host: host)
         if keepingRows { pictures.letGo(host: host) } else { pictures.forget(host: host) }
@@ -2551,6 +2643,8 @@ final class ShellSession {
         // drops nothing that Home or a list brought in.
         // The app registration goes with it, so nothing of the sign-in is left.
         await mastodon.signOut(host: host, forgettingApp: true)
+        // The reader's marks go with the sign-in, at once and on disk (#285), as a sign-out's do.
+        await forgetReaderMarksDue()
         jar.forget(host: host, keeping: sources.map(\.host))
         // **The rows stay (#7).** Clear drops this source's copies — pictures in memory and on
         // disk, emoji, first posts, the sign-in — and not its place in the index: every row still
@@ -2588,11 +2682,11 @@ final class ShellSession {
     func keep(months: Int?, from now: Date = Date()) async -> Int {
         let went = await store.letGoBeyond(months: months, from: now)
         guard went.posts > 0 else { return 0 }
-        // The window cuts what is held aside too, and the count says so at once (#194).
+        // The window cuts a topic's kept replies too, and the count says so at once (#194).
         let all = await store.all()
-        let held = await store.aside()
-        adoptHeld(notes: all, aside: held)
-        adoptedAside = await store.asideRevision
+        let replies = await store.replies()
+        adoptHeld(notes: all, replies: replies)
+        adoptedReplies = await store.repliesRevision
         await persist?()
         try? await compactStore?()
         await readStoreBytes()
@@ -2630,28 +2724,32 @@ final class ShellSession {
         await persist?()
     }
 
-    /// One page of a topic's replies, landed in the store **held aside** and saved, and the topic
-    /// as the store now holds it (#177).
+    /// One page of a topic's replies, landed in the store as that topic's kept replies and saved,
+    /// and the topic as the store now holds it (#177).
     ///
-    /// Aside, because a reply read in a thread is not a row All grew by (#175). A reply already
+    /// **A reply the forum dates is an item** (#297): it stands in All at the time the forum
+    /// gave it, through its topic's board. One the forum gave no date is a part of the topic
+    /// and not an item (`Note.isPartOfTopic`): no timeline grows by it. A reply already
     /// held takes the words just read — **never the forum's notice over them**, #154's rule for an
     /// opening post, so a guest's read of a page does not undo what a member's read kept.
     ///
     /// **A reply the page gave no date keeps the one it was first kept with.** Stamped with each
     /// read's moment, every re-read would move the row, write the whole store down again, and keep
-    /// it inside the reader's keep-for window for ever.
+    /// it inside the reader's keep-for window for ever. **And one the forum dated on an earlier
+    /// read keeps that date** where this read's page gave none, so an item does not stop being
+    /// one because a template left its date out.
     func land(_ replies: [DiscuzPost], host: String, tid: Int) async -> [DiscuzPost] {
         let read = Date()
         let first = Dictionary(
             await store.held(host: host, idPrefix: DiscuzPost.heldPrefix(host: host, tid: tid))
-                .map { ($0.id, $0.postedAt) },
+                .map { ($0.id, (kept: $0.postedAt, said: $0.opening?.postedAt)) },
             uniquingKeysWith: { first, _ in first }
         )
         let notes = replies.map { reply in
             let id = DiscuzPost.heldPrefix(host: host, tid: tid) + String(reply.pid)
-            return reply.asNote(host: host, read: first[id] ?? read)
+            return reply.dated(first[id]?.said).asNote(host: host, read: first[id]?.kept ?? read)
         }
-        await store.hold(notes, ifSourceHere: host)
+        await store.ingest(notes, ifSourceHere: host)
         await store.refresh(notes.filter { $0.opening != nil }, ifSourceHere: host)
         await persist?()
         return await keptReplies(host: host, tid: tid)
@@ -2712,7 +2810,12 @@ final class ShellSession {
     func signOut(host: String) async {
         if kind(of: host) == .mastodon {
             stopReadingAsYou(host: host)
+            await loads.letGo(host: host)
+            refs.letGo(host: host)
             await mastodon.signOut(host: host)
+            // What the source said this reader did to its posts goes with the sign-in, now and
+            // on disk (#285) — before anything can take the store away with it still said.
+            await reloadFromStore()
         } else {
             await forums.forget(host: host.lowercased())
         }
@@ -2743,9 +2846,11 @@ final class ShellSession {
             return
         }
         if rowRefusal?.host == host { rowRefusal = nil }
-        guard let failure = await mastodon.signIn(
-            host: host, through: browser, writing: writing
-        ) else {
+        let failure = await mastodon.signIn(host: host, through: browser, writing: writing)
+        // **Before the first read as whoever signed in** (#285): what the source said an earlier
+        // reader did is let go of first, so what it now says of this one is not taken with it.
+        await forgetReaderMarksDue()
+        guard let failure else {
             if mastodon.isSignedIn(host: host) { await readAsYou(host: host) }
             return
         }
@@ -2762,7 +2867,7 @@ final class ShellSession {
     func readAsYou(host: String) async {
         guard let door = mastodon.authorized(host: host, for: .timeline) else { return }
         await readingAsYou(host: host, key: "account.mastodon.home.progress") {
-            try await MastodonAccount(door: door, store: self.store).read()
+            try await self.reach.account(door, landingIn: self.store).read()
         }
     }
 
@@ -2783,7 +2888,7 @@ final class ShellSession {
         progress = ProgressReport(owner: .row(host: host), key: "account.source.lists.progress")
         defer { progress = nil }
         do {
-            let offered = try await MastodonAccount(door: door, store: store).lists()
+            let offered = try await reach.account(door, landingIn: store).lists()
             guard mine == errand else { return }
             let chosen = Set(source.lists.map(\.id)).intersection(offered.map(\.id))
             stage = .choosingLists(ListChoice(host: host, offered: offered, ticked: chosen))
@@ -2806,7 +2911,7 @@ final class ShellSession {
         guard let door = mastodon.authorized(host: choice.host, for: .timeline) else { return }
         progressHost = choice.host
         await readingAsYou(host: choice.host, key: "account.source.lists.reading") {
-            try await MastodonAccount(door: door, store: self.store).choose(picks)
+            try await self.reach.account(door, landingIn: self.store).choose(picks)
         }
     }
 
@@ -2939,7 +3044,11 @@ final class ShellSession {
         }
         await store.remove(host: host, keepingPosts: keepingPosts)
         await adopt()
-        await clear(host: host, keepingRows: keepingPosts)
+        // A post the person keeps stays though the rest went (#284), and a row that stays is
+        // `keepingPosts`' case for the pictures: let go without the bump, so it asks nothing of
+        // a host nothing may ask.
+        let rowsStay = keepingPosts ? true : !(await store.held(host: host)).isEmpty
+        await clear(host: host, keepingRows: rowsStay)
 
         // Folded on both sides rather than on one. `Host.parse` lowercases everything it returns,
         // so all three of these are already folded today — and that is a guarantee three files

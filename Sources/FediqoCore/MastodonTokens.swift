@@ -22,16 +22,36 @@ public struct MastodonToken: Sendable, Equatable, CustomStringConvertible,
     /// token with nothing written down is one whose reader was never asked. Both read and neither
     /// writes; only the second is owed the question.
     public let scopes: String?
+    /// What the sign-in that issued it asked the source for, at its widest (#285), or nothing for
+    /// a token kept before this was written down. **Not what it may do** — that is `scopes` — but
+    /// what tells a sign-in that asked for bookmarks and was not given them from one made before
+    /// bookmarks were asked for at all: the first is not asked again, and the second is owed it.
+    public let asked: String?
 
     public init(
         host: String, accessToken: String, clientID: String, clientSecret: String,
-        scopes: String? = nil
+        scopes: String? = nil, asked: String? = nil
     ) {
         self.host = host.lowercased()
         self.accessToken = accessToken
         self.clientID = clientID
         self.clientSecret = clientSecret
         self.scopes = scopes
+        self.asked = asked
+    }
+
+    /// This token, written down as issued by a sign-in that asked for `asked` — the fact beside
+    /// it, and never the token itself.
+    public func recorded(asked: String?) -> MastodonToken {
+        MastodonToken(
+            host: host, accessToken: accessToken, clientID: clientID, clientSecret: clientSecret,
+            scopes: scopes, asked: asked
+        )
+    }
+
+    /// Whether this sign-in asked for bookmarks and was not given them (#285).
+    public var bookmarksRefused: Bool {
+        MastodonOAuth.bookmarks(asked) && !MastodonOAuth.bookmarks(scopes)
     }
 
     public var app: MastodonApp {
@@ -86,6 +106,16 @@ public protocol MastodonTokenStore: Sendable {
     /// access prompt in front of the launch screen, once per source — and in `swift test` it hangs
     /// on the first one. The scopes are not a secret; the token is.
     func grants() throws -> [String: MastodonGrant]
+    /// The hosts whose sign-in may bookmark (#285), **without reading a token** — `grants()`'s
+    /// rule and for its reason, read off the same attribute. Apart from `grants()` because it is
+    /// another question: a sign-in made before bookmarks were asked for writes as it always did,
+    /// and only lacks this.
+    func bookmarking() throws -> Set<String>
+    /// The hosts whose sign-in asked for bookmarks and was not given them (#285), **without
+    /// reading a token** — so the row and Account stop offering to ask a source that has already
+    /// answered, across a relaunch. A sign-in made before bookmarks were asked for is in neither
+    /// this nor `bookmarking()`.
+    func bookmarksRefused() throws -> Set<String>
 
     func app(host: String) throws -> MastodonApp?
     func save(_ app: MastodonApp) throws
@@ -98,6 +128,13 @@ extension MastodonTokenStore {
     public func signedInHosts() throws -> Set<String> {
         Set(try grants().keys)
     }
+
+    /// No host, for a store that does not say: nothing is bookmarked through a sign-in nobody
+    /// can show bought it.
+    public func bookmarking() throws -> Set<String> { [] }
+
+    /// No host, for a store that does not say: a source nobody can show was asked is asked.
+    public func bookmarksRefused() throws -> Set<String> { [] }
 }
 
 /// The query dictionaries, built where a test can read them back.
@@ -152,6 +189,13 @@ public enum MastodonKeychain {
         if let scopes = token.scopes {
             attributes[kSecAttrGeneric as String] = Data(scopes.utf8)
         }
+        // What the sign-in asked for (#285), beside what it was given and for the same reason:
+        // readable without the secret. Scope names, which are not one. **Fails the safe way** if
+        // it ever stops coming back: a source that had refused bookmarks is offered the question
+        // once more, and nothing is widened.
+        if let asked = token.asked {
+            attributes[kSecAttrComment as String] = asked
+        }
         return attributes
     }
 
@@ -176,6 +220,19 @@ public enum MastodonKeychain {
         return MastodonGrant.of(scopes: String(decoding: data, as: UTF8.self))
     }
 
+    /// Whether one item's attributes say its sign-in may bookmark (#285). A token kept before
+    /// the scopes were written down says nothing, and nothing is no.
+    public static func bookmarks(_ row: [String: Any]) -> Bool {
+        guard let data = row[kSecAttrGeneric as String] as? Data else { return false }
+        return MastodonOAuth.bookmarks(String(decoding: data, as: UTF8.self))
+    }
+
+    /// Whether one item's attributes say its sign-in asked for bookmarks and was not given them
+    /// (#285): asked is written down, and what it was given leaves them out.
+    public static func bookmarksRefused(_ row: [String: Any]) -> Bool {
+        MastodonOAuth.bookmarks(row[kSecAttrComment as String] as? String) && !bookmarks(row)
+    }
+
     /// Every host this app holds a token for, attributes only — no `kSecReturnData`.
     public static func allItems() -> [String: Any] {
         [
@@ -196,6 +253,8 @@ public enum MastodonKeychain {
             /// Absent in an item kept before a sign-in asked about writing — which is what makes
             /// that reader one this app still owes the question to.
             var scopes: String?
+            /// Absent in an item kept before what a sign-in asked for was written down (#285).
+            var asked: String?
         }
 
         private struct App: Codable {
@@ -208,7 +267,7 @@ public enum MastodonKeychain {
         static func encode(_ token: MastodonToken) -> Data {
             let value = Token(
                 accessToken: token.accessToken, clientID: token.clientID,
-                clientSecret: token.clientSecret, scopes: token.scopes
+                clientSecret: token.clientSecret, scopes: token.scopes, asked: token.asked
             )
             return (try? JSONEncoder().encode(value)) ?? Data()
         }
@@ -224,7 +283,7 @@ public enum MastodonKeychain {
             else { return nil }
             return MastodonToken(
                 host: host, accessToken: value.accessToken, clientID: value.clientID,
-                clientSecret: value.clientSecret, scopes: value.scopes
+                clientSecret: value.clientSecret, scopes: value.scopes, asked: value.asked
             )
         }
 
@@ -277,16 +336,31 @@ public struct KeychainMastodonTokens: MastodonTokenStore {
     /// No token is lost, no reading changes, and nothing is widened; the app asks the question
     /// again. That is the safe direction, and it is the reason this rests where it does.
     public func grants() throws -> [String: MastodonGrant] {
+        try rows().mapValues(MastodonKeychain.grant)
+    }
+
+    /// `grants()`'s query and its failure direction: an attribute that stops coming back is a
+    /// host that may not bookmark, and the row asks again.
+    public func bookmarking() throws -> Set<String> {
+        Set(try rows().filter { MastodonKeychain.bookmarks($0.value) }.keys)
+    }
+
+    public func bookmarksRefused() throws -> Set<String> {
+        Set(try rows().filter { MastodonKeychain.bookmarksRefused($0.value) }.keys)
+    }
+
+    /// Every held token's attributes, by host, and never a value.
+    private func rows() throws -> [String: [String: Any]] {
         var item: CFTypeRef?
         let status = SecItemCopyMatching(MastodonKeychain.allItems() as CFDictionary, &item)
         if status == errSecItemNotFound { return [:] }
         guard status == errSecSuccess else { throw ForumCredentialError.keychain(status) }
         guard let rows = item as? [[String: Any]] else { return [:] }
-        return rows.reduce(into: [:]) { grants, row in
+        return rows.reduce(into: [:]) { found, row in
             guard let host = (row[kSecAttrAccount as String] as? String)?.lowercased() else {
                 return
             }
-            grants[host] = MastodonKeychain.grant(row)
+            found[host] = row
         }
     }
 
@@ -359,6 +433,14 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
 
     public func grants() throws -> [String: MastodonGrant] {
         lock.withLock { held.mapValues(\.grant) }
+    }
+
+    public func bookmarking() throws -> Set<String> {
+        lock.withLock { Set(held.filter { MastodonOAuth.bookmarks($0.value.scopes) }.keys) }
+    }
+
+    public func bookmarksRefused() throws -> Set<String> {
+        lock.withLock { Set(held.filter(\.value.bookmarksRefused).keys) }
     }
 
     public func app(host: String) throws -> MastodonApp? {

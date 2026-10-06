@@ -692,16 +692,17 @@ struct ReloadTests {
         #expect(session.posts.reading(ForumThreadRef(host: Self.forum, tid: Self.tid)) == .absent(.unreachable))
     }
 
-    private static func status(_ id: String, _ text: String) -> String {
-        """
-        {"id":"\(id)","uri":"https://\(one)/users/ada/statuses/\(id)",
+    private static func status(_ id: String, _ text: String, answering parent: String? = nil) -> String {
+        let reply = parent.map { #""in_reply_to_id":"\#($0)","# } ?? ""
+        return """
+        {"id":"\(id)","uri":"https://\(one)/users/ada/statuses/\(id)",\(reply)
          "created_at":"2024-01-01T00:00:00.000Z","content":"<p>\(text)</p>",
          "account":{"username":"ada","acct":"ada","display_name":"Ada"}}
         """
     }
 
     private static let context = #"{"ancestors":[],"descendants":["#
-        + status("11", "a reply") + "," + status("12", "an edited reply") + "]}"
+        + status("11", "a reply", answering: "9") + "," + status("12", "an edited reply", answering: "9") + "]}"
 
     /// A Mastodon post held on `one.example` with `statusID`, first as "first words".
     private static func mastodonNote(statusID: String?) -> Note {
@@ -812,8 +813,8 @@ struct ReloadTests {
                 "an empty timeline would read as settled")
     }
 
-    @Test("A post held aside neither enters All nor replaces what the screen draws")
-    func asideRenewsNothing() async throws {
+    @Test("A post a search brought enters All and is drawn, and reading it again draws what it now says")
+    func whatASearchBringsIsDrawn() async throws {
         let (session, _) = await shell()
         let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
         let following = Task { await session.followStore() }
@@ -826,8 +827,8 @@ struct ReloadTests {
             author: "Ada", handle: "@ada@\(Self.one)", body: "found", postedAt: Date(timeIntervalSince1970: 90),
             categories: []
         )
-        await session.store.hold([found], ifSourceHere: Self.one)
-        // A read of it again — an act pressed on it, a thread re-read — leaves it aside too.
+        await session.store.ingest([found], ifSourceHere: Self.one)
+        // A read of it again — an act pressed on it, a thread re-read — is a row changed.
         let edited = Note(
             id: found.id, source: found.source, author: "Ada", handle: found.handle,
             body: "found, edited", postedAt: found.postedAt, categories: []
@@ -836,12 +837,10 @@ struct ReloadTests {
         for _ in 0..<2_000 { await Task.yield() }
         // And asked outright, rather than trusting the follower to have come round.
         await session.reloadFromStore()
-        #expect(session.notesRevision == drawn, "nothing drawn changed, so nothing was replaced")
-        #expect(session.notes.map(\.key.rowID) == [item.id])
-        #expect(!session.notes.contains { $0.key == found.key }, "the timeline's rows never include it")
-        // Found by a press on it all the same (#178), and still as held aside.
-        #expect(session.heldNote(found.key.rowID)?.holding == .aside)
-        #expect(await session.store.note(found.key)?.body == "found, edited", "and it is still here to read")
+        #expect(session.notesRevision > drawn, "what is drawn changed")
+        #expect(Set(session.notes.map(\.key.rowID)) == [item.id, found.key.rowID], "the timeline's rows include it")
+        #expect(session.heldNote(found.key.rowID)?.body == "found, edited", "as it now reads")
+        #expect(session.heldNote(found.key.rowID)?.categories.isEmpty == true, "and through no category")
     }
 
     @Test("Opening a thread and making a search both finish while a reload is on its way")
@@ -857,7 +856,7 @@ struct ReloadTests {
         let timeline = Task { await session.reload.timeline(.trends, in: session) }
         #expect(await spun { await gated.asks == 2 })
         await session.conversations.open(item, in: session)
-        #expect(session.conversations.standing(of: item.id).conversation(around: item)?.descendants.count == 2)
+        #expect(session.conversations.conversation(around: item).descendants.count == 2)
         let search = ShellSearch()
         search.open(from: nil, over: session.notes)
         await search.indexed()
@@ -957,8 +956,8 @@ struct ReloadTests {
         #expect(row.categories == [.public])
         #expect(session.notes.first { $0.key == heldReply.key }?.body == "an edited reply",
                 "a reply already held is updated")
-        #expect(!session.notes.contains { $0.id.hasSuffix("/11") }, "a reply never held is dropped")
-        #expect(session.notes.count == 2)
+        #expect(session.notes.contains { $0.id.hasSuffix("/11") }, "a reply never held is held now: an item, in All")
+        #expect(session.notes.count == 3)
         // Where you were stays: the same row, under the same id, still in the stream.
         let stream = session.timelineItems(latest: nil)
         #expect(DummyCommand.focused(in: stream, selected: item.id) == .post(DummyItem(row)))
@@ -1182,7 +1181,7 @@ struct ReloadTests {
         #expect(!session.reload.stop(), "Esc is not spent on an ask nobody pressed for")
         #expect(!session.reload.stopped)
         await session.conversations.open(item, in: session)
-        #expect(session.conversations.standing(of: item.id).conversation(around: item)?.descendants.count == 2)
+        #expect(session.conversations.conversation(around: item).descendants.count == 2)
         await session.reload.held(in: session)
         #expect(await gated.asks == 2, "a wait coming round while one is on its way starts nothing")
 
@@ -1190,7 +1189,7 @@ struct ReloadTests {
         await held.value
         #expect(!session.reload.running)
         #expect(session.reload.line == nil)
-        #expect(session.notes.count == 6)
+        #expect(session.notes.count == 8, "the timelines' six, and the two answers the thread read: items now")
     }
 
     @Test("A source that fails on a wait says so in the toast, and the others still land")

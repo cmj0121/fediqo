@@ -36,7 +36,7 @@ struct TouchTests {
     @Test("Every key the guide names outside App can be done without one")
     func everyTimelineKeyHasATouchPath() {
         let timeline = DummyShortcut.all.filter { $0.group != .app }
-        #expect(timeline.count == 21)
+        #expect(timeline.count == 22)
         let short = timeline.filter { $0.touch == .keysOnly || $0.touch == .partly }.map(\.name)
         #expect(short.isEmpty, "no touch path for: \(short.joined(separator: ", "))")
     }
@@ -252,7 +252,6 @@ struct TouchTests {
         // `onOpen` carries the post, which is what keeps the root off a state read.
         _ = DummyItemRow(
             item: Self.post, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
-            marks: .constant(DummyMarks()),
             onOpen: {}, onView: {}, onTurn: {}, onToast: { _ in }
         )
         // The header's two, which cannot be handed a press without the answer that goes with it.

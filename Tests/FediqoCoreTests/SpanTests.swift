@@ -10,16 +10,16 @@ struct SpanTests {
     private static let beta = Source(host: "beta.test", kind: .mastodon)
     private static let origin = Date(timeIntervalSince1970: 1_700_000_000)
 
-    private static func note(_ id: String, day: Double, from source: Source, holding: Holding = .arrived) -> Note {
+    private static func note(_ id: String, day: Double, from source: Source) -> Note {
         Note(id: id, source: source, author: "Ada", handle: "@ada", body: "hello",
-             postedAt: origin.addingTimeInterval(day * 86_400), categories: [.public], holding: holding)
+             postedAt: origin.addingTimeInterval(day * 86_400), categories: [.public])
     }
 
-    /// Days 0 through 3: alpha holds one a day, one of day 2's held aside; beta holds day 1 and 2.
+    /// Days 0 through 3: alpha holds one a day, one of day 2's through no category; beta holds day 1 and 2.
     private static func held() -> ItemStore {
         ItemStore(sources: [alpha, beta], notes: [
             note("a0", day: 0, from: alpha), note("a1", day: 1, from: alpha),
-            note("a2", day: 2, from: alpha, holding: .aside), note("a3", day: 3, from: alpha),
+            note("a2", day: 2, from: alpha), note("a3", day: 3, from: alpha),
             note("b1", day: 1, from: beta), note("b2", day: 2, from: beta),
         ])
     }
@@ -27,14 +27,13 @@ struct SpanTests {
     /// From the start of day 1 to the start of day 3: days 1 and 2.
     private static let days1to2 = origin.addingTimeInterval(86_400)..<origin.addingTimeInterval(3 * 86_400)
 
-    @Test("A span from one host takes its arrived and aside rows inside it, and nothing else")
+    @Test("A span from one host takes every row of its inside it, and nothing else")
     func spanFromOneHost() async {
         let store = Self.held()
         let revision = await store.revision
         #expect(await store.count(span: Self.days1to2, host: "Alpha.Test") == 2, "the count the question names")
         #expect(await store.letGo(span: Self.days1to2, host: "Alpha.Test") == 2)
         #expect(await store.all().map(\.id).sorted() == ["a0", "a3", "b1", "b2"])
-        #expect(await store.aside().isEmpty, "the aside row on day 2 went with the arrived one")
         #expect(await store.snapshot().notes.map(\.id).sorted() == ["a0", "a3", "b1", "b2"])
         #expect(await store.sources() == [Self.alpha, Self.beta], "every source stays joined")
         #expect(await store.revision > revision, "a save follows")

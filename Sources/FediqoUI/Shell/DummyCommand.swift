@@ -49,6 +49,12 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     case boost
     /// `f` — favourite the post the lamp is on on its source, or take it back (#107). `b`'s shape.
     case favourite
+    /// `y` — keep the post the lamp is on, or stop keeping it (#284). One key for both directions,
+    /// as `b` is. Nothing is sent anywhere: a kept post is one this device never lets go.
+    ///
+    /// **Why `y`.** It is yours, and it was free: every letter nearer the word already answers
+    /// to something a row does.
+    case keep
     /// `w` — write an answer to the post the lamp is on, **from inside the conversation it belongs
     /// to** (#108). `c` writes a post that answers nothing; this is the same act pointed at
     /// something. Refused on the timeline itself, where the answer's place is not in view.
@@ -126,6 +132,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "/": return .search
         case "b": return .boost
         case "f": return .favourite
+        case "y": return .keep
         case "w": return .answer
         case "d": return .withdraw
         case "p": return .openAuthor
@@ -546,6 +553,8 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .act, keys: ["b"], name: "boost", commands: [.boost], touch: .press),
         // The star under the post, for `b`'s reason.
         DummyShortcut(group: .act, keys: ["f"], name: "favourite", commands: [.favourite], touch: .press),
+        // The box under the post, drawn on every row this device holds.
+        DummyShortcut(group: .act, keys: ["y"], name: "keep", commands: [.keep], touch: .press),
         // The answer mark under a post in an open conversation. On the timeline the same mark
         // opens the conversation first, which is where the key is answered too.
         DummyShortcut(group: .act, keys: ["w"], name: "answer", commands: [.answer], touch: .press),

@@ -19,15 +19,15 @@ struct SpanTests {
     }
 
     /// Posted at noon `daysAgo` days ago, so a day's edge never decides what a test says.
-    private static func note(_ id: String, daysAgo: Int, from source: Source, holding: Holding = .arrived) -> Note {
+    private static func note(_ id: String, daysAgo: Int, from source: Source) -> Note {
         Note(id: id, source: source, author: "Ada", handle: "@ada", body: "hello \(id)",
-             postedAt: day(daysAgo).addingTimeInterval(12 * 3_600), categories: [.public], holding: holding)
+             postedAt: day(daysAgo).addingTimeInterval(12 * 3_600), categories: [.public])
     }
 
     /// Alpha: three, five and nine days ago, the five-days one a search's find; beta: five days ago.
     private static func held() -> ItemStore {
         ItemStore(sources: [alpha, beta], notes: [
-            note("a3", daysAgo: 3, from: alpha), note("a5", daysAgo: 5, from: alpha, holding: .aside),
+            note("a3", daysAgo: 3, from: alpha), note("a5", daysAgo: 5, from: alpha),
             note("a9", daysAgo: 9, from: alpha), note("b5", daysAgo: 5, from: beta),
         ])
     }
@@ -53,15 +53,14 @@ struct SpanTests {
         let measures = Counter()
         session.measureStore = { await measures.bump() }
         await session.reloadFromStore()
-        #expect(session.holdings.posts == 4 && session.aside.map(\.id) == ["a5"])
+        #expect(session.holdings.posts == 4 && session.notes.map(\.id).sorted() == ["a3", "a5", "a9", "b5"])
 
         let span = SpanSection.span(from: Self.day(6), to: Self.day(4))
         #expect(await session.spanHeld(span, host: Self.alpha.host) == 1, "the count the pickers show")
         #expect(await session.letGo(span: span, host: Self.alpha.host) == 1)
 
         #expect(session.notes.map(\.id).sorted() == ["a3", "a9", "b5"], "All no longer shows it")
-        #expect(session.aside.isEmpty, "the search no longer finds it")
-        #expect(session.holdings.posts == 3 && session.holdings.aside == 0)
+        #expect(session.holdings.posts == 3)
         #expect(session.holdings.posts(host: Self.alpha.host) == 2)
         #expect(session.holdings.posts(host: Self.beta.host) == 1, "another source is untouched")
         let snapshot = await store.snapshot()

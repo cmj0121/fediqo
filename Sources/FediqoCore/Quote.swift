@@ -10,6 +10,12 @@ import Foundation
 //
 // **One level, and never more.** The quoted post keeps what a row draws of it, and of its own
 // quote only the state and the id — the rest is a post of its own, opened as one.
+//
+// **Nothing here is kept with the quoting post** (#293). What an item keeps of its quote is its
+// reference: the state, and which post where it may be shown. The quoted post is an item of its
+// own from the moment it arrives — it comes in beside the status that quotes it
+// (`Note.brought`) — and `Quote` and `QuotedPost` are what a row is handed to draw: the
+// reference, and the held post read as what a quote shows of one.
 
 /// A post's quote of another post, as its source said it.
 public struct Quote: Hashable, Sendable {
@@ -43,8 +49,8 @@ public struct Quote: Hashable, Sendable {
     }
 
     public let state: State
-    /// The quoted post, where the state is `accepted` and the source handed it over in full.
-    /// Nothing otherwise — including where a source sent it beside a state that may not be shown.
+    /// The quoted post, where the state is `accepted` and whoever made this had it to hand: the
+    /// held item, for a row. Nothing otherwise — including beside a state that may not be shown.
     public let post: QuotedPost?
     /// The quoted post's id on the source it came through, where the state is `accepted`: what
     /// opens a quote that came with an id alone. Nothing otherwise.
@@ -80,12 +86,19 @@ public struct QuotedPost: Hashable, Sendable {
     public let reply: Reply?
     /// The quoted post's own quote, one level down: its state and its id, and nothing of it.
     public let quoting: NestedQuote?
+    /// When its source says the quoted post was last changed, and the language it says it is
+    /// in. Not drawn in a quote — **carried so the copy that comes beside a quoting status is a
+    /// copy like any other to the store** (#286, #293): one that says a later change than the
+    /// item held revises it, keeping what it said, and does not take its language away.
+    public let editedAt: Date?
+    public let language: String?
 
     public init(
         id: String, statusID: String? = nil, author: String, handle: String, body: String,
         postedAt: Date, avatarURL: URL? = nil, attachments: [Attachment] = [],
         sensitive: Bool? = nil, spoiler: String? = nil, emojis: [CustomEmoji] = [],
-        url: URL? = nil, audience: Audience? = nil, reply: Reply? = nil, quoting: NestedQuote? = nil
+        url: URL? = nil, audience: Audience? = nil, reply: Reply? = nil, quoting: NestedQuote? = nil,
+        editedAt: Date? = nil, language: String? = nil
     ) {
         self.id = id
         self.statusID = statusID
@@ -102,6 +115,8 @@ public struct QuotedPost: Hashable, Sendable {
         self.audience = audience
         self.reply = reply
         self.quoting = quoting
+        self.editedAt = editedAt
+        self.language = language
     }
 
     /// A note read as the post it quotes: what a row draws of it, its own quote cut to one level.
@@ -111,23 +126,29 @@ public struct QuotedPost: Hashable, Sendable {
             body: note.body, postedAt: note.postedAt, avatarURL: note.avatarURL,
             attachments: note.attachments, sensitive: note.sensitive, spoiler: note.spoiler,
             emojis: note.emojis, url: note.url, audience: note.audience, reply: note.reply,
-            quoting: note.quote.map { NestedQuote(state: $0.state, statusID: $0.statusID) }
+            quoting: note.quote.map { NestedQuote(state: $0.state, statusID: $0.statusID) },
+            editedAt: note.editedAt, language: note.language
         )
     }
 
     /// Whether the author covered it. `DummyItem.covered`'s rule: a yes, or a line.
     public var covered: Bool { sensitive == true || !(spoiler ?? "").isEmpty }
 
-    /// This post as a note of its own, through `source` — **held aside** and arrived through no
-    /// timeline, so holding it never grows All. Its own quote is its id alone, which a read of
-    /// the post itself fills in.
+    /// This post as a note of its own, through `source` — an item like any other (#296): it has
+    /// the source's own time for it, its ID, its source and its words. It arrived through no
+    /// category, so a rule on one does not show it; All does. Fewer facts than a copy read as
+    /// itself — no counts, nothing of what the reader did — which the next copy that is fills in. Its own quote is
+    /// its id alone, which a read of the post itself fills in.
     public func note(through source: Source) -> Note {
         Note(
             id: id, source: source, author: author, handle: handle, body: body,
-            postedAt: postedAt, categories: [], reply: reply, audience: audience,
+            postedAt: postedAt, categories: [], audience: audience,
             avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
-            emojis: emojis, url: url, statusID: statusID, holding: .aside,
-            quote: quoting.map { Quote(state: $0.state, statusID: $0.statusID) }
+            emojis: emojis, url: url, statusID: statusID, editedAt: editedAt, language: language,
+            refs: [
+                reply.map { Reference.answers($0.inReplyToId, to: $0.handle) },
+                quoting.map { Reference.quotes($0.state, statusID: $0.statusID) },
+            ].compactMap { $0 }
         )
     }
 }
@@ -144,36 +165,10 @@ public struct NestedQuote: Hashable, Sendable {
     }
 }
 
-extension Quote {
-    /// The quote a later copy of the same post states, laid over the one held (#214).
-    ///
-    /// **The later copy wins**, as a count does: a quote's state is the source's latest word on
-    /// it, so a quote taken back, deleted, blocked or muted since is drawn as that — and nothing of
-    /// the quoted post with it — and one pending is accepted when the source says so. A copy that
-    /// says nothing of a quote leaves the held one. **The one exception is the same quote said
-    /// again**: accepted both times, of the same post, where the later copy came as an id alone
-    /// (the quoted post's own copy, held aside) — the held post stays rather than being lost.
-    static func later(_ later: Quote?, over held: Quote?) -> Quote? {
-        guard let later else { return held }
-        guard let held, later.state == .accepted, held.state == .accepted,
-              later.statusID == nil || held.statusID == nil || later.statusID == held.statusID
-        else { return later }
-        return Quote(
-            state: .accepted, post: later.post ?? held.post, statusID: later.statusID ?? held.statusID
-        )
-    }
-}
-
 extension Note {
-    /// The post this one quotes, as a note of its own through the same source — **held aside**,
-    /// so opening it works with the network off and it never grows All. Nothing where the quote
-    /// may not be shown.
-    public var quotedNote: Note? {
-        quote?.post?.note(through: source)
-    }
-
-    /// The row the quoted post is, where it is here to open.
+    /// The row the quoted post is, where its source handed it over: the name this item's quote
+    /// refers to it by, looked up within this item's own source and never an address.
     public var quotedKey: NoteKey? {
-        quote?.post.map { NoteKey(host: source.host, id: $0.id) }
+        quotesReference?.id.map { NoteKey(host: source.host, id: $0) }
     }
 }

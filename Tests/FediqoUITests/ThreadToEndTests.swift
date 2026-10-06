@@ -94,8 +94,8 @@ struct ThreadToEndTests {
                 "each page asked of the forum once, at its own address")
     }
 
-    @Test("Each page lands in the store first, held aside, and no timeline grows by it")
-    func eachPageLandsInTheStoreAside() async {
+    @Test("Each page of a forum topic lands in the store first; where the page gives its replies no date they are parts of the topic, and no timeline grows by them")
+    func eachPageLandsInTheStore() async {
         let session = await forumShell(FixtureHTTP(Self.threePages))
         await session.posts.fetchReplies(Self.ref)
         await session.posts.more(Self.ref)
@@ -105,7 +105,7 @@ struct ThreadToEndTests {
             host: Self.forum, idPrefix: DiscuzPost.heldPrefix(host: Self.forum, tid: Self.tid)
         )
         #expect(held.count == 4, "every reply read is written down")
-        #expect(held.allSatisfy { $0.holding == .aside })
+        #expect(held.allSatisfy { $0.isTopicReply })
         #expect(session.notes.map(\.id) == ["discuz:\(Self.forum):\(Self.tid)"], "All holds the thread, not its replies")
         #expect(await session.keptReplies(host: Self.forum, tid: Self.tid).map(\.pid) == [2, 3, 4, 5])
     }
@@ -263,17 +263,53 @@ struct ThreadToEndTests {
         #expect(await http.paths.count == 2, "the end asks nothing")
     }
 
-    @Test("A conversation's answers land in the store aside, and All does not grow by them")
-    func answersLandAside() async {
+    @Test("A conversation's answers land in the store as items, and each stands in All")
+    func answersStandInAll() async {
         let (session, item) = await conversationShell(FixtureHTTP(Self.cutShort))
         await session.conversations.open(item, in: session)
         await session.conversations.more(item, in: session)
 
         for id in ["10", "11", "12", "13"] {
             let key = NoteKey(host: Self.host, id: "https://\(Self.host)/users/ada/statuses/\(id)")
-            #expect(await session.store.note(key)?.holding == .aside, "answer \(id) is held")
+            #expect(await session.store.note(key)?.categories.isEmpty == true, "answer \(id) is held, through no category")
+            #expect(await session.store.all().contains { $0.key == key }, "answer \(id) stands in All")
         }
-        #expect(session.notes.count == 1, "All holds the post and nothing read around it")
+        await session.reloadFromStore()
+        #expect(session.notes.count == 5, "All holds the post and each answer read")
+    }
+
+    /// The rows the timeline made of `rules` draws, with that timeline in front.
+    private func drawn(_ rules: [Rule?], in session: ShellSession) -> Set<String> {
+        let timeline = TimelineDefinition(name: "T", rules: rules.compactMap { $0 })
+        session.written = [timeline]
+        session.timelineID = .written(timeline.id)
+        defer { session.timelineID = .all }
+        return Set(session.timelineItems(latest: nil).map(\.id))
+    }
+
+    @Test("An answer read stands at its own time in All; a timeline made of a category alone does not show it, and one whose rule is its author or a word in it does")
+    func answersGoThroughTheRulesThatLetThemThrough() async throws {
+        let (session, item) = await conversationShell(FixtureHTTP(Self.cutShort))
+        await session.conversations.open(item, in: session)
+        await session.conversations.more(item, in: session)
+        await session.reloadFromStore()
+        let answers = Set(["10", "11", "12", "13"].map {
+            NoteKey(host: Self.host, id: "https://\(Self.host)/users/ada/statuses/\($0)").rowID
+        })
+        let sources = session.sources
+
+        session.timelineID = .all
+        let all = session.timelineItems(latest: nil)
+        #expect(Set(all.map(\.id)) == answers.union([item.id]))
+        let published = try #require(ISO8601DateFormatter().date(from: "2024-01-01T00:00:00Z"))
+        #expect(all.filter { answers.contains($0.id) }.allSatisfy { $0.postedAt == published }, "at the time each was posted, not the time it was read")
+        #expect(all.first?.id != item.id && all.last?.id == item.id, "newest first: the answers stand above the older post they answer")
+
+        #expect(drawn([.category(.home, in: .every, sources: sources)], in: session).isEmpty, "none of them came through Home")
+        #expect(drawn([.category(.public, in: .every, sources: sources)], in: session) == [item.id], "nor through Public: the post alone")
+        #expect(drawn([.author("ada@\(Self.host)", in: .every, sources: sources)], in: session) == answers.union([item.id]))
+        #expect(drawn([.keyword("answer", in: .every)], in: session) == answers)
+        #expect(drawn([.source(Self.host)], in: session) == answers.union([item.id]))
     }
 
     @Test("A post that says it has answers beyond what one ask brings, but is the post itself, is the end")
@@ -456,7 +492,7 @@ struct ThreadToEndTests {
         #expect(await session.store.held(host: Self.forum, idPrefix: "discuz:").contains { $0.body == "独一无二的词" },
                 "kept on this device")
         let search = ShellSearch()
-        search.open(from: nil, over: session.searchable)
+        search.open(from: nil, over: session.notes)
         await search.indexed()
         search.text = "独一无二"
         search.settle("独一无二")
@@ -466,7 +502,7 @@ struct ThreadToEndTests {
         let (mastodon, item) = await conversationShell(FixtureHTTP(Self.cutShort))
         await mastodon.conversations.open(item, in: mastodon)
         await mastodon.reloadFromStore()  // what following the store does on the app's own
-        #expect(mastodon.searchable.contains { $0.body == "answer 10" })
+        #expect(mastodon.notes.contains { $0.body == "answer 10" })
     }
 
     @Test("Closing one thread stops its own page, and not the one opened in its place")

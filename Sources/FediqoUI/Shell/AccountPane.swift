@@ -672,27 +672,42 @@ struct AccountPane: View {
     /// worse off than before the question existed. One press puts the question instead.
     @ViewBuilder
     private var askedAgain: some View {
-        let hosts = Self.askedAgain(session.sources, in: session.mastodon)
+        standing(
+            Self.askedAgain(session.sources, in: session.mastodon),
+            line: "account.sources.writing.again.line", help: "account.sources.writing.again",
+            choose: "account.sources.writing.again.choose", press: askWriting
+        )
+        // The newer question, to a sign-in that already acts (#285): the same sentence shape, and
+        // a press that puts the bookmark question itself — one press, no choice to make, and no
+        // way to narrow the sign-in by it.
+        standing(
+            Self.askedForBookmarks(session.sources, in: session.mastodon),
+            line: "account.sources.bookmarks.again.line", help: "account.sources.bookmarks.again",
+            choose: "account.sources.bookmarks.again.choose", press: askBookmarks
+        )
+    }
+
+    /// One standing sentence about `hosts`, and the control that puts its question to each.
+    @ViewBuilder
+    private func standing(
+        _ hosts: [String], line lineKey: String, help helpKey: String, choose chooseKey: String,
+        press: @escaping (String) -> Void
+    ) -> some View {
         if !hosts.isEmpty {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 let named = hosts.joined(separator: ", ")
-                let line = String(format: L10n.t("account.sources.writing.again.line"), named)
+                let line = String(format: L10n.t(lineKey), named)
                 Text(line)
                     .shellFont(.meta)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
-                    .shellHelp(
-                        verbatim: String(format: L10n.t("account.sources.writing.again"), named),
-                        about: line
-                    )
+                    .shellHelp(verbatim: String(format: L10n.t(helpKey), named), about: line)
                 // One per source and not one for the list: the question is about one server's
                 // sign-in, and a single control would have to ask which — which is the dialog
                 // asked twice.
                 ForEach(hosts, id: \.self) { host in
-                    Button(String(format: L10n.t("account.sources.writing.again.choose"), host)) {
-                        askWriting(host)
-                    }
-                    .shellFont(.meta)
+                    Button(String(format: L10n.t(chooseKey), host)) { press(host) }
+                        .shellFont(.meta)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -721,6 +736,13 @@ struct AccountPane: View {
     /// `widest`'s grounds.
     static func askedAgain(_ sources: [Source], in mastodon: MastodonSessions) -> [String] {
         sources.map(\.host).filter { mastodon.grants[$0] == .unasked }
+    }
+
+    /// The sources on this page whose sign-in reads and acts and was made before bookmarks were
+    /// asked for (#285) — `askedAgain`'s list for the newer question, drawn the same way and
+    /// answered by the same press. Never one of `askedAgain`'s: that sign-in is asked everything.
+    static func askedForBookmarks(_ sources: [Source], in mastodon: MastodonSessions) -> [String] {
+        sources.map(\.host).filter { mastodon.bookmarks(host: $0) == .unasked }
     }
 
     /// The control set of the widest row in this list — decision 33's one-threshold rule.
@@ -827,6 +849,14 @@ struct AccountPane: View {
     /// second surface for the question and not a third behaviour on the first.
     func askWriting(_ host: String) {
         session.signInChoice = host
+    }
+
+    /// The bookmark sentence's own control (#285): it puts the bookmark question about `host`,
+    /// the one a post's row puts, and signs nobody out to do it. Nothing where that sign-in is no
+    /// longer one to ask.
+    func askBookmarks(_ host: String) {
+        guard session.mastodon.bookmarks(host: host) == .unasked else { return }
+        session.bookmarkAsk = host.lowercased()
     }
 
     /// The reader answered the scope question: sign in on the server's page, asking for what they

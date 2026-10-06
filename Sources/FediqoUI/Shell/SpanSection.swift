@@ -54,7 +54,11 @@ struct SpanSection: View {
                         // Counted at the press, as `GoneSection` counts: nothing to let go is
                         // said on the row, anything is asked about by its count now.
                         let counted = await session.spanHeld(ask.span, host: ask.host)
-                        if counted == 0 { count = 0 } else { asking = ask.counting(counted) }
+                        if counted == 0 {
+                            count = 0
+                        } else {
+                            asking = ask.counting(counted, kept: await session.spanKept(ask.span, host: ask.host))
+                        }
                     }
                 }
                 .disabled((count ?? 0) == 0)
@@ -140,6 +144,8 @@ struct SpanSection: View {
 /// many posts the store counted for them at the press — what the question names.
 struct SpanAsk: Equatable {
     var posts = 0
+    /// How many posts of those days and that source the person keeps, which stay (#294).
+    var kept = 0
     let from: Date
     let to: Date
     let host: String?
@@ -147,18 +153,24 @@ struct SpanAsk: Equatable {
     var span: Range<Date> { SpanSection.span(from: from, to: to) }
 
     /// The same ask, with the count the store gave.
-    func counting(_ posts: Int) -> SpanAsk {
+    func counting(_ posts: Int, kept: Int = 0) -> SpanAsk {
         var counted = self
         counted.posts = posts
+        counted.kept = kept
         return counted
     }
 }
 
 extension ShellSession {
     /// How many posts `span` holds from `host`, or from every host where nil — what the press
-    /// would let go (#248), read off the store so the rows held aside are counted too.
+    /// would let go (#248), read off the store so a forum topic's kept replies are counted too.
     func spanHeld(_ span: Range<Date>, host: String?) async -> Int {
         await store.count(span: span, host: host)
+    }
+
+    /// How many kept posts `span` holds from `host`: what the press would leave (#294).
+    func spanKept(_ span: Range<Date>, host: String?) async -> Int {
+        await store.keptCount(span: span, host: host)
     }
 
     /// Lets go of the posts of `span` from `host`, or from every host where nil — the reader's

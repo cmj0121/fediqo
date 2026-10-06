@@ -179,18 +179,19 @@ public struct MastodonAccount: Sendable {
         _ path: String, source: Source, category: Category, olderThan maxID: String? = nil
     ) async throws -> [Note] {
         try await listed(path, source: source, category: category, query: try MastodonPage.older(than: maxID))
-            .map(\.note)
+            .landing
     }
 
     /// One page, each post with the id the timeline lists it under — a boost's own.
     private func listed(
         _ path: String, source: Source, category: Category, query: [URLQueryItem]
     ) async throws -> [Listed] {
+        let sent = ReadMoment.now()
         let data = try await reading(category).get(
             path: path, query: [URLQueryItem(name: "limit", value: String(MastodonReadOn.limit))] + query
         )
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
-            $0.listed(source: source, category: category)
+            $0.listed(source: source, category: category, sent: sent)
         }
     }
 

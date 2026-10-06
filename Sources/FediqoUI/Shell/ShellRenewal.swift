@@ -38,9 +38,8 @@ extension ShellReload {
             // where this device already holds what it said.
             await session.blogs.open(item)
         } else {
+            // A thread read earlier this run is drawn from what is held now by the same call.
             await session.conversations.open(item, in: session)
-            // A thread read earlier this run, drawn from what is held now.
-            if inFront?.id == item.id { session.renewConversation() }
             // A quote post kept before quotes were read, read again so its quote shows (#214).
             if inFront?.id == item.id { await readQuoteIfHeldBefore(item, in: session) }
         }

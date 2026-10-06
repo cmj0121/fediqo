@@ -31,6 +31,19 @@ public actor ItemStore {
     /// run's, and the answer they give is.
     private var arrival: [NoteKey: Int] = [:]
     private var arrivals = 0
+    /// Where in the run's order the reader's own act on each post last landed (#291): the answer
+    /// to a favourite, a boost or a bookmark, put or taken back. A copy of that post sent before
+    /// it (`Note.asked`) leaves what the row says the reader did.
+    ///
+    /// **For the run, and never written down**: a relaunch has no read on its way, so there is
+    /// nothing left for a place to be compared with. A post acted on is marked for as long as the
+    /// run lasts, its row gone or not — one number a post, for the posts one reader pressed.
+    private var acted: [NoteKey: UInt64] = [:]
+    /// Where in the run's order the reader's marks were last taken off each host's posts
+    /// (`forgetReaderMarks`): a sign-in there ended, or became somebody else's. A copy from that
+    /// host sent before it was read as the reader who has gone, and says nothing of this one —
+    /// on every post of the host, acted on or not (#291). For the run, as `acted` is.
+    private var swept: [String: UInt64] = [:]
     /// The oldest a note may be posted and still be held, or nil to keep everything forever —
     /// the default. The reader's drop by time (#7), held here so every way in obeys it.
     private(set) var retention: Date?
@@ -39,15 +52,15 @@ public actor ItemStore {
     /// new in it. Starts at 0 for any store, a relaunched one included. **A count recounted is
     /// the one change it does not move** (#208): that is drawn now and written with the next.
     public private(set) var revision = 0
-    /// Counts the changes to what `all()` draws, which is fewer than `revision`'s (#175): a
-    /// source's boards restated, or a post held aside, is a change a save writes and no timeline
-    /// shows. A reader that has adopted `all()` at this count has nothing new to adopt.
+    /// Counts the changes to what `all()` hands over, which is fewer than `revision`'s (#175): a
+    /// source's boards restated, or a forum topic's reply kept, is a change a save writes and no
+    /// timeline shows. A reader that has adopted `all()` at this count has nothing new to adopt.
     public private(set) var drawn = 0
-    /// Counts the changes to what `aside()` hands over (#176): a row held aside arriving, changing
-    /// or going, or widening into one a timeline draws. A reader that has adopted `aside()` at
-    /// this count has nothing new to adopt — so a landing only the timelines see does not make a
-    /// search read every row held aside again.
-    public private(set) var asideRevision = 0
+    /// Counts the changes to what `replies()` hands over: a forum topic's reply kept, changed or
+    /// gone. A reader that has adopted `replies()` at this count has nothing new to adopt — so a
+    /// timeline landing, which is most changes, does not make the count of what is held read
+    /// every kept reply again, and a page of a topic read does not replace every row of All.
+    public private(set) var repliesRevision = 0
     /// Everyone listening for a change. See `changes()`.
     private var listeners: [UUID: AsyncStream<Int>.Continuation] = [:]
 
@@ -81,17 +94,17 @@ public actor ItemStore {
 
     /// Something here changed: the revision moves and everyone listening is told. **The one place
     /// either happens**, so a call that tells a saver it changed cannot forget to tell a screen.
-    /// `shown` says whether it changed what `all()` draws too, and moves `drawn` where it did;
-    /// `aside` the same of what `aside()` hands over, and `asideRevision`. **Both said at every
-    /// call**, so a change added later has to answer for the rows held aside rather than fall
-    /// silent about them by default.
+    /// `shown` says whether it changed what `all()` hands over too, and moves `drawn` where it
+    /// did; `replies` the same of what `replies()` hands over, and `repliesRevision`. **Both said
+    /// at every call**, so a change added later has to answer for a topic's kept replies rather
+    /// than fall silent about them by default.
     ///
     /// `kept` false is a change nothing need write down (#208): the screens are told and renewed,
     /// and the revision a saver reads stays where it is, so no save is made for it alone.
-    private func changed(shown: Bool, aside: Bool, kept: Bool = true) {
+    private func changed(shown: Bool, replies: Bool, kept: Bool = true) {
         if kept { revision += 1 }
         if shown { drawn += 1 }
-        if aside { asideRevision += 1 }
+        if replies { repliesRevision += 1 }
         for listener in listeners.values { listener.yield(revision) }
     }
 
@@ -103,6 +116,10 @@ public actor ItemStore {
     /// app that does not open. So the rules `add` and `ingest` keep hold here too: one source per
     /// host, the first one winning as `add` has it, and one row per `NoteKey`, the later copy
     /// winning outright — a snapshot is one moment written once, not two reads to merge.
+    ///
+    /// **A row that still owes a load comes in still owing it** (`Note.refsDue`, #293): the last
+    /// run did not get to it, and this one asks for it — within the pace every load keeps
+    /// (`LoadPacer`). Only a store laid in whole from elsewhere owes nothing (`replace`).
     public init(sources: [Source], notes incoming: [Note], said: [SourceProfile] = []) {
         for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
             sourceList.append(source)
@@ -113,7 +130,13 @@ public actor ItemStore {
         for profile in said where Self.isWord(profile) && hosts.contains(profile.host) {
             saidByHost[profile.host] = profile
         }
-        notes = Dictionary(incoming.map { ($0.key, $0) }, uniquingKeysWith: { _, new in new })
+        notes = Dictionary(incoming.map { note in
+            // A row holds nothing of another post (`Note.brought`): what a snapshot's rows
+            // refer to is among its rows, or is not held.
+            var row = note
+            row.brought = []
+            return (row.key, row)
+        }, uniquingKeysWith: { _, new in new })
         // The order the rows are handed over is the order they arrived in: the run that wrote
         // this snapshot wrote them oldest first. A row named twice keeps the first mention's
         // place, the way `ingest` keeps a row's place when it is met again.
@@ -121,6 +144,38 @@ public actor ItemStore {
             arrival[note.key] = arrivals
             arrivals += 1
         }
+        // What the file says is owed is settled against what the file holds (#293): a post
+        // waited for that is here is named and no longer owed, and a row that could never have
+        // owed — a reblog, one with nothing to ask for — does not go on saying it does.
+        Self.settleOwing(in: &notes, of: nil)
+        // A reply kept before replies were items says what board it came through (#297).
+        for (key, note) in notes where note.source.kind == .discuz {
+            let through = Self.throughItsBoard(note, in: notes)
+            if through.categories != note.categories { notes[key] = through }
+        }
+    }
+
+    /// `note` as it arrived, **through its topic's board where it is a forum's dated reply**
+    /// (#297): a reply is read off its topic's page, and the topic is in a board, so a rule on
+    /// that board shows the reply as it shows the topic. Only a board — a topic the ranking
+    /// lists named arrived as Trends, and its replies did not. Anything else is as it was; so
+    /// is a reply whose topic is not held, which then says no board until it is read again
+    /// beside one. A topic that gains a board later passes it on then (`admit`).
+    /// The boards among `categories`, and nothing else.
+    private static func boards(of categories: Set<Category>) -> Set<Category> {
+        categories.filter { category in
+            if case .board = category { return true }
+            return false
+        }
+    }
+
+    private static func throughItsBoard(_ note: Note, in notes: [NoteKey: Note], or landing: [NoteKey: Note] = [:]) -> Note {
+        guard let topic = note.topicKey, !note.isPartOfTopic, let held = notes[topic] ?? landing[topic] else { return note }
+        let boards = Self.boards(of: held.categories)
+        guard !boards.isSubset(of: note.categories) else { return note }
+        var through = note
+        through.categories.formUnion(boards)
+        return through
     }
 
     /// Everything here replaced by `sources` and `notes` in one hop — what a read back leaves
@@ -128,7 +183,18 @@ public actor ItemStore {
     /// adopt it, with the same rules `init(sources:notes:)` keeps. The keep window stays the
     /// reader's and is applied to what comes in; every screen is told, and the watcher of the
     /// sources hears the new list.
-    public func replace(sources: [Source], notes incoming: [Note], said: [SourceProfile] = []) {
+    ///
+    /// **No row comes in still owing a load** (`Note.refsDue`, #293). What another device had
+    /// yet to ask its sources for is not this device's to ask: a store that arrived with every
+    /// row marked would otherwise be a request a row to the person's own servers, set off by
+    /// whoever made the package.
+    public func replace(sources: [Source], notes arriving: [Note], said: [SourceProfile] = []) {
+        let incoming = arriving.map { note in
+            var settled = note
+            settled.refsDue = false
+            settled.brought = []
+            return settled
+        }
         sourceList = []
         for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
             sourceList.append(source)
@@ -138,8 +204,16 @@ public actor ItemStore {
         for profile in said where Self.isWord(profile) && hosts.contains(profile.host) {
             saidByHost[profile.host] = profile
         }
+        // A kept row comes in whatever its age (#284): the window is a limit, and keep wins.
+        // **And so does what a row that comes in shows** (#214, #290), by `letGoBeyond`'s rule:
+        // the post a kept or in-window item quotes or reblogs, never a reblog. Without it a
+        // store read back would arrive with a kept reblog saying its post is not held.
+        let entering = incoming.filter { $0.kept || withinRetention($0) }
+        let reblogs = Set(incoming.lazy.filter(\.isReblog).map(\.key))
+        let shown = Set(entering.flatMap(\.heldWith)).subtracting(reblogs)
         notes = Dictionary(
-            incoming.filter(withinRetention).map { ($0.key, $0) }, uniquingKeysWith: { _, new in new }
+            incoming.filter { $0.kept || withinRetention($0) || shown.contains($0.key) }.map { ($0.key, $0) },
+            uniquingKeysWith: { _, new in new }
         )
         arrival = [:]
         arrivals = 0
@@ -148,7 +222,7 @@ public actor ItemStore {
             arrivals += 1
         }
         sourcesWatcher?(sourceList.map(\.host))
-        changed(shown: true, aside: true)
+        changed(shown: true, replies: true)
     }
 
     /// Whether `note` is inside the reader's keep window.
@@ -172,7 +246,7 @@ public actor ItemStore {
         if sourceList.contains(where: { $0.host == source.host }) { return }
         sourceList.append(source)
         sourcesWatcher?(sourceList.map(\.host))
-        changed(shown: false, aside: false)
+        changed(shown: false, replies: false)
     }
 
     /// Restates which boards a source is subscribed to, where that source is here.
@@ -194,7 +268,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: boards, lists: existing.lists
         )
-        changed(shown: false, aside: false)
+        changed(shown: false, replies: false)
     }
 
     /// Restates which Mastodon lists a source reads — a choice, or the same lists relabelled with
@@ -207,7 +281,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
         )
-        changed(shown: false, aside: false)
+        changed(shown: false, replies: false)
     }
 
     /// Gives the lists a source reads **now** the names in `names`, by id. Only relabels: a list
@@ -222,7 +296,7 @@ public actor ItemStore {
         sourceList[index] = Source(
             host: existing.host, kind: existing.kind, boards: existing.boards, lists: lists
         )
-        changed(shown: false, aside: false)
+        changed(shown: false, replies: false)
     }
 
     /// `ingest(_:)`, only while `host` is still a source here — in the same step, so a source
@@ -231,20 +305,6 @@ public actor ItemStore {
         let host = host.lowercased()
         guard sourceList.contains(where: { $0.host == host }) else { return }
         ingest(incoming)
-    }
-
-    /// Takes in posts this device went and fetched for one place — a search, a thread, a
-    /// hashtag — **held aside**: `note(_:)` hands each over and a save writes it, and `all()` never
-    /// draws it (#175). `ingest(_:ifSourceHere:)` in every other respect, the one way such a post
-    /// gets in, so no caller spells `Holding` for itself.
-    ///
-    /// A post already here as one a timeline brought stays one: holding only ever widens.
-    public func hold(_ incoming: [Note], ifSourceHere host: String) {
-        ingest(incoming.map { note in
-            var aside = note
-            aside.holding = .aside
-            return aside
-        }, ifSourceHere: host)
     }
 
     /// Takes notes in. The same item through one source stays one row: the first copy wins and
@@ -261,7 +321,7 @@ public actor ItemStore {
     /// reading it, every minute, for nothing. `refresh`, `keep` and `setRetention` already only
     /// speak when something really moved; this is the fourth.
     ///
-    /// **A post that quotes another brings the quoted post with it, held aside** (#214): opening
+    /// **A post that quotes another brings the quoted post with it, as an item of its own** (#214): opening
     /// the quote finds it here with the network off, and no timeline draws it for having been
     /// quoted. One place, so every way a post gets in — a timeline, a search, a thread — does it.
     ///
@@ -274,57 +334,184 @@ public actor ItemStore {
 
     /// `ingest(_:)`'s landing. `exempt` takes `incoming` in whatever its age: the posts a post
     /// read again quotes (#214), which the keep window does not cut while it quotes them.
-    private func admit(_ incoming: [Note], exempt: Bool) {
+    private func admit(_ incoming: [Note], exempt: Bool, owing: Bool = true) {
         guard !incoming.isEmpty else { return }
-        let admitted = exempt ? incoming : incoming.filter(withinRetention)
-        let incoming = admitted + admitted.compactMap(\.quotedNote)
+        // A copy of a row the person keeps is taken in whatever its age (#284): the row is here
+        // past the window, and what its source says of it now is still news about it.
+        // Nothing but a convention carries `Note.asked` from where a status is read to here
+        // (#291), so a debug build checks it: a copy that says what the reader did says when it
+        // was sent. A release build takes such a copy as `outrun` says — for the older.
+        assert(
+            incoming.allSatisfy { note in
+                !note.source.kind.saysReaderMarks || note.asked.place != nil
+                    || (note.boosted == nil && note.favourited == nil && note.bookmarked == nil)
+            },
+            "a copy saying what the reader did reached the store without when it was sent"
+        )
+        // **The post a reblog reblogs is taken in with the reblog, whatever its own age** (#290),
+        // as the post a post quotes is (#214): a reblog made today of a post from last year
+        // stands in the window by its own time, and a row that could not show what it reblogs
+        // would be a reblog of nothing.
+        //
+        // **And the post a reblog brought is not taken in without it.** A reblog older than the
+        // window is refused; the post it carried came through no timeline of its own, and taken
+        // in alone it would stand in All with nothing saying why it is here. So it is refused
+        // with its reblog — unless it is already held, or another copy of it in this landing
+        // arrived on its own.
+        let fresh = exempt ? incoming : incoming.filter { withinRetention($0) || notes[$0.key]?.kept == true }
+        let reblogged = Set(fresh.compactMap(\.reblogKey))
+        let orphaned = exempt ? [] : Set(incoming.compactMap(\.reblogKey)).subtracting(reblogged)
+        let admitted = exempt ? incoming : incoming.filter { note in
+            if reblogged.contains(note.key) { return true }
+            guard withinRetention(note) || notes[note.key]?.kept == true else { return false }
+            return !(orphaned.contains(note.key) && note.categories.isEmpty && notes[note.key] == nil)
+        }
+        // **What an item refers to and brought with it is taken in with it** (#214, #293): the
+        // post a post quotes, where its source sent that post along — at no request. It is an
+        // item like any other from here, and one taken in this way owes no load of its own:
+        // what is loaded for an item is the item's direct target and nothing further.
+        let brought = admitted.flatMap(\.brought)
+        // Its topic as held, or as this same landing brings it.
+        let landing = Dictionary((admitted + brought).map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        let incoming = (admitted + brought).map { Self.throughItsBoard($0, in: notes, or: landing) }
+        var arrived: [NoteKey] = []
+        // Forum topics this landing showed to be in a board they were not held under (#297).
+        var boarded: Set<NoteKey> = []
         var moved = false
         var recounted = false
         var shown = false
-        var aside = false
-        for note in incoming {
+        var replies = false
+        for (place, note) in incoming.enumerated() {
             let key = note.key
             if let existing = notes[key] {
+                // **A row does not change what it is** (#290). A reblog and a post are never one
+                // row: their ids are their source's own word, and a source that names a reblog
+                // as a post it already handed over, or the other way about, is not believed —
+                // the row held stays as it is, and the copy is not taken.
+                guard existing.isReblog == note.isReblog else { continue }
                 let categories = existing.categories.union(note.categories)
-                let holding = existing.holding.widened(by: note.holding)
                 let listed = existing.listed.later(note.listed)
                 // What the held copy never said, this one may (#208): a row kept before its
                 // audience was written down takes it from the next timeline that brings it.
-                var merged = existing.filled(from: note)
+                // …except what it says the reader did, where it was sent before their own act on
+                // the post landed (#291): a reload on its way when they pressed.
+                var merged = existing.filled(from: note, marksStand: outrun(note))
+                // **Its source has changed it since this row was read** (#286): the row says what
+                // the post says now, where it stood, and keeps what it said. A copy that is the
+                // older of the two — a read still on its way when a later one landed — changes no
+                // word of it.
+                if note.isLater(than: existing) { merged = merged.revised(by: note, was: existing) }
                 // The same source handing the post over again is the source having it (#179):
                 // a mark it once earned comes off.
-                let kept = categories != existing.categories || holding != existing.holding
+                let kept = categories != existing.categories
                     || listed != existing.listed || existing.goneSince != nil || merged != existing
                 // The counts this copy states are the source's figure now (#208), and a later
                 // figure than the one held.
                 merged.counts = note.counts.filled(from: existing.counts)
                 guard kept || merged.counts != existing.counts else { continue }
                 merged.categories = categories
-                merged.holding = holding
                 merged.listed = listed
                 merged.goneSince = nil
                 notes[key] = merged
-                shown = shown || holding == .arrived
-                // Held aside before: it changed there, or it widened out of there.
-                aside = aside || existing.holding == .aside
+                if existing.source.kind == .discuz, Self.boards(of: categories) != Self.boards(of: existing.categories) {
+                    boarded.insert(key)
+                }
+                shown = shown || !merged.isPartOfTopic
+                replies = replies || merged.isPartOfTopic
                 if kept { moved = true } else { recounted = true }
             } else {
+                var note = note
+                note.asked = .unsaid
+                // What came with it is taken in beside it, above, and is no part of the row.
+                note.brought = []
+                // Never a load a copy brought in with it, from a file or another device.
+                note.refsDue = false
                 notes[key] = note
+                if owing, place < admitted.count { arrived.append(key) }
                 arrival[key] = arrivals
                 arrivals += 1
-                shown = shown || note.holding == .arrived
-                aside = aside || note.holding == .aside
+                shown = shown || !note.isPartOfTopic
+                replies = replies || note.isPartOfTopic
                 moved = true
             }
+        }
+        // **A row held from before a reblog was an item** (#290) is the post, saying it arrived as
+        // a reblog by somebody. Now that the reblog itself is here, it says so for itself: the
+        // post's row stops saying it, and what that timeline listed — the reblog's own id, and
+        // any place it is not whole there — is the reblog's to carry.
+        for reblog in incoming where reblog.isReblog {
+            guard let key = reblog.reblogKey, let post = notes[key], post.arrived(asReblogBy: reblog),
+                  var held = notes[reblog.key], held.isReblog
+            else { continue }
+            //
+            // **And the post no longer came through that timeline**, as a post a reblog brings
+            // today does not: where the id that timeline listed the post under was the reblog's
+            // own, the timeline listed the reblog. Whether it also listed the post itself, lower
+            // down, before or after, this row cannot say — a later listing replaces an earlier id
+            // (`listed.later`), and the reblog's is always the later — so the category comes off,
+            // and a read that lists the post itself puts it back. The one case that can be told
+            // is told: a copy of the post in this very landing that arrived through the timeline
+            // on its own keeps the category, under the id that copy was listed by.
+            let moving = post.listed.filter { reblog.listed[$0.key] == $0.value }
+            var plain = post.withoutArrivalAsReblog()
+            for category in moving.keys {
+                held.gaps.formUnion(plain.gaps.filter { $0.category == category })
+                plain.gaps = plain.gaps.filter { $0.category != category }
+                let own = incoming.first { $0.key == key && !$0.isReblog && $0.listed[category] != nil }
+                plain.listed[category] = own?.listed[category]
+                if own == nil { plain.categories.remove(category) }
+            }
+            notes[key] = plain
+            notes[reblog.key] = held
+            moved = true
+            shown = true
+        }
+        // **A topic found in a board passes it to the replies of it already held** (#297): they
+        // were read off its page before the topic was known to be in that board, and a timeline
+        // of that board would otherwise show the topic without replies All shows. Only where a
+        // topic's boards grew, which is rare: one pass over that forum's rows then.
+        if !boarded.isEmpty {
+            for (key, note) in notes where note.source.kind == .discuz {
+                guard let topic = note.topicKey, boarded.contains(topic) else { continue }
+                let through = Self.throughItsBoard(note, in: notes)
+                guard through.categories != note.categories else { continue }
+                notes[key] = through
+                moved = true
+                shown = true
+            }
+        }
+        // **An item that has just arrived owes a load where something it refers to is not held**
+        // (#293) — judged once, here, after the whole landing is in, so a post and the one it
+        // answers arriving together owe nothing. Only an item's first arrival: one held already,
+        // read again, asks for nothing more, and a target let go later is not asked for again.
+        if !arrived.isEmpty {
+            // The post a reblog in this landing reblogs came with it, as a quoted post does: it
+            // is what an item refers to, and owes nothing — unless it also arrived on its own.
+            let carried = Set(admitted.compactMap(\.reblogKey))
+            for key in arrived {
+                // Every arrival that refers to a post by its source's id is looked at once: the
+                // settling below names what is held and leaves owing only what is not.
+                guard let note = notes[key], note.source.kind.loadsReferences,
+                      !(carried.contains(key) && note.categories.isEmpty), !note.askable.isEmpty
+                else { continue }
+                notes[key]?.refsDue = true
+            }
+        }
+        // **And what was owed before is settled on sight** (#293): a post some held item was
+        // waiting for may be among what just landed — brought by a timeline, a thread, another
+        // item's load — and that item then owes nothing and names it, whoever fetched it.
+        if settleOwing(of: Set(incoming.map(\.key.host))) {
+            moved = true
+            shown = true
         }
         // **A landing that only recounted is drawn and not written down** (#208). A timeline read
         // every minute moves some count on nearly every page, and a save for each would be the
         // every-minute write this function exists not to make; the next change that is kept
         // carries the figures to disk with it.
         if moved {
-            changed(shown: shown, aside: aside)
+            changed(shown: shown, replies: replies)
         } else if recounted {
-            changed(shown: shown, aside: aside, kept: false)
+            changed(shown: shown, replies: replies, kept: false)
         }
     }
 
@@ -334,33 +521,83 @@ public actor ItemStore {
     /// booster (`Note.refreshed(over:)`). **A post not held is dropped**: reading one post again
     /// updates what is here, and brings in nothing the reader did not already have. Returns
     /// whether anything held really changed, so a caller adopts the store only then.
+    ///
+    /// **A copy its source says was read before the row was** (#286) changes no word of it. Its
+    /// counts still land. What it says the reader did lands only where `acted` — the source's own
+    /// answer to an act the reader has just made (`MastodonWrite`), which must never be lost to a
+    /// row that looks newer, and which no stale timeline or thread read is.
+    ///
+    /// **And `acted` marks the post as acted on, from this moment** (#291): a read sent before it
+    /// — of a timeline, the post or its thread — still lands, and says nothing of what the reader
+    /// did that this answer has not said more lately. Only an answer that arrives marks anything:
+    /// an act the source turned away never reaches here. `acted` names the mark the act moved:
+    /// that one is taken whatever the answer's age, and the other two as any copy's are.
     @discardableResult
-    public func refresh(_ incoming: [Note], ifSourceHere host: String) -> Bool {
+    public func refresh(_ incoming: [Note], ifSourceHere host: String, acted: ReaderMark? = nil) -> Bool {
         let host = host.lowercased()
         guard sourceList.contains(where: { $0.host == host }) else { return false }
         var moved = false
         var shown = false
-        var aside = false
+        var replies = false
         var held: [Note] = []
         for note in incoming where note.source.host == host {
-            guard let existing = notes[note.key] else { continue }
-            held.append(note)
+            // A row does not change what it is (#290), here as in `admit`: one post read again,
+            // a thread, an act's answer are all read as posts, and one named as a reblog this
+            // device holds is not laid over it.
+            guard let existing = notes[note.key], existing.isReblog == note.isReblog else { continue }
+            let stale = note.isEarlier(than: existing)
+            if !stale { held.append(note) }
+            // **An answer is the latest word on its own act, and on nothing else for certain**
+            // (#291). It says all three marks, and two acts on one post can be out at once: the
+            // answer to the second was sent before the first one's landed, and may say the old
+            // word for it. So the act's own mark is always taken, and the other two only where
+            // this copy is not the older — which is all a read's copy is ever taken for.
+            let older = outrun(note)
+            let own: Set<ReaderMark> = acted.map { [$0] } ?? []
+            // …and every read sent before this moment is older than the answer — marked whether
+            // or not the answer changes the row, since a read that already said as much changes
+            // nothing about which of the two is the later. After `older` is read: the answer is
+            // not older than itself.
+            if acted != nil { self.acted[note.key] = ReadMoment.now().place }
             // The same words read again are not a change (#175): a thread re-read with nothing
             // edited in it neither writes the store down again nor renews a screen.
-            let refreshed = note.refreshed(over: existing)
+            let refreshed = stale
+                ? existing.restated(by: note, taking: acted == nil || older ? own : Set(ReaderMark.allCases))
+                : note.refreshed(over: existing, taking: older ? own : Set(ReaderMark.allCases))
             guard refreshed != existing else { continue }
             notes[note.key] = refreshed
             moved = true
-            shown = shown || refreshed.holding == .arrived
-            aside = aside || refreshed.holding == .aside
+            // A reply its forum has now dated stops being a part and starts being an item
+            // (#297): both lists moved. Only here — a copy taken in beside a held row leaves
+            // the row's own date as it was, and this is what lays the later read over it.
+            shown = shown || !refreshed.isPartOfTopic
+            replies = replies || refreshed.isPartOfTopic || existing.isPartOfTopic
         }
-        if moved { changed(shown: shown, aside: aside) }
-        // The posts these quote, held aside as `ingest` holds them (#214): a quote read again may
+        if moved { changed(shown: shown, replies: replies) }
+        // The posts these quote, taken in as `ingest` takes them (#214): a quote read again may
         // name one this device has not held yet.
-        let quoted = held.compactMap(\.quotedNote)
+        let quoted = held.flatMap(\.brought)
         let before = revision
-        if !quoted.isEmpty { admit(quoted, exempt: true) }
+        // Brought by the post that quotes them, and so owing no load of their own (#293).
+        if !quoted.isEmpty { admit(quoted, exempt: true, owing: false) }
         return moved || revision != before
+    }
+
+    /// Whether the reader's own act on this post landed after the read that brought `copy` was
+    /// sent (#291), so that what the copy says they did is older than what the row says.
+    ///
+    /// **A copy that cannot say when it was sent is taken for one sent before**, on a post the
+    /// reader has acted on and nowhere else: their own act is the surer word, and a copy that
+    /// lost its moment on the way in must not be able to undo it. Every read of a source that
+    /// says what the reader did says when it was sent (`StatusDTO.asNote`).
+    ///
+    /// **And so is a copy sent before a sign-in to its host ended** (`swept`), on any post of
+    /// that host: it was read as a reader who has gone, and its marks are theirs.
+    private func outrun(_ copy: Note) -> Bool {
+        let key = copy.key
+        guard let landed = [acted[key], swept[key.host]].compactMap({ $0 }).max() else { return false }
+        guard let sent = copy.asked.place else { return true }
+        return sent < landed
     }
 
     /// Keeps a forum row's opening post as just read, with the row (#154). Only for rows held,
@@ -374,26 +611,26 @@ public actor ItemStore {
     @discardableResult
     public func keep(_ openings: [NoteKey: ForumOpening], shown: Bool = false) -> Bool {
         var moved = false
-        var aside = false
+        var replies = false
         for (key, opening) in openings {
             guard let held = notes[key], held.opening != opening,
                   sourceList.contains(where: { $0.host == key.host })
             else { continue }
             notes[key] = held.with(opening: opening)
             moved = true
-            aside = aside || held.holding == .aside
+            replies = replies || held.isPartOfTopic
         }
         // Written down, and not a change to what is drawn: the screen draws an opening from the
         // forum's own cache as it is read, and replacing every row for each one kept as the reader
         // scrolls is what #154 set out not to do. Only a later change to what All shows carries
         // it onto the screen's rows — unless the caller says the screen draws it from here.
-        if moved { changed(shown: shown, aside: aside) }
+        if moved { changed(shown: shown, replies: replies) }
         return moved
     }
 
     /// The anchor a timeline is read on from (#201): the newest id a read of `category` from
     /// `host` listed a post under, of a post its source has not said is gone. A post the reader
-    /// wrote, or one held aside, was listed by no read, and is never it.
+    /// wrote, or one a search or a thread brought, was listed by no read, and is never it.
     public func newestListedID(host raw: String, category: Category) -> String? {
         let host = raw.lowercased()
         return notes.values
@@ -407,7 +644,7 @@ public actor ItemStore {
     public func held(host raw: String, category: Category) -> Set<NoteKey> {
         let host = raw.lowercased()
         return Set(notes.values.filter {
-            $0.source.host == host && $0.holding == .arrived && $0.categories.contains(category)
+            $0.source.host == host && $0.categories.contains(category)
         }.map(\.key))
     }
 
@@ -438,17 +675,19 @@ public actor ItemStore {
             notes[key]?.gaps = gaps
             moved = true
         }
-        if moved { changed(shown: true, aside: false) }
+        if moved { changed(shown: true, replies: false) }
     }
 
     /// Where posts may be missing below `key` in `category`, as reading down from it needs it
     /// (#204): the id to read before, and what is held of that timeline below it. Nothing where
     /// `key` carries no such mark, or neither the mark nor that timeline names an id to read before.
     ///
-    /// **By listed ids alone** wherever this timeline listed a post held below: the posts it
-    /// listed under an id below the mark's, as themselves and not as boosts. Only where it listed
+    /// **By listed ids alone** wherever this timeline listed an item held below: the items it
+    /// listed under an id below the mark's — a reblog being an item under its own key (#290), so
+    /// nothing is left out for being one. Only where it listed
     /// none of them — a timeline held from before listings were kept (#201) — is below read off
-    /// when each was posted, and then never of a post `me` wrote or boosted, nor any boost: those
+    /// when each was posted, and then never of a post `me` wrote or boosted, nor any row that
+    /// arrived as a reblog before a reblog was an item: those
     /// are held for when they were written or boosted, not for where their timeline stands. And
     /// never while the reader is `signedIn` there and who they are is not known yet: which posts
     /// are theirs cannot be told, so nothing is guessed, nothing is asked, and the mark stays.
@@ -460,7 +699,7 @@ public actor ItemStore {
               let listed = gap.from ?? marked.listed[category]
         else { return nil }
         let timeline = notes.values.filter {
-            $0.key != key && $0.source.host == key.host && $0.holding == .arrived && $0.categories.contains(category)
+            $0.key != key && $0.source.host == key.host && $0.categories.contains(category)
         }
         let listedBelow = timeline.filter { note in
             note.listed[category].map { StatusID.later(listed, than: $0) } == true
@@ -468,13 +707,13 @@ public actor ItemStore {
         if let floor = listedBelow.compactMap({ $0.listed[category] }).max(by: { StatusID.later($1, than: $0) }) {
             return MissingPlace(
                 post: key, category: category, listed: listed,
-                held: Set(listedBelow.filter { $0.boostedBy == nil }.map(\.key)), floor: floor
+                held: Set(listedBelow.map(\.key)), floor: floor
             )
         }
         let postedBelow = timeline.filter { $0.listed[category] == nil && $0.postedAt <= marked.postedAt }
         if !postedBelow.isEmpty, signedIn, me == nil { return nil }
         let held = postedBelow.filter { note in
-            note.boostedBy == nil && note.boosted != true
+            note.boostedBy == nil && !note.isReblog && note.boosted != true
                 && me.map { note.handle.caseInsensitiveCompare($0) != .orderedSame } ?? true
         }
         return MissingPlace(
@@ -490,9 +729,9 @@ public actor ItemStore {
     /// `moment`. Nothing but the posts where `key` no longer carries the mark: a read meanwhile said
     /// something else of that place.
     ///
-    /// **Onto a post held**: the oldest the read brought that this store took in as itself, and
-    /// back onto `key` where it took in none — one refused as older than what is kept, or only
-    /// boosts — so the place is never left unsaid.
+    /// **Onto an item held**: the oldest the read listed that this store took in — a post or a
+    /// reblog alike, each being what its listing listed (#290) — and back onto `key` where it took
+    /// in none, one refused as older than what is kept, so the place is never left unsaid.
     public func land(
         _ down: ReadDown, below key: NoteKey, of category: Category, at moment: Date = Date(),
         ifSourceHere raw: String
@@ -504,7 +743,7 @@ public actor ItemStore {
         guard notes[key]?.gaps.contains(mark) == true else { return }
         notes[key]?.gaps.remove(mark)
         let carrier = down.notes
-            .filter { $0.boostedBy == nil && $0.listed[category] != nil && notes[$0.key] != nil }
+            .filter { $0.listed[category] != nil && notes[$0.key] != nil }
             .min { StatusID.later($1.listed[category]!, than: $0.listed[category]!) }?.key ?? key
         let place: TimelineGap? = switch down.end {
         case .met: nil
@@ -513,7 +752,7 @@ public actor ItemStore {
         }
         // One of each kind per timeline per post: a place said there before gives way to this one.
         if let place { notes[carrier]?.gaps.update(with: place) }
-        changed(shown: true, aside: false)
+        changed(shown: true, replies: false)
     }
 
     /// Lets go of one server: the source, the boards the reader picked on it, and the notes it
@@ -536,19 +775,26 @@ public actor ItemStore {
     /// the rest all ask `sourceList` first, so nothing new lands under a host that has gone.
     /// Each note still names its source, so a row can say which host it was read through and
     /// that the host is no longer here.
+    ///
+    /// **A post the person keeps stays either way** (#284), exactly as `keepingPosts` leaves one:
+    /// still drawn, still naming the source it was read through, and marked by the row as from a
+    /// host no longer here. It goes once it is un-kept and something lets it go.
     public func remove(host raw: String, keepingPosts: Bool = false) {
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
         saidByHost[host] = nil
         sourcesWatcher?(sourceList.map(\.host))
         if keepingPosts {
-            changed(shown: false, aside: false)
+            changed(shown: false, replies: false)
             return
         }
-        let aside = notes.contains { $0.key.host == host && $0.value.holding == .aside }
-        notes = notes.filter { $0.key.host != host }
-        arrival = arrival.filter { $0.key.host != host }
-        changed(shown: true, aside: aside)
+        let shown = shownByKept()
+        let going = notes.values.filter { $0.key.host == host && !$0.kept && !shown.contains($0.key) }
+        for note in going {
+            notes[note.key] = nil
+            arrival[note.key] = nil
+        }
+        changed(shown: true, replies: going.contains { $0.isPartOfTopic })
     }
 
     public func sources() -> [Source] {
@@ -571,7 +817,7 @@ public actor ItemStore {
         // once per source for nothing a reader could tell apart. The screens are told, so the
         // page says the newer moment this run; the index keeps the older until a word changes.
         let sameWord = before.map { $0.said(at: moment) == stamped } ?? false
-        changed(shown: false, aside: false, kept: !sameWord)
+        changed(shown: false, replies: false, kept: !sameWord)
     }
 
     /// Whether `profile` is a word worth keeping: said at a moment, and of a kind this app can
@@ -597,7 +843,7 @@ public actor ItemStore {
     public func forgetSaid(host raw: String) {
         let host = raw.lowercased()
         guard saidByHost.removeValue(forKey: host) != nil else { return }
-        changed(shown: false, aside: false)
+        changed(shown: false, replies: false)
     }
 
     /// Keeps only the latest `months` months as of `now` from here on, or everything where
@@ -610,39 +856,31 @@ public actor ItemStore {
     }
 
     /// `setRetention`, saying which sources the posts went from as well as how many (#251) — what
-    /// the months limit writes into its account.
+    /// the months limit writes into its account. **A kept post stays whatever its age** (#284),
+    /// and is counted in nothing that went.
     public func letGoBeyond(months: Int?, from now: Date = Date(), calendar: Calendar = .current) -> WentByLimit {
         retention = KeepPolicy.cutoff(keepingMonths: months, from: now, calendar: calendar)
         guard let retention else { return .none }
         let before = notes.count
-        let asideBefore = Set(notes.filter { $0.value.holding == .aside }.keys)
-        // A quoted post a kept post quotes stays, as `ingest` keeps it (#214) — held aside from
-        // here, where a timeline had brought it: the timeline's reach has passed it, the quote's
-        // has not.
-        let quoted = Set(notes.values.filter { $0.postedAt >= retention }.compactMap(\.quotedKey))
-        var demoted = false
+        // A quoted post a kept post quotes stays, as `ingest` keeps it (#214): the window's reach
+        // has passed it, the quote's has not.
+        let quoted = Set(notes.values.filter { $0.kept || $0.postedAt >= retention }.flatMap(\.heldWith))
+            .filter { notes[$0]?.isReblog != true }
         var kept: [NoteKey: Note] = [:]
         var gone: Set<String> = []
+        var replies = false
         for (key, note) in notes {
-            if note.postedAt >= retention {
+            if note.kept || note.postedAt >= retention || quoted.contains(key) {
                 kept[key] = note
-            } else if quoted.contains(key) {
-                var aside = note
-                if aside.holding != .aside {
-                    aside.holding = .aside
-                    demoted = true
-                }
-                kept[key] = aside
             } else {
                 gone.insert(key.host)
+                replies = replies || note.isPartOfTopic
             }
         }
         notes = kept
-        if notes.count != before || demoted {
+        if notes.count != before {
             arrival = arrival.filter { notes[$0.key] != nil }
-            // Which rows are aside, not how many: a cut and a demotion in one pass can leave the
-            // count where it was while the rows themselves changed.
-            changed(shown: true, aside: Set(notes.filter { $0.value.holding == .aside }.keys) != asideBefore)
+            changed(shown: true, replies: replies)
         }
         return WentByLimit(posts: before - notes.count, sources: gone.sorted())
     }
@@ -650,38 +888,79 @@ public actor ItemStore {
     /// Lets go of the `count` oldest posts held — the room limit's step past the picture copies
     /// (#249). Returns how many went and from which sources.
     ///
-    /// **Oldest by when they were posted, across every source, rows held aside included**: the
-    /// room is this device's and not one source's, and a search's find held aside weighs what a
+    /// **Oldest by when they were posted, across every source, a topic's kept replies included**: the
+    /// room is this device's and not one source's, and a kept reply weighs what a
     /// timeline's post does. Two posted in the same second go in the order they arrived. A post
     /// another held post quotes stays whatever its age, as the keep window keeps it (#214): it
-    /// goes once the post quoting it has.
+    /// goes once the post quoting it has. **A kept post is never one of them** (#284): the oldest
+    /// that are not kept go, and where only kept posts are left nothing goes at all.
     public func letGoOldest(count: Int) -> WentByLimit {
         guard count > 0, !notes.isEmpty else { return .none }
-        let quoted = Set(notes.values.compactMap(\.quotedKey))
-        let arrival = self.arrival
-        let going = notes.values
-            .filter { !quoted.contains($0.key) }
-            .sorted {
-                $0.postedAt != $1.postedAt
-                    ? $0.postedAt < $1.postedAt
-                    : (arrival[$0.key] ?? 0) < (arrival[$1.key] ?? 0)
-            }
-            .prefix(count)
+        let going = mayGoForRoom().prefix(count)
         guard !going.isEmpty else { return .none }
         for note in going {
             notes[note.key] = nil
             self.arrival[note.key] = nil
         }
-        changed(shown: going.contains { $0.holding == .arrived }, aside: going.contains { $0.holding == .aside })
+        changed(shown: going.contains { !$0.isPartOfTopic }, replies: going.contains { $0.isPartOfTopic })
         return WentByLimit(posts: going.count, sources: Set(going.map(\.key.host)).sorted())
     }
 
+    /// Whether `letGoOldest` could let anything go right now (#284): a post is held that is
+    /// neither kept nor quoted by a held post. What the room check asks before it spends the
+    /// picture copies — asked of the store each time, so a post un-kept, from this window or
+    /// another, is seen by the very next check.
+    public func holdsWhatRoomMayLetGo() -> Bool {
+        !mayGoForRoom().isEmpty
+    }
+
+    /// The rows `letGoOldest` chooses among, in the order they go: oldest posted first, two of
+    /// one second in the order they arrived. Not kept, and not held for another item that stays.
+    ///
+    /// **Held for another only while that other is staying** (#290, #214). A post is spared for
+    /// an item that quotes or reblogs it where that item is kept, or shown by a kept reblog, or
+    /// **goes later than the post does** in this order — so the post goes once what shows it has.
+    /// An item that goes no later than what it refers to spares nothing: two rows naming each
+    /// other, or a chain of them, cannot hold one another here for ever, and a store that only
+    /// such rows fill is never one the room says only kept posts fill. **And a reblog is spared
+    /// for nothing that refers to it**: what a reference keeps is a post to show, and a reblog
+    /// shows none of its own.
+    private func mayGoForRoom() -> [Note] {
+        let arrival = self.arrival
+        let order = notes.values.sorted {
+            $0.postedAt != $1.postedAt
+                ? $0.postedAt < $1.postedAt
+                : (arrival[$0.key] ?? 0) < (arrival[$1.key] ?? 0)
+        }
+        var rank: [NoteKey: Int] = [:]
+        for (index, note) in order.enumerated() { rank[note.key] = index }
+        let shown = shownByKept()
+        var spared: Set<NoteKey> = []
+        for (index, note) in order.enumerated() {
+            let stays = note.kept || shown.contains(note.key)
+            for key in note.heldWith where notes[key]?.isReblog == false {
+                if stays || (rank[key] ?? .max) < index { spared.insert(key) }
+            }
+        }
+        return order.filter { !$0.kept && !shown.contains($0.key) && !spared.contains($0.key) }
+    }
+
+    /// The posts kept reblogs show (#290). **Keeping a reblog keeps what it shows**: the mark is
+    /// on the reblog — the item the person pressed — and the post it reblogs is held for as long
+    /// as that mark is, by every letting go there is: the window, the room, a span of dates, a
+    /// source removed, a post its source says is gone. A kept row that could come to say its
+    /// post is no longer held would be a keep that kept nothing the person could see.
+    private func shownByKept() -> Set<NoteKey> {
+        Set(notes.values.lazy.filter { $0.kept && $0.isReblog }.compactMap(\.reblogKey))
+    }
+
     /// How many rows were posted inside `span` and, where `host` is given, came through that host
-    /// — arrived and aside alike (#248). What a press to let a span go would take, so the question
-    /// before it names the true count.
+    /// — items and a topic's kept replies alike (#248). What a press to let a span go would take, so the question
+    /// before it names the true count: a kept post is not counted, since the press leaves it (#284).
     public func count(span: Range<Date>, host raw: String? = nil) -> Int {
         let host = raw?.lowercased()
-        return notes.values.reduce(0) { $0 + (Self.inside(span, host: host, $1) ? 1 : 0) }
+        let shown = shownByKept()
+        return notes.values.reduce(0) { $0 + (Self.inside(span, host: host, $1, shown) ? 1 : 0) }
     }
 
     /// Lets go of every row posted inside `span`, from `host` or from every host where nil — the
@@ -693,23 +972,28 @@ public actor ItemStore {
     /// every source stays joined — a host with nothing left is a source with nothing held, as
     /// `setRetention` leaves one. The host need not be a source here: a source removed while its
     /// posts were kept (#250) leaves rows this reaches like any other.
+    ///
+    /// **Never a post the person keeps** (#284): keep is their word too, and the later one to
+    /// undo. A post a kept post quotes is not spared for that, as above.
     @discardableResult
     public func letGo(span: Range<Date>, host raw: String? = nil) -> Int {
         let host = raw?.lowercased()
-        let going = notes.values.filter { Self.inside(span, host: host, $0) }
+        let shown = shownByKept()
+        let going = notes.values.filter { Self.inside(span, host: host, $0, shown) }
         guard !going.isEmpty else { return 0 }
         for note in going {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
-        changed(shown: going.contains { $0.holding == .arrived }, aside: going.contains { $0.holding == .aside })
+        changed(shown: going.contains { !$0.isPartOfTopic }, replies: going.contains { $0.isPartOfTopic })
         return going.count
     }
 
-    /// Whether `note` is what `letGo(span:host:)` reaches: posted inside `span`, and from `host`
-    /// where one is named.
-    private static func inside(_ span: Range<Date>, host: String?, _ note: Note) -> Bool {
-        span.contains(note.postedAt) && (host == nil || note.source.host == host)
+    /// Whether `note` is what `letGo(span:host:)` reaches: posted inside `span`, from `host`
+    /// where one is named, and not kept.
+    private static func inside(_ span: Range<Date>, host: String?, _ note: Note, _ shownByKept: Set<NoteKey>) -> Bool {
+        !note.kept && !shownByKept.contains(note.key)
+            && span.contains(note.postedAt) && (host == nil || note.source.host == host)
     }
 
     /// Everything this store holds, read in one hop — what a save writes to disk.
@@ -728,37 +1012,418 @@ public actor ItemStore {
         return (sourceList, ordered, said, revision)
     }
 
-    /// Every row a timeline may show, newest first — and **never one held aside** (#175).
+    /// Every item this device holds, newest first (#296): whatever brought it — a timeline, a
+    /// search, a read under a tag, a thread opened, a quote — it is an item like any other, and
+    /// every timeline whose rules let it through shows it. What it arrived through is its
+    /// categories, and one that arrived through none is shown by no rule on a category.
     ///
-    /// This device can hold a post no timeline shows: one found by a search, one read inside a
-    /// thread, one brought under a hashtag. It is here, `note(_:)` hands it over, and a save
-    /// writes it; what it is not is a row All grew by. Everything that feeds All reads this, so
-    /// the distinction is made once and honoured everywhere rather than remembered by each caller.
+    /// **Never a forum topic's reply its forum gave no date** (`Note.isPartOfTopic`): that is a
+    /// part of a topic and not an item, and is handed over by `replies()`. A reply the forum
+    /// dated is an item, and is here (#297).
     public func all() -> [Note] {
         let arrival = self.arrival
-        return notes.values.filter { $0.holding == .arrived }
+        let stalled = self.stalled
+        return notes.values.filter { !$0.isPartOfTopic }
+            .map { note in
+                // Named and not held: asked of what is held now, for the few items that name
+                // anything — one lookup a name, and nothing for an item that names none.
+                var unheld: Set<Reference.Kind> = []
+                for reference in note.refs where reference.kind != .reblogs {
+                    if let id = reference.id, notes[NoteKey(host: note.key.host, id: id)] == nil { unheld.insert(reference.kind) }
+                }
+                let stalls = !stalled.isEmpty && stalled.contains(note.key)
+                let tried = refused.isEmpty ? nil : refused[note.key]
+                guard stalls || !unheld.isEmpty || tried != nil else { return note }
+                var said = note
+                said.refsStalled = stalls
+                said.refsUnheld = unheld
+                if let tried {
+                    said.refsTried = Set(note.refs.filter { $0.statusID.map(tried.contains) == true }.map(\.kind))
+                }
+                return said
+            }
             .sorted { Self.storeOrder($0, $1, arrival) }
     }
 
-    /// Every row held aside, newest first — what `all()` leaves out, and nothing it draws.
+    // MARK: - What an item refers to, loaded (#293)
+
+    /// The items whose load was given up for this run. Of this run only: never written down.
+    private var stalled: Set<NoteKey> = []
+    /// What was asked for an item this run and came back as nothing to keep — not the post
+    /// asked for, or an answer that is no word on it — by item, as the source's ids asked. Not
+    /// asked again this run: the item may still owe another load, and without this the one
+    /// that was refused would be asked for again each time its row came near. Of this run only.
+    private var refused: [NoteKey: Set<String>] = [:]
+
+    /// The name of every post among `notes` held from each of `hosts`, by its source's own id.
+    private static func named(in notes: [NoteKey: Note], of hosts: Set<String>) -> [String: [String: String]] {
+        var names: [String: [String: String]] = [:]
+        for note in notes.values where hosts.contains(note.key.host) && !note.isReblog {
+            if let id = note.statusID { names[note.key.host, default: [:]][id] = note.id }
+        }
+        return names
+    }
+
+    /// Settles what the items of `hosts` owe against what is held now (#293): a reference whose
+    /// post is held is given that post's name, however the post came to be here — a timeline
+    /// brought it later, a thread was read, another item's load fetched it — and an item with
+    /// nothing left that could be asked for owes nothing. That last is also what takes the mark
+    /// off anything that could never have owed: a reblog, an item whose references name nothing
+    /// askable, a row a file says owes and cannot.
     ///
-    /// **For the one place that reads past a timeline** (#176): a search finds what this device
-    /// holds, and what a search brought back is held aside so All does not grow by it. Nothing
-    /// else draws these; a search still passes them through the rules of the timeline in front.
-    public func aside() -> [Note] {
+    /// **A post said to be gone that is held after all is not gone**: the reference is named
+    /// and the word comes off, whichever way the post arrived.
+    ///
+    /// **Only items that owe, or say a post is gone, are looked at**: one pass to find them — and where there are none,
+    /// which is nearly always, that pass is all — then one pass over their hosts' items for the
+    /// names. Returns the items that changed.
+    @discardableResult
+    private static func settleOwing(in notes: inout [NoteKey: Note], of hosts: Set<String>?) -> [NoteKey] {
+        // Items that owe — and items that say a post is gone: said once, on one answer, and
+        // taken back where the post turns up after all.
+        let owing = notes.values.filter {
+            ($0.refsDue || $0.refs.contains(where: \.gone)) && (hosts?.contains($0.key.host) ?? true)
+        }
+        guard !owing.isEmpty else { return [] }
+        let names = named(in: notes, of: Set(owing.map(\.key.host)))
+        var moved: [NoteKey] = []
+        for note in owing {
+            let held = names[note.key.host] ?? [:]
+            let settled = note.refs.map { reference -> Reference in
+                guard reference.kind != .reblogs, reference.id == nil,
+                      let statusID = reference.statusID, let id = held[statusID]
+                else { return reference }
+                // Held, so named — and no longer gone, whatever its source once answered.
+                return Reference(
+                    kind: reference.kind, id: id, statusID: statusID, handle: reference.handle, state: reference.state
+                )
+            }
+            var now = settled == note.refs ? note : note.referring(by: settled)
+            if now.askable.isEmpty { now.refsDue = false }
+            guard now != note else { continue }
+            notes[note.key] = now
+            moved.append(note.key)
+        }
+        return moved
+    }
+
+    /// `settleOwing(in:of:)` over what this store holds. Whether any row changed.
+    @discardableResult
+    private func settleOwing(of hosts: Set<String>? = nil) -> Bool {
+        let moved = Self.settleOwing(in: &notes, of: hosts)
+        for key in moved where notes[key]?.refsDue == false {
+            stalled.remove(key)
+            refused[key] = nil
+        }
+        // An item left owing only what was already tried and refused owes nothing more: the
+        // mark comes off, as it does where the one thing an item owed is refused.
+        var cleared = false
+        for (key, tried) in refused where hosts?.contains(key.host) ?? true {
+            guard let note = notes[key] else {
+                refused[key] = nil
+                continue
+            }
+            guard note.refsDue, note.askable.allSatisfy({ tried.contains($0.statusID) }) else { continue }
+            notes[key]?.refsDue = false
+            refused[key] = nil
+            cleared = true
+        }
+        return !moved.isEmpty || cleared
+    }
+
+    /// One load an item owes: the item, and the source's own id of the post to ask for.
+    public struct Owed: Sendable, Equatable {
+        public let item: NoteKey
+        public let kind: Reference.Kind
+        public let statusID: String
+        /// Whether the item may have arrived only because somebody was signed in — through
+        /// anything but a public timeline. What an unsigned read says of the post such an item
+        /// refers to is not the source's word on it: a post its reader could see may answer
+        /// "no such post" to nobody in particular.
+        public let asReader: Bool
+
+        public init(item: NoteKey, kind: Reference.Kind, statusID: String, asReader: Bool = false) {
+            self.item = item
+            self.kind = kind
+            self.statusID = statusID
+            self.asReader = asReader
+        }
+    }
+
+    /// What the items held from `host` still owe, newest item first, less what was given up for
+    /// this run — or only what `items` owe, where given, which looks at those items alone.
+    /// Nothing where `host` is not a source here. **Each is one post to ask the item's own
+    /// source for, by that source's id for it**: never another host, and never an address.
+    public func owed(host raw: String, among items: Set<NoteKey>? = nil) -> [Owed] {
+        let host = raw.lowercased()
+        guard sourceList.contains(where: { $0.host == host }) else { return [] }
+        let candidates: [Note] = items.map { $0.compactMap { notes[$0] } } ?? Array(notes.values)
         let arrival = self.arrival
-        return notes.values.filter { $0.holding == .aside }
+        return candidates
+            .filter { $0.refsDue && $0.key.host == host && !stalled.contains($0.key) }
+            .sorted { Self.storeOrder($0, $1, arrival) }
+            .flatMap { note in
+                note.askable.filter { refused[note.key]?.contains($0.statusID) != true }.map {
+                    Owed(item: note.key, kind: $0.kind, statusID: $0.statusID, asReader: Self.arrivedAsReader(note))
+                }
+            }
+    }
+
+    /// Whether `note` reached this device by a read made as the reader — **a fact about a
+    /// signed read, and the one place it is told** (#293). What such an item refers to is the
+    /// reader's to ask for: never asked unsigned in their place, an unsigned "no such post"
+    /// about it is not the source's word, and what it still owes goes when their sign-in ends.
+    ///
+    /// **Told by what the item itself carries**, since nothing else outlasts the read:
+    /// - Through the public timeline or what is rising there: not the reader's. An unsigned read
+    ///   brings those, whoever was signed in.
+    /// - Through Home or a list: the reader's. Nobody else has those timelines.
+    /// - Through no category — a search, a thread, a hashtag's read — it is the reader's only
+    ///   where the copy says what the reader did to the post (`boosted`, `favourited`,
+    ///   `bookmarked`, as yes or as no). A source says those to a signed read and to no other,
+    ///   so an item without them was read unsigned: on a source nobody is signed in to, nothing
+    ///   arrived as the reader, what it refers to may be asked unsigned, and an unsigned "no
+    ///   such post" is that source's word.
+    ///
+    /// **Written down with the item, and let go with the sign-in.** Those marks are kept in the
+    /// store, so a launch knows it of a row from the last run; and the sweep that takes them
+    /// off when a sign-in ends (`forgetReaderMarks`) drops such an item's debt in the same step,
+    /// so no row is left owing as a reader nobody can name.
+    private static func arrivedAsReader(_ note: Note) -> Bool {
+        var through = false
+        for category in note.categories {
+            switch category {
+            case .public, .trends: return false
+            case .home, .list: through = true
+            case .board: break
+            }
+        }
+        return through || note.boosted != nil || note.favourited != nil || note.bookmarked != nil
+    }
+
+    /// How one load ended, as whoever made the request reports it.
+    public enum Loaded: Sendable {
+        /// The source handed the post over.
+        case held(Note)
+        /// The source says there is no such post (404, 410): gone, said so where the reference
+        /// is shown, and not asked for again.
+        case gone
+        /// The source did not hand the post over to who asked, and that is no word on whether it
+        /// exists — an unsigned read of what a signed-in reader's item refers to. Not asked for
+        /// again, and not said to be gone.
+        case notSaid
+        /// Given up for this run: the item still owes it, and a later run asks again.
+        case stalled
+    }
+
+    /// Takes in what one load brought for `owed`, and settles what the item owes.
+    ///
+    /// **The post loaded is an item like any other** (#296): at its own publish time, through no
+    /// category, and owing no load of its own — what it refers to in turn is not followed. It is
+    /// taken in whatever its age, for the item that refers to it, and stays while that item
+    /// does (`Note.heldWith`): the reference is given the post's name, which is what holds it.
+    ///
+    /// **Only the post that was asked for.** One whose id at its source is not the id asked, one
+    /// stamped with another source, and a reblog are not what the item refers to, and are not
+    /// taken: the source is not believed about a post nobody asked it for.
+    ///
+    /// Nothing where the item is no longer held, or its source no longer here: a load that
+    /// comes back to a row let go of lands nowhere.
+    public func land(_ loaded: Loaded, for owed: Owed) {
+        let key = owed.item
+        guard sourceList.contains(where: { $0.host == key.host }), let item = notes[key] else { return }
+        /// The item's references, with the one that was asked for settled by `change`.
+        func referring(_ change: (Reference) -> Reference) -> [Reference] {
+            item.refs.map { reference in
+                reference.kind == owed.kind && reference.statusID == owed.statusID && reference.id == nil ? change(reference) : reference
+            }
+        }
+        switch loaded {
+        case .stalled:
+            guard stalled.insert(key).inserted else { return }
+            changed(shown: true, replies: false, kept: false)
+            return
+        case .held(let post):
+            guard post.source.host == key.host, post.statusID == owed.statusID, !post.isReblog else {
+                // Not what was asked for: nothing is taken, and it is not asked for again.
+                notes[key] = withoutAsking(item, for: owed)
+                break
+            }
+            var arriving = post
+            arriving.categories = []
+            arriving.listed = [:]
+            arriving.gaps = []
+            admit([arriving], exempt: true, owing: false)
+        case .gone:
+            notes[key] = item.referring(by: referring { $0.settled(gone: true) })
+        case .notSaid:
+            notes[key] = withoutAsking(item, for: owed)
+        }
+        // Whatever came, what is held now decides what is still owed — this item's and every
+        // other's that was waiting on the same post.
+        stalled.remove(key)
+        settleOwing(of: [key.host])
+        changed(shown: true, replies: false)
+    }
+
+    /// `item` no longer owing a load of what `owed` names, with nothing learned of that post:
+    /// the mark comes off where it was the last thing owed, and the reference stays as it was.
+    ///
+    /// **Where the item owes another load too, this one is remembered as tried** (`refused`):
+    /// the mark stays for the other, and the reference that was asked is not asked again this
+    /// run nor said to be on its way.
+    private func withoutAsking(_ item: Note, for owed: Owed) -> Note {
+        var now = item
+        if item.askable.allSatisfy({ $0.statusID == owed.statusID }) {
+            now.refsDue = false
+            refused[item.key] = nil
+        } else {
+            refused[item.key, default: []].insert(owed.statusID)
+        }
+        return now
+    }
+
+    /// Lets every item of `host` whose load was given up be asked for again: the reader asked,
+    /// or signed in again.
+    public func unstall(host raw: String) {
+        let host = raw.lowercased()
+        let before = stalled.count + refused.count
+        stalled = stalled.filter { $0.host != host }
+        refused = refused.filter { $0.key.host != host }
+        if stalled.count + refused.count != before { changed(shown: true, replies: false, kept: false) }
+    }
+
+    /// Every kept reply of a forum topic that its forum gave no date, newest first — what `all()` leaves out. For the count
+    /// of what this device holds, which they are part of; nothing draws them but their topic,
+    /// which reads its own through `held(host:idPrefix:)`.
+    public func replies() -> [Note] {
+        let arrival = self.arrival
+        return notes.values.filter(\.isPartOfTopic)
             .sorted { Self.storeOrder($0, $1, arrival) }
     }
+
 
     /// Lets go of one row — a post its author took back (#109). Silent where it is not held.
     ///
     /// **One row and never a host's worth.** `remove(host:)` is the reader letting go of a server;
     /// this is a server saying one post no longer exists, and the other copies of it through other
     /// sources are theirs to say about.
-    public func forget(_ key: NoteKey) {
-        guard let gone = notes.removeValue(forKey: key) else { return }
-        changed(shown: gone.holding == .arrived, aside: gone.holding == .aside)
+    ///
+    /// **A row the person keeps is not let go by this either** (#284): it stays, marked as gone
+    /// from its source as of `moment` — which it now is — and goes once it is un-kept and what is
+    /// marked is let go. One already marked keeps the moment it was first heard. **Nor is the
+    /// post a kept reblog shows** (#290), the reader's own post taken back included: it stays,
+    /// marked the same way, for as long as that reblog is kept.
+    public func forget(_ key: NoteKey, at moment: Date = Date()) {
+        guard var gone = notes[key] else { return }
+        if gone.kept || shownByKept().contains(key) {
+            guard gone.goneSince == nil else { return }
+            gone.goneSince = moment
+            notes[key] = gone
+        } else {
+            notes[key] = nil
+            arrival[key] = nil
+        }
+        changed(shown: !gone.isPartOfTopic, replies: gone.isPartOfTopic)
+    }
+
+    /// Takes back what a signed-in reader's reads said they had done to `host`'s posts — boosted,
+    /// favourited, bookmarked (#285) — so each row says what a post no such read brought says:
+    /// nothing. For a sign-in that has ended, or been replaced by another account's: those words
+    /// were that reader's, and left here they would be told to the next one, whose first press
+    /// would undo an act they never made. The posts stay; what this device keeps of its own
+    /// (`kept`) is untouched. Returns whether any row changed, so a caller writes only then.
+    @discardableResult
+    public func forgetReaderMarks(host raw: String) -> Bool {
+        forgetReaderMarks { $0 == raw.lowercased() }
+    }
+
+    /// `forgetReaderMarks(host:)` for every host not among `hosts` — the ones still signed in to.
+    @discardableResult
+    public func forgetReaderMarks(keeping hosts: Set<String>) -> Bool {
+        forgetReaderMarks { !hosts.contains($0) }
+    }
+
+    private func forgetReaderMarks(where gone: (String) -> Bool) -> Bool {
+        // From here on a read sent before this moment says nothing of the reader (#291): one
+        // still on the wire was asked as whoever has just gone. Marked for every host this
+        // names, a row with a mark on it or not — the read on its way may bring the first.
+        let moment = ReadMoment.now().place
+        for host in Set(sourceList.map(\.host)).union(notes.keys.map(\.host)) where gone(host) {
+            swept[host] = moment
+        }
+        var shown = false
+        var replies = false
+        for (key, note) in notes where gone(key.host) {
+            // **And what the reader's own reads left owing goes with them** (#293): an item that
+            // arrived by a signed read (`arrivedAsReader`) refers to posts that reader could see. Asked
+            // for later, unsigned, in the reader's absence, that would be this device requesting
+            // on its own what only the sign-in they ended was shown — so the debt is dropped
+            // here, at the moment and for the reason their marks are.
+            let owesAsReader = note.refsDue && Self.arrivedAsReader(note)
+            guard owesAsReader || note.boosted != nil || note.favourited != nil || note.bookmarked != nil else { continue }
+            var plain = note.boosted != nil || note.favourited != nil || note.bookmarked != nil ? note.withoutReaderMarks() : note
+            if owesAsReader {
+                plain.refsDue = false
+                stalled.remove(key)
+            }
+            notes[key] = plain
+            shown = shown || !note.isPartOfTopic
+            replies = replies || note.isPartOfTopic
+        }
+        guard shown || replies else { return false }
+        changed(shown: shown, replies: replies)
+        return true
+    }
+
+    /// Keeps one row, or un-keeps it (#284) — the person's own mark, sent nowhere. Silent where
+    /// the row is not held, and where it already is as asked; returns whether anything changed,
+    /// so a caller writes it down only then. The row's source need not be here: a kept post
+    /// outlives its source's removal, and is un-kept like any other.
+    ///
+    /// **Un-keeping lets nothing go by itself.** The row is an ordinary one from that moment, and
+    /// goes when a limit next acts or the person next lets something go — as it would have.
+    @discardableResult
+    public func setKept(_ kept: Bool, for key: NoteKey) -> Bool {
+        guard var held = notes[key], held.kept != kept else { return false }
+        held.kept = kept
+        notes[key] = held
+        changed(shown: !held.isPartOfTopic, replies: held.isPartOfTopic)
+        return true
+    }
+
+    /// Stops keeping every row kept, or every one that came through `host` where one is given
+    /// (#294) — a source no longer here included, as `setKept` reaches one. One act and one
+    /// change, however many rows. Returns how many were kept and are not now.
+    ///
+    /// **Lets nothing go by itself**, as un-keeping one row lets nothing go: each is an ordinary
+    /// row from this moment, and goes when a limit next acts or the person next lets something go.
+    @discardableResult
+    public func stopKeeping(host raw: String? = nil) -> Int {
+        let host = raw?.lowercased()
+        let keeping = notes.values.filter { $0.kept && (host == nil || $0.key.host == host) }
+        guard !keeping.isEmpty else { return 0 }
+        for var note in keeping {
+            note.kept = false
+            notes[note.key] = note
+        }
+        changed(shown: keeping.contains { !$0.isPartOfTopic }, replies: keeping.contains { $0.isPartOfTopic })
+        return keeping.count
+    }
+
+    /// How many kept rows were posted inside `span` and, where `host` is given, came through that
+    /// host (#294): what `letGo(span:host:)` would leave for being kept, so the question before
+    /// it can say how many stay.
+    public func keptCount(span: Range<Date>, host raw: String? = nil) -> Int {
+        let host = raw?.lowercased()
+        return notes.values.reduce(0) { sum, note in
+            sum + (note.kept && span.contains(note.postedAt) && (host == nil || note.key.host == host) ? 1 : 0)
+        }
+    }
+
+    /// How many kept rows are marked gone from their source (#294): what `letGoneGo` leaves.
+    public func keptGoneCount() -> Int {
+        notes.values.reduce(0) { $0 + ($1.kept && $1.goneSince != nil ? 1 : 0) }
     }
 
     /// Marks one row as gone from its source (#179): a read of that one post heard the source say
@@ -776,24 +1441,28 @@ public actor ItemStore {
         else { return false }
         held.goneSince = moment
         notes[key] = held
-        changed(shown: held.holding == .arrived, aside: held.holding == .aside)
+        changed(shown: !held.isPartOfTopic, replies: held.isPartOfTopic)
         return true
     }
 
-    /// How many rows are marked gone from their source (#179) — what a press would let go.
+    /// How many rows are marked gone from their source (#179) — what a press would let go, so
+    /// never one the person keeps (#284).
     public func goneCount() -> Int {
-        notes.values.reduce(0) { $0 + ($1.goneSince == nil ? 0 : 1) }
+        let shown = shownByKept()
+        return notes.values.reduce(0) { $0 + ($1.goneSince == nil || $1.kept || shown.contains($1.key) ? 0 : 1) }
     }
 
     /// Lets go of every row marked gone from its source at or before `cutoff`, or of every marked
     /// row where `cutoff` is nil — the reader's press (#179). Returns how many went.
     ///
     /// **Marked rows and nothing else.** A row that merely did not arrive again carries no mark,
-    /// so no wait and no press here can reach it.
+    /// so no wait and no press here can reach it. **And never a kept one** (#284): it stays,
+    /// still marked, for as long as it is kept.
     @discardableResult
     public func letGoneGo(markedBy cutoff: Date? = nil) -> Int {
+        let shown = shownByKept()
         let going = notes.values.filter { note in
-            guard let gone = note.goneSince else { return false }
+            guard !note.kept, !shown.contains(note.key), let gone = note.goneSince else { return false }
             return cutoff.map { gone <= $0 } ?? true
         }
         guard !going.isEmpty else { return 0 }
@@ -801,24 +1470,26 @@ public actor ItemStore {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
-        changed(shown: going.contains { $0.holding == .arrived }, aside: going.contains { $0.holding == .aside })
+        changed(shown: going.contains { !$0.isPartOfTopic }, replies: going.contains { $0.isPartOfTopic })
         return going.count
     }
 
     /// How many places say their source no longer has what lay there (#204) — what a press would
     /// let go beside the posts `goneCount` counts.
     public func settledCount() -> Int {
-        // A post marked gone takes its places with it, and is counted as the post it is.
-        notes.values.filter { $0.goneSince == nil }.reduce(0) { $0 + $1.gaps.filter { $0.kind == .settled }.count }
+        // A post marked gone takes its places with it, and is counted as the post it is — unless
+        // it is kept (#284), which stays, so its places are counted as places.
+        notes.values.filter { $0.goneSince == nil || $0.kept }.reduce(0) { $0 + $1.gaps.filter { $0.kind == .settled }.count }
     }
 
     /// Lets go of every place settled at or before `cutoff`, or of every one where `cutoff` is nil
     /// — `letGoneGo`'s wait and press, for the places a read down settled (#204). The mark goes
-    /// and the post it sits by stays. Returns how many went.
+    /// and the post it sits by stays — so a kept post's places go like any other's (#284): a
+    /// place is a mark beside an item, and no item goes here. Returns how many went.
     @discardableResult
     public func letSettledGo(markedBy cutoff: Date? = nil) -> Int {
         var went = 0
-        var aside = false
+        var replies = false
         for (key, note) in notes {
             let going = note.gaps.filter { gap in
                 guard gap.kind == .settled else { return false }
@@ -828,9 +1499,9 @@ public actor ItemStore {
             guard !going.isEmpty else { continue }
             notes[key]?.gaps.subtract(going)
             went += going.count
-            aside = aside || note.holding == .aside
+            replies = replies || note.isPartOfTopic
         }
-        if went > 0 { changed(shown: true, aside: aside) }
+        if went > 0 { changed(shown: true, replies: replies) }
         return went
     }
 
@@ -844,7 +1515,15 @@ public actor ItemStore {
         notes[key]
     }
 
-    /// Every row held from `host` whose id starts `idPrefix` — **aside ones included**, which is
+    /// The rows held among `keys`, by key — one hop for a caller that just landed a read and
+    /// draws what the store made of it (#284), rather than what the wire said.
+    public func notes(_ keys: [NoteKey]) -> [NoteKey: Note] {
+        var found: [NoteKey: Note] = [:]
+        for key in keys { found[key] = notes[key] }
+        return found
+    }
+
+    /// Every row held from `host` whose id starts `idPrefix` — **a topic's kept replies included**, which is
     /// the point: a thread read to its end (#177) is read back from here, answers and all, and
     /// `all()` would hand over none of them. In the order they arrived; a caller that means
     /// another order says so.

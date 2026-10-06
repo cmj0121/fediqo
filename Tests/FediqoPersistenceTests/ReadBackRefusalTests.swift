@@ -16,9 +16,9 @@ struct ReadBackRefusalTests {
     private static let forum = PackagerFixture.forum
 
     private static func note(
-        _ id: String, source: Source = mastodon, holding: Holding = .arrived, body: String? = nil
+        _ id: String, source: Source = mastodon, body: String? = nil
     ) -> Note {
-        PackagerFixture.note(id, source: source, holding: holding, body: body)
+        PackagerFixture.note(id, source: source, body: body)
     }
 
     private static func populated() async throws -> Device { try await PackagerFixture.populated() }

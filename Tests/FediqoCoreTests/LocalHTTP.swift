@@ -56,6 +56,32 @@ enum LocalServers {
         return raw
     }
 
+    /// What `servers-up` wrote beside the writer's first sign-in (#298): a sign-in of the writer
+    /// and of a second person that may do everything a person can, the seeded app's id, and the
+    /// ids of what the seed put in the writer's home, a list and what is rising — none of which
+    /// this server would put there by itself, with no background worker running.
+    struct Seeded: Decodable {
+        struct Posts: Decodable {
+            let list: String
+            /// The other person's post, never changed.
+            let plain: String
+            /// The other person's post, changed once.
+            let edited: String
+            /// The other person's reblog of the writer's first note, and that note.
+            let reblog: String
+            let reblogged: String
+        }
+        let writer: String
+        let other: String
+        let client: String
+        let seeded: Posts
+    }
+
+    static func seeded() throws -> Seeded {
+        let url = repoRoot.appending(path: "servers/.run/mastodon-tokens.json")
+        return try JSONDecoder().decode(Seeded.self, from: Data(contentsOf: url))
+    }
+
     static var repoRoot: URL {
         var url = URL(fileURLWithPath: #filePath)
         while url.pathComponents.count > 1 {
@@ -85,6 +111,13 @@ enum LocalHTTP {
 
     static func client() throws -> some HTTPClient & HTTPSender {
         try Cache.shared.client()
+    }
+
+    /// A session that keeps cookies and follows no redirect, for the one thing a sign-in page
+    /// needs that a source's API does not: to be signed in to as a person at a browser is, and
+    /// to see where the page sends them. Admitted as every other ask here is.
+    static func browser() throws -> LocalBrowser {
+        try Cache.shared.browser()
     }
 }
 
@@ -216,6 +249,15 @@ private final class Cache: @unchecked Sendable {
         return client
     }
 
+    func browser() throws -> LocalBrowser {
+        let trust = LocalTrust(anchors: [try Self.loadCA()], allowed: LocalServers.hosts)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.timeoutIntervalForRequest = 30
+        configuration.waitsForConnectivity = false
+        return LocalBrowser(session: URLSession(configuration: configuration, delegate: trust, delegateQueue: nil))
+    }
+
     private static func loadCA() throws -> SecCertificate {
         let env = ProcessInfo.processInfo.environment["FEDIQO_SERVERS_CA"]
         let url = env.map { URL(fileURLWithPath: $0) }
@@ -239,6 +281,28 @@ private final class Cache: @unchecked Sendable {
             throw LocalHTTPError.missingCA
         }
         return cert
+    }
+}
+
+/// See `LocalHTTP.browser()`.
+struct LocalBrowser: Sendable {
+    let session: URLSession
+
+    private final class NoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        func urlSession(
+            _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+            newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
+        ) {
+            completionHandler(nil)
+        }
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        guard let url = request.url else { throw LocalHTTPError.invalidURL }
+        try LocalHTTP.admit(url)
+        let (data, response) = try await session.data(for: request, delegate: NoRedirect())
+        guard let http = response as? HTTPURLResponse else { throw LocalHTTPError.invalidURL }
+        return (data, http)
     }
 }
 

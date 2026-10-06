@@ -12,17 +12,32 @@ There is no Fediqo server.
 
 ## The concept
 
-| Noun     | What it is                                             | What it is not        |
-| -------- | ------------------------------------------------------ | --------------------- |
-| source   | a server or account you read; protocol stays behind    | a protocol page       |
-| rule     | what this timeline lets through; a hide names its rule | a mute list           |
-| timeline | one query of this device's store, in time order        | a network's home page |
-| item     | a `note` or a `thread`                                 | a row of one protocol |
+| Noun     | What it is                                                         | What it is not        |
+| -------- | ------------------------------------------------------------------ | --------------------- |
+| source   | anything that hands over items with a time, and can be asked again | a protocol page       |
+| item     | the smallest thing with a publish time                             | a row of one protocol |
+| filter   | the rules a timeline lets items through by; a hide names its rule  | a mute list           |
+| timeline | inputs and a filter, laid flat in publish order                    | a network's home page |
+
+A source can be as unlike another as it wants — an account on a network, a forum, a feed, a
+web page split over numbered pages. It is a source when every item it hands over has its own
+publish time, to the day at least, and an ID that stays the same, and when it can be asked for
+what is newer. A timeline's input is a source or another timeline, so a new timeline is an
+existing one with a filter put on it.
+
+[`docs/concept.md`](docs/concept.md) is the whole of it: the item and its ID, fields,
+revisions, what you can do to an item, and how one is let go.
+
+The concept is where Fediqo is going, and Using it, below, is what this checkout does today.
+Today a Mastodon host or a Discuz forum can be joined. A post's own revisions are here; a
+timeline's are not. A rule can ask a Mastodon source's own fields; no other kind of source
+declares any yet. The deleted mark before a purge, and a timeline built on another timeline,
+are not here yet.
 
 ## How it works
 
 ```text
-  sources (any open protocol)
+  sources (anything that gives its items a time)
            │
            ▼
      your device, and nothing else
@@ -68,8 +83,8 @@ The store is yours to take away and yours to let go. It leaves as one password-l
 your own hands, or moves to another of your devices nearby when both agree, and it passes
 through nowhere of ours and not through the Apple account. Part of it goes when you say so —
 by a span of dates, by a source — or when a limit you set is reached, and what a limit let go
-says which limit did. Nothing goes that neither you nor your own limit chose. How each works
-is under What this device holds, below.
+says which limit did. Nothing goes that neither you nor your own limit chose, and a post you
+keep goes by none of them. How each works is under What this device holds, below.
 
 Several sources go in and one timeline comes out, so the same post from two of them is one
 row rather than two. Nothing is scored or re-ordered on the way: the only thing between what
@@ -77,9 +92,10 @@ arrived and what you see is a rule you wrote.
 
 ## What it is not
 
-- not a race to speak every network
-- not a reader of RSS, YouTube and blogs
-- not a client for X, Instagram or Facebook — only protocols anyone can implement and host
+- not a ranker — nothing is scored or re-ordered
+- not a reader of what has no time: a book's chapters, a manual's pages
+- not a way past anything a source does to keep a program from reading it
+- there is no Fediqo server
 
 ## How it is built
 
@@ -133,14 +149,20 @@ A timeline is its rules. A rule names one kind of thing:
 | Kind     | Lets through                                                   |
 | -------- | -------------------------------------------------------------- |
 | source   | posts from that source                                         |
-| author   | posts by that person (`user@instance`), or boosted by them     |
+| author   | posts by that person (`user@instance`), and reblogs they made  |
 | keyword  | posts whose text contains it, hashtags included                |
 | category | posts that arrived through it                                  |
+| a field  | posts whose source says that of them — see below               |
 
 - Rules of the same kind are any: one of them is enough.
-- Rules of different kinds are all: each kind must let the post through.
+- Rules of different kinds are all: each kind must let the post through. Each field is a kind
+  of its own: two language rules are any, a language rule and a Sent to rule are all.
 - A Hide rule hides what it matches, whatever else lets it through. A timeline with only Hide
   rules is All, less what they hide.
+- A rule on a person is about what they made — what they wrote and what they reblogged —
+  shown or hidden alike. What others reblog of theirs is hidden by a second rule, Whose post
+  it reblogs (below): Hide the author and Hide reblogs of them, and their words are drawn
+  nowhere.
 - An author, keyword, or category rule can be for every source or for one. A list or a board
   belongs to one source, so a rule naming one is only for that source.
 - A keyword ignores case, and full-width against half-width, and matches anywhere in the text
@@ -154,6 +176,41 @@ applies to the posts this device holds.
 
 A timeline shows only what this device holds. An author rule shows that person's posts that
 arrived here, not everything they ever wrote.
+
+### What one kind of source says
+
+Some things only one kind of source says about a post. A Mastodon says five, and a rule can
+ask each:
+
+| Field                 | Says                                              | A rule asks for        |
+| --------------------- | ------------------------------------------------- | ---------------------- |
+| Sent to               | how far the post was sent                         | one of its audiences   |
+| Language              | the language the post says it is in               | a language held posts say |
+| Covered by its author | whether it was marked sensitive or given a warning | yes, or no            |
+| Is a reblog           | whether the row is somebody's reblog of a post    | yes, or no             |
+| Whose post it reblogs | who wrote the post a reblog reblogs               | a person (`user@instance`) |
+
+Is a reblog and Whose post it reblogs are asked of the row itself; the other three are asked
+of the post, and on a reblog's row of the post it reblogs. So a Hide on Is a reblog: yes takes the reblogs out and
+leaves each post where it stands on its own, shown once; showing only reblogs shows no post
+for having been reblogged. A post held from before reblogs were rows, which says it arrived
+as a reblog, is a post: it answers no.
+
+Only a reblog says whose post it reblogs. So Hide on Whose post it reblogs: `@x@instance`
+hides other people's reblogs of that person's posts and leaves the posts that person wrote;
+Show on it shows only reblogs of their posts, and no post. The person is typed, or picked
+from the authors held, as for an author rule. A reblog whose post this device does not hold
+says nothing here, and is neither shown nor hidden by such a rule; nor is a post, or anything
+from a forum.
+
+The editor offers a field only while one of your sources declares it, and only the values
+those sources can give: every audience, yes and no, and for Language the languages the posts
+this device holds actually say, named in your language. A post whose source says no such
+thing does not match: a forum's post has no Sent to, so a rule on it neither shows that post
+nor hides it, and a post that states no language matches no language rule. Such a rule can be
+for every source or for one that declares the field. When the last source that declares a
+field is removed, the rule stays and is marked missing, as any rule naming something gone is.
+A reload of a timeline made only of these asks the sources that declare the field.
 
 ### Categories
 
@@ -174,8 +231,8 @@ choose a forum's boards. Home is always read once you are signed in.
 A Mastodon source can be signed in to from its row on Account, so its Home and your lists can
 be read. Before the server's page opens, Fediqo asks which sign-in you want, and says which
 part is which: reading alone, or reading and writing. Reading brings in your Home and your
-lists. Writing lets you post, reply, boost and favourite from Fediqo, and take any of them
-back — and nothing else: Fediqo never asks to follow anybody, change your profile, or touch
+lists. Writing lets you post, reply, boost, favourite and bookmark from Fediqo, and take any of
+them back — and nothing else: Fediqo never asks to follow anybody, change your profile, or touch
 your filters. Choosing reading alone asks for exactly what Fediqo asked for before it could
 write at all, so refusing the writing part changes nothing about reading. Signing in again is
 how you change your answer.
@@ -185,6 +242,28 @@ nothing with it. Account says so, names the source, and puts the choice there be
 press asks the same question, without signing you out first. Cancel on the server's page and
 the sign-in you already had is still the one in use. What you already agreed to is never
 widened behind your back.
+
+If you signed in to read and write before Fediqo could bookmark, that sign-in posts, replies,
+boosts and favourites exactly as it did; only bookmarking waits. The bookmark under a post
+there says it has to be asked for, and Account names the source: one press on either asks, on
+a page that names bookmarks, without signing you out first. A server that has no bookmarks to
+grant leaves you signed in to read and write, and the bookmark is not offered there.
+
+A bookmark is kept at the source. The mark under a post is what its source last said — filled
+where it holds your bookmark, and never filled by a press that did not land — so it reads the
+same in any other app, and after a relaunch. A press the source turns away says so and leaves
+the mark as it was; press again to try again. Keeping a post is another thing, and this
+device's own: see Keeping a post, below.
+
+What you just did to a post is not undone by a reload that was already on its way. Boost,
+favourite or bookmark a post — or take one back — while a timeline is still loading, and the
+mark stays as the source answered your press when that timeline lands. The next reload you ask
+for is the source's word again: a mark taken off in another app reads as off.
+
+What a source says you boosted, favourited and bookmarked is yours as its signed-in reader, and
+goes when that sign-in does: signing out, a server ending the sign-in, Clear, Remove, or another
+account signing in on that source leaves its posts here saying nothing of any of the three,
+until a signed-in read says so again.
 
 Every row on Account says what may be done on that source — read, read and write, or read only
 where the protocol has no writing in Fediqo at all, which is every forum. What it says is the
@@ -229,14 +308,103 @@ open, `r` reloads that post and its thread, from any source, and not the timelin
 Pressing `r` again while a reload runs does not start a second one; Esc stops it. A source that fails says
 so, and the others still land. The selected post stays selected.
 
+Reading toward the end of a timeline asks its sources for the next stretch, with no key
+pressed. On Trends that is the next stretch of what is rising on each Mastodon source: what
+arrives carries the trends category and stands at its publish time like every other post —
+nothing here ranks it. A source that has no more to give is named at the foot of the timeline
+for as long as that is so, and is not asked again until `r` reads from the top; the wait
+reading the same sources between times changes none of that. One that fails says so, the
+others still land, and it is asked again. A forum's trends are its ranking lists, which have no next. A timeline that does not
+ask for trends by name reads on through time only.
+
 `/` opens one search field. Its pattern is matched anywhere in every field a post is known by:
 who wrote it, who boosted it, its text, its hashtags, its source, and its categories, by
 their English or translated names and by list and board names. `*` stands for any run of
 characters, including none, and `?` for exactly one. Every other character stands for itself:
 there is no regex, operator, field prefix, or quoting. Case, and full-width against
-half-width, do not change what is found. Only posts this device holds are searched, and no
-source is asked. What is found is in time order. Clearing the field returns to the timeline
-as it was.
+half-width, do not change what is found. As you type, the posts this device holds are
+searched. Return also asks the sources of the timeline in front that can be searched. What is
+found is in time order. Clearing the field returns to the timeline.
+
+A reblog is a row of its own. Its first line says who reblogged and, at its far end, when —
+the time the row stands at. Under it is the post itself: its author's face and name, and
+beside them when the post was published. Pressing who reblogged opens their page; pressing the
+face or the name opens the author's. The post it reblogs also stands on its own at the time it
+was published, as it does where it arrived with no reblog. Both rows show in a timeline whose
+rules let both through, and reading again moves
+neither. The reblog's row shows the post as this device holds it — covered where its author covered
+it, marked where its source changed or deleted it — or says the post is no longer held, and
+then the row is the reblog alone. A reblog its source says was taken back says so on its first
+line. What you press on the row is done to the post, and each mark is named for whose post it
+goes to: favourite, reblog, bookmark and
+answer go to the post, and opening the row opens the post. Keeping the row keeps the reblog — the keep mark is named for it —
+and the post it shows stays for as long as the reblog is kept, whatever else is let go — a
+post you take back, or one its source says is gone, stays too, marked as gone from its source. A
+rule on an author is asked of who reblogged, shown or hidden alike — what others reblog of a
+person is hidden by a rule on Whose post it reblogs; a rule
+on a keyword or a field is asked of the
+post reblogged, so what hides a post hides its reblogs — but for Is a reblog and Whose post it reblogs, which are asked
+of the row, so hiding reblogs leaves the post's own row; a rule on a category is asked of the
+reblog, which arrived through the timeline that listed it, while the post it brought arrived
+through none. A post held from before reblogs were rows, which arrived as a reblog, stays
+where it was and says it arrived as a reblog by that person, until a timeline brings that
+reblog again; from then the reblog is the row that timeline shows, and the post is shown by
+it only where it also arrives on its own.
+
+What a post refers to is read for it. When a post first arrives and the post it answers is
+not on this device — or a post it quotes that did not come with it — Fediqo asks the source
+that brought it for that one post, without your asking. The post that arrived is shown at
+once, and the line that names what it answers, or the quote, says that post is on its way
+until it has come. It is asked for once: read again, the post asks for nothing more, and a
+loaded post let go later is not brought back. Only the post referred to directly is read,
+never what that post refers to in turn. A post its source says no longer exists is not asked
+for again, and the line says it is gone or hidden at its source — a source gives the same
+answer for a post it deleted and one it will not show you; a post that was read this way and
+later let go says it is no longer held; a read that fails is tried twice more, then left for this run and said so on the
+row, and asked again at the next launch. Each of these reads is listed with the others under
+Requests this run, is made only of your own source — as you, where you are signed in to it,
+and never unsigned in your place: when a sign-in ends, what your own timelines there still
+had to read this way is dropped with it — and waits its turn: a source is asked for one at a time,
+no closer than three seconds apart, and further apart where it says to slow down. One arrival asks a source
+for at most ten such posts; the rest are read when their rows come near the screen. A post
+read this way is a post like any other, and stays for as long as the post that refers to it.
+A quote is drawn from the quoted post as this device holds it: it shows what this device
+last read of that post — the post changed at its source is shown changed once the quoting
+post, or the post itself, is read again, and keeps what it said before. From this version a
+quote no longer carries a copy of the post it quotes, so a quote whose post this device does
+not hold shows none of that post's words and says it is no longer held.
+
+Opening a post shows what belongs with it, from what this device holds. Above it stands the
+post it answers, and the post that one answers, as far up as the posts held go; nothing is
+fetched by walking up. Where the next post up is on its way, could not be read for now, is
+gone or hidden at its source or is no longer held, a line in its place says so. Below it stand the held
+posts that answer it, each under the one it answers, and after them the held posts that quote
+it, under a title of their own. Who reblogged it, as far as their reblogs are held, is one
+line under the post. The thread is still read from the source when you open a post, and what
+that brings is shown because it is now held and answers — so an answer a search or a timeline
+brought stands there too, and with the network off the view is exactly what the device holds.
+An answer the thread read brings whose own earlier post the source did not hand over stands
+directly under the opened post, with a line above it saying what is known of that earlier
+post; that lasts until you quit, since which posts a source handed over as one thread is not
+written down — afterwards, with the network off, such an answer has no place in this view
+until the thread is read again, and stands in All all the same. The same holds above: opened
+from an answer to a post the source will not show, the posts the thread read says stand above
+that one are shown first, then a line in its place, then the answer — until you quit. A post the thread read brings that is
+older than you keep is shown until you quit, and is not held.
+
+Everything this device holds stands in its timelines. What a search brought back, what was
+read under a hashtag, the answers read when a post was opened, and a post another one quotes
+are posts like any other: each stands in All at the time it was posted, and stays there after
+the search is cleared or the post is closed. None of them came through a category of its
+source, so a timeline whose rules name a category — one made of Home alone, say — does not
+show them; a rule on a source, an author, a keyword or a field shows the ones it matches. A
+forum topic's replies are read when you open the topic. A reply the forum dates is then a
+post like any other: it stands in All at the time the forum gave it — never the time it was
+read — and in a timeline whose rules let it through, among them a rule on its topic's board;
+a search finds it; and pressing it opens its topic with that reply lit and in view. A reply
+the forum gives no date for is in no timeline and no search, since nothing but the moment it
+was read could place it: it stays part of its topic, read there and counted with everything
+held. A topic stays for as long as a reply of it is held.
 
 Preferences can set a latest date. Every timeline — All, Trends, yours, and a search — then
 shows nothing posted after 23:59:59 of that day, in this device's time zone, and the timeline
@@ -249,6 +417,19 @@ What needs a network — asking a source, signing in, posting — says it could 
 source, rather than hanging. When the network returns, what was left unasked is asked again,
 with no relaunch.
 
+A post its Mastodon source says was changed after it was published carries a Changed mark,
+and stays exactly where it was: its age is still when it was published, and no timeline moves
+it. It shows what it says now, on an ordinary reload as on `r` with the post open, and a rule
+or a search is asked of what it says now. What it said before stays on this device — only the
+wordings this device held, never fetched from the source — and is under the post where it is
+opened, oldest first, each with when its source said it changed. A post already changed when
+it was first read is marked and has nothing earlier to show. A wording is the post's words and
+its author's warning; an earlier wording that was covered stays covered until you lift the
+post's cover or press Show it on that wording. On a phone, a post carrying two or more of the
+Source removed, Deleted at source and Changed marks shows them as their glyphs alone. Earlier
+wordings are counted under Usage, ride a take-away and a move nearby with their post, and go
+when the post goes, by any way; a post you keep keeps them.
+
 A covered post carries a Covered mark, apart from its words. Where the author wrote a warning,
 it reads as their warning, set apart from the body. Where they wrote none, Fediqo puts no
 sentence in their place. `s` lifts the cover; the mark then says it was covered, and `s`
@@ -258,10 +439,9 @@ opened from is centred and still selected.
 ### What this device holds
 
 The Usage page is tabbed by purpose: Sources, Time, Keep, and Copies. Tab rotates them.
-Sources holds the totals, each source's figures and its Clear; posts held without arriving
-through a timeline — a search's finds, a conversation's answers, a topic's replies — are
-counted, and said to be held apart from the timelines. Time holds the week or month
-breakdown. Keep holds the two limits, Let go by dates, and What the limits let go. Copies
+Sources holds the totals, each source's figures and its Clear: one figure of posts for each
+source, counting everything held from it, a forum topic's replies included. Time holds the week or month
+breakdown. Keep holds the two limits, Posts you keep, Let go by dates, and What the limits let go. Copies
 holds the pictures this device is keeping, and the drop that takes them. Clear takes a
 server's cached copies and its sign-in, and keeps its posts. Preferences keeps what you
 choose: language, theme, type, the latest date, what becomes of a removed source's posts,
@@ -271,9 +451,65 @@ What a source says about itself — its name, its figures, how long a post may b
 this device with the source. After a relaunch, with or without a network, its page shows what
 it last said and when, and asks again behind it. Something new replaces what was kept.
 
+What this device lets go is gone from its store, not only from the screen. When a post goes —
+dropped by you, by a limit, with its source, or taken back by its author — its words, and any
+earlier wording kept with it, are written over in the store's file by the save that follows,
+and a store an earlier version left such words in is rid of them the first time this version
+opens it. A store that a read back replaced is not kept either, and nor is one that was put
+aside because it was damaged: it is deleted once you have been told of it and what took its
+place has been saved. Beyond that, what the system keeps beneath a file is the system's, and a
+package you took away earlier still holds what it held.
+
+When the store cannot be opened, Fediqo says why at the first thing you see, and what it does
+depends on the reason. If the store is only out of reach — another copy of Fediqo is using it,
+the device has no room left, its folder cannot be read or written — nothing on disk is changed
+and nothing takes its place: Fediqo opens without it and saves nothing that time, so what you
+do in that run is not kept, and the same store opens once the cause has passed. In such a run
+nothing is swept by the list of sources either — picture copies and forum sign-ins stay as
+they were — and a read back that would replace the store is refused, as is a take-away, which
+would have nothing to take. If the store is damaged, it is put aside and an empty one takes
+its place; the notice says so, and that the damaged one will be deleted. It is deleted once
+you have pressed I understand on that notice and the new store has been saved, and there is no
+getting it back after that. Put the notice down any other way, or quit before reading it, and
+the damaged one is kept and the notice is shown again. If a read back was interrupted and left
+two stores, Fediqo opens neither and asks which to keep, saying how many posts each holds and
+when it was last written; the other is deleted only after the one you chose has opened and
+been saved, and if the one you chose proves damaged the other is put back.
+
+#### Keeping a post
+
+Any post can be kept: the box under it, on its row and where it is opened, or `y` on the
+selected post. The same press un-keeps it. The mark is this device's own, and nothing is sent
+to the source. A kept post is never let go — not by either limit, not by dates, not with what
+its source deleted, and not when its source is removed, whichever was chosen for that source's
+posts: it stays, marked Source removed. A kept post of your own that you take back stays too,
+marked Deleted at source. Where a question says how many posts would go, kept ones are not in
+the number, and What the limits let go never counts one. Its picture copies are not kept with
+it: they go with a removed source and for room like any others, and come back when the post
+is read again while its source is here. Where kept posts alone are more than the room, the
+store stays over it and Room says so; other posts are then let go as they arrive. Kept survives a relaunch, and goes
+with a take-away and a move nearby. Un-kept, it is an ordinary post again from that moment:
+the press itself lets nothing go.
+
+Usage's Keep tab counts what you keep under Posts you keep: every source together, then each
+by name — a source you removed among them — with what their words weigh, earlier wordings
+counted in. Pictures are not in that figure; picture copies are counted by source, on Copies.
+Stop keeping, beside each figure, un-keeps all of them or all from that source at once. It asks
+first and names the count, and it lets nothing go: they are ordinary posts from then, and the
+next limit or letting go may take them. A post two sources carry stays kept through the other
+source's copy; one source's Stop keeping counts only the posts it makes ordinary and says how
+many stay kept that way, and Every source reaches them all. A question that lets posts go —
+removing a source, letting go by dates, letting go of what was deleted at its source — says
+how many kept posts stay. Reading back a store, and holding or moving one nearby, says how
+many of the posts it brings are kept before you agree, and a package whose store does not
+bear that number out is refused before anything here changes. One from a version that did not
+write the number down says that it does not say.
+
 #### The two limits
 
-Keep posts holds only the latest months; Room is what this device gives the index and its
+Keep posts holds only the latest months — and with them a post you keep, and an older post
+that one still held quotes or reblogs, which stays in All until the post or reblog showing it
+goes; Room is what this device gives the index and its
 picture copies together. Side by side, and whichever is reached first acts. Past the room,
 picture copies go first, oldest first — they come back when read again — and only then the
 oldest posts, from every source. A limit never set lets nothing go, and every source stays

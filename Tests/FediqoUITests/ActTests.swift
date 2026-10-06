@@ -97,7 +97,7 @@ struct ActTests {
             author: "Ada", handle: "@ada@social.example", body: "hello",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home],
             boosted: boosted, favourited: favourited, statusID: statusID
-        )
+        ).readNow()
     }
 
     private func shell(
@@ -378,8 +378,8 @@ struct ActTests {
     func noLocalFavourites() async throws {
         let (session, _) = try await shell(scopes: writing, holding: note(boosted: false, favourited: true))
         #expect(try row(session).favourited == true)
-        #expect(DummyMarks() == DummyMarks(bookmarked: false, kept: false),
-                "the device-local marks no longer carry a favourite")
+        #expect(DummyMarks() == DummyMarks(kept: false),
+                "the device-local marks no longer carry a favourite, nor a bookmark (#285)")
     }
 
     // MARK: - An answer read inside a conversation
@@ -450,7 +450,7 @@ struct ActTests {
                 author: "Ada", handle: "@ada@origin.example", body: "hello",
                 postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home],
                 boosted: false, statusID: statusID
-            )
+            ).readNow()
         }
         for host in ["a.example", "b.example"] { await store.add(Source(host: host, kind: .mastodon)) }
         await store.ingest([copy(on: "b.example", "222"), copy(on: "a.example", "111")])

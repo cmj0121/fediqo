@@ -94,7 +94,7 @@ struct ComposeTests {
     ) async throws -> (ShellSession, WriteServer, MemoryMastodonTokens) {
         let tokens = MemoryMastodonTokens()
         try tokens.save(token(host, scopes: scopes))
-        let server = WriteServer(routes, holding: holding, gate: gate)
+        let server = WriteServer(routes, gate: gate)
         let store = ItemStore()
         await store.add(Source(host: host, kind: .mastodon))
         await store.add(Source(host: forum, kind: .discuz))

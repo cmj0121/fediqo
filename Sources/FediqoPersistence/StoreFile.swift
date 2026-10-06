@@ -1,16 +1,32 @@
 import FediqoCore
 import Foundation
 import GRDB
+import SQLite3
 
 /// The on-device index. Lives in Application Support and is excluded from backup.
 public struct StoreFile: Sendable {
     let db: DatabaseQueue
 
-    public init(at directory: URL) throws {
+    /// `busyWait` is how long this connection waits on another before a read or a write fails
+    /// as busy (#295): another copy of the app saving into the same folder is an ordinary thing,
+    /// and a store that is merely being written is not one to give up on at the first ask.
+    public init(at directory: URL, busyWait: TimeInterval = StoreFile.busyWait) throws {
         try makeExcludedFromBackup(directory)
         let path = directory.appendingPathComponent(Self.indexName).path
         if Self.isNewer(at: path) { throw Newer() }
-        try self.init(database: DatabaseQueue(path: path))
+        var waiting = Configuration()
+        waiting.busyMode = .timeout(busyWait)
+        try self.init(database: DatabaseQueue(path: path, configuration: waiting))
+        // **A store that can be read and not written is not one this run may use** (#295).
+        // SQLite opens a file it may not write for reading alone and says nothing until the
+        // first write — which would be the first save, failing into a log after the person had
+        // read on for an hour. Asked here, where the answer can be said, and of the connection
+        // and the folder themselves, so that asking writes nothing: whether SQLite opened the
+        // file for reading alone, and whether the folder its journal is made in takes a file.
+        let readOnly = try db.read { db in sqlite3_db_readonly(db.sqliteConnection, "main") == 1 }
+        guard !readOnly, FileManager.default.isWritableFile(atPath: directory.path) else {
+            throw DatabaseError(resultCode: .SQLITE_READONLY)
+        }
     }
 
     public init(database: DatabaseQueue) throws {
@@ -18,8 +34,71 @@ public struct StoreFile: Sendable {
         // first save would then empty tables this build only half understands.
         if try database.read(migrator.hasBeenSuperseded) { throw Newer() }
         db = database
+        // Before anything is written, a migration's rewriting of rows included.
+        try db.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA secure_delete = ON") }
         try migrator.migrate(db)
     }
+
+    /// **What this device lets go is not left readable in its index** (#292).
+    ///
+    /// SQLite frees a deleted row's pages for the next insert and, left to itself, leaves what
+    /// was written on them where it was: a save with fewer rows than the last would keep the
+    /// words of every post let go — and each earlier wording its author took away (#286) — in
+    /// the file's free pages until something happened to be written over them. `secure_delete`
+    /// set to `ON` has SQLite write zeroes over everything it frees, as it frees it, in the same
+    /// transaction as the save that let the rows go. Set on the one connection a `DatabaseQueue`
+    /// has, and asked for by name: the system's own default is `FAST`, which zeroes only inside
+    /// pages it was writing anyway and leaves the free ones.
+    ///
+    /// **The index is the one file.** It keeps a rollback journal and never a write-ahead log
+    /// (`isNewer`), and the journal — which holds each replaced page as it was — is deleted as
+    /// the save commits, so nothing lies beside the index once a save has returned or the store
+    /// has closed. A run killed mid-save leaves its journal, and the rows it was letting go are
+    /// then still held: the next open rolls the save back and deletes it.
+    ///
+    /// **What this does not reach**, and does not claim to: what the file system keeps of a file
+    /// that was deleted or cut short — the journal, a rebuild's temporary copy, the tail of an
+    /// index made smaller, an index a read back replaced. That is the system's, beneath this
+    /// app's files. **A store put aside as damaged is kept only until the person has been told
+    /// of it** and what took its place has been saved (`dropWhatWasReplaced`, #295); one that
+    /// could not be opened for the moment's reasons is not put aside at all.
+    ///
+    /// A store written by a build before this one may already hold such words in its free
+    /// pages, where zeroing what is freed from now on would never reach: `scrub()` rebuilds such
+    /// a file whole.
+    ///
+    /// **Asked only once the store has been read** — by `open(at:now:)`, and where a package's
+    /// index is read back — and never by `init`: an index that cannot be read is never written
+    /// over, and a rebuild is a write of every page.
+    ///
+    /// **Whenever the file has free pages, and the first time whatever it has.** A build before
+    /// this one frees pages without zeroing them, and may do so again after this build has had
+    /// the store — a person going back a version and forward again — so a mark that the file was
+    /// once rebuilt cannot be the whole of the question. Free pages can be asked for, and a
+    /// store with any is rebuilt. The ones this build frees are zeroed already, so after a save
+    /// that let a good deal go the next open rebuilds for nothing: a fifth of a second at fifty
+    /// thousand posts, at launch, before any limit has measured the file. The mark is kept for
+    /// the first open alone, when an older file with no page free is rebuilt regardless — what
+    /// such a build left inside its pages is not this one's to vouch for.
+    ///
+    /// A rebuild copies the rows held and nothing else into a file made afresh. Marked only once
+    /// it has happened: one that failed — a full disk — is tried again at the next open, and the
+    /// store is used either way, since what is held is as readable as it was.
+    func scrub() {
+        let (version, free) = (try? db.read { db in
+            (try Int.fetchOne(db, sql: "PRAGMA user_version") ?? 0, try Int.fetchOne(db, sql: "PRAGMA freelist_count") ?? 0)
+        }) ?? (0, 1)
+        guard version < Self.scrubbed || free > 0 else { return }
+        try? db.writeWithoutTransaction { db in
+            try db.execute(sql: "VACUUM")
+            try db.execute(sql: "PRAGMA user_version = \(Self.scrubbed)")
+        }
+    }
+
+    /// The index's `user_version` once this build has rebuilt it. **A number in the file's
+    /// header and not a migration**: the tables are as they were, so a build before this one
+    /// still opens the store — a migration id would have made it refuse to.
+    static let scrubbed = 1
 
     /// The index records a migration this build does not know: a newer build wrote it.
     struct Newer: Error {}
@@ -40,6 +119,21 @@ public struct StoreFile: Sendable {
         return (try? probe.read(migrator.hasBeenSuperseded)) ?? false
     }
 
+    /// Whether the index standing at `path` holds nothing — no source and no post — or `nil`
+    /// where that cannot be asked. Asked on a read-only connection, so asking changes nothing.
+    static func holdsNothing(indexAt path: String) -> Bool? {
+        var readOnly = Configuration()
+        readOnly.readonly = true
+        guard let probe = try? DatabaseQueue(path: path, configuration: readOnly) else { return nil }
+        return try? probe.read { db in
+            let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'")
+            for table in ["source", "note"] where tables.contains(table) {
+                if try Int.fetchOne(db, sql: "SELECT count(*) FROM \(table)") ?? 0 > 0 { return false }
+            }
+            return true
+        }
+    }
+
     /// What a launch found on disk: the file to write back to, if there is one to trust, and
     /// what it held.
     public struct Opened: Sendable {
@@ -49,17 +143,21 @@ public struct StoreFile: Sendable {
         public let notes: [Note]
         /// What each source last said about itself, as of when (#188).
         public let said: [SourceProfile]
-        /// Where an unreadable index was moved, when one was. It is left there for a person, or a
-        /// later version of this code, to look at; nothing in the app reads it again.
+        /// Where an unreadable index was moved by this launch, when one was. Nothing in the app
+        /// reads it again; it is deleted once the person has been told and what took its place
+        /// has been saved (`trouble`, `StoreFile.told(in:)`).
         public let setAside: URL?
+        /// What the person is to be told about the store, where anything (#295).
+        public let trouble: StoreTrouble?
         /// The index was written by a newer build. It was left exactly as found — not read, not
         /// set aside — and `file` is `nil`, so this run does not write over it either.
         public let storeIsNewer: Bool
 
         init(
             file: StoreFile?, sources: [Source] = [], notes: [Note] = [], said: [SourceProfile] = [],
-            setAside: URL? = nil, storeIsNewer: Bool = false
+            setAside: URL? = nil, storeIsNewer: Bool = false, trouble: StoreTrouble? = nil
         ) {
+            self.trouble = trouble
             self.file = file
             self.sources = sources
             self.notes = notes
@@ -69,33 +167,83 @@ public struct StoreFile: Sendable {
         }
     }
 
-    /// Opens the index in `directory` and reads it, failing closed.
+    /// Opens the index in `directory` and reads it, failing closed — and says what it found
+    /// where that is anything but a store opened (`Opened.trouble`, #295).
     ///
     /// **An index that cannot be read is never written over.** `save` begins by emptying both
-    /// tables, so a launch that shrugged off a failed read — a corrupt page, a migration this
-    /// build cannot run, a row it cannot decode — and started empty would, at the first save,
-    /// turn one bad launch into everything the reader had, gone. So a failure here moves the
-    /// file aside under a timestamped name before a fresh one is made in its place, and when it
-    /// cannot even do that the run gets no file at all: it reads nothing and saves nothing, and
-    /// whatever is on disk is still there next launch.
+    /// tables, so a launch that shrugged off a failed read and started empty would, at the first
+    /// save, turn one bad launch into everything the reader had, gone.
     ///
-    /// **An index from a newer build is not unreadable, and is not set aside.** It is left where
-    /// it is, byte for byte, and the run gets no file and `storeIsNewer`, so the newer build finds
-    /// it as it left it.
+    /// **Why it could not be read decides what is done** (`cause(of:)`):
+    ///
+    /// - **Damaged** — not a database, a page that does not add up, a migration this build
+    ///   cannot run, a row it cannot decode. The file is moved aside under a timestamped name
+    ///   and a fresh one is made in its place. Where it cannot be moved, nothing is made.
+    /// - **Out of reach for now** — in use by another copy of the app, no room, a folder or a
+    ///   file that would not be read or written. **Nothing is moved and nothing is made**: the
+    ///   run gets no file at all, reads nothing and saves nothing, and whatever is on disk is
+    ///   there, untouched, at the next launch.
+    ///
+    /// **An index from a newer build is neither**, and is not set aside. It is left where it is,
+    /// byte for byte, and the run gets no file and `storeIsNewer`.
+    ///
+    /// **A read back left unsettled opens nothing** (#292): see `StorePackager.settleHalfCommits`.
     ///
     /// The decision lives here rather than in the app so it can be tested against a real file.
-    public static func open(at directory: URL, now: Date = Date()) -> Opened {
+    public static func open(at directory: URL, now: Date = Date(), busyWait: TimeInterval = StoreFile.busyWait) -> Opened {
+        open(at: directory, now: now) { try StoreFile(at: $0, busyWait: busyWait) }
+    }
+
+    /// `open(at:now:busyWait:)`, with the opening itself handed in: the one failure a test
+    /// cannot make a real file give — a disk with no room — is made here instead.
+    static func open(at directory: URL, now: Date, opening: (URL) throws -> StoreFile) -> Opened {
+        // A read back's old index is aside here, neither replaced nor put back (#292): the store
+        // this device held is that one, and no index is opened or made beside it. The run reads
+        // nothing and saves nothing, and the next launch tries to settle it again.
+        if let unsettled = StorePackager.unsettledReadBack(in: directory) {
+            return Opened(file: nil, trouble: unsettled)
+        }
         do {
-            let file = try StoreFile(at: directory)
+            let file = try opening(directory)
             let snapshot = try file.load()
-            return Opened(file: file, sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said)
+            // Read, and so not about to be set aside: only now is it rewritten (#292).
+            file.scrub()
+            // One put aside by a launch that was quit before it could say so is said now — and
+            // said truly: where the other of two stores took its place, not that an empty one did.
+            let untold = putAside(in: directory).filter { !$0.told }
+            let restored = untold.contains { aside in
+                FileManager.default.fileExists(atPath: directory.appendingPathComponent(aside.base + restoredSuffix).path)
+            }
+            return Opened(
+                file: file, sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said,
+                trouble: untold.isEmpty ? nil : .damaged(replacedBy: restored ? .otherStore : .empty)
+            )
         } catch is Newer {
             return Opened(file: nil, storeIsNewer: true)
         } catch {
-            guard let aside = try? setAside(in: directory, now: now),
-                  let fresh = try? StoreFile(at: directory)
-            else { return Opened(file: nil) }
-            return Opened(file: fresh, setAside: aside)
+            switch cause(of: error) {
+            case .unreachable(let why):
+                return Opened(file: nil, trouble: .unreachable(why))
+            case .damaged:
+                guard let aside = try? setAside(in: directory, now: now) else {
+                    return Opened(file: nil, trouble: .unreachable(.outOfReach))
+                }
+                // The store the person chose of two (`StorePackager.choose`) is the one that
+                // turned out damaged: the other, kept only until this one had opened and saved,
+                // is the store again. Nothing is made in the damaged one's place — the next
+                // launch puts the other back there.
+                if StorePackager.reinstateDisplaced(in: directory) {
+                    // Written down beside the damaged one, so that the launch that comes to say
+                    // it was damaged says what took its place.
+                    let base = aside.deletingPathExtension().lastPathComponent
+                    try? Data().write(to: directory.appendingPathComponent(base + restoredSuffix))
+                    return Opened(file: nil, setAside: aside, trouble: .unreachable(.otherComesBack))
+                }
+                guard let fresh = try? opening(directory) else {
+                    return Opened(file: nil, setAside: aside, trouble: .unreachable(.putAsideOnly))
+                }
+                return Opened(file: fresh, setAside: aside, trouble: .damaged(replacedBy: .empty))
+            }
         }
     }
 
@@ -128,7 +276,8 @@ public struct StoreFile: Sendable {
     /// row's pages for the next insert, so a save with fewer rows weighs what the last one did
     /// until the file is rebuilt — and a limit judged by `bytesOnDisk()` would never see the
     /// posts it let go of. Asked only after a limit acted, never on the ordinary save: it
-    /// rewrites the whole index.
+    /// rewrites the whole index. **Room, and nothing else**: what the rows let go said is already
+    /// gone from those pages by the save that freed them (`scrub`).
     public func compact() async throws {
         try await db.writeWithoutTransaction { db in try db.execute(sql: "VACUUM") }
     }
@@ -146,7 +295,7 @@ public struct StoreFile: Sendable {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime, .withFractionalSeconds, .withTimeZone]
         let random = UUID().uuidString.prefix(8).lowercased()
-        let base = "index-unreadable-\(formatter.string(from: now))-\(random)"
+        let base = "\(unreadablePrefix)\(formatter.string(from: now))-\(random)"
         let aside = directory.appendingPathComponent(base + ".sqlite")
         try manager.moveItem(at: index, to: aside)
         for suffix in sidecars {
@@ -185,6 +334,20 @@ public struct StoreFile: Sendable {
         }
     }
 
+    /// Takes the mark that its references are still to be asked for off every row (#293): what
+    /// a read back does to the store a package carried before that store becomes this device's
+    /// (`ItemStore.replace`), on the file itself where the file is moved into place as it is.
+    func settleReferences() throws {
+        try db.writeWithoutTransaction { db in try db.execute(sql: "UPDATE note SET refs_due = 0 WHERE refs_due") }
+    }
+
+    /// How many rows the index holds as kept (#284), asked of the table and not of the notes read
+    /// out of it: what a read back checks a package's header against (#294), so it is every row
+    /// the file carries, whether or not this build can draw it.
+    func keptCount() throws -> Int {
+        try db.read { db in try Int.fetchOne(db, sql: "SELECT count(*) FROM note WHERE kept") ?? 0 }
+    }
+
     public func load() throws -> (sources: [Source], notes: [Note], said: [SourceProfile]) {
         try db.read { db in
             let records = try SourceRecord.fetchAll(db)
@@ -196,7 +359,7 @@ public struct StoreFile: Sendable {
             // first (#114), and a table read in no stated order is read in whatever order
             // SQLite likes. Stated, so that it is a guarantee rather than a habit.
             let notes = try NoteRecord.order(Column.rowID).fetchAll(db).compactMap { record in
-                (byHost[record.host] ?? record.formerSource).map(record.note(from:))
+                (byHost[record.host] ?? record.formerSource).flatMap(record.note(from:))
             }
             return (sources, notes, said)
         }
@@ -218,7 +381,55 @@ public struct StoreFile: Sendable {
                 try NoteRecord(note).insert(db)
             }
         }
+        // Only here, the write having returned: a save that threw has replaced nothing.
+        dropWhatWasReplaced()
     }
+
+    /// Deletes every earlier store kept beside this one that this one has now outlived (#292,
+    /// #295), this index having just been saved:
+    ///
+    /// - **A store a read back replaced**, where a run was killed before clearing it away: an
+    ///   `incoming-aside-…` folder whose marker says replaced, beside this index.
+    /// - **A store the person chose against**, of two a read back left (`StorePackager.choose`):
+    ///   one whose marker says displaced. The one they chose is this one, opened and now saved.
+    /// - **A store put aside because it was damaged** (`index-unreadable-…`, with what SQLite and
+    ///   the limits kept beside it), by this run or any before it — **only once the person has
+    ///   been told** (`told(in:)`). One they have not been told of is kept, whatever is saved.
+    ///
+    /// **An earlier store must not outlive the store that took its place.** Such a copy holds
+    /// every post that store held, and nothing this device lets go afterwards reaches it. But
+    /// it is the only other copy there is, so it goes only when both things are true: this
+    /// index has been saved, which is why this is asked from `save`; and nobody is waiting to be
+    /// told. There is no period in which it can be got back, and the notice says so.
+    ///
+    /// **Never an aside that was only moved out of the way.** One whose marker says neither
+    /// replaced nor displaced is the store this device held and the only copy of it.
+    ///
+    /// Deleting is unlinking; what the file system keeps beneath is the system's, as above. Each
+    /// store's mark goes last, so a deleting cut short is finished by the next save.
+    private func dropWhatWasReplaced() {
+        let path = db.path
+        guard path != ":memory:", !path.isEmpty else { return }
+        let folder = URL(fileURLWithPath: path).deletingLastPathComponent()
+        let manager = FileManager.default
+        for name in (try? manager.contentsOfDirectory(atPath: folder.path)) ?? []
+        where name.hasPrefix(Self.readBackAsidePrefix) {
+            let kept = folder.appendingPathComponent(name)
+            if StorePackager.wasReplaced(kept, in: folder) || StorePackager.wasDisplaced(kept) {
+                try? manager.removeItem(at: kept)
+            }
+        }
+        for aside in Self.putAside(in: folder) where aside.told {
+            for ending in [".sqlite"] + Self.sidecars.map({ ".sqlite" + $0 }) + ["-" + LimitAccountFile.name, Self.restoredSuffix, Self.toldSuffix] {
+                try? manager.removeItem(at: folder.appendingPathComponent(aside.base + ending))
+            }
+        }
+    }
+
+    /// What a store set aside as unreadable, and the folder a read back moves the index it is
+    /// replacing into, are named by.
+    static let unreadablePrefix = "index-unreadable-"
+    static let readBackAsidePrefix = "incoming-aside-"
 }
 
 private var migrator: DatabaseMigrator {
@@ -289,7 +500,7 @@ private var migrator: DatabaseMigrator {
     // makes it refuse the store instead, which is `CategoryRow`'s rule reaching a second marker.
     migrator.registerMigration("v3-holding") { db in
         try db.alter(table: "note") { t in
-            t.add(column: "holding", .text).notNull().defaults(to: Holding.arrived.rawValue)
+            t.add(column: "holding", .text).notNull().defaults(to: "arrived")
         }
     }
     // When a read of one post heard its source say it no longer has it (#179), or NULL. Every row
@@ -318,7 +529,313 @@ private var migrator: DatabaseMigrator {
             t.add(column: "said_at", .datetime)
         }
     }
+    // Whether the person keeps a row (#284). Every row already stored is one nobody kept, which
+    // is what the column's default says.
+    //
+    // **A migration id for `v3-holding`'s reason.** An older build knows nothing of this column:
+    // its limits would let a kept post go like any other, and its first save would write every
+    // row back without the mark. The id makes it refuse the store instead.
+    migrator.registerMigration("v6-kept") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "kept", .boolean).notNull().defaults(to: false)
+        }
+    }
+    // Whether the reader has bookmarked a row at its source, as the source last said (#285), or
+    // NULL where it never said. Every row already stored is one no source was heard about, so
+    // the NULL each takes is the truth.
+    //
+    // **A migration id for `v3-holding`'s reason.** An older build's first save would write
+    // every row back without what the source said, and a relaunch under this build would draw
+    // posts bookmarked at their source as not bookmarked. The id makes it refuse the store.
+    migrator.registerMigration("v7-bookmarked") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "bookmarked", .boolean)
+        }
+    }
+    // When a row's source says it was last changed, and what the row said before each change this
+    // device saw (#286) — both NULL on every row already stored, which is the truth: none was
+    // seen to change.
+    //
+    // **A migration id for `v3-holding`'s reason.** An older build's first save would write every
+    // row back without either, and worse than losing them: its next read of a changed post would
+    // be told nothing was changed. The id makes it refuse the store instead.
+    //
+    // **On the note's own row and in no table of its own**, so an earlier wording cannot outlive
+    // its post: whatever lets the row go has let these go with it.
+    migrator.registerMigration("v8-revisions") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "edited_at", .datetime)
+            // A JSON array of `WordingRow`, oldest first.
+            t.add(column: "earlier", .text)
+        }
+    }
+    // The language a row's source says it is in (#287), or NULL where it said none — which every
+    // row already stored takes, and is the truth: none was read for it.
+    //
+    // **A migration id for `v3-holding`'s reason.** A timeline may now be made of the posts that
+    // say one language; an older build's first save would write every row back without what it
+    // said, and that timeline would be empty under this build until every post was read again.
+    // The id makes it refuse the store instead.
+    migrator.registerMigration("v9-language") { db in
+        try db.alter(table: "note") { t in
+            t.add(column: "language", .text)
+        }
+    }
+    // What a row refers to (#290, #293), and whether that has been asked for.
+    //
+    // `refs` is a JSON array of `ReferenceRow`: for each, its kind and whichever of the target's
+    // ID and its source's own id for it the source said, with whom an answer is to and where a
+    // quote stands. Every row already held is given the references its reply and its quote
+    // state, in this migration's transaction, so that from here on the column is where a row's
+    // references are read from.
+    //
+    // **A row whose facts will not read is left with no references written, and the migration
+    // goes on.** It is not this step's to judge the store: a cell that is not text, or not the
+    // JSON a row's facts are, is found by `load()` as it was before this step — which is what
+    // decides whether the store is damaged — and a row that `load()` takes after all is read
+    // leniently (`ReferenceRow.references`). A migration that threw here would be a stricter
+    // and an earlier judge than the load, and since #295 a store judged damaged is deleted.
+    //
+    // `refs_due` is whether a row's references are still to be asked for (`Note.refsDue`), and
+    // is **false for every row already held**: what an item refers to is asked for once, when
+    // the item first arrives, and these arrived before there was any asking. So the first launch
+    // of a build that loads does not go and fetch for every post on the device at once.
+    //
+    // **A migration id for `v3-holding`'s reason.** An older build's first save would write
+    // every row back without either column's value — a row whose references were still to be
+    // asked for would never have them asked — and, once a reblog is an item whose only content
+    // is its reference, without the one thing that row says.
+    //
+    // **Frozen code**, as `v2-categories` is: it reads the facts by the names they were written
+    // under and spells the references itself, so a later change to the live records cannot
+    // change what this step did to a v9 store.
+    migrator.registerMigration("v10-references") { db in
+        struct V9Facts: Decodable {
+            struct Reply: Decodable {
+                var handle: String?
+                var inReplyToId: String?
+            }
+            struct Quote: Decodable {
+                struct Post: Decodable { var id: String }
+                var state: String
+                var statusID: String?
+                var post: Post?
+            }
+            var reply: Reply?
+            var quote: Quote?
+        }
+        struct V10Reference: Encodable {
+            var kind: String
+            var id: String?
+            var statusID: String?
+            var handle: String?
+            var state: String?
+        }
+        try db.alter(table: "note") { t in
+            t.add(column: "refs", .text)
+            t.add(column: "refs_due", .boolean).notNull().defaults(to: false)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let update = try db.makeStatement(sql: "UPDATE note SET refs = ? WHERE rowid = ?")
+        let rows = try Row.fetchAll(db, sql: "SELECT rowid AS rowid, facts AS facts FROM note")
+        for row in rows {
+            // Asked for as a value and turned into text here, so a cell that is not text is
+            // nothing rather than a trap.
+            guard let text = String.fromDatabaseValue(row["facts"] as DatabaseValue),
+                  let facts = try? JSONDecoder().decode(V9Facts.self, from: Data(text.utf8))
+            else { continue }
+            var references: [V10Reference] = []
+            if let reply = facts.reply {
+                references.append(V10Reference(kind: "answers", statusID: reply.inReplyToId, handle: reply.handle))
+            }
+            if let quote = facts.quote {
+                references.append(V10Reference(
+                    kind: "quotes", id: quote.post?.id, statusID: quote.statusID, state: quote.state
+                ))
+            }
+            let written = String(decoding: try encoder.encode(references), as: UTF8.self)
+            try update.execute(arguments: [written, row["rowid"] as Int64])
+        }
+    }
+    // One way of holding (#296): everything this device holds is an item and stands in its
+    // timelines, so the column that said which rows were held apart from them goes. Dropped, not
+    // left: nothing remains in the file that means "held apart" — no value to be honoured by a
+    // build that still reads it, and none to be mistaken for a fact later.
+    //
+    // Every row is kept. One that was held apart is, from here, a row like any other; a forum
+    // topic's kept reply is told by its own id (`Note.isTopicReply`), as it always could be — and
+    // whether its forum dated it by the date kept with it since replies were kept (#297).
+    //
+    // **A migration id for `v3-holding`'s reason, turned round.** A build that knows the column
+    // would write `aside` into it again for what a search or a thread brought, and this build
+    // would then show in All what that build meant to hold apart — or, opening this store, it
+    // would find no column and fail. The id makes it refuse the store instead.
+    migrator.registerMigration("v11-one-holding") { db in
+        try db.alter(table: "note") { t in
+            t.drop(column: "holding")
+        }
+    }
+    // References are the one place a row says what it refers to (#293): what a row's facts said
+    // of the post it answers and the post it quotes — and the copy of the quoted post kept
+    // inside them — goes, and `refs` is all there is.
+    //
+    // **First every row's references are made whole from its facts, for the last time.** Since
+    // `v10-references` each row's `refs` has said what its `reply` and `quote` said, and every
+    // save since has written both from the one note. This step checks rather than trusts: a
+    // row whose cell does not name the post its facts say it answers, or the quote they say it
+    // makes — a cell that is missing, that will not read, or that a save from some path wrote
+    // short — is given what the facts say. A reference the cell already has is left exactly as
+    // it is: it may carry a name a load found, or the word that the post is gone, which the
+    // facts never knew. **Only then are `reply` and `quote` taken out of the facts.**
+    //
+    // **The quoted post's copy goes with them, and is not made into a row.** Since quotes were
+    // read the quoted post has been taken in as an item of its own beside the post that quotes
+    // it, and kept for as long as that post is; the reference names it. Where it is no longer
+    // held — the person let it go, or its source said it was gone — the copy was the one place
+    // its words still stood after that, and from here the quote says the post is no longer
+    // held, which is true.
+    //
+    // **A row whose facts will not read is left as it is, and the migration goes on**, for
+    // `v10-references`' reason: `load()` is what judges a store, and since #295 a store judged
+    // damaged is deleted.
+    //
+    // **A migration id for `v3-holding`'s reason.** A build from before reads what a row
+    // answers and quotes back into its facts from nothing, and would write every reply and
+    // every quote back as neither — and it draws a quote from the copy, which is no longer
+    // there. The id makes it refuse the store instead.
+    //
+    // **Frozen code**: it reads the facts and the references by the names they were written
+    // under, as text, and names no live type.
+    migrator.registerMigration("v12-references-only") { db in
+        let rows = try Row.fetchAll(db, sql: "SELECT rowid AS rowid, facts AS facts, refs AS refs FROM note")
+        let setRefs = try db.makeStatement(sql: "UPDATE note SET refs = ? WHERE rowid = ?")
+        // **Only where the database itself reads the cell as JSON text.** The row was chosen
+        // by this code's reading of its facts, and the removal is done by SQLite's: where the
+        // two disagree about one cell — facts kept as a blob, text the two parse differently —
+        // the statement changes nothing rather than failing the step, and the store with it.
+        // A row left with the two keys is harmless: nothing reads them, and the next save of
+        // the row writes its facts without them.
+        let strip = try db.makeStatement(sql: """
+            UPDATE note SET facts = json_remove(facts, '$.reply', '$.quote')
+            WHERE rowid = ? AND typeof(facts) = 'text' AND json_valid(facts)
+            """)
+        for row in rows {
+            guard let text = String.fromDatabaseValue(row["facts"] as DatabaseValue),
+                  let facts = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any]
+            else { continue }
+            let reply = facts["reply"] as? [String: Any]
+            let quote = facts["quote"] as? [String: Any]
+            guard facts["reply"] != nil || facts["quote"] != nil else { continue }
+            // What the cell holds: each entry of it that is an object. A cell that is no list
+            // holds none, and an entry that is no object is not carried over where the cell is
+            // written again — it named nothing any build could read.
+            var references = (String.fromDatabaseValue(row["refs"] as DatabaseValue)
+                .flatMap { (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [Any] } ?? [])
+                .compactMap { $0 as? [String: Any] }
+            var grew = false
+            if let reply, !references.contains(where: { $0["kind"] as? String == "answers" }) {
+                var answers: [String: Any] = ["kind": "answers"]
+                if let id = reply["inReplyToId"] as? String { answers["statusID"] = id }
+                if let handle = reply["handle"] as? String { answers["handle"] = handle }
+                references.insert(answers, at: 0)
+                grew = true
+            }
+            if let quote, let state = quote["state"] as? String,
+               !references.contains(where: { $0["kind"] as? String == "quotes" }) {
+                var quotes: [String: Any] = ["kind": "quotes", "state": state]
+                if state == "accepted" {
+                    let post = quote["post"] as? [String: Any]
+                    if let id = post?["id"] as? String { quotes["id"] = id }
+                    if let id = (quote["statusID"] as? String) ?? (post?["statusID"] as? String) { quotes["statusID"] = id }
+                }
+                references.append(quotes)
+                grew = true
+            }
+            let rowid = row["rowid"] as Int64
+            if grew {
+                let written = try JSONSerialization.data(withJSONObject: references, options: [.sortedKeys])
+                try setRefs.execute(arguments: [String(decoding: written, as: UTF8.self), rowid])
+            }
+            try strip.execute(arguments: [rowid])
+        }
+    }
     return migrator
+}
+
+/// One `Reference` as `note.refs` writes it, a JSON array of these in the order the item holds
+/// them. The kind and a quote's state are in the spellings Core gives them; a name the source
+/// did not say is left out.
+///
+/// **A new kind is a new migration** (`Reference`): this build reads only the kinds it knows.
+private struct ReferenceRow: Codable {
+    var kind: String
+    var id: String?
+    var statusID: String?
+    var handle: String?
+    var state: String?
+    /// `Reference.gone` (#293): written only where true, so every cell written before it — and
+    /// every reference that is not gone — is the text it always was. **A key, and no migration**:
+    /// this reader takes a cell with keys it does not know and ignores them, so a build from
+    /// before this key reads such a cell as the same references, not gone. (No such build opens
+    /// this store — it is past `v11-one-holding` — but the cell would not stop one.)
+    var gone: Bool?
+
+    init(_ reference: Reference) {
+        kind = reference.kind.rawValue
+        id = reference.id
+        statusID = reference.statusID
+        handle = reference.handle
+        state = reference.state?.rawValue
+        gone = reference.gone ? true : nil
+    }
+
+    /// The most text a cell of references is read from: far past what `Reference.most` of them
+    /// at `Reference.longest` each could spell, and a bound on what a carried store can make
+    /// this device parse for one row.
+    static let longestCell = 64 * 1024
+
+    /// `references` as the cell's text. Keys in one order, so one set is always written one way.
+    static func text(_ references: [Reference]) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = (try? encoder.encode(references.map(ReferenceRow.init))) ?? Data("[]".utf8)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The references a cell holds, and whether all of it read.
+    ///
+    /// **Nothing else says what a row refers to** (#293), so what will not read here is lost to
+    /// the row — and a row is never lost to the store for it. Read as leniently as that allows:
+    /// - **One reference at a time.** An entry that is no object, names no kind, or names a kind
+    ///   this build does not know, is left out alone; the entries beside it stand. (A kind this
+    ///   build does not know is a newer build's, whose store this one refuses whole by its
+    ///   migration id — met here it is damage, and costs only itself.)
+    /// - **A name that is not text is no name**, and `gone` that is not a yes is not gone: the
+    ///   reference stands without it. A key this build does not know is ignored.
+    /// - **No cell, one too long, or one that is no list, is no references** — and `whole` is
+    ///   false, as it is where any entry was left out, so `NoteRow.note(from:)` can tell a row
+    ///   that refers to nothing from one whose references were lost.
+    static func references(_ text: String?) -> (references: [Reference], whole: Bool) {
+        guard let text, text.utf8.count <= longestCell,
+              let rows = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [Any]
+        else { return ([], false) }
+        var references: [Reference] = []
+        var whole = true
+        for row in rows {
+            guard let row = row as? [String: Any], let kind = (row["kind"] as? String).flatMap(Reference.Kind.init(rawValue:)) else {
+                whole = false
+                continue
+            }
+            references.append(Reference(
+                kind: kind, id: row["id"] as? String, statusID: row["statusID"] as? String,
+                handle: row["handle"] as? String,
+                state: kind == .quotes ? Quote.State(wire: row["state"] as? String) : nil,
+                gone: row["gone"] as? Bool == true
+            ))
+        }
+        return (references, whole)
+    }
 }
 
 /// One category as it is written into `note.categories`, a JSON array of these sorted by kind
@@ -412,7 +929,7 @@ private struct SourceRecord: Codable, FetchableRecord, PersistableRecord {
     /// load — and the load fails closed — rather than coming back as a source with no boards.
     var boards: [SubscriptionRow]
     /// What this source last said about itself (#188), or nothing where it has not been heard.
-    /// A column behind its own migration id, for `holding`'s reason: an older build must refuse
+    /// A column behind its own migration id, for the reason given on `NoteRecord.kept`: an older build must refuse
     /// this store rather than save it back without every word.
     var said: SaidRow?
     /// When `said` was said. Nothing where `said` is nothing.
@@ -507,8 +1024,9 @@ private struct NoteFacts: Codable {
     var body: String
     var title: String?
     var board: String?
-    /// `nil` is not a reply; a `ReplyRow` with no handle is a reply whose parent was never named.
-    var reply: ReplyRow?
+    /// `Note.boostedBy`: who reblogged it, on a row that arrived as a reblog before a reblog was
+    /// an item of its own (#290). **Written by nothing new**: no read sets it. Kept and written
+    /// back only so that row goes on saying how it arrived, until it is converted or let go.
     var boostedBy: String?
     /// Absent in a row written before 0.2.0 learned it, which reads as no booster. See
     /// `Note.boosterHandle`.
@@ -555,84 +1073,12 @@ private struct NoteFacts: Codable {
     /// `Note.counts` (#208), or nothing where the source counted nothing. Additive and optional
     /// for `boosted`'s reasons: a row written before reads as counted by nobody.
     var counts: CountsRow?
-    /// `Note.quote` (#214): the post this row quotes, what a row draws of it, so it shows with
-    /// the network off. Additive and optional for `boosted`'s reasons: a row written before reads
-    /// as one that quotes nothing until a read says otherwise, and an older build ignores the key.
-    var quote: QuoteRow?
     /// `Note.source.kind` (#250), so a note kept after its source was removed still knows what
     /// kind of server it was read through: `load()` has no source row to take that from. Written
     /// on every row and read only where the host has no source row. Additive and optional for
     /// `boosted`'s reasons: a row written before reads as none, and such a row always has a
     /// source row, since nothing before this kept a note past its source.
     var kind: String?
-}
-
-/// `Quote` as `NoteFacts` writes it: the state in the source's spelling, and the quoted post.
-private struct QuoteRow: Codable {
-    var state: String
-    var statusID: String?
-    var post: QuotedRow?
-
-    init(_ quote: Quote) {
-        state = quote.state.rawValue
-        statusID = quote.statusID
-        post = quote.post.map(QuotedRow.init)
-    }
-
-    var quote: Quote {
-        Quote(state: Quote.State(wire: state), post: post?.post, statusID: statusID)
-    }
-}
-
-/// `QuotedPost` as `NoteFacts` writes it: every fact a row draws, and its own quote as a state
-/// and an id — one level, as it was read.
-private struct QuotedRow: Codable {
-    var id: String
-    var statusID: String?
-    var author: String
-    var handle: String
-    var body: String
-    var postedAt: Date
-    var avatarURL: URL?
-    var attachments: [AttachmentRow]
-    var sensitive: Bool?
-    var spoiler: String?
-    var emojis: [EmojiRow]
-    var url: URL?
-    var audience: String?
-    var reply: ReplyRow?
-    var quotingState: String?
-    var quotingStatusID: String?
-
-    init(_ post: QuotedPost) {
-        id = post.id
-        statusID = post.statusID
-        author = post.author
-        handle = post.handle
-        body = post.body
-        postedAt = post.postedAt
-        avatarURL = post.avatarURL
-        attachments = post.attachments.map(AttachmentRow.init)
-        sensitive = post.sensitive
-        spoiler = post.spoiler
-        emojis = post.emojis.map(EmojiRow.init)
-        url = post.url
-        audience = post.audience?.rawValue
-        reply = post.reply.map { ReplyRow(handle: $0.handle, inReplyToId: $0.inReplyToId) }
-        quotingState = post.quoting?.state.rawValue
-        quotingStatusID = post.quoting?.statusID
-    }
-
-    var post: QuotedPost {
-        QuotedPost(
-            id: id, statusID: statusID, author: author, handle: handle, body: body,
-            postedAt: postedAt, avatarURL: avatarURL, attachments: attachments.map(\.attachment),
-            sensitive: sensitive, spoiler: spoiler, emojis: emojis.map(\.emoji), url: url,
-            audience: audience.flatMap(Audience.init(rawValue:)),
-            reply: reply.map { Reply(handle: $0.handle, inReplyToId: $0.inReplyToId) },
-            quoting: quotingState.map { NestedQuote(state: Quote.State(wire: $0), statusID: quotingStatusID) }
-        )
-    }
 }
 
 /// `Counts` as `NoteFacts` writes it.
@@ -729,11 +1175,44 @@ private struct QuotationRow: Codable {
     }
 }
 
-private struct ReplyRow: Codable {
-    var handle: String?
-    /// Absent in a row written before 0.4.0 learned it, which reads as a reply whose parent was
-    /// never named — the same thing `handle` says about who. See `Note.boosterHandle`.
-    var inReplyToId: String?
+/// `Wording` as `note.earlier` writes it.
+private struct WordingRow: Codable {
+    var body: String
+    var spoiler: String?
+    /// Absent where the source never said, which is `Wording.sensitive`'s own nothing.
+    var sensitive: Bool?
+    /// Milliseconds since 1970, the precision the row's own dates are kept at.
+    var until: Int64
+
+    init(_ wording: Wording) {
+        body = wording.body
+        spoiler = wording.spoiler
+        sensitive = wording.sensitive
+        until = Int64((wording.until.timeIntervalSince1970 * 1000).rounded())
+    }
+
+    var wording: Wording {
+        Wording(
+            body: body, spoiler: spoiler, sensitive: sensitive,
+            until: Date(timeIntervalSince1970: Double(until) / 1000)
+        )
+    }
+
+    /// `wordings` as the cell's text, or nothing for none.
+    static func text(_ wordings: [Wording]) -> String? {
+        guard !wordings.isEmpty, let data = try? JSONEncoder().encode(wordings.map(WordingRow.init)) else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The wordings a cell holds, or none where it holds nothing this build can read.
+    static func wordings(_ text: String?) -> [Wording] {
+        guard let text, let rows = try? JSONDecoder().decode([WordingRow].self, from: Data(text.utf8)) else {
+            return []
+        }
+        return rows.map(\.wording)
+    }
 }
 
 /// One attachment as `NoteFacts` writes it: every field, so what a row drew before a relaunch
@@ -792,19 +1271,45 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     var categories: [CategoryRow]
     /// A `facts` that is not JSON throws when the row is fetched, so the load fails closed.
     var facts: NoteFacts
-    /// `Note.holding` (#175). A column rather than a field in `facts`, and with a migration id
-    /// behind it, because an older build must refuse this store rather than show a row nobody
-    /// read from a timeline in All.
-    var holding: String
-    /// `Note.goneSince` (#179). A column behind its own migration id, for `holding`'s reason.
+    /// `Note.goneSince` (#179). A column behind its own migration id, for the reason given on `kept`.
     var gone_at: Date?
+    /// `Note.kept` (#284). **A column behind its own migration id**, as every column added after
+    /// the first is: a build that does not know the column must refuse the store, because its
+    /// first save would write each row back without it — and what the column said would be gone.
+    var kept: Bool
+    /// `Note.bookmarked` (#285). A column behind its own migration id, for the reason given on `kept`.
+    var bookmarked: Bool?
+    /// `Note.editedAt` (#286). A column behind its own migration id, for the reason given on `kept`.
+    var edited_at: Date?
+    /// `Note.earlier` (#286) as a JSON array of `WordingRow`, or nothing where the row holds
+    /// none. With `edited_at`'s id.
+    ///
+    /// **Kept as text and read leniently, unlike `facts`.** A `facts` that is not JSON fails the
+    /// load closed, because a row with no words is not a row; a damaged `earlier` is a row that
+    /// has lost what it said before and is whole in every other way, and setting the reader's
+    /// whole store aside for that would cost them far more than the cell held.
+    var earlier: String?
+    /// `Note.language` (#287). A column behind its own migration id, for the reason given on `kept`.
+    var language: String?
+    /// `Note.refs` (#290, #293) as a JSON array of `ReferenceRow`: **all a row says of what it
+    /// refers to**. A column behind its own migration id, for the reason given on `kept`. Kept
+    /// as text and read leniently: `ReferenceRow`.
+    var refs: String?
+    /// `Note.refsDue` (#293). With `refs`' id.
+    var refs_due: Bool
 
     init(_ note: Note) {
         host = note.source.host
         id = note.id
         posted_at = note.postedAt
-        holding = note.holding.rawValue
         gone_at = note.goneSince
+        kept = note.kept
+        bookmarked = note.bookmarked
+        edited_at = note.editedAt
+        earlier = WordingRow.text(note.earlier)
+        language = note.language
+        refs = ReferenceRow.text(note.refs)
+        refs_due = note.refsDue
         categories = note.categories.map(CategoryRow.init).sorted()
         facts = NoteFacts(
             author: note.author,
@@ -812,7 +1317,6 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             body: note.body,
             title: note.title,
             board: note.board,
-            reply: note.reply.map { ReplyRow(handle: $0.handle, inReplyToId: $0.inReplyToId) },
             boostedBy: note.boostedBy,
             boosterHandle: note.boosterHandle,
             sensitive: note.sensitive,
@@ -831,7 +1335,6 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
                 .sorted { $0.category < $1.category },
             audience: note.audience?.rawValue,
             counts: CountsRow(note.counts),
-            quote: note.quote.map(QuoteRow.init),
             kind: note.source.kind.rawValue
         )
     }
@@ -853,8 +1356,37 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     /// Categories come back as they went in, an empty set included: what a note arrived through
     /// is a fact about it, and filling in `.public` for none would put it somewhere it was never
     /// read from.
-    func note(from source: Source) -> Note {
-        Note(
+    ///
+    /// **What a row refers to is its `refs`, and nothing else** (#293). Where that cell will not
+    /// read, in whole or in part (`ReferenceRow.references`), the row is judged by what is left
+    /// of it — and the store is read either way, never set aside for one cell:
+    ///
+    /// - **A row that says something is a post, and stays**: it has words, a title, a cover, a
+    ///   picture or an opening post, and loads referring to whatever of its references did
+    ///   read. A reply whose reference was lost is drawn as a post that answers nothing, and a
+    ///   quoting post as one that quotes nothing, until its source's next word on it — a read
+    ///   of the post, or a change to it — says so again. That is a loss, and a quiet one; the
+    ///   other choice is to drop the post, words and all, a kept one included, for want of a
+    ///   line above it.
+    /// - **A row that says nothing is no item, and is left out**: no words, title, cover,
+    ///   picture or opening post, **and no reference that read**. A post whose whole content is
+    ///   its quote — no words once the quote's own line is taken off — says something for as
+    ///   long as that reference reads, whatever else in its cell did not; so does an answer.
+    ///   A reblog is exactly such a row but for its reference (#290),
+    ///   so one whose reference was lost would otherwise open as an empty post by whoever
+    ///   reblogged — under the reblog's name, with the reblog's own id as an id to send. Kept
+    ///   or not: there is nothing of it to keep. Since a save writes the rows held, the next
+    ///   one writes the file without it.
+    /// - **A forum topic's reply says what it answers by its id** (`Note.init`), whatever its
+    ///   cell says.
+    func note(from source: Source) -> Note? {
+        let (references, whole) = ReferenceRow.references(refs)
+        if !whole, references.isEmpty,
+           facts.body.isEmpty, (facts.title ?? "").isEmpty, (facts.spoiler ?? "").isEmpty,
+           facts.attachments.isEmpty, facts.opening == nil {
+            return nil
+        }
+        return Note(
             id: id,
             source: source,
             author: facts.author,
@@ -864,11 +1396,11 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             board: facts.board,
             postedAt: posted_at,
             categories: Set(categories.compactMap(\.category)),
-            reply: facts.reply.map { Reply(handle: $0.handle, inReplyToId: $0.inReplyToId) },
             boostedBy: facts.boostedBy,
             boosterHandle: facts.boosterHandle,
             boosted: facts.boosted,
             favourited: facts.favourited,
+            bookmarked: bookmarked,
             audience: facts.audience.flatMap(Audience.init(rawValue:)),
             avatarURL: facts.avatarURL,
             attachments: facts.attachments.map(\.attachment),
@@ -879,17 +1411,19 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             counts: facts.counts?.counts ?? Counts(),
             statusID: facts.statusID,
             opening: facts.opening?.opening,
-            // A spelling this build does not know cannot reach here — the migration id makes an
-            // older store's rows carry the default and a newer store be refused outright — so the
-            // fallback is the one every row written before this column had.
-            holding: Holding(rawValue: holding) ?? .arrived,
             goneSince: gone_at,
             gaps: Set(facts.gaps?.compactMap(\.gap) ?? []),
             listed: Dictionary(
                 (facts.listed ?? []).compactMap { row in row.category.category.map { ($0, row.id) } },
                 uniquingKeysWith: { a, _ in a }
             ),
-            quote: facts.quote?.quote
+            kept: kept,
+            editedAt: edited_at,
+            // Held to the bounds every kept wording is held to, whoever wrote the cell.
+            earlier: Wording.bounded(WordingRow.wordings(earlier)),
+            language: language,
+            refs: references,
+            refsDue: refs_due
         )
     }
 }

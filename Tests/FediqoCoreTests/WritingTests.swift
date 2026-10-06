@@ -26,7 +26,11 @@ struct WritingTests {
     @Test("The writing part is what posting, boosting, replying and favouriting need, and nothing else")
     func writingIsNarrow() {
         #expect(MastodonOAuth.writing == "write:statuses write:favourites")
+        // What a sign-in to act asks for since #285, and what it asked for before, which is the
+        // rung a server with no bookmark scope is asked on.
         #expect(MastodonOAuth.scopes(writing: true)
+            == "read:statuses read:lists read:accounts read:search write:statuses write:favourites write:bookmarks")
+        #expect(MastodonOAuth.scopes(writing: true, bookmarks: false)
             == "read:statuses read:lists read:accounts read:search write:statuses write:favourites")
         for wider in ["write", "write:follows", "write:accounts", "write:filters", "admin"] {
             #expect(!MastodonOAuth.writing.split(separator: " ").contains(Substring(wider)),
@@ -57,12 +61,13 @@ struct WritingTests {
         let writes = MastodonOAuth.known(writing: true)
         // The set is the ladder `signIn` climbs, so the two must name the same two strings.
         for wanted in [true, false] {
-            let ladder = MastodonOAuth.registrations(writing: wanted)
-            #expect(MastodonOAuth.known(writing: wanted) == [ladder.wide, ladder.narrow])
-            #expect(ladder.wide.contains("read:search"))
-            #expect(!ladder.narrow.contains("read:search"))
-            #expect(MastodonOAuth.writes(ladder.wide) == wanted)
-            #expect(MastodonOAuth.writes(ladder.narrow) == wanted)
+            let ladder = MastodonOAuth.ladder(writing: wanted)
+            let (wide, narrow) = (ladder[0], ladder[1])
+            #expect(MastodonOAuth.known(writing: wanted) == [wide, narrow])
+            #expect(wide.contains("read:search"))
+            #expect(!narrow.contains("read:search"))
+            #expect(MastodonOAuth.writes(wide) == wanted)
+            #expect(MastodonOAuth.writes(narrow) == wanted)
         }
         #expect(reads == [MastodonOAuth.reading, MastodonOAuth.readingWithoutSearch])
         #expect(writes.count == 2)

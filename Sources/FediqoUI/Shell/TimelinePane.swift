@@ -63,7 +63,6 @@ struct TimelinePane: View {
     var ways: TimelineWays
     /// While open, its results are the list and the timeline waits under it (#32).
     var search: ShellSearch?
-    @State private var marks: [String: DummyMarks] = [:]
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
     /// again. Per host and not one counter for the pane: see `waitForCatalogues`.
     @State private var settledHosts: Set<String> = []
@@ -119,7 +118,6 @@ struct TimelinePane: View {
                     catalogueSettled: settledHosts.contains(person.host),
                     posts: session.posts,
                     selectedID: $selectedID,
-                    marks: markBinding,
                     // A row here opens the conversation it belongs to (#122), so the answer mark
                     // does what it does on the timeline: it opens that conversation first.
                     acting: acting,
@@ -148,7 +146,6 @@ struct TimelinePane: View {
                     catalogueSettled: false,
                     posts: session.posts,
                     selectedID: $selectedID,
-                    marks: markBinding,
                     acting: acting,
                     decks: $decks,
                     playback: playback,
@@ -189,7 +186,6 @@ struct TimelinePane: View {
                         onUnlockBlog: { password in Task { await session.blogs.unlock(opened, password: password) } },
                         onSignIn: { Task { await session.signIn(host: opened.source.host) } },
                         selectedID: $selectedID,
-                        marks: markBinding,
                         // Inside the conversation the answer mark opens the answer (#108).
                         acting: { acting($0, inside: opened) },
                         decks: $decks,
@@ -358,7 +354,7 @@ struct TimelinePane: View {
     static func catalogue(_ host: String, in store: EmojiCatalogueStore, over http: any HTTPClient) async {
         if await store.needsFetch(host: host) {
             await store.refresh(host: host) {
-                try await MastodonClient(http: http, host: host).customEmojis()
+                try await SourceReach.mastodon(host, over: http).customEmojis()
             }
         }
         await store.settle(host: host)
@@ -430,7 +426,6 @@ struct TimelinePane: View {
                             catalogues: session.emoji,
                             catalogueSettled: settledHosts.contains(item.source.host),
                             posts: session.posts,
-                            marks: markBinding(item),
                             acting: acting(item),
                             selected: item.id == selectedID,
                             top: decks.top(of: item.id, of: item.attachments.count),
@@ -477,6 +472,9 @@ struct TimelinePane: View {
                                 .frame(height: ShellSpace.hair)
                         }
                     }
+                    // Which sources have no more of what is rising to give (#288). A search's
+                    // results are not a timeline, and end nowhere a source chose.
+                    if !searching { TrendsEndFoot(timeline: timeline, session: session) }
                 }
                 .scrollTargetLayout()
             }
@@ -544,7 +542,7 @@ struct TimelinePane: View {
         var acting = session.acting(on: item)
         acting.perform = { act in
             switch act {
-            case .boost, .favourite:
+            case .boost, .favourite, .bookmark:
                 Task { await session.toggle(act, on: item) }
             case .answer:
                 if let root {
@@ -556,14 +554,10 @@ struct TimelinePane: View {
                 session.askToWithdraw(item)
             }
         }
+        // What `y` does (#284), and it says so itself: one act, one outcome, whichever asked.
+        acting.keep = { Task { await session.toggleKept(item) } }
+        acting.ask = { _ in session.askToBookmark(item) }
         return acting
-    }
-
-    private func markBinding(_ item: DummyItem) -> Binding<DummyMarks> {
-        Binding(
-            get: { marks[item.id] ?? item.marks },
-            set: { marks[item.id] = $0 }
-        )
     }
 
     private func showToast(_ text: String) {
@@ -754,6 +748,10 @@ struct KeepsTopRow: ViewModifier {
     func body(content: Content) -> some View {
         content.onScrollTargetVisibilityChange(idType: String.self) { visible in
             session.scrolledTop = visible.first
+            // What the rows on screen still owe goes first in its source's line (#293).
+            // Only rows that owe: a screen of rows that owe nothing asks nothing of anybody.
+            let owing = visible.filter(session.owingRows.contains)
+            if !owing.isEmpty { Task { await session.refs.near(owing, in: session) } }
         }
     }
 }

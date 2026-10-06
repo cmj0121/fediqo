@@ -55,6 +55,18 @@ public struct DummyPerson: Identifiable, Hashable, Sendable {
     /// **Nothing rather than an empty person**, which is what makes "a row with no author offers
     /// no press" a fact rather than a habit: there is no value to open, so no call site can be
     /// written that opens one.
+    /// Whoever made `note`, as a person to open: a reblog's reblogger (#290), whose row draws
+    /// somebody else's post and so cannot be asked through `init(_: DummyItem)`.
+    init?(making note: Note) {
+        let handle = note.handle.isEmpty ? nil : note.handle
+        guard !note.author.isEmpty || handle != nil else { return nil }
+        host = note.source.host
+        name = note.author
+        self.handle = handle
+        avatarURL = note.avatarURL
+        emojis = note.emojis
+    }
+
     public init?(_ item: DummyItem) {
         let handle = (item.handle?.isEmpty == true) ? nil : item.handle
         guard !item.author.isEmpty || handle != nil else { return nil }
@@ -90,9 +102,15 @@ public struct DummyPerson: Identifiable, Hashable, Sendable {
     /// **Newest first, and no rule applied.** A timeline's order is whatever its rules say; this
     /// is not a timeline, it is everything of theirs that is here, and the reader's question of a
     /// person's page is what they said last.
+    ///
+    /// **A reblog they made is theirs** (#290), and stands here at the time they made it, showing
+    /// the post it reblogs as that post is held. A post of theirs that somebody else reblogged is
+    /// here once, at its own publish time: the reblog is the other person's.
     public static func held(of person: DummyPerson, in notes: [Note]) -> [DummyItem] {
-        notes.filter(person.wrote)
-            .sorted { $0.postedAt > $1.postedAt }
-            .map(DummyItem.init)
+        let theirs = notes.filter(person.wrote)
+        // What a reblog of theirs reblogs, and what a post of theirs quotes, are other items.
+        let refers = theirs.contains { $0.isReblog || $0.quotedKey != nil }
+        let targets = ReblogTargets(refers ? notes : [])
+        return theirs.sorted { $0.postedAt > $1.postedAt }.map { DummyItem($0, among: targets) }
     }
 }

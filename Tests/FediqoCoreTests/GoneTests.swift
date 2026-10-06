@@ -13,10 +13,10 @@ struct GoneTests {
         return calendar
     }
 
-    private func note(_ id: String, audience: Audience? = .everyone, holding: Holding = .arrived) -> Note {
+    private func note(_ id: String, audience: Audience? = .everyone) -> Note {
         Note(
             id: id, source: source, author: "Ada", handle: "@ada@first.example", body: "hello",
-            postedAt: origin, categories: [.public], audience: audience, statusID: id, holding: holding
+            postedAt: origin, categories: [.public], audience: audience, statusID: id
         )
     }
 
@@ -53,12 +53,12 @@ struct GoneTests {
         #expect(await !store.markGone(note("1").key))
     }
 
-    @Test("A post held aside is marked without moving what All draws")
-    func asideMarkedQuietly() async {
-        let store = ItemStore(sources: [source], notes: [note("1", holding: .aside)])
+    @Test("A post a search brought is marked like any other, and its row draws the mark")
+    func aFindIsMarkedAndDrawn() async {
+        let store = ItemStore(sources: [source], notes: [note("1")])
         let drawn = await store.drawn
         #expect(await store.markGone(note("1").key))
-        #expect(await store.drawn == drawn)
+        #expect(await store.drawn == drawn + 1)
     }
 
     @Test("A post missing from a listing is never marked: a landing without it leaves it as it was")
@@ -90,7 +90,7 @@ struct GoneTests {
 
     @Test("The press lets every marked post go, says how many, and leaves the rest as they were")
     func pressLetsGo() async {
-        let store = ItemStore(sources: [source], notes: [note("1"), note("2"), note("3", holding: .aside)])
+        let store = ItemStore(sources: [source], notes: [note("1"), note("2"), note("3")])
         await store.markGone(note("1").key, at: origin)
         await store.markGone(note("3").key, at: origin)
         let kept = await store.note(note("2").key)
@@ -177,9 +177,9 @@ struct GoneTests {
         #expect(await store.drawn == drawn + 1)
     }
 
-    @Test("What the press would let go is counted, held aside or not")
+    @Test("What the press would let go is counted, whichever read brought it")
     func counted() async {
-        let store = ItemStore(sources: [source], notes: [note("1"), note("2"), note("3", holding: .aside)])
+        let store = ItemStore(sources: [source], notes: [note("1"), note("2"), note("3")])
         #expect(await store.goneCount() == 0)
         await store.markGone(note("1").key)
         await store.markGone(note("3").key)

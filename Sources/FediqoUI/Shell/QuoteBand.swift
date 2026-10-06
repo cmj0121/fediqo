@@ -71,9 +71,70 @@ struct QuoteBand: View {
 
     /// What the decorator says: who is quoted, or in a few words why the quote cannot be shown.
     /// **No `default:`**, for `sentence`'s reason.
-    static func decorator(_ quote: Quote, language: DummyLanguage? = nil) -> String {
+    /// Where the load of a quoted post that did not come with its quote stands (#293).
+    enum Loading: Equatable {
+        case onItsWay
+        /// Given up for this run.
+        case stalled
+        /// Asked for, and its source said there is no such post.
+        case gone
+        /// It was here and has since been let go.
+        case unheld
+
+        /// Of `item`'s quote, or nothing where there is nothing of the kind to say.
+        init?(_ item: DummyItem) {
+            if item.owes.contains(.quotes) {
+                self = item.owesStalled ? .stalled : .onItsWay
+            } else if item.refsGone.contains(.quotes) {
+                self = .gone
+            } else if item.refsUnheld.contains(.quotes) {
+                self = .unheld
+            } else {
+                return nil
+            }
+        }
+
+        /// Of the post `item` answers, or nothing where there is nothing of the kind to say —
+        /// the same four, read the way `DummyItemRow.replyLine` reads them.
+        init?(answeredBy item: DummyItem) {
+            if item.owes.contains(.answers) {
+                self = item.owesStalled ? .stalled : .onItsWay
+            } else if item.refsGone.contains(.answers) {
+                self = .gone
+            } else if item.refsUnheld.contains(.answers) {
+                self = .unheld
+            } else {
+                return nil
+            }
+        }
+
+        /// What the opened view says in the place of a post that is answered and not here.
+        var aboveKey: String {
+            switch self {
+            case .onItsWay: "thread.above.onItsWay"
+            case .stalled: "thread.above.stalled"
+            case .gone: "thread.above.gone"
+            case .unheld: "thread.above.unheld"
+            }
+        }
+
+        var key: String {
+            switch self {
+            case .onItsWay: "quote.short.onItsWay"
+            case .stalled: "quote.short.stalled"
+            case .gone: "quote.short.gone"
+            case .unheld: "quote.short.unheld"
+            }
+        }
+    }
+
+    static func decorator(_ quote: Quote, loading: Loading? = nil, language: DummyLanguage? = nil) -> String {
         if let post = quote.post {
             return String(format: L10n.t("quote.decorator", language: language), post.handle)
+        }
+        // Accepted, not here in full, and asked for: say that, and not that it came as an id.
+        if quote.state == .accepted, let loading {
+            return L10n.t(loading.key, language: language)
         }
         let key: String
         switch quote.state {
@@ -120,12 +181,14 @@ struct QuoteMark: View {
     var lifted: Bool = false
     /// Whether the quoting post is covered, which covers what it quotes too.
     var covered: Bool = false
+    /// Where the load of the quoted post stands, where one is owed (#293).
+    var loading: QuoteBand.Loading?
     var onOpen: (() -> Void)?
 
     var body: some View {
         HStack(spacing: ShellSpace.tight) {
             Image(systemName: "quote.opening")
-            Text(QuoteBand.decorator(quote))
+            Text(QuoteBand.decorator(quote, loading: loading))
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(QuoteBand.spokenMark(quote, lifted: lifted, covered: covered))
@@ -313,8 +376,8 @@ extension EnvironmentValues {
 }
 
 extension ShellSession {
-    /// The row the post `item` quotes, where this device holds it (#214): the quoted post held
-    /// aside with it, or — for a quote that came as an id alone, a level down — the post this
+    /// The row the post `item` quotes, where this device holds it (#214): the quoted post taken
+    /// in with it, or — for a quote that came as an id alone, a level down — the post this
     /// source gave that id, where it is held at all. Nothing where the quote may not be shown.
     func quotedRow(of item: DummyItem) -> String? {
         if let id = item.quotedRowID { return heldNote(id) == nil ? nil : id }
@@ -323,7 +386,7 @@ extension ShellSession {
         }
         let host = item.source.host
         let matches = { (note: Note) in note.source.host == host && note.statusID == statusID }
-        return (notes.first(where: matches) ?? aside.first(where: matches))?.key.rowID
+        return notes.first(where: matches)?.key.rowID
     }
 }
 

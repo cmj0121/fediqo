@@ -226,7 +226,7 @@ struct AnswerTests {
     func placement() throws {
         func note(_ id: String, _ parent: String) throws -> Note {
             try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(Self.status(id, answering: parent).utf8))
-                .asNote(source: Source(host: host, kind: .mastodon), categories: [])
+                .asNote(source: Source(host: host, kind: .mastodon), categories: [], sent: .now())
         }
         let held = [try note("12", "9"), try note("13", "12"), try note("15", "13"), try note("14", "9")]
         let under12 = try note("20", "12")

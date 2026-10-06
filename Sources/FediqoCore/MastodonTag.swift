@@ -7,7 +7,7 @@ import Foundation
 /// that keeps them for its members still answers.
 ///
 /// What comes back arrives through no category — a tag is not one of the source's timelines — and
-/// is for the store to hold aside, so no timeline grows by it.
+/// is held through none: an item that stands in All, and in no timeline made of a category (#296).
 public struct MastodonTag: Sendable {
     private enum Door: Sendable {
         case unsigned(any HTTPClient)
@@ -36,6 +36,7 @@ public struct MastodonTag: Sendable {
     public func posts(under tag: PostTag, source: Source) async throws -> [Note] {
         let path = try Self.path(under: tag, host: host)
         let query = [URLQueryItem(name: "limit", value: "40")]
+        let sent = ReadMoment.now()
         let data: Data
         switch door {
         case .signedIn(let door):
@@ -51,7 +52,7 @@ public struct MastodonTag: Sendable {
             data = body
         }
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data)
-            .map { $0.asNote(source: source, categories: []) }
+            .map { $0.asNote(source: source, categories: [], sent: sent) }
     }
 
     /// The tag's timeline, as a path whose last segment is the name and nothing else (#124).

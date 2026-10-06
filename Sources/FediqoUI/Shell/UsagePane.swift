@@ -195,6 +195,7 @@ struct UsagePane: View {
                 breakdown(session)
             case .keep:
                 keep(session)
+                KeptSection(session: session)
                 SpanSection(session: session)
                 GoneSection(session: session)
                 LimitAccountSection(session: session)
@@ -235,13 +236,14 @@ struct UsagePane: View {
             }
             .pickerStyle(.segmented)
             // All sources first, in the rows' own shape; where it says none, no stretch follows.
-            // Everything held, aside rows included (#194), and what it all weighs on disk.
+            // Everything held (#194), and what it all weighs on disk.
             stretch(
                 Text(L10n.t("prefs.held.total")).shellFont(.name).foregroundStyle(ShellChrome.ink(colorScheme)),
                 figure: Self.totalLine(holdings.posts, onDisk: session.storeBytes)
             )
-            if holdings.aside > 0 {
-                stretch(reading(Text(L10n.t("prefs.held.aside"))), figure: Self.postsLine(holdings.aside))
+            // What changed posts said before (#286): held with them, so counted with them.
+            if let earlier = Self.earlierFigure(holdings.earlier) {
+                stretch(reading(Text(L10n.t("prefs.held.earlier"))), figure: earlier)
             }
             ForEach(holdings.byPeriod.prefix(Self.stretchesShown), id: \.start) { bucket in
                 stretch(reading(Text(Self.stretchLabel(bucket.start, period: session.heldPeriod))),
@@ -288,6 +290,9 @@ struct UsagePane: View {
             ) {
                 reading(Text(line))
             }
+            if let line = Self.roomKeptLine(heldByKept: session.roomHeldByKept) {
+                reading(Text(line))
+            }
         } header: {
             ShellSectionHead(title: "prefs.keep", line: "prefs.keep.line", help: "prefs.keep.help")
         }
@@ -324,6 +329,12 @@ struct UsagePane: View {
             )
         }
         return line
+    }
+
+    /// What the Room says where the posts the person keeps are alone more than it (#284), and
+    /// nothing otherwise: the limit cannot be met, and the line says what would let it be.
+    static func roomKeptLine(heldByKept: Bool, language: DummyLanguage? = nil) -> String? {
+        heldByKept ? L10n.t("prefs.room.kept", language: language) : nil
     }
 
     /// Picture copies, all sources together, and the drop that takes them (#7, by cache).
@@ -370,10 +381,10 @@ struct UsagePane: View {
         return postsLine(count) + " · " + String(format: L10n.t("prefs.held.disk"), size(onDisk))
     }
 
-    /// "3 held apart from the timelines", or nothing where none is (#194): what a source holds
-    /// that no timeline shows, said beside its count.
-    static func asideLine(_ count: Int) -> String? {
-        count == 0 ? nil : L10n.t("prefs.held.aside") + " · " + postsLine(count)
+    /// How many earlier wordings of changed posts are held, as a figure — or nothing where none
+    /// are, so a device that never saw a post change draws no line about it.
+    static func earlierFigure(_ count: Int, language: DummyLanguage? = nil) -> String? {
+        count == 0 ? nil : L10n.count("prefs.held.earlier.count", count, language: language)
     }
 
     /// A week by the day it starts, a month by its name, both in the shell's language.

@@ -14,7 +14,6 @@ struct AudienceKeptTests {
 
     private func copy(
         audience: Audience? = nil,
-        holding: Holding = .arrived,
         boosted: Bool? = nil,
         favourited: Bool? = nil,
         sensitive: Bool? = nil,
@@ -27,8 +26,8 @@ struct AudienceKeptTests {
             id: "https://first.example/1", source: source, author: "Ada", handle: "@ada@first.example",
             body: "hello", board: board, postedAt: origin, categories: [.home],
             boosted: boosted, favourited: favourited, audience: audience, sensitive: sensitive,
-            spoiler: spoiler, counts: counts, statusID: statusID, holding: holding
-        )
+            spoiler: spoiler, counts: counts, statusID: statusID
+        ).readNow()
     }
 
     @Test("A row kept without its audience takes it from the next timeline that brings it, and is drawn anew")
@@ -42,15 +41,13 @@ struct AudienceKeptTests {
         #expect(await store.revision > revision, "and written down")
     }
 
-    @Test("A row held aside takes its audience the same way, and what is held aside says it changed")
+    @Test("A row a search brought takes its audience the same way, and its row draws it")
     func asideRestoresAudience() async {
-        let store = ItemStore(sources: [source], notes: [copy(holding: .aside)])
-        let aside = await store.asideRevision
+        let store = ItemStore(sources: [source], notes: [copy()])
         let drawn = await store.drawn
-        await store.hold([copy(audience: .mentioned)], ifSourceHere: source.host)
-        #expect(await store.aside().first?.audience == .mentioned)
-        #expect(await store.asideRevision > aside)
-        #expect(await store.drawn == drawn, "no timeline draws a row held aside")
+        await store.ingest([copy(audience: .mentioned)], ifSourceHere: source.host)
+        #expect(await store.all().first?.audience == .mentioned)
+        #expect(await store.drawn > drawn, "it is an item, and its row draws it")
     }
 
     @Test("A timeline copy that says nothing of audience leaves the one held, and says nothing moved")
@@ -90,16 +87,14 @@ struct AudienceKeptTests {
         #expect(await store.revision == revision, "and not written down for itself")
     }
 
-    @Test("A recount of a row held aside renews what is held aside, and not what a timeline draws")
+    @Test("A recount of a row a search brought is drawn like any other's, and not written down for itself")
     func asideRecounts() async {
-        let store = ItemStore(sources: [source], notes: [copy(holding: .aside, counts: Counts(replies: 1))])
-        let aside = await store.asideRevision
+        let store = ItemStore(sources: [source], notes: [copy(counts: Counts(replies: 1))])
         let drawn = await store.drawn
         let revision = await store.revision
-        await store.hold([copy(counts: Counts(replies: 3))], ifSourceHere: source.host)
-        #expect(await store.aside().first?.counts == Counts(replies: 3))
-        #expect(await store.asideRevision > aside)
-        #expect(await store.drawn == drawn)
+        await store.ingest([copy(counts: Counts(replies: 3))], ifSourceHere: source.host)
+        #expect(await store.all().first?.counts == Counts(replies: 3))
+        #expect(await store.drawn > drawn)
         #expect(await store.revision == revision)
     }
 

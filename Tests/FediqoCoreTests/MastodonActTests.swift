@@ -40,7 +40,7 @@ struct MastodonActTests {
 
     private func held(_ json: String) throws -> Note {
         try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
-            .asNote(source: source, category: .home)
+            .asNote(source: source, category: .home, sent: .now())
     }
 
     private func actor(
@@ -136,6 +136,28 @@ struct MastodonActTests {
             _ = try await write.boost(before, on: true)
         }
         #expect(await store.all() == [before])
+    }
+
+    @Test("A reblog is never sent with: no act, no taking back, no answer and no read is made with the id its source gave the reblog")
+    func aReblogsOwnIDIsNeverSent() async throws {
+        let reblog = Note(
+            id: "https://social.example/users/bob/statuses/900/activity", source: source, author: "Bob",
+            handle: "@bob@social.example", body: "", postedAt: Date(timeIntervalSince1970: 0), categories: [.home],
+            statusID: "900", refs: [Reference(kind: .reblogs, id: "https://social.example/users/ada/statuses/9", statusID: "9")]
+        )
+        #expect(reblog.statusID == "900" && reblog.sendableID == nil, "the note keeps the id; nothing may send it")
+        let (write, _, server, _) = try await actor(holding: reblog, [:])
+        await #expect(throws: MastodonWriteError.unfindable) { _ = try await write.boost(reblog, on: true) }
+        await #expect(throws: MastodonWriteError.unfindable) { _ = try await write.favourite(reblog, on: true) }
+        await #expect(throws: MastodonWriteError.unfindable) { _ = try await write.bookmark(reblog, on: true) }
+        await #expect(throws: MastodonWriteError.unfindable) { try await write.withdraw(reblog) }
+        await #expect(throws: MastodonWriteError.unfindable) {
+            _ = try await write.post("an answer", visibility: .everyone, answering: reblog)
+        }
+        #expect(await server.paths.isEmpty)
+        let http = FixtureHTTP([:])
+        #expect(try await MastodonPost(http: http, host: host).id(of: reblog) == nil)
+        #expect(await http.paths.isEmpty)
     }
 
     @Test("A post this device cannot name on its server is not sent at all")
@@ -261,7 +283,7 @@ struct MastodonActTests {
             _ = try await write.post("yes", visibility: .everyone, answering: bare)
         }
         let elsewhere = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(Self.status().utf8))
-            .asNote(source: Source(host: "other.example", kind: .mastodon), category: .home)
+            .asNote(source: Source(host: "other.example", kind: .mastodon), category: .home, sent: .now())
         await #expect(throws: MastodonWriteError.unfindable) {
             _ = try await write.post("yes", visibility: .everyone, answering: elsewhere)
         }

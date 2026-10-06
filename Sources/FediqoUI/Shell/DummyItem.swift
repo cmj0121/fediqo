@@ -70,16 +70,17 @@ public struct DummyCounts: Hashable, Sendable {
 
 /// What this device has done to a dummy item, and kept to itself.
 ///
-/// **The favourite left this type with #107.** It was a list kept in Fediqo that nobody else could
-/// see and no other app agreed with; it is now `DummyItem.favourited`, which is what the source
-/// says. What is left here is what really is this device's own: a bookmark, which is a different
-/// thing on a source that has both and is not #107's, and what the reader chose to keep.
+/// **The favourite left this type with #107, and the bookmark with #285.** Each was a mark kept
+/// in Fediqo that nobody else could see and no other app agreed with; they are now
+/// `DummyItem.favourited` and `DummyItem.bookmarked`, which are what the source says. What is
+/// left here is what really is this device's own: what the reader chose to keep.
+///
+/// **`kept` is the store's word** (#284): `Note.kept`, carried on the item, and moved only by
+/// `ShellSession.setKept`.
 public struct DummyMarks: Hashable, Sendable {
-    public var bookmarked: Bool
     public var kept: Bool
 
-    public init(bookmarked: Bool = false, kept: Bool = false) {
-        self.bookmarked = bookmarked
+    public init(kept: Bool = false) {
         self.kept = kept
     }
 }
@@ -124,6 +125,9 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// Whether the reader has favourited it, as the source said — `Note.favourited`, in `boosted`'s
     /// shape and for its reasons (#107).
     public var favourited: Bool?
+    /// Whether the reader has bookmarked it, as the source said — `Note.bookmarked`, in
+    /// `boosted`'s shape and for its reasons (#285).
+    public var bookmarked: Bool?
     public let audience: DummyAudience?
     /// The author's picture, where the source sent an address for one.
     public let avatarURL: URL?
@@ -150,6 +154,17 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// has. **This copy's fact**, which is what its acts are read off; what the row says is
     /// `goneEverywhere`.
     public var goneSince: Date?
+    /// When this copy's source says the post was last changed — `Note.editedAt`, carried so every
+    /// place a row is drawn marks it the same way (#286). Nothing on a post never changed.
+    /// **Never when it was posted**: `postedAt` is that, and it is what the row's age reads.
+    public var editedAt: Date?
+    /// What this copy said before, as this device held it, oldest first — `Note.earlier`, carried
+    /// so the pane a post is opened in can show it with nothing asked of anybody (#286).
+    ///
+    /// **This copy's, on a row two sources carried** (#114): each server tells its own copy's
+    /// changes when it hears of them, and the row is drawn as one copy — so what it says it said
+    /// before is what that copy said before.
+    public var earlier: [Wording] = []
     /// Where a timeline this copy arrived through is not whole next to it — `Note.gaps`, carried
     /// so the list can say so at its place (#201). **This copy's**, of its own source's timelines.
     public var gaps: Set<TimelineGap> = []
@@ -167,8 +182,10 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     public let emojis: [CustomEmoji]
     public let counts: DummyCounts
     public let marks: DummyMarks
-    /// The post this one quotes (#214) — `Note.quote`, carried so every place a row is drawn
-    /// draws the quote the same way. Nothing on a post that quotes none, which is most.
+    /// The post this one quotes (#214), carried so every place a row is drawn draws the quote
+    /// the same way: where the quote stands, as the post's reference says (`Note.quote`), and
+    /// **the quoted post as this device holds it**, where whoever built the row had it to hand
+    /// (`init(_:among:)`, `quoting(_:)`). Nothing on a post that quotes none, which is most.
     public var quote: Quote?
     /// The row the quoted post is, where the quote came with the post in full: what opening the
     /// quote walks to. Nothing where it may not be shown, or came as an id alone.
@@ -184,12 +201,80 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// is `SamePost`'s answer, a fact the sources stated; this only carries it.
     public private(set) var otherCopies: [DummyItem] = []
 
+    /// Whether this row is a reblog (#290): an item of its own, standing at the time of the
+    /// reblog, that shows the post it reblogs. Its id, its time, what it arrived through and
+    /// whether the person keeps it are the reblog's; `boostedBy` is who reblogged; everything
+    /// drawn of a post on it — words, author, pictures, cover, counts, what the reader did — is
+    /// the reblogged post's, read from that post's own item.
+    ///
+    /// **`statusID` is nothing on a reblog's row.** The id a source gave the reblog names the
+    /// reblog, and nothing a reader presses on this row is meant for the reblog: so the row
+    /// carries no id an act could be sent with, and what is pressed goes to `reblogged`.
+    public private(set) var isReblog = false
+    /// The post this reblog reblogs, as its own row — what an act pressed on this row is done
+    /// to, and what opening it opens. Empty on anything but a reblog, and on a reblog whose post
+    /// this device no longer holds (`reblogUnheld`).
+    public private(set) var reblogged: [DummyItem] = []
+    /// Whether this is a reblog of a post no longer held here: the row says who reblogged and
+    /// when, and that the post is not here, and draws nothing of a post.
+    public var reblogUnheld: Bool { isReblog && reblogged.isEmpty && !reblogOnItsWay }
+    /// Whether this is a reblog whose post is not here yet and has been asked for (#293): the
+    /// reblog still owes the one load an item is given when it first arrives (`Note.refsDue`).
+    /// The row says the post is on its way, in the place it will stand. Nothing sets that mark
+    /// on a reblog until loading is built; the row is drawn for it already.
+    public private(set) var reblogOnItsWay = false
+    /// Which of the posts this row's post refers to are still to come (#293): loads it owes that
+    /// have not ended — what it answers, what it quotes. Empty on a row that owes nothing, which
+    /// is nearly every row. The places that show those posts say they are on their way.
+    public private(set) var owes: Set<Reference.Kind> = []
+    /// Whether those loads were given up for this run: the places say so instead, and a later
+    /// run asks again.
+    public private(set) var owesStalled = false
+    /// Which of the posts it refers to its source said are gone (#293), and which were here and
+    /// are no longer held. The places that would show them say so.
+    public private(set) var refsGone: Set<Reference.Kind> = []
+    public private(set) var refsUnheld: Set<Reference.Kind> = []
+
+    /// Who reblogged, as a person to open — the reblog's own maker, whose page a press on the
+    /// row's first line opens. Nothing on anything but a reblog.
+    public private(set) var reblogger: DummyPerson?
+    /// When the post this row draws was published: the post's own time. The same as `postedAt`
+    /// on every row but a reblog's, where `postedAt` is when it was reblogged — the time the row
+    /// stands at — and this is the time its header says, beside the author it belongs to.
+    public private(set) var publishedAt: Date = .distantPast
+    /// Whether the post this row draws is marked gone from its source (#179): the row's own
+    /// mark, and on a reblog the mark of the post it reblogs — a fact about the words shown.
+    public var postGone: Bool {
+        isReblog ? (reblogged.first?.goneEverywhere ?? false) : goneEverywhere
+    }
+    /// Whether this reblog was taken back at its source: the reblog itself is marked gone,
+    /// whatever became of the post. The first line says so; the post is drawn as it is held.
+    public var reblogUndone: Bool { isReblog && goneEverywhere }
+    /// Whether this row is a post held from before a reblog was an item of its own, which
+    /// arrived as a reblog by `boostedBy` (#290): it stands at its own publish time and says so,
+    /// until a timeline brings that reblog again.
+    public var arrivedAsReblog: Bool { !isReblog && boostedBy != nil }
+
+    /// The rows an act pressed on this one goes to (#290): its own copies, or — for a reblog —
+    /// the post each copy reblogs. A reblog whose post is not held offers nothing to press.
+    public var actCopies: [DummyItem] {
+        isReblog ? copies.flatMap(\.reblogged) : copies
+    }
+
     /// Whether the row is marked as gone from its source (#179): **every** copy's source has said
     /// so. A post one server deleted and another still carries is still there to read and to act
     /// on through the other, and a row saying nothing can be sent while its acts go through the
     /// live copy would be the mark and the acts disagreeing about one post.
     public var goneEverywhere: Bool {
         goneSince != nil && otherCopies.allSatisfy { $0.goneSince != nil }
+    }
+
+    /// Whether the person keeps this row (#284): **any** copy of it is kept. A post two sources
+    /// carried is one row, and keeping the row keeps every copy (`ShellSession.setKept`) — so a
+    /// row drawn as kept while one copy is not is a store moved from outside, and the next press
+    /// un-keeps them all.
+    public var kept: Bool {
+        marks.kept || otherCopies.contains { $0.marks.kept }
     }
 
     /// Every source this post came through, the row's own first. One for most rows.
@@ -338,24 +423,92 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// the lead**, so it changes once when the first-arrived copy's source is removed and once
     /// more if that source is added again: a lamp or a place keyed by the old id is lost at
     /// that moment, as it would be for any row redrawn under a new key, and never otherwise.
-    init(merging copies: [Note], here: Set<String>? = nil) {
+    init(merging copies: [Note], here: Set<String>? = nil, targets: ReblogTargets = ReblogTargets([])) {
         let lead = here.flatMap { here in copies.firstIndex { here.contains($0.source.host) } } ?? 0
-        self.init(copies[lead])
-        otherCopies = copies.enumerated().filter { $0.offset != lead }.map { DummyItem($0.element) }
+        self.init(copies[lead], among: targets)
+        otherCopies = copies.enumerated().filter { $0.offset != lead }
+            .map { DummyItem($0.element, among: targets) }
     }
 
     /// Notes, in the order they are to be drawn, as rows: one per post, however many sources
     /// carried it. The one place a list of held notes becomes a list of rows, so the timeline and
     /// the search cannot come to disagree about when two copies are one. `here` is the hosts
     /// still on this device, for `init(merging:here:)`.
-    static func merged(_ notes: [Note], here: Set<String>? = nil) -> [DummyItem] {
-        SamePost.gathered(notes).map { DummyItem(merging: $0, here: here) }
+    ///
+    /// `held` is everything this device holds, where `notes` is only what is to be drawn of it:
+    /// a reblog's row shows the post it reblogs (#290), which is looked up there — a post the
+    /// timeline's rules left out is still what its reblog shows.
+    /// `targets` is that lookup already built, where the caller holds one — the session's, built
+    /// once where its notes were replaced.
+    static func merged(
+        _ notes: [Note], here: Set<String>? = nil, among held: [Note]? = nil, targets: ReblogTargets? = nil
+    ) -> [DummyItem] {
+        let targets = targets ?? ReblogTargets(held ?? notes)
+        return SamePost.gathered(notes).map { DummyItem(merging: $0, here: here, targets: targets) }
     }
 
-    /// One stored note, drawn as a row.
+    /// One stored note, drawn as a row. **A reblog drawn this way is drawn as one whose post is
+    /// not held**: what it reblogs is another item, which `init(_:reblogging:)` is handed.
     public init(_ note: Note) {
-        noteID = note.id
-        id = note.key.rowID
+        self.init(content: note, as: note)
+        isReblog = note.isReblog
+        reblogOnItsWay = note.isReblog && note.refsDue
+        reblogger = note.isReblog ? DummyPerson(making: note) : nil
+        // Less what was asked for this run and came back as nothing to keep: that is not on
+        // its way, and its place says only what it always said.
+        owes = note.refsDue ? Set(note.askable.map(\.kind)).subtracting(note.refsTried) : []
+        owesStalled = note.refsStalled
+        refsGone = Set(note.refs.filter(\.gone).map(\.kind))
+        refsUnheld = note.refsUnheld
+    }
+
+    /// One stored note drawn as a row among what is held (`targets`): with the post it reblogs
+    /// where it is a reblog (#290), and with the post that it — or the post it reblogs — quotes
+    /// (#293), each where it is held.
+    public init(_ note: Note, among targets: ReblogTargets) {
+        let target = targets.target(of: note)
+        self.init(note, reblogging: target)
+        // What is drawn is the post reblogged, where this is a reblog showing one; a reblog
+        // with no post to show draws no quote.
+        guard let content = isReblog ? (reblogged.isEmpty ? nil : target) : note else { return }
+        let quoted = targets.quoted(by: content)
+        self = quoting(quoted)
+        reblogged = reblogged.map { $0.quoting(quoted) }
+    }
+
+    /// This row with the post it quotes as `quoted` — that post's own item, read as what a
+    /// quote shows of one. As it was where the row quotes nothing that may be shown, where
+    /// `quoted` is nothing, and where it is not a post of this row's own source.
+    public func quoting(_ quoted: Note?) -> DummyItem {
+        guard let quote, quote.state == .accepted, let quoted, !quoted.isReblog,
+              quoted.source.host == source.host
+        else { return self }
+        var row = self
+        row.quote = Quote(state: .accepted, post: QuotedPost(quoted), statusID: quote.statusID)
+        row.quotedRowID = quoted.key.rowID
+        return row
+    }
+
+    /// One stored note drawn as a row, with the post it reblogs where it is a reblog and that
+    /// post is held (#290). Anything but a reblog is `init(_:)`, whatever `target` is.
+    public init(_ note: Note, reblogging target: Note?) {
+        guard note.isReblog, let target, !target.isReblog, target.source.host == note.source.host else {
+            self.init(note)
+            return
+        }
+        self.init(content: target, as: note)
+        isReblog = true
+        reblogged = [DummyItem(target)]
+        reblogger = DummyPerson(making: note)
+    }
+
+    /// `content` drawn as a row that is `identity`'s: the same note for every row but a reblog's,
+    /// where the post reblogged is what is drawn and the reblog is what the row is — its id, its
+    /// time, what it arrived through, where its timeline is not whole, whether it is kept.
+    private init(content note: Note, as identity: Note) {
+        let reblog = identity.isReblog && identity.key != note.key
+        noteID = identity.id
+        id = identity.key.rowID
         source = DummySource.unsigned(note.source.host, kind: Self.shape(of: note.source.kind))
         author = note.author
         handle = note.handle
@@ -371,21 +524,29 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         body = blog.map(\.words).flatMap { $0.isEmpty ? nil : $0 } ?? note.body
         boardKey = nil
         boardText = note.board
-        postedAt = blog?.postedAt ?? note.postedAt
+        postedAt = reblog ? identity.postedAt : blog?.postedAt ?? note.postedAt
+        publishedAt = blog?.postedAt ?? note.postedAt
         workRelated = false
-        answering = Self.answering(note.reply)
-        boostedBy = note.boostedBy
+        // What it answers is its reference's to say (#293): a forum topic's reply says it by
+        // that alone, and names nobody.
+        answering = note.reply == nil && note.refs.contains { $0.kind == .answers } ? .somebody : Self.answering(note.reply)
+        boostedBy = reblog ? identity.author : note.boostedBy
         boosted = note.boosted
         favourited = note.favourited
-        statusID = note.statusID
+        bookmarked = note.bookmarked
+        // Never a reblog's own id (`isReblog`): not on a reblog showing its post, and not on
+        // one whose post is gone.
+        statusID = identity.isReblog ? nil : note.statusID
         audience = note.audience.map(DummyAudience.init)
         avatarURL = note.avatarURL ?? blog?.avatarURL
         url = note.url
         attachments = note.attachments
         opening = note.opening
-        categories = note.categories
-        goneSince = note.goneSince
-        gaps = note.gaps
+        categories = identity.categories
+        goneSince = identity.goneSince
+        editedAt = note.editedAt
+        earlier = note.earlier
+        gaps = identity.gaps
         sensitive = note.sensitive
         spoiler = note.spoiler
         emojis = note.emojis
@@ -394,7 +555,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
             reblogs: note.counts.reblogs,
             favourites: note.counts.favourites
         )
-        marks = DummyMarks()
+        marks = DummyMarks(kept: identity.kept)
         quote = note.quote
         quotedRowID = note.quotedKey?.rowID
     }
@@ -478,18 +639,122 @@ public struct DummyConversation: Hashable, Sendable {
     public let ancestors: [DummyItem]
     public let post: DummyItem
     public let descendants: [DummyThreadEntry]
+    /// Where the post the first row answers stands, when it is not here to be drawn and there
+    /// is something to say of it (#293): on its way, not read for now, gone at its source, no
+    /// longer held. Said in that post's place — a line above the first row, one step out from
+    /// it — so the rows keep their places when it arrives.
+    var missing: QuoteBand.Loading?
+    /// The posts a read of the thread said stand above a post that is not here (#293,
+    /// `Opened.beyond`), the start of the thread first: drawn first, over the line that stands
+    /// in that post's place.
+    public var beyond: [DummyItem] = []
+    /// What the line in the missing post's place says, as a string's key, or nothing where no
+    /// line is drawn: where that post stands, where there is something to say of it
+    /// (`missing`), and otherwise — with posts drawn beyond it — only that it is not here.
+    var gapKey: String? {
+        missing?.aboveKey ?? (beyond.isEmpty ? nil : "thread.above.notHere")
+    }
+    /// The held posts that quote the opened one, drawn after its answers (#293).
+    public var quoting: [DummyItem] = []
+    /// Who reblogged the opened post, as far as this device holds their reblogs, the latest
+    /// first and each person once (#293). Said in one line under the post: a reblog is in no
+    /// thread, and its row would be the opened post drawn a second time.
+    public var rebloggers: [String] = []
 
-    public var inOrder: [DummyItem] {
-        ancestors + [post] + descendants.map(\.item)
+    public init(ancestors: [DummyItem], post: DummyItem, descendants: [DummyThreadEntry]) {
+        self.ancestors = ancestors
+        self.post = post
+        self.descendants = descendants
     }
 
+    /// Every row, in the order drawn — what `j` and `k` walk.
+    public var inOrder: [DummyItem] {
+        beyond + ancestors + [post] + descendants.map(\.item) + quoting
+    }
+
+    /// How many steps in the first row of the chain stands: one for each post drawn beyond a
+    /// missing one, and one where a line stands in that post's place; none otherwise.
+    public var lead: Int { beyond.count + (gapKey == nil ? 0 : 1) }
+
     public func depth(of id: String) -> Int {
-        if let index = ancestors.firstIndex(where: { $0.id == id }) { return index }
-        if post.id == id { return ancestors.count }
+        if let index = beyond.firstIndex(where: { $0.id == id }) { return index }
+        if let index = ancestors.firstIndex(where: { $0.id == id }) { return lead + index }
+        if post.id == id { return lead + ancestors.count }
         if let entry = descendants.first(where: { $0.item.id == id }) {
-            return ancestors.count + entry.depth
+            return lead + ancestors.count + entry.depth
         }
+        if quoting.contains(where: { $0.id == id }) { return lead + ancestors.count + 1 }
         return 0
+    }
+}
+
+extension DummyConversation {
+    /// What belongs with the opened post, as rows (#293): `opened` is read off references among
+    /// what is held, and this draws it around the row the pane was given.
+    ///
+    /// **The post itself is the one the pane was already given**, for `around`'s reason.
+    ///
+    /// **The first row's own line about the post it answers is said above it instead**, where
+    /// there is something to say: the row is the first thing drawn, the place of what it
+    /// answers is the line over it, and one fact said twice a finger apart is noise. Every other
+    /// row's parent is the row above, and its line is the plain one.
+    static func opened(_ root: DummyItem, _ opened: Opened) -> DummyConversation {
+        var conversation = around(
+            root, rootID: root.statusID, ancestors: opened.above, descendants: opened.below, quoted: opened.quoted
+        )
+        let first = conversation.ancestors.first ?? root
+        let missing = QuoteBand.Loading(answeredBy: first)
+        let beyond = opened.beyond.filter { $0.key.rowID != root.id && !$0.isReblog }
+            .map { DummyItem($0).quoting(opened.quoted[$0.key]) }
+        if missing != nil || !beyond.isEmpty {
+            conversation = DummyConversation(
+                ancestors: conversation.ancestors.enumerated().map { $0.offset == 0 ? $0.element.sayingAbove() : $0.element },
+                post: conversation.ancestors.isEmpty ? root.sayingAbove() : root,
+                descendants: conversation.descendants
+            )
+            conversation.missing = missing
+            conversation.beyond = beyond
+        }
+        // An answer the thread's read brought whose parent is not here: at the first step, and
+        // what is known of that parent said above it — and so not on the row's own line.
+        if !opened.loose.isEmpty {
+            let loose = Set(opened.loose.map(\.rowID))
+            let missing = conversation.missing, beyond = conversation.beyond
+            conversation = DummyConversation(
+                ancestors: conversation.ancestors, post: conversation.post,
+                descendants: conversation.descendants.map { entry in
+                    // One that says it answers nothing has nothing to be said above it.
+                    guard loose.contains(entry.item.id), entry.item.answering != .nothing else { return entry }
+                    var said = DummyThreadEntry(item: entry.item.sayingAbove(), depth: entry.depth)
+                    said.aboveKey = QuoteBand.Loading(answeredBy: entry.item)?.aboveKey ?? "thread.above.notHere"
+                    return said
+                }
+            )
+            conversation.missing = missing
+            conversation.beyond = beyond
+        }
+        conversation.quoting = opened.quoting.filter { $0.key.rowID != root.id }
+            .map { DummyItem($0).quoting(opened.quoted[$0.key]) }
+        var seen: Set<String> = []
+        // A reblog since taken back at its source is not somebody reblogging it now.
+        conversation.rebloggers = opened.reblogs.filter { $0.goneSince == nil }.compactMap { reblog in
+            // By handle, which is who they are; by name where a source gave no handle, so
+            // two such people are still two.
+            seen.insert(reblog.handle.isEmpty ? reblog.author : reblog.handle).inserted ? reblog.author : nil
+        }
+        return conversation
+    }
+}
+
+extension DummyItem {
+    /// This row with nothing to say of the post it answers but that it answers: where the pane
+    /// says where that post stands in the post's own place, above the row.
+    func sayingAbove() -> DummyItem {
+        var row = self
+        row.owes.remove(.answers)
+        row.refsGone.remove(.answers)
+        row.refsUnheld.remove(.answers)
+        return row
     }
 }
 
@@ -521,20 +786,27 @@ extension DummyConversation {
     /// at the first generation and look like a server that sends flat threads. Nothing where it
     /// could not be known, and then every answer does stand at the first generation, which is the
     /// honest fallback rather than an accident.
+    ///
+    /// `quoted` is the post each row quotes, where it is held, by the quoting row's key
+    /// (`Opened.quoted`): what its quote is drawn from.
     public static func around(
-        _ root: DummyItem, rootID: String?, ancestors: [Note], descendants: [Note]
+        _ root: DummyItem, rootID: String?, ancestors: [Note], descendants: [Note], quoted: [NoteKey: Note] = [:]
     ) -> DummyConversation {
         var depths: [String: Int] = [:]
         if let rootID { depths[rootID] = 0 }
         var entries: [DummyThreadEntry] = []
-        for note in descendants where note.key.rowID != root.id {
+        // A reblog is in no thread (#290): it answers nothing. None reaches here — a thread's
+        // reads are of posts — and one that did would be drawn with no post, as a reblog made
+        // from one note alone is (`init(_:)`), so it is left out rather than drawn wrong.
+        for note in descendants where note.key.rowID != root.id && !note.isReblog {
             let parent = note.reply?.inReplyToId.flatMap { depths[$0] }
             let depth = (parent ?? 0) + 1
             if let id = note.statusID { depths[id] = depth }
-            entries.append(DummyThreadEntry(item: DummyItem(note), depth: depth))
+            entries.append(DummyThreadEntry(item: DummyItem(note).quoting(quoted[note.key]), depth: depth))
         }
         return DummyConversation(
-            ancestors: ancestors.filter { $0.key.rowID != root.id }.map(DummyItem.init),
+            ancestors: ancestors.filter { $0.key.rowID != root.id && !$0.isReblog }
+                .map { DummyItem($0).quoting(quoted[$0.key]) },
             post: root,
             descendants: entries
         )
@@ -544,6 +816,10 @@ extension DummyConversation {
 public struct DummyThreadEntry: Hashable, Sendable {
     public let item: DummyItem
     public let depth: Int
+    /// What the pane says above this row, in the place of the post it answers, where that post
+    /// is not here and the row stands at the first step for want of it (#293): a string's key.
+    /// Nothing on a row whose parent is the row it stands under.
+    var aboveKey: String?
 
     public init(item: DummyItem, depth: Int) {
         self.item = item

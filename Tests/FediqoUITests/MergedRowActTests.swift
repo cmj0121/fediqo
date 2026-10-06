@@ -48,7 +48,7 @@ struct MergedRowActTests {
             author: "Ada", handle: handle, body: "hello",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [.home],
             boosted: boosted, favourited: favourited, statusID: statusID
-        )
+        ).readNow()
     }
 
     /// A shell holding `copies` in the order given, signed in with writing on `signed`, having
@@ -137,7 +137,9 @@ struct MergedRowActTests {
         })
         #expect(held(session, on: second)?.boosted == true)
         #expect(held(session, on: second)?.favourited == true)
-        #expect(held(session, on: first)?.boosted == false, "the first source was not asked")
+        // Nobody is signed in to the first source, so nothing is said there of what a reader did
+        // (#285) — and nothing was asked of it.
+        #expect(held(session, on: first)?.boosted == nil, "the first source was not asked")
         #expect(session.acts.standings.isEmpty, "what landed is the source's word")
     }
 
@@ -259,7 +261,7 @@ struct MergedRowActTests {
 
         #expect(session.acting(on: row).standings[.boost] == .failed)
         #expect(held(session, on: second)?.boosted == false, "the row is as it was")
-        #expect(held(session, on: first)?.boosted == false)
+        #expect(held(session, on: first)?.boosted == nil, "no sign-in there, so no reader's word (#285)")
         await session.toggle(.boost, on: try self.row(session))
         #expect(await server.paths == [
             "/api/v1/statuses/222/reblog", "/api/v1/statuses/222/reblog",

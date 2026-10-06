@@ -40,6 +40,16 @@ struct ItemActing {
     ///
     /// Nothing where the list cannot act — a fixture, a preview — and then no mark is drawn.
     var perform: ((PostAct) -> Void)?
+    /// The press on the keep mark (#284): keeps the row, or un-keeps it. **Beside `perform` and
+    /// not one of its acts**, because it is none of #54's: nothing is sent to a source, so it is
+    /// offered on a row whatever its source offers, signed in or not, and it has no standing to
+    /// be on its way or to fail. Nothing where the list cannot act, and then the press changes
+    /// nothing.
+    var keep: (() -> Void)?
+    /// The press on a mark whose act the sign-in must be asked again for (#285) — bookmarking,
+    /// on a sign-in made before it was asked for. It raises the question and sends nothing.
+    /// Nothing where the list cannot act, and then no such mark is drawn.
+    var ask: ((PostAct) -> Void)?
 }
 
 /// What one act's mark draws on one row — `ItemActs.mark`'s answer.
@@ -85,6 +95,8 @@ enum ItemActs {
         case .answer: return "arrowshape.turn.up.left"
         // Never "done": a post taken back is not on the row to be drawn.
         case .withdraw: return "trash"
+        // The star's shape (#285): filled where the source says it is bookmarked.
+        case .bookmark: return done ? "bookmark.fill" : "bookmark"
         }
     }
 
@@ -99,6 +111,8 @@ enum ItemActs {
             return L10n.t(done ? "item.act.unfavourite" : "item.act.favourite", language: language)
         case .answer: return L10n.t("item.act.answer", language: language)
         case .withdraw: return L10n.t("item.act.withdraw", language: language)
+        case .bookmark:
+            return L10n.t(done ? "item.act.unbookmark" : "item.act.bookmark", language: language)
         }
     }
 
@@ -127,6 +141,14 @@ enum ItemActs {
         }
     }
 
+    /// What a mark says where its act has to be allowed first (#285): the act, and that asking
+    /// the source again is what a press does. One sentence for the pointer and for VoiceOver.
+    static func askLine(_ act: PostAct, language: DummyLanguage? = nil) -> String {
+        String(
+            format: L10n.t("item.act.ask", language: language), name(act, done: false, language: language)
+        )
+    }
+
     /// Everything one act's mark draws on one row: its glyph, whether it is done, the count
     /// beside it and the sentence a pointer and VoiceOver are given.
     ///
@@ -144,13 +166,21 @@ enum ItemActs {
         case .favourite: (copy.favourited == true, copy.counts.favourites)
         case .answer: (false, copy.counts.replies)
         case .withdraw: (false, nil)
+        // What the source the act goes through last said (#285); a source counts no bookmarks.
+        case .bookmark: (copy.bookmarked == true, nil)
         }
         let host = item.otherCopies.isEmpty ? nil : copy.source.host
+        var said = spoken(act, done: done, standing: standing, through: host, language: language)
+        // **On a reblog's row the mark says whose post it goes to** (#290): the row is headed by
+        // who reblogged, and a press here reaches the post and never the reblog.
+        if item.isReblog {
+            said = String(format: L10n.t("item.act.onPost", language: language), said, copy.author)
+        }
         return ItemMark(
             symbol: symbol(act, done: done, standing: standing),
             done: done,
             count: count,
-            spoken: spoken(act, done: done, standing: standing, through: host, language: language)
+            spoken: said
         )
     }
 

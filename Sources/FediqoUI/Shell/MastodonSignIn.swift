@@ -43,6 +43,38 @@ public final class MastodonSessions {
     /// sign-in and by a sign-out, which are the two acts that replace what a write would use.
     private(set) var writeRefused: Set<String> = []
 
+    /// The hosts whose sign-in may bookmark (#285) — read with `grants`, off the same attribute
+    /// and never off a token. A sign-in made before bookmarks were asked for is not among them,
+    /// and writes exactly as it did.
+    private(set) var bookmarkHosts: Set<String> = []
+
+    /// Hosts whose sign-in asked for bookmarks and was not given them (#285): a server with no
+    /// such scope, or one that granted less than it was asked.
+    /// The row and Account stop offering to ask there, since asking again would get the same
+    /// answer. **Read with `grants`, off what the sign-in wrote down beside itself**, so it holds
+    /// across a relaunch and goes with the sign-in; a later sign-in asks afresh.
+    private(set) var bookmarksRefused: Set<String> = []
+
+    /// Hosts that turned a bookmark away with a 403 this run (#285), until they are signed in to
+    /// again — `writeRefused`'s shape, for the one act. Never written down.
+    private(set) var bookmarkTurnedAway: Set<String> = []
+
+    /// Hosts whose signed-in reader is no longer the one their rows were read as (#285): signed
+    /// out, ended by the server, cleared, or signed in to as somebody not shown to be the same.
+    /// The session takes them (`takeReadersChanged`) and lets go of what the source had said that
+    /// reader did to its posts.
+    @ObservationIgnored private var readersChanged: Set<String> = []
+
+    /// Whether the last look at who is signed in could be had at all. A Keychain that cannot be
+    /// read — a locked device at launch — is not everybody signing out.
+    @ObservationIgnored private(set) var grantsKnown = false
+
+    /// The hosts whose reader changed since this was last asked, handed over once.
+    func takeReadersChanged() -> Set<String> {
+        defer { readersChanged = [] }
+        return readersChanged
+    }
+
     /// Who the reader is on each signed-in host, as `@user@host`, **as that source said this run**
     /// (#109) — what tells a post the reader wrote from one they did not.
     ///
@@ -97,12 +129,24 @@ public final class MastodonSessions {
     /// it is **never** quietly retried for reading alone, because a reader who asked to write
     /// and was handed a read-only sign-in without being told has been answered for.
     ///
+    /// **A registration the server refuses for its scopes falls a rung too**, exactly as its page
+    /// answering `invalid_scope` does — a server that does not know the bookmark scope may say so
+    /// there and never open a page at all.
+    ///
     /// **What that reader actually sees, said plainly:** a server that refuses the writing part
     /// answers `invalid_scope`, which is indistinguishable here from a server that refuses
-    /// `read:search`, so decision 32's one retry runs first — the reader is sent to the server's
-    /// page a second time, on a registration that drops `read:search` and still carries the
-    /// writing part, and is refused there too before the sign-in fails and says so. Two pages for
-    /// one refusal. Telling the two apart needs something the callback does not carry.
+    /// `read:search` or bookmarks, so every rung of the ladder is tried first — the reader is sent
+    /// to the server's page again for each, and is refused on the last before the sign-in fails
+    /// and says so. Four pages for one refusal, where it was two before bookmarks were asked for;
+    /// a server that refuses bookmarks alone is three, and then signed in. Telling the refusals
+    /// apart needs something the callback does not carry.
+    ///
+    /// **A sign-in to read and act asks for bookmarks too** (#285), and a server that refuses that
+    /// one word leaves the reader with the read-and-write sign-in they asked for: the ladder's
+    /// later rungs are that sign-in without it, tried after `read:search`'s. Reading alone asks
+    /// for exactly what it asked before. A registration made for acting without bookmarks —
+    /// every one an earlier build made — is not started on (`MastodonOAuth.known`), so asking
+    /// again is asked on a page that names bookmarks.
     ///
     /// **A sign-in made while a token is already held replaces it here and revokes it there**
     /// (#69). `tokens.save` is delete-then-add, so the superseded token would otherwise stay live
@@ -123,26 +167,38 @@ public final class MastodonSessions {
             kept = nil
         }
         // The one ladder, from the one place that owns it: what this answer registers for, and
-        // what it falls back to where the server refuses `read:search`.
-        let (wide, narrow) = MastodonOAuth.registrations(writing: writing)
-        let token: MastodonToken
+        // what it falls back to, a rung at a time, where the server answers `invalid_scope`.
+        let ladder = MastodonOAuth.ladder(writing: writing)
+        var rung = kept.flatMap { app in ladder.firstIndex(of: app.scopes ?? "") } ?? 0
+        // What this sign-in asks for at its widest, written down with the token it ends in.
+        let widest = ladder[rung]
+        var token: MastodonToken
         do {
-            let app: MastodonApp
-            if let kept {
-                app = kept
-            } else {
-                app = try await oauth.register(scopes: wide)
-                if signOuts[host, default: 0] == before { try? tokens.save(app) }
+            var app = kept
+            var issued: MastodonToken?
+            while issued == nil {
+                do {
+                    let registered: MastodonApp
+                    if let app {
+                        registered = app
+                    } else {
+                        registered = try await oauth.register(scopes: ladder[rung])
+                        if signOuts[host, default: 0] == before { try? tokens.save(registered) }
+                        app = registered
+                    }
+                    issued = try await oauth.signIn(as: registered, through: browser)
+                } catch MastodonSignInError.invalidScope where rung + 1 < ladder.count {
+                    try? tokens.forgetApp(host: host)
+                    kept = nil
+                    app = nil
+                    // Cleared or removed while the page was up: no further rung is registered
+                    // for, and no further page opened, on a source the reader has let go of.
+                    guard signOuts[host, default: 0] == before else { return nil }
+                    rung += 1
+                }
             }
-            do {
-                token = try await oauth.signIn(as: app, through: browser)
-            } catch MastodonSignInError.invalidScope where app.scopes == wide {
-                try? tokens.forgetApp(host: host)
-                kept = nil
-                let narrower = try await oauth.register(scopes: narrow)
-                if signOuts[host, default: 0] == before { try? tokens.save(narrower) }
-                token = try await oauth.signIn(as: narrower, through: browser)
-            }
+            guard let issued else { return .unreadable }
+            token = issued.recorded(asked: widest)
         } catch let error as MastodonSignInError {
             if error == .clientRejected || error == .invalidScope || (kept != nil && error == .cancelled) {
                 try? tokens.forgetApp(host: host)
@@ -160,25 +216,57 @@ public final class MastodonSessions {
         do {
             try tokens.save(token)
         } catch {
+            // **The sign-in the reader had, put back before anything is awaited** (#285). `save`
+            // deletes before it adds, so an add that fails has taken the old token from this
+            // device with it still live at the server, on a press that promised nobody is signed
+            // out first. Put back here and not after the round trip below: a sign-out landing
+            // during that wait would find nothing to forget or revoke, and the token put back
+            // after it would sign the reader in again behind their sign-out. Where it cannot be
+            // put back either, it is revoked, so nothing is live there that this device has lost.
+            var lost: MastodonToken?
+            if let superseded, ((try? tokens.token(host: host)) ?? nil) == nil {
+                do { try tokens.save(superseded) } catch { lost = superseded }
+            }
+            refresh()
             await oauth.revoke(token)
+            if let lost { await oauth.revoke(lost) }
             return .keychain
         }
         // **After the new one is safely kept, and never a token with the same string**: what is
         // held now is what a write will use, and revoking it would sign the reader out of a
-        // sign-in the row says they have. The keychain arm above leaves the superseded token
-        // alone for the same reason — nothing there knows whether it is still the one held.
+        // sign-in the row says they have.
         if let superseded, superseded.accessToken != token.accessToken {
             await oauth.revoke(superseded)
         }
         // A fresh sign-in is a fresh answer from the server about what this device may do, so
         // whatever it turned away before this is spent.
         writeRefused.remove(host)
+        bookmarkTurnedAway.remove(host)
+        let reader = handles[host]
         handles[host] = nil
         refresh()
         // Who the reader is matters only to taking back what they wrote, which needs the writing
         // part — so a sign-in that did not buy it asks nothing more than it always did.
         if grants[host] == .writing { await learnWho(host: host) }
+        // **Not shown to be the reader who was here before** (#285): another account, or one
+        // nobody could name on either side. What the source said that reader had done to its
+        // posts is not this one's to be told.
+        if reader == nil || handles[host] != reader { readersChanged.insert(host) }
         return nil
+    }
+
+    /// A bookmark this source turned away with a 403 (#285), **remembered for this run and written
+    /// nowhere**, as a write turned away is (`refusedWrite`): the bookmark is not offered on that
+    /// source again until it is signed in to again or the app is opened again, and every other
+    /// act the sign-in could do, it still does. One refusal is not proof — a proxy in front of
+    /// one path, an account limited for a day — so nothing the sign-in wrote down is touched.
+    ///
+    /// **Only where `sent` is still the token held**: a refusal that comes back about a sign-in
+    /// the reader has since replaced says nothing about the one they have now.
+    func refusedBookmark(host raw: String, sentWith sent: MastodonToken) {
+        let host = raw.lowercased()
+        guard token(host: host)?.accessToken == sent.accessToken else { return }
+        bookmarkTurnedAway.insert(host)
     }
 
     /// Asks the source who the reader is on it (#109). Silent on any failure: not knowing offers
@@ -230,6 +318,19 @@ public final class MastodonSessions {
         )
     }
 
+    /// Whether the sign-in on one source may bookmark (#285) — beside `writing(host:kind:)` and
+    /// not inside it, since a sign-in that lacks this still writes everything it wrote.
+    ///
+    /// `unasked` only for a sign-in that writes and has not been asked this run: one that reads
+    /// has nothing to add bookmarks to, and its row already says to sign in to act.
+    func bookmarks(host raw: String) -> BookmarkStanding {
+        let host = raw.lowercased()
+        if bookmarkTurnedAway.contains(host) { return .unavailable }
+        if bookmarkHosts.contains(host) { return .allowed }
+        guard grants[host] == .writing, !bookmarksRefused.contains(host) else { return .unavailable }
+        return .unasked
+    }
+
     /// The token leaves this device first; then the server is asked to forget it, and whatever it
     /// answers changes nothing here.
     ///
@@ -256,6 +357,7 @@ public final class MastodonSessions {
         }
         if forgettingApp { try? tokens.forgetApp(host: host) }
         writeRefused.remove(host)
+        bookmarkTurnedAway.remove(host)
         handles[host] = nil
         refresh()
         if let token {
@@ -323,8 +425,17 @@ public final class MastodonSessions {
         // **One query, one value, and it reads no token** — see `MastodonTokenStore.grants()`. Who
         // is signed in is this dictionary's keys, so a row can never draw a sign-in this object
         // does not also have a grant for.
-        let grants = (try? tokens.grants()) ?? [:]
+        let read = try? tokens.grants()
+        grantsKnown = read != nil
+        let grants = read ?? [:]
+        // A host that held a sign-in and no longer does, however it went (#285) — and only where
+        // the look itself could be had.
+        if read != nil { readersChanged.formUnion(Set(self.grants.keys).subtracting(grants.keys)) }
         if grants != self.grants { self.grants = grants }
+        let bookmarking = ((try? tokens.bookmarking()) ?? []).intersection(grants.keys)
+        if bookmarking != bookmarkHosts { bookmarkHosts = bookmarking }
+        let refused = ((try? tokens.bookmarksRefused()) ?? []).intersection(grants.keys)
+        if refused != bookmarksRefused { bookmarksRefused = refused }
         // Who the reader is goes with the sign-in it was learnt through.
         let kept = handles.filter { grants[$0.key] != nil }
         if kept != handles { handles = kept }

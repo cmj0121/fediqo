@@ -54,13 +54,13 @@ struct UsageSourceList: View {
     }
 
     /// The sources no longer here that this device still holds posts from (#250), by host: the
-    /// hosts the count knows (`holdings.bySource`, arrived and aside alike, #194) that are not
+    /// hosts the count knows (`holdings.bySource`, #194) that are not
     /// among the sources, each with the kind its notes were stamped with — nothing else
     /// remembers a removed source. Sorted by host, since nothing else orders them.
     static func removed(_ session: ShellSession) -> [Source] {
         let here = Set(session.sources.map(\.host))
         let kinds = Dictionary(
-            (session.notes + session.heldAside).map { ($0.source.host, $0.source.kind) },
+            (session.notes + session.heldReplies).map { ($0.source.host, $0.source.kind) },
             uniquingKeysWith: { first, _ in first }
         )
         return session.holdings.bySource.keys
@@ -99,9 +99,6 @@ struct UsageRemovedSourceDetail: View {
         }
         Section {
             reading(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
-            if let apart = UsagePane.asideLine(session.holdings.aside(host: source.host)) {
-                reading(Text(apart))
-            }
             reading(Text(L10n.t("usage.removed.line")))
         } header: {
             ShellSectionHead(title: "prefs.cache", line: "item.left", help: "usage.removed.help")
@@ -139,9 +136,6 @@ struct UsageSourceDetail: View {
         Section {
             if cataloguesRead { catalogueLine }
             reading(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
-            if let apart = UsagePane.asideLine(session.holdings.aside(host: source.host)) {
-                reading(Text(apart))
-            }
             reading(Text(UsagePane.picturesLine(source, in: session, onDisk: onDisk)))
             postLine
             passwordLine

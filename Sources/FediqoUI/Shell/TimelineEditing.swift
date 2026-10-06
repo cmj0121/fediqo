@@ -150,15 +150,15 @@ extension ShellSession {
         if let drawnTimeline, drawnTimeline.key == key { return drawnTimeline.items }
         let items = currentTimeline.items(
             from: notes, among: written, index: definition.readsText ? textIndex : TextIndex([]), latest: latest,
-            here: hosts
+            here: hosts, targets: reblogTargets
         )
         drawnTimeline = DrawnTimeline(key: key, items: items)
         timelineEvaluations += 1
         return items
     }
 
-    /// What this device holds under one hashtag, newest first — every timeline's rows and what
-    /// is held aside alike (#124) — kept until either changes, for `heldPosts(of:)`'s reason.
+    /// What this device holds under one hashtag, newest first — every item, whichever read
+    /// brought it (#124, #296) — kept until they change, for `heldPosts(of:)`'s reason.
     ///
     /// **Through the rules of the timeline in front** (#197), as a search's results are (#145):
     /// a tag's page is a search for a tag, and shows only what that timeline lets through — up to
@@ -173,9 +173,9 @@ extension ShellSession {
         )
         if let drawnTag, drawnTag.key == key { return drawnTag.items }
         let shown = CompiledTimeline(definition, sources: [])
-            .shown(searchable, definition.readsText ? searchTextIndex : TextIndex([]))
+            .shown(notes, definition.readsText ? textIndex : TextIndex([]), targets: reblogTargets)
         let found = HeldUnderTag.held(under: tag, in: shown, sent: sent)
-        let items = DummyItem.merged(latest?.shown(found) ?? found, here: hosts)
+        let items = DummyItem.merged(latest?.shown(found) ?? found, here: hosts, targets: reblogTargets)
         drawnTag = HeldTag(key: key, items: items)
         return items
     }
@@ -199,14 +199,15 @@ extension ShellSession {
     /// it; two readers each spelling the timeline, the notes and the text index out for
     /// themselves would be two answers to "what did the search find" that could come apart.
     ///
-    /// **What is held aside too** (#176): what a search brought back from the sources is held
-    /// aside so All does not grow by it, and is found here — through the same rules — with the
-    /// network on or off.
+    /// **What a search brought back too** (#176, #296): it is an item like any other — it stands
+    /// in All, and stays there when the search is cleared — and is found here, through the same
+    /// rules, with the network on or off.
     func searched(_ search: ShellSearch, latest: LatestDate?) -> [DummyItem]? {
         search.items(
             in: definition(of: currentTimeline),
-            text: searchTextIndex,
-            from: searchable,
+            text: textIndex,
+            from: notes,
+            targets: reblogTargets,
             revision: heldRevision,
             sources: sources,
             latest: latest
@@ -330,6 +331,8 @@ extension ShellSession {
 /// factories make the rule, so Add has nothing to offer until they return one.
 struct RuleDraft: Equatable {
     let tag: RuleKind.Tag
+    /// The field a rule on a field is about (#287), by its name. Nothing for every other kind.
+    let field: String?
     var target: RuleTarget?
     var typed = ""
     var effect: RuleEffect = .include
@@ -337,6 +340,26 @@ struct RuleDraft: Equatable {
 
     init(_ tag: RuleKind.Tag) {
         self.tag = tag
+        field = nil
+    }
+
+    /// A rule on `field`, with nothing picked yet.
+    init(field: SourceField) {
+        tag = .field
+        self.field = field.name
+    }
+
+    /// Whether what this rule names is a handle typed into the form's field, as an author
+    /// rule's is: a rule on a field that holds one (`SourceField.holdsHandle`).
+    var takesHandle: Bool {
+        tag == .field && field.flatMap { SourceField.declared[$0] }?.holdsHandle == true
+    }
+
+    /// A draft of the kind `rule` is — and, for a rule on a field, of its field — with nothing
+    /// picked: what its choices are asked of.
+    init(kindOf rule: Rule) {
+        tag = rule.kind.tag
+        if case .field(let name, _, _) = rule.kind { field = name } else { field = nil }
     }
 
     /// A rule already written, opened to be changed: what it names, its effect and its scope, as
@@ -347,7 +370,7 @@ struct RuleDraft: Equatable {
     /// (`choices`, the picker's own list), since the picker lists categories by source; its
     /// scope stays every source until it is changed.
     init(editing rule: Rule, sources: [Source], choices: [RuleTarget] = []) {
-        tag = rule.kind.tag
+        self.init(kindOf: rule)
         effect = rule.effect
         switch rule.kind {
         case .source(let host):
@@ -366,6 +389,15 @@ struct RuleDraft: Equatable {
                 return host
             }.first
             target = .category(category, on: RuleText.host(of: scope) ?? listed ?? sources.first?.host ?? "")
+            self.scope = scope
+        case .field(let name, let value, let scope):
+            // A handle is shown as it is typed, as an author's is.
+            if takesHandle, case .text(let handle) = value {
+                typed = "@" + handle
+                target = .field(name, .text(typed))
+            } else {
+                target = .field(name, value)
+            }
             self.scope = scope
         }
     }
@@ -386,6 +418,7 @@ struct RuleDraft: Equatable {
     mutating func pick(_ picked: RuleTarget, sources: [Source]) {
         target = picked
         if case .author(let handle) = picked { typed = handle }
+        if takesHandle, case .field(_, .text(let handle)) = picked { typed = handle }
         let choices = RuleBuilder.scopes(for: picked, sources: sources)
         if case .category(_, let host) = picked, choices.contains(.source(host: host)) {
             scope = .source(host: host)
@@ -399,6 +432,8 @@ struct RuleDraft: Equatable {
         switch tag {
         case .author: pick(.author(text), sources: sources)
         case .keyword: pick(.keyword(text), sources: sources)
+        case .field:
+            if takesHandle, let field { pick(.field(field, .text(text)), sources: sources) }
         case .source, .category: break
         }
     }
@@ -447,6 +482,8 @@ enum EditorAction: Equatable {
     /// The name field, to rename the timeline.
     case focusName
     case pickKind(RuleKind.Tag)
+    /// A field one of the reader's sources declares, picked by its name (#287).
+    case pickField(String)
     case nextChoice
     case previousChoice
     case toggleEffect
@@ -479,7 +516,7 @@ enum EditorAction: Equatable {
     /// wherever a field does not have the keys.
     static func from(
         _ key: Character, command: Bool = false, option: Bool = false, stage: EditorStage, fieldFocused: Bool,
-        keysHeld: Bool = true
+        keysHeld: Bool = true, fields: [String] = [], typed: Bool = false
     ) -> EditorAction? {
         if key == KeyEquivalent.escape.character { return escapeIsExitCommand ? nil : escape(at: stage) }
         if option, !command, case .form = stage, key == "o" || key == "ø" { return .nextScope }
@@ -505,10 +542,15 @@ enum EditorAction: Equatable {
             default: return down ? .nextRule : up ? .previousRule : nil
             }
         case .kinds:
-            guard let digit = key.wholeNumberValue, (1...RuleKind.Tag.allCases.count).contains(digit) else {
-                return nil
-            }
-            return .pickKind(RuleKind.Tag.allCases[digit - 1])
+            // The kinds every source has, then the fields the reader's sources declare (#287),
+            // numbered on in the order the pills are drawn. **Nine is as far as a digit goes**: a
+            // pill past it has none, and is pressed or walked to with Tab — which this stage
+            // never takes, so the system's own focus moves along the pills. See
+            // `ProtocolKind.fields`.
+            let kinds = Self.kinds
+            guard let digit = key.wholeNumberValue, digit >= 1 else { return nil }
+            if digit <= kinds.count { return .pickKind(kinds[digit - 1]) }
+            return fields.indices.contains(digit - kinds.count - 1) ? .pickField(fields[digit - kinds.count - 1]) : nil
         case .form:
             switch key {
             case "x": return .toggleEffect
@@ -516,23 +558,29 @@ enum EditorAction: Equatable {
             case KeyEquivalent.return.character: return .confirmRule
             // Only where the kind has no field: ⌫ after a Return in an unfinished author or
             // keyword is a slip back into the text, never the whole rule gone.
-            case KeyEquivalent.delete.character: return Self.removesFromForm(stage) ? .removeRule : nil
+            case KeyEquivalent.delete.character: return Self.removesFromForm(stage, typed: typed) ? .removeRule : nil
             default: return down ? .nextChoice : up ? .previousChoice : nil
             }
         }
     }
 
-    /// Whether ⌫ removes the rule open in this stage's form: a source or a category, which have
-    /// no field to type back into.
-    static func removesFromForm(_ stage: EditorStage) -> Bool {
-        stage == .form(.source) || stage == .form(.category)
+    /// The kinds of rule every source can be asked by, in the order they are offered. A rule on
+    /// a field is offered by its field instead, after these.
+    static let kinds: [RuleKind.Tag] = [.source, .author, .keyword, .category]
+
+    /// Whether ⌫ removes the rule open in this stage's form: a source, a category or a field's
+    /// value, which have no field to type back into. `typed` is whether this form has one all
+    /// the same — a field whose value is a handle (`RuleDraft.takesHandle`) — and then ⌫ is an
+    /// author's: a slip back into the text.
+    static func removesFromForm(_ stage: EditorStage, typed: Bool = false) -> Bool {
+        stage == .form(.source) || stage == .form(.category) || (stage == .form(.field) && !typed)
     }
 
     /// The keycap strip under each stage: the caps, and the key naming what they do. A rule
     /// opened to be changed says it can be removed from there, and is confirmed as a change. The
     /// timeline tab names only the keys that act on the timeline.
     static func strip(
-        for stage: EditorStage, changing: Bool = false, tab: EditorTab = .rules
+        for stage: EditorStage, changing: Bool = false, tab: EditorTab = .rules, fields: Int = 0, typed: Bool = false
     ) -> [(caps: String, key: String)] {
         if tab == .timeline {
             return [("⇥ t", "editor.keys.tab"), ("m", "editor.keys.name"), ("[ ]", "editor.keys.move"),
@@ -545,8 +593,8 @@ enum EditorAction: Equatable {
              ("⌫", "editor.keys.remove"), ("⌘⌫", "editor.keys.removeTimeline"),
              ("⌘↩", "editor.keys.done"), ("esc", "editor.keys.cancel")]
         case .kinds:
-            [("1–4", "editor.keys.kind"), ("esc", "editor.keys.back")]
-        case .form where changing && removesFromForm(stage):
+            [("1–\(kinds.count + fields)", "editor.keys.kind"), ("esc", "editor.keys.back")]
+        case .form where changing && removesFromForm(stage, typed: typed):
             [("j k", "editor.keys.pick"), ("x", "editor.keys.effect"), ("o ⌥O", "editor.keys.scope"),
              ("↩", "editor.keys.change"), ("⌫", "editor.keys.remove"), ("esc", "editor.keys.back")]
         case .form where changing:

@@ -10,14 +10,12 @@ import Testing
 struct ScreenAuditTests {
     private static let host = "one.example"
 
-    private static func note(_ id: String, holding: Holding) -> Note {
-        var note = Note(
+    private static func note(_ id: String) -> Note {
+        Note(
             id: "https://\(host)/users/ada/statuses/\(id)", source: Source(host: host, kind: .mastodon),
             author: "Ada", handle: "@ada@\(host)", body: "post \(id)",
             postedAt: Date(timeIntervalSince1970: 0), categories: [], statusID: id
         )
-        note.holding = holding
-        return note
     }
 
     private func shell(_ notes: [Note], http: FixtureHTTP = FixtureHTTP([:])) async -> ShellSession {
@@ -29,17 +27,17 @@ struct ScreenAuditTests {
         return session
     }
 
-    /// A search hit the sources sent (#176), or an answer read in a thread (#177), is held aside
-    /// and drawn where it was found. Pressed, it has to open — the conversation around it is the
+    /// A search hit the sources sent (#176), or an answer read in a thread (#177), is an item
+    /// like any other (#296). Pressed, it has to open — the conversation around it is the
     /// one thing a press on a post means — and it opened nothing: the pane looked for its root
     /// among what All draws, found none, and drew the page under the press instead.
-    @Test("A post held aside opens into its conversation, and All does not grow by the opening")
-    func aPostHeldAsideOpens() async {
-        let aside = Self.note("20", holding: .aside)
+    @Test("A post a search brought opens into its conversation, and is in All before and after")
+    func aPostASearchBroughtOpens() async {
+        let aside = Self.note("20")
         let http = FixtureHTTP([
             "/api/v1/statuses/20/context": .text(#"{"ancestors":[],"descendants":[]}"#),
         ])
-        let session = await shell([Self.note("1", holding: .arrived), aside], http: http)
+        let session = await shell([Self.note("1"), aside], http: http)
 
         let root = session.held(aside.key.rowID)
         #expect(root?.body == "post 20", "the conversation's root is found among what this device holds")
@@ -47,15 +45,14 @@ struct ScreenAuditTests {
         await session.conversations.open(root!, in: session)
         #expect(await http.paths == ["/api/v1/statuses/20/context"], "and its conversation is asked for")
         #expect(session.conversations.standing(of: aside.key.rowID) == ShellConversationStanding.none)
-        #expect(session.notes.map(\.key) == [Self.note("1", holding: .arrived).key], "All is what it was")
-        #expect(await session.store.note(aside.key)?.holding == .aside)
+        #expect(Set(session.notes.map(\.key)) == [Self.note("1").key, aside.key], "All is what it was: both")
     }
 
     /// The same post as a row to act on: the boost reaches its source, what the source answers is
-    /// laid over the store's row, and the row stays held aside — a boost is not a timeline
-    /// bringing it. Pressed again, the boost is taken back.
-    @Test("A post held aside is boosted and unboosted, and stays aside")
-    func aPostHeldAsideIsActedOn() async throws {
+    /// laid over the store's row — still through no category: a boost is not a timeline bringing
+    /// it. Pressed again, the boost is taken back.
+    @Test("A post a search brought is boosted and unboosted, and arrives through no category for it")
+    func aPostASearchBroughtIsActedOn() async throws {
         let host = "social.example"
         let tokens = MemoryMastodonTokens()
         try tokens.save(MastodonToken(
@@ -72,7 +69,7 @@ struct ScreenAuditTests {
             postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [],
             boosted: false, statusID: "9"
         )
-        aside.holding = .aside
+        aside.asked = .now()
         let store = ItemStore()
         await store.add(Source(host: host, kind: .mastodon))
         await store.ingest([aside])
@@ -83,25 +80,24 @@ struct ScreenAuditTests {
         await session.reloadFromStore()
 
         let row = try #require(session.held(aside.key.rowID))
-        #expect(session.acts(on: row).offers(.boost), "a post held aside offers its marks")
+        #expect(session.acts(on: row).offers(.boost), "a post a search brought offers its marks")
         await session.toggle(.boost, on: row)
         #expect(await server.paths == ["/api/v1/statuses/9/reblog"], "the boost reached its source")
         #expect(await store.note(aside.key)?.boosted == true, "the source's answer is the row's")
-        #expect(await store.note(aside.key)?.holding == .aside, "and the row stays held aside")
-        #expect(session.notes.isEmpty, "All does not grow by a boost")
+        #expect(await store.note(aside.key)?.categories.isEmpty == true, "and no category is added by a boost")
+        #expect(session.notes.count == 1)
 
         await session.toggle(.boost, on: try #require(session.held(aside.key.rowID)))
         #expect(await server.paths == ["/api/v1/statuses/9/reblog", "/api/v1/statuses/9/unreblog"])
         #expect(await store.note(aside.key)?.boosted == false)
-        #expect(await store.note(aside.key)?.holding == .aside)
-        #expect(session.notes.isEmpty)
+        #expect(session.notes.count == 1)
     }
 
-    /// A post held aside and later let go of — a Clear of its source's notes, a keep-for window —
+    /// A post a search brought and later let go of — a Clear of its source's notes, a keep-for window —
     /// is gone from the lookup the moment the store says so, like a post in All.
-    @Test("A post held aside that the store lets go of is no longer found")
+    @Test("A post a search brought that the store lets go of is no longer found")
     func aPostLetGoIsNotFound() async {
-        let aside = Self.note("20", holding: .aside)
+        let aside = Self.note("20")
         let session = await shell([aside])
         await session.store.forget(aside.key)
         await session.reloadFromStore()

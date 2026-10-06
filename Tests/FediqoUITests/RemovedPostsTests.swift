@@ -194,16 +194,14 @@ struct RemovedPostsTests {
 
     @Test("Usage lists a removed source that still has posts here, after the sources, with its count")
     func usageListsRemovedSources() async {
-        var apart = Self.note("0", from: Self.beta)
-        apart.holding = .aside
+        let apart = Self.note("0", from: Self.beta)
         let session = await Self.shell([
             apart, Self.note("1", from: Self.beta), Self.note("2", from: Self.beta), Self.note("3", from: Self.alpha),
         ])
         #expect(UsageSourceList.removed(session).isEmpty)
         await session.remove(host: Self.beta.host, keepingPosts: true)
         #expect(UsageSourceList.removed(session) == [Source(host: Self.beta.host, kind: .discuz)])
-        #expect(session.holdings.posts(host: Self.beta.host) == 3, "a row held aside was not counted (#194)")
-        #expect(session.holdings.aside(host: Self.beta.host) == 1)
+        #expect(session.holdings.posts(host: Self.beta.host) == 3)
         #expect(session.holdings.posts == 4, "the rows no longer sum to the total")
         #expect(UsageSourceList.source(Self.beta.host, in: session)?.kind == .discuz)
         session.usagePurpose = .source

@@ -26,6 +26,8 @@ struct GoneSection: View {
     /// The press has counted what it would let go and is asking first, as every other drop on
     /// this page does; what it counted is what the question names.
     @State private var asking: WentGone?
+    /// How many posts marked gone the person keeps, counted with `asking`: they stay (#294).
+    @State private var askingKept = 0
 
     /// The waits offered, in days. Never, the default, is offered beside them.
     static let dayChoices = [1, 7, 30, 90]
@@ -49,14 +51,19 @@ struct GoneSection: View {
                     Task {
                         // Nothing to let go is said at once; anything is asked about first.
                         let counted = await session.goneHeld()
-                        if counted.isNone { went = counted } else { asking = counted }
+                        if counted.isNone {
+                            went = counted
+                        } else {
+                            askingKept = await session.goneKept()
+                            asking = counted
+                        }
                     }
                 }
             }
         } header: {
             ShellSectionHead(title: "prefs.gone", line: "usage.gone.line", help: "prefs.gone.footer")
         }
-        .shellConfirm($asking, question: { ShellQuestion.letGo(posts: $0.posts, places: $0.places) }) { _, _ in
+        .shellConfirm($asking, question: { ShellQuestion.letGo(posts: $0.posts, places: $0.places, kept: askingKept) }) { _, _ in
             Task { went = await session.letAllGoneGo() }
         }
     }
@@ -75,10 +82,13 @@ struct GoneSection: View {
 
     /// What the question says under it: where places go too, that only their marks do — and where
     /// only places go, nothing of posts going.
-    static func askDetail(posts: Int, places: Int, language: DummyLanguage? = nil) -> String {
+    ///
+    /// `counted` is where the question itself says how many kept posts stay (#294): the detail
+    /// then says only that they are not in the count, and not a second time that they stay.
+    static func askDetail(posts: Int, places: Int, counted: Bool = false, language: DummyLanguage? = nil) -> String {
         let key = places == 0 ? "prefs.gone.ask.detail"
             : posts == 0 ? "prefs.gone.ask.detail.placesonly" : "prefs.gone.ask.detail.places"
-        return L10n.t(key, language: language)
+        return L10n.t(counted && posts > 0 ? key + ".counted" : key, language: language)
     }
 
     /// What the page says where the keep-for window is the shorter of the two, and nothing where

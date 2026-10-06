@@ -20,6 +20,7 @@ public struct MastodonSearch: Sendable {
     /// Throws `MastodonAuthError.http(403)` where the token cannot search: one issued before
     /// `read:search` was asked for.
     public func statuses(matching words: String, source: Source) async throws -> [Note] {
+        let sent = ReadMoment.now()
         let data = try await door.get(path: "/api/v2/search", query: [
             URLQueryItem(name: "q", value: words),
             URLQueryItem(name: "type", value: "statuses"),
@@ -27,7 +28,7 @@ public struct MastodonSearch: Sendable {
             URLQueryItem(name: "limit", value: "40"),
         ])
         return try MastodonJSON.decoder.decode(SearchDTO.self, from: data).statuses
-            .map { $0.asNote(source: source, categories: []) }
+            .map { $0.asNote(source: source, categories: [], sent: sent) }
     }
 
     /// What a search pattern (#32) sends a server: its words, with `*` and `?` let go — a server

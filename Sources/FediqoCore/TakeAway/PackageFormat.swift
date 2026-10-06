@@ -248,12 +248,17 @@ public struct PackageSummary: Sendable, Equatable {
     public let device: String
     public let appVersion: String
     public let entryCount: Int
+    /// How many of `posts` the person who took it away keeps (#294), or nothing where the header
+    /// does not say — a package written before the header said it. **What the header says and
+    /// nothing worked out**: two readings of one package agree on it, which a move nearby checks.
+    public let kept: Int?
 
     public init(
         contents: Contents = .whole, sources: [SourceLine], posts: Int, timelines: Int, takenAt: Date,
         withPictures: Bool, bytes: Int, hasSecrets: Bool, device: String, appVersion: String,
-        entryCount: Int
+        entryCount: Int, kept: Int? = nil
     ) {
+        self.kept = kept
         self.contents = contents
         self.sources = sources
         self.posts = posts
@@ -279,8 +284,15 @@ public struct PackageSummary: Sendable, Equatable {
         var device: String
         var appVersion: String
         var entryCount: Int
+        /// How many of the posts are kept (#294). **One more name in the header, and no new
+        /// version of the format**: a build before this one reads the header by the names it
+        /// knows and passes over this one, so a package from this build means to it exactly what
+        /// it meant before; and a package from such a build has no such name, and reads here as
+        /// not saying.
+        var kept: Int?
 
         init(_ summary: PackageSummary) {
+            kept = summary.kept
             contents = summary.contents.rawValue
             sources = summary.sources
             posts = summary.posts
@@ -296,10 +308,12 @@ public struct PackageSummary: Sendable, Equatable {
         func summary(_ prelude: PackageFormat.Prelude) throws -> PackageSummary {
             guard let contents = PackageSummary.Contents(rawValue: contents) else { throw PackageRefusal.newer }
             guard posts >= 0, timelines >= 0, entryCount >= 0 else { throw PackageRefusal.altered }
+            if let kept, kept < 0 || kept > posts { throw PackageRefusal.altered }
             return PackageSummary(
                 contents: contents, sources: sources, posts: posts, timelines: timelines,
                 takenAt: prelude.takenAt, withPictures: prelude.withPictures, bytes: prelude.bytes,
-                hasSecrets: hasSecrets, device: device, appVersion: appVersion, entryCount: entryCount
+                hasSecrets: hasSecrets, device: device, appVersion: appVersion, entryCount: entryCount,
+                kept: kept
             )
         }
     }

@@ -20,7 +20,6 @@ struct DummyItemRow: View {
     /// the same object by construction, and a preview or a test wired to its own cache would
     /// otherwise press one and draw the other.
     let posts: ForumPosts
-    @Binding var marks: DummyMarks
     /// This row's share of #54's acts: what the post offers, where each offered act has got to,
     /// and the presses themselves (#106).
     ///
@@ -400,11 +399,30 @@ struct DummyItemRow: View {
 
     private func decoratorLine(_ openQuote: (() -> Void)?) -> some View {
         HStack(spacing: ShellSpace.snug) {
+            // **A reblog says who brought the post first** (#290): the line is the reblog's own
+            // — who, and at its far end when — and what the post is (an answer, a quote) comes
+            // after, as facts about the post below it.
+            if item.isReblog, let line = Self.reblogLine(item) {
+                reblogLead(line)
+                    // Just under the time's: what the post is — an answer, a quote — gives way
+                    // before who reblogged does, and who reblogged before when.
+                    .layoutPriority(0.5)
+                    .modifier(ProbedMeta(part: .reblogger, probe: probe))
+            }
             if item.answering != .nothing { answered }
-            if let who = item.boostedBy { boosted(by: who) }
+            if !item.isReblog, let line = Self.reblogLine(item) { boosted(line) }
             // Beside the booster, on the same one line (#214): a boost of a quote is one line.
             if let quote = item.quote {
-                QuoteMark(quote: quote, lifted: quoteLifted, covered: covered, onOpen: openQuote)
+                QuoteMark(
+                    quote: quote, lifted: quoteLifted, covered: covered, loading: QuoteBand.Loading(item), onOpen: openQuote
+                )
+            }
+            if let moment = Self.reblogTime(item) {
+                Spacer(minLength: ShellSpace.snug)
+                rebloggedAgo(moment)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
+                    .modifier(ProbedMeta(part: .reblogAge, probe: probe))
             }
         }
         .shellFont(.mark)
@@ -415,25 +433,111 @@ struct DummyItemRow: View {
 
     /// Whether this post says what happened to it before it got here.
     var decorated: Bool {
-        item.answering != .nothing || item.boostedBy != nil || item.quote != nil
+        item.answering != .nothing || Self.reblogLine(item) != nil || item.quote != nil
+    }
+
+    /// What a row says of a reblog, or nothing where it has nothing to say of one (#290).
+    ///
+    /// **Three sentences for three facts.** A reblog says who reblogged — the row stands at the
+    /// time they did. A reblog whose post this device no longer holds says that instead of
+    /// drawing a post that is not there. And a post held from before a reblog was an item of its
+    /// own, which arrived as somebody's reblog, says that it did: it stands at its own publish
+    /// time, and the sentence must not read as though the row were the reblog.
+    ///
+    /// **Nothing for a reblog with no post to show** — one whose post is on its way, or no longer
+    /// held. Its row is the reblog alone: whoever reblogged is its header, and what would have
+    /// been the post's words says where the post is (`reblogNotice`).
+    static func reblogLine(_ item: DummyItem, language: DummyLanguage? = nil) -> String? {
+        guard let who = item.boostedBy else { return nil }
+        let key = item.isReblog ? (item.reblogUndone ? "item.reblog.undone" : "item.boostedBy") : "item.arrivedAsReblogBy"
+        return String(format: L10n.t(key, language: language), who)
+    }
+
+    /// What a row says of the post it answers: whom, where its source named them — and, while
+    /// that post is being loaded for it (#293), that it is on its way; or, where the load was
+    /// given up for this run, that it could not be read for now. Once the post is held, or was
+    /// never to be loaded, the line is the plain one it has always been.
+    static func replyLine(_ item: DummyItem, language: DummyLanguage? = nil) -> String {
+        let plain: String = switch item.answering {
+        case .handle(let handle): String(format: L10n.t("item.replyingTo", language: language), handle)
+        default: L10n.t("item.isReply", language: language)
+        }
+        let key: String
+        if item.owes.contains(.answers) {
+            key = item.owesStalled ? "item.reply.stalled" : "item.reply.onItsWay"
+        } else if item.refsGone.contains(.answers) {
+            // Asked for once, and its source said there is no such post.
+            key = "item.reply.gone"
+        } else if item.refsUnheld.contains(.answers) {
+            // It was here — loaded for this post — and has since been let go.
+            key = "item.reply.unheld"
+        } else {
+            return plain
+        }
+        return String(format: L10n.t(key, language: language), plain)
+    }
+
+    /// What a reblog's row says in the place of a post it cannot show (#290, #293): that the post
+    /// is on its way, or that this device no longer holds it. Nothing on any other row.
+    ///
+    /// **This app's sentence, in the place of somebody's words**, so it is drawn as the row's
+    /// other facts are — dimmed — and never as the post's own writing.
+    static func reblogNotice(_ item: DummyItem, language: DummyLanguage? = nil) -> String? {
+        if item.reblogOnItsWay { return L10n.t("item.reblog.onItsWay", language: language) }
+        if item.reblogUnheld { return L10n.t("item.reblog.unheld", language: language) }
+        return nil
+    }
+
+    /// What a listener is told of a reblog's first line: who reblogged, and exactly when.
+    static func spokenReblog(_ item: DummyItem, language: DummyLanguage? = nil) -> String? {
+        guard item.isReblog, let line = reblogLine(item, language: language) else { return nil }
+        return String(format: L10n.t("item.reblog.spoken", language: language), line, exact(item.postedAt))
+    }
+
+    private static func exact(_ moment: Date) -> String {
+        moment.formatted(.dateTime.year().month().day().hour().minute().second())
+    }
+
+    /// Who reblogged, as the first thing on a reblog's row — and a press that opens **their**
+    /// page, as the face and the name under it open the author's. The glyph is the act's own
+    /// (`arrow.2.squarepath`), which is also what tells this row from a quote: nothing here is
+    /// drawn as a second post, because whoever reblogged added no words.
+    @ViewBuilder
+    private func reblogLead(_ line: String) -> some View {
+        if let reblogger = item.reblogger, let onOpenPerson {
+            Button { onOpenPerson(reblogger) } label: { boosted(line) }
+                .buttonStyle(.plain)
+                .help(Self.spokenPerson(reblogger))
+                .accessibilityLabel(Self.spokenReblog(item) ?? line)
+                .accessibilityHint(Self.spokenPerson(reblogger))
+        } else {
+            boosted(line)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Self.spokenReblog(item) ?? line)
+        }
+    }
+
+    /// When it was reblogged: the time the row stands at, at the far end of the reblog's own
+    /// line — the column the ages below it are read down, so a list still reads in order — while
+    /// the header under it says when the post was published.
+    private func rebloggedAgo(_ moment: Date) -> some View {
+        Text(moment, format: .relative(presentation: .numeric, unitsStyle: .abbreviated))
+            .lineLimit(1)
+            .help(Self.exact(moment))
+            .accessibilityHidden(true)
     }
 
     private var answered: some View {
         HStack(spacing: ShellSpace.tight) {
             Image(systemName: "arrowshape.turn.up.left")
-            switch item.answering {
-            case .handle(let handle):
-                Text(String(format: L10n.t("item.replyingTo"), handle))
-            default:
-                Text(L10n.t("item.isReply"))
-            }
+            Text(Self.replyLine(item))
         }
     }
 
-    private func boosted(by who: String) -> some View {
+    private func boosted(_ line: String) -> some View {
         HStack(spacing: ShellSpace.tight) {
             Image(systemName: "arrow.2.squarepath")
-            Text(String(format: L10n.t("item.boostedBy"), who))
+            Text(line)
         }
     }
 
@@ -450,6 +554,7 @@ struct DummyItemRow: View {
         HStack(alignment: .center, spacing: ShellSpace.snug) {
             pressingPerson(avatar)
             pressingPerson(names(written))
+                .modifier(ProbedMeta(part: .names, probe: probe))
             Spacer(minLength: ShellSpace.snug)
             meta
         }
@@ -487,12 +592,18 @@ struct DummyItemRow: View {
         HStack(spacing: ShellSpace.snug) {
             sourcePill
                 .layoutPriority(0)
+                .modifier(ProbedMeta(part: .source, probe: probe))
             leftMark
+                .modifier(ProbedMeta(part: .left, probe: probe))
             goneMark
+                .modifier(ProbedMeta(part: .gone, probe: probe))
+            changedMark
+                .modifier(ProbedMeta(part: .changed, probe: probe))
             visibility
             postedAgo
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
+                .modifier(ProbedMeta(part: .age, probe: probe))
         }
     }
 
@@ -552,7 +663,8 @@ struct DummyItemRow: View {
     }
 
     private var postedAgo: some View {
-        Text(item.postedAt, format: .relative(presentation: .numeric, unitsStyle: .abbreviated))
+        // The post's own time (#290): on a reblog's row, when it was reblogged is on the line above.
+        Text(Self.headerTime(item), format: .relative(presentation: .numeric, unitsStyle: .abbreviated))
             .shellFont(.reading)
             .foregroundStyle(ShellChrome.inkFaint(colorScheme))
             .lineLimit(1)
@@ -561,7 +673,17 @@ struct DummyItemRow: View {
     }
 
     private var exactPostedAt: String {
-        item.postedAt.formatted(.dateTime.year().month().day().hour().minute().second())
+        Self.exact(Self.headerTime(item))
+    }
+
+    /// The time the header says, beside who wrote the post: when the post was published. On
+    /// every row but a reblog's that is also when the row stands.
+    static func headerTime(_ item: DummyItem) -> Date { item.publishedAt }
+
+    /// The time a reblog's first line says, beside who reblogged: when it was reblogged, which
+    /// is when the row stands. Nothing on a row that draws no such line.
+    static func reblogTime(_ item: DummyItem) -> Date? {
+        item.isReblog && reblogLine(item) != nil ? item.postedAt : nil
     }
 
     /// Who the author wrote it for: the glyph says which audience, the colour says how far the
@@ -584,6 +706,25 @@ struct DummyItemRow: View {
         .frame(width: vis, height: vis)
     }
 
+    /// Whether the header's marks are drawn as their glyphs alone (#286): on a narrow page, where
+    /// two or more of them are drawn at once.
+    ///
+    /// **Given up on purpose, and all together.** Each mark is a word because it is a fact
+    /// nothing else on the row tells — but three words, a host and an age do not fit across a
+    /// phone, and left to itself the line pushed the age off the edge and the name down to a
+    /// letter. So where they cannot all be words, none is: three glyphs that differ by shape, each
+    /// still named to a pointer and to VoiceOver, with the name and the age where they were. One
+    /// mark alone keeps its word, which is every row but the rare one.
+    private var terse: Bool {
+        narrow && Self.headerMarks(item, here: sourcesHere) >= 2
+    }
+
+    /// How many of the header's marks `item` draws: its source removed, its post deleted at its
+    /// source, its post changed there.
+    static func headerMarks(_ item: DummyItem, here: Set<String>?) -> Int {
+        [sourceLeft(item, here: here), item.postGone, item.editedAt != nil].count(where: { $0 })
+    }
+
     /// Its source has said it no longer has this post (#179): the row stays, and says so.
     ///
     /// **A word and not only a glyph**, because this is the one fact on the meta line a reader
@@ -592,12 +733,15 @@ struct DummyItemRow: View {
     /// it is out of the accessibility tree; the word is what a listener hears, inside the row.
     @ViewBuilder
     private var goneMark: some View {
-        if item.goneEverywhere {
+        // The post's mark (#290): on a reblog's row, of the post it shows.
+        if item.postGone {
             HStack(spacing: ShellSpace.tight) {
                 Image(systemName: "xmark.bin")
                     .accessibilityHidden(true)
-                Text(Self.goneWord())
+                if !terse { Text(Self.goneWord()) }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Self.goneWord())
             .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
@@ -605,6 +749,58 @@ struct DummyItemRow: View {
             .layoutPriority(1)
             .help(L10n.t("item.gone.detail"))
         }
+    }
+
+    /// Its source says the post was changed after it was published (#286): the row says so, and
+    /// stays where it was.
+    ///
+    /// **The gone mark's shape, word for word**, for its reason: a fact about the post nothing
+    /// else on the row tells, as a word a listener hears with a glyph beside it that they do not.
+    /// A pencil, not a clock: the age beside it is still when the post was published, and this
+    /// says only that what it says is not what it first said. When, and what it said before, are
+    /// where the post is opened.
+    @ViewBuilder
+    private var changedMark: some View {
+        if let editedAt = item.editedAt {
+            HStack(spacing: ShellSpace.tight) {
+                Image(systemName: "pencil")
+                    .accessibilityHidden(true)
+                if !terse { Text(Self.changedWord()) }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Self.changedWord())
+            .shellFont(.mark)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
+            .help(Self.changedDetail(editedAt, earlier: item.earlier.count))
+        }
+    }
+
+    /// What the changed mark reads, in the shell's language — named for `goneWord`'s reason.
+    /// The key of the keep mark's name on `item`: what a press does, and on a reblog's row that
+    /// it is the reblog it does it to.
+    static func keepName(_ item: DummyItem) -> String {
+        switch (item.isReblog, item.kept) {
+        case (false, false): "item.act.keep"
+        case (false, true): "item.act.unkeep"
+        case (true, false): "item.act.keep.reblog"
+        case (true, true): "item.act.unkeep.reblog"
+        }
+    }
+
+    static func changedWord(language: DummyLanguage? = nil) -> String {
+        L10n.t("item.changed", language: language)
+    }
+
+    /// What a pointer is told about the changed mark: when its source says it last changed, and
+    /// whether this device holds what it said before.
+    static func changedDetail(_ editedAt: Date, earlier: Int, language: DummyLanguage? = nil) -> String {
+        String(
+            format: L10n.t(earlier > 0 ? "item.changed.detail" : "item.changed.detail.none", language: language),
+            EarlierWordings.when(editedAt, language: language)
+        )
     }
 
     /// What the gone mark reads, in the shell's language — named for `spokenAudience`'s reason.
@@ -627,8 +823,10 @@ struct DummyItemRow: View {
             HStack(spacing: ShellSpace.tight) {
                 Image(systemName: "minus.circle")
                     .accessibilityHidden(true)
-                Text(Self.leftWord())
+                if !terse { Text(Self.leftWord()) }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Self.leftWord())
             .shellFont(.mark)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .lineLimit(1)
@@ -1084,6 +1282,12 @@ struct DummyItemRow: View {
 
     private func words(_ written: Written) -> some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            if let notice = Self.reblogNotice(item) {
+                Text(notice)
+                    .shellFont(.reading)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .modifier(ProbedMeta(part: .reblogNotice, probe: probe))
+            }
             if item.source.kind == .board, let board = item.board {
                 Text(board)
                     .shellFont(.meta)
@@ -1237,21 +1441,66 @@ struct DummyItemRow: View {
 
     @ViewBuilder
     private var keep: some View {
-        mark(marks.bookmarked ? "bookmark.fill" : "bookmark",
-             label: "item.act.bookmark", on: marks.bookmarked) {
-            marks.bookmarked.toggle()
-            onToast(L10n.t(marks.bookmarked ? "item.toast.bookmark.on" : "item.toast.bookmark.off"))
-        }
-        // The marks that keep a post stand a little apart from the ones that pass it on.
-        .layoutValue(key: MarkGap.self, value: ShellSpace.room)
-        mark(marks.kept ? "archivebox.fill" : "archivebox",
-             label: "item.act.kept", on: marks.kept) {
-            marks.kept.toggle()
-            onToast(L10n.t(marks.kept ? "item.toast.kept.on" : "item.toast.kept.off"))
-        }
+        bookmarkMark
+            // The marks that keep a post stand a little apart from the ones that pass it on.
+            .layoutValue(key: MarkGap.self, value: ShellSpace.room)
+        keptMark
+            // And the keep mark opens that group where no bookmark is offered before it.
+            .layoutValue(key: MarkGap.self, value: drawsBookmark ? nil : ShellSpace.room)
         actMark(.withdraw)
         mark("ellipsis", label: "item.act.more", on: false) {
             onToast(L10n.t("item.toast.more"))
+        }
+    }
+
+    /// Whether the asking bookmark mark is drawn: the act must be asked for, and there is
+    /// somewhere for the press to go.
+    private var asksBookmark: Bool { acting.acts.asks(.bookmark) && acting.ask != nil }
+
+    /// Whether `bookmarkMark` draws anything at all — read off the same two conditions it draws
+    /// by, so the gap that opens the group goes to whichever mark really is its first.
+    private var drawsBookmark: Bool {
+        asksBookmark || (acting.acts.offers(.bookmark) && acting.perform != nil)
+    }
+
+    /// The bookmark mark (#285): `actMark`'s where the sign-in may bookmark, and where it was made
+    /// before bookmarks were asked for, a mark that says so and asks — one press puts the
+    /// question, and nothing is sent until the reader has answered it on the source's own page.
+    /// Absent everywhere else, as every act the post does not offer is.
+    ///
+    /// **Never filled on a press**: filled is what the source last said, so nothing looks
+    /// bookmarked that its source does not hold.
+    @ViewBuilder
+    private var bookmarkMark: some View {
+        if asksBookmark, let ask = acting.ask {
+            let label = ItemActs.askLine(.bookmark)
+            DummyMarkButton(symbol: "bookmark.slash", count: nil, label: label, on: false,
+                            quiet: !reading, glyph: glyph, countWidth: countBox, touch: touch) {
+                ask(.bookmark)
+            }
+            .modifier(ProbedMark(label: label, probe: probe))
+        } else {
+            actMark(.bookmark)
+        }
+    }
+
+    /// The keep mark (#284): whether the person keeps this row, and the press that changes it.
+    ///
+    /// **Read off the item, which is the store's word**, never off `marks`: a kept post is one
+    /// no limit lets go, and a mark that filled on a press the store did not take would be a
+    /// promise nothing keeps. So the press only asks (`ItemActing.keep`), and the mark fills when
+    /// the row is drawn again from what the store then holds.
+    ///
+    /// **Drawn on every row, as it was before it was real**, so the marks line is the same line
+    /// everywhere; in a list with nowhere for the press to go — a fixture, a preview — the press
+    /// changes nothing, and the mark goes on saying what the item says.
+    private var keptMark: some View {
+        // **Keep is the one mark on a reblog's row that is the reblog's** (#290): it keeps the item
+        // pressed, and says so by name. It already stands apart from the marks that go to the
+        // post, in the group that keeps things on this device.
+        mark(item.kept ? "archivebox.fill" : "archivebox",
+             label: Self.keepName(item), on: item.kept) {
+            acting.keep?()
         }
     }
 
@@ -1703,6 +1952,38 @@ final class RowBandProbe {
     var frames: [RowBand: CGRect] = [:]
     /// Where each mark was laid out, by its name.
     var marks: [String: CGRect] = [:]
+    /// Where each part of the header's line was laid out.
+    var meta: [RowMetaPart: CGRect] = [:]
+}
+
+/// The parts of a row's header line a test reads the places of.
+enum RowMetaPart: Hashable {
+    case names, source, left, gone, changed, age
+    /// On a reblog's first line: who reblogged, and when.
+    case reblogger, reblogAge
+    /// Where a reblog with no post to show says where the post is.
+    case reblogNotice
+}
+
+/// Reports where a part of the header's line was laid out to a probe, where one is handed in;
+/// draws nothing and changes nothing.
+private struct ProbedMeta: ViewModifier {
+    let part: RowMetaPart
+    let probe: RowBandProbe?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let probe {
+            content.background(
+                GeometryReader { room in
+                    let _ = probe.meta[part] = room.frame(in: .named(RowBandProbe.space))
+                    Color.clear
+                }
+            )
+        } else {
+            content
+        }
+    }
 }
 
 /// Reports a band's frame to a probe, where one is handed in; draws nothing and changes nothing.

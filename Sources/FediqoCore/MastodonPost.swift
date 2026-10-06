@@ -36,6 +36,8 @@ public struct MastodonPost: Sendable {
     /// Throws `MastodonAuthError.http(403)` where the token cannot search: one issued before
     /// `read:search` was asked for.
     public func id(of note: Note) async throws -> String? {
+        // A reblog is not a post to read again or to read around (#290): it names none.
+        guard !note.isReblog else { return nil }
         if let held = note.statusID { return held }
         guard case .signedIn = door else { return nil }
         let data = try await get("/api/v2/search", query: [
@@ -51,8 +53,9 @@ public struct MastodonPost: Sendable {
     /// The post with this id, stamped with `source` and arriving through no category: a thread
     /// is not a timeline.
     public func post(id: String, source: Source) async throws -> Note {
-        try MastodonJSON.decoder.decode(StatusDTO.self, from: try await get(Self.path(id)))
-            .asNote(source: source, categories: [])
+        let sent = ReadMoment.now()
+        return try MastodonJSON.decoder.decode(StatusDTO.self, from: try await get(Self.path(id)))
+            .asNote(source: source, categories: [], sent: sent)
     }
 
     /// The posts before and after it in its thread. Asked after the post, and separately: on a
@@ -78,12 +81,13 @@ public struct MastodonPost: Sendable {
     /// here: the order a thread reads in is the source's fact about the thread, and a second
     /// opinion about it belongs to whatever draws it, if anywhere.
     public func conversation(id: String, source: Source) async throws -> MastodonThread {
+        let sent = ReadMoment.now()
         let context = try MastodonJSON.decoder.decode(
             ContextDTO.self, from: try await get(Self.path(id) + "/context")
         )
         return MastodonThread(
-            ancestors: context.ancestors.map { $0.asNote(source: source, categories: []) },
-            descendants: context.descendants.map { $0.asNote(source: source, categories: []) }
+            ancestors: context.ancestors.map { $0.asNote(source: source, categories: [], sent: sent) },
+            descendants: context.descendants.map { $0.asNote(source: source, categories: [], sent: sent) }
         )
     }
 

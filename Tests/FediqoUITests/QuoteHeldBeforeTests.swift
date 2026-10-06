@@ -52,7 +52,7 @@ struct QuoteHeldBeforeTests {
     private static func heldBefore() throws -> Note {
         let json = status.replacingOccurrences(of: #""quote": {"#, with: #""not_a_quote": {"#)
         return try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(json.utf8))
-            .asNote(source: Source(host: host, kind: .mastodon), category: .home)
+            .asNote(source: Source(host: host, kind: .mastodon), category: .home, sent: .now())
     }
 
     private func shell(_ old: Note, post: String = status) async -> (ShellSession, ItemStore, FixtureHTTP) {
@@ -122,7 +122,7 @@ struct QuoteHeldBeforeTests {
     @Test("Opening any other thread reads its conversation alone, as before")
     func openingAnOrdinaryPostReadsNoMore() async throws {
         let plain = try MastodonJSON.decoder.decode(StatusDTO.self, from: Data(Self.status.utf8))
-            .asNote(source: Source(host: Self.host, kind: .mastodon), category: .home)
+            .asNote(source: Source(host: Self.host, kind: .mastodon), category: .home, sent: .now())
         #expect(!ShellReload.heldBeforeQuotes(plain), "a post read with its quote")
         let (session, _, http) = await shell(plain)
         await session.reload.opened(try #require(session.held(plain.key.rowID)), in: session)
@@ -141,9 +141,13 @@ struct QuoteHeldBeforeTests {
 
         let held = try #require(await store.note(old.key))
         #expect(held.quote?.state == .accepted)
-        #expect(held.quote?.post?.statusID == "117277361887436248")
+        // The row keeps which post it quotes; the quoted post is an item of its own (#293),
+        // and the row drawn shows it from there.
+        #expect(held.quote?.statusID == "117277361887436248" && held.quotedKey != nil)
         #expect(!held.body.hasPrefix("RE:"))
-        #expect(session.held(old.key.rowID)?.quote?.state == .accepted, "the row drawn has it too")
+        let drawn = try #require(session.held(old.key.rowID))
+        #expect(drawn.quote?.state == .accepted, "the row drawn has it too")
+        #expect(drawn.quote?.post?.statusID == "117277361887436248", "with the quoted post, as this device holds it")
 
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: dir) }

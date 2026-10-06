@@ -749,8 +749,7 @@ struct ForumPostsTests {
     /// A row drawn at a fixed width, measured the way `EmojiEverywhereTests` measures it — the
     /// same harness, so the two figures are comparable.
     private static func height(_ item: DummyItem, posts: ForumPosts) -> CGFloat {
-        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: posts,
-                               marks: .constant(DummyMarks()), onToast: { _ in })
+        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: posts, onToast: { _ in })
             .frame(width: 720)
         let host = NSHostingView(rootView: row)
         host.layoutSubtreeIfNeeded()
@@ -805,8 +804,7 @@ struct ForumPostsTests {
     // MARK: - Making items
 
     private static func row(_ item: DummyItem) -> DummyItemRow {
-        DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
-                     marks: .constant(DummyMarks()), onToast: { _ in })
+        DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), onToast: { _ in })
     }
 
     /// An item built the way the product builds one — through a `Note` — so that the kind, the

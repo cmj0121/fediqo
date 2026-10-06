@@ -51,13 +51,25 @@ public struct MastodonClient: Sendable {
         }
     }
 
-    public func trending(source: Source) async throws -> [Note] {
-        try await statuses(
+    /// How many trending posts one ask brings: a stretch of what is rising.
+    public static let trendsStretch = 20
+
+    /// What is rising on this source: one stretch of its trending posts, `offset` posts into the
+    /// list — the top of it where 0 (#288).
+    ///
+    /// **By how far into the list, not by a post**: a ranking has no "older than", and a source
+    /// pages it by an offset. It gives as far down as it chooses to and no further; a stretch
+    /// shorter than was asked for, or empty, is its "no more". The list moves between two asks,
+    /// so a post may come twice or be skipped — which the store settles, holding one row per
+    /// post, and which nothing here tries to repair.
+    public func trending(source: Source, offset: Int = 0) async throws -> [Note] {
+        try await listed(
             path: "/api/v1/trends/statuses",
-            limit: 20,
+            limit: Self.trendsStretch,
+            query: offset > 0 ? [URLQueryItem(name: "offset", value: String(offset))] : [],
             source: source,
             category: .trends
-        )
+        ).landing
     }
 
     /// Every shortcode this server has registered, folded the way a status's own list is.
@@ -185,7 +197,7 @@ public struct MastodonClient: Sendable {
     ) async throws -> [Note] {
         try await listed(
             path: path, limit: limit, query: try MastodonPage.older(than: maxID), source: source, category: category
-        ).map(\.note)
+        ).landing
     }
 
     /// One page, each post with the id the timeline lists it under — a boost's own.
@@ -203,12 +215,13 @@ public struct MastodonClient: Sendable {
         ) else {
             throw MastodonRequestError.invalidURL
         }
+        let sent = ReadMoment.now()
         let (data, response) = try await http.data(from: url)
         guard (200..<300).contains(response.statusCode) else {
             throw MastodonRequestError.http(response.statusCode)
         }
         return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map {
-            $0.listed(source: source, category: category)
+            $0.listed(source: source, category: category, sent: sent)
         }
     }
 }
@@ -342,6 +355,24 @@ struct StatusDTO: Decodable, Sendable {
     let uri: String?
     let url: String?
     let createdAt: Date
+    /// When the status was last edited (#286), or nothing where it never was — and on a server
+    /// older than editing, which sends no such field.
+    ///
+    /// **Read leniently**, as `quote` is: a moment this build cannot read is no word about a
+    /// change, and never costs the reader the status — or the page it is on, which one status
+    /// that will not decode takes with it.
+    let editedAt: LenientMoment?
+
+    /// A moment in the spelling this decoder reads dates in, or nothing where it is spelled any
+    /// other way — rather than a failed decode. Its own type and not `Lenient<Date>`: a `Date`
+    /// decoded by itself reads a number, not the decoder's date strategy.
+    struct LenientMoment: Decodable, Sendable {
+        let value: Date?
+
+        init(from decoder: any Decoder) throws {
+            value = (try? decoder.singleValueContainer().decode(String.self)).flatMap(MastodonJSON.date(from:))
+        }
+    }
     let content: String
     let account: Account
     let reblog: Box<StatusDTO>?
@@ -358,6 +389,12 @@ struct StatusDTO: Decodable, Sendable {
     /// Whether the account this was fetched as has favourited it (#107). Absent on an unsigned
     /// read, as `reblogged` is.
     let favourited: Bool?
+    /// The language the status says it is in (#287), or nothing where it says none. Read
+    /// leniently: a value of another shape is no language, and never costs the status.
+    let language: Lenient<String>?
+    /// Whether the account this was fetched as has bookmarked it (#285). Absent on an unsigned
+    /// read, as `reblogged` is.
+    let bookmarked: Bool?
     let mediaAttachments: [MediaAttachment]?
     /// Whether the author covered it, and the line they covered it with. Optional because a
     /// server that did not send them has told us nothing, which is not the same as telling us
@@ -385,9 +422,10 @@ struct StatusDTO: Decodable, Sendable {
         }
     }
 
-    /// The quote this status states, or nothing — including a `quote` that names no state, which
-    /// is no quote this app can say anything about (and whose `RE:` line is then kept).
-    func quote(source: Source) -> Quote? {
+    /// The quote this status states — its reference, and the quoted post where the source
+    /// handed it over and it may be shown — or nothing: including a `quote` that names no state,
+    /// which is no quote this app can say anything about (and whose `RE:` line is then kept).
+    func quoted(source: Source) -> (reference: Reference, post: Note?)? {
         quote?.value?.asQuote(source: source)
     }
 
@@ -398,17 +436,24 @@ struct StatusDTO: Decodable, Sendable {
         let quotedStatus: Box<StatusDTO>?
         let quotedStatusId: String?
 
-        /// What a note keeps of it. The quoted status is read the way any status is, through
-        /// the same source, and cut to what a row draws of it (`QuotedPost`). Nothing where no
-        /// state was said.
-        func asQuote(source: Source) -> Quote? {
+        /// What a note keeps of it — **its reference, and nothing of the quoted post** (#293):
+        /// the state, and where the quote may be shown which post, by its name where the
+        /// source handed it over and by the source's own id for it. Nothing where no state was
+        /// said.
+        ///
+        /// **And the quoted post beside it, as an item of its own**, where the state is one
+        /// that may be shown and the source sent it: read the way any status is, through the
+        /// same source and no category, and cut to what a quote shows of one (`QuotedPost`) —
+        /// which is nothing of what the reader did to it. Its own quote is its id alone, a
+        /// level down and no further.
+        func asQuote(source: Source) -> (reference: Reference, post: Note?)? {
             guard state != nil else { return nil }
-            let quoted = quotedStatus?.value
-            return Quote(
-                state: Quote.State(wire: state),
-                post: quoted.map { QuotedPost($0.asNote(source: source, categories: [])) },
-                statusID: quoted?.id ?? quotedStatusId
-            )
+            let stands = Quote.State(wire: state)
+            let post = stands == .accepted
+                ? quotedStatus?.value.map { QuotedPost($0.unstamped(source: source, categories: [])).note(through: source) }
+                : nil
+            let reference = Reference.quotes(stands, id: post?.id, statusID: quotedStatus?.value?.id ?? quotedStatusId)
+            return (reference, post)
         }
     }
 
@@ -501,32 +546,107 @@ struct StatusDTO: Decodable, Sendable {
         }
     }
 
-    /// This status as a timeline listed it (#201): the post, carrying the id the listing gave it
-    /// — a boost's own — as that timeline's.
-    func listed(source: Source, category: Category) -> Listed {
-        var note = asNote(source: source, category: category)
+    /// This status as a timeline listed it (#201): the item, carrying the id the listing gave it
+    /// as that timeline's — and, where the status is a reblog (#290), the post it reblogs beside
+    /// it, which the listing brought in the same payload and did not list.
+    func listed(source: Source, category: Category, sent: ReadMoment) -> Listed {
+        let arrived = arrival(source: source, categories: [category], sent: sent)
+        var note = arrived.item
         note.listed = [category: id]
-        return (id, note)
+        return (id, note, arrived.reblogged.map { [$0] } ?? [])
     }
 
-    func asNote(source: Source, category: Category) -> Note {
-        asNote(source: source, categories: [category])
-    }
-
-    func asNote(source: Source, categories: Set<Category>) -> Note {
-        let subject = reblog?.value ?? self
-        let quote = subject.quote(source: source)
-        // Named once, so the name the row draws and the pictures that name is written in
-        // cannot come to disagree about whether there is a booster at all.
-        let booster = reblog == nil ? nil : account
+    /// This status as it arrives through `categories` (#290): the item it is, and the post it
+    /// reblogs where it is a reblog.
+    ///
+    /// **A reblog is two things.** The reblog is an item of its own: who reblogged, when, and a
+    /// reference to what — under the id its source gave the reblog, at the reblog's own time,
+    /// through the categories it arrived through. It has no words, pictures, cover, counts or
+    /// reader's marks: those are the post's. The post it reblogs is an ordinary item at its own
+    /// publish time, **through no category**: it came in the payload and not through the
+    /// timeline, so a rule on a category shows it only if it also arrives on its own.
+    ///
+    /// **Everything here is a stranger's word, and the reblog's identity is made from it**, so:
+    /// - a reblog its source gave no `uri` is held under a name this device makes of the host and
+    ///   the reblog's own id (`Note.inventedID`), which merges with nothing;
+    /// - a name longer than a name may be is no name (`StatusDTO.name`): the reblog, or its
+    ///   target, is held under the made-up one;
+    /// - a reblog named as the very post it reblogs is given that made-up name instead, and one
+    ///   that would still be the same row, or whose target's own id at its source is longer than
+    ///   a name is (`Reference.bounded`), is no reblog: the post it carries arrives as itself;
+    /// - a reblog of a reblog — which no server sends — refers to the inner one by name and
+    ///   brings nothing with it: what is not a post is not taken in as one, and what lies under
+    ///   the second `reblog` is never decoded (`Box`);
+    /// - the target's id is a name looked up within this source (`Note.reblogKey`), whatever
+    ///   host it spells. Nothing is ever asked of it.
+    func arrival(source: Source, categories: Set<Category>, sent: ReadMoment) -> (item: Note, reblogged: Note?) {
+        guard let inner = reblog?.value else {
+            return (asNote(source: source, categories: categories, sent: sent), nil)
+        }
         let host = source.host
-        return Note(
+        let targetID = inner.name ?? Note.inventedID(host: host, statusID: inner.id)
+        let invented = Note.inventedID(host: host, statusID: id)
+        let ownID = name.flatMap { $0 == targetID ? nil : $0 } ?? invented
+        let reference = Reference(kind: .reblogs, id: targetID, statusID: inner.id)
+        guard ownID != targetID, Reference.bounded([reference]) == [reference] else {
+            return (asNote(source: source, categories: categories, sent: sent), nil)
+        }
+        // `statusID` is the reblog's own id at its source: what tells a made-up name from a
+        // minted one (`Note.post`). It is never an id to send — see `Note.sendableID`.
+        var item = Note(
+            id: ownID, source: source, author: account.name,
+            handle: Self.handle(account.acct, host: host), body: "", postedAt: createdAt,
+            categories: categories, avatarURL: Host.fetchableURL(account.avatar),
+            // The pictures the reblogger's name is written in, and no others: the post's own
+            // are on the post.
+            emojis: CustomEmoji.folded((account.emojis ?? []).compactMap(\.asEmoji)),
+            statusID: id, refs: [reference]
+        )
+        item.asked = sent
+        guard inner.reblog == nil else { return (item, nil) }
+        var post = inner.post(source: source, categories: [])
+        post.asked = sent
+        return (item, post)
+    }
+
+    func asNote(source: Source, category: Category, sent: ReadMoment) -> Note {
+        asNote(source: source, categories: [category], sent: sent)
+    }
+
+    /// This status as a note, and **when the read that brought it was sent** (#291) — taken
+    /// before the request went out, by whoever sent it. Asked for by name and never defaulted:
+    /// a status is the one thing that says what the reader did to a post, so every way one
+    /// becomes a note says how old that word is, and a new way cannot forget to. The note must
+    /// reach the store as this returns it: one made anew from it has lost the moment.
+    func asNote(source: Source, categories: Set<Category>, sent: ReadMoment) -> Note {
+        var note = unstamped(source: source, categories: categories)
+        note.asked = sent
+        return note
+    }
+
+    /// `asNote` without the moment: the post a status quotes, which is cut to what a row draws
+    /// of it (`QuotedPost`) — and that is nothing of what the reader did to it.
+    ///
+    /// **The post, wherever the status is a reblog** (#290): a search, a tag, a thread, one post
+    /// read again and the source's answer to an act all want the post a status is about, and a
+    /// reblog is about the post it carries. Only a timeline's listing makes the reblog an item
+    /// (`arrival`), since only there did somebody's reblog bring the post.
+    fileprivate func unstamped(source: Source, categories: Set<Category>) -> Note {
+        (reblog?.value ?? self).post(source: source, categories: categories)
+    }
+
+    /// This status as the post it is, reading nothing through a reblog it may carry.
+    fileprivate func post(source: Source, categories: Set<Category>) -> Note {
+        let subject = self
+        let quote = subject.quoted(source: source)
+        let host = source.host
+        var note = Note(
             // The name the post was minted under, where this server sent one — the fact two
             // servers carrying one status both state, and the whole of what #113 merges on.
             // Where it sent none, a name this device made up: `Note.inventedID` mints it and is
             // also what recognises it again, so a copy held under a made-up name is merged with
             // nothing rather than with whatever else happens to spell the same.
-            id: subject.uri ?? Note.inventedID(host: host, statusID: subject.id),
+            id: subject.name ?? Note.inventedID(host: host, statusID: subject.id),
             source: source,
             author: subject.account.name,
             handle: Self.handle(subject.account.acct, host: host),
@@ -537,22 +657,17 @@ struct StatusDTO: Decodable, Sendable {
             ),
             postedAt: subject.createdAt,
             categories: categories,
-            reply: Self.reply(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),
-            boostedBy: booster?.name,
-            boosterHandle: booster.map { Self.handle($0.acct, host: host) },
-            // **The subject's flag and never the wrapper's**, which is the same reading every
-            // other field on this row takes. A boost is a status of its own carrying the post
-            // inside it; what a reader means by "have I boosted this" is about the post, and the
-            // wrapper's own `reblogged` is about the wrapper. On anything but a boost the two are
-            // one value, because `subject` is `self`.
+            // **The post's own flag and never a reblog's**: what a reader means by "have I boosted
+            // this" is about the post, and a reblog's own `reblogged` is about the reblog.
             boosted: subject.reblogged,
             favourited: subject.favourited,
+            bookmarked: subject.bookmarked,
             audience: Self.audience(subject.visibility),
             avatarURL: Host.fetchableURL(subject.account.avatar),
             attachments: subject.mediaAttachments?.compactMap { $0.asAttachment } ?? [],
             sensitive: subject.sensitive,
             spoiler: subject.spoilerText,
-            emojis: Self.emojis(of: subject, boostedBy: booster),
+            emojis: Self.emojis(of: subject),
             // **Decision 9's rule, at the field it had been missed at.** The avatar two lines up,
             // the attachments and the emoji all go through `Host.fetchableURL`; this one went
             // through bare `URL(string:)`, so `javascript:`, `data:` and `file:///` all survived
@@ -567,42 +682,55 @@ struct StatusDTO: Decodable, Sendable {
                 reblogs: subject.reblogsCount,
                 favourites: subject.favouritesCount
             ),
-            // The post's own id on this server, the boosted one's on a boost: what the row is.
+            // The post's own id on this server: what the row is.
             statusID: subject.id,
-            // The boosted post's quote on a boost, as every other fact here (#214).
-            quote: quote
+            editedAt: Self.edited(subject.editedAt?.value, posted: subject.createdAt, now: Date()),
+            language: subject.language?.value,
+            // What it refers to, as the status says it: the post it answers, the post it quotes.
+            refs: [
+                Self.answers(inReplyToId: subject.inReplyToId, mentions: subject.mentions, host: host),
+                quote?.reference,
+            ].compactMap { $0 }
         )
+        // The quoted post came in the same payload: handed to the store beside this one.
+        note.brought = quote?.post.map { [$0] } ?? []
+        return note
     }
 
-    /// Every alphabet the row can actually need, folded into one list.
+    /// How far ahead of this device's clock a source's edit moment may be: a clock a few minutes
+    /// out is ordinary, and anything past that is not a moment a post was changed at.
+    static let editSkew: TimeInterval = 300
+
+    /// When a status says it was changed, as this device will take it (#286): what it says, or
+    /// **when it was published** where what it says is later than `now` and a little — a moment
+    /// nothing was changed at.
     ///
-    /// **Three accounts are in play on a boost, and the row draws words from all three.**
-    /// `subject.emojis` spell the boosted status's body and its spoiler line;
-    /// `subject.account.emojis` spell the name the row draws as the author; and the booster's
-    /// own `account.emojis` spell the name it draws as `boostedBy`. Leave the third out and a
-    /// booster called `:blobcat:` is drawn as eight letters and two colons on every boost they
-    /// make. On anything else `subject` is `self`, so the third list *is* the second and the
-    /// fold takes the copy back out.
-    ///
-    /// One shortcode can mean one picture on the booster's server and a different one on the
-    /// author's, and a single list per note cannot hold both. The boosted status's own list is
-    /// offered first and first spelling wins, because that status is the post: its body and
-    /// its spoiler line are nearly all the words on the row, and a name is a few.
-    private static func emojis(of subject: StatusDTO, boostedBy booster: Account?) -> [CustomEmoji] {
-        let raw = (subject.emojis ?? []) + (subject.account.emojis ?? []) + (booster?.emojis ?? [])
-        return CustomEmoji.folded(raw.compactMap(\.asEmoji))
+    /// **The one thing two copies of a post are ordered by**, so a source naming a year far ahead
+    /// would otherwise make every true copy that followed look older than the one held, and the
+    /// row would never say anything new again. **And a value that does not move with the clock**:
+    /// the same impossible moment read again is the same moment here, so the row is marked as
+    /// changed once and rewritten for nothing after — and any true change, which cannot be
+    /// earlier than the post, is later than it.
+    static func edited(_ said: Date?, posted: Date, now: Date) -> Date? {
+        said.map { $0 > now.addingTimeInterval(editSkew) ? posted : $0 }
+    }
+
+    /// Every alphabet the post's row can need, folded into one list: the status's own, which
+    /// spell its words and its cover line, and its author's, which spell the name. A reblogger's
+    /// are on the reblog (`arrival`), where the reblogger's name is.
+    private static func emojis(of subject: StatusDTO) -> [CustomEmoji] {
+        CustomEmoji.folded(((subject.emojis ?? []) + (subject.account.emojis ?? [])).compactMap(\.asEmoji))
     }
 
     static func handle(_ acct: String, host: String) -> String {
         acct.contains("@") ? "@\(acct)" : "@\(acct)@\(host)"
     }
 
-    private static func reply(inReplyToId: String?, mentions: [Mention]?, host: String) -> Reply? {
+    /// The post a status answers, by its source's own id for it, and whom it is to where the
+    /// status mentions somebody. Nothing for a status that answers nothing.
+    private static func answers(inReplyToId: String?, mentions: [Mention]?, host: String) -> Reference? {
         guard let inReplyToId else { return nil }
-        if let acct = mentions?.first?.acct {
-            return Reply(handle: handle(acct, host: host), inReplyToId: inReplyToId)
-        }
-        return Reply(handle: nil, inReplyToId: inReplyToId)
+        return .answers(inReplyToId, to: (mentions?.first?.acct).map { handle($0, host: host) })
     }
 
     private static func audience(_ visibility: String?) -> Audience? {
@@ -616,11 +744,31 @@ extension StatusDTO.Account {
     }
 }
 
-/// `reblog` nests a status inside itself; a class box keeps the type finite.
+/// `reblog` and a quote's `quoted_status` nest a status inside a status; a class box keeps the
+/// type finite.
+///
+/// **One deep of each, by construction** (#290). A status inside a status is decoded; a status
+/// under a second `reblog`, or a second `quoted_status`, is not decoded at all — `value` is
+/// nothing, and no initialiser is entered for it. So however deep a stranger's JSON nests, what
+/// is built from it is at most a status, the status it reblogs and the one that quotes: the
+/// depth is this type's, never the payload's. No server sends a reblog of a reblog.
 final class Box<Wrapped: Decodable & Sendable>: Decodable, Sendable {
-    let value: Wrapped
+    let value: Wrapped?
     init(from decoder: any Decoder) throws {
-        value = try Wrapped(from: decoder)
+        let path = decoder.codingPath.map(\.stringValue)
+        let reblogs = path.filter { $0 == "reblog" }.count
+        let quoted = path.filter { $0 == "quotedStatus" || $0 == "quoted_status" }.count
+        value = reblogs > 1 || quoted > 1 ? nil : try Wrapped(from: decoder)
+    }
+}
+
+extension StatusDTO {
+    /// The name this status was minted under, where its server sent one **no longer than a name
+    /// may be** (`Reference.longest`, in bytes). A longer one is not a name this device will key
+    /// a row by or refer to: the status is then held under the name this device makes of the
+    /// host and the status's own id (`Note.inventedID`), as one sent with no `uri` is.
+    var name: String? {
+        uri.flatMap { $0.utf8.count <= Reference.longest ? $0 : nil }
     }
 }
 

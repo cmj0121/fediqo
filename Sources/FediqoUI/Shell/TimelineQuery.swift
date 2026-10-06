@@ -115,9 +115,13 @@ public enum TimelineQuery: Hashable, Identifiable, Sendable {
         among written: [TimelineDefinition] = [],
         index: TextIndex = TextIndex([]),
         latest: LatestDate?,
-        here: Set<String>? = nil
+        here: Set<String>? = nil,
+        targets: ReblogTargets? = nil
     ) -> [DummyItem] {
-        let shown = CompiledTimeline(definition(among: written), sources: []).shown(notes, index)
-        return DummyItem.merged(latest?.shown(shown) ?? shown, here: here)
+        // One lookup of what each reblog reblogs (#290) for the rules and the rows alike: the
+        // caller's, or one built here over everything handed in.
+        let targets = targets ?? ReblogTargets(notes)
+        let shown = CompiledTimeline(definition(among: written), sources: []).shown(notes, index, targets: targets)
+        return DummyItem.merged(latest?.shown(shown) ?? shown, here: here, targets: targets)
     }
 }

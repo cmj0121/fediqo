@@ -39,17 +39,17 @@ struct LimitRoom {
     }
 
     /// A 4 KB post, `daysAgo` days before the origin.
-    static func note(_ id: String, daysAgo: Double, from source: Source, holding: Holding = .arrived) -> Note {
+    static func note(_ id: String, daysAgo: Double, from source: Source) -> Note {
         Note(
             id: id, source: source, author: "Ada", handle: "@ada", body: String(repeating: "x", count: 4_000),
-            postedAt: origin.addingTimeInterval(-daysAgo * 86_400), categories: [.public], holding: holding
+            postedAt: origin.addingTimeInterval(-daysAgo * 86_400), categories: [.public]
         )
     }
 
-    /// Sixty posts, alternating sources, one a day back from the origin; the oldest held aside.
+    /// Sixty posts, alternating sources, one a day back from the origin.
     static func held() -> [Note] {
         (0..<60).map { n in
-            note("\(n)", daysAgo: Double(n), from: n.isMultiple(of: 2) ? alpha : beta, holding: n == 59 ? .aside : .arrived)
+            note("\(n)", daysAgo: Double(n), from: n.isMultiple(of: 2) ? alpha : beta)
         }
     }
 

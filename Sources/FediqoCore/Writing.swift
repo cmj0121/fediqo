@@ -65,6 +65,18 @@ public enum SourceWriting: Sendable, Equatable, CaseIterable {
     }
 }
 
+/// Whether a sign-in that writes may also bookmark (#285) — a second question beside
+/// `SourceWriting`, because a sign-in made before bookmarks were asked for writes exactly as it
+/// did and lacks only this.
+public enum BookmarkStanding: Sendable, Equatable, CaseIterable {
+    /// The sign-in bought it.
+    case allowed
+    /// The sign-in was made before bookmarks were asked for. Asking again is what changes it.
+    case unasked
+    /// Asked for, and the source did not grant it. Nothing the reader does here changes that.
+    case unavailable
+}
+
 /// One thing a reader does to a post on the source they read it through — #54's acts, named so
 /// that the rule about which of them a post offers is a value rather than a run of conditions
 /// inside a view body.
@@ -81,6 +93,9 @@ public enum PostAct: Sendable, Hashable, CaseIterable {
     case answer
     /// What the reader wrote, taken back (#109). **Offered only on their own posts.**
     case withdraw
+    /// A mark put on the post at its source, for the reader alone (#285). **Offered only where
+    /// the sign-in bought bookmarking**, which one made before it was asked for did not.
+    case bookmark
 }
 
 /// Why a post offers none of the acts. Nothing is a post that offers them.
@@ -112,13 +127,20 @@ public struct PostActs: Sendable, Hashable {
     public let offered: Set<PostAct>
     /// Why the acts are absent, where they are. Nothing where they are there to press.
     public let refused: PostActRefusal?
+    /// The acts this post would offer once its sign-in is asked again (#285): never one it
+    /// offers, and empty on nearly every post. A mark for one of these asks; it does not act.
+    public let asking: Set<PostAct>
 
-    public init(offered: Set<PostAct>, refused: PostActRefusal? = nil) {
+    public init(offered: Set<PostAct>, refused: PostActRefusal? = nil, asking: Set<PostAct> = []) {
         self.offered = offered
         self.refused = refused
+        self.asking = asking.subtracting(offered)
     }
 
     public func offers(_ act: PostAct) -> Bool { offered.contains(act) }
+
+    /// Whether `act` is one the sign-in has to be asked again for before it is offered.
+    public func asks(_ act: PostAct) -> Bool { asking.contains(act) }
 
     /// What a post read through a source with this standing offers.
     ///
@@ -136,10 +158,16 @@ public struct PostActs: Sendable, Hashable {
     /// is no post there for it to reach. The row's own mark already says why, so a refusal line
     /// under it would be saying it twice.
     ///
+    /// `bookmarks` is whether that sign-in may bookmark (#285). **Not known is not allowed**, as
+    /// `mine` is: the mark is offered where the sign-in bought it, asks where the sign-in was
+    /// made before it could be bought, and is absent where the source would not grant it. Every
+    /// other act is as it was, whichever of the three.
+    ///
     /// **No `default:`**, this package's standing rule: a fifth `SourceWriting` has to say what a
     /// post on such a source offers.
     public static func on(
-        _ writing: SourceWriting, nameable: Bool, mine: Bool = false, gone: Bool = false
+        _ writing: SourceWriting, nameable: Bool, mine: Bool = false, gone: Bool = false,
+        bookmarks: BookmarkStanding = .unavailable
     ) -> PostActs {
         if gone { return .none }
         switch writing {
@@ -148,8 +176,14 @@ public struct PostActs: Sendable, Hashable {
         case .refused: return PostActs(offered: [], refused: .turnedAway)
         case .writes:
             guard nameable else { return PostActs(offered: [], refused: .unnameable) }
-            let everyone = Set(PostAct.allCases).subtracting([.withdraw])
-            return PostActs(offered: mine ? everyone.union([.withdraw]) : everyone)
+            var offered = Set(PostAct.allCases).subtracting([.withdraw, .bookmark])
+            if mine { offered.insert(.withdraw) }
+            switch bookmarks {
+            case .allowed: offered.insert(.bookmark)
+            case .unasked: return PostActs(offered: offered, asking: [.bookmark])
+            case .unavailable: break
+            }
+            return PostActs(offered: offered)
         }
     }
 

@@ -77,3 +77,13 @@ func hangGuard(
         await open()
     }
 }
+
+extension Note {
+    /// This note as a read sent just now brought it (#291): what a note made by hand has to say
+    /// for itself before the store takes its word on what the reader did.
+    func readNow() -> Note {
+        var copy = self
+        copy.asked = .now()
+        return copy
+    }
+}

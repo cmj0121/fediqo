@@ -70,6 +70,13 @@ public struct FediqoRootView: View {
     /// Told when the reader dismisses that notice, so a window opened later does not raise it
     /// again: each window is its own root view with its own state.
     private let storeNoticeSeen: (@MainActor () -> Void)?
+    /// Up once at launch when the store did not simply open (#295): it could not be opened, it
+    /// was damaged and put aside, or a read back left two. Without it the reader sees an empty
+    /// app, or a run that saves nothing, and nothing to say why.
+    @State private var storeTrouble: StoreTrouble?
+    /// Told what the reader answered to that notice — that they were told, or which of two
+    /// stores they chose — so what waits on their answer can go ahead.
+    private let storeTroubleAnswered: (@MainActor (StoreTroubleAnswer) -> Void)?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -98,6 +105,8 @@ public struct FediqoRootView: View {
         limits: (any LimitAccountStore)? = nil,
         storeIsNewer: Bool = false,
         storeNoticeSeen: (@MainActor () -> Void)? = nil,
+        storeTrouble: StoreTrouble? = nil,
+        storeTroubleAnswered: (@MainActor (StoreTroubleAnswer) -> Void)? = nil,
         carrier: (any StoreCarrier)? = nil,
         nearby: (any NearbyLink)? = nil,
         deviceName: String = ""
@@ -117,6 +126,8 @@ public struct FediqoRootView: View {
         _session = State(initialValue: session)
         _storeIsNewer = State(initialValue: storeIsNewer)
         self.storeNoticeSeen = storeNoticeSeen
+        _storeTrouble = State(initialValue: storeTrouble)
+        self.storeTroubleAnswered = storeTroubleAnswered
     }
 
     /// From here on, nothing leaves for a host that is not one of `hosts` — the sources the person
@@ -132,6 +143,8 @@ public struct FediqoRootView: View {
     public static func onlyToSources(_ hosts: [String], kept store: ItemStore, read: Bool = true) {
         let work = SourceWork.shared
         work.govern(sources: hosts)
+        // A launch that did not read its store asks for nothing nobody pressed for (#293, #295).
+        ShellSession.loadsStartWith = read
         let book = AllowanceBook.shared
         book.launched(with: hosts, read: read)
         let (changes, feed) = AsyncStream<[String]>.makeStream()
@@ -151,11 +164,23 @@ public struct FediqoRootView: View {
     /// servers the reader still reads. Queued ahead of every picture a row can ask for, so the
     /// sweep never races a copy being written for a server just added. What is left is then
     /// trimmed to the cap (#7), so a cap lowered by a new build holds from its first launch.
-    public static func keepPictures(in copies: any MediaCopies, for hosts: [String]) {
+    ///
+    /// **Only where `hosts` is the list the person has** (`read`, #295). A run whose store could
+    /// not be opened holds no sources, and dropping the copies of every host not among none
+    /// would take every picture on the device while the notice says nothing was changed: the
+    /// copies are then handed over as they are, neither swept nor trimmed, and still drawn from.
+    public static func keepPictures(in copies: any MediaCopies, for hosts: [String], read: Bool = true) {
+        ShellPictures.shared.disk = keptPictures(in: copies, for: hosts, read: read)
+    }
+
+    /// `keepPictures`' work, apart from where its result is put.
+    static func keptPictures(in copies: any MediaCopies, for hosts: [String], read: Bool) -> DiskCopies {
         let disk = DiskCopies(copies)
-        disk.keepOnly(hosts: hosts)
-        disk.trim()
-        ShellPictures.shared.disk = disk
+        if read {
+            disk.keepOnly(hosts: hosts)
+            disk.trim()
+        }
+        return disk
     }
 
     private var availability: ShellAvailability { session.availability }
@@ -275,6 +300,7 @@ public struct FediqoRootView: View {
             // Taking back what the reader wrote (#109): the one act that asks first. A modifier of
             // its own rather than the dialog spelled here — see `WithdrawQuestion`.
             .modifier(WithdrawQuestion(session: session))
+            .modifier(BookmarkQuestion(session: session))
             // An answer, over the conversation it belongs to (#108). Driven by the session's one
             // value, so the key and the mark open the same surface by writing the same thing.
             .sheet(item: $session.answering) { target in
@@ -356,6 +382,7 @@ public struct FediqoRootView: View {
             .modifier(EndedSignInNotice(session: session))
             .modifier(ActivitySheet(session: session))
             .modifier(StoreNewerNotice(shown: $storeIsNewer, seen: storeNoticeSeen))
+            .modifier(StoreTroubleNotice(trouble: $storeTrouble, answered: storeTroubleAnswered))
             .overlay {
                 if showingShortcuts {
                     ShortcutGuide(tab: $shortcutTab) { showingShortcuts = false }
@@ -448,6 +475,15 @@ public struct FediqoRootView: View {
     /// not. See `ShellQuestion.remove`.
     static func boards(of host: String, in sources: [Source]) -> Int {
         sources.first { $0.host == host }?.boards.count ?? 0
+    }
+
+    /// The question before `host` is removed, with what this session holds for it read here: the
+    /// boards it takes, and how many of its posts the person keeps, which stay (#294).
+    static func removeQuestion(_ host: String, in session: ShellSession, postsStay: Bool) -> ShellConfirmation {
+        ShellQuestion.remove(
+            host: host, boards: boards(of: host, in: session.sources), postsStay: postsStay,
+            kept: session.holdings.kept(host: host).posts
+        )
     }
 
     /// A forum's own page closed, on the window a Mac opens it in or the sheet elsewhere — **one
@@ -578,6 +614,11 @@ public struct FediqoRootView: View {
             return actFocused(.boost)
         case .favourite:
             return actFocused(.favourite)
+        case .keep:
+            return onFocusedItem { item in
+                Task { await session.toggleKept(item) }
+                return true
+            }
         case .answer:
             return answerFocused()
         case .withdraw:
@@ -975,7 +1016,7 @@ public struct FediqoRootView: View {
         if search.isOpen {
             search.focus()
         } else {
-            search.open(from: selectedItemID, over: session.searchable)
+            search.open(from: selectedItemID, over: session.notes)
             selectedItemID = nil
         }
         return true
@@ -1201,7 +1242,10 @@ public struct FediqoRootView: View {
     /// lamp moves only where the open is allowed, for `openViewer`'s reason: a press that can
     /// open nothing must not move anything either.
     private func openThread(_ id: String) -> Bool {
-        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        // A reblog opens the post it reblogs (#290), and one whose post is not held opens nothing.
+        guard Self.canWalk(place: place, open: openLayers), let opened = session.rowOpened(by: id) else {
+            return false
+        }
         selectedItemID = id
         // A forum's ranked blog opens here too, and reads in the app (#209): its pane is a
         // thread's, with no replies under it, and its page is what that pane offers where the
@@ -1210,7 +1254,7 @@ public struct FediqoRootView: View {
         // The lamp is read back after the press has moved it, which is how a conversation comes
         // back to its own opening post and a person's page comes back to the row the lamp was
         // on: one sentence for what used to be two. See `ShellWalk`.
-        return walk.walk(to: .thread(id), from: selectedItemID)
+        return walk.walk(to: .thread(opened), from: selectedItemID)
     }
 
     /// Whether `r` — and the mark in the header that is its touch path (#33) — has anything to
@@ -1791,12 +1835,7 @@ private struct HostQuestion: ViewModifier {
     static func remove(_ session: ShellSession, prefs: DummyPrefs) -> HostQuestion {
         HostQuestion(
             session: session, asking: \.removing,
-            question: { host in
-                ShellQuestion.remove(
-                    host: host, boards: FediqoRootView.boards(of: host, in: session.sources),
-                    postsStay: prefs.removedPostsStay
-                )
-            },
+            question: { FediqoRootView.removeQuestion($0, in: session, postsStay: prefs.removedPostsStay) },
             act: { await session.remove(host: $0, keepingPosts: prefs.removedPostsStay) }
         )
     }
@@ -1857,6 +1896,26 @@ private struct EndedSignInNotice: ViewModifier {
             get: { session.mastodon.ended.isEmpty ? nil : session.mastodon.ended },
             set: { if $0 == nil { session.mastodon.endedSeen() } }
         )
+    }
+}
+
+/// The store did not simply open (#295): said at the first thing the person sees.
+///
+/// **Only a press on the notice answers it.** Being told of a damaged store is its own button,
+/// and choosing between two stores is theirs; the sheet going away any other way — Escape, a
+/// swipe, the system taking it down, another presenter winning, the view replaced while the app
+/// is still launching — answers nothing, and the notice is shown again at the next launch. What
+/// waits on being told is a deletion that cannot be taken back.
+///
+/// A modifier of its own, so the root view's chain gains one line and no closure of its own.
+private struct StoreTroubleNotice: ViewModifier {
+    @Binding var trouble: StoreTrouble?
+    let answered: (@MainActor (StoreTroubleAnswer) -> Void)?
+
+    func body(content: Content) -> some View {
+        content.shellConfirm($trouble, question: { ShellQuestion.storeTrouble($0) }) { _, id in
+            if let answer = ShellQuestion.storeTroubleChose(id) { answered?(answer) }
+        }
     }
 }
 

@@ -31,10 +31,7 @@ extension ShellSession {
         case .gone: return true
         case .no: return false
         case .ask:
-            let watched = WatchedHTTP(http, for: .conversation, in: work)
-            let unsigned = MastodonPost(
-                http: Deadline(watched as any HTTPClient, within: limit), host: held.source.host
-            )
+            let unsigned = reach.unsignedPost(held.source.host, for: .conversation, within: limit)
             return await unsigned.confirmsGone(held, id: id)
         }
     }
@@ -50,10 +47,15 @@ extension ShellSession {
         return await letGoneGo(markedBy: cutoff)
     }
 
-    /// What is marked gone from its source, held aside or not — the posts, and the places whose
+    /// What is marked gone from its source, a forum topic's reply included — the posts, and the places whose
     /// source no longer has what lay there (#204). What the press asks about before it lets go.
     func goneHeld() async -> WentGone {
         WentGone(posts: await store.goneCount(), places: await store.settledCount())
+    }
+
+    /// How many posts marked gone the person keeps: what the press leaves (#294).
+    func goneKept() async -> Int {
+        await store.keptGoneCount()
     }
 
     /// Lets go of everything marked gone from its source, now — the reader's press. Returns what

@@ -128,9 +128,7 @@ extension ShellReload {
                 ) else {
                     return true
                 }
-                let client = MastodonClient(
-                    http: timed(session.http, for: .timeline, name: .public, in: session), host: host
-                )
+                let client = session.reach.mastodon(host, for: .timeline, name: .public, within: deadline)
                 let down = try await client.publicTimeline(source: stamp, readingDownFrom: place)
                 try Task.checkCancellation()
                 await session.store.land(down, below: post, of: .public, ifSourceHere: host)
@@ -145,7 +143,7 @@ extension ShellReload {
                 default: nil
                 }
                 let door = session.mastodon.authorized(token: token, within: deadline, for: .timeline, name: name)
-                let account = MastodonAccount(door: door, store: session.store)
+                let account = session.reach.account(door, landingIn: session.store)
                 let me = session.mastodon.handles[host]
                 try await asReader(host) { try await account.readDown(category, below: post, writtenBy: me) }
                 return true

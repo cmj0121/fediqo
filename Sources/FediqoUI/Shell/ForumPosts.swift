@@ -609,7 +609,7 @@ final class ForumPosts {
     /// from it because a page and the first read can be in the air for one topic at once.
     @ObservationIgnored private var clearedPages: Set<Key> = []
 
-    /// Where what a page brought is landed — **the store, held aside and saved** — and what it
+    /// Where what a page brought is landed — **the store, as the topic's kept replies, and saved** — and what it
     /// hands back is every reply of that topic the store now holds, in reading order. Set by the
     /// session; nothing where there is none, which is a test's, and then this run's own copy is
     /// the whole of it.
@@ -1010,12 +1010,8 @@ final class ForumPosts {
     /// `readTransport` rather than `transport`, because `transport(host:)` would *build* one for
     /// every host and this app does not start a web process for a host that never needed it.
     private func client(for host: String, part: Part, within limit: Duration?) -> DiscuzClient {
-        var transport = forums?.readTransport(host: host, else: http) ?? http
-        transport = WatchedHTTP(
-            transport, for: part == .opening ? .forumPost : .forumReplies, in: work
-        )
-        if let limit { transport = Deadline(transport, within: limit) }
-        return DiscuzClient(http: transport, host: host)
+        SourceReach(http: http, work: work, forums: forums)
+            .discuz(host, for: part == .opening ? .forumPost : .forumReplies, within: limit)
     }
 
     /// Core's eight answers, folded to the four a reader is told apart.

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// A protocol a host might speak. Unknown is a name, not a silence.
 public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
@@ -39,68 +40,29 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
         }
     }
 
+    // **Each of these reads `offers`** (#299, `SourceOffers`): what a kind of source offers is
+    // said once there, and these are the names the rest of the package already asks by.
+
+    /// Whether a post read from a source of this kind says whether it quotes one (#214).
+    public var saysQuotes: Bool { offers.saysQuotes }
+
+    /// Whether a source of this kind says what its signed-in reader has done to a post (#285).
+    public var saysReaderMarks: Bool { offers.saysReaderMarks }
+
     /// Whether a source of this kind has the timelines every Mastodon-shaped server shares —
     /// public, trends, home — so that a category naming one of them can mean this source.
-    ///
-    /// **The one list**, read by a timeline's rules and by `hasTrends`, which starts from it: a
-    /// second list is how a tab and a rule come to disagree about a server. No `default:`, so a kind
-    /// added later has to be answered here rather than inheriting somebody else's answer.
-    /// Whether a post read from a source of this kind says whether it quotes one (#214): a read
-    /// that says nothing of a quote is then a post with none, not a source that never said.
-    public var saysQuotes: Bool { self == .mastodon }
-
-    public var hasTimelines: Bool {
-        switch self {
-        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
-            .gotosocial:
-            true
-        // Neither forum has one. A forum's categories are its boards.
-        case .discourse, .discuz, .unknown:
-            false
-        }
-    }
+    public var hasTimelines: Bool { offers.timelines }
 
     /// Whether a source of this kind has something trending — so that `.trends` can mean it, the
     /// Trends tab can be offered for it, and a reload of a timeline that reaches its Trends reads
-    /// them.
-    ///
-    /// **Every kind with timelines, and a Discuz! beside them without them.** A Discuz! forum
-    /// ranks its threads and its blogs by the week (`DiscuzRanklist`), which is exactly what a
-    /// microblog's trending read is: what everybody else is reading. It still has no public or
-    /// home timeline, so `hasTimelines` stays false for it and those still never reach a forum.
-    /// A Discourse has no ranking this app reads. No `default:`, `hasTimelines`' rule.
-    public var hasTrends: Bool {
-        switch self {
-        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
-            .gotosocial, .discuz:
-            true
-        case .discourse, .unknown:
-            false
-        }
-    }
+    /// them. Every kind with timelines, and a Discuz! beside them without them.
+    public var hasTrends: Bool { offers.trends }
 
     /// Whether this is a forum, whose authors are that forum's and nobody else's.
-    public var isForum: Bool { self == .discourse || self == .discuz }
+    public var isForum: Bool { offers.authorsAreItsOwn }
 
     /// Whether Fediqo can write to a source of this kind at all (#69).
-    ///
-    /// **`hasTimelines`' shape and for its reason** — one list per protocol fact, here beside the
-    /// others rather than beside the feature that first needed it, so a protocol added later is
-    /// answered in one place. No `default:`.
-    ///
-    /// **A forum is `false` although it signs in**, and the two are unrelated: a Discuz! sign-in is
-    /// a cookie and a saved password that let this device *read* a board a signed-out reader may
-    /// not, and this app has no way at all to post to a forum. So a forum row says read only, for a
-    /// reason that is about the protocol rather than about anything its reader chose.
-    public var canWrite: Bool {
-        switch self {
-        // Signed in on the server's own page, and the writing part is what #69 lets a reader buy.
-        case .mastodon: true
-        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
-            .discourse, .discuz, .unknown:
-            false
-        }
-    }
+    public var canWrite: Bool { offers.writes }
 }
 
 /// One board of a forum the reader subscribed to.
@@ -205,31 +167,6 @@ public enum Category: Hashable, Sendable {
     case list(id: String)
     /// A forum section, by the id the source gives it — Discuz!'s `fid` as a string.
     case board(id: String)
-}
-
-/// How a row came to be held, and so whether a timeline may show it (#175).
-///
-/// **Holding a post is not the same as it arriving.** A post a source handed over as part of a
-/// timeline it serves arrived, and All draws it. A post this device went and fetched for one
-/// place — a search hit, an answer read inside a thread, a post brought under a hashtag — is held
-/// so it can be read where it was found, and All does not grow because a search was made. #90 said
-/// this in passing about a thread's answers; here it is a fact of the store, said once, so the
-/// tasks that need it do not each invent their own.
-///
-/// **It only ever widens.** A row held aside that later arrives through a timeline is a row that
-/// arrived, and nothing takes that back — `Note.categories`' rule, for its reason: what a copy
-/// arrived through is a fact about it, and a later read that did not come through a timeline is
-/// not that fact going away.
-public enum Holding: String, Sendable, Hashable {
-    /// It arrived through a read of a source's timeline. Every timeline may show it.
-    case arrived
-    /// This device holds it, and no timeline shows it.
-    case aside
-
-    /// The wider of the two.
-    func widened(by other: Holding) -> Holding {
-        self == .arrived || other == .arrived ? .arrived : .aside
-    }
 }
 
 public enum Audience: String, Sendable, Hashable, CaseIterable {
@@ -403,6 +340,55 @@ public struct Attachment: Sendable, Hashable {
     public var isEmpty: Bool { displayURL == nil }
 }
 
+/// When the read that brought a copy of a post was sent, as a place in the order this run's
+/// reads and the reader's own acts happened in (#291) — or nothing, where a copy cannot say.
+///
+/// **What tells a read already on its way from one asked afterwards.** A post never edited
+/// carries no moment of its own to order two copies by (`Note.editedAt`), so a timeline asked
+/// before the reader favourited a post and landing after the source answered would put the mark
+/// back to what it was. The store marks the post with the next place as the act's answer lands
+/// (`ItemStore.refresh(_:ifSourceHere:acted:)`), and a copy sent before that place says nothing of
+/// what the reader did that the row does not say more lately.
+///
+/// **Counted, not clocked**, for `ItemStore.arrival`'s reason: the order two things happened in
+/// is the only thing asked, and a clock can say two of them happened at once. One count for the
+/// whole run rather than one per store, because a read is sent by a client that holds no store;
+/// two stores that share the count each still see their own reads and acts in a true order.
+///
+/// **For the run, and never written down.** A relaunch has no read on its way.
+///
+/// **No part of what a note is.** Two copies that say the same things are the same note whenever
+/// each was asked for, so every `ReadMoment` equals every other and hashes to nothing: a row
+/// compared with a later copy of itself does not look changed by when the copy was sent.
+public struct ReadMoment: Hashable, Sendable {
+    /// The place in the run's order, or nothing where this copy cannot say when it was sent.
+    public let place: UInt64?
+
+    /// A copy that cannot say when it was sent: one made by hand, read back from disk, or from a
+    /// source whose posts say nothing of the reader. **Never taken for one sent just now** — on a
+    /// post the reader has acted on, it says nothing of what they did.
+    public static let unsaid = ReadMoment(place: nil)
+
+    private static let places = Mutex<UInt64>(0)
+
+    /// The next place in the run's order: later than every one handed out before it. What a read
+    /// takes as it is sent, and what the store marks a post with as an act's answer lands.
+    public static func now() -> ReadMoment {
+        ReadMoment(place: places.withLock { count in
+            count += 1
+            return count
+        })
+    }
+
+    public static func == (_: ReadMoment, _: ReadMoment) -> Bool { true }
+    public func hash(into _: inout Hasher) {}
+}
+
+/// One of the three things a source says its signed-in reader has done to a post (#285).
+public enum ReaderMark: Hashable, Sendable, CaseIterable {
+    case boosted, favourited, bookmarked
+}
+
 /// A note this device has stored. Its categories remember what it arrived through.
 public struct Note: Identifiable, Hashable, Sendable {
     public let id: String
@@ -439,15 +425,21 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// through one takes nothing away (#25). Empty is a post from a cross-board listing — a forum's
     /// front page — which a source rule still reaches.
     public var categories: Set<Category>
-    public let reply: Reply?
-    /// The name of whoever boosted this copy, as drawn.
-    public let boostedBy: String?
-    /// Who boosted this copy, as `@user@instance`, so an author rule can match the booster (#26).
+    /// Who this row arrived as a reblog by, as drawn — **a fact only of a row held from before a
+    /// reblog was an item of its own** (#290). No arrival writes it: a reblog a timeline lists is
+    /// an item (`isReblog`), and the post it brings says nothing of who reblogged. A row that
+    /// carries it stays the post, at its publish time, saying it arrived as a reblog by them,
+    /// until a timeline brings that reblog again and the store takes the word off.
     ///
-    /// **Only as good as the first copy.** A boost and its original share one row per host, and
-    /// the first copy to arrive is the one kept, so a boost that arrives after its original
-    /// leaves no booster here and matches on its author alone. Nothing fills it in afterwards,
-    /// and a note stored before this existed has none.
+    /// **Written by nothing, and read for that one line alone.** No decode sets it and no rule
+    /// or search asks it; it is carried from copy to copy of the row that has it, and goes when
+    /// that row is converted (`withoutArrivalAsReblog`) or let go. It is not a reference, and
+    /// stands apart from them: there was never an item for it to name.
+    public let boostedBy: String?
+    /// `boostedBy`'s person as `@user@instance`, where the row wrote one down — what tells that
+    /// reblog from another person's when it comes again. No rule reads it: an author rule is
+    /// asked of who made an item, and this row was made by its author. Written by nothing, and
+    /// gone with `boostedBy`.
     public let boosterHandle: String?
     /// Whether the reader this copy was fetched as has boosted it, **as the source said** — not
     /// as this device remembers pressing anything (#106).
@@ -468,6 +460,12 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// favourite is a note to the author and to oneself, and a list of them this device kept on
     /// its own would be a list no other app agrees with.
     public let favourited: Bool?
+    /// Whether the reader this copy was fetched as has bookmarked it, as the source said (#285).
+    ///
+    /// `favourited`'s shape, for its reasons: nothing is a source that never said, which is every
+    /// unsigned read, and it is the server's answer that is kept rather than a press. A bookmark
+    /// is the source's to hold; what this device holds of its own is `kept`.
+    public let bookmarked: Bool?
     /// Who the post was written for, as the source said (#208), or nothing where it never said —
     /// every forum post, and a row kept before 0.5.0 wrote this down until a read says it again.
     ///
@@ -495,7 +493,7 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// **Unlike every other fact here, a later timeline copy's figure wins** — a count is only
     /// ever the source's latest, and the first copy's would be days stale by the end of the
     /// keep-for window. A count the later copy does not state keeps the one held. A `var` for
-    /// `holding`'s reason: the store sets it on a row it already holds, and draws the new figure
+    /// `categories`' reason: the store sets it on a row it already holds, and draws the new figure
     /// without writing the store down for it alone (`ItemStore.ingest`).
     public var counts: Counts
     /// The id the server this copy came through gives the status, where it is a microblog's —
@@ -512,26 +510,22 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// arrives here (`ForumOpening.init?(_:)`). It goes when the row goes — a Remove, or the
     /// reader's keep-for window — and stays when a Clear keeps the row.
     public let opening: ForumOpening?
-    /// Whether a timeline may show this row, or whether this device only holds it (#175).
-    ///
-    /// **A `var`, as `categories` is, and for its reason**: the store widens it where the same
-    /// post arrives a second time through a timeline, and that is the one way it moves.
-    public var holding: Holding
     /// When a read of this one post heard its source say it no longer has it (#179), or nothing
     /// while the source has said no such thing.
     ///
     /// **Only a read of the post itself sets it.** A post missing from a listing merely did not
     /// arrive, and a listing is never a statement about any one post — so nothing that reads a
     /// timeline, a search or a thread's page touches it. What the reader took back themselves
-    /// (#109) is let go, not marked: `ItemStore.forget` is that path, and it never passes here.
+    /// (#109) is let go, not marked: `ItemStore.forget` is that path, and it sets this only on a
+    /// post they keep (#284), which stays.
     ///
-    /// A `var` for `holding`'s reason: the store sets it on a row it already holds, and a read
+    /// A `var` for `categories`' reason: the store sets it on a row it already holds, and a read
     /// that finds the post again takes it off.
     public var goneSince: Date?
     /// Where a timeline this post arrived through is not whole next to it (#201): newer posts
     /// that remain above it, or posts that may be missing below it. Empty on nearly every post.
     ///
-    /// A `var` for `holding`'s reason: the store sets it on a row it already holds, as a read
+    /// A `var` for `categories`' reason: the store sets it on a row it already holds, as a read
     /// lands. Kept with the row, so it goes when the row goes and outlives a relaunch with it.
     public var gaps: Set<TimelineGap>
     /// The id each timeline listed this post under when a read of that timeline brought it — a
@@ -539,11 +533,83 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// thing that moves where: a post the reader wrote, a search's find or a thread's answer was
     /// listed by no timeline, and so is never read on from.
     ///
-    /// A `var` for `holding`'s reason: the store grows it as the same post is listed again.
+    /// A `var` for `categories`' reason: the store grows it as the same post is listed again.
     public var listed: [Category: String]
-    /// The post this one quotes, as its source said (#214), or nothing where it quotes none or
-    /// the source has no such idea. Kept with the row, so the quoted post shows offline.
-    public let quote: Quote?
+    /// Whether the person keeps this item (#284). A kept item is never let go: no purge, no limit
+    /// and no removal of its source takes it, until the person un-keeps it.
+    ///
+    /// **This device's own, and nobody else's word.** No source says it and nothing is sent to
+    /// one, so no read sets it or takes it off: a copy that arrives again, and a post read again,
+    /// leave it as it was. Only `ItemStore.setKept` moves it.
+    ///
+    /// A `var` for `categories`' reason: the store sets it on a row it already holds.
+    public var kept: Bool
+    /// When its source says the post was last changed after it was published (#286), or nothing
+    /// where it says it never was — and on a source that says no such thing at all.
+    ///
+    /// **The source's word, and the one thing that tells a later copy from an earlier one.** A
+    /// copy that says a later moment than the one held is the post as it is now; one that says an
+    /// earlier moment, or none where the held copy says one, was read before the copy held and
+    /// is still on its way in. **Never where the item stands**: `postedAt` is when it was
+    /// published, and that is what every timeline orders by.
+    public let editedAt: Date?
+    /// What the post said before, as this device held it, oldest first (#286): each wording with
+    /// the moment its source said it changed. Empty on a post never seen to change — and on one
+    /// already changed when it was first read, since nothing is asked of the source for what
+    /// this device never held.
+    ///
+    /// **Part of the row, and nowhere else.** It is written with the row, rides where the row
+    /// rides, and is gone when the row is: there is no second place a wording its author took
+    /// back could be left behind in.
+    public let earlier: [Wording]
+    /// The language the post says it is in, as its source spelled it and folded to lower case
+    /// (#287), or nothing where the source said none — which is not a language, and matches no
+    /// rule on one.
+    public let language: String?
+    /// What this item refers to (#290, #293): each another item on the same source, with the
+    /// kind of reference it is. Held to `Reference.bounded`.
+    ///
+    /// **The one place an item says what it refers to** (#293). That it answers another, and
+    /// that it quotes one, are read off these (`reply`, `quote`) and kept nowhere else, so
+    /// there is no second word for them to disagree with.
+    public let refs: [Reference]
+    /// The posts this copy's source handed over with it, each an item of its own: the post a
+    /// status quotes (#214). **A fact about the copy on its way in, as `asked` is**: the store
+    /// takes each in beside it as the copy lands, and keeps none of it on the row — what an
+    /// item keeps of the post it quotes is its reference, and the post is its own item's.
+    public var brought: [Note] = []
+    /// Whether what this item refers to is still to be asked for (#293). It is asked for once,
+    /// when the item first arrives: the store marks the arrival, and takes the mark off when the
+    /// asking is done. A target let go afterwards stays let go — the mark is off, and it is a
+    /// fact about this item, so nothing of a purged target is kept to remember it by.
+    ///
+    /// **Off is the rest state**: for an item whose references were asked for, for one that
+    /// refers to nothing, and for every item held before there was any asking — so a store
+    /// carried forward owes no loads, and nothing made by hand does.
+    ///
+    /// **This device's own, as `kept` is.** No source says it and no read moves it: a copy that
+    /// arrives again, and a post read again, leave it as it was. Nothing sets it yet.
+    ///
+    /// A `var` for `categories`' reason: the store sets it on a row it already holds.
+    public var refsDue: Bool
+    /// When the read that brought this copy was sent (#291), or `unsaid`. **A fact about the
+    /// copy on its way in, not about the post**: the store reads it as the copy lands and keeps
+    /// none of it, and every note made from another starts again from `unsaid`.
+    public var asked: ReadMoment = .unsaid
+    /// Whether the load this item owes was given up for this run (#293): tried as often as a
+    /// load is, or its source given up. **Of this run only, and never written down**: the store
+    /// says it as it hands the note out, a launch starts with none, and `refsDue` — which is
+    /// written — is what a later run asks again by.
+    public var refsStalled = false
+    /// Which kinds of post this item refers to are named and not held (#293): loaded for it —
+    /// or come with it — and since let go. **Said by the store as it hands the note out**, from
+    /// what it holds at that moment, and never written down: it is a fact about the store, and
+    /// the reference's name is all the item keeps.
+    public var refsUnheld: Set<Reference.Kind> = []
+    /// Which kinds of post this item refers to were asked for this run and came back as nothing
+    /// to keep (#293) while the item still owes another load: not asked again this run, and
+    /// not on their way. Said by the store as it hands the note out; of this run only.
+    public var refsTried: Set<Reference.Kind> = []
 
     public init(
         id: String,
@@ -555,11 +621,11 @@ public struct Note: Identifiable, Hashable, Sendable {
         board: String? = nil,
         postedAt: Date,
         categories: Set<Category>,
-        reply: Reply? = nil,
         boostedBy: String? = nil,
         boosterHandle: String? = nil,
         boosted: Bool? = nil,
         favourited: Bool? = nil,
+        bookmarked: Bool? = nil,
         audience: Audience? = nil,
         avatarURL: URL? = nil,
         attachments: [Attachment] = [],
@@ -570,12 +636,51 @@ public struct Note: Identifiable, Hashable, Sendable {
         counts: Counts = Counts(),
         statusID: String? = nil,
         opening: ForumOpening? = nil,
-        holding: Holding = .arrived,
         goneSince: Date? = nil,
         gaps: Set<TimelineGap> = [],
         listed: [Category: String] = [:],
-        quote: Quote? = nil
+        kept: Bool = false,
+        editedAt: Date? = nil,
+        earlier: [Wording] = [],
+        language: String? = nil,
+        refs: [Reference] = [],
+        refsDue: Bool = false
     ) {
+        // **A reblog has no words of its own** (#290), wherever a note is made — off the wire,
+        // back from the store, out of a package, in a test. A note that says it reblogs another
+        // **is** a reblog: that one reference is all it refers by, and everything a post says —
+        // words, title, cover, pictures, counts, what the reader did, a reply, a quote, a
+        // change, a language, an address — is nothing on it, whatever it was handed. Settled
+        // this way round and not the other because the id of a row that says it reblogs may be
+        // a reblog's own, and a row kept as a post under that id would be one an act could be
+        // sent with; the words let go are a post's, which its source still has under the
+        // post's own name.
+        // **A reply of a forum topic answers its topic** (#297), wherever the note is made: its
+        // id names the topic, so the reference is read off it — one kept before a reply said
+        // what it answers says it too, and a copy rebuilt from another cannot lose it.
+        let answered = DiscuzPost.topicID(ofReply: id, from: source).map { [Reference(kind: .answers, id: $0)] }
+        let bounded = Reference.bounded(answered ?? refs)
+        let reblogs = bounded.first { $0.kind == .reblogs }
+        let post = reblogs == nil
+        self.refs = reblogs.map { [$0] } ?? bounded
+        let body = post ? body : ""
+        let title = post ? title : nil
+        let boostedBy = post ? boostedBy : nil
+        let boosterHandle = post ? boosterHandle : nil
+        let boosted = post ? boosted : nil
+        let favourited = post ? favourited : nil
+        let bookmarked = post ? bookmarked : nil
+        let audience = post ? audience : nil
+        let attachments = post ? attachments : []
+        let sensitive = post ? sensitive : nil
+        let spoiler = post ? spoiler : nil
+        let url = post ? url : nil
+        let counts = post ? counts : Counts()
+        let opening = post ? opening : nil
+        let editedAt = post ? editedAt : nil
+        let earlier = post ? earlier : []
+        let language = post ? language : nil
+        self.refsDue = refsDue
         self.id = id
         self.source = source
         self.author = author
@@ -585,11 +690,11 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.board = board
         self.postedAt = postedAt
         self.categories = categories
-        self.reply = reply
         self.boostedBy = boostedBy
         self.boosterHandle = boosterHandle
         self.boosted = boosted
         self.favourited = favourited
+        self.bookmarked = bookmarked
         self.audience = audience
         self.avatarURL = avatarURL
         self.attachments = attachments
@@ -600,32 +705,159 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.counts = counts
         self.statusID = statusID
         self.opening = opening
-        self.holding = holding
         self.goneSince = goneSince
         self.gaps = gaps
         self.listed = listed
-        self.quote = quote
+        self.kept = kept
+        self.editedAt = editedAt
+        self.earlier = earlier
+        // Held to what a language tag looks like wherever a note is made (#287) — off the wire,
+        // back from the store, in a test — so nothing that is not one is ever on a row.
+        self.language = SourceField.languageTag(language)
+    }
+
+    /// What this post's words weigh, in the bytes they are written in (#294): its body, title and
+    /// warning, and every earlier wording held with it. What `Holdings.Kept` adds up.
+    var wordBytes: Int {
+        body.utf8.count + (title?.utf8.count ?? 0) + (spoiler?.utf8.count ?? 0)
+            + earlier.reduce(0) { $0 + $1.bytes }
+    }
+
+    /// What the post says, as a wording: its words and its author's warning, and whether it was
+    /// covered. See `Wording`.
+    func wording(until moment: Date) -> Wording {
+        Wording(body: body, spoiler: spoiler, sensitive: sensitive, until: moment)
+    }
+
+    /// A moment as two copies are compared by: whole milliseconds, which is what a store keeps.
+    /// A date read off the wire and the same date read back from disk are not always one
+    /// `Double`, and compared as they are the copy just read would look a hair later than the row
+    /// it is — a change every reload, written down every time.
+    private static func moment(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1000).rounded())
+    }
+
+    /// Whether this copy was read before `held` was, **by its source's own word** (#286): it says
+    /// an earlier change than the one held, or none where the held copy says one. Such a copy is
+    /// a read still on its way in when a later one landed, and takes nothing of the held one's.
+    func isEarlier(than held: Note) -> Bool {
+        switch (editedAt, held.editedAt) {
+        case (nil, .some): true
+        case (let mine?, let theirs?): Self.moment(mine) < Self.moment(theirs)
+        default: false
+        }
+    }
+
+    /// Whether this copy is the post as its source changed it after `held` was read: it says a
+    /// change, and a later one than the copy held says.
+    func isLater(than held: Note) -> Bool {
+        switch (editedAt, held.editedAt) {
+        case (.some, nil): true
+        case (let mine?, let theirs?): Self.moment(mine) > Self.moment(theirs)
+        default: false
+        }
+    }
+
+    /// The earlier wordings of `held`, with what it said until `self` — a later copy — changed
+    /// it, where the two say different things. Bounded (`Wording.bounded`), oldest going first.
+    private func earlier(after held: Note) -> [Wording] {
+        guard let editedAt, isLater(than: held) else { return held.earlier }
+        let was = held.wording(until: editedAt)
+        guard was.body != body || (was.spoiler ?? "") != (spoiler ?? "") else { return held.earlier }
+        return Wording.bounded(held.earlier + [was])
+    }
+
+    /// The moment this copy says it changed, spelled as `held` spells it where the two are the
+    /// same moment — so a copy that says nothing new is equal to the row it is, and rewrites
+    /// nothing.
+    private func editedAt(over held: Note) -> Date? {
+        isLater(than: held) || isEarlier(than: held) ? editedAt : held.editedAt ?? editedAt
+    }
+
+    /// This held note as `stale` restates it — a copy its source's own word says was read before
+    /// this one (#286). **No word of it is taken.** Its counts are, as any copy's are; and what
+    /// it says the reader did is taken only where `acted` — the source's answer to an act the
+    /// reader has just made, which is the latest word there is on that whatever the copy's age.
+    /// A timeline's or a thread's stale copy says nothing of the reader this row does not say
+    /// more lately. `taking` is which of the three the copy's word is taken for: none for a read,
+    /// and for an answer the act's own mark and whichever others it is not older on (#291).
+    func restated(by stale: Note, taking: Set<ReaderMark>) -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board, postedAt: postedAt, categories: categories,
+            boostedBy: boostedBy, boosterHandle: boosterHandle,
+            boosted: taking.contains(.boosted) ? stale.boosted ?? boosted : boosted,
+            favourited: taking.contains(.favourited) ? stale.favourited ?? favourited : favourited,
+            bookmarked: taking.contains(.bookmarked) ? stale.bookmarked ?? bookmarked : bookmarked,
+            audience: audience, avatarURL: avatarURL, attachments: attachments,
+            sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url,
+            counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
+            goneSince: goneSince, gaps: gaps, listed: listed,
+            kept: kept, editedAt: editedAt, earlier: earlier, language: language,
+            refs: refs, refsDue: refsDue
+        )
+    }
+
+    /// This held note as `later` — a copy its source changed since — now says it (#286): the
+    /// later copy's words, warning, cover, attachments, emoji and quote, with what this one said
+    /// kept as an earlier wording. **Everything about where the row stands is this one's**: its
+    /// publish time, the timelines it arrived through, how it is held, and what this device
+    /// keeps of its own. What an ordinary reload does to a held row its source has changed.
+    ///
+    /// `was` is the row as it was held before this copy touched it — what it said is read off
+    /// that, never off `self`, which `filled(from:)` may already have given the later copy's
+    /// words (a quote arriving brings its words with it).
+    func revised(by later: Note, was: Note) -> Note {
+        // What it answers is this row's; the quote is as the later copy says it (#214) — only
+        // a source that never says a quote leaves the held one.
+        let quotes = source.kind.saysQuotes
+            ? later.quotesReference.flatMap { Reference.laterQuote($0, over: quotesReference) }
+            : Reference.laterQuote(later.quotesReference, over: quotesReference)
+        return Note(
+            id: id, source: source, author: later.author, handle: handle, body: later.body,
+            title: later.title ?? title, board: board, postedAt: postedAt, categories: categories,
+            boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
+            favourited: favourited, bookmarked: bookmarked, audience: later.audience ?? audience,
+            avatarURL: later.avatarURL ?? avatarURL, attachments: later.attachments,
+            sensitive: later.sensitive ?? sensitive, spoiler: later.spoiler ?? spoiler,
+            emojis: later.emojis, url: url, counts: counts, statusID: statusID, opening: opening,
+            goneSince: goneSince, gaps: gaps, listed: listed,
+            kept: kept, editedAt: later.editedAt, earlier: later.earlier(after: was),
+            // The language the post says it is in **now**, nothing included: a post changed to
+            // state none no longer matches a rule on the one it used to state.
+            language: later.language,
+            refs: Reference.rebuilt(answers: answersReference, quotes: quotes, from: refs), refsDue: refsDue
+        )
     }
 
     /// This copy, read again, laid over the one held for the same row (#29): what the server says
     /// now — text, cover, attachments, counts — with the categories the held copy arrived through
-    /// kept (and grown), its booster kept, and its board where this read names none.
+    /// kept (and grown), what it reblogs kept, the word that it arrived as a reblog kept where it
+    /// was held from before a reblog was an item (#290), and its board where this read names none.
     ///
-    /// **`boosted` and `favourited` fall back to what was held, rather than being overwritten with
+    /// **`boosted`, `favourited` and `bookmarked` fall back to what was held, rather than being overwritten with
     /// nothing.** A
     /// re-read made signed out — the public timeline, a thread asked of a host with no token —
     /// carries no such field, and letting that silence replace a yes the same server gave an hour
     /// ago would draw the post as unboosted because nobody asked, which is the one thing #106
     /// says the mark must never do. A read made as the reader always says something, so it always
     /// wins.
-    func refreshed(over held: Note) -> Note {
-        Note(
+    func refreshed(over held: Note, taking: Set<ReaderMark> = Set(ReaderMark.allCases)) -> Note {
+        // The quote as the source says it now (#214) — a quote taken back reads so, and one an
+        // edit took away is gone. Only a source that never says a quote leaves the held one.
+        let quotes = source.kind.saysQuotes
+            ? quotesReference.flatMap { Reference.laterQuote($0, over: held.quotesReference) }
+            : Reference.laterQuote(quotesReference, over: held.quotesReference)
+        return Note(
             id: id, source: source, author: author, handle: handle, body: body, title: title,
             board: board ?? held.board, postedAt: postedAt,
-            categories: held.categories.union(categories), reply: reply,
+            categories: held.categories.union(categories),
             boostedBy: held.boostedBy, boosterHandle: held.boosterHandle,
-            boosted: boosted ?? held.boosted,
-            favourited: favourited ?? held.favourited,
+            // A mark not among `taking` is one this copy is older on (#291): it was sent before
+            // the reader's own act on the post landed, or before a sign-in there ended.
+            boosted: taking.contains(.boosted) ? boosted ?? held.boosted : held.boosted,
+            favourited: taking.contains(.favourited) ? favourited ?? held.favourited : held.favourited,
+            bookmarked: taking.contains(.bookmarked) ? bookmarked ?? held.bookmarked : held.bookmarked,
             // Who it was for, whether it is covered and with what, and each count: what this read
             // left unsaid is what was held (#208), for `boosted`'s reason. A Mastodon source
             // always sends its cover line, empty where there is none, so a nil spoiler here is a
@@ -637,21 +869,29 @@ public struct Note: Identifiable, Hashable, Sendable {
             // A read of the row that says nothing of its opening post — a board listing, which
             // never does — leaves the one this device read where it is (#154).
             opening: opening ?? held.opening,
-            // Where the row is held does not move on a read again (#175): a post read again is
-            // not a post a timeline brought, so a row held aside stays aside and one in All stays
-            // there. Only `ItemStore.ingest` widens it.
-            holding: held.holding,
             // **No mark survives a read that found the post** (#179): the source has just handed
             // it over, which is the one thing a post gone from it cannot be.
             goneSince: nil,
             // What a read of this one post says is nothing about where its timeline is whole.
             gaps: held.gaps,
             listed: held.listed.later(listed),
-            // The quote as the source says it now (#214) — a quote taken back reads so, and one an
-            // edit took away is gone. Only a source that never says a quote leaves the held one.
-            quote: source.kind.saysQuotes
-                ? quote.flatMap { Quote.later($0, over: held.quote) }
-                : Quote.later(quote, over: held.quote)
+            // The person's own mark, which no read says anything about (#284).
+            kept: held.kept,
+            // What it said before this read changed it, kept (#286) — only where the source says
+            // it changed since, and only what this device held.
+            editedAt: editedAt(over: held), earlier: earlier(after: held),
+            // A read of the post itself is the whole of what its source says of it now, so the
+            // language is this copy's even where it states none — unlike the reader's marks,
+            // which a signed-out read leaves unsaid rather than says no to.
+            language: language,
+            // **What it reblogs is the held row's, always** (#290): a reblog's target does not
+            // change once it is held, so no later copy can turn a reblog — a kept one, which
+            // holds its post — towards another post.
+            // What it answers is this read's word, as its words are; a name a load found for
+            // either reference stays (`Reference.rebuilt`).
+            refs: Reference.rebuilt(answers: answersReference, quotes: quotes, from: held.refs),
+            // This device's own, which no read says anything about (#293).
+            refsDue: held.refsDue
         )
     }
 
@@ -665,26 +905,56 @@ public struct Note: Identifiable, Hashable, Sendable {
     /// too; not the opening post, which no listing carries (#154). A title, the post's address
     /// and its author's picture are not here either: a source that has them sent them with the
     /// first copy, and one that did not has none to send. Nor the counts, where the later copy
-    /// wins rather than fills (`counts`).
+    /// wins rather than fills (`counts`) — and nor what the reader has done to the post, where the
+    /// later copy's word wins wherever it says one (#285).
     ///
     /// **A quote filled in brings its words with it** (#214). A row held before this device read
     /// quotes was read with the quote spelled into its words as an `RE:` address; the copy that
     /// says the quote has its words without it. Keeping the held words would draw the quote twice.
-    func filled(from other: Note) -> Note {
-        let quoteArrives = quote == nil && other.quote != nil
+    func filled(from other: Note, marksStand: Bool = false) -> Note {
+        let quoteArrives = quotesReference == nil && other.quotesReference != nil
+        // A copy its source's own word says was read before this one (#286) says nothing of the
+        // reader that this row does not say more lately: a reload still on its way when the
+        // reader pressed, landing after the source answered the press. And so one the store
+        // knows was sent before the reader's act landed (#291), which is `marksStand`.
+        let stale = marksStand || other.isEarlier(than: self)
+        // The later copy's quote wins, as its counts do (#214) — see `Reference.laterQuote`.
+        let quotes = Reference.laterQuote(other.quotesReference, over: quotesReference)
         return Note(
             id: id, source: source, author: author, handle: handle,
             body: quoteArrives ? other.body : body, title: title,
-            board: board ?? other.board, postedAt: postedAt, categories: categories, reply: reply,
+            board: board ?? other.board, postedAt: postedAt, categories: categories,
             boostedBy: boostedBy, boosterHandle: boosterHandle,
-            boosted: boosted ?? other.boosted, favourited: favourited ?? other.favourited,
+            // **What the reader has done to it is the source's latest word** (#285), as its
+            // counts are: where the later copy says, it wins, so a boost, a favourite or a
+            // bookmark taken off elsewhere reads as off after an ordinary reload. Where it says
+            // nothing — a read made signed out — what was held stands.
+            boosted: stale ? boosted : other.boosted ?? boosted,
+            favourited: stale ? favourited : other.favourited ?? favourited,
+            bookmarked: stale ? bookmarked : other.bookmarked ?? bookmarked,
             audience: audience ?? other.audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive ?? other.sensitive, spoiler: spoiler ?? other.spoiler,
             emojis: emojis, url: url, counts: counts,
-            statusID: statusID ?? other.statusID, opening: opening, holding: holding,
+            statusID: statusID ?? other.statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
-            // The later copy's quote wins, as its counts do (#214) — see `Quote.later`.
-            quote: Quote.later(other.quote, over: quote)
+            kept: kept, editedAt: editedAt, earlier: earlier, language: language ?? other.language,
+            refs: Reference.rebuilt(answers: answersReference, quotes: quotes, from: refs), refsDue: refsDue
+        )
+    }
+
+    /// This note with nothing said of what the reader has done to it (#285): not boosted, not
+    /// favourited, not bookmarked, and not the opposite either — the state of a post no signed-in
+    /// read has brought. What a row goes back to when the sign-in those words were said to ends.
+    func withoutReaderMarks() -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board, postedAt: postedAt, categories: categories,
+            boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: nil,
+            favourited: nil, bookmarked: nil, audience: audience, avatarURL: avatarURL,
+            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
+            url: url, counts: counts, statusID: statusID, opening: opening,
+            goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
+            editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
         )
     }
 
@@ -692,13 +962,101 @@ public struct Note: Identifiable, Hashable, Sendable {
     public func with(opening: ForumOpening) -> Note {
         Note(
             id: id, source: source, author: author, handle: handle, body: body, title: title,
-            board: board, postedAt: postedAt, categories: categories, reply: reply,
+            board: board, postedAt: postedAt, categories: categories,
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
-            favourited: favourited, audience: audience, avatarURL: avatarURL,
+            favourited: favourited, bookmarked: bookmarked, audience: audience, avatarURL: avatarURL,
             attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
-            url: url, counts: counts, statusID: statusID, opening: opening, holding: holding,
-            goneSince: goneSince, gaps: gaps, listed: listed, quote: quote
+            url: url, counts: counts, statusID: statusID, opening: opening,
+            goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
+            editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
         )
+    }
+
+    /// This note referring by `references` — what a load found the names of (#293). Everything
+    /// else is as it was.
+    func referring(by references: [Reference]) -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board, postedAt: postedAt, categories: categories,
+            boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
+            favourited: favourited, bookmarked: bookmarked, audience: audience, avatarURL: avatarURL,
+            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
+            url: url, counts: counts, statusID: statusID, opening: opening,
+            goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
+            editedAt: editedAt, earlier: earlier, language: language, refs: references, refsDue: refsDue
+        )
+    }
+
+    /// This note without the word that it arrived as a reblog by somebody (#290) — what a row
+    /// held from before a reblog was an item goes back to once that reblog is here as itself.
+    func withoutArrivalAsReblog() -> Note {
+        Note(
+            id: id, source: source, author: author, handle: handle, body: body, title: title,
+            board: board, postedAt: postedAt, categories: categories,
+            boosted: boosted, favourited: favourited, bookmarked: bookmarked, audience: audience,
+            avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
+            emojis: emojis, url: url, counts: counts, statusID: statusID, opening: opening,
+            goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
+            editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
+        )
+    }
+}
+
+/// What a post said before its source changed it (#286), as this device held it.
+///
+/// **The words and the author's warning, and nothing else.** Those are what a post says. Its
+/// pictures, a poll and its emoji are not kept here: a change to those alone still marks the post
+/// as changed, and offers no earlier wording. Counts and what the reader did to it are no part
+/// of what it says at all.
+public struct Wording: Hashable, Sendable {
+    /// How many earlier wordings a post keeps. A post rewritten more often than this lets its
+    /// oldest go, so a source restating one post at every read cannot grow one row without end.
+    public static let kept = 50
+    /// How much the earlier wordings of one post may weigh together, as UTF-8: 128 KB. Fifty
+    /// wordings of an ordinary post — five hundred characters, a kilobyte or two each — fit
+    /// several times over, and so do the last few of the longest post a large server allows;
+    /// what it stops is a source handing over a megabyte at every read and having each one kept.
+    public static let budget = 128 * 1024
+
+    public let body: String
+    /// The line the author covered it with then. Nothing where the source said none.
+    public let spoiler: String?
+    /// Whether the author had covered it then, or nothing where the source never said — the
+    /// post's own three answers (`Note.sensitive`), kept so a wording that was covered with no
+    /// line of warning is still known to have been covered once the post no longer is.
+    public let sensitive: Bool?
+    /// When its source said the post changed from this — the moment this stopped being what it
+    /// says.
+    public let until: Date
+
+    public init(body: String, spoiler: String? = nil, sensitive: Bool? = nil, until: Date) {
+        self.body = body
+        self.spoiler = spoiler
+        self.sensitive = sensitive
+        self.until = until
+    }
+
+    /// Whether the author had covered this wording: `DummyItem.covered`'s rule, asked of then.
+    public var covered: Bool { sensitive == true || !(spoiler ?? "").isEmpty }
+
+    /// What this wording weighs against `budget`.
+    var bytes: Int { body.utf8.count + (spoiler?.utf8.count ?? 0) }
+
+    /// `wordings` held to both bounds, the oldest going first: no more than `kept` of them, and
+    /// no more than `budget` between them. **The one rule, for a wording being kept and for a
+    /// row being read back**, so a store written by anything else is held to it too.
+    ///
+    /// **A wording heavier than the whole budget goes first, wherever it stands**: it could never
+    /// be kept, and trimmed oldest-first it would take every lighter wording before it on its
+    /// way out — one oversized rewrite costing a post everything it had said.
+    public static func bounded(_ wordings: [Wording]) -> [Wording] {
+        var held = Array(wordings.filter { $0.bytes <= budget }.suffix(kept))
+        var weight = held.reduce(0) { $0 + $1.bytes }
+        while weight > budget, let oldest = held.first {
+            weight -= oldest.bytes
+            held.removeFirst()
+        }
+        return held
     }
 }
 
