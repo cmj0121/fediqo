@@ -475,6 +475,7 @@ public struct FediqoRootView: View {
             .environment(\.shellSourcesHere, Set(session.sources.map(\.host)))
             // Whether there is nothing here but a finger (#303), asked once and handed down.
             .environment(\.shellTouch, ShellHands.shared.touch)
+            .environment(\.shellCovered, Self.covered(viewing: viewedItem != nil, shortcuts: showingShortcuts, landing: playsLanding))
             .overlay(alignment: .top) {
                 if staged?.reports == true { StagedReport(session: session, counts: staged?.counts == true) }
             }
@@ -1285,6 +1286,14 @@ public struct FediqoRootView: View {
         }
     }
 
+    /// Whether something is drawn over the shell in this same view (#305): the opened picture,
+    /// the keys' guide, the landing. Every question, the composer, the editor, a sign-in, the
+    /// list of timelines and a link read out of a post on a phone are sheets — views of their
+    /// own, which a gesture on them never reaches the shell through.
+    static func covered(viewing: Bool, shortcuts: Bool, landing: Bool) -> Bool {
+        viewing || shortcuts || landing
+    }
+
     /// One step of a staged launch, done as the person's own press or scroll would do it.
     private func take(_ step: ShellStaged.Step, of staged: ShellStaged) {
         switch step {
@@ -1320,6 +1329,19 @@ public struct FediqoRootView: View {
         case .list: session.timelineListShown = true
         case .unvisited: session.timelinePlaces = TimelinePlaces()
         case .reload: _ = reload()
+        case .refused:
+            if session.sources.count > 1 { session.rowRefusal = (host: session.sources[1].host, key: "account.bookmarks.failed") }
+        case .slid(let page, let share):
+            let slide = session.slide(page)
+            slide.x = -CGFloat(share) * slide.width
+            slide.lean = CGFloat(share)
+        case .tabsList(let page): session.slide(page).listShown = true
+        case .editor: session.newTimeline()
+        case .usageNext:
+            let tabs = Array(UsagePane.Purpose.allCases)
+            if let to = TimelineSwipe.target(from: tabs.firstIndex(of: session.usagePurpose), count: tabs.count, step: 1) {
+                session.usagePurpose = tabs[to]
+            }
         case .next: session.stepTimeline(by: 1)
         case .previous: session.stepTimeline(by: -1)
         }

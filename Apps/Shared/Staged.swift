@@ -45,9 +45,17 @@ enum Staged {
             host: host, accessToken: "staged", clientID: "staged", clientSecret: "staged",
             scopes: MastodonOAuth.reading + " " + MastodonOAuth.writing
         ))
+        // Signed in to read only, for the picture of the sources (#302).
+        try? tokens.save(MastodonToken(
+            host: "reads.example", accessToken: "staged", clientID: "staged", clientSecret: "staged",
+            scopes: MastodonOAuth.reading
+        ))
         return FediqoRootView(
             http: StagedHTTP(),
-            store: ItemStore(sources: [source], notes: notes + (screenName == "returned" || screenName == "fresh" ? rising : [])),
+            store: ItemStore(
+                sources: [source] + (screenName?.hasPrefix("account") == true ? others : []),
+                notes: notes + (screenName == "returned" || screenName == "fresh" ? rising : [])
+            ),
             forums: ForumSessions(),
             mastodon: MastodonSessions(tokens: tokens, sender: StagedHTTP()),
             deviceName: "Staged",
@@ -70,6 +78,20 @@ enum Staged {
         }
         return staged
     }
+
+    /// The sources a person might hold besides the one the posts are from (#302): signed in to
+    /// read only, signed in to nothing, a forum with boards chosen, another kind of forum, and
+    /// one with a long name. None is asked anything: `StagedHTTP` answers for them all.
+    private static let others: [Source] = [
+        Source(host: "reads.example", kind: .mastodon),
+        Source(host: "signed-out.example", kind: .mastodon),
+        Source(host: "forum.example", kind: .discuz, boards: [
+            BoardSubscription(fid: 1, name: "General"), BoardSubscription(fid: 2, name: "Phones"),
+            BoardSubscription(fid: 3, name: "A board with a long name"),
+        ]),
+        Source(host: "talk.example", kind: .discourse),
+        Source(host: "a-rather-long-subdomain.of-a-long-name.example", kind: .mastodon),
+    ]
 
     private static var screenName: String? { ProcessInfo.processInfo.environment["FEDIQO_STAGED_SCREEN"] }
 
@@ -100,6 +122,11 @@ enum Staged {
             var staged = ShellStaged(place: .preferences)
             staged.preferences = "gestures"
             return staged
+        // Preferences' page for which Fediqo this is: its version, build and source.
+        case "about":
+            var staged = ShellStaged(place: .preferences)
+            staged.preferences = "build"
+            return staged
         case "tops":
             var staged = ShellStaged(place: .timeline, reports: true)
             staged.counts = true
@@ -115,6 +142,26 @@ enum Staged {
             var staged = ShellStaged(place: .timeline, opens: NoteKey(host: host, id: opened).rowID, reports: true)
             staged.counts = true
             return staged
+        // An empty timeline in front, and the step a swipe takes made from it (#305): a drag
+        // cannot be made for a picture, and the step it ends in can.
+        case "onempty": return ShellStaged(place: .timeline, steps: [.empty])
+        // A timeline with nothing in it while a reload is held: where the page says it is
+        // being read, and where the notice of it stands, with no post under either.
+        case "loadingempty": return ShellStaged(place: .timeline, steps: [.empty, .reload])
+        case "fromempty": return ShellStaged(place: .timeline, steps: [.empty, .previous])
+        case "account": return ShellStaged(place: .account, steps: [.refused])
+        // A page held 40% through a swipe to the next (#305): the head at rest, its dot leaning,
+        // and what is under it displaced and cut at the pane's edge.
+        case "midslide": return ShellStaged(place: .timeline, steps: [.slid("timeline", 0.4)])
+        case "usagemid": return ShellStaged(place: .usage, steps: [.slid("usage", 0.4)])
+        // The list each page's name opens, and the editor (#305).
+        case "usagelist": return ShellStaged(place: .usage, steps: [.tabsList("usage")])
+        case "preflist": return ShellStaged(place: .preferences, steps: [.tabsList("preferences")])
+        case "accountlist": return ShellStaged(place: .account, steps: [.tabsList("account")])
+        case "editor": return ShellStaged(place: .timeline, steps: [.editor])
+        case "editorlist": return ShellStaged(place: .timeline, steps: [.editor, .tabsList("editor")])
+        case "usage": return ShellStaged(place: .usage)
+        case "usagenext": return ShellStaged(place: .usage, steps: [.usageNext])
         case "menu": return ShellStaged(place: .timeline, menus: true)
         case "cut": return ShellStaged(place: .timeline, steps: [.scroll(90)], reports: true)
         case "returned": return ShellStaged(place: .timeline, steps: [.scroll(700), .trends, .all], reports: true)

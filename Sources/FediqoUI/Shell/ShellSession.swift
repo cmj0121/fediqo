@@ -413,6 +413,16 @@ final class ShellSession {
     /// The post being read under a finger (#303), beside the row it is worked out from and held
     /// past observation for its reason. See `ShellReadingMark`.
     @ObservationIgnored let readingMark = ShellReadingMark()
+    /// How far each page that is swiped sideways has been slid (#305), by the page's name.
+    /// Here so the page's head and its body read one, and past observation for the mark's reason.
+    @ObservationIgnored private var slides: [String: PageSlide] = [:]
+
+    func slide(_ page: String) -> PageSlide {
+        if let slide = slides[page] { return slide }
+        let slide = PageSlide()
+        slides[page] = slide
+        return slide
+    }
 
     /// The row one id stands for, anywhere in what this device holds — or nothing, where this
     /// device does not hold it any more.

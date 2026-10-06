@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 /// What a page's tabs are made of: a name and the glyph it leads with.
 ///
@@ -25,18 +28,79 @@ protocol ShellTab: Hashable, Identifiable {
 struct ShellTabs<Tab: ShellTab>: View {
     let tabs: [Tab]
     let selected: Tab
+    /// How far a swipe has the page under the tabs, and whether the list of them is up: the
+    /// page's own, where it is swiped; nothing, and the tabs keep one of their own.
+    var slide: PageSlide?
     let onSelect: (Tab) -> Void
 
-    init(_ tabs: [Tab], selected: Tab, onSelect: @escaping (Tab) -> Void) {
+    init(_ tabs: [Tab], selected: Tab, slide: PageSlide? = nil, onSelect: @escaping (Tab) -> Void) {
         self.tabs = tabs
         self.selected = selected
+        self.slide = slide
         self.onSelect = onSelect
+    }
+
+    @Environment(\.shellLayout) private var shellLayout
+    @Environment(\.shellTabsSlide) private var handed
+    @State private var own = PageSlide()
+
+    /// Whether the tabs are one head that names the one in front, with a dot for each (#305):
+    /// on a narrow page, where there is more than one. A wide page writes them all in a row.
+    static func headed(_ layout: ShellLayout, count: Int) -> Bool {
+        layout == .narrow && PageHead<EmptyView>.drawn(count: count)
+    }
+
+    /// What the name lists: every tab by name and glyph, the one in front marked.
+    static func listed(_ tabs: [Tab], selected: Tab, language: DummyLanguage? = nil) -> [PageListEntry] {
+        tabs.map { tab in
+            PageListEntry(
+                id: String(describing: tab.id), name: L10n.t(tab.titleKey, language: language),
+                symbol: tab.symbol, current: tab == selected
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var head: some View {
+        @Bindable var slide = slide ?? handed ?? own
+        let index = tabs.firstIndex(of: selected)
+        PageHead(
+            front: PageHead<EmptyView>.Front(
+                id: String(describing: selected.id), name: L10n.t(selected.titleKey), symbol: selected.symbol,
+                index: index, count: tabs.count
+            ),
+            hint: L10n.t("tabs.list.hint"), positionKey: "tabs.position", slide: slide,
+            onPress: { slide.listShown = true },
+            marks: { EmptyView() }
+        )
+        .sheet(isPresented: $slide.listShown) {
+            PageListSheet(
+                title: L10n.t("tabs.list.title"), entries: Self.listed(tabs, selected: selected),
+                choose: { chosen in
+                    if let tab = tabs.first(where: { String(describing: $0.id) == chosen.id }) { onSelect(tab) }
+                }
+            ) { EmptyView() }
+        }
+        .onDisappear { if slide.listShown { slide.listShown = false } }
+        .modifier(TabsScroll(step: { step in
+            guard let index, let to = TimelineSwipe.target(from: index, count: tabs.count, step: step) else { return nil }
+            onSelect(tabs[to])
+            return TimelineSwipe.announcement(name: L10n.t(tabs[to].titleKey), position: to, count: tabs.count, key: "tabs.position")
+        }))
     }
 
     /// Which ends of a scrolled row have more beyond them. See `ShellTabsMore`.
     @State private var more = ShellTabsMore(leading: false, trailing: true)
 
     var body: some View {
+        if Self.headed(shellLayout, count: tabs.count) {
+            head.headOfPage()
+        } else {
+            strip
+        }
+    }
+
+    private var strip: some View {
         ViewThatFits(in: .horizontal) {
             row
             // **A row that scrolls says so** (#302): the end with more beyond it fades out, so a
@@ -54,6 +118,8 @@ struct ShellTabs<Tab: ShellTab>: View {
                 }
                 .mask(ShellTabsFade(more: more))
         }
+        // The row stays where it is and shows the change: a swipe begins under it (#305).
+        .headOfPage()
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isTabBar)
     }
@@ -135,6 +201,8 @@ struct ShellTabPill: View {
                 .fill(selected ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
         )
         .contentShape(Capsule(style: .continuous))
+        // The tab chosen is shown changing, and does not snap, however it was chosen (#305).
+        .animation(.easeInOut(duration: TimelineDots.moves), value: selected)
     }
 }
 
@@ -179,4 +247,58 @@ private struct ShellTabsFade: View {
         )
         .frame(width: reach)
     }
+}
+
+/// VoiceOver's scroll on the tabs' head goes to the tab beside, and says which it is and where
+/// it stands — the way without a gesture, as on the timeline. Nothing on a Mac.
+private struct TabsScroll: ViewModifier {
+    /// One on or back: says what was arrived at, or nothing at an end.
+    let step: (Int) -> String?
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.accessibilityScrollAction { edge in
+            let way = ScrollsToNeighbour.step(toward: edge)
+            guard way != 0, let said = step(way) else { return }
+            UIAccessibility.post(notification: .pageScrolled, argument: said)
+        }
+        #else
+        content
+        #endif
+    }
+}
+
+/// A list under a page's tabs, on a narrow page: **the tabs are one head over the list, and not
+/// a row in it** (#305). The head stays where it is, the whole list under it follows a sideways
+/// swipe as one, and scrolled up the list goes under the head and is not read through it.
+///
+/// The head starts where the timeline's does, a page's edge in, so the name is in one place on
+/// every page. Nothing where the page is wide: its tabs are a row in the list, as they were.
+struct TabsOverForm<Tabs: View>: ViewModifier {
+    let headed: Bool
+    let slide: PageSlide
+    @ViewBuilder var tabs: Tabs
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(ProbedPane(part: .under))
+            .modifier(Slid(slide: slide, applies: headed ? nil : false))
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if headed {
+                    tabs
+                        .padding(.horizontal, Self.inset)
+                        .padding(.top, ShellSpace.step)
+                        .padding(.bottom, ShellSpace.snug)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        // Whatever the page is drawn on, which on a narrow page is the
+                        // system's own and not the chassis's colour.
+                        .background(.background)
+                        .modifier(ProbedPane(part: .head))
+                }
+            }
+    }
+
+    /// How far in the head starts from the list's own edge: the page's margin, less the room
+    /// the list already stands in from the page.
+    static var inset: CGFloat { ShellSpace.pad - ShellSpace.snug }
 }

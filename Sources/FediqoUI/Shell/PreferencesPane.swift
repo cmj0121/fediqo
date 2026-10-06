@@ -109,6 +109,12 @@ struct PreferencesPane: View {
     @State private var unhosted: Detail?
 
     @Environment(\.shellTouch) private var touch
+    @Environment(\.shellLayout) private var shellLayout
+    /// Whether the tabs are one head over the list (#305): on a narrow page.
+    private var headed: Bool { ShellTabs<Purpose>.headed(shellLayout, count: Purpose.shown(touch: touch).count) }
+    @State private var ownSlide = PageSlide()
+    /// How far what is under the tabs has been slid by a sideways swipe (#305).
+    private var slide: PageSlide { session?.slide("preferences") ?? ownSlide }
 
     private var purpose: Purpose { Purpose.drawn(session?.preferencesPurpose ?? .choices, touch: touch) }
 
@@ -124,9 +130,16 @@ struct PreferencesPane: View {
 
     var body: some View {
         Form {
-            Section { tabs }
-            page
+            // **On a narrow page the tabs are one head, over the list and not in it** (#305):
+            // the whole of what is under the head then follows a swipe as one. A wide page
+            // keeps its row of tabs where it was, in the list.
+            if !headed { Section { tabs } }
+            // On a wide page the tabs are a row in the list, and what is under them follows a
+            // swipe row by row.
+            Group { page }.modifier(Slid(slide: slide, applies: headed ? false : nil))
         }
+        // On a narrow one the tabs are one head over the list, and the whole list follows.
+        .modifier(TabsOverForm(headed: headed, slide: slide) { tabs })
         .formStyle(.grouped)
         // **The pane the type size is chosen on has to move with it** (#96). A `Form`'s rows
         // take the platform's own font unless they are told otherwise, and on a Mac that font
@@ -146,6 +159,12 @@ struct PreferencesPane: View {
             guard let session, session.preferencesPurpose != Purpose.drawn(session.preferencesPurpose, touch: now) else { return }
             session.preferencesPurpose = Purpose.drawn(session.preferencesPurpose, touch: now)
         }
+        // A sideways swipe goes to the tab beside, and back out of a row's detail (#305).
+        .modifier(SwipesTabs(
+            slide: slide, tabs: Purpose.shown(touch: touch), selected: purpose,
+            detail: opened.wrappedValue != nil, back: { opened.wrappedValue = nil },
+            select: { session?.preferencesPurpose = $0 }
+        ))
         .modifier(CarryFlow(session: session))
         .modifier(NearbyFlow(session: session))
     }
@@ -255,7 +274,7 @@ struct PreferencesPane: View {
     /// The page's tabs (`ShellTabs`), in the Form so the grouped chrome is the page's own. Tab
     /// rotates them (`ShellSession.rotatePreferencesTab`).
     private var tabs: some View {
-        ShellTabs(Purpose.shown(touch: touch), selected: purpose) { session?.preferencesPurpose = $0 }
+        ShellTabs(Purpose.shown(touch: touch), selected: purpose, slide: slide) { session?.preferencesPurpose = $0 }
     }
 
     /// Off is no latest date. Turning it on starts at today, the date that hides nothing yet.

@@ -110,12 +110,14 @@ struct NarrowPhoneTests {
         #expect(ShellTabsMore(offset: 0, across: 300, content: 300) == ShellTabsMore(leading: false, trailing: false))
     }
 
-    @Test("A notice stands over the compose button where it floats, and where it does not it stands where it did")
-    func noticeOverTheButton() {
+    @Test("A notice stands beside the compose button where it floats, by the width of the button's corner, and where none floats it has the whole foot of the page")
+    func noticeBesideTheButton() {
         let corner = FediqoRootView.composeCorner(canCompose: true)
-        #expect(StandsOverFloatingCorner.lift(corner: corner, already: ShellSpace.pad) == corner.height - ShellSpace.pad)
-        #expect(StandsOverFloatingCorner.lift(corner: FediqoRootView.composeCorner(canCompose: false), already: ShellSpace.pad) == 0)
-        #expect(StandsOverFloatingCorner.lift(corner: .zero, already: 0) == 0, "a wide page lifts nothing")
+        #expect(corner.width > FediqoRootView.Compact.button)
+        #expect(StandsBesideFloatingCorner.kept(corner: corner, already: 0) == corner.width)
+        #expect(StandsBesideFloatingCorner.kept(corner: corner, already: ShellSpace.pad) == corner.width - ShellSpace.pad, "its own margin is not kept twice")
+        #expect(StandsBesideFloatingCorner.kept(corner: FediqoRootView.composeCorner(canCompose: false), already: ShellSpace.pad) == 0)
+        #expect(StandsBesideFloatingCorner.kept(corner: .zero, already: 0) == 0, "a wide page keeps nothing back")
     }
 
     #if os(macOS)
@@ -421,6 +423,60 @@ struct NarrowPhoneTests {
         let phone = Self.inner("Nothing new.", proposing: 320)
         #expect(abs(wide.width - alone.width) <= 0.5 && abs(phone.width - alone.width) <= 0.5, "\(alone.width) alone, \(wide.width) on a desktop, \(phone.width) on a phone")
         #expect(alone.width < 200, "a short notice is not the measure wide: \(alone.width)")
+    }
+
+    /// Where the notice's plate landed in a page `width` wide, placed as the timeline places it:
+    /// at the foot, beside whatever corner the page was told is taken. The plate, and not the
+    /// margin the notice keeps at each side of it.
+    private static func placed(_ text: String, width: CGFloat, corner: CGSize) -> CGRect {
+        final class Frame { var rect = CGRect.zero }
+        let landed = Frame()
+        let view = Color.clear
+            .frame(width: width, height: 400)
+            .overlay(alignment: .bottom) {
+                TimelineToastBanner(toast: TimelineToast(kind: .loading, text: text))
+                    .background(GeometryReader { room in
+                        let _ = landed.rect = room.frame(in: .named("page"))
+                        Color.clear
+                    })
+                    .padding(.bottom, ShellSpace.pad)
+                    .standsBesideFloatingCorner(by: ShellSpace.pad)
+            }
+            .coordinateSpace(name: "page")
+            .environment(\.shellFloatingCorner, corner)
+        let hosted = NSHostingView(rootView: view)
+        hosted.frame = NSRect(origin: .zero, size: hosted.fittingSize)
+        hosted.layoutSubtreeIfNeeded()
+        return landed.rect.insetBy(dx: ShellSpace.pad, dy: 0)
+    }
+
+    @Test("On a page with the compose button the notice is at the foot and wholly to the leading side of the button, short or long; with no button it is in the middle of the foot, as wide as the page allows",
+          arguments: [320, 440] as [CGFloat])
+    func theNoticeIsBesideTheButton(_ width: CGFloat) throws {
+        let corner = FediqoRootView.composeCorner(canCompose: true)
+        // The button as the root lays it: its own size, and the room it keeps from the edge.
+        let button = width - ShellSpace.room - FediqoRootView.Compact.button
+        let long = String(repeating: "Reloading fixture.example Public. ", count: 12)
+        for text in ["Reloading", long] {
+            let beside = Self.placed(text, width: width, corner: corner)
+            #expect(beside.width > 40 && beside.minX >= ShellSpace.pad - 0.5, "\(beside)")
+            #expect(beside.maxX <= button - ShellSpace.snug + 0.5, "the notice ends at \(beside.maxX) and the button begins at \(button)")
+            #expect(abs(beside.maxY - (400 - ShellSpace.pad)) <= 0.5, "at the foot, and not lifted: \(beside)")
+            #expect(abs(beside.midX - (width - corner.width + ShellSpace.pad) / 2) <= 0.5, "in the middle of the room it has: \(beside)")
+            let alone = Self.placed(text, width: width, corner: .zero)
+            #expect(abs(alone.midX - width / 2) <= 0.5 && abs(alone.maxY - (400 - ShellSpace.pad)) <= 0.5, "\(alone)")
+            #expect(alone.maxX <= width - ShellSpace.pad + 0.5 && alone.minX >= ShellSpace.pad - 0.5)
+        }
+        // A long one uses the room it has: it is narrower beside the button than alone, by the corner.
+        let beside = Self.placed(long, width: width, corner: corner), alone = Self.placed(long, width: width, corner: .zero)
+        #expect(beside.width < alone.width, "\(beside.width) beside the button, \(alone.width) alone")
+        // And the timeline places it so.
+        let pane = try String(
+            contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Sources/FediqoUI/Shell/TimelinePane.swift"),
+            encoding: .utf8
+        )
+        #expect(pane.contains(".padding(.bottom, ShellSpace.pad)\n                    // At the foot of the page, beside the compose button where it floats and\n                    // never under it or over it (#302).\n                    .standsBesideFloatingCorner(by: ShellSpace.pad)"))
     }
 
     // MARK: - The head of an opened post

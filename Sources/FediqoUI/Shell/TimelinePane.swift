@@ -81,6 +81,9 @@ struct TimelinePane: View {
     /// The list answers the count and not the switch: a list drawn afresh — a return through a
     /// timeline with no posts — is not there to hear the switch, and is there for this.
     @State private var returns = 0
+    /// How far a sideways swipe has slid what is under the head (#305). Read by `Slid`, and by
+    /// the head's dots, which lean with it.
+    private var slide: PageSlide { session.slide("timeline") }
     /// When the reload mark was last pressed to begin a reload (#307). See `reloadMark`.
     @State private var reloadPressed: Date?
 
@@ -114,11 +117,15 @@ struct TimelinePane: View {
                 .padding(.horizontal, ShellSpace.pad)
                 .padding(.top, ShellSpace.step)
                 .padding(.bottom, ShellSpace.snug)
+                // The head stays where it is and shows the change: a swipe begins under it.
+                .headOfPage()
+                .modifier(ProbedPane(part: .head))
 
             Rectangle()
                 .fill(ShellChrome.hairline(colorScheme))
                 .frame(height: ShellSpace.hair)
 
+            Group {
             // **Whatever step the reader is standing on** (#122). A face pressed inside a
             // conversation opens over it, and a row pressed on that page opens over the page;
             // which is in front is `ShellWalk` and is not decided again here. **No `default:`.**
@@ -244,14 +251,27 @@ struct TimelinePane: View {
             case .link, nil:
                 underneath
             }
+            }
+            // What is under the head follows a sideways swipe (#305) — this, and not the pane.
+            .modifier(ProbedPane(part: .under))
+            .modifier(Slid(slide: slide))
         }
-        .modifier(BacksFromEdge(touch: touch, opened: Self.backs(from: standing), back: onBack))
+        // **A sideways swipe, heard on the pane and begun under its head** (#305): whatever it draws —
+        // posts, or that there are none — and whichever page is in front. On the timeline it
+        // goes to the one beside; on a post, a person or a tag opened over it, it goes back.
+        // What follows the finger stays inside the pane: not over the rail on a wide page.
+        .modifier(SwipesSideways(
+            session: session, slide: slide, touch: touch, page: Self.page(standing),
+            opened: Self.openedID(standing), searching: searching, back: onBack
+        ))
+        .modifier(HoldsSlide(holds: touch))
         .overlay(alignment: .bottom) {
             if let banner {
                 TimelineToastBanner(toast: banner, work: session.work, reading: session.reload.reading)
                     .padding(.bottom, ShellSpace.pad)
-                    // Over the compose button where it floats, never under it (#302).
-                    .standsOverFloatingCorner(by: ShellSpace.pad)
+                    // At the foot of the page, beside the compose button where it floats and
+                    // never under it or over it (#302).
+                    .standsBesideFloatingCorner(by: ShellSpace.pad)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -445,13 +465,23 @@ struct TimelinePane: View {
         return TimelineSwipe.opensAt(kept: nil, first: first).map(Landing.top)
     }
 
-    /// Whether the page stood on is one opened over the list — a post, a person, a tag — which
-    /// a swipe in from the leading edge goes back from (#305). A page read out of a post is
-    /// somebody's own, and its edge is its own.
-    static func backs(from standing: ShellStep?) -> Bool {
+    /// What is in front, as far as a sideways swipe cares (#305): the timeline itself, a page
+    /// opened over it, or a page read out of a post, which is somebody's own.
+    static func page(_ standing: ShellStep?) -> TimelineSwipe.Page {
         switch standing {
-        case .person, .tag, .thread: true
-        case .link, nil: false
+        case .person, .tag, .thread: .opened
+        case .link: .link
+        case nil: .timeline
+        }
+    }
+
+    /// A name for the page opened, so a swipe begun on one is not acted on over another.
+    static func openedID(_ standing: ShellStep?) -> String? {
+        switch standing {
+        case .thread(let id): "thread:" + id
+        case .person(let person): "person:" + person.id
+        case .tag(let tag): "tag:" + String(describing: tag)
+        case .link, nil: nil
         }
     }
 
@@ -562,14 +592,8 @@ struct TimelinePane: View {
                     if !searching { TrendsEndFoot(timeline: timeline, session: session) }
                 }
                 .scrollTargetLayout()
-                // A sideways swipe goes to the timeline beside this one (#305). Inside what
-                // scrolls, because that is how it finds the scroll view to listen on.
-                .modifier(SwipesToNeighbour(session: session, touch: touch, opened: standing != nil, searching: searching))
             }
             .scrollIndicators(.never)
-            // The list slid sideways by a swipe stays inside its own pane (#305): not over the
-            // rail beside it on a wide page.
-            .modifier(HoldsSlide(holds: touch))
             // Pulled down from its top, the list is read again as the reload mark reads it
             // (#307) — the same press, by the same function — wherever that mark is offered.
             .modifier(PullsToReload(
@@ -740,7 +764,7 @@ struct TimelinePane: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             if shellLayout == .narrow, !session.queries.isEmpty {
-                TimelineNarrowHead(session: session) {
+                TimelineNarrowHead(session: session, slide: slide) {
                     searchMark
                     reloadMark
                 }
@@ -1062,33 +1086,38 @@ struct FingerRoom: ViewModifier {
     }
 }
 
-/// The swipe to the timeline beside this one, on an iPhone or iPad (#305). Nothing on a Mac.
+/// The sideways swipe on the timelines' page, on an iPhone or iPad (#305). Nothing on a Mac.
 /// A modifier of its own for `KeepsTopRow`'s reason.
-struct SwipesToNeighbour: ViewModifier {
+struct SwipesSideways: ViewModifier {
     let session: ShellSession
+    let slide: PageSlide
     let touch: Bool
-    let opened: Bool
+    let page: TimelineSwipe.Page
+    /// The page opened, by name, where one is.
+    let opened: String?
     let searching: Bool
+    let back: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.shellCovered) private var covered
 
     func body(content: Content) -> some View {
-        #if os(iOS)
+        let means = TimelineSwipe.means(
+            touch: touch, page: page, searching: searching,
+            listShown: session.timelineListShown, editing: session.editing != nil, covered: covered
+        )
         let place = session.timelinePosition
-        content.background(TimelineSwipeCatcher(
-            enabled: TimelineSwipe.enabled(
-                touch: touch, opened: opened, searching: searching,
-                listShown: session.timelineListShown, editing: session.editing != nil
-            ),
-            hasNext: TimelineSwipe.target(from: place.index, count: place.count, step: 1) != nil,
-            hasPrevious: TimelineSwipe.target(from: place.index, count: place.count, step: -1) != nil,
-            reduceMotion: reduceMotion,
-            inFront: { session.currentTimeline.id },
-            step: { session.stepTimeline(by: $0) }
+        let ways = means.map { TimelineSwipe.ways($0, index: place.index, count: place.count) }
+        content.modifier(PageSwipes(
+            slide: slide, enabled: means != nil, key: means == .back ? "back" : "beside",
+            hasNext: ways?.next ?? false, hasPrevious: ways?.previous ?? false,
+            inFront: { means == .back ? opened : session.currentTimeline.id },
+            step: { step in
+                guard means == .back else { return session.stepTimeline(by: step) }
+                guard step == -1 else { return false }
+                back()
+                return true
+            }
         ))
-        #else
-        content
-        #endif
     }
 }
 
@@ -1118,22 +1147,6 @@ struct SlideBounds: Shape {
 
     func path(in rect: CGRect) -> Path {
         Path(rect.insetBy(dx: holds ? 0 : -Self.beyond, dy: -Self.beyond))
-    }
-}
-
-/// The swipe in from the leading edge that goes back from an opened page (#305). See
-/// `BackEdgeCatcher`. Nothing on a Mac.
-struct BacksFromEdge: ViewModifier {
-    let touch: Bool
-    let opened: Bool
-    let back: () -> Void
-
-    func body(content: Content) -> some View {
-        #if os(iOS)
-        content.background(BackEdgeCatcher(enabled: TimelineSwipe.backHeard(touch: touch, opened: opened), back: back))
-        #else
-        content
-        #endif
     }
 }
 

@@ -113,24 +113,28 @@ struct TimelineList: Equatable {
 /// glyph, the dots and the marks at the far end keep their size.
 struct TimelineNarrowHead<Marks: View>: View {
     @Bindable var session: ShellSession
+    /// How far a finger is dragging what is under the head toward the timeline beside.
+    var slide: PageSlide? = nil
     @ViewBuilder var marks: Marks
-
-    @Environment(\.colorScheme) private var colorScheme
 
     private var timeline: TimelineQuery { session.currentTimeline }
 
-    /// A line of the name's writing, near enough: what its finger's reach is worked out from.
-    @ShellMetric(relativeTo: .callout) private var drawn: CGFloat = 20
-
     var body: some View {
-        HStack(alignment: .center, spacing: ShellSpace.step) {
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                name
-                standing
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            marks
-        }
+        let missing = session.hasMissingRule(timeline)
+        let place = session.timelinePosition
+        PageHead(
+            front: PageHead<Marks>.Front(
+                id: timeline.id, name: session.name(of: timeline), symbol: timeline.symbol,
+                accessory: missing ? "circle.dashed" : nil, line: session.rule(of: timeline),
+                index: place.index, count: place.count
+            ),
+            hint: Self.hint(missing: missing), slide: slide,
+            onPress: {
+                guard TimelineList.raises(pressed: session.timelineListPressed, editing: session.editing != nil) else { return }
+                session.timelineListShown = true
+            },
+            marks: { marks }
+        )
         // What was pressed in the list is done when the list has gone, and not on a clock.
         .sheet(isPresented: $session.timelineListShown, onDismiss: { session.timelineListDismissed() }) {
             TimelineListSheet(session: session)
@@ -145,41 +149,6 @@ struct TimelineNarrowHead<Marks: View>: View {
         }
     }
 
-    private var name: some View {
-        let missing = session.hasMissingRule(timeline)
-        return Button {
-            guard TimelineList.raises(pressed: session.timelineListPressed, editing: session.editing != nil) else { return }
-            session.timelineListShown = true
-        } label: {
-            HStack(spacing: ShellSpace.tight) {
-                Image(systemName: timeline.symbol)
-                    .symbolVariant(.fill)
-                    .accessibilityHidden(true)
-                Text(session.name(of: timeline))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                if missing {
-                    Image(systemName: "circle.dashed")
-                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                        .accessibilityHidden(true)
-                }
-                Image(systemName: "chevron.down")
-                    .shellFont(.mark, weight: .semibold)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                    .accessibilityHidden(true)
-            }
-            .shellFont(.name, weight: .semibold)
-            .foregroundStyle(ShellChrome.selectInk(colorScheme))
-            // The whole line, glyph to chevron, and a finger's reach round it on a phone —
-            // reached, not drawn, so the head is no taller for it.
-            .modifier(ShellTouchFloor(drawn: drawn))
-        }
-        .buttonStyle(.plain)
-        .help(L10n.t("timeline.list.hint"))
-        .accessibilityLabel(session.name(of: timeline))
-        .accessibilityHint(Self.hint(missing: missing))
-    }
-
     /// What VoiceOver adds after the name: that pressing it lists the timelines, and before
     /// that, where a rule has lost its source, that one has. Each a sentence written whole in
     /// its language, so neither is joined by another language's full stop.
@@ -187,43 +156,48 @@ struct TimelineNarrowHead<Marks: View>: View {
         L10n.t(missing ? "timeline.list.hint.missing" : "timeline.list.hint", language: language)
     }
 
-    @ViewBuilder
-    private var standing: some View {
-        let rule = session.rule(of: timeline)
-        let place = session.timelinePosition
-        let dots = place.index.flatMap { TimelineDots.dots(position: $0, of: place.count) }
-        HStack(spacing: ShellSpace.snug) {
-            if let dots { TimelineDotsRow(dots: dots) }
-            Text(rule)
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .lineLimit(1)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Self.spoken(rule: rule, position: place.index, of: place.count))
-    }
-
     /// The second line as it is heard: the rules, then "2 of 5".
     static func spoken(rule: String, position: Int?, of total: Int, language: DummyLanguage? = nil) -> String {
-        guard let position, total > 1 else { return rule }
-        return rule + " " + String(format: L10n.t("timeline.position", language: language), position + 1, total)
+        PageHead<Marks>.spoken(line: rule, position: position, of: total, language: language)
     }
 }
 
 /// The dots themselves. Drawn, never heard: the line they stand in says "2 of 5".
+///
+/// **A row of dots and nothing over them.** Each is as lit as the page in front is near it
+/// (`TimelineDots.drawn`): at rest one is lit and the rest are faint, and while a finger slides
+/// the page the one in front fades as its neighbour lights, by as much as the finger has gone.
+/// There was one lit dot carried over a row of faint ones, and between two places it showed
+/// beside the faint dot it had left and the one it was coming to — three where there are two.
+///
+/// **Nothing here is animated by the row.** What a finger moves is drawn where the finger has
+/// it, and a thing that also animated itself would chase the finger a fifth of a second behind.
+/// The one animation is the letting go, made where the page is let go (`PageSwipeCatcher`) and
+/// together with the page's own. With motion reduced nothing leans, and the dot lit is simply
+/// the other one once the page has changed.
+///
+/// It is the only thing that reads the slide here, so a drag draws this row again and nothing else.
 struct TimelineDotsRow: View {
-    let dots: TimelineDots
+    /// Which of them is in front, from nought, and how many there are.
+    let index: Int
+    let total: Int
+    var slide: PageSlide? = nil
 
     @Environment(\.colorScheme) private var colorScheme
     @ShellMetric(relativeTo: .caption) private var side: CGFloat = 6
 
     var body: some View {
+        let drawn = TimelineDots.drawn(position: CGFloat(index) + TimelineDots.leaning(slide?.lean ?? 0), of: total)
+        let faint = ShellChrome.inkFaint(colorScheme), lit = ShellChrome.selectInk(colorScheme)
+        // Laid out by the row's own direction, so in a language read from the right the next
+        // dot is the one to the left, as the next page is.
         HStack(spacing: side * 0.6) {
-            ForEach(0 ..< dots.count, id: \.self) { index in
+            ForEach(Array(drawn.enumerated()), id: \.offset) { _, dot in
                 Circle()
-                    .fill(index == dots.lit ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkFaint(colorScheme))
+                    .fill(faint.mix(with: lit, by: Double(dot.lit)))
                     .frame(width: side, height: side)
-                    .scaleEffect(dots.fades(index) ? 0.5 : 1)
+                    // Drawn smaller, never laid out smaller: the row is one size whatever it shows.
+                    .scaleEffect(1 - dot.small / 2)
             }
         }
         .fixedSize()
@@ -231,11 +205,57 @@ struct TimelineDotsRow: View {
     }
 }
 
+extension TimelineDots {
+    /// How long the head takes to show a change, in seconds.
+    static let moves: Double = 0.2
+    /// How far the name and the rules travel as they change, in points.
+    static let shift: CGFloat = 14
+
+    /// One dot as it is drawn.
+    struct Drawn: Equatable, Sendable {
+        /// How lit it is: `1` the page in front, `0` any other, and between the two while the
+        /// page is between them.
+        var lit: CGFloat
+        /// How far it is one of the small ones that say there are more past it: `0` to `1`.
+        var small: CGFloat = 0
+    }
+
+    /// How far a finger leans the row, of the page's width it has slid the page: never past the
+    /// one beside.
+    static func leaning(_ progress: CGFloat) -> CGFloat {
+        min(1, max(-1, progress))
+    }
+
+    /// The row for a page standing at `position` among `total` — a whole number at rest, and
+    /// between two while a finger has the page between them. Nothing for fewer than two.
+    ///
+    /// **Each dot is lit by how near the page is to it**: wholly at its own place, not at all a
+    /// whole place away, and in between by the share — so two neighbours are lit between them
+    /// by exactly as much as one is at rest, and no third is ever lit. A position past either
+    /// end is the end.
+    ///
+    /// **With more than `most` the row is a window that goes with the page**, by the rule
+    /// `dots(position:of:)` places it by, asked of the same position: in the middle of a long
+    /// row the window moves under a lit dot that stays where it is, and nothing is seen to
+    /// change — which is what it looks like once arrived, too. Near an end the window has
+    /// stopped and the lit dot goes on, and the small dot at that end grows as there stops
+    /// being anything past it.
+    static func drawn(position: CGFloat, of total: Int) -> [Drawn] {
+        guard total > 1 else { return [] }
+        let count = min(total, most)
+        let hidden = CGFloat(total - count)
+        let place = min(CGFloat(total - 1), max(0, position))
+        let first = min(hidden, max(0, place - CGFloat(most / 2)))
+        var row = (0 ..< count).map { Drawn(lit: max(0, 1 - abs(place - first - CGFloat($0)))) }
+        row[0].small = min(1, first)
+        row[count - 1].small = min(1, hidden - first)
+        return row
+    }
+}
+
 /// Every timeline, one to a row, and under them the two acts: a new one, and changing this one.
-///
-/// **One press on a row goes to that timeline** and the list closes. The rows are the faces
-/// every list in the app draws (`ShellListRowFace`), with the timeline's rules as the row's
-/// second line, so a timeline is chosen knowing what it is.
+/// The rows are `PageListSheet`'s, with the timeline's rules as the row's second line, so a
+/// timeline is chosen knowing what it is.
 struct TimelineListSheet: View {
     @Bindable var session: ShellSession
 
@@ -244,58 +264,27 @@ struct TimelineListSheet: View {
 
     var body: some View {
         let list = session.timelineList
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                    ForEach(list.entries) { entry in
-                        row(entry)
-                    }
-                    ShellRule().padding(.vertical, ShellSpace.snug)
-                    if list.offersNew {
-                        act("plus", "timeline.new.title", .new)
-                    }
-                    if list.offersEdit {
-                        act("pencil", "shortcut.edit", .edit(session.currentTimeline))
-                    }
-                }
-                .padding(ShellSpace.step)
+        PageListSheet(
+            title: L10n.t("timeline.list.title"),
+            entries: list.entries.map { entry in
+                PageListEntry(
+                    id: entry.id, name: entry.name, brief: entry.rule,
+                    symbol: entry.missing ? "circle.dashed" : entry.query.symbol, current: entry.current,
+                    hint: entry.missing ? L10n.t("timeline.pill.missing.hint") : nil
+                )
+            },
+            choose: { chosen in
+                if let entry = list.entries.first(where: { $0.id == chosen.id }) { session.goToTimeline(entry.query) }
             }
-            .background(ShellChrome.page(colorScheme))
-            .navigationTitle(L10n.t("timeline.list.title"))
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.t("compose.cancel")) { dismiss() }
-                }
+        ) {
+            ShellRule().padding(.vertical, ShellSpace.snug)
+            if list.offersNew {
+                act("plus", "timeline.new.title", .new)
+            }
+            if list.offersEdit {
+                act("pencil", "shortcut.edit", .edit(session.currentTimeline))
             }
         }
-        #if os(macOS)
-        .frame(minWidth: 320, minHeight: 360)
-        #else
-        .presentationDetents([.medium, .large])
-        #endif
-    }
-
-    private func row(_ entry: TimelineList.Entry) -> some View {
-        Button {
-            session.goToTimeline(entry.query)
-            dismiss()
-        } label: {
-            ShellListRowFace(
-                title: entry.name, brief: entry.rule, figure: nil, selected: entry.current,
-                mark: Image(systemName: entry.missing ? "circle.dashed" : entry.query.symbol)
-            )
-            .background(
-                RoundedRectangle(cornerRadius: RailView.Metrics.wellRadius, style: .continuous)
-                    .fill(entry.current ? ShellChrome.selectFill(colorScheme) : .clear)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityHint(entry.missing ? L10n.t("timeline.pill.missing.hint") : "")
-        .accessibilityAddTraits(entry.current ? .isSelected : [])
     }
 
     /// An act of the list's: written down with the timeline it was pressed for, and done by

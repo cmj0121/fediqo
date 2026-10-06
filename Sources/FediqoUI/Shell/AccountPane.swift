@@ -76,7 +76,8 @@ struct AccountPane: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: ShellSpace.room) {
-                    masthead
+                    // What the page stands under stays where it is: a swipe begins under it.
+                    masthead.headOfPage()
                     page
                 }
                 .padding(ShellSpace.pad)
@@ -85,6 +86,11 @@ struct AccountPane: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .scrollIndicators(.never)
             .clearsFloatingCorner()
+            // A sideways swipe goes to the tab beside, where the page has tabs (#305).
+            .modifier(SwipesTabs(
+                slide: session.slide("account"), tabs: Self.tabbed(sources: session.sources.count) ? Array(Purpose.allCases) : [],
+                selected: session.accountPurpose, select: { session.accountPurpose = $0 }
+            ))
             // **The page takes the reader to the block, once, on its appearing.**
             //
             // **Gated on `nil → non-nil` and nothing else.** A reader coming back from the boards
@@ -222,10 +228,18 @@ struct AccountPane: View {
             ShellTabs(Purpose.allCases, selected: session.accountPurpose) {
                 session.accountPurpose = $0
             }
-            switch session.accountPurpose {
-            case .sources: sources
-            case .add: addPage
+            // The tabs' head leans with the page's own slide, and its list is the page's (#305).
+            .environment(\.shellTabsSlide, session.slide("account"))
+            .modifier(ProbedPane(part: .head))
+            // What is under the tabs follows a sideways swipe; the tabs stay (#305).
+            Group {
+                switch session.accountPurpose {
+                case .sources: sources
+                case .add: addPage
+                }
             }
+            .modifier(ProbedPane(part: .under))
+            .modifier(Slid(slide: session.slide("account")))
         } else {
             addPage
         }

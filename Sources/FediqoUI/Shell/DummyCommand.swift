@@ -536,8 +536,8 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .move, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage], touch: .press),
         // Back in the thread's own header, and the close mark on the viewer.
-        // And a swipe in from the leading edge, from an opened post, person or tag (#305).
-        DummyShortcut(group: .move, keys: ["q"], name: "back", commands: [.back], touch: .press, gestures: [.back, .backButton]),
+        // And a sideways swipe on an opened post, person or tag (#305).
+        DummyShortcut(group: .move, keys: ["q"], name: "back", commands: [.back], touch: .press, gestures: [.back]),
 
         // MARK: Read — what is in front of the reader
 

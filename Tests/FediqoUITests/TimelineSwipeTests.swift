@@ -49,16 +49,147 @@ struct TimelineSwipeTests {
         #expect(TimelineSwipe.hears(leaving: false) && !TimelineSwipe.hears(leaving: true))
     }
 
-    @Test("A swipe in from the leading edge goes back only under a finger and only from a page opened over the list: a post, a person, a tag")
-    func theSwipeBack() {
-        #expect(TimelineSwipe.backHeard(touch: true, opened: true))
-        #expect(!TimelineSwipe.backHeard(touch: false, opened: true))
-        #expect(!TimelineSwipe.backHeard(touch: true, opened: false))
-        #expect(TimelinePane.backs(from: .thread("a")))
-        if let tag = PostTag("fediqo") { #expect(TimelinePane.backs(from: .tag(tag))) }
-        #expect(!TimelinePane.backs(from: nil), "the list itself has nothing to go back to")
-        #expect(!TimelinePane.backs(from: .link(URL(string: "https://fixture.example/")!)), "somebody's page keeps its own edge")
+    @Test("A sideways swipe means one thing a page: on the timeline's own page — with posts or with none — the timeline beside; on a post, a person or a tag opened over it, back; on a page read out of a post, nothing")
+    func whatASwipeMeans() {
+        func means(_ page: TimelineSwipe.Page, touch: Bool = true, searching: Bool = false, list: Bool = false, editing: Bool = false) -> TimelineSwipe.Means? {
+            TimelineSwipe.means(touch: touch, page: page, searching: searching, listShown: list, editing: editing)
+        }
+        #expect(means(.timeline) == .beside)
+        #expect(means(.opened) == .back)
+        #expect(means(.link) == nil)
+        #expect(means(.timeline, touch: false) == nil && means(.opened, touch: false) == nil, "nothing with a keyboard")
+        #expect(means(.timeline, searching: true) == nil, "a search's results are no timeline")
+        #expect(means(.opened, searching: true) == .back)
+        #expect(means(.timeline, list: true) == nil && means(.opened, editing: true) == nil)
+        // Anything drawn over the page — a picture, the keys' guide, the landing — and no swipe.
+        for page in [TimelineSwipe.Page.timeline, .opened] {
+            #expect(TimelineSwipe.means(touch: true, page: page, searching: false, listShown: false, editing: false, covered: true) == nil)
+        }
+        #expect(FediqoRootView.covered(viewing: true, shortcuts: false, landing: false))
+        #expect(FediqoRootView.covered(viewing: false, shortcuts: true, landing: false))
+        #expect(FediqoRootView.covered(viewing: false, shortcuts: false, landing: true))
+        #expect(!FediqoRootView.covered(viewing: false, shortcuts: false, landing: false))
+        // The page is what the walk stands on, and nothing about what the timeline has to draw:
+        // an empty one, one still reading and one that failed are all the timeline's own page.
+        #expect(TimelinePane.page(nil) == .timeline)
+        #expect(TimelinePane.page(.thread("a")) == .opened)
+        if let tag = PostTag("fediqo") { #expect(TimelinePane.page(.tag(tag)) == .opened) }
+        #expect(TimelinePane.page(.link(URL(string: "https://fixture.example/")!)) == .link)
+        #expect(TimelinePane.openedID(.thread("a")) == "thread:a" && TimelinePane.openedID(nil) == nil)
     }
+
+    @Test("Back is the swipe that goes to the timeline before: the finger toward the trailing edge, by the same distance or the same flick; the other way, short, or flicked hard back, it is not")
+    func theSwipeBack() {
+        #expect(TimelineSwipe.goesBack(dx: 64, velocity: 0))
+        #expect(TimelineSwipe.goesBack(dx: 24, velocity: 500))
+        #expect(!TimelineSwipe.goesBack(dx: 63, velocity: 0))
+        #expect(!TimelineSwipe.goesBack(dx: -200, velocity: 0), "the other way goes nowhere")
+        #expect(!TimelineSwipe.goesBack(dx: 200, velocity: -500), "flicked hard back the way it came")
+        let ways = TimelineSwipe.ways(.back, index: 2, count: 5)
+        #expect(!ways.next && ways.previous, "only the way back: the other way is a rubber band")
+        #expect(TimelineSwipe.follow(dx: -90, hasNext: ways.next, hasPrevious: ways.previous) == -30)
+        #expect(TimelineSwipe.follow(dx: 90, hasNext: ways.next, hasPrevious: ways.previous) == 90)
+    }
+
+    @Test("On a page with tabs a swipe goes to the tab beside and stops at the first and the last; with a row's detail open it means back and no tab; with a keyboard it means nothing")
+    func aPageWithTabs() {
+        #expect(TimelineSwipe.means(touch: true, detail: false, tabs: 4) == .beside)
+        #expect(TimelineSwipe.means(touch: true, detail: true, tabs: 4) == .back)
+        #expect(TimelineSwipe.means(touch: false, detail: false, tabs: 4) == nil && TimelineSwipe.means(touch: false, detail: true, tabs: 4) == nil)
+        // With fewer than two tabs and no detail there is no swipe at all; a detail is still left by one.
+        #expect(TimelineSwipe.means(touch: true, detail: false, tabs: 0) == nil)
+        #expect(TimelineSwipe.means(touch: true, detail: false, tabs: 1) == nil)
+        #expect(TimelineSwipe.means(touch: true, detail: true, tabs: 0) == .back)
+        // And none under anything drawn over the page.
+        #expect(TimelineSwipe.means(touch: true, detail: false, tabs: 4, covered: true) == nil)
+        #expect(TimelineSwipe.means(touch: true, detail: true, tabs: 4, covered: true) == nil)
+        #expect(TimelineSwipe.backstop > 0.16 + 0.2 + 0.02, "the backstop comes after both animations")
+        for count in [UsagePane.Purpose.allCases.count, PreferencesPane.Purpose.shown(touch: true).count, AccountPane.Purpose.allCases.count, EditorTab.allCases.count] {
+            #expect(count >= 2)
+            let first = TimelineSwipe.ways(.beside, index: 0, count: count), last = TimelineSwipe.ways(.beside, index: count - 1, count: count)
+            #expect(first.next && !first.previous, "nothing before the first tab: a swipe never goes on into another place")
+            #expect(!last.next && last.previous)
+            #expect(TimelineSwipe.target(from: 0, count: count, step: 1) == 1)
+        }
+        // A page with no tabs has nowhere to go either way.
+        let none = TimelineSwipe.ways(.beside, index: nil, count: 0)
+        #expect(!none.next && !none.previous)
+    }
+
+    @Test("A swipe that sets out on a row that scrolls sideways is that row's; a list that scrolls up and down is swiped across")
+    func whatIsNotSwipedAcross() {
+        #expect(SwipeObstacle.scrollsSideways(content: CGSize(width: 900, height: 30), bounds: CGSize(width: 300, height: 30)))
+        #expect(!SwipeObstacle.scrollsSideways(content: CGSize(width: 300, height: 4000), bounds: CGSize(width: 300, height: 600)), "a list is swiped across")
+    }
+
+    @Test("A swipe does not begin on a page's head — the timeline's name and marks, a row of tabs — and does begin under it")
+    func whereASwipeBegins() {
+        let head = CGRect(x: 0, y: 0, width: 320, height: 60), tabs = CGRect(x: 16, y: 80, width: 288, height: 30)
+        #expect(SwipeZone.refuses(CGPoint(x: 100, y: 30), zones: [head, tabs]))
+        #expect(SwipeZone.refuses(CGPoint(x: 100, y: 95), zones: [head, tabs]))
+        #expect(!SwipeZone.refuses(CGPoint(x: 100, y: 300), zones: [head, tabs]), "under the head, on what moves")
+        #expect(!SwipeZone.refuses(CGPoint(x: 100, y: 30), zones: []))
+    }
+
+    @Test("The head's dot leans by the share of the page a finger has moved it, toward the next as positive — and not at all where the swipe means back, or before the page is measured")
+    func theLean() {
+        #expect(TimelineSwipe.lean(moved: -128, width: 320, beside: true) == 0.4)
+        #expect(TimelineSwipe.lean(moved: 128, width: 320, beside: true) == -0.4)
+        #expect(TimelineSwipe.lean(moved: 128, width: 320, beside: false) == 0, "a swipe back leans toward nobody")
+        #expect(TimelineSwipe.lean(moved: -128, width: 0, beside: true) == 0)
+        let slide = PageSlide()
+        #expect(slide.lean == 0 && !slide.listShown)
+        // Toward the trailing edge is positive whichever way the language reads (the recogniser
+        // turns it round before asking), so the lean is toward the next in both.
+        // Let go, the dots are sent the rest of the way to the one beside, with the page.
+        #expect(TimelineSwipe.leaves(by: 1, beside: true, still: false) == 1)
+        #expect(TimelineSwipe.leaves(by: -1, beside: true, still: false) == -1)
+        #expect(TimelineSwipe.leaves(by: -1, beside: false, still: false) == 0, "going back, there is no one beside")
+        #expect(TimelineSwipe.leaves(by: 1, beside: true, still: true) == 0, "with motion reduced nothing leans")
+    }
+
+    #if os(macOS)
+    /// Where two things landed, written as they are laid out.
+    private final class Landed {
+        var head = CGRect.zero
+        var under = CGRect.zero
+    }
+
+    @Test("What is slid is what the slide is put on, and nothing beside it: the head above stays exactly where it was, before, during and after")
+    func onlyWhatIsUnderTheHeadMoves() {
+        let slide = PageSlide()
+        let landed = Landed()
+        let view = VStack(spacing: 0) {
+            Color.clear.frame(height: 40)
+                .background(GeometryReader { place in
+                    let _ = landed.head = place.frame(in: .global)
+                    Color.clear
+                })
+            Color.clear.frame(height: 100)
+                .background(GeometryReader { place in
+                    let _ = landed.under = place.frame(in: .global)
+                    Color.clear
+                })
+                .modifier(Slid(slide: slide, applies: true))
+        }
+        .frame(width: 300)
+        let hosted = NSHostingView(rootView: view)
+        hosted.frame = NSRect(x: 0, y: 0, width: 300, height: 140)
+        func settle() {
+            hosted.layoutSubtreeIfNeeded()
+            RunLoop.main.run(mode: .default, before: .distantPast)
+        }
+        settle()
+        let head = landed.head, under = landed.under
+        slide.x = -120
+        settle()
+        #expect(landed.head == head, "the head moved to \(landed.head) from \(head)")
+        #expect(abs(landed.under.minX - (under.minX - 120)) <= 0.5, "what is under it is at \(landed.under.minX), slid from \(under.minX)")
+        slide.x = 0
+        settle()
+        #expect(landed.head == head && abs(landed.under.minX - under.minX) <= 0.5)
+    }
+    #endif
 
     @Test("A list slid sideways is held to its pane's own sides under a finger, and cut nowhere above or below; with a keyboard nothing is cut at all")
     func theSlideIsHeld() {
@@ -87,16 +218,6 @@ struct TimelineSwipeTests {
         #expect(TimelineSwipe.target(from: nil, count: 3, step: 1) == nil)
         #expect(TimelineSwipe.target(from: 0, count: 3, step: 0) == nil)
         #expect(TimelineSwipe.target(from: 0, count: 1, step: 1) == nil)
-    }
-
-    @Test("A swipe is heard only with nothing but a finger and the list itself in front: not with a keyboard, a post opened, a search, the list of timelines or the editor")
-    func whenItIsHeard() {
-        #expect(TimelineSwipe.enabled(touch: true, opened: false, searching: false, listShown: false, editing: false))
-        #expect(!TimelineSwipe.enabled(touch: false, opened: false, searching: false, listShown: false, editing: false))
-        #expect(!TimelineSwipe.enabled(touch: true, opened: true, searching: false, listShown: false, editing: false))
-        #expect(!TimelineSwipe.enabled(touch: true, opened: false, searching: true, listShown: false, editing: false))
-        #expect(!TimelineSwipe.enabled(touch: true, opened: false, searching: false, listShown: true, editing: false))
-        #expect(!TimelineSwipe.enabled(touch: true, opened: false, searching: false, listShown: false, editing: true))
     }
 
     @Test("The list follows the finger all the way toward a timeline that is there, and a third as far at an end where there is none")

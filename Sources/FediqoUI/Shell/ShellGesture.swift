@@ -18,18 +18,17 @@ public enum ShellGesture: String, CaseIterable, Identifiable, Sendable {
     case stop
     /// The system's own press on the top of the screen goes to the top of the list.
     case top
-    /// The timeline's name, pressed, lists every timeline; a new one and changing this one are there.
+    /// The name at the top, pressed, lists what it is one of: every timeline, with a new one and
+    /// changing this one there; or, on a page with tabs, its tabs.
     case name
     /// A sideways swipe goes to the timeline beside this one.
     case swipe
-    /// A swipe in from the screen's leading edge goes back from an opened post, person or tag.
+    /// A sideways swipe on an opened post, person or tag goes back.
     case back
     /// On a wide page, where every timeline's name is in a row: a name pressed goes to it.
     case pill
     /// And a name pressed and held changes that timeline.
     case pillHold
-    /// On a wide page the screen's edge is the rail's: Back is the button at the page's head.
-    case backButton
 
     public var id: String { rawValue }
 
@@ -55,7 +54,6 @@ public enum ShellGesture: String, CaseIterable, Identifiable, Sendable {
         case .back: "chevron.left"
         case .pill: "capsule"
         case .pillHold: "pencil"
-        case .backButton: "chevron.left.circle"
         }
     }
 
@@ -65,12 +63,12 @@ public enum ShellGesture: String, CaseIterable, Identifiable, Sendable {
 
     /// What the Gestures page lists, in order: **only what works in the arrangement in front.**
     /// A narrow page names its one timeline, and the name is the way to the rest; a wide one
-    /// writes every name in a row, has no name to press for a list, and gives the screen's
-    /// leading edge to the rail — so there the way back is the button.
+    /// writes every name in a row and has no name to press for a list. The swipes are the same
+    /// on both.
     static func listed(narrow: Bool) -> [ShellGesture] {
         narrow
             ? [.press, .hold, .pull, .stop, .top, .name, .swipe, .back]
-            : [.press, .hold, .pull, .stop, .top, .pill, .pillHold, .swipe, .backButton]
+            : [.press, .hold, .pull, .stop, .top, .pill, .pillHold, .swipe, .back]
     }
 
     /// The gestures the keys' table names, across all its lines.

@@ -14,11 +14,11 @@ import AppKit
 @Suite("The gestures are said in one place", .serialized)
 @MainActor
 struct GesturesTests {
-    @Test("The page lists only what works in the arrangement in front: on a narrow page the timeline's name and the swipe back; on a wide one the names in their row, held to change, and the Back button")
+    @Test("The page lists only what works in the arrangement in front: on a narrow page the timeline's name and the swipe back; on a wide one the names in their row, held to change; the swipes on both")
     func whatThePageLists() {
         #expect(ShellGesture.listed(narrow: true) == [.press, .hold, .pull, .stop, .top, .name, .swipe, .back])
-        #expect(ShellGesture.listed(narrow: false) == [.press, .hold, .pull, .stop, .top, .pill, .pillHold, .swipe, .backButton])
-        #expect(!ShellGesture.listed(narrow: false).contains(.back), "the screen's edge is the rail's on a wide page")
+        #expect(ShellGesture.listed(narrow: false) == [.press, .hold, .pull, .stop, .top, .pill, .pillHold, .swipe, .back])
+        #expect(ShellGesture.listed(narrow: false).contains(.back), "the swipe back is anywhere on the page, so a wide page has it too")
         #expect(!ShellGesture.listed(narrow: false).contains(.name), "and there is no one name to press")
         #expect(Set(ShellGesture.listed(narrow: true)).union(ShellGesture.listed(narrow: false)) == Set(ShellGesture.allCases), "every gesture is on one page or the other")
     }
@@ -41,7 +41,7 @@ struct GesturesTests {
     func whichLineNamesWhich() {
         #expect(gestures("tabs") == [.swipe, .name, .pill])
         #expect(gestures("top") == [.top])
-        #expect(gestures("back") == [.back, .backButton])
+        #expect(gestures("back") == [.back])
         #expect(gestures("expand") == [.press])
         #expect(gestures("reload") == [.pull])
         #expect(gestures("edit") == [.name, .pillHold])

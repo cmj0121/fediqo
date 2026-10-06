@@ -143,9 +143,16 @@ struct UsagePane: View {
 
     private var readout: some View {
         Form {
-            Section { tabs }
-            page
+            // **On a narrow page the tabs are one head, over the list and not in it** (#305):
+            // the whole of what is under the head then follows a swipe as one. A wide page
+            // keeps its row of tabs where it was, in the list.
+            if !headed { Section { tabs } }
+            // On a wide page the tabs are a row in the list, and what is under them follows a
+            // swipe row by row.
+            Group { page }.modifier(Slid(slide: slide, applies: headed ? false : nil))
         }
+        // On a narrow one the tabs are one head over the list, and the whole list follows.
+        .modifier(TabsOverForm(headed: headed, slide: slide) { tabs })
         .formStyle(.grouped)
         // The page's own colour, as on the timeline and Account, and no scroll bar.
         .scrollContentBackground(.hidden)
@@ -169,15 +176,33 @@ struct UsagePane: View {
         .shellConfirm($tightening, question: { ShellQuestion.tighten(room: $0) }) { room, _ in
             prefs.roomBytes = room
         }
+        .modifier(swipes)
     }
 
     /// The page's tabs (`ShellTabs`). Tab rotates them (`ShellSession.rotateUsageTab`); they sit
     /// in the Form so the grouped chrome is the page's own, not a second colour.
     private var tabs: some View {
-        ShellTabs(Purpose.allCases, selected: session?.usagePurpose ?? .source) {
-            session?.usagePurpose = $0
-            session?.usageOpened = nil
-        }
+        ShellTabs(Purpose.allCases, selected: session?.usagePurpose ?? .source, slide: slide) { select($0) }
+    }
+
+    @Environment(\.shellLayout) private var shellLayout
+    /// Whether the tabs are one head over the list (#305): on a narrow page.
+    private var headed: Bool { ShellTabs<Purpose>.headed(shellLayout, count: Purpose.allCases.count) }
+    @State private var ownSlide = PageSlide()
+    private var slide: PageSlide { session?.slide("usage") ?? ownSlide }
+
+    private func select(_ tab: Purpose) {
+        session?.usagePurpose = tab
+        session?.usageOpened = nil
+    }
+
+    /// A sideways swipe goes to the tab beside, and back out of a source's detail (#305).
+    private var swipes: SwipesTabs<Purpose> {
+        SwipesTabs(
+            slide: slide, tabs: Array(Purpose.allCases), selected: session?.usagePurpose ?? .source,
+            detail: session?.usageDetailShown ?? false, back: { _ = session?.closeUsageSource() },
+            select: select
+        )
     }
 
     @ViewBuilder

@@ -68,6 +68,17 @@ public struct ShellStaged: Sendable {
         case unvisited
         /// The reload mark pressed, as `r` presses it (#307).
         case reload
+        /// A source's row with something to say: a refusal against the second source (#302).
+        case refused
+        /// The list a page's name opens, up, by the page's name.
+        case tabsList(String)
+        /// The timeline editor, up, on a new timeline.
+        case editor
+        /// A page held part-way through a slide, by the page's name and the share of its width:
+        /// what a swipe looks like while the finger is still on it.
+        case slid(String, Double)
+        /// Usage's tab beside the one in front: what a swipe there ends in (#305).
+        case usageNext
         /// One timeline on, or back: what a swipe does once it is let go (#305).
         case next
         case previous

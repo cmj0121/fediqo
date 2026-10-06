@@ -40,8 +40,8 @@ enum TimelineSwipe {
     static let damped: CGFloat = 1.0 / 3
 
     /// Whether a drag that has gone `dx` across and `dy` down is a swipe at all: it set out
-    /// level. **From anywhere on the list, its leading edge included** — nothing else on this
-    /// page wants that edge; the swipe back is an opened page's (`backHeard`).
+    /// level. **From anywhere on the page, its leading edge included** — nothing else there
+    /// wants that edge.
     static func begins(dx: CGFloat, dy: CGFloat) -> Bool {
         abs(dx) > 0 && abs(dx) >= level * abs(dy)
     }
@@ -69,13 +69,6 @@ enum TimelineSwipe {
         return (0 ..< count).contains(next) ? next : nil
     }
 
-    /// Whether a swipe is heard: only where there is nothing but a finger, with the list itself
-    /// in front — nothing opened over it, no search, and neither the list of timelines nor the
-    /// editor up.
-    static func enabled(touch: Bool, opened: Bool, searching: Bool, listShown: Bool, editing: Bool) -> Bool {
-        touch && !opened && !searching && !listShown && !editing
-    }
-
     /// Whether a drag let go is still acted on once the list has slid away: only if the
     /// timeline in front is the one the drag began on. Something else may have changed it in
     /// that sixth of a second — a key, the list of timelines — and a step taken then would be
@@ -83,6 +76,25 @@ enum TimelineSwipe {
     static func completes(startedOn: String?, inFront: String?) -> Bool {
         startedOn != nil && startedOn == inFront
     }
+
+    /// How far the head's dot leans for a page moved `moved` points toward the trailing edge:
+    /// the share of its width, toward the next as positive — and nothing where the swipe means
+    /// back, or before the page has been measured.
+    static func lean(moved: CGFloat, width: CGFloat, beside: Bool) -> CGFloat {
+        guard beside, width > 0 else { return 0 }
+        return -moved / width
+    }
+
+    /// Where the head's dots are sent as a page let go leaves by `step`: all the way to the one
+    /// beside — and nowhere where the swipe means back, or with motion reduced, when the dot lit
+    /// is simply the other one once the page has changed.
+    static func leaves(by step: Int, beside: Bool, still: Bool) -> CGFloat {
+        beside && !still ? CGFloat(step.signum()) : 0
+    }
+
+    /// How long after a slide begins it is put to rest whatever has or has not been heard of
+    /// it, in seconds: several times the slide's own length.
+    static let backstop: Double = 1.2
 
     /// Whether a new drag is heard at all: not while the last one is still sliding the list.
     static func hears(leaving: Bool) -> Bool { !leaving }
@@ -100,62 +112,322 @@ enum TimelineSwipe {
         kept ?? first
     }
 
-    /// Whether a swipe in from the leading edge goes back (#305): under a finger, on a page
-    /// opened over the list — a post, a person, a tag — and nowhere else. It does what that
-    /// page's Back does, and changes no timeline.
-    static func backHeard(touch: Bool, opened: Bool) -> Bool {
-        touch && opened
+    /// What a sideways swipe means on the page in front — **one thing a page** (#305).
+    enum Means: Equatable, Sendable {
+        /// The one beside this one: a timeline's neighbour on the timeline's own page, whatever
+        /// it is drawing — its posts, or that it has none, is still reading, or could not be
+        /// read — and a tab's neighbour on a page that has tabs.
+        case beside
+        /// Back: on a page opened over it — a post, a person, a tag. Only the way back; a swipe
+        /// the other way goes nowhere.
+        case back
+    }
+
+    /// What is in front, as far as a swipe cares.
+    enum Page: Equatable, Sendable {
+        /// The timeline itself, with or without posts to draw.
+        case timeline
+        /// A post, a person or a tag opened over it.
+        case opened
+        /// A page read out of a post: somebody's own, and its sideways is its own.
+        case link
+    }
+
+    /// What a swipe means now, or nothing where it is not heard: only under a finger, never
+    /// over a search's results, never with the list of timelines or the editor up, and
+    /// **never while anything is drawn over the page** (`covered`): a picture opened, the keys'
+    /// guide, the landing. Those are drawn in the same view as the page under them, and a
+    /// swipe across one would be heard by the page behind it.
+    static func means(
+        touch: Bool, page: Page, searching: Bool, listShown: Bool, editing: Bool, covered: Bool = false
+    ) -> Means? {
+        guard touch, !covered, !listShown, !editing else { return nil }
+        switch page {
+        case .timeline: return searching ? nil : .beside
+        case .opened: return .back
+        case .link: return nil
+        }
+    }
+
+    /// Whether a swipe let go goes back: the way it goes on a timeline to the one before — the
+    /// finger toward the trailing edge — by the same distances and the same flick.
+    static func goesBack(dx: CGFloat, velocity: CGFloat) -> Bool {
+        outcome(dx: dx, velocity: velocity) == -1
+    }
+
+    /// What a swipe means on a page with tabs (#305): the tab beside the one in front, or —
+    /// with a row's detail opened over the page — back out of it. Under a finger only.
+    ///
+    /// **With fewer than two tabs and no detail open it means nothing at all**: a page with
+    /// nowhere to go is not listened on, so nothing rubber-bands and no press is cancelled.
+    static func means(touch: Bool, detail: Bool, tabs: Int, covered: Bool = false) -> Means? {
+        guard touch, !covered else { return nil }
+        if detail { return .back }
+        return tabs > 1 ? .beside : nil
+    }
+
+    /// Which ways there is somewhere to go, for what a swipe means: a timeline's neighbours, or
+    /// for the way back only back.
+    static func ways(_ means: Means, index: Int?, count: Int) -> (next: Bool, previous: Bool) {
+        switch means {
+        case .beside: (target(from: index, count: count, step: 1) != nil, target(from: index, count: count, step: -1) != nil)
+        case .back: (false, true)
+        }
     }
 
     /// What VoiceOver says of the timeline arrived at, or stood on at an end where there was
     /// nowhere further to go: its name, and "2 of 5".
-    static func announcement(name: String, position: Int?, count: Int, language: DummyLanguage? = nil) -> String {
+    static func announcement(
+        name: String, position: Int?, count: Int, key: String = "timeline.position", language: DummyLanguage? = nil
+    ) -> String {
         guard let position, count > 1 else { return name }
-        return name + ", " + String(format: L10n.t("timeline.position", language: language), position + 1, count)
+        return name + ", " + String(format: L10n.t(key, language: language), position + 1, count)
+    }
+}
+
+/// How far the page in front is slid sideways, and how faint (#305).
+///
+/// **Read by the one modifier that moves the page and by nothing else** (`Slid`), so a drag
+/// draws no row again: what is under the modifier is handed to it whole, and is not asked what
+/// it is each time the page moves a point.
+@MainActor
+@Observable
+final class PageSlide {
+    var x: CGFloat = 0
+    var faint = false
+    /// How far a finger is dragging the page toward the one beside, as a share of the page's
+    /// width: positive toward the next. **Set by the finger, and let go once** — to the one
+    /// beside as the page leaves for it, or back to nought as the page comes back — and nought
+    /// at every other time: the page arriving has its own place, and leans nowhere. Nought,
+    /// too, where a swipe means back and there is no one beside to lean toward.
+    var lean: CGFloat = 0
+    /// Whether the list the page's name opens is up.
+    var listShown = false
+    /// How wide the page is, as its recogniser last measured it; nought before it has.
+    @ObservationIgnored var width: CGFloat = 0
+}
+
+/// Moves what it is put on by a `PageSlide`.
+struct Slid: ViewModifier {
+    let slide: PageSlide
+    /// Whether it moves anything: on an iPhone or iPad, unless said otherwise (`shellSlides`).
+    var applies: Bool? = nil
+
+    @Environment(\.shellSlides) private var slides
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if applies ?? slides {
+            content.offset(x: slide.x).opacity(slide.faint ? 0 : 1)
+        } else {
+            content
+        }
+    }
+}
+
+/// The sideways swipe on a page: **one thing, for every page that has an order to it and one
+/// of them in front** — the timelines, a page's tabs, and the way back from what is opened
+/// over either. On an iPhone or iPad; nothing on a Mac.
+struct PageSwipes: ViewModifier {
+    let slide: PageSlide
+    let enabled: Bool
+    /// What a swipe means here now, by name: when it changes, a slide half made is put back.
+    let key: String
+    let hasNext: Bool
+    let hasPrevious: Bool
+    let inFront: () -> String?
+    let step: (Int) -> Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.background(PageSwipeCatcher(
+            enabled: enabled, key: key, hasNext: hasNext, hasPrevious: hasPrevious,
+            reduceMotion: reduceMotion, slide: slide, inFront: inFront, step: step
+        ))
+        #else
+        content
+        #endif
+    }
+}
+
+/// A page with tabs, swiped sideways to the tab beside the one in front (#305); and with a
+/// row's detail opened over it, swiped back out of that. Stops at the first and last tab: it
+/// never goes on into another place of the app.
+///
+/// **It listens, and moves nothing itself.** What follows the finger is what the page puts
+/// `Slid` on with the same `slide` — what is under its row of tabs, and never the row: the
+/// tabs stay where they are and show the change.
+struct SwipesTabs<Tab: Hashable>: ViewModifier {
+    let slide: PageSlide
+    let tabs: [Tab]
+    let selected: Tab
+    /// Whether a detail is opened over the page, and the way back out of it.
+    var detail = false
+    var back: () -> Void = {}
+    let select: (Tab) -> Void
+
+    @Environment(\.shellTouch) private var touch
+    @Environment(\.shellCovered) private var covered
+
+    func body(content: Content) -> some View {
+        let means = TimelineSwipe.means(touch: touch, detail: detail, tabs: tabs.count, covered: covered)
+        let index = tabs.firstIndex(of: selected)
+        let ways = means.map { TimelineSwipe.ways($0, index: index, count: tabs.count) }
+        content
+            .modifier(PageSwipes(
+                slide: slide, enabled: means != nil, key: means == .back ? "back" : "beside",
+                hasNext: ways?.next ?? false, hasPrevious: ways?.previous ?? false,
+                inFront: { means == .back ? "detail" : index.map(String.init) },
+                step: { step in
+                    if means == .back {
+                        guard step == -1 else { return false }
+                        back()
+                        return true
+                    }
+                    guard let to = TimelineSwipe.target(from: index, count: tabs.count, step: step) else { return false }
+                    select(tabs[to])
+                    return true
+                }
+            ))
+            .modifier(TabsHeld(holds: touch))
+    }
+}
+
+/// Keeps a tabbed page slid sideways inside itself, on an iPhone or iPad.
+private struct TabsHeld: ViewModifier {
+    let holds: Bool
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.clipShape(SlideBounds(holds: holds))
+        #else
+        content
+        #endif
+    }
+}
+
+/// What under a finger moves sideways itself, and so is not swiped across (#305): a control
+/// that is dragged — a slider, a switch, a stepper, a segmented control, a picker's wheel — a
+/// field being typed in, whose caret is dragged, and anything that scrolls sideways, such as a
+/// row of tabs too long for the page. A swipe that sets out on one of these is that thing's.
+enum SwipeObstacle {
+    /// Whether a scroll view holding this much, in this much room, scrolls sideways.
+    static func scrollsSideways(content: CGSize, bounds: CGSize) -> Bool {
+        content.width > bounds.width + 1
+    }
+
+    #if os(iOS)
+    /// Whether `view` is one of them, by what it is.
+    @MainActor
+    static func isOne(_ view: UIView) -> Bool {
+        if let scroll = view as? UIScrollView {
+            // A field being typed in is a scroll view too; any other is one only if it scrolls sideways.
+            return view is UITextView || scrollsSideways(content: scroll.contentSize, bounds: scroll.bounds.size)
+        }
+        return view is UISlider || view is UISwitch || view is UIStepper || view is UISegmentedControl
+            || view is UIPickerView || view is UIDatePicker || view is UITextField
+    }
+
+    /// Whether `view` or anything it stands in, up to and including `top`, is one.
+    @MainActor
+    static func stands(_ view: UIView, upTo top: UIView?) -> Bool {
+        var here: UIView? = view
+        while let now = here {
+            if isOne(now) { return true }
+            if now === top { break }
+            here = now.superview
+        }
+        return false
+    }
+    #endif
+}
+
+/// Where a swipe does not begin: on the head of a page — the timeline's name and marks, a row
+/// of tabs. **The head stays where it is and shows the change; what is under it is what moves**,
+/// and a finger that came down on something that will not move is not dragging the page.
+enum SwipeZone {
+    static func refuses(_ start: CGPoint, zones: [CGRect]) -> Bool {
+        zones.contains { $0.contains(start) }
     }
 }
 
 #if os(iOS)
-/// The recogniser, put on the list's own scroll view. See `TimelineSwipe` for why it is this.
+/// Marks what it stands behind as a head: see `SwipeZone`.
+struct NoSwipeZone: UIViewRepresentable {
+    final class Zone: UIView {}
+
+    func makeUIView(context: Context) -> Zone {
+        let view = Zone()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: Zone, context: Context) {}
+}
+#endif
+
+extension View {
+    /// A head: a sideways swipe does not begin on it. Nothing on a Mac.
+    @ViewBuilder
+    func headOfPage() -> some View {
+        #if os(iOS)
+        background(NoSwipeZone())
+        #else
+        self
+        #endif
+    }
+}
+
+#if os(iOS)
+/// The recogniser for a sideways swipe on the timelines' page. See `TimelineSwipe` for why it
+/// is this, and `TimelineSwipe.means` for what a swipe means where.
 ///
-/// Drawn nowhere: it stands inside what the list scrolls, finds the scroll view it is in, and
-/// adds its pan there. **The list is moved by its layer and not by anything SwiftUI reads**, so
-/// a drag draws no row again.
+/// **One, for the whole page under the timeline's head, whatever is drawn there.** It was put
+/// inside the list's own scroll view, and a timeline with no posts draws no list: there was
+/// nothing to carry it, and no swipe out of an empty timeline. Now it stands behind the page,
+/// listens on the view of the screen the page is in, and hears only a drag that set out inside
+/// the page. The same one is the way back from an opened post, person or tag — which the swipe
+/// in from the very edge of the screen was, and which nobody found.
 ///
 /// ## What it is to every other recogniser, said rather than left to the order they are asked in
 ///
-/// - **The scroll view's own pan waits for this one to fail** (`shouldBeRequiredToFailBy`).
-///   Two pans on one view are exclusive, and whichever is asked first would otherwise win
-///   every drag. This one fails at once on a drag that did not set out level — both judge the
-///   same first few points — so scrolling waits for nothing a hand could feel, and nothing
-///   here ever turns the scroll view's pan off.
-/// - **It is simultaneous with nothing** (`shouldRecognizeSimultaneouslyWith` is no). So once
-///   it has begun, the press a row or a mark was waiting to finish is cancelled — a swipe that
-///   ends over a button presses nothing — and so is the long press that would raise a row's
-///   menu; and once a long press has been recognised, this, still only possible, fails.
+/// - **Every scroll view's own pan in the page waits for this one to fail**
+///   (`shouldBeRequiredToFailBy`). This one fails at once on a drag that did not set out level
+///   — both judge the same first few points — so scrolling waits for nothing a hand could
+///   feel, and nothing here ever turns a scroll view's pan off.
+/// - **It is simultaneous with nothing.** Once it has begun, the press a row or a mark was
+///   waiting to finish is cancelled, and so is the long press that would raise a row's menu;
+///   once a long press has been recognised, this, still only possible, fails.
 ///   `cancelsTouchesInView` says the same to anything listening to touches themselves.
-struct TimelineSwipeCatcher: UIViewRepresentable {
+struct PageSwipeCatcher: UIViewRepresentable {
     var enabled: Bool
+    var key: String
     var hasNext: Bool
     var hasPrevious: Bool
     var reduceMotion: Bool
-    /// The timeline in front, asked as a drag begins and again as it is acted on.
+    let slide: PageSlide
+    /// What is in front, asked as a drag begins and again as it is acted on.
     var inFront: () -> String?
-    /// One timeline on or back. Says whether there was one to go to.
+    /// One on or back. Says whether there was somewhere to go.
     var step: (Int) -> Bool
 
     func makeUIView(context: Context) -> Finder {
         let view = Finder()
         view.isUserInteractionEnabled = false
         view.catcher = context.coordinator
+        context.coordinator.page = view
         return view
     }
 
     func updateUIView(_ view: Finder, context: Context) {
         let catcher = context.coordinator
+        let was = catcher.now
         catcher.now = self
-        if catcher.pan.isEnabled, !enabled { catcher.rest() }
+        if was.key != key || was.enabled != enabled { catcher.rest() }
         catcher.pan.isEnabled = enabled
+        catcher.attach()
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -164,29 +436,36 @@ struct TimelineSwipeCatcher: UIViewRepresentable {
         coordinator.detach()
     }
 
-    /// Finds the scroll view this stands in, once it is in one.
+    /// Stands behind the page: its frame is the page's.
     final class Finder: UIView {
         weak var catcher: Coordinator?
 
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            catcher?.now.slide.width = bounds.width
+        }
+
+        /// In a window, it listens; out of one — the page gone to another place, or let go —
+        /// it stops listening and what it had slid is put back.
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            var above = superview
-            while let view = above, !(view is UIScrollView) { above = view.superview }
-            catcher?.attach(to: above as? UIScrollView)
+            if window == nil { catcher?.detach() } else { catcher?.attach() }
         }
     }
 
     @MainActor
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var now: TimelineSwipeCatcher
+        var now: PageSwipeCatcher
         let pan = UIPanGestureRecognizer()
-        private weak var list: UIScrollView?
-        /// The timeline the drag in hand began on.
+        weak var page: Finder?
+        private weak var host: UIView?
         private var startedOn: String?
-        /// The list is sliding away or in: no new drag is heard till it is at rest.
         private var leaving = false
+        /// Counted up at every slide begun and every rest: what a slide's backstop checks, so
+        /// one left over from an earlier slide does nothing.
+        private var slides = 0
 
-        init(_ catcher: TimelineSwipeCatcher) {
+        init(_ catcher: PageSwipeCatcher) {
             now = catcher
             super.init()
             pan.addTarget(self, action: #selector(panned))
@@ -195,47 +474,82 @@ struct TimelineSwipeCatcher: UIViewRepresentable {
             pan.isEnabled = catcher.enabled
         }
 
-        func attach(to scroll: UIScrollView?) {
-            guard scroll !== list else { return }
-            detach()
-            list = scroll
-            scroll?.addGestureRecognizer(pan)
+        /// Listens on the view of the screen the page is in: the nearest above it that is a
+        /// view controller's own. A sheet over the page is another's, and is not listened through.
+        func attach() {
+            guard let page, page.window != nil else { return }
+            var above = page.superview
+            while let view = above, !(view.next is UIViewController), view.superview != nil { above = view.superview }
+            guard let found = above, found !== host else { return }
+            host?.removeGestureRecognizer(pan)
+            host = found
+            found.addGestureRecognizer(pan)
         }
 
-        /// The pan taken off, and with it everything it asked of the scroll view's own: the
-        /// waiting is asked through the delegate for each touch, and is not a thing left set.
         func detach() {
             rest()
-            list?.removeGestureRecognizer(pan)
-            list = nil
+            host?.removeGestureRecognizer(pan)
+            host = nil
         }
 
-        /// The list where it belongs, whatever a drag or a slide had made of it.
+        /// The page where it belongs, whatever a drag or a slide had made of it.
         func rest() {
-            list?.layer.removeAllAnimations()
-            list?.transform = .identity
-            list?.alpha = 1
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) {
+                now.slide.x = 0
+                now.slide.faint = false
+                now.slide.lean = 0
+            }
             leaving = false
             startedOn = nil
+            slides += 1
         }
+
+        private var mirrored: Bool { page?.effectiveUserInterfaceLayoutDirection == .rightToLeft }
 
         /// Toward the trailing edge is positive, whichever way the language reads.
-        private func across(_ x: CGFloat) -> CGFloat {
-            list?.effectiveUserInterfaceLayoutDirection == .rightToLeft ? -x : x
-        }
+        private func across(_ x: CGFloat) -> CGFloat { mirrored ? -x : x }
 
-        /// **Refused unless the drag set out level**, and while the last one is still sliding.
+        /// **Refused unless the drag set out level, inside the page**, and while the last one
+        /// is still sliding.
         func gestureRecognizerShouldBegin(_ recogniser: UIGestureRecognizer) -> Bool {
-            guard let list, recogniser === pan else { return true }
+            guard recogniser === pan, let page, now.enabled else { return false }
             guard TimelineSwipe.hears(leaving: leaving) else { return false }
-            let moved = pan.translation(in: list)
-            return TimelineSwipe.begins(dx: moved.x, dy: moved.y)
+            let moved = pan.translation(in: page)
+            let here = pan.location(in: page)
+            let began = CGPoint(x: here.x - moved.x, y: here.y - moved.y)
+            guard page.bounds.contains(began) else { return false }
+            guard TimelineSwipe.begins(dx: moved.x, dy: moved.y) else { return false }
+            guard !SwipeZone.refuses(began, zones: heads(in: page)) else { return false }
+            return !obstacle(at: began, in: page)
         }
 
-        /// The scroll view's own pan waits for this one to fail. Only that pan: nothing else
-        /// is made to wait.
+        /// Where the page's heads and rows of tabs are, in the page's own space: a swipe that
+        /// sets out on one is not begun (`SwipeZone`).
+        private func heads(in page: UIView) -> [CGRect] {
+            var found: [CGRect] = []
+            func look(_ view: UIView) {
+                if view is NoSwipeZone.Zone, view.window != nil { found.append(view.convert(view.bounds, to: page)) }
+                view.subviews.forEach(look)
+            }
+            if let host { look(host) }
+            return found
+        }
+
+        /// Whether what the finger came down on moves sideways itself (`SwipeObstacle`): asked
+        /// of what is there, from it up to the view listened on.
+        private func obstacle(at point: CGPoint, in page: UIView) -> Bool {
+            guard let host, let hit = host.hitTest(page.convert(point, to: host), with: nil) else { return false }
+            return SwipeObstacle.stands(hit, upTo: host)
+        }
+
+        /// A scroll view's own pan, of one inside the page, waits for this one to fail.
         func gestureRecognizer(_ recogniser: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
-            recogniser === pan && other === list?.panGestureRecognizer
+            guard recogniser === pan, let page, let scroll = other.view as? UIScrollView,
+                  other === scroll.panGestureRecognizer
+            else { return false }
+            return page.convert(page.bounds, to: nil).intersects(scroll.convert(scroll.bounds, to: nil))
         }
 
         func gestureRecognizer(_ recogniser: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
@@ -243,135 +557,79 @@ struct TimelineSwipeCatcher: UIViewRepresentable {
         }
 
         @objc private func panned() {
-            guard let list else { return }
-            let dx = across(pan.translation(in: list).x)
+            guard let page else { return }
+            let dx = across(pan.translation(in: page).x)
             switch pan.state {
             case .began:
                 startedOn = now.inFront()
             case .changed:
                 guard !now.reduceMotion else { return }
                 let moved = TimelineSwipe.follow(dx: dx, hasNext: now.hasNext, hasPrevious: now.hasPrevious)
-                list.transform = CGAffineTransform(translationX: across(moved), y: 0)
+                now.slide.x = across(moved)
+                now.slide.lean = TimelineSwipe.lean(moved: moved, width: page.bounds.width, beside: now.key == "beside")
             case .ended:
-                let step = TimelineSwipe.outcome(dx: dx, velocity: across(pan.velocity(in: list).x))
+                let step = TimelineSwipe.outcome(dx: dx, velocity: across(pan.velocity(in: page).x))
                 let goes = step != 0 && (step > 0 ? now.hasNext : now.hasPrevious)
-                goes ? leave(list, by: step) : settle(list)
+                goes ? leave(width: page.bounds.width, by: step) : settle()
             case .cancelled, .failed:
-                settle(list)
+                settle()
             default:
                 break
             }
         }
 
-        private func settle(_ list: UIScrollView) {
+        /// Back where it was, the head's dots with it: one animation for both.
+        private func settle() {
             startedOn = nil
-            UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0) {
-                list.transform = .identity
+            withAnimation(.spring(duration: 0.25, bounce: 0.1)) {
+                now.slide.x = 0
+                now.slide.lean = 0
             }
         }
 
-        /// The list in front goes off the way it was pushed, the timeline is changed, and the
-        /// one arrived at comes in from the other side — one list throughout. With motion
-        /// reduced, it fades out and the other in. **The step is taken only if the timeline in
-        /// front is still the one the drag began on** (`TimelineSwipe.completes`).
-        private func leave(_ list: UIScrollView, by step: Int) {
-            let width = list.bounds.width
+        /// The page goes off the way it was pushed, what is in front is changed, and what is
+        /// arrived at comes in from the other side. With motion reduced, it fades out and the
+        /// other in. **The step is taken only if what is in front is still what the drag began
+        /// on** (`TimelineSwipe.completes`).
+        private func leave(width: CGFloat, by step: Int) {
             let off = across(step > 0 ? -width : width)
             let reduce = now.reduceMotion
             let began = startedOn
+            let slide = now.slide
             startedOn = nil
             leaving = true
-            UIView.animate(withDuration: 0.16, delay: 0, options: .curveEaseIn) {
-                if reduce { list.alpha = 0 } else { list.transform = CGAffineTransform(translationX: off, y: 0) }
-            } completion: { _ in
+            slides += 1
+            let mine = slides
+            // **The backstop.** What follows hangs on two animations saying they are done, and
+            // one that is never told so — the page taken off screen half-way — would leave the
+            // page slid away and no swipe heard again. Well after both should have ended, a
+            // slide that is still this one is put to rest.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(TimelineSwipe.backstop))
+                if self.leaving, self.slides == mine { self.rest() }
+            }
+            // **The head's dots go the rest of the way as the page leaves, in the one animation
+            // with it.** They were held where the finger left them until the page had gone and
+            // then sent on by an animation of their own: a stop and a second start.
+            withAnimation(.easeIn(duration: 0.16)) {
+                if reduce { slide.faint = true } else { slide.x = off }
+                slide.lean = TimelineSwipe.leaves(by: step, beside: self.now.key == "beside", still: reduce)
+            } completion: {
                 guard self.leaving else { return }
+                // The place changes and the lean goes in one drawing, unanimated: the row is
+                // already drawn as the one arrived at, and nothing is seen to change.
+                slide.lean = 0
                 let stepped = TimelineSwipe.completes(startedOn: began, inFront: self.now.inFront()) && self.now.step(step)
-                if stepped, !reduce { list.transform = CGAffineTransform(translationX: -off, y: 0) }
-                UIView.animate(withDuration: 0.2, delay: 0.02, options: .curveEaseOut) {
-                    list.transform = .identity
-                    list.alpha = 1
-                } completion: { _ in
+                var still = Transaction()
+                still.disablesAnimations = true
+                withTransaction(still) { slide.x = stepped && !reduce ? -off : 0 }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    slide.x = 0
+                    slide.faint = false
+                } completion: {
                     self.leaving = false
                 }
             }
-        }
-    }
-}
-
-/// The swipe in from the leading edge that goes back, on a page opened over the list (#305).
-///
-/// The pages a post, a person and a tag open on are this app's own and not a navigation stack's,
-/// so the system gives them no swipe back: this is it. A screen-edge pan — the leading edge, the
-/// trailing one where the language reads the other way — that **does exactly what the page's
-/// Back does**, and nothing to any timeline.
-///
-/// **A scroll view's pan under it waits for it to fail** (`shouldBeRequiredToFailBy`), as the
-/// list's waits for the swipe between timelines: an edge pan fails at once on a touch that did
-/// not come down at the edge, so nothing is felt to wait.
-///
-/// It listens on the nearest view above it that holds the page, so a sheet over the page —
-/// which is not inside that view — is not listened through.
-struct BackEdgeCatcher: UIViewRepresentable {
-    var enabled: Bool
-    var back: () -> Void
-
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        view.isUserInteractionEnabled = false
-        return view
-    }
-
-    func updateUIView(_ view: UIView, context: Context) {
-        let catcher = context.coordinator
-        catcher.back = back
-        catcher.edge.isEnabled = enabled
-        // A tick later: the page this stands behind is put in the window after it is.
-        DispatchQueue.main.async { catcher.attach(from: view) }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(back) }
-
-    static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
-        coordinator.edge.view?.removeGestureRecognizer(coordinator.edge)
-    }
-
-    @MainActor
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var back: () -> Void
-        let edge = UIScreenEdgePanGestureRecognizer()
-
-        init(_ back: @escaping () -> Void) {
-            self.back = back
-            super.init()
-            edge.addTarget(self, action: #selector(swiped))
-            edge.delegate = self
-            edge.cancelsTouchesInView = true
-        }
-
-        /// The nearest view above `view` that holds a scroll view — the page — or, with none,
-        /// the view it is in.
-        func attach(from view: UIView) {
-            func holdsScroll(_ view: UIView) -> Bool {
-                view is UIScrollView || view.subviews.contains(where: holdsScroll)
-            }
-            var above = view.superview
-            while let candidate = above, !holdsScroll(candidate), candidate.superview != nil { above = candidate.superview }
-            guard let host = above, edge.view !== host else { return }
-            edge.view?.removeGestureRecognizer(edge)
-            edge.edges = host.effectiveUserInterfaceLayoutDirection == .rightToLeft ? .right : .left
-            host.addGestureRecognizer(edge)
-        }
-
-        func gestureRecognizer(_ recogniser: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
-            recogniser === edge && other is UIPanGestureRecognizer && other.view is UIScrollView
-        }
-
-        func gestureRecognizer(_ recogniser: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-            false
-        }
-
-        @objc private func swiped() {
-            if edge.state == .ended { back() }
         }
     }
 }
