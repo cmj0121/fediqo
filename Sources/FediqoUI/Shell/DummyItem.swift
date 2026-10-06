@@ -644,6 +644,16 @@ public struct DummyConversation: Hashable, Sendable {
     /// longer held. Said in that post's place — a line above the first row, one step out from
     /// it — so the rows keep their places when it arrives.
     var missing: QuoteBand.Loading?
+    /// The posts a read of the thread said stand above a post that is not here (#293,
+    /// `Opened.beyond`), the start of the thread first: drawn first, over the line that stands
+    /// in that post's place.
+    public var beyond: [DummyItem] = []
+    /// What the line in the missing post's place says, as a string's key, or nothing where no
+    /// line is drawn: where that post stands, where there is something to say of it
+    /// (`missing`), and otherwise — with posts drawn beyond it — only that it is not here.
+    var gapKey: String? {
+        missing?.aboveKey ?? (beyond.isEmpty ? nil : "thread.above.notHere")
+    }
     /// The held posts that quote the opened one, drawn after its answers (#293).
     public var quoting: [DummyItem] = []
     /// Who reblogged the opened post, as far as this device holds their reblogs, the latest
@@ -659,14 +669,15 @@ public struct DummyConversation: Hashable, Sendable {
 
     /// Every row, in the order drawn — what `j` and `k` walk.
     public var inOrder: [DummyItem] {
-        ancestors + [post] + descendants.map(\.item) + quoting
+        beyond + ancestors + [post] + descendants.map(\.item) + quoting
     }
 
-    /// How many steps in the first row stands: one where a line stands above it in the place of
-    /// the post it answers, none otherwise.
-    public var lead: Int { missing == nil ? 0 : 1 }
+    /// How many steps in the first row of the chain stands: one for each post drawn beyond a
+    /// missing one, and one where a line stands in that post's place; none otherwise.
+    public var lead: Int { beyond.count + (gapKey == nil ? 0 : 1) }
 
     public func depth(of id: String) -> Int {
+        if let index = beyond.firstIndex(where: { $0.id == id }) { return index }
         if let index = ancestors.firstIndex(where: { $0.id == id }) { return lead + index }
         if post.id == id { return lead + ancestors.count }
         if let entry = descendants.first(where: { $0.item.id == id }) {
@@ -692,19 +703,23 @@ extension DummyConversation {
             root, rootID: root.statusID, ancestors: opened.above, descendants: opened.below, quoted: opened.quoted
         )
         let first = conversation.ancestors.first ?? root
-        if let missing = QuoteBand.Loading(answeredBy: first) {
+        let missing = QuoteBand.Loading(answeredBy: first)
+        let beyond = opened.beyond.filter { $0.key.rowID != root.id && !$0.isReblog }
+            .map { DummyItem($0).quoting(opened.quoted[$0.key]) }
+        if missing != nil || !beyond.isEmpty {
             conversation = DummyConversation(
                 ancestors: conversation.ancestors.enumerated().map { $0.offset == 0 ? $0.element.sayingAbove() : $0.element },
                 post: conversation.ancestors.isEmpty ? root.sayingAbove() : root,
                 descendants: conversation.descendants
             )
             conversation.missing = missing
+            conversation.beyond = beyond
         }
         // An answer the thread's read brought whose parent is not here: at the first step, and
         // what is known of that parent said above it — and so not on the row's own line.
         if !opened.loose.isEmpty {
             let loose = Set(opened.loose.map(\.rowID))
-            let missing = conversation.missing
+            let missing = conversation.missing, beyond = conversation.beyond
             conversation = DummyConversation(
                 ancestors: conversation.ancestors, post: conversation.post,
                 descendants: conversation.descendants.map { entry in
@@ -716,6 +731,7 @@ extension DummyConversation {
                 }
             )
             conversation.missing = missing
+            conversation.beyond = beyond
         }
         conversation.quoting = opened.quoting.filter { $0.key.rowID != root.id }
             .map { DummyItem($0).quoting(opened.quoted[$0.key]) }

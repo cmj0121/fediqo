@@ -155,6 +155,10 @@ final class ShellConversations {
     /// drawn at the first step under the post all the same (`Opened.loose`), and counted, so a
     /// thread the source handed over whole is not said to be cut. Never written down.
     @ObservationIgnored private var said: [String: Set<NoteKey>] = [:]
+    /// Which posts the last read of each thread handed over as standing above the post, in the
+    /// source's own order, this run — drawn above the place of a post the source would not
+    /// show, where the references stop there (`Opened.beyond`). Never written down.
+    @ObservationIgnored private var saidAbove: [String: [NoteKey]] = [:]
     /// Which host each key was read from, so `forget(host:)` is a sweep and not a search.
     @ObservationIgnored private var hosts: [String: String] = [:]
     /// What is on the wire, so a redraw that asks again while the first ask is out waits for it
@@ -257,7 +261,7 @@ final class ShellConversations {
                 pool.append(note)
             }
         }
-        let view = Opened.around(held, among: pool, said: said[id] ?? [])
+        let view = Opened.around(held, among: pool, said: said[id] ?? [], saidAbove: saidAbove[id] ?? [])
         hosts[id] = host
         if views[id] != view { views[id] = view }
     }
@@ -380,6 +384,7 @@ final class ShellConversations {
         let swap = { (held: Note) in held.key == note.key ? note : held }
         for (id, view) in views {
             var swapped = view
+            swapped.beyond = view.beyond.map(swap)
             swapped.above = view.above.map(swap)
             swapped.below = view.below.map(swap)
             swapped.quoting = view.quoting.map(swap)
@@ -393,6 +398,8 @@ final class ShellConversations {
     func drop(_ key: NoteKey) {
         for (id, view) in views {
             var left = view
+            left.beyond.removeAll { $0.key == key }
+            saidAbove[id]?.removeAll { $0 == key }
             left.above.removeAll { $0.key == key }
             left.below.removeAll { $0.key == key }
             left.quoting.removeAll { $0.key == key }
@@ -471,6 +478,7 @@ final class ShellConversations {
             views[id] = nil
             brought[id] = nil
             said[id] = nil
+            saidAbove[id] = nil
             hosts[id] = nil
             inFlight[id]?.cancel()
             inFlight[id] = nil
@@ -493,6 +501,7 @@ final class ShellConversations {
         views = [:]
         brought = [:]
         said = [:]
+        saidAbove = [:]
         furthers = [:]
         asked = [:]
         failedAtRoot = []
@@ -597,6 +606,8 @@ final class ShellConversations {
             // drawn before, since the place is the references' to say and they have not changed.
             keep(thread.ancestors + thread.descendants, notHeldIn: landed, under: item.id)
             said[item.id, default: []].formUnion(thread.descendants.filter { $0.key != held.key }.map(\.key))
+            // What stands above is this read's word whole: a thread read again says it afresh.
+            saidAbove[item.id] = thread.ancestors.filter { $0.key != held.key && !$0.isReblog }.map(\.key)
             await lay(item, in: session)
             failedAtRoot.remove(item.id)
             if thread.isAlone {

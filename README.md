@@ -387,7 +387,9 @@ An answer the thread read brings whose own earlier post the source did not hand 
 directly under the opened post, with a line above it saying what is known of that earlier
 post; that lasts until you quit, since which posts a source handed over as one thread is not
 written down — afterwards, with the network off, such an answer has no place in this view
-until the thread is read again, and stands in All all the same. A post the thread read brings that is
+until the thread is read again, and stands in All all the same. The same holds above: opened
+from an answer to a post the source will not show, the posts the thread read says stand above
+that one are shown first, then a line in its place, then the answer — until you quit. A post the thread read brings that is
 older than you keep is shown until you quit, and is not held.
 
 Everything this device holds stands in its timelines. What a search brought back, what was

@@ -470,11 +470,14 @@ struct MastodonSaysTests {
         #expect(view.loose == [try #require(thread.descendants.first?.key)])
         #expect(Opened.around(opened, among: [opened] + thread.descendants).below.isEmpty, "by references alone it has no place")
         // And above: the start the source handed over is not what the answer says it answers,
-        // so the view from references puts nothing above the answer.
+        // so references alone put nothing above the answer.
         let fromAnswer = try await MastodonPost(door: try door(.writer)).conversation(id: answer, source: Self.source)
         let answerNote = try #require(thread.descendants.first)
         #expect(fromAnswer.ancestors.map(\.statusID) == [root])
         #expect(Opened.around(answerNote, among: [answerNote] + fromAnswer.ancestors).above.isEmpty)
+        // With what the read said stands above, the start is drawn beyond the withheld post.
+        let laid = Opened.around(answerNote, among: [answerNote] + fromAnswer.ancestors, saidAbove: fromAnswer.ancestors.map(\.key))
+        #expect(laid.above.isEmpty && laid.beyond.map(\.statusID) == [root])
     }
 
     // MARK: - 8. A quote

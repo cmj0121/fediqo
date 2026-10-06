@@ -109,10 +109,15 @@ struct DummyThreadPane: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
+                        // What a read said stands above a post that is not here, the start first.
+                        ForEach(Array(conversation.beyond.enumerated()), id: \.element.id) { step in
+                            threaded(step.element, dimmed: true, depth: step.offset)
+                        }
                         // The place of a post that is answered and not here (#293).
-                        if let missing = conversation.missing {
-                            placeAbove(missing.aboveKey)
+                        if let key = conversation.gapKey {
+                            placeAbove(key)
                                 .modifier(ProbedPlace(part: .above, probe: probe))
+                                .padding(.leading, indent(conversation.beyond.count))
                         }
                         ForEach(Array(conversation.ancestors.enumerated()), id: \.element.id) { step in
                             threaded(step.element, dimmed: true, depth: lead + step.offset)
@@ -189,7 +194,7 @@ struct DummyThreadPane: View {
                 // The first row drawn — the first ancestor, or the opened post where there is
                 // none — which is the row `g` lit (`FediqoRootView.jumpedToTop`).
                 .onChange(of: jumpToTop) { _, _ in
-                    let first = conversation.ancestors.first?.id ?? conversation.post.id
+                    let first = conversation.beyond.first?.id ?? conversation.ancestors.first?.id ?? conversation.post.id
                     withAnimation(.easeInOut(duration: 0.18)) {
                         proxy.scrollTo(first, anchor: .top)
                     }

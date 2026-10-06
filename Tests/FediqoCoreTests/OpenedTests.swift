@@ -97,6 +97,27 @@ struct OpenedTests {
         #expect(under.loose == keys(["13"]))
     }
 
+    @Test("Where the chain above stops at a post not held and a read said more stand above, those stand beyond it in the source's order; where the chain reaches the start, or the item answers nothing, or nothing was said, nothing is beyond")
+    func whatTheReadSaidStandsAbove() {
+        func keys(_ ids: [String]) -> [NoteKey] { ids.map { NoteKey(host: Self.host, id: Self.name($0)) } }
+        // 1 ← 2 ← (5, not held) ← 8 ← 9: opened at 9.
+        let root = Self.post("9", answering: "8")
+        let held = [root, Self.post("8", answering: "5"), Self.post("2", at: -10, answering: "1"), Self.post("1", at: -20), Self.post("3", answering: "1")]
+        let opened = Opened.around(root, among: held, saidAbove: keys(["1", "2", "8"]))
+        #expect(Self.ids(opened.above) == ["8"])
+        #expect(Self.ids(opened.beyond) == ["1", "2"], "the source's order, and no post twice")
+        #expect(Self.ids(opened.rows) == ["1", "2", "8"])
+        #expect(Opened.around(root, among: held).beyond.isEmpty, "with no read's word, only what references reach")
+        #expect(Opened.around(root, among: held, saidAbove: keys(["2", "1", "404"])).beyond.map(\.statusID) == ["2", "1"], "as said, and only what is held")
+        // The chain reaches the start: whatever was said, there is nothing beyond it.
+        let whole = [Self.post("9", answering: "8"), Self.post("8"), Self.post("1")]
+        #expect(Opened.around(whole[0], among: whole, saidAbove: keys(["1", "8"])).beyond.isEmpty)
+        #expect(Opened.around(Self.post("9"), among: held, saidAbove: keys(["1"])).beyond.isEmpty, "it answers nothing")
+        // Another source's post of that name is not it.
+        let elsewhere = Self.post("1", on: "two.example")
+        #expect(Opened.around(root, among: [root, elsewhere], saidAbove: [elsewhere.key, NoteKey(host: Self.host, id: Self.name("1"))]).beyond.isEmpty)
+    }
+
     @Test("A loop in what posts say they answer ends: each post is drawn once")
     func aLoopEnds() {
         let root = Self.post("9", answering: "11")

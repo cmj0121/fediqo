@@ -15,6 +15,15 @@ import Foundation
 public struct Opened: Equatable, Sendable {
     /// What the item answers, the start of the chain first. Each answers the one before it.
     public var above: [Note] = []
+    /// The posts a read of the thread said stand above the item, beyond a post that is not
+    /// here — the start of the thread first. `above` ends where a post it answers is not held;
+    /// a source that will not show that post still hands over the ones above it, and these
+    /// are those, as far as they are held: drawn over the place of the post that is missing,
+    /// which is between them and the chain. **Known for the run that read the thread, and no
+    /// longer**, as `loose` is and for its reason: which posts a source handed over as one
+    /// thread is not a reference and is not kept, so after a relaunch with the network off
+    /// only what references reach stands above, until the thread is read again.
+    public var beyond: [Note] = []
     /// Every held item that answers it, or answers one that does: an answer directly after what
     /// it answers and before that one's next answer, the older answer first under each post.
     public var below: [Note] = []
@@ -40,7 +49,7 @@ public struct Opened: Equatable, Sendable {
     public var isAlone: Bool { above.isEmpty && below.isEmpty && quoting.isEmpty && reblogs.isEmpty }
 
     /// Every post drawn as a row of its own around the item.
-    public var rows: [Note] { above + below + quoting }
+    public var rows: [Note] { beyond + above + below + quoting }
 
     /// What belongs with `root` among `held`. Nothing around a reblog, which is in no thread:
     /// opening one opens the post it reblogs.
@@ -50,7 +59,13 @@ public struct Opened: Equatable, Sendable {
     /// `said` is what a read of the thread around `root` handed over as its answers, this run
     /// (`loose`). Each of those no reference places under `root` stands after the answers that
     /// are placed, under the highest held post it answers up to, the older first.
-    public static func around(_ root: Note, among held: [Note], said: Set<NoteKey> = []) -> Opened {
+    ///
+    /// `saidAbove` is what that read handed over as standing above `root`, in the source's own
+    /// order (`beyond`). Where the chain of references reaches the start of the thread there is
+    /// nothing beyond it, whatever was said. Nothing is asked by walking, here or anywhere.
+    public static func around(
+        _ root: Note, among held: [Note], said: Set<NoteKey> = [], saidAbove: [NoteKey] = []
+    ) -> Opened {
         guard !root.isReblog else { return Opened() }
         let host = root.source.host
         var byKey: [NoteKey: Note] = [:]
@@ -76,6 +91,14 @@ public struct Opened: Equatable, Sendable {
         while let parent = up, seen.insert(parent.key).inserted {
             opened.above.insert(parent, at: 0)
             up = answered(by: parent)
+        }
+        // The chain stopped at a post that is not here, and the read said more stand above.
+        let top = opened.above.first ?? root
+        if top.refs.contains(where: { $0.kind == .answers }), answered(by: top) == nil {
+            for key in saidAbove where key.host == host {
+                guard let note = byKey[key], seen.insert(key).inserted else { continue }
+                opened.beyond.append(note)
+            }
         }
 
         var answers: [NoteKey: [Note]] = [:]

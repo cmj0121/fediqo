@@ -374,6 +374,46 @@ struct OpenedViewHostedTests {
         #expect(DummyConversation.opened(root, opened).rebloggers == ["Bob", "Cyd"])
     }
 
+    @Test("Opened from an answer to a post the source will not show: the posts the read said stand above are drawn first, then a line in the withheld post's place, then the answer one step in from it; the keys walk them; and with the read forgotten only what references reach is drawn")
+    func aboveAPostNotHandedOver() async throws {
+        // The start (8), a post withheld (5), the answer to it (9), and an answer to that (10).
+        // Asked for by itself, the withheld post answers as a post that is not there does.
+        let http = FixtureHTTP([Self.threadPath: Self.context(
+            ancestors: [Self.status("8")], descendants: [Self.status("10", answering: "9")]
+        ), "/api/v1/statuses/5": .text(#"{"error":"Not Found"}"#, status: 404)])
+        let session = await Self.shell(http)
+        await Self.land([Self.post("9", answering: "5", through: [])], in: session)
+        let item = try await Self.open("9", in: session)
+        let drawn = try Self.drawn("9", in: session)
+        #expect(drawn.gapKey == "thread.above.gone", "what is known of the post in between: gone or hidden at its source")
+        // Where nothing is known of it, the line says only that it is not here.
+        var plain = Opened()
+        plain.beyond = [Self.post("8")]
+        #expect(DummyConversation.opened(DummyItem(Self.post("9", answering: "5")), plain).gapKey == "thread.above.notHere")
+        #expect(DummyConversation.opened(DummyItem(Self.post("9", answering: "5")), Opened()).gapKey == nil)
+        #expect(drawn.beyond.map(\.statusID) == ["8"] && drawn.ancestors.isEmpty)
+        #expect(drawn.inOrder.map(\.statusID) == ["8", "9", "10"])
+        #expect(drawn.gapKey != nil && drawn.lead == 2)
+        #expect(drawn.depth(of: drawn.beyond[0].id) == 0 && drawn.depth(of: item.id) == 2)
+        #expect(DummyItemRow.replyLine(drawn.post, language: .english) == "Reply to @bob@\(Self.host)", "said once, in the line")
+        #expect(await http.paths.sorted() == ["/api/v1/statuses/5", Self.threadPath], "the one post it answers, once; nothing is asked by walking")
+
+        let (probe, row) = try await Self.laid("9", in: session)
+        let start = try #require(row("8")), line = try #require(probe.frames[.above]), answer = try #require(row("9"))
+        #expect(start.minX == 0 && start.maxY <= line.minY + 0.5 && line.maxY <= answer.minY + 0.5, "the start, the line, the answer")
+        #expect(line.minX == Self.step, "the line where the withheld post would stand")
+        #expect(answer.minX == 2 * Self.step && row("10")?.minX == 3 * Self.step)
+
+        // What a source handed over as one thread is this run's to know: forgotten, as at a
+        // relaunch with the network off, the start has no place above. It is held all the same.
+        session.conversations.clear()
+        await session.conversations.redraw(item, in: session)
+        let after = try Self.drawn("9", in: session)
+        #expect(after.beyond.isEmpty && after.inOrder.map(\.statusID) == ["9", "10"])
+        let held = await session.store.all().map(\.statusID)
+        #expect(held.contains("8"))
+    }
+
     @Test("Offline: the view is exactly what references and held items give — above, below, each in its place — and the foot says the rest did not arrive; a post with nothing held around it says the thread could not be had")
     func offline() async throws {
         let http = FixtureHTTP([Self.threadPath: .fail, "/api/v1/statuses/30/context": .fail])
