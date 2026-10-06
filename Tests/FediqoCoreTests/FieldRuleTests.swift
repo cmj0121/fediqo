@@ -52,9 +52,11 @@ struct FieldRuleTests {
 
     @Test("A Mastodon declares how far a post was sent, its language and whether it was covered, each with its type; no other kind declares any")
     func whatAKindDeclares() {
-        #expect(ProtocolKind.mastodon.fields.map(\.name) == ["audience", "language", "covered", "reblog"])
-        #expect(ProtocolKind.mastodon.fields.map(\.about) == [.post, .post, .post, .item], "each says what it is a fact about; whether an item is a reblog is the one about the item")
+        #expect(ProtocolKind.mastodon.fields.map(\.name) == ["audience", "language", "covered", "reblog", "reblogOf"])
+        #expect(ProtocolKind.mastodon.fields.map(\.about) == [.post, .post, .post, .item, .item], "each says what it is a fact about; whether an item is a reblog, and whose post it reblogs, are about the item")
         #expect(SourceField.reblog.type == .flag)
+        #expect(SourceField.reblogOf.type == .text && SourceField.reblogOf.holdsHandle)
+        #expect(ProtocolKind.mastodon.fields.filter(\.holdsHandle) == [.reblogOf])
         #expect(SourceField.audience.type == .options(fixed: ["everyone", "unlisted", "followers", "mentioned"], open: false))
         #expect(SourceField.language.type == .options(fixed: [], open: true), "any language there is")
         #expect(SourceField.covered.type == .flag)
@@ -62,7 +64,7 @@ struct FieldRuleTests {
             #expect(kind.fields.isEmpty)
             #expect(kind.field(named: "audience") == nil)
         }
-        #expect(Set(ProtocolKind.mastodon.fields.map(\.name)).count == 4, "a name is one field")
+        #expect(Set(ProtocolKind.mastodon.fields.map(\.name)).count == 5, "a name is one field")
     }
 
     @Test("A note answers for a field its source's kind declares; one the source said nothing of, or of another kind, answers nothing")
@@ -199,17 +201,32 @@ struct FieldRuleTests {
         for bad in ["ja jp", "日本語", String(repeating: "a", count: 36), "ja\n"] {
             #expect(Rule.field("language", is: .option(bad), in: .every) == nil, "\(bad.debugDescription) is no language")
         }
-        #expect(SourceField.declared.keys.sorted() == ["audience", "covered", "language", "reblog"])
+        #expect(SourceField.declared.keys.sorted() == ["audience", "covered", "language", "reblog", "reblogOf"])
         #expect(SourceField.audience.accepts(.option("followers")) && !SourceField.audience.accepts(.option("x")))
         #expect(SourceField.covered.accepts(.flag(false)) && !SourceField.covered.accepts(.option("no")))
         // A field no kind of source declares is not judged: a later build may declare it.
         #expect(Rule.field("mood", is: .option("glad"), in: .every) != nil)
         #expect(Rule.field("mood", is: .flag(true), in: .every) != nil)
         // Named so a stored rule's shape need not change; asked by nothing yet.
-        for value in [FieldValue.text("x"), .number(3), .date(Date(timeIntervalSince1970: 0))] {
+        for value in [FieldValue.number(3), .date(Date(timeIntervalSince1970: 0))] {
             #expect(!value.isAsked)
             #expect(Rule.field("later", is: value, in: .every) == nil)
         }
+        // A text is asked of a field that holds a handle, and of no other: a name this build
+        // does not declare has no way to compare one.
+        #expect(Rule.field("later", is: .text("x"), in: .every) == nil)
+        #expect(Rule.field("covered", is: .text("ada@m.example"), in: .every) == nil)
+        // A handle is kept as an author rule keeps one, however it was typed; what is no handle is no rule.
+        #expect(Rule.field("reblogOf", is: .text(" @Ada@M.Example "), in: .every)?.kind == .field(name: "reblogOf", is: .text("ada@m.example"), in: .every))
+        #expect(Rule.field("reblogOf", is: .text("ada@m.example"), in: .every)?.kind == Rule.field("reblogOf", is: .text("@ADA@m.example"), in: .every)?.kind)
+        for bad in ["", "ada", "@ada", "ada@", "@m.example", "a@b@c", "  "] {
+            #expect(Rule.field("reblogOf", is: .text(bad), in: .every) == nil, "\(bad.debugDescription) is no handle")
+            #expect(!SourceField.reblogOf.accepts(.text(bad)))
+        }
+        #expect(Rule.field("reblogOf", is: .option("ada@m.example"), in: .every) == nil)
+        #expect(Rule.field("reblogOf", is: .flag(true), in: .every) == nil)
+        #expect(SourceField.reblogOf.accepts(.text("ada@m.example")) && !SourceField.reblogOf.accepts(.text("@Ada@m.example")), "held as folded, and as nothing else")
+        #expect(Rule.handle("@Ada@M.Example") == "ada@m.example" && Rule.handle("ada") == nil)
     }
 
     @Test("One rule “language is Japanese” shows only posts whose source says so; a post that says no language is not shown")

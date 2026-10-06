@@ -225,6 +225,8 @@
 "rule.field.reblog" = "是轉發";
 "rule.field.reblog.phrase.yes" = "轉發";
 "rule.field.reblog.phrase.no" = "不是轉發的";
+"rule.field.reblogOf" = "轉發誰的貼文";
+"rule.field.reblogOf.phrase" = "轉發 %@ 的貼文";
 "rule.band.field" = "「%@」是其中任何一個";
 "rule.kind.field" = "來源說的事";
 "rule.keyword.placeholder" = "一個字詞";

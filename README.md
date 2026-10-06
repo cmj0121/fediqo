@@ -159,8 +159,10 @@ A timeline is its rules. A rule names one kind of thing:
   of its own: two language rules are any, a language rule and a Sent to rule are all.
 - A Hide rule hides what it matches, whatever else lets it through. A timeline with only Hide
   rules is All, less what they hide.
-- A Hide on a person also hides what others reblog of theirs; showing a person shows what they
-  wrote and what they reblogged.
+- A rule on a person is about what they made — what they wrote and what they reblogged —
+  shown or hidden alike. What others reblog of theirs is hidden by a second rule, Whose post
+  it reblogs (below): Hide the author and Hide reblogs of them, and their words are drawn
+  nowhere.
 - An author, keyword, or category rule can be for every source or for one. A list or a board
   belongs to one source, so a rule naming one is only for that source.
 - A keyword ignores case, and full-width against half-width, and matches anywhere in the text
@@ -177,7 +179,7 @@ arrived here, not everything they ever wrote.
 
 ### What one kind of source says
 
-Some things only one kind of source says about a post. A Mastodon says four, and a rule can
+Some things only one kind of source says about a post. A Mastodon says five, and a rule can
 ask each:
 
 | Field                 | Says                                              | A rule asks for        |
@@ -186,12 +188,20 @@ ask each:
 | Language              | the language the post says it is in               | a language held posts say |
 | Covered by its author | whether it was marked sensitive or given a warning | yes, or no            |
 | Is a reblog           | whether the row is somebody's reblog of a post    | yes, or no             |
+| Whose post it reblogs | who wrote the post a reblog reblogs               | a person (`user@instance`) |
 
-Is a reblog is asked of the row itself; the other three are asked of the post, and on a
-reblog's row of the post it reblogs. So a Hide on Is a reblog: yes takes the reblogs out and
+Is a reblog and Whose post it reblogs are asked of the row itself; the other three are asked
+of the post, and on a reblog's row of the post it reblogs. So a Hide on Is a reblog: yes takes the reblogs out and
 leaves each post where it stands on its own, shown once; showing only reblogs shows no post
 for having been reblogged. A post held from before reblogs were rows, which says it arrived
 as a reblog, is a post: it answers no.
+
+Only a reblog says whose post it reblogs. So Hide on Whose post it reblogs: `@x@instance`
+hides other people's reblogs of that person's posts and leaves the posts that person wrote;
+Show on it shows only reblogs of their posts, and no post. The person is typed, or picked
+from the authors held, as for an author rule. A reblog whose post this device does not hold
+says nothing here, and is neither shown nor hidden by such a rule; nor is a post, or anything
+from a forum.
 
 The editor offers a field only while one of your sources declares it, and only the values
 those sources can give: every audience, yes and no, and for Language the languages the posts
@@ -330,10 +340,10 @@ goes to: favourite, reblog, bookmark and
 answer go to the post, and opening the row opens the post. Keeping the row keeps the reblog — the keep mark is named for it —
 and the post it shows stays for as long as the reblog is kept, whatever else is let go — a
 post you take back, or one its source says is gone, stays too, marked as gone from its source. A
-rule on an author is asked of who reblogged — and a Hide on a person also hides what others
-reblog of theirs, while showing a person shows what they wrote and what they reblogged; a rule
+rule on an author is asked of who reblogged, shown or hidden alike — what others reblog of a
+person is hidden by a rule on Whose post it reblogs; a rule
 on a keyword or a field is asked of the
-post reblogged, so what hides a post hides its reblogs — but for Is a reblog, which is asked
+post reblogged, so what hides a post hides its reblogs — but for Is a reblog and Whose post it reblogs, which are asked
 of the row, so hiding reblogs leaves the post's own row; a rule on a category is asked of the
 reblog, which arrived through the timeline that listed it, while the post it brought arrived
 through none. A post held from before reblogs were rows, which arrived as a reblog, stays

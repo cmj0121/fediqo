@@ -163,7 +163,11 @@ struct ReblogRowTests {
         #expect(drawn(.keyword("cats", in: .every)) == [reblog.key.rowID, post.key.rowID])
         #expect(drawn(.author("bob@social.example", in: .every, sources: session.sources)) == [reblog.key.rowID])
         #expect(drawn(.author("ada@social.example", in: .every, sources: session.sources)) == [post.key.rowID])
-        #expect(drawn(.author("ada@social.example", in: .every, effect: .exclude, sources: session.sources)).isEmpty, "hiding Ada hides Bob's reblog of her post too")
+        #expect(drawn(.author("ada@social.example", in: .every, effect: .exclude, sources: session.sources)) == [reblog.key.rowID], "hiding Ada hides what she made; Bob's reblog of her post is Bob's")
+        // Whose post it reblogs, through the session's one lookup of what each reblog reblogs.
+        #expect(drawn(.field("reblogOf", is: .text("@ada@social.example"), in: .every, effect: .exclude)) == [post.key.rowID])
+        #expect(drawn(.field("reblogOf", is: .text("@ada@social.example"), in: .every)) == [reblog.key.rowID])
+        #expect(drawn(.field("reblogOf", is: .text("@bob@social.example"), in: .every)).isEmpty)
         #expect(drawn(.author("bob@social.example", in: .every, effect: .exclude, sources: session.sources)) == [post.key.rowID])
     }
 

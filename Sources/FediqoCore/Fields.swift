@@ -12,9 +12,13 @@ import Foundation
 
 /// What kind of thing a field holds.
 ///
-/// **All five are here, and two are asked today.** A rule compares an option and a yes-or-no;
-/// text, a number and a date are named so a stored rule's shape does not change when a field of
-/// one arrives, and nothing builds or compares one yet (`FieldValue.isAsked`).
+/// **All five are here, and three are asked today.** A rule compares an option, a yes-or-no and
+/// a text; a number and a date are named so a stored rule's shape does not change when a field
+/// of one arrives, and nothing builds or compares one yet (`FieldValue.isAsked`).
+///
+/// **A text is compared whole, as its field folds it.** The one text field there is holds a
+/// handle (`SourceField.holdsHandle`), folded as an author rule folds one; nothing here matches
+/// part of a text, and a field that wanted that would have to say how.
 public enum FieldType: Hashable, Sendable {
     case text
     case number
@@ -72,6 +76,18 @@ public struct SourceField: Hashable, Sendable, Identifiable {
     /// let it through, and a rule showing only reblogs shows no post for being reblogged.
     public static let reblog = SourceField(name: "reblog", type: .flag, about: .item)
 
+    /// Whose post a reblog reblogs (#290): the handle of the author of the post reblogged, as
+    /// `user@instance`, folded as an author rule's is. **About the item** — only a reblog says
+    /// it. A post says nothing for it, whoever wrote it and however it arrived, so a rule on
+    /// this neither shows a post nor hides one: hiding reblogs of a person leaves that person's
+    /// own posts, and showing them shows no post. **And a reblog whose post is not held says
+    /// nothing**: who wrote it is the post's own item's to say, and there is none here.
+    public static let reblogOf = SourceField(name: "reblogOf", type: .text, about: .item)
+
+    /// Whether this field's text is a handle: compared as `user@instance`, folded, and taken in
+    /// the editor the way an author rule's handle is.
+    public var holdsHandle: Bool { self == .reblogOf }
+
     /// Every field any kind of source declares, by name: what a rule's value is held to
     /// (`accepts`), whichever of the reader's sources are here.
     public static let declared: [String: SourceField] = Dictionary(
@@ -102,8 +118,11 @@ public struct SourceField: Hashable, Sendable, Identifiable {
     /// match, and is never made (`Rule.field`).
     public func accepts(_ value: FieldValue) -> Bool {
         switch (type, value) {
-        case (.flag, .flag), (.text, .text), (.number, .number), (.date, .date):
+        case (.flag, .flag), (.number, .number), (.date, .date):
             return true
+        // A handle is held as `Rule.handle` folds one, and as nothing else.
+        case (.text, .text(let text)):
+            return holdsHandle && Rule.handle(text) == text
         case (.options(let fixed, let open), .option(let option)):
             if fixed.contains(option) { return true }
             guard open else { return false }
@@ -122,11 +141,12 @@ public enum FieldValue: Hashable, Sendable {
     case flag(Bool)
     case option(String)
 
-    /// Whether a rule can be asked of this kind of value today: an option, or a yes-or-no.
+    /// Whether a rule can be asked of this kind of value today: an option, a yes-or-no, or a
+    /// text — and a text only of a field that holds a handle, which `Rule.field` holds it to.
     public var isAsked: Bool {
         switch self {
-        case .flag, .option: true
-        case .text, .number, .date: false
+        case .flag, .option, .text: true
+        case .number, .date: false
         }
     }
 
@@ -144,7 +164,7 @@ extension ProtocolKind {
     ///
     /// **No `default:`**, this package's standing rule: a protocol added later has to say.
     ///
-    /// **Past five fields the editor's digits run out.** The kinds are picked by 1–4 and each
+    /// **Five fields, and the editor's digits are spent.** The kinds are picked by 1–4 and each
     /// field offered by the next digit, so a tenth pill has no digit: it is reached as every pill
     /// already is without one — pressed, or walked to with Tab, which the kinds stage leaves to
     /// the system — and `EditorAction.from` says the same where the digits are read. Whoever
@@ -152,7 +172,7 @@ extension ProtocolKind {
     public var fields: [SourceField] {
         switch self {
         case .mastodon:
-            [.audience, .language, .covered, .reblog]
+            [.audience, .language, .covered, .reblog, .reblogOf]
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
             .discourse, .discuz, .unknown:
             []
@@ -177,7 +197,11 @@ extension Note {
     /// What this note's source says of it for the field `name`, or nothing — where its kind of
     /// source declares no such field, and where the source said nothing. **Nothing is not a
     /// value**: a rule on the field neither shows such a post nor hides it.
-    public func value(of name: String) -> FieldValue? {
+    ///
+    /// `reblogged` is the post this item reblogs, where it is a reblog and that post is held —
+    /// handed in by whoever holds the notes, as `CompiledTimeline.verdict` is handed it. A field
+    /// about what an item reblogs is read off it, and says nothing without it.
+    public func value(of name: String, reblogged: Note? = nil) -> FieldValue? {
         guard let field = source.kind.field(named: name) else { return nil }
         switch field {
         case .audience: return audience.map { .option($0.rawValue) }
@@ -187,6 +211,13 @@ extension Note {
         // held from before a reblog was an item, which arrived as somebody's reblog, included.
         // It is the post.
         case .reblog: return .flag(isReblog)
+        // Only a reblog says it, and only of a post held from the same source: a name that
+        // spells another host is not looked at.
+        case .reblogOf:
+            guard isReblog, let reblogged, !reblogged.isReblog, reblogged.source.host == source.host,
+                  let handle = Rule.handle(reblogged.handle)
+            else { return nil }
+            return .text(handle)
         default: return nil
         }
     }

@@ -226,6 +226,8 @@
 "rule.field.reblog" = "Is a reblog";
 "rule.field.reblog.phrase.yes" = "reblogs";
 "rule.field.reblog.phrase.no" = "everything that is not a reblog";
+"rule.field.reblogOf" = "Whose post it reblogs";
+"rule.field.reblogOf.phrase" = "reblogs of %@";
 "rule.band.field" = "Whose “%@” is any of these";
 "rule.kind.field" = "What a source says";
 "rule.keyword.placeholder" = "A word";

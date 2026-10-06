@@ -349,6 +349,12 @@ struct RuleDraft: Equatable {
         self.field = field.name
     }
 
+    /// Whether what this rule names is a handle typed into the form's field, as an author
+    /// rule's is: a rule on a field that holds one (`SourceField.holdsHandle`).
+    var takesHandle: Bool {
+        tag == .field && field.flatMap { SourceField.declared[$0] }?.holdsHandle == true
+    }
+
     /// A draft of the kind `rule` is — and, for a rule on a field, of its field — with nothing
     /// picked: what its choices are asked of.
     init(kindOf rule: Rule) {
@@ -385,7 +391,13 @@ struct RuleDraft: Equatable {
             target = .category(category, on: RuleText.host(of: scope) ?? listed ?? sources.first?.host ?? "")
             self.scope = scope
         case .field(let name, let value, let scope):
-            target = .field(name, value)
+            // A handle is shown as it is typed, as an author's is.
+            if takesHandle, case .text(let handle) = value {
+                typed = "@" + handle
+                target = .field(name, .text(typed))
+            } else {
+                target = .field(name, value)
+            }
             self.scope = scope
         }
     }
@@ -406,6 +418,7 @@ struct RuleDraft: Equatable {
     mutating func pick(_ picked: RuleTarget, sources: [Source]) {
         target = picked
         if case .author(let handle) = picked { typed = handle }
+        if takesHandle, case .field(_, .text(let handle)) = picked { typed = handle }
         let choices = RuleBuilder.scopes(for: picked, sources: sources)
         if case .category(_, let host) = picked, choices.contains(.source(host: host)) {
             scope = .source(host: host)
@@ -419,7 +432,9 @@ struct RuleDraft: Equatable {
         switch tag {
         case .author: pick(.author(text), sources: sources)
         case .keyword: pick(.keyword(text), sources: sources)
-        case .source, .category, .field: break
+        case .field:
+            if takesHandle, let field { pick(.field(field, .text(text)), sources: sources) }
+        case .source, .category: break
         }
     }
 
@@ -501,7 +516,7 @@ enum EditorAction: Equatable {
     /// wherever a field does not have the keys.
     static func from(
         _ key: Character, command: Bool = false, option: Bool = false, stage: EditorStage, fieldFocused: Bool,
-        keysHeld: Bool = true, fields: [String] = []
+        keysHeld: Bool = true, fields: [String] = [], typed: Bool = false
     ) -> EditorAction? {
         if key == KeyEquivalent.escape.character { return escapeIsExitCommand ? nil : escape(at: stage) }
         if option, !command, case .form = stage, key == "o" || key == "ø" { return .nextScope }
@@ -543,7 +558,7 @@ enum EditorAction: Equatable {
             case KeyEquivalent.return.character: return .confirmRule
             // Only where the kind has no field: ⌫ after a Return in an unfinished author or
             // keyword is a slip back into the text, never the whole rule gone.
-            case KeyEquivalent.delete.character: return Self.removesFromForm(stage) ? .removeRule : nil
+            case KeyEquivalent.delete.character: return Self.removesFromForm(stage, typed: typed) ? .removeRule : nil
             default: return down ? .nextChoice : up ? .previousChoice : nil
             }
         }
@@ -554,16 +569,18 @@ enum EditorAction: Equatable {
     static let kinds: [RuleKind.Tag] = [.source, .author, .keyword, .category]
 
     /// Whether ⌫ removes the rule open in this stage's form: a source, a category or a field's
-    /// value, which have no field to type back into.
-    static func removesFromForm(_ stage: EditorStage) -> Bool {
-        stage == .form(.source) || stage == .form(.category) || stage == .form(.field)
+    /// value, which have no field to type back into. `typed` is whether this form has one all
+    /// the same — a field whose value is a handle (`RuleDraft.takesHandle`) — and then ⌫ is an
+    /// author's: a slip back into the text.
+    static func removesFromForm(_ stage: EditorStage, typed: Bool = false) -> Bool {
+        stage == .form(.source) || stage == .form(.category) || (stage == .form(.field) && !typed)
     }
 
     /// The keycap strip under each stage: the caps, and the key naming what they do. A rule
     /// opened to be changed says it can be removed from there, and is confirmed as a change. The
     /// timeline tab names only the keys that act on the timeline.
     static func strip(
-        for stage: EditorStage, changing: Bool = false, tab: EditorTab = .rules, fields: Int = 0
+        for stage: EditorStage, changing: Bool = false, tab: EditorTab = .rules, fields: Int = 0, typed: Bool = false
     ) -> [(caps: String, key: String)] {
         if tab == .timeline {
             return [("⇥ t", "editor.keys.tab"), ("m", "editor.keys.name"), ("[ ]", "editor.keys.move"),
@@ -577,7 +594,7 @@ enum EditorAction: Equatable {
              ("⌘↩", "editor.keys.done"), ("esc", "editor.keys.cancel")]
         case .kinds:
             [("1–\(kinds.count + fields)", "editor.keys.kind"), ("esc", "editor.keys.back")]
-        case .form where changing && removesFromForm(stage):
+        case .form where changing && removesFromForm(stage, typed: typed):
             [("j k", "editor.keys.pick"), ("x", "editor.keys.effect"), ("o ⌥O", "editor.keys.scope"),
              ("↩", "editor.keys.change"), ("⌫", "editor.keys.remove"), ("esc", "editor.keys.back")]
         case .form where changing:

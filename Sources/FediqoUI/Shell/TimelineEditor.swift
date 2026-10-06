@@ -47,7 +47,7 @@ struct TimelineEditor: View {
             }
             EditorKeyStrip(
                 stage: flow.stage, changing: flow.changing != nil, tab: flow.tab,
-                fields: RuleBuilder.fields(in: sources).count
+                fields: RuleBuilder.fields(in: sources).count, typed: flow.adding.takesHandle
             )
         }
         .padding(ShellSpace.pad)
@@ -69,7 +69,7 @@ struct TimelineEditor: View {
                 stage: flow.stage,
                 fieldFocused: focus == .name || focus == .desc || focus == .text,
                 keysHeld: focus == .keys || (flow.tab == .rules && flow.focusedRule != nil),
-                fields: RuleBuilder.fields(in: sources).map(\.name)
+                fields: RuleBuilder.fields(in: sources).map(\.name), typed: flow.adding.takesHandle
             )
             guard let action else { return .ignored }
             perform(action)
@@ -158,10 +158,8 @@ struct TimelineEditor: View {
         case .source:
             return session.sources.map { .source($0.host) }
         case .author:
-            let held = RuleBuilder.authors(in: session.notes)
-            let key = Fold.handle(draft.typed)
-            let narrowed = key.isEmpty || held.contains(key) ? held : held.filter { $0.contains(key) }
-            return narrowed.prefix(30).map { .author("@" + $0) }
+            return RuleBuilder.handles(RuleBuilder.authors(in: session.notes), typed: draft.typed)
+                .map { .author("@" + $0) }
         case .keyword:
             return []
         case .category:
@@ -173,8 +171,14 @@ struct TimelineEditor: View {
             guard let name = draft.field,
                   let field = RuleBuilder.fields(in: session.sources).first(where: { $0.name == name })
             else { return [] }
-            return RuleBuilder.values(of: field, sources: session.sources, notes: session.notes)
-                .map { .field(name, $0) }
+            let values = RuleBuilder.values(of: field, sources: session.sources, notes: session.notes)
+            // A handle is typed, and what is offered narrows as an author rule's does.
+            guard field.holdsHandle else { return values.map { .field(name, $0) } }
+            let held = values.compactMap { value -> String? in
+                if case .text(let handle) = value { return handle }
+                return nil
+            }
+            return RuleBuilder.handles(held, typed: draft.typed).map { .field(name, .text("@" + $0)) }
         }
     }
 
@@ -458,6 +462,8 @@ private struct EditorKeyStrip: View {
     let tab: EditorTab
     /// How many fields the kinds offer after the four, for the cap that numbers them.
     var fields = 0
+    /// Whether the form in front takes a typed handle though it is a field's.
+    var typed = false
     @Environment(\.colorScheme) private var colorScheme
 
     /// Only where there is a keyboard: on a phone without one it names keys nobody can press.
@@ -473,7 +479,7 @@ private struct EditorKeyStrip: View {
     }
 
     private var caps: some View {
-        ForEach(EditorAction.strip(for: stage, changing: changing, tab: tab, fields: fields), id: \.caps) { line in
+        ForEach(EditorAction.strip(for: stage, changing: changing, tab: tab, fields: fields, typed: typed), id: \.caps) { line in
             HStack(spacing: ShellSpace.tight) {
                 Text(line.caps)
                     .shellFont(.reading)
@@ -518,7 +524,7 @@ private struct RuleForm: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .accessibilityAddTraits(.isHeader)
             }
-            if draft.tag == .author || draft.tag == .keyword { field }
+            if draft.tag == .author || draft.tag == .keyword || draft.takesHandle { field }
             ScrollViewReader { proxy in
                 ScrollView { picker.frame(maxWidth: .infinity, alignment: .leading) }
                     .onChange(of: draft.target) { _, target in
@@ -532,7 +538,7 @@ private struct RuleForm: View {
     private var field: some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             TextField(
-                draft.tag == .author ? "@user@instance" : L10n.t("rule.keyword.placeholder"),
+                draft.tag == .author || draft.takesHandle ? "@user@instance" : L10n.t("rule.keyword.placeholder"),
                 text: Binding(get: { draft.typed }, set: { draft.type($0, sources: sources) })
             )
             .shellFont(.body)

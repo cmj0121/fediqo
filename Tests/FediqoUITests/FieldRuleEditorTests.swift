@@ -132,6 +132,12 @@ struct FieldRuleEditorTests {
             #"{"kind":"field","field":"language","type":"option","value":"ja jp"}"#,
             #"{"kind":"field","field":"language","type":"option","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
             #"{"kind":"field","field":"language","type":"flag","value":"yes"}"#,
+            // Whose post it reblogs holds a handle, folded, and nothing else.
+            #"{"kind":"field","field":"reblogOf","type":"text","value":"ada"}"#,
+            #"{"kind":"field","field":"reblogOf","type":"text","value":""}"#,
+            #"{"kind":"field","field":"reblogOf","type":"text","value":"a@b@c"}"#,
+            #"{"kind":"field","field":"reblogOf","type":"option","value":"ada@m.example"}"#,
+            #"{"kind":"field","field":"reblogOf","type":"flag","value":"yes"}"#,
           ])
     func aKeptRuleItCannotAskFailsClosed(rule: String) async {
         let store = WrittenTimelineStore(defaults: KeptInMemory())
@@ -197,15 +203,92 @@ struct FieldRuleEditorTests {
         #expect(again.timelineItems(latest: nil).map(\.noteID).sorted() == shown)
     }
 
+    @Test("A rule on whose post it reblogs is kept in the shape every rule on a field is — its field's name, the text type, the handle — and comes back the same rule; a handle kept in another spelling comes back folded")
+    func aHandleIsKeptAndReadBack() throws {
+        let store = WrittenTimelineStore(defaults: KeptInMemory())
+        let rule = try #require(Rule.field("reblogOf", is: .text("@Ada@M.example"), in: .source(host: "m.example"), effect: .exclude))
+        let timeline = TimelineDefinition(name: "Fields", rules: [rule])
+        store.save([timeline])
+        #expect(store.load() == .timelines([timeline]))
+        let data = try #require(store.defaults.data(forKey: store.key))
+        let top = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(top["version"] as? Int == 3, "no new version: the text type was in the shape from the start")
+        let kept = try #require(((top["timelines"] as? [[String: Any]])?.first?["rules"] as? [[String: Any]])?.first)
+        #expect(Set(kept.keys) == ["id", "effect", "kind", "field", "type", "value", "host"])
+        #expect(kept["kind"] as? String == "field" && kept["field"] as? String == "reblogOf")
+        #expect(kept["type"] as? String == "text" && kept["value"] as? String == "ada@m.example")
+        #expect(kept["host"] as? String == "m.example" && kept["effect"] as? String == "exclude")
+
+        let spelled = Data(#"{"version":3,"timelines":[{"id":"11111111-1111-1111-1111-111111111111","name":"X","rules":[{"id":"00000000-0000-0000-0000-000000000001","effect":"include","kind":"field","field":"reblogOf","type":"text","value":"@ADA@m.example"}]}]}"#.utf8)
+        store.defaults.set(spelled, forKey: store.key)
+        guard case .timelines(let read) = store.load() else {
+            Issue.record("a handle in another spelling is still a handle")
+            return
+        }
+        #expect(read.first?.rules.first?.kind == .field(name: "reblogOf", is: .text("ada@m.example"), in: .every))
+    }
+
+    @Test("Whose post it reblogs is offered as the fifth field and takes a handle the way an author rule does: typed, narrowed from the authors held, confirmed as the rule; opened again it is the same rule, and ⌫ there is a slip back into the text")
+    func theFormTakesAHandle() async throws {
+        let session = await session(WrittenTimelineStore(defaults: KeptInMemory()))
+        let fields = RuleBuilder.fields(in: session.sources).map(\.name)
+        #expect(EditorAction.from("9", stage: .kinds, fieldFocused: false, fields: fields) == .pickField("reblogOf"))
+        var flow = EditorFlow(draft: TimelineDraft(new: 1))
+        flow.addRule()
+        flow.pickField(.reblogOf)
+        #expect(flow.stage == .form(.field) && flow.adding.takesHandle && flow.wantsField, "the keyboard belongs in its field")
+        #expect(flow.adding.rule(session.sources) == nil)
+        // What is offered is the author rule's own list, read the same way.
+        let authors = TimelineEditor.choices(for: RuleDraft(.author), in: session)
+        let offered = TimelineEditor.choices(for: flow.adding, in: session)
+        #expect(offered == [.field("reblogOf", .text("@ada@m.example")), .field("reblogOf", .text("@ada@f.example"))])
+        #expect(offered.count == authors.count)
+
+        flow.adding.type("ada", sources: session.sources)
+        #expect(flow.adding.rule(session.sources) == nil, "a name with no instance is no handle")
+        #expect(TimelineEditor.choices(for: flow.adding, in: session) == offered, "narrowed to the handles holding what is typed")
+        flow.adding.type("m.ex", sources: session.sources)
+        #expect(TimelineEditor.choices(for: flow.adding, in: session) == [.field("reblogOf", .text("@ada@m.example"))])
+        flow.adding.type(" @Cyd@Elsewhere.example ", sources: session.sources)
+        #expect(flow.adding.scopes(session.sources) == [.every, .source(host: "m.example")], "a Mastodon's field: never a forum's")
+        flow.adding.toggleEffect()
+        flow.confirm(sources: session.sources)
+        let rule = try #require(flow.draft.rules.first)
+        #expect(rule.kind == .field(name: "reblogOf", is: .text("cyd@elsewhere.example"), in: .every) && rule.effect == .exclude)
+
+        flow.open(rule.id, sources: session.sources, choices: [])
+        #expect(flow.stage == .form(.field) && flow.wantsField)
+        #expect(flow.adding.typed == "@cyd@elsewhere.example")
+        #expect(flow.adding.rule(session.sources, id: rule.id) == rule)
+        #expect(!EditorAction.removesFromForm(flow.stage, typed: flow.adding.takesHandle))
+        #expect(EditorAction.from(KeyEquivalent.delete.character, stage: flow.stage, fieldFocused: false, typed: true) == nil)
+        #expect(EditorAction.from(KeyEquivalent.delete.character, stage: flow.stage, fieldFocused: false) == .removeRule, "a field with values to pick is removed by ⌫, as before")
+        // A picked handle fills the field.
+        flow.adding.step(1, through: offered, sources: session.sources)
+        #expect(flow.adding.typed == "@ada@m.example" && flow.adding.rule(session.sources)?.kind == .field(name: "reblogOf", is: .text("ada@m.example"), in: .every))
+    }
+
+    @Test("A rule on whose post it reblogs is said in words, with the handle as a handle", arguments: [DummyLanguage.english, .taiwanese])
+    func theHandleInWords(language: DummyLanguage) throws {
+        let rule = try #require(Rule.field("reblogOf", is: .text("ada@m.example"), in: .every, effect: .exclude))
+        let english = language == .english
+        #expect(RuleText.fieldName("reblogOf", language: language) == (english ? "Whose post it reblogs" : "轉發誰的貼文"))
+        #expect(RuleText.valueName(.text("ada@m.example"), of: "reblogOf", language: language) == "@ada@m.example")
+        #expect(RuleText.phrase(rule, sources: [Self.mastodon], language: language) == (english ? "reblogs of @ada@m.example" : "轉發 @ada@m.example 的貼文"))
+        #expect(RuleText.target(rule, sources: [Self.mastodon], language: language).contains("@ada@m.example"))
+        let spoken = RuleText.spoken(rule, status: .present, sources: [Self.mastodon], language: language)
+        #expect(!spoken.contains("%") && !spoken.contains("rule."))
+    }
+
     // MARK: - What the editor offers
 
     @Test("A field is offered only where one of the reader's sources declares it, each once")
     func offeredOnlyWhereDeclared() {
         #expect(RuleBuilder.fields(in: [Self.forum]).isEmpty)
         #expect(RuleBuilder.fields(in: []).isEmpty)
-        #expect(RuleBuilder.fields(in: [Self.forum, Self.mastodon]).map(\.name) == ["audience", "language", "covered", "reblog"])
+        #expect(RuleBuilder.fields(in: [Self.forum, Self.mastodon]).map(\.name) == ["audience", "language", "covered", "reblog", "reblogOf"])
         let two = [Self.mastodon, Source(host: "second.example", kind: .mastodon)]
-        #expect(RuleBuilder.fields(in: two).map(\.name) == ["audience", "language", "covered", "reblog"])
+        #expect(RuleBuilder.fields(in: two).map(\.name) == ["audience", "language", "covered", "reblog", "reblogOf"])
     }
 
     @Test("Only values the reader's sources can give are offered: every audience, a yes and a no, and the languages held posts say — most posts first, and never a forum's")

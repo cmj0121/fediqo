@@ -27,7 +27,7 @@ struct EditorFlow: Equatable {
 
     /// Whether the stage in front has a field of its own the keyboard belongs in.
     var wantsField: Bool {
-        stage == .form(.author) || stage == .form(.keyword)
+        stage == .form(.author) || stage == .form(.keyword) || (stage == .form(.field) && adding.takesHandle)
     }
 
     /// The rule being changed, as it was kept.

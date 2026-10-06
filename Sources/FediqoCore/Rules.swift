@@ -129,14 +129,20 @@ public struct Rule: Hashable, Sendable, Identifiable {
         sources: [Source],
         id: UUID = UUID()
     ) -> Rule? {
-        let folded = Fold.handle(handle.trimmingCharacters(in: .whitespacesAndNewlines))
-        let parts = folded.split(separator: "@", omittingEmptySubsequences: false)
-        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty, let scope = normalised(scope) else {
-            return nil
-        }
-        let instance = String(parts[1])
+        guard let folded = Self.handle(handle), let scope = normalised(scope) else { return nil }
+        let instance = String(folded.split(separator: "@")[1])
         let forum = sources.contains { $0.host == instance && $0.kind.isForum }
         return Rule(id: id, effect: effect, kind: .author(handle: folded, in: forum ? .source(host: instance) : scope))
+    }
+
+    /// A handle as a rule holds one: `user@instance`, folded, with or without a leading `@` and
+    /// whatever space was typed round it — or nothing where it is not a user and an instance.
+    /// **The one reading of a handle a rule is made from**, an author's and a field's alike.
+    public static func handle(_ raw: String) -> String? {
+        let folded = Fold.handle(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+        let parts = folded.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        return folded
     }
 
     public static func keyword(
@@ -179,11 +185,13 @@ public struct Rule: Hashable, Sendable, Identifiable {
     /// A rule on a field one kind of source declares (#287): the field's name, and the value
     /// asked for. An option is folded to lower case, as a note's is.
     ///
-    /// **Nothing for a value no rule can be asked of yet** — text, a number, a date — so a stored
+    /// **Nothing for a value no rule can be asked of yet** — a number, a date, and a text for
+    /// any field but one that holds a handle — so a stored
     /// rule of a type this build cannot compare is refused whole, never kept as one that matches
     /// nothing. **And nothing for a value its field cannot hold**, where this build declares the
     /// field (`SourceField.accepts`): a yes asked of how far a post was sent, an audience that is
-    /// not one of the four, a language that is no language tag. Such a rule could never match —
+    /// not one of the four, a language that is no language tag, a text that is no handle where
+    /// the field holds one. Such a rule could never match —
     /// a hide written that way would hide nothing and say it was hiding — so it is not a rule.
     ///
     /// Whether any source *here* declares the field is not asked: a rule naming one that no
@@ -199,7 +207,15 @@ public struct Rule: Hashable, Sendable, Identifiable {
     ) -> Rule? {
         guard !name.isEmpty, value.isAsked, let scope = normalised(scope) else { return nil }
         if case .option(let option) = value, option.isEmpty { return nil }
-        let folded = value.folded
+        var folded = value.folded
+        // **A text is asked only of a field that says how its text is compared**, and the one
+        // that does holds a handle: kept as an author rule keeps one, however it was typed. A
+        // text for any other name — one this build does not declare — has no comparison here,
+        // and is refused as a number is.
+        if case .text(let text) = value {
+            guard SourceField.declared[name]?.holdsHandle == true, let handle = Self.handle(text) else { return nil }
+            folded = .text(handle)
+        }
         if let field = SourceField.declared[name], !field.accepts(folded) { return nil }
         return Rule(id: id, effect: effect, kind: .field(name: name, is: folded, in: scope))
     }
@@ -336,12 +352,14 @@ public struct CompiledTimeline: Sendable {
     /// finds the reblog by the post's words, and what hides the post hides its reblog.
     /// **A reblog whose post is not held says nothing**: it matches no rule on words or fields.
     ///
-    /// **A hide on an author is asked both ways.** Showing a person shows what they made: the
-    /// posts they wrote and the reblogs they made, so an include is asked of who made the item
-    /// and of nobody else. Hiding a person hides their words wherever they would be drawn, so a
-    /// hide is asked of who reblogged **and** of who wrote the post reblogged — or somebody
-    /// else's reblog would draw the hidden person's words and pictures under it. A reblog whose
-    /// post is not held draws nobody's words, and is asked of who reblogged alone.
+    /// **A rule on an author is asked of who made the item, and of nobody else** — a hide
+    /// exactly as an include. A person's rule is about what they made: the posts they wrote and
+    /// the reblogs they made. Somebody else's reblog of their post is that somebody's item, and
+    /// is shown or hidden by a rule on whose post a reblog reblogs (`SourceField.reblogOf`),
+    /// which the person writes where they want it: hide the author and hide reblogs of them, and
+    /// their words are drawn nowhere.
+    ///
+    /// **A field about the item is handed the post too**, since one of them is read off it.
     public func verdict(_ note: Note, _ index: TextIndex, reblogged: Note? = nil) -> Verdict {
         let said: Note? = note.isReblog ? reblogged.flatMap { $0.isReblog ? nil : $0 } : note
         var entry: TextIndex.Entry?
@@ -351,7 +369,7 @@ public struct CompiledTimeline: Sendable {
             saidEntry = found
             return found
         }
-        func matches(_ matcher: Matcher, hiding: Bool) -> Bool {
+        func matches(_ matcher: Matcher) -> Bool {
             if let host = matcher.host, host != note.source.host { return false }
             switch matcher.check {
             case .host: return true
@@ -361,37 +379,34 @@ public struct CompiledTimeline: Sendable {
             // Asked of what the field is about, as its declaration says (`SourceField.about`):
             // the item itself, or — for a fact about a post — what a reblog reblogs.
             case .field(let name, let value):
-                let asked = note.source.kind.field(named: name)?.about == .item ? note : said
-                return asked?.value(of: name) == value
+                if note.source.kind.field(named: name)?.about == .item {
+                    return note.value(of: name, reblogged: note.isReblog ? said : nil) == value
+                }
+                return said?.value(of: name) == value
             case .handle(let handle):
                 let found = entry ?? index.entry(for: note)
                 entry = found
-                if found.foldedHandle == handle { return true }
-                guard hiding, note.isReblog, let post = said else { return false }
-                return folded(post).foldedHandle == handle
+                return found.foldedHandle == handle
             case .keyword(let text):
                 guard let post = said else { return false }
                 return Fold.contains(folded(post).text, text)
             }
         }
-        if let hit = excludes.first(where: { matches($0, hiding: true) }) { return .hidden(by: hit.id) }
-        for group in groups where !group.contains(where: { matches($0, hiding: false) }) {
+        if let hit = excludes.first(where: matches) { return .hidden(by: hit.id) }
+        for group in groups where !group.contains(where: matches) {
             return .hidden(by: group[0].id)
         }
         return .shown
     }
 
     /// Whether any rule here is asked of the post a reblog reblogs: a rule on words or on a
-    /// field, and a hide on an author.
+    /// field.
     private var readsWhatIsSaid: Bool {
-        let reads: (Matcher) -> Bool = {
+        (excludes + groups.joined()).contains {
             switch $0.check {
             case .keyword, .field: true
             case .host, .handle, .category: false
             }
-        }
-        return (excludes + groups.joined()).contains(where: reads) || excludes.contains {
-            if case .handle = $0.check { true } else { false }
         }
     }
 

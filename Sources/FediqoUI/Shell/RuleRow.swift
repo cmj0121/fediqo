@@ -73,8 +73,12 @@ enum RuleBuilder {
             }
             let held = counts.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.map(\.key)
             return (fixed + held.filter { !fixed.contains($0) }).prefix(valuesOffered).map(FieldValue.option)
+        // A handle is typed, and offered from the authors this device holds posts by — as an
+        // author rule's is (`handles`).
+        case .text:
+            return field.holdsHandle ? authors(in: notes).map { .text($0) } : []
         // Nothing asks one of these yet, so nothing is offered for one.
-        case .text, .number, .date:
+        case .number, .date:
             return []
         }
     }
@@ -111,6 +115,15 @@ enum RuleBuilder {
             }
             return picked.isEmpty ? nil : (source.host, picked)
         }
+    }
+
+    /// The handles offered where one is typed — an author rule's, and a field's that holds one:
+    /// those of `held`, narrowed to the ones containing what is typed unless it is one of them
+    /// already, and no more than a screen of them.
+    static func handles(_ held: [String], typed: String) -> [String] {
+        let key = Fold.handle(typed)
+        let narrowed = key.isEmpty || held.contains(key) ? held : held.filter { $0.contains(key) }
+        return Array(narrowed.prefix(30))
     }
 
     /// Handles of the authors this device holds posts by, most posts first.
@@ -170,7 +183,8 @@ enum RuleText {
                 return L10n.locale(language).localizedString(forIdentifier: option) ?? option
             }
             return option
-        case .text(let text): return text
+        // A handle reads as one, as an author rule's does.
+        case .text(let text): return SourceField.declared[name]?.holdsHandle == true ? "@" + text : text
         case .number(let number): return number.formatted(.number.locale(L10n.locale(language)))
         case .date(let date): return date.formatted(.dateTime.year().month().day().locale(L10n.locale(language)))
         }

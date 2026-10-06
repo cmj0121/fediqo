@@ -643,33 +643,95 @@ struct ReblogItemTests {
         #expect(shown([showAda, .keyword("nothing here", in: .every, effect: .exclude)], held.all) == ["7", "8"])
     }
 
-    @Test("Hiding a person hides their words wherever they would be drawn: a hide on an author takes somebody else's reblog of their post, and names the rule; a hide on who reblogged takes the reblog and not the post's own row")
-    func hidingAPersonIsAskedBothWays() throws {
+    private static func reblogsOf(_ who: String, effect: RuleEffect = .include) throws -> Rule {
+        try #require(Rule.field("reblogOf", is: .text("\(who)@\(host)"), in: .every, effect: effect))
+    }
+
+    @Test("A hide on an author is asked of who made the item, as an include is: it takes that person's own rows and leaves somebody else's reblog of their post; a hide on who reblogged takes the reblog and not the post's own row")
+    func hidingAPersonIsWhoMadeIt() throws {
         let held = try Self.held()
         let hideAda = try #require(Rule.author("ada@\(Self.host)", in: .every, effect: .exclude, sources: [Self.source]))
-        #expect(shown([hideAda], held.all).isEmpty, "her rows, and Bob's reblog of her post")
+        #expect(shown([hideAda], held.all) == ["900"], "her rows go; Bob's reblog of her post is Bob's item")
         let timeline = CompiledTimeline(TimelineDefinition(name: "t", rules: [hideAda]), sources: [Self.source])
-        #expect(timeline.verdict(held.reblog, TextIndex(held.all), reblogged: held.post) == .hidden(by: hideAda.id), "the hidden reblog names its rule")
-        #expect(timeline.verdict(held.reblog, TextIndex([]), reblogged: held.post) == .hidden(by: hideAda.id), "with no index built, too")
+        #expect(timeline.verdict(held.reblog, TextIndex(held.all), reblogged: held.post) == .shown, "with the post in hand, too")
+        #expect(timeline.verdict(held.reblog, TextIndex([]), reblogged: held.post) == .shown, "and with no index built")
 
         let hideBob = Rule.author("bob@\(Self.host)", in: .every, effect: .exclude, sources: [Self.source])
         #expect(shown([hideBob], held.all) == ["7", "8"], "the reblog goes; what Ada wrote stays")
 
-        // A hide beside an include: Bob's reblogs are shown, but not those of Ada's posts.
+        // A hide beside an include: Bob's reblogs are shown, Ada's too.
         let showBob = Rule.author("bob@\(Self.host)", in: .every, sources: [Self.source])
-        #expect(shown([showBob, hideAda], held.all).isEmpty)
+        #expect(shown([showBob, hideAda], held.all) == ["900"])
     }
 
-    @Test("A reblog whose post is not held draws nobody's words: a hide on an author is asked of who reblogged alone")
-    func hidingAnUnheldReblog() throws {
+    @Test("Whose post it reblogs is a rule of the person's own: hiding reblogs of somebody takes other people's reblogs of their posts and leaves their own posts, and names the rule; with a hide on the author beside it both go; an include shows only reblogs of that person")
+    func reblogsOfAPerson() throws {
+        let held = try Self.held()
+        let hideReblogsOfAda = try Self.reblogsOf("ada", effect: .exclude)
+        #expect(shown([hideReblogsOfAda], held.all) == ["7", "8"], "Bob's reblog of her post goes; what she wrote stays")
+        let timeline = CompiledTimeline(TimelineDefinition(name: "t", rules: [hideReblogsOfAda]), sources: [Self.source])
+        #expect(timeline.verdict(held.reblog, TextIndex(held.all), reblogged: held.post) == .hidden(by: hideReblogsOfAda.id), "the hidden reblog names its rule")
+        #expect(timeline.verdict(held.reblog, TextIndex([]), reblogged: held.post) == .hidden(by: hideReblogsOfAda.id), "with no index built, too")
+        #expect(timeline.verdict(held.post, TextIndex(held.all)) == .shown)
+
+        // What a hide on the author did by itself before, the two rules do together.
+        let hideAda = Rule.author("ada@\(Self.host)", in: .every, effect: .exclude, sources: [Self.source])
+        #expect(shown([hideAda, hideReblogsOfAda], held.all).isEmpty, "her words are drawn nowhere")
+        let showBob = Rule.author("bob@\(Self.host)", in: .every, sources: [Self.source])
+        #expect(shown([showBob, hideReblogsOfAda], held.all).isEmpty, "Bob's reblogs are shown, but not those of Ada's posts")
+
+        #expect(shown([try Self.reblogsOf("ada")], held.all) == ["900"], "only reblogs of her posts: no post, hers or anybody's")
+        #expect(shown([try Self.reblogsOf("bob")], held.all).isEmpty, "who reblogged is not whose post it is")
+        #expect(shown([try Self.reblogsOf("bob", effect: .exclude)], held.all) == ["900", "7", "8"])
+        // Two on the one field are any; with another field, all.
+        #expect(shown([try Self.reblogsOf("ada"), try Self.reblogsOf("cyd")], held.all) == ["900"])
+        #expect(shown([try Self.reblogsOf("ada"), .field("reblog", is: .flag(false), in: .every)], held.all).isEmpty)
+        // Asked of the item: its value is nothing on a post, a handle on a reblog whose post is in hand.
+        #expect(held.post.value(of: "reblogOf", reblogged: held.post) == nil)
+        #expect(held.reblog.value(of: "reblogOf", reblogged: held.post) == .text("ada@\(Self.host)"))
+        #expect(held.reblog.value(of: "reblogOf") == nil)
+        #expect(held.reblog.value(of: "reblogOf", reblogged: held.reblog) == nil, "a reblog is not what a reblog reblogs")
+        let elsewhere = Note(
+            id: held.post.id, source: Source(host: "other.example", kind: .mastodon), author: "Ada", handle: "@ada@\(Self.host)",
+            body: "x", postedAt: Self.origin, categories: []
+        )
+        #expect(held.reblog.value(of: "reblogOf", reblogged: elsewhere) == nil, "only a post of the reblog's own source is what it reblogs")
+    }
+
+    @Test("A reblog whose post is not held says nothing of whose post it reblogs: no rule on that shows it or hides it; a rule on an author is asked of who reblogged, as ever")
+    func anUnheldReblog() throws {
         let held = try Self.held()
         let without = [held.reblog, held.own]
+        #expect(shown([try Self.reblogsOf("ada", effect: .exclude)], without) == ["900", "8"], "not hidden: nothing says whose post it is")
+        #expect(shown([try Self.reblogsOf("ada")], without).isEmpty, "and not shown")
         let hideAda = Rule.author("ada@\(Self.host)", in: .every, effect: .exclude, sources: [Self.source])
-        #expect(shown([hideAda], without) == ["900"], "Ada's own row goes; the reblog shows nothing of hers")
+        #expect(shown([hideAda], without) == ["900"], "Ada's own row goes; the reblog is Bob's")
         let hideBob = Rule.author("bob@\(Self.host)", in: .every, effect: .exclude, sources: [Self.source])
         #expect(shown([hideBob], without) == ["8"])
         let showAda = Rule.author("ada@\(Self.host)", in: .every, sources: [Self.source])
         #expect(shown([showAda], without) == ["8"])
+    }
+
+    @Test("A post held from before, which arrived as somebody's reblog, and a forum's item say nothing of whose post they reblog: neither is shown by such a rule nor hidden by one")
+    func legacyAndForumSayNothing() throws {
+        let legacy = try Self.legacy()
+        let forum = Source(host: "f.example", kind: .discuz)
+        let topic = Note(
+            id: "f.example/t/1", source: forum, author: "Ada", handle: "ada@f.example", body: "a topic",
+            postedAt: Self.origin, categories: [.board(id: "2")], boostedBy: "Bob"
+        )
+        #expect(legacy.value(of: "reblogOf", reblogged: legacy) == nil && topic.value(of: "reblogOf", reblogged: topic) == nil)
+        for who in ["ada", "bob"] {
+            let hide = try #require(Rule.field("reblogOf", is: .text("\(who)@\(Self.host)"), in: .every, effect: .exclude))
+            let show = try #require(Rule.field("reblogOf", is: .text("\(who)@\(Self.host)"), in: .every))
+            for rule in [hide, show] {
+                let timeline = CompiledTimeline(TimelineDefinition(name: "t", rules: [rule]), sources: [Self.source, forum])
+                let all = [legacy, topic]
+                #expect(timeline.shown(all, TextIndex(all)).count == (rule.effect == .exclude ? 2 : 0))
+            }
+        }
+        let forumHandle = try #require(Rule.field("reblogOf", is: .text("ada@f.example"), in: .every))
+        #expect(CompiledTimeline(TimelineDefinition(name: "t", rules: [forumHandle]), sources: [forum]).status(of: forumHandle) == .missingField)
     }
 
     @Test("A rule on words is asked of the post reblogged: an include finds the reblog by them, and a hide takes it with the post")
