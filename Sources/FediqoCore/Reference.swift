@@ -162,7 +162,7 @@ extension Note {
 extension ProtocolKind {
     /// Whether what an item of this kind of source refers to is loaded for it (#293). A
     /// Mastodon's, and no other's: #293 is about no other source.
-    public var loadsReferences: Bool { self == .mastodon }
+    public var loadsReferences: Bool { offers.loadsReferences }
 }
 
 extension Reply {

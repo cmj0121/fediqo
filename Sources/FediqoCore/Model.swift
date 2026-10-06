@@ -40,71 +40,29 @@ public enum ProtocolKind: String, Sendable, Hashable, CaseIterable {
         }
     }
 
-    /// Whether a source of this kind has the timelines every Mastodon-shaped server shares —
-    /// public, trends, home — so that a category naming one of them can mean this source.
-    ///
-    /// **The one list**, read by a timeline's rules and by `hasTrends`, which starts from it: a
-    /// second list is how a tab and a rule come to disagree about a server. No `default:`, so a kind
-    /// added later has to be answered here rather than inheriting somebody else's answer.
-    /// Whether a post read from a source of this kind says whether it quotes one (#214): a read
-    /// that says nothing of a quote is then a post with none, not a source that never said.
-    public var saysQuotes: Bool { self == .mastodon }
+    // **Each of these reads `offers`** (#299, `SourceOffers`): what a kind of source offers is
+    // said once there, and these are the names the rest of the package already asks by.
+
+    /// Whether a post read from a source of this kind says whether it quotes one (#214).
+    public var saysQuotes: Bool { offers.saysQuotes }
 
     /// Whether a source of this kind says what its signed-in reader has done to a post (#285).
-    public var saysReaderMarks: Bool { self == .mastodon }
+    public var saysReaderMarks: Bool { offers.saysReaderMarks }
 
-    public var hasTimelines: Bool {
-        switch self {
-        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
-            .gotosocial:
-            true
-        // Neither forum has one. A forum's categories are its boards.
-        case .discourse, .discuz, .unknown:
-            false
-        }
-    }
+    /// Whether a source of this kind has the timelines every Mastodon-shaped server shares —
+    /// public, trends, home — so that a category naming one of them can mean this source.
+    public var hasTimelines: Bool { offers.timelines }
 
     /// Whether a source of this kind has something trending — so that `.trends` can mean it, the
     /// Trends tab can be offered for it, and a reload of a timeline that reaches its Trends reads
-    /// them.
-    ///
-    /// **Every kind with timelines, and a Discuz! beside them without them.** A Discuz! forum
-    /// ranks its threads and its blogs by the week (`DiscuzRanklist`), which is exactly what a
-    /// microblog's trending read is: what everybody else is reading. It still has no public or
-    /// home timeline, so `hasTimelines` stays false for it and those still never reach a forum.
-    /// A Discourse has no ranking this app reads. No `default:`, `hasTimelines`' rule.
-    public var hasTrends: Bool {
-        switch self {
-        case .mastodon, .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica,
-            .gotosocial, .discuz:
-            true
-        case .discourse, .unknown:
-            false
-        }
-    }
+    /// them. Every kind with timelines, and a Discuz! beside them without them.
+    public var hasTrends: Bool { offers.trends }
 
     /// Whether this is a forum, whose authors are that forum's and nobody else's.
-    public var isForum: Bool { self == .discourse || self == .discuz }
+    public var isForum: Bool { offers.authorsAreItsOwn }
 
     /// Whether Fediqo can write to a source of this kind at all (#69).
-    ///
-    /// **`hasTimelines`' shape and for its reason** — one list per protocol fact, here beside the
-    /// others rather than beside the feature that first needed it, so a protocol added later is
-    /// answered in one place. No `default:`.
-    ///
-    /// **A forum is `false` although it signs in**, and the two are unrelated: a Discuz! sign-in is
-    /// a cookie and a saved password that let this device *read* a board a signed-out reader may
-    /// not, and this app has no way at all to post to a forum. So a forum row says read only, for a
-    /// reason that is about the protocol rather than about anything its reader chose.
-    public var canWrite: Bool {
-        switch self {
-        // Signed in on the server's own page, and the writing part is what #69 lets a reader buy.
-        case .mastodon: true
-        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
-            .discourse, .discuz, .unknown:
-            false
-        }
-    }
+    public var canWrite: Bool { offers.writes }
 }
 
 /// One board of a forum the reader subscribed to.

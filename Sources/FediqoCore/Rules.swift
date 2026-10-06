@@ -482,10 +482,6 @@ public struct CompiledTimeline: Sendable {
         // other can match, so asking one for this timeline would bring nothing it shows.
         if case .field(let name, _, _) = rule.kind { return source.kind.field(named: name) != nil }
         guard case .category(let category, _) = rule.kind else { return true }
-        switch category {
-        case .public, .home, .list: return source.kind.hasTimelines
-        case .trends: return source.kind.hasTrends
-        case .board: return source.kind.isForum
-        }
+        return source.kind.offers.serves(category)
     }
 }

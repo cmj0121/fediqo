@@ -160,24 +160,15 @@ public enum FieldValue: Hashable, Sendable {
 
 extension ProtocolKind {
     /// The fields a source of this kind says of a post, beyond the ones every source has. None
-    /// for a kind that declares none — which today is every kind but Mastodon.
-    ///
-    /// **No `default:`**, this package's standing rule: a protocol added later has to say.
+    /// for a kind that declares none — which today is every kind but Mastodon. Read off what the
+    /// kind offers (`SourceOffers.fields`), which is where they are listed.
     ///
     /// **Five fields, and the editor's digits are spent.** The kinds are picked by 1–4 and each
     /// field offered by the next digit, so a tenth pill has no digit: it is reached as every pill
     /// already is without one — pressed, or walked to with Tab, which the kinds stage leaves to
     /// the system — and `EditorAction.from` says the same where the digits are read. Whoever
-    /// declares a sixth field here should look there before they do.
-    public var fields: [SourceField] {
-        switch self {
-        case .mastodon:
-            [.audience, .language, .covered, .reblog, .reblogOf]
-        case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
-            .discourse, .discuz, .unknown:
-            []
-        }
-    }
+    /// declares a sixth field should look there before they do.
+    public var fields: [SourceField] { offers.fields }
 
     /// The field this kind declares under `name`, or nothing.
     public func field(named name: String) -> SourceField? {
