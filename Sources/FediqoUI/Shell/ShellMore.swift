@@ -314,7 +314,7 @@ extension ShellReload {
                 try await mastodon(due, before: id, stamp: stamp, in: session)
                 stretches.asked(due.stretch, before: id)
             case .offset(let offset):
-                let client = MastodonClient(http: timed(session.http, for: .timeline, name: .trends, in: session), host: host)
+                let client = session.reach.mastodon(host, for: .timeline, name: .trends, within: deadline)
                 let notes = try await client.trending(source: stamp, offset: offset)
                 try Task.checkCancellation()
                 await session.store.ingest(notes, ifSourceHere: host)
@@ -349,7 +349,7 @@ extension ShellReload {
         let host = stamp.host
         switch due.stretch.category {
         case .public?:
-            let client = MastodonClient(http: timed(session.http, for: .timeline, name: .public, in: session), host: host)
+            let client = session.reach.mastodon(host, for: .timeline, name: .public, within: deadline)
             let notes = try await client.publicTimeline(source: stamp, olderThan: id)
             try Task.checkCancellation()
             await session.store.ingest(notes, ifSourceHere: host)
@@ -365,7 +365,7 @@ extension ShellReload {
             default: nil
             }
             let door = session.mastodon.authorized(token: token, within: deadline, for: .timeline, name: name)
-            let account = MastodonAccount(door: door, store: session.store)
+            let account = session.reach.account(door, landingIn: session.store)
             _ = try await asReader(host) { try await account.older(category, than: id) }
         case nil:
             return
@@ -374,22 +374,21 @@ extension ShellReload {
 
     private func forum(_ due: Due, page further: Int, stamp: Source, in session: ShellSession) async throws -> [Note] {
         let host = stamp.host
-        let http = transport(host, in: session)
         switch (stamp.kind, due.stretch.category) {
         case (.discuz, .board(let id)?):
             let board = due.source.boards.first { String($0.fid) == id }
-            let client = DiscuzClient(
-                http: timed(http, for: .timeline, name: board.map { .called($0.name) }, in: session), host: host
+            let client = session.reach.discuz(
+                host, for: .timeline, name: board.map { .called($0.name) }, within: deadline
             )
             guard let fid = Int(id) else { return [] }
             // Discuz! counts its pages from one, so the one past the first is page two.
             return try await client.board(fid, source: stamp, named: board?.name, page: further + 1)
         case (.discuz, nil):
-            let client = DiscuzClient(http: timed(http, for: .timeline, in: session), host: host)
+            let client = session.reach.discuz(host, for: .timeline, within: deadline)
             return try await client.latest(source: stamp, page: further + 1)
         case (.discourse, nil):
             // Discourse counts from nought, so the one past the first is page one.
-            let client = DiscourseClient(http: timed(http, for: .timeline, in: session), host: host)
+            let client = session.reach.discourse(host, for: .timeline, within: deadline)
             return try await client.latest(source: stamp, page: further)
         default:
             return []

@@ -462,16 +462,16 @@ final class ShellReload {
         do {
             let notes: [Note]
             if source.kind == .discourse {
-                let http = timed(transport(host, in: session), for: .timeline, name: name, in: session)
-                guard case .topics(let topics) = try await DiscourseClient(http: http, host: host)
-                    .topics(under: tag, source: stamp)
+                let client = session.reach.discourse(host, for: .timeline, name: name, within: deadline)
+                guard case .topics(let topics) = try await client.topics(under: tag, source: stamp)
                 else { return .tagsOff }
                 notes = topics
             } else if let door = session.mastodon.authorized(host: host, within: deadline, for: .timeline, name: name) {
-                notes = try await asReader(host) { try await MastodonTag(door: door).posts(under: tag, source: stamp) }
+                let reader = session.reach.tag(door)
+                notes = try await asReader(host) { try await reader.posts(under: tag, source: stamp) }
             } else {
-                let http = timed(session.http, for: .timeline, name: name, in: session)
-                notes = try await MastodonTag(http: http, host: host).posts(under: tag, source: stamp)
+                notes = try await session.reach.unsignedTag(host, name: name, within: deadline)
+                    .posts(under: tag, source: stamp)
             }
             try Task.checkCancellation()
             await session.store.ingest(notes, ifSourceHere: host)
@@ -500,8 +500,9 @@ final class ShellReload {
         else { return .missed }
         let stamp = Source(host: host, kind: source.kind)
         do {
+            let search = session.reach.search(door)
             let notes = try await asReader(host) {
-                try await MastodonSearch(door: door).statuses(matching: words, source: stamp)
+                try await search.statuses(matching: words, source: stamp)
             }
             try Task.checkCancellation()
             await session.store.ingest(notes, ifSourceHere: host)
@@ -931,9 +932,7 @@ final class ShellReload {
                 guard let topic = held.id.split(separator: ":").last.flatMap({ Int($0) }) else {
                     return .failed
                 }
-                let client = DiscourseClient(
-                    http: timed(transport(host, in: session), for: .conversation, in: session), host: host
-                )
+                let client = session.reach.discourse(host, for: .conversation, within: deadline)
                 let note = try await client.topic(topic, source: stamp, board: held.board)
                 try Task.checkCancellation()
                 await session.store.refresh([note], ifSourceHere: host)
@@ -1019,9 +1018,7 @@ final class ShellReload {
         case .mastodon:
             // Each read is shown under the name the reader knows it by while it runs (#170).
             let client = { (name: SourceWork.Name) in
-                MastodonClient(
-                    http: self.timed(session.http, for: .timeline, name: name, in: session), host: host
-                )
+                session.reach.mastodon(host, for: .timeline, name: name, within: self.deadline)
             }
             // Read on from the newest post held of it, not its newest stretch alone (#201).
             let publicRead = { await self.readOnPublic(client(.public), stamp: stamp, in: session) }
@@ -1062,13 +1059,12 @@ final class ShellReload {
             return await readAsYou(source, for: categories, in: session) && read
         case .discuz:
             // A board's read is shown under that board's name (#164); the front page names none.
+            // The forum's transport is chosen once for the reload: every board and the ranking
+            // lists are read through the one the reload began with.
             let http = transport(host, in: session)
             let client = { (board: BoardSubscription?) in
-                DiscuzClient(
-                    http: self.timed(
-                        http, for: .timeline, name: board.map { .called($0.name) }, in: session
-                    ),
-                    host: host
+                session.reach.discuz(
+                    host, over: http, for: .timeline, name: board.map { .called($0.name) }, within: self.deadline
                 )
             }
             let read: Bool
@@ -1102,7 +1098,7 @@ final class ShellReload {
         case .discourse:
             // A Discourse's front page is its one read; it has no boards this app picks.
             guard categories == nil else { return true }
-            let client = DiscourseClient(http: timed(transport(host, in: session), for: .timeline, in: session), host: host)
+            let client = session.reach.discourse(host, for: .timeline, within: deadline)
             return await land(host, in: session) { try await client.latest(source: stamp) }
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial,
              .unknown:
@@ -1138,7 +1134,7 @@ final class ShellReload {
                 token: token, within: deadline, for: .timeline, name: named(category)
             )
         }
-        let account = MastodonAccount(door: door, store: session.store) { [doors] category in
+        let account = session.reach.account(door, landingIn: session.store) { [doors] category in
             doors[category] ?? plain
         }
         do {
@@ -1184,9 +1180,7 @@ final class ShellReload {
     private func ranked(
         _ source: Source, through http: any HTTPClient, in session: ShellSession
     ) async {
-        let client = DiscuzClient(
-            http: timed(http, for: .timeline, name: .trends, in: session), host: source.host
-        )
+        let client = session.reach.discuz(source.host, over: http, for: .timeline, name: .trends, within: deadline)
         _ = await land(source.host, in: session) { try await client.rankedThreads(source: source) }
         guard !Task.isCancelled else { return }
         _ = await land(source.host, in: session) { try await client.rankedBlogs(source: source) }
@@ -1209,14 +1203,12 @@ final class ShellReload {
 
     /// Bounded by the reload's deadline, and on `SourceWork` for what it is (#164) while it runs.
     /// `name` is the timeline or board it reads, by the name the reader knows, where it reads one.
+    /// Wired where every ask is (`SourceReach.wire`).
     func timed(
         _ http: any HTTPClient, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil,
         in session: ShellSession
     ) -> any HTTPClient {
-        Deadline(
-            WatchedHTTP(http, for: purpose, name: name, in: session.work) as any HTTPClient,
-            within: deadline
-        )
+        session.reach.wire(http, for: purpose, name: name, within: deadline)
     }
 
     /// The name a reader knows each of a Mastodon source's timelines by, as it stands when the
@@ -1237,7 +1229,7 @@ final class ShellReload {
 
     /// A forum signed in to is read through its own browser, as a join reads it.
     func transport(_ host: String, in session: ShellSession) -> any HTTPClient {
-        session.forums.readTransport(host: host, else: session.http)
+        session.reach.base(for: host)
     }
 }
 

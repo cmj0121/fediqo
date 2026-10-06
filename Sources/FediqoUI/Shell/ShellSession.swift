@@ -857,9 +857,7 @@ final class ShellSession {
         do {
             // The same document the reload reads, and what it says goes to the store too (#188):
             // a source this device kept no word of yet has one from here on.
-            let (_, profile) = try await MastodonClient(
-                http: WatchedHTTP(http, for: .serverCheck, in: work), host: host
-            ).introduction()
+            let (_, profile) = try await reach.mastodon(host, for: .serverCheck, within: nil).introduction()
             postLimits[host] = MastodonWrite.limit(advertised: profile?.statusLimit)
             if let profile {
                 await store.said(profile)
@@ -897,7 +895,7 @@ final class ShellSession {
             throw MastodonWriteError.noSource
         }
         do {
-            _ = try await MastodonWrite(door: door, store: store)
+            _ = try await reach.write(door, landingIn: store)
                 .post(text, visibility: composeAudience)
             composeDraft = ComposerSheet.draftAfterLanding(current: composeDraft, sent: text)
             await adopt()
@@ -1099,7 +1097,7 @@ final class ShellSession {
         let others = item.copies.filter { $0.id != copy.id }
             .map { NoteKey(host: $0.source.host, id: $0.noteID) }
         await perform(.withdraw, on: item) { door, note in
-            try await MastodonWrite(door: door, store: self.store).withdraw(note)
+            try await self.reach.write(door, landingIn: self.store).withdraw(note)
             for key in [note.key] + others {
                 await self.store.forget(key)
                 // A copy the person keeps stays, marked gone from its source (#284): it is laid
@@ -1132,7 +1130,7 @@ final class ShellSession {
     func toggle(_ act: PostAct, on item: DummyItem) async {
         guard act == .boost || act == .favourite || act == .bookmark else { return }
         await perform(act, on: item) { door, note in
-            let write = MastodonWrite(door: door, store: self.store)
+            let write = self.reach.write(door, landingIn: self.store)
             switch act {
             case .boost: return try await write.boost(note, on: note.boosted != true)
             case .favourite: return try await write.favourite(note, on: note.favourited != true)
@@ -1252,7 +1250,7 @@ final class ShellSession {
         else { throw MastodonWriteError.noSource }
         let reach = answerReach[item.id] ?? target.start
         do {
-            let note = try await MastodonWrite(door: door, store: store)
+            let note = try await self.reach.write(door, landingIn: store)
                 .post(text, visibility: reach, answering: answered)
             answerDrafts[item.id] = ComposerSheet.draftAfterLanding(
                 current: answerDraft(target), sent: text
@@ -2869,7 +2867,7 @@ final class ShellSession {
     func readAsYou(host: String) async {
         guard let door = mastodon.authorized(host: host, for: .timeline) else { return }
         await readingAsYou(host: host, key: "account.mastodon.home.progress") {
-            try await MastodonAccount(door: door, store: self.store).read()
+            try await self.reach.account(door, landingIn: self.store).read()
         }
     }
 
@@ -2890,7 +2888,7 @@ final class ShellSession {
         progress = ProgressReport(owner: .row(host: host), key: "account.source.lists.progress")
         defer { progress = nil }
         do {
-            let offered = try await MastodonAccount(door: door, store: store).lists()
+            let offered = try await reach.account(door, landingIn: store).lists()
             guard mine == errand else { return }
             let chosen = Set(source.lists.map(\.id)).intersection(offered.map(\.id))
             stage = .choosingLists(ListChoice(host: host, offered: offered, ticked: chosen))
@@ -2913,7 +2911,7 @@ final class ShellSession {
         guard let door = mastodon.authorized(host: choice.host, for: .timeline) else { return }
         progressHost = choice.host
         await readingAsYou(host: choice.host, key: "account.source.lists.reading") {
-            try await MastodonAccount(door: door, store: self.store).choose(picks)
+            try await self.reach.account(door, landingIn: self.store).choose(picks)
         }
     }
 

@@ -860,9 +860,8 @@ extension ShellSession {
     /// has closed. Each request ends within `limit`, and `signedIn` says which door it was.
     func conversationPost(host: String, within limit: Duration) -> (post: MastodonPost, signedIn: Bool) {
         if let door = mastodon.authorized(host: host, within: limit, for: .conversation) {
-            return (MastodonPost(door: door), true)
+            return (reach.post(door), true)
         }
-        let watched = WatchedHTTP(http, for: .conversation, in: work)
-        return (MastodonPost(http: Deadline(watched as any HTTPClient, within: limit), host: host), false)
+        return (reach.unsignedPost(host, for: .conversation, within: limit), false)
     }
 }

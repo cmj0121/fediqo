@@ -194,13 +194,12 @@ final class ShellRefs {
         if let door = session.mastodon.authorized(host: host, within: limit, for: .reference) {
             readAsYou.insert(host)
             asking[host]?[statusID]?.unsigned = false
-            post = MastodonPost(door: door)
+            post = session.reach.post(door)
         } else if readAsYou.contains(host) {
             return .answered()
         } else {
             asking[host]?[statusID]?.unsigned = true
-            let watched = WatchedHTTP(session.http, for: .reference, in: session.work)
-            post = MastodonPost(http: Deadline(watched as any HTTPClient, within: limit), host: host)
+            post = session.reach.unsignedPost(host, for: .reference, within: limit)
         }
         do {
             let note = try await post.post(id: statusID, source: Source(host: host, kind: source.kind))

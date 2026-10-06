@@ -31,10 +31,7 @@ extension ShellSession {
         case .gone: return true
         case .no: return false
         case .ask:
-            let watched = WatchedHTTP(http, for: .conversation, in: work)
-            let unsigned = MastodonPost(
-                http: Deadline(watched as any HTTPClient, within: limit), host: held.source.host
-            )
+            let unsigned = reach.unsignedPost(held.source.host, for: .conversation, within: limit)
             return await unsigned.confirmsGone(held, id: id)
         }
     }

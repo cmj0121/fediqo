@@ -354,7 +354,7 @@ struct TimelinePane: View {
     static func catalogue(_ host: String, in store: EmojiCatalogueStore, over http: any HTTPClient) async {
         if await store.needsFetch(host: host) {
             await store.refresh(host: host) {
-                try await MastodonClient(http: http, host: host).customEmojis()
+                try await SourceReach.mastodon(host, over: http).customEmojis()
             }
         }
         await store.settle(host: host)

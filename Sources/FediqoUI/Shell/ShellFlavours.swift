@@ -119,7 +119,7 @@ final class ShellFlavours {
 
     private func read(_ host: String, through http: any HTTPClient, into store: ItemStore?) async {
         do {
-            let (kind, profile) = try await MastodonClient(http: http, host: host).introduction()
+            let (kind, profile) = try await SourceReach.mastodon(host, over: http).introduction()
             try Task.checkCancellation()
             flavours[host] = .said(kind)
             // After the flavour is written, so the store's change is adopted under the name the

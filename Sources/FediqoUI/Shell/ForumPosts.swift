@@ -1010,12 +1010,8 @@ final class ForumPosts {
     /// `readTransport` rather than `transport`, because `transport(host:)` would *build* one for
     /// every host and this app does not start a web process for a host that never needed it.
     private func client(for host: String, part: Part, within limit: Duration?) -> DiscuzClient {
-        var transport = forums?.readTransport(host: host, else: http) ?? http
-        transport = WatchedHTTP(
-            transport, for: part == .opening ? .forumPost : .forumReplies, in: work
-        )
-        if let limit { transport = Deadline(transport, within: limit) }
-        return DiscuzClient(http: transport, host: host)
+        SourceReach(http: http, work: work, forums: forums)
+            .discuz(host, for: part == .opening ? .forumPost : .forumReplies, within: limit)
     }
 
     /// Core's eight answers, folded to the four a reader is told apart.
