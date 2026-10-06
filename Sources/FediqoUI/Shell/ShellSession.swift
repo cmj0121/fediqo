@@ -403,6 +403,9 @@ final class ShellSession {
     /// and a redraw of everything that reads this session on every one of those would be the
     /// scroll paying for a note nobody reads until the list is drawn again.
     @ObservationIgnored var scrolledTop: String?
+    /// The post being read under a finger (#303), beside the row it is worked out from and held
+    /// past observation for its reason. See `ShellReadingMark`.
+    @ObservationIgnored let readingMark = ShellReadingMark()
 
     /// The row one id stands for, anywhere in what this device holds — or nothing, where this
     /// device does not hold it any more.

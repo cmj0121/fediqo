@@ -331,7 +331,7 @@ widths() {
 # writes every timeline's name in a row, which a phone at any width does not.
 # `SHOTS_SCREENS="compose notice"` takes those alone, for looking at one screen while it is worked on.
 # shellcheck disable=SC2206
-PHONE_SCREENS=(${SHOTS_SCREENS:-timeline post compose preferences notice link signin})
+PHONE_SCREENS=(${SHOTS_SCREENS:-timeline post compose preferences notice link signin cut returned emptied})
 PHONE_WIDTHS=(320 375 whole)
 PHONE_SCALES=(smallest default largest)
 
@@ -345,9 +345,9 @@ newest() {
 }
 
 # One device, every screen at every size of text, at each of the widths named.
-#   stage <udid> <pixels per point> <out> <width>...
+#   stage <udid> <pixels per point> <keyboard: 1 or nothing> <out> <width>...
 stage() {
-    local udid="$1" density="$2" out="$3"; shift 3
+    local udid="$1" density="$2" keyboard="$3" out="$4"; shift 4
     local was
     was="$(xcrun simctl list devices | grep -F "$udid" | grep -c Booted || true)"
     xcrun simctl bootstatus "$udid" -b >/dev/null 2>&1 || xcrun simctl boot "$udid" >/dev/null 2>&1 || true
@@ -367,6 +367,7 @@ stage() {
                 env SIMCTL_CHILD_FEDIQO_STAGED=1 \
                     SIMCTL_CHILD_FEDIQO_STAGED_SCREEN="$screen" \
                     SIMCTL_CHILD_FEDIQO_STAGED_WIDTH="$wide" \
+                    SIMCTL_CHILD_FEDIQO_STAGED_KEYBOARD="$keyboard" \
                     xcrun simctl launch "$udid" "$BUNDLE_ID" \
                         -fediqo.dummy.language en -fediqo.dummy.fontSize "$scale" >/dev/null
                 sleep 4
@@ -405,8 +406,11 @@ phone() {
     # A run of every screen starts from nothing; a run of some replaces those and keeps the rest.
     [ -n "${SHOTS_SCREENS:-}" ] || rm -rf "$out"
     mkdir -p "$out"
-    stage "$handset" 3 "$out" "${PHONE_WIDTHS[@]}"
-    stage "$tablet" 2 "$out" whole
+    # The phone as a phone is: nothing but a finger. The iPad with a keyboard attached, which is
+    # what it was photographed with before there was a difference (#303), so its pictures still
+    # say whether a wide page has changed.
+    stage "$handset" 3 "" "$out" "${PHONE_WIDTHS[@]}"
+    stage "$tablet" 2 1 "$out" whole
 
     say ""
     say "$out:"

@@ -70,6 +70,13 @@ struct TimelinePane: View {
     @State private var toastTick = 0
     @Environment(\.colorScheme) private var colorScheme
     @Environment(DummyPrefs.self) private var prefs
+    /// Nothing here but a finger (#303): the list marks the post being read as it scrolls, one
+    /// press opens a row, and the selection is neither drawn nor followed. See `ShellReadingMark`.
+    @Environment(\.shellTouch) private var touch
+    /// Counted up each time a timeline returned to has a post to put back at the top (#303).
+    /// The list answers the count and not the switch: a list drawn afresh — a return through a
+    /// timeline with no posts — is not there to hear the switch, and is there for this.
+    @State private var returns = 0
 
     private var timeline: TimelineQuery { session.currentTimeline }
 
@@ -268,11 +275,23 @@ struct TimelinePane: View {
             // A tag's page stays over the switch, and its lamp and the place under it are
             // `FediqoRootView.timelineSwitched`'s (#197): only the search's parked post is filed here.
             let onTag = if case .tag = standing { true } else { false }
+            // And the rows the mark was among are not this list's (#303).
+            let mark = session.readingMark
+            let wasReading = mark.left()
+            mark.forget()
             if !searching {
                 if !onTag {
-                    selectedID = session.timelinePlaces.switched(
-                        from: left, to: arrived, standingOn: selectedID, among: items.map(\.id)
+                    // Under a finger the place kept is the post being read, and the one given
+                    // back is marked and put at the top; nothing is selected.
+                    let kept = session.timelinePlaces.switched(
+                        from: left, to: arrived, standingOn: touch ? wasReading : selectedID, among: items.map(\.id)
                     )
+                    let restored = Self.restored(kept, touch: touch)
+                    if touch {
+                        mark.keep(restored.marked)
+                        returns += 1
+                    }
+                    if selectedID != restored.selected { selectedID = restored.selected }
                 }
             } else {
                 let shown = session.timelineItems(latest: prefs.latestDate).map(\.id)
@@ -386,9 +405,30 @@ struct TimelinePane: View {
     /// the arrangement changes — and a reader who scrolled without lighting anything was put
     /// back at the top, which is the place scrolled to lost. A static function over the two
     /// facts, so the order between them is a thing a test can ask.
-    static func landing(selected: String?, top: String?) -> Landing? {
-        if let id = DummyCommand.centredOnAppear(selected: selected) { return .centred(id) }
-        return top.map(Landing.top)
+    ///
+    /// **Under a finger there is no lamp to centre** (#303): the list goes back to the place
+    /// scrolled to, whatever a press that opened something left selected.
+    ///
+    /// **And to the post being read before the row that was at the top**, which is the one
+    /// above it where that row was cut by the top of the list: coming back, the lamp is on the
+    /// post it was on. A timeline returned to through one with no posts is drawn afresh too,
+    /// and the post it was left at is the mark by then (`ShellReadingMark.keep`).
+    static func landing(selected: String?, top: String?, touch: Bool = false, marked: String? = nil) -> Landing? {
+        if !touch, let id = DummyCommand.centredOnAppear(selected: selected) { return .centred(id) }
+        return ((touch ? marked : nil) ?? top).map(Landing.top)
+    }
+
+    /// Where a timeline returned to puts the post it was left at (#100, #303): in the middle
+    /// where it is the selection, and at the top where it is the mark under a finger — the
+    /// first row wholly on screen is then that post. Nothing for a timeline with no post kept.
+    static func arrival(selected: String?, returning: String?, touch: Bool) -> Landing? {
+        touch ? returning.map(Landing.top) : selected.map(Landing.centred)
+    }
+
+    /// What a timeline switched to does about the post it kept (#303): the selection it becomes
+    /// with a keyboard or a pointer, and under a finger the mark, with nothing selected.
+    static func restored(_ kept: String?, touch: Bool) -> (selected: String?, marked: String?) {
+        touch ? (nil, kept) : (kept, nil)
     }
 
     /// The list under the walk: what is held, or the notice that says there is nothing.
@@ -423,21 +463,32 @@ struct TimelinePane: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         let isLast = index == last
+                        // **One view a post, the rule under it included** (#303). The list
+                        // reports which of its children are wholly on screen, and a rule that
+                        // was a child of its own was reported whole while its post was cut.
+                        VStack(alignment: .leading, spacing: 0) {
+                        // Under a finger the row is lit by its own share of the reading mark,
+                        // and drawn again only when that share changes (#303).
+                        ReadRow(
+                            lamp: session.readingMark.lamp(for: item.id), touch: touch,
+                            selected: item.id == selectedID
+                        ) { lit in
                         DummyItemRow(
                             item: item,
                             catalogues: session.emoji,
                             catalogueSettled: settledHosts.contains(item.source.host),
                             posts: session.posts,
                             acting: acting(item),
-                            selected: item.id == selectedID,
+                            selected: lit,
                             top: decks.top(of: item.id, of: item.attachments.count),
                             lifted: decks.isLifted(item.id),
                             player: playback.rowPlayer(for: item, decks: decks),
                             // A press lights the row; a second press on the row it is already on
                             // opens the conversation, which is what `Return` does (#33). The rule
-                            // is `DummyCommand.tapped` and is read by both lists.
+                            // is `DummyCommand.tapped` and is read by both lists. Under a
+                            // finger the first press opens it (#303).
                             onSelect: {
-                                switch DummyCommand.tapped(item.id, selected: selectedID) {
+                                switch DummyCommand.tapped(item.id, selected: selectedID, touch: touch) {
                                 case .select: selectedID = item.id
                                 case .open: onOpenThread(item.id)
                                 }
@@ -460,6 +511,7 @@ struct TimelinePane: View {
                             onEnded: { playback.stop() },
                             onToast: showToast
                         )
+                        }
                         .id(item.id)
                         // Reading toward the end asks for the next stretch (#87): a lazy row
                         // appears as it is scrolled or walked to, and nothing else asks.
@@ -473,6 +525,7 @@ struct TimelinePane: View {
                                 .fill(ShellChrome.hairline(colorScheme))
                                 .frame(height: ShellSpace.hair)
                         }
+                        }
                     }
                     // Which sources have no more of what is rising to give (#288). A search's
                     // results are not a timeline, and end nowhere a source chose.
@@ -484,17 +537,30 @@ struct TimelinePane: View {
             // The end of the list stops short of whatever floats over the page (#112).
             .clearsFloatingCorner()
             .modifier(KeepsTopRow(session: session))
-            .modifier(HoldsPlace(session: session, proxy: proxy))
+            .modifier(HoldsPlace(session: session, proxy: proxy, touch: touch))
+            // The rows the mark may be among, said when they change and not on every pass (#303).
+            .onChange(of: items.map(\.id), initial: true) { _, ids in
+                session.readingMark.list(Set(ids))
+            }
             .onAppear {
                 // A tick later: a lazy stack just built has not laid out the row to scroll to.
-                switch Self.landing(selected: selectedID, top: session.scrolledTop) {
+                let mark = session.readingMark
+                mark.returning = nil
+                switch Self.landing(selected: selectedID, top: session.scrolledTop, touch: touch, marked: mark.id) {
                 case .centred(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .center) }
                 case .top(let id): Task { @MainActor in proxy.scrollTo(id, anchor: .top) }
                 case nil: break
                 }
+                // Under a finger a selection is only where a press that opened something came
+                // from; back on the list it is nothing, and the mark is the list's (#303).
+                if touch, selectedID != nil { selectedID = nil }
             }
             .onChange(of: selectedID) { _, id in
-                guard let id else { return }
+                // Not under a finger, and not for the row a keyboard was just handed (#303).
+                let mark = session.readingMark
+                let handed = mark.handed
+                mark.handed = nil
+                guard let id, ShellReadingMark.centres(onSelecting: id, touch: touch, handed: handed) else { return }
                 withAnimation(.easeInOut(duration: 0.18)) {
                     proxy.scrollTo(id, anchor: .center)
                 }
@@ -508,16 +574,49 @@ struct TimelinePane: View {
             // same wait `onAppear` takes; and by the time the tick comes round the pane's own
             // handler has lit the row, so the id asked for is the one that was restored rather
             // than the one this pass was built with.
+            //
+            // **Under a finger it is put at the top** (#303), where the mark is: the first row
+            // wholly on screen is then the post the timeline was left at.
             .onChange(of: session.timelineID) { _, _ in
                 Task { @MainActor in
-                    guard let id = selectedID else { return }
-                    proxy.scrollTo(id, anchor: .center)
+                    let mark = session.readingMark
+                    let arrival = Self.arrival(selected: selectedID, returning: mark.returning, touch: touch)
+                    mark.returning = nil
+                    switch arrival {
+                    case .centred(let id): proxy.scrollTo(id, anchor: .center)
+                    case .top(let id): proxy.scrollTo(id, anchor: .top)
+                    case nil: break
+                    }
+                }
+            }
+            .onChange(of: returns) { _, _ in
+                Task { @MainActor in
+                    let mark = session.readingMark
+                    guard touch, let id = mark.returning else { return }
+                    mark.returning = nil
+                    proxy.scrollTo(id, anchor: .top)
                 }
             }
             // A reload lands newer rows above the selected one; it stays centred (#23, #29).
+            // Under a finger nothing is selected to centre, and the list stays where it is read.
             .onChange(of: session.reload.landed) { _, _ in
-                guard let selectedID else { return }
+                guard let selectedID, ShellReadingMark.centres(onSelecting: selectedID, touch: touch, handed: nil) else { return }
                 proxy.scrollTo(selectedID, anchor: .center)
+            }
+            // A keyboard attached or taken away (#303): the marked row becomes the selected one,
+            // or the selection goes and the mark is the list's again. Only with the list in
+            // front — a post opened keeps the lamp the walk gave it — and the list does not move.
+            //
+            // **Only after the list was moved by hand.** A keyboard reported a moment after
+            // launch was there all along, and a launch with a keyboard selects nothing.
+            .onChange(of: touch) { _, now in
+                let mark = session.readingMark
+                defer { if now { mark.becameTouch() } }
+                guard standing == nil else { return }
+                let next = ShellReadingMark.handover(touchNow: now, marked: mark.id, used: mark.used, selected: selectedID)
+                guard next != selectedID else { return }
+                if !now { mark.handed = next }
+                selectedID = next
             }
             .onChange(of: jumpToTop) { _, _ in
                 guard let first = items.first else { return }
@@ -534,13 +633,13 @@ struct TimelinePane: View {
     /// draw one answer: the session holds what the sign-in bought and what the source has turned
     /// away since, and three panes working it out for themselves would be three derivations free
     /// to disagree about one post.
-    private func acting(_ item: DummyItem) -> ItemActing {
+    func acting(_ item: DummyItem) -> ItemActing {
         acting(item, inside: nil)
     }
 
     /// The same, for a row drawn inside the conversation around `root` — where the answer mark
     /// opens the answer rather than the conversation (#108).
-    private func acting(_ item: DummyItem, inside root: DummyItem?) -> ItemActing {
+    func acting(_ item: DummyItem, inside root: DummyItem?) -> ItemActing {
         var acting = session.acting(on: item)
         acting.perform = { act in
             switch act {
@@ -750,10 +849,22 @@ struct KeepsTopRow: ViewModifier {
     func body(content: Content) -> some View {
         content.onScrollTargetVisibilityChange(idType: String.self) { visible in
             session.scrolledTop = visible.first
+            // The reading mark is worked out from the same report (#303), and from the rows
+            // wholly on screen, said below. Kept whether or not a finger is all there is, so a
+            // keyboard taken away finds the mark where the list is; nothing reads it till then.
+            session.readingMark.visible(visible)
             // What the rows on screen still owe goes first in its source's line (#293).
             // Only rows that owe: a screen of rows that owe nothing asks nothing of anybody.
             let owing = visible.filter(session.owingRows.contains)
             if !owing.isEmpty { Task { await session.refs.near(owing, in: session) } }
+        }
+        .onScrollTargetVisibilityChange(idType: String.self, threshold: 1) { whole in
+            session.readingMark.whole(whole)
+        }
+        // The person moving the list, as against the list being moved: what a timeline
+        // returned to was kept on gives way to what is on screen only for the first (#303).
+        .onScrollPhaseChange { _, phase in
+            if ShellReadingMark.byHand(phase) { session.readingMark.scrolledByHand() }
         }
     }
 }
@@ -765,13 +876,20 @@ struct KeepsTopRow: ViewModifier {
 /// **The top row, not the lamp.** `r` centres the lamp as it ends, because the reader asked and
 /// is looking for what came; a renewal the reader did not ask for leaves the page as it was read.
 /// A modifier of its own for `KeepsTopRow`'s reason.
+///
+/// **Under a finger, the post being read** (#303): the row at the top may be one cut by the
+/// top of the list, and putting that back whole would move the lamp up a post at every landing.
 struct HoldsPlace: ViewModifier {
     let session: ShellSession
     let proxy: ScrollViewProxy
+    var touch = false
 
     func body(content: Content) -> some View {
         content.onChange(of: session.notesRevision) { _, _ in
-            guard let top = session.scrolledTop else { return }
+            let held = ShellReadingMark.heldAtTop(
+                top: session.scrolledTop, marked: session.readingMark.id, touch: touch
+            )
+            guard let top = held else { return }
             proxy.scrollTo(top, anchor: .top)
         }
     }

@@ -313,8 +313,12 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// Pure, and separate from the acting, for the reason `focused(in:selected:)` is: inside a
     /// view neither case can be asserted. Both lists that draw a row read this one function, so
     /// the stream and an open thread cannot come to answer a press differently.
-    public static func tapped(_ id: String, selected: String?) -> DummyRowTap {
-        ShellListEntry.pressed(id, selected: selected)
+    ///
+    /// **Under a finger one press opens** (#303). There the reader selects nothing — the post
+    /// being read is marked by the list as it scrolls — so a press has one meaning, and it is
+    /// the one a second press has with a keyboard or a pointer.
+    public static func tapped(_ id: String, selected: String?, touch: Bool = false) -> DummyRowTap {
+        touch ? .open : ShellListEntry.pressed(id, selected: selected)
     }
 
     /// Which post a list centres on when it is drawn afresh.

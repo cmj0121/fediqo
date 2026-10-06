@@ -329,6 +329,24 @@ struct NarrowPhoneTests {
         }
     }
 
+    @Test("A mark and its count never touch the next mark, however long the counts: on a phone the marks stand at least their least gap apart, and give up their counts before that",
+          arguments: [CGFloat(320), 375, 390], [DynamicTypeSize.large, .xxLarge, .accessibility1])
+    func marksNeverTouch(_ width: CGFloat, _ type: DynamicTypeSize) throws {
+        let item = DummyItem(Note(
+            id: "n1", source: Source(host: Self.host, kind: .mastodon), author: "Ada", handle: "@ada@\(Self.host)",
+            body: "Short.", postedAt: Self.posted, categories: [.public], audience: .everyone,
+            counts: Counts(replies: 12_345, reblogs: 67_890, favourites: 123_456), statusID: "1"
+        ))
+        let probe = Self.laid(item, layout: .narrow, width: width, type: type, acting: Self.everyAct)
+        let band = try #require(probe.frames[.marks])
+        let marks = probe.marks.values.sorted { $0.minX < $1.minX }
+        #expect(marks.count == 8)
+        for (left, right) in zip(marks, marks.dropFirst()) {
+            #expect(right.minX - left.maxX >= DummyItemRow.Box.markGap - 0.5, "\(width) \(type): two marks are \(right.minX - left.maxX) apart: \(left) and \(right)")
+        }
+        #expect(try #require(marks.last).maxX <= band.maxX + 0.5, "\(width) \(type): the marks run past their line")
+    }
+
     @Test("With room for them the marks are laid out exactly as they were: each its own width, from the line's start")
     func marksWithRoomAreAsTheyWere() throws {
         let probe = Self.laid(Self.crowded(), layout: .wide, width: 1000, type: .large, acting: Self.everyAct)

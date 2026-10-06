@@ -67,6 +67,8 @@ struct DummyThreadPane: View {
     /// The hosts still on this device (#250): a thread on a source that has gone says so under
     /// the post, in place of the forum's sentence about nobody having answered.
     @Environment(\.shellSourcesHere) private var sourcesHere
+    /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
+    @Environment(\.shellTouch) private var touch
     /// The post at the top of the view, kept there as the thread renews under it (#198): an answer
     /// laid in above it moves what is below the reader, never the post they are reading.
     @State private var topID: String?
@@ -270,7 +272,7 @@ struct DummyThreadPane: View {
             // The same one rule the stream's rows read: a press lights the row, and a second
             // press on the row already lit is `Return` (#33).
             onSelect: {
-                switch DummyCommand.tapped(item.id, selected: selectedID) {
+                switch DummyCommand.tapped(item.id, selected: selectedID, touch: touch) {
                 case .select: selectedID = item.id
                 case .open: onOpenThread(item.id)
                 }

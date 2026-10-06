@@ -22,6 +22,8 @@ import UIKit
 /// What a picture is of is said by three more variables:
 ///
 ///     FEDIQO_STAGED_SCREEN   timeline | post | compose | preferences | notice | link | signin
+///                            | cut | returned | emptied — the list scrolled and switched, with what it reports written over it
+///     FEDIQO_STAGED_KEYBOARD 1 — stands as a device with a keyboard attached; without it, as one with none
 ///     FEDIQO_STAGED_WIDTH    320 — the window made that many points wide, where the screen is wider
 ///
 /// and the text size and language by the app's own preferences, handed over as launch arguments
@@ -42,7 +44,7 @@ enum Staged {
         ))
         return FediqoRootView(
             http: StagedHTTP(),
-            store: ItemStore(sources: [source], notes: notes),
+            store: ItemStore(sources: [source], notes: notes + (screenName == "returned" ? rising : [])),
             forums: ForumSessions(),
             mastodon: MastodonSessions(tokens: tokens, sender: StagedHTTP()),
             deviceName: "Staged",
@@ -52,7 +54,24 @@ enum Staged {
     }
 
     private static var staged: ShellStaged {
-        switch ProcessInfo.processInfo.environment["FEDIQO_STAGED_SCREEN"] {
+        var staged = screen
+        // A phone has no keyboard, and a simulator reports its Mac's: without this the picture
+        // is of a phone with one attached. `FEDIQO_STAGED_KEYBOARD=1` keeps the one reported.
+        staged.noKeyboard = ProcessInfo.processInfo.environment["FEDIQO_STAGED_KEYBOARD"] != "1"
+        staged.scroll = { down in StagedScroll.scroll(down) }
+        return staged
+    }
+
+    private static var screenName: String? { ProcessInfo.processInfo.environment["FEDIQO_STAGED_SCREEN"] }
+
+    private static var screen: ShellStaged {
+        switch screenName {
+        // The three a picture is evidence of (#303): the top row a third off the screen; a
+        // timeline left a few rows down for another with posts and come back to; and the same
+        // through a timeline with none.
+        case "cut": ShellStaged(place: .timeline, steps: [.scroll(90)], reports: true)
+        case "returned": ShellStaged(place: .timeline, steps: [.scroll(700), .trends, .all], reports: true)
+        case "emptied": ShellStaged(place: .timeline, steps: [.scroll(700), .empty, .all], reports: true)
         case "post": ShellStaged(place: .timeline, opens: NoteKey(host: host, id: opened).rowID)
         case "compose": ShellStaged(place: .timeline, composing: true)
         case "preferences": ShellStaged(place: .preferences)
@@ -97,6 +116,16 @@ enum Staged {
             url: URL(string: "https://\(host)/@staged/\(status)"), counts: counts, statusID: status,
             editedAt: edited ? posted.addingTimeInterval(120) : nil,
             refs: answers.map { [Reference(kind: .answers, id: name($0), statusID: $0, handle: answering)] } ?? []
+        )
+    }
+
+    /// Posts that are rising, for the one picture that needs a second timeline with posts in
+    /// it. Older than every other, so they stand at the end of the timeline of everything.
+    private static let rising: [Note] = (1 ... 4).map { number in
+        Note(
+            id: name("9\(number)"), source: source, author: "Rising \(number)", handle: "@rising@\(host)",
+            body: "A post that is rising, number \(number).", postedAt: Date().addingTimeInterval(-Double(5000 + number) * 60),
+            categories: [.trends], audience: .everyone, statusID: "9\(number)"
         )
     }
 
@@ -168,6 +197,29 @@ private struct StagedHTTP: HTTPClient, HTTPSender {
     private func answer(_ url: URL, _ body: String, status: Int = 200) -> (Data, HTTPURLResponse) {
         let headers = ["Content-Type": "application/json"]
         return (Data(body.utf8), HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!)
+    }
+}
+
+/// The list scrolled as a finger would have scrolled it, for a picture of a list that is not
+/// at its start: the tallest scroll view on screen is put that many points down.
+@MainActor
+private enum StagedScroll {
+    static func scroll(_ down: CGFloat) {
+        #if os(iOS)
+        var found: UIScrollView?
+        func look(_ view: UIView) {
+            if let scroll = view as? UIScrollView, scroll.contentSize.height > scroll.bounds.height,
+               scroll.bounds.height > (found?.bounds.height ?? 0) {
+                found = scroll
+            }
+            view.subviews.forEach(look)
+        }
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.windows.forEach(look)
+        }
+        guard let found else { return }
+        found.setContentOffset(CGPoint(x: 0, y: down - found.adjustedContentInset.top), animated: false)
+        #endif
     }
 }
 

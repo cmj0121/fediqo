@@ -200,6 +200,9 @@ struct DummyItemRow: View {
         /// trusting it.
         static let pillSideways: CGFloat = ShellSpace.snug
         static let pillUpright: CGFloat = ShellSpace.tight
+        /// The least two marks under a post stand apart, however little room their line has
+        /// (#302): a mark and its count never touch the next mark.
+        static let markGap: CGFloat = ShellSpace.tight
     }
 
     /// The role the audience mark is drawn in — **a rung up the scale from the line it stands
@@ -1519,7 +1522,9 @@ struct DummyItemRow: View {
     /// **One height on every row**, because the line is a press's floor tall whatever the marks
     /// on it — so a row whose marks run long is not taller than its neighbours.
     private var actions: some View {
-        MarksLine(spacing: ShellSpace.snug) {
+        // **A mark and its count never touch the next mark** (#302): the gaps close no further
+        // than `Box.markGap`, and past that each mark gives up its room and then its count.
+        MarksLine(spacing: ShellSpace.snug, least: Box.markGap) {
             actMark(.answer)
             actMark(.boost)
             mark("quote.bubble", label: "item.act.quote", on: false) {

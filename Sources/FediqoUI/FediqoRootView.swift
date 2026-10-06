@@ -117,7 +117,9 @@ public struct FediqoRootView: View {
     ) {
         let session = ShellSession(
             http: http, store: store, forums: forums, mastodon: mastodon,
-            timelines: WrittenTimelineStore(defaults: .standard)
+            // A launch made for a picture writes no timeline down: one it makes for itself
+            // (`ShellStaged.Step.empty`) is gone with the launch.
+            timelines: staged == nil ? WrittenTimelineStore(defaults: .standard) : nil
         )
         session.persist = persist
         session.carrier = carrier
@@ -133,6 +135,8 @@ public struct FediqoRootView: View {
         _storeTrouble = State(initialValue: storeTrouble)
         self.storeTroubleAnswered = storeTroubleAnswered
         self.staged = staged
+        // Before anything asks whether there is a keyboard (`ShellHands`).
+        if staged?.noKeyboard == true { ShellKeyboard.stagedAbsent = true }
         // A launch put somewhere is photographed there, and the mascot would be in the picture.
         _showingLanding = State(initialValue: staged == nil)
     }
@@ -469,6 +473,11 @@ public struct FediqoRootView: View {
             // The hosts still here, handed down once for the same reason: a row from a source
             // since removed says so wherever it is drawn (#250), and only the root knows which.
             .environment(\.shellSourcesHere, Set(session.sources.map(\.host)))
+            // Whether there is nothing here but a finger (#303), asked once and handed down.
+            .environment(\.shellTouch, ShellHands.shared.touch)
+            .overlay(alignment: .top) {
+                if staged?.reports == true { StagedReport(session: session) }
+            }
             .environment(\.locale, prefs.language.locale)
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
@@ -1253,12 +1262,33 @@ public struct FediqoRootView: View {
         if staged.composing, availability.canCompose { composing = true }
         if let url = staged.reads { _ = linkReader.open(url) }
         if let host = staged.signsIn { session.signingIn = ForumSignInRequest(host: host, stop: .noCredential) }
+        for step in staged.steps {
+            guard (try? await Task.sleep(for: .milliseconds(500))) != nil else { return }
+            take(step, of: staged)
+        }
         // Said again before it goes, for as long as the launch lasts.
         if let says = staged.says {
             for tick in 1... {
                 session.toast = ShellToast(tick: -tick, text: says)
                 guard (try? await Task.sleep(for: .seconds(1))) != nil else { return }
             }
+        }
+    }
+
+    /// One step of a staged launch, done as the person's own press or scroll would do it.
+    private func take(_ step: ShellStaged.Step, of staged: ShellStaged) {
+        switch step {
+        case .scroll(let down): staged.scroll?(down)
+        case .all: session.timelineID = .all
+        case .trends: session.timelineID = .trends
+        case .empty:
+            if session.written.isEmpty, let nobody = Rule.author("@nobody@nowhere.example", in: .every, sources: []) {
+                var draft = TimelineDraft(new: 1)
+                draft.name = "Nobody"
+                draft.rules = [nobody]
+                session.commit(draft)
+            }
+            if let made = session.written.first { session.timelineID = .written(made.id) }
         }
     }
 
