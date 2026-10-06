@@ -89,6 +89,9 @@ public struct FediqoRootView: View {
     /// `stranded(among:scale:from:)` for what goes wrong when it is not.
     @State private var wakeCursor = 0
 
+    /// Where this launch is put with nothing pressed, where it is put anywhere. See `ShellStaged`.
+    private let staged: ShellStaged?
+
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -109,7 +112,8 @@ public struct FediqoRootView: View {
         storeTroubleAnswered: (@MainActor (StoreTroubleAnswer) -> Void)? = nil,
         carrier: (any StoreCarrier)? = nil,
         nearby: (any NearbyLink)? = nil,
-        deviceName: String = ""
+        deviceName: String = "",
+        staged: ShellStaged? = nil
     ) {
         let session = ShellSession(
             http: http, store: store, forums: forums, mastodon: mastodon,
@@ -128,6 +132,9 @@ public struct FediqoRootView: View {
         self.storeNoticeSeen = storeNoticeSeen
         _storeTrouble = State(initialValue: storeTrouble)
         self.storeTroubleAnswered = storeTroubleAnswered
+        self.staged = staged
+        // A launch put somewhere is photographed there, and the mascot would be in the picture.
+        _showingLanding = State(initialValue: staged == nil)
     }
 
     /// From here on, nothing leaves for a host that is not one of `hosts` — the sources the person
@@ -251,6 +258,7 @@ public struct FediqoRootView: View {
                 if let landing = launch.settle(availability, standingOn: place) {
                     place = landing
                 }
+                if let staged { Task { await arrive(at: staged) } }
                 // Last, because it does not return: from here every landing renews what is in
                 // front, with no key pressed (#175).
                 await session.followStore()
@@ -1224,6 +1232,23 @@ public struct FediqoRootView: View {
     /// a press carries its own id.
     static func canWalk(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
         place == .timeline && DummyCommand.canWalk(whenOpen: open)
+    }
+
+    /// A launch put where `staged` says, by the same functions a press goes through, so nothing
+    /// is reached here that a reader could not reach: a place the rail has turned off is not
+    /// entered, a row not held opens nothing, and the composer stays shut for a reader who may
+    /// not write.
+    ///
+    /// **The place first, and the rest once the page has been drawn on it.** The first timeline
+    /// being chosen is a timeline switched, which ends a walk (`timelineSwitched`), and that
+    /// change is answered when the view is next drawn — after this would have opened the post.
+    /// A wait and not a signal, because nothing says a view has answered its changes; it costs
+    /// a picture a third of a second and a reader nothing, since no reader's launch comes here.
+    private func arrive(at staged: ShellStaged) async {
+        if let wanted = staged.place { place = availability.placing(place, as: wanted) }
+        try? await Task.sleep(for: .milliseconds(300))
+        if let row = staged.opens { _ = openThread(row) }
+        if staged.composing, availability.canCompose { composing = true }
     }
 
     /// `Return`: the conversation around the post the lamp is on.

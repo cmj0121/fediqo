@@ -135,6 +135,10 @@ final class Launch {
 @MainActor
 final class FediqoAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        #if DEBUG
+        // A launch made for a picture opened nothing, so it has nothing to save or sweep.
+        if Staged.isOn { return .terminateNow }
+        #endif
         Task {
             await Launch.shared.end()
             NSApp.reply(toApplicationShouldTerminate: true)
@@ -155,6 +159,13 @@ final class FediqoAppDelegate: NSObject, UIApplicationDelegate {
 
     private func endOnce() {
         guard ending == nil else { return }
+        #if DEBUG
+        // A launch made for a picture opened nothing, so it has nothing to save or sweep.
+        if Staged.isOn {
+            finished = true
+            return
+        }
+        #endif
         ending = Task { @MainActor in
             await Launch.shared.end()
             self.finished = true
@@ -225,35 +236,45 @@ struct FediqoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            FediqoRootView(
-                store: Launch.shared.store, forums: Launch.shared.forums,
-                mastodon: Launch.shared.mastodon, persist: save,
-                measureStore: measureStore, compactStore: compactStore, weighStore: weighStore,
-                limits: Launch.shared.limits,
-                storeIsNewer: Launch.shared.storeIsNewer,
-                storeNoticeSeen: { Launch.shared.storeIsNewer = false },
-                storeTrouble: Launch.shared.storeTrouble,
-                storeTroubleAnswered: { answer in
-                    guard let trouble = Launch.shared.storeTrouble else { return }
-                    Launch.shared.storeTrouble = nil
-                    Task {
-                        await Launch.shared.saver.answered(
-                            answer, to: trouble, in: StoreFile.applicationSupportDirectory
-                        )
-                    }
-                },
-                carrier: Launch.shared.carrier,
-                nearby: NWNearbyLink(), deviceName: Launch.deviceName
-            )
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .background {
-                    saveInBackground()
-                }
-            }
+            #if DEBUG
+            if Staged.isOn { Staged.root } else { live }
+            #else
+            live
+            #endif
         }
         #if os(macOS)
         .windowResizability(.contentMinSize)
         #endif
+    }
+
+    /// The app as a person launches it. Apart from `body` only so that a launch made for a
+    /// picture (`Staged`) can stand in its place without `Launch.shared` ever being made.
+    private var live: some View {
+        FediqoRootView(
+            store: Launch.shared.store, forums: Launch.shared.forums,
+            mastodon: Launch.shared.mastodon, persist: save,
+            measureStore: measureStore, compactStore: compactStore, weighStore: weighStore,
+            limits: Launch.shared.limits,
+            storeIsNewer: Launch.shared.storeIsNewer,
+            storeNoticeSeen: { Launch.shared.storeIsNewer = false },
+            storeTrouble: Launch.shared.storeTrouble,
+            storeTroubleAnswered: { answer in
+                guard let trouble = Launch.shared.storeTrouble else { return }
+                Launch.shared.storeTrouble = nil
+                Task {
+                    await Launch.shared.saver.answered(
+                        answer, to: trouble, in: StoreFile.applicationSupportDirectory
+                    )
+                }
+            },
+            carrier: Launch.shared.carrier,
+            nearby: NWNearbyLink(), deviceName: Launch.deviceName
+        )
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                saveInBackground()
+            }
+        }
     }
 
     /// A failure is already logged by the saver; there is nothing more to do about it here.
