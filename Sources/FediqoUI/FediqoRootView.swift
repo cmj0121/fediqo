@@ -476,7 +476,7 @@ public struct FediqoRootView: View {
             // Whether there is nothing here but a finger (#303), asked once and handed down.
             .environment(\.shellTouch, ShellHands.shared.touch)
             .overlay(alignment: .top) {
-                if staged?.reports == true { StagedReport(session: session) }
+                if staged?.reports == true { StagedReport(session: session, counts: staged?.counts == true) }
             }
             .overlay {
                 if staged?.menus == true { StagedMenus(session: session) }
@@ -1260,15 +1260,22 @@ public struct FediqoRootView: View {
     /// a picture a third of a second and a reader nothing, since no reader's launch comes here.
     private func arrive(at staged: ShellStaged) async {
         if let wanted = staged.place { place = availability.placing(place, as: wanted) }
+        if let page = staged.preferences.flatMap(PreferencesPane.Purpose.init(rawValue:)) { session.preferencesPurpose = page }
         guard (try? await Task.sleep(for: .milliseconds(300))) != nil else { return }
-        if let row = staged.opens { _ = openThread(row) }
-        if staged.composing, availability.canCompose { composing = true }
-        if let url = staged.reads { _ = linkReader.open(url) }
-        if let host = staged.signsIn { session.signingIn = ForumSignInRequest(host: host, stop: .noCredential) }
+        // **The steps first, and what is opened after them.** A step may change the timeline in
+        // front, and that ends a walk: a post opened before the steps was shut again by them,
+        // and every picture of an opened post since timelines were staged was of the list.
         for step in staged.steps {
             guard (try? await Task.sleep(for: .milliseconds(500))) != nil else { return }
             take(step, of: staged)
         }
+        if !staged.steps.isEmpty {
+            guard (try? await Task.sleep(for: .milliseconds(400))) != nil else { return }
+        }
+        if let row = staged.opens { _ = openThread(row) }
+        if staged.composing, availability.canCompose { composing = true }
+        if let url = staged.reads { _ = linkReader.open(url) }
+        if let host = staged.signsIn { session.signingIn = ForumSignInRequest(host: host, stop: .noCredential) }
         // Said again before it goes, for as long as the launch lasts.
         if let says = staged.says {
             for tick in 1... {

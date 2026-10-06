@@ -80,33 +80,54 @@ enum Staged {
         // through a timeline with none.
         // The timeline's own head (#304): one of the person's own in front, with a long name;
         // one that lost its source; and the list of them all, up.
-        case "named": ShellStaged(place: .timeline, steps: [.go(2)])
-        case "lost": ShellStaged(place: .timeline, steps: [.go(3)])
-        case "list": ShellStaged(place: .timeline, steps: [.go(2), .list])
+        case "named": return ShellStaged(place: .timeline, steps: [.go(2)])
+        case "lost": return ShellStaged(place: .timeline, steps: [.go(3)])
+        case "list": return ShellStaged(place: .timeline, steps: [.go(2), .list])
         // What a swipe leaves (#305), by the step a swipe takes: two timelines on; at the last
         // one, a step on that goes nowhere; and a timeline never visited, come to from a list
         // scrolled down to a row the two share, which opens at its own first post.
-        case "swiped": ShellStaged(place: .timeline, steps: [.next, .next], reports: true)
-        case "ended": ShellStaged(place: .timeline, steps: [.go(4), .next], reports: true)
+        case "swiped": return ShellStaged(place: .timeline, steps: [.next, .next], reports: true)
+        case "ended": return ShellStaged(place: .timeline, steps: [.go(4), .next], reports: true)
         // Rising posts are the last of All and all of Trends: All is scrolled to its end, among
         // them, and Trends — never visited, and long enough to scroll — is come to.
-        case "fresh": ShellStaged(place: .timeline, steps: [.scroll(100_000), .trends], reports: true)
+        case "fresh": return ShellStaged(place: .timeline, steps: [.scroll(100_000), .trends], reports: true)
         // A reload that does not end, so the mark is Stop for the picture (#307): `StagedHTTP`
         // holds what this screen asks for.
-        case "loading": ShellStaged(place: .timeline, steps: [.reload])
-        case "menu": ShellStaged(place: .timeline, menus: true)
-        case "cut": ShellStaged(place: .timeline, steps: [.scroll(90)], reports: true)
-        case "returned": ShellStaged(place: .timeline, steps: [.scroll(700), .trends, .all], reports: true)
-        case "emptied": ShellStaged(place: .timeline, steps: [.scroll(700), .empty, .all], reports: true)
-        case "post": ShellStaged(place: .timeline, opens: NoteKey(host: host, id: opened).rowID)
-        case "compose": ShellStaged(place: .timeline, composing: true)
-        case "preferences": ShellStaged(place: .preferences)
-        case "notice": ShellStaged(place: .timeline, says: notice)
+        case "loading": return ShellStaged(place: .timeline, steps: [.reload])
+        // The page of gestures (#308), and the count of scroll views that want the press on the
+        // top of the screen: over the list, and over an opened post.
+        case "gestures":
+            var staged = ShellStaged(place: .preferences)
+            staged.preferences = "gestures"
+            return staged
+        case "tops":
+            var staged = ShellStaged(place: .timeline, reports: true)
+            staged.counts = true
+            return staged
+        case "topsprefs":
+            var staged = ShellStaged(place: .preferences, reports: true)
+            staged.counts = true
+            return staged
+        // An opened post while a reload is held: Stop above a conversation (#307).
+        case "loadingpost":
+            return ShellStaged(place: .timeline, opens: NoteKey(host: host, id: opened).rowID, steps: [.reload])
+        case "topspost":
+            var staged = ShellStaged(place: .timeline, opens: NoteKey(host: host, id: opened).rowID, reports: true)
+            staged.counts = true
+            return staged
+        case "menu": return ShellStaged(place: .timeline, menus: true)
+        case "cut": return ShellStaged(place: .timeline, steps: [.scroll(90)], reports: true)
+        case "returned": return ShellStaged(place: .timeline, steps: [.scroll(700), .trends, .all], reports: true)
+        case "emptied": return ShellStaged(place: .timeline, steps: [.scroll(700), .empty, .all], reports: true)
+        case "post": return ShellStaged(place: .timeline, opens: NoteKey(host: host, id: opened).rowID)
+        case "compose": return ShellStaged(place: .timeline, composing: true)
+        case "preferences": return ShellStaged(place: .preferences)
+        case "notice": return ShellStaged(place: .timeline, says: notice)
         // Both are somebody's page, and there is nobody: the name is one no server answers to,
         // so the picture is of this app's own frame around a page that did not arrive.
-        case "link": ShellStaged(place: .timeline, reads: URL(string: "https://\(host)/a/page/read/out/of/a/post"))
-        case "signin": ShellStaged(place: .timeline, signsIn: "forum.\(host)")
-        default: ShellStaged(place: .timeline)
+        case "link": return ShellStaged(place: .timeline, reads: URL(string: "https://\(host)/a/page/read/out/of/a/post"))
+        case "signin": return ShellStaged(place: .timeline, signsIn: "forum.\(host)")
+        default: return ShellStaged(place: .timeline)
         }
     }
 
@@ -211,7 +232,7 @@ private struct StagedHTTP: HTTPClient, HTTPSender {
         if path.hasSuffix("/context") { return answer(url, #"{"ancestors":[],"descendants":[]}"#) }
         if path.contains("/timelines/") || path.contains("/trends/") || path.hasSuffix("/notifications") {
             // Held, for the one picture of a reload still running; cancelled, it throws.
-            if ProcessInfo.processInfo.environment["FEDIQO_STAGED_SCREEN"] == "loading" {
+            if ProcessInfo.processInfo.environment["FEDIQO_STAGED_SCREEN"]?.hasPrefix("loading") == true {
                 try await Task.sleep(for: .seconds(120))
             }
             return answer(url, "[]")

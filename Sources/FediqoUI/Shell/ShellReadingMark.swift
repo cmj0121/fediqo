@@ -89,7 +89,24 @@ final class ShellReadingMark {
         id = row
     }
 
+    /// Whether the post kept has been on screen since it was kept.
+    private var keptSeen = false
+
+    /// Whether a post kept is kept no longer (#308): it has been on screen and is not now.
+    /// The person's own scroll lets it go at once (`scrolledByHand`); this is for the list
+    /// being moved away from it by something else — the system's press on the top of the
+    /// screen, which is no hand on the list — so the mark is never left on a post out of sight.
+    nonisolated static func letsGo(kept: String?, seen: Bool, visible: [String]) -> Bool {
+        guard let kept, seen, !visible.isEmpty else { return false }
+        return !visible.contains(kept)
+    }
+
     private func remark() {
+        if let kept, visible.contains(kept) { keptSeen = true }
+        if Self.letsGo(kept: kept, seen: keptSeen, visible: visible) {
+            kept = nil
+            keptSeen = false
+        }
         mark(Self.marked(whole: whole, visible: visible, standing: id, kept: kept))
     }
 
@@ -141,6 +158,7 @@ final class ShellReadingMark {
     /// The post a timeline returned to was left at: marked, and kept so until the person scrolls.
     func keep(_ row: String?) {
         kept = row
+        keptSeen = false
         returning = row
         mark(row)
     }

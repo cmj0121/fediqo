@@ -375,4 +375,79 @@ struct BackEdgeCatcher: UIViewRepresentable {
         }
     }
 }
+
+/// Takes the scroll view this stands in out of the running for the system's press on the top of
+/// the screen (#308).
+///
+/// **That press goes to the top of one scroll view, and only where there is one that wants it.**
+/// Every scroll view wants it unless told otherwise, a row of names that scrolls sideways as
+/// much as the list under it — and with two that want it, it goes to neither. So everything on
+/// a timeline's page that scrolls and is not the list says it does not.
+struct NotToTop: UIViewRepresentable {
+    func makeUIView(context: Context) -> Finder {
+        let view = Finder()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: Finder, context: Context) {
+        view.setNeedsLayout()
+    }
+
+    /// **Never a scroll view that scrolls up and down** (`ScrollAxis.notUpAndDown`). Asked each
+    /// time this is laid out, since what a scroll view holds is not known when it is made, and
+    /// answered both ways: one that has come to scroll up and down is given the press back.
+    final class Finder: UIView {
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            var above = superview
+            while let view = above, !(view is UIScrollView) { above = view.superview }
+            guard let scroll = above as? UIScrollView, scroll.contentSize.height > 0 else { return }
+            scroll.scrollsToTop = !ScrollAxis.notUpAndDown(content: scroll.contentSize, bounds: scroll.bounds.size)
+        }
+    }
+}
+
+/// How many scroll views on screen want the press on the top of the screen, of how many there
+/// are: what a staged picture writes down, since nothing can make that press for it.
+@MainActor
+enum ScrollsToTopCount {
+    static func now() -> (wanting: Int, all: Int) {
+        var wanting = 0, all = 0
+        func look(_ view: UIView) {
+            if let scroll = view as? UIScrollView, !scroll.isHidden, scroll.window != nil {
+                all += 1
+                if scroll.scrollsToTop { wanting += 1 }
+            }
+            view.subviews.forEach(look)
+        }
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            scene.windows.forEach(look)
+        }
+        return (wanting, all)
+    }
+}
 #endif
+
+extension View {
+    /// Says of the scroll view this is inside that the press on the top of the screen is not
+    /// for it. Put on what it scrolls. Nothing on a Mac.
+    @ViewBuilder
+    func notToTop() -> some View {
+        #if os(iOS)
+        background(NotToTop())
+        #else
+        self
+        #endif
+    }
+}
+
+/// Which way a scroll view scrolls, by what it holds.
+enum ScrollAxis {
+    /// Whether it does not scroll up and down: what it holds is no taller than it is. A row of
+    /// names is so whether or not there are names enough to scroll sideways — two names that
+    /// fit are still a scroll view the system counts — and a list longer than its page never is.
+    static func notUpAndDown(content: CGSize, bounds: CGSize) -> Bool {
+        content.height > 0 && content.height <= bounds.height + 1
+    }
+}

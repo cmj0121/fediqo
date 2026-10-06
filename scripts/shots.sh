@@ -331,7 +331,7 @@ widths() {
 # writes every timeline's name in a row, which a phone at any width does not.
 # `SHOTS_SCREENS="compose notice"` takes those alone, for looking at one screen while it is worked on.
 # shellcheck disable=SC2206
-PHONE_SCREENS=(${SHOTS_SCREENS:-timeline post compose preferences notice link signin cut returned emptied named lost list swiped ended fresh menu loading})
+PHONE_SCREENS=(${SHOTS_SCREENS:-timeline post compose preferences notice link signin cut returned emptied named lost list swiped ended fresh menu loading gestures tops topspost topsprefs loadingpost})
 PHONE_WIDTHS=(320 375 whole)
 PHONE_SCALES=(smallest default largest)
 
@@ -373,7 +373,7 @@ stage() {
                     SIMCTL_CHILD_FEDIQO_STAGED_KEYBOARD="$keyboard" \
                     SIMCTL_CHILD_FEDIQO_STAGED_TIMELINES="$phone" \
                     xcrun simctl launch "$udid" "$BUNDLE_ID" \
-                        -fediqo.dummy.language en -fediqo.dummy.fontSize "$scale" >/dev/null
+                        -fediqo.dummy.language "${SHOTS_LANGUAGE:-en}" -fediqo.dummy.fontSize "$scale" >/dev/null
                 # Long enough for a launch and the steps a staged screen takes. A machine busy
                 # with something else needs longer, or the picture is of a launch half done:
                 # `SHOTS_WAIT=12`.

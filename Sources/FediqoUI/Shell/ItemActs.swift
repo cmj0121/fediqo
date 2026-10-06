@@ -298,7 +298,9 @@ extension ItemActs {
 
     /// How many heads have been built: a count a test reads, to hold that a row drawn and
     /// never pressed builds none.
+    #if DEBUG
     nonisolated(unsafe) static var headsBuilt = 0
+    #endif
 
     /// What heads the row's menu (#306): what a pointer resting on the row's parts is told, for
     /// a reader with no pointer to rest — **in the words those parts already say**. Who
@@ -312,7 +314,9 @@ extension ItemActs {
     static func head(
         for item: DummyItem, here: Set<String>?, refused: PostActRefusal? = nil, language: DummyLanguage? = nil
     ) -> [String] {
+        #if DEBUG
         headsBuilt += 1
+        #endif
         var lines: [String] = [DummyItemRow.spokenNames(item)]
         if let reblog = DummyItemRow.spokenReblog(item, language: language) {
             lines.append(reblog)

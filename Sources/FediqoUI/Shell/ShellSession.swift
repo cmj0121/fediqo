@@ -649,8 +649,12 @@ final class ShellSession {
     /// Allowed, Your hosts, Move, and round again — closing a detail left open, as a pill does.
     @discardableResult
     func rotatePreferencesTab(by step: Int) -> Bool {
+        // The six: Tab is a key, so there is a keyboard, and the gestures' page is not offered.
+        // Left in front as a keyboard was attached, it is the first page that is drawn, and
+        // that is where Tab goes on from.
         preferencesPurpose = DummyCommand.advanced(
-            Array(PreferencesPane.Purpose.allCases), from: preferencesPurpose, by: step
+            Array(PreferencesPane.Purpose.allCases),
+            from: PreferencesPane.Purpose.drawn(preferencesPurpose, touch: false), by: step
         )
         return true
     }

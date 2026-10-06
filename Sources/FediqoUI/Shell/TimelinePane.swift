@@ -758,6 +758,9 @@ struct TimelinePane: View {
                         }
                         .padding(.vertical, ShellSpace.hair)
                         .modifier(FingerRoom())
+                        // The names scroll sideways; the press on the top of the screen is the
+                        // list's (#308).
+                        .notToTop()
                     }
                     .scrollIndicators(.never)
                     .modifier(FingerRoom(given: false))

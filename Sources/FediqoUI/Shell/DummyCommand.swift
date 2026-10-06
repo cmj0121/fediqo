@@ -499,6 +499,12 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
     /// A second way under a finger, where there is one beside `touch` (#307): the list pulled
     /// down for `r`, the Stop the reload mark becomes for the part of `Escape` that stops one.
     public var also: DummyTouch? = nil
+    /// The gestures that do this line's act under a finger, where it has any of its own beyond
+    /// a press on the thing itself (#308). The Gestures page lists them.
+    public var gestures: [ShellGesture] = []
+    /// Where a finger finds what this line is for, where the line itself is a keyboard's alone
+    /// and something else answers the same need: the name of that place, as a key to its words.
+    public var counterpart: String? = nil
 
     public var id: String { name }
     public var detail: String { L10n.t("shortcut.\(name)") }
@@ -518,20 +524,26 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // and a phone already has the scroll; a "top" button would be chrome on every row of
         // every timeline for something the reader's thumb does. What `g` does besides — light
         // the first post — is `.press` on that post, which is the line above.
-        DummyShortcut(group: .move, keys: ["g"], name: "top", commands: [.goTop], touch: .scroll),
+        //
+        // And the system's own press on the top of the screen, which goes there in one (#308).
+        DummyShortcut(group: .move, keys: ["g"], name: "top", commands: [.goTop], touch: .scroll, gestures: [.top]),
         // The named pills along the top of the timeline, pressed.
+        // On a narrow page: a sideways swipe to the one beside (#305), or the timeline's name
+        // pressed for the list of them all (#304).
         DummyShortcut(group: .move, keys: ["Tab", "⇧Tab"], name: "tabs",
-                      commands: [.nextTab, .previousTab], touch: .press),
+                      commands: [.nextTab, .previousTab], touch: .press, gestures: [.swipe, .name, .pill]),
         // The rail on a Mac, the tab bar on a phone.
         DummyShortcut(group: .move, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage], touch: .press),
         // Back in the thread's own header, and the close mark on the viewer.
-        DummyShortcut(group: .move, keys: ["q"], name: "back", commands: [.back], touch: .press),
+        // And a swipe in from the leading edge, from an opened post, person or tag (#305).
+        DummyShortcut(group: .move, keys: ["q"], name: "back", commands: [.back], touch: .press, gestures: [.back, .backButton]),
 
         // MARK: Read — what is in front of the reader
 
+        // A second press with a pointer; under a finger the first press opens (#303).
         DummyShortcut(group: .read, keys: ["Return", "Space"], name: "expand",
-                      commands: [.expandPost], touch: .pressAgain),
+                      commands: [.expandPost], touch: .pressAgain, also: .press, gestures: [.press]),
         // The cover is a button over its whole face — `DummyItemRow.cover`.
         DummyShortcut(group: .read, keys: ["s"], name: "reveal", commands: [.reveal], touch: .press),
         // The card itself, pressed. The mark on it is `a`'s and takes its own press.
@@ -553,7 +565,7 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .read, keys: ["/"], name: "search", commands: [.search], touch: .press),
         // The mark in the header, pressed — and the list pulled down from its top (#307), which
         // does what the press does and is offered wherever the mark is.
-        DummyShortcut(group: .read, keys: ["r"], name: "reload", commands: [.reload], touch: .press, also: .pull),
+        DummyShortcut(group: .read, keys: ["r"], name: "reload", commands: [.reload], touch: .press, also: .pull, gestures: [.pull]),
 
         // MARK: Act — what the reader does to a post, or writes
 
@@ -574,16 +586,22 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         DummyShortcut(group: .act, keys: ["d"], name: "withdraw", commands: [.withdraw], touch: .press),
         DummyShortcut(group: .act, keys: ["c"], name: "compose", commands: [.compose], touch: .press),
         // A tab held, or double-clicked — `TimelinePane.queryPill`.
+        // On a narrow page there is no row of tabs to hold: it is in the list the timeline's
+        // name opens (#304).
         DummyShortcut(group: .act, keys: ["e"], name: "edit",
-                      commands: [.editTimeline], touch: .hold),
+                      commands: [.editTimeline], touch: .hold, also: .press, gestures: [.name, .pillHold]),
 
         // MARK: App — the three a finger cannot wholly reach
 
         // **This list is the one thing in this app a finger cannot ask for**, which is the honest
         // answer and not a resting place: a reader with no keyboard has no way to the written-down
         // keys, and needs none, because #33 is the promise that they never have to read them.
+        //
+        // **Still so, and it has a counterpart** (#308): where there is no keyboard, Preferences
+        // has a page of gestures. That is not a way to this list — a finger cannot raise it —
+        // so the line stays a keyboard's, and says where a finger reads its own.
         DummyShortcut(group: .app, keys: ["?"], name: "list",
-                      commands: [.showShortcuts], touch: .keysOnly),
+                      commands: [.showShortcuts], touch: .keysOnly, counterpart: "prefs.tab.gestures"),
         // Everything this closes has its own control — the ground behind a pop-up, Back, the
         // close mark. What it does that none of them do is stop a running reload and put the lamp
         // out, and neither of those has a touch path: hence `.partly` rather than `.press`, which
@@ -592,7 +610,8 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // **Stopping a reload has one now** (#307): the reload mark is Stop while one runs, and
         // that is `also`. Putting the lamp out still has none — and under a finger there is no
         // lamp to put out (#303) — so the line stays `.partly`.
-        DummyShortcut(group: .app, keys: ["Escape"], name: "dismiss", commands: [.dismiss], touch: .partly, also: .press),
+        DummyShortcut(group: .app, keys: ["Escape"], name: "dismiss", commands: [.dismiss], touch: .partly, also: .press,
+                      gestures: [.stop, .back]),
         DummyShortcut(group: .app, keys: ["⌘R"], name: "landing",
                       commands: [.replayLanding], touch: .keysOnly),
     ]

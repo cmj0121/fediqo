@@ -36,6 +36,11 @@ public struct ShellStaged: Sendable {
     /// head and the acts, written out plainly. A menu cannot be raised without a press, so its
     /// words are photographed this way; how the menu itself looks is the system's.
     public var menus: Bool
+    /// Whether the line over the picture counts the scroll views that want the press on the
+    /// top of the screen (#308), in place of what the list reports.
+    public var counts: Bool = false
+    /// The page of Preferences put in front, by its name, where the picture is of one.
+    public var preferences: String?
     /// Whether the picture says, in a line over the page, which row the list reports at its
     /// top, which it reports as the first wholly on screen, and which is marked as being read
     /// (#303) — what a picture cannot otherwise show of a report nobody draws.
@@ -96,6 +101,8 @@ public struct ShellStaged: Sendable {
 /// drawn again on a clock. Only a staged launch that asks for it draws this.
 struct StagedReport: View {
     let session: ShellSession
+    /// The scroll views' count in place of the list's report.
+    var counts = false
 
     /// A row's own number, which is the end of its id: enough to tell rows apart in a picture.
     static func short(_ row: String?) -> String {
@@ -107,10 +114,21 @@ struct StagedReport: View {
         "top \(short(top)) · whole \(short(whole)) · marked \(short(marked)) · kept \(short(kept))"
     }
 
+    /// How many scroll views on screen want the press on the top of the screen (#308).
+    @MainActor
+    static var toTop: String {
+        #if os(iOS)
+        let count = ScrollsToTopCount.now()
+        return "to top: \(count.wanting) of \(count.all) scroll views"
+        #else
+        return ""
+        #endif
+    }
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { _ in
             let mark = session.readingMark
-            Text(Self.line(top: session.scrolledTop, whole: mark.whole.first, marked: mark.id, kept: mark.kept))
+            Text(counts ? Self.toTop : Self.line(top: session.scrolledTop, whole: mark.whole.first, marked: mark.id, kept: mark.kept))
                 .font(.caption2.monospaced())
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)

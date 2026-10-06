@@ -436,6 +436,27 @@ sentence in their place. `s` lifts the cover; the mark then says it was covered,
 covers it again. Covered pictures carry the same mark. After Esc from a thread, the post it
 opened from is centred and still selected.
 
+### On a phone
+
+With no keyboard attached, Preferences has a Gestures page that lists what a finger does; with
+one attached that page is gone and the keys are the list. Two things stay a keyboard's: the
+list of keys itself, and replaying the landing.
+
+A narrow screen names the one timeline it shows: its name, its rules in one line, and a dot for
+where it stands among yours. Press the name for the list of every timeline, where a new one is
+made and this one changed. A sideways swipe goes to the timeline beside it, and stops at either
+end. A wide screen keeps every name in a row, and swipes all the same.
+
+One post is always marked as the one being read: the first wholly on screen, moving as you
+scroll, and never moving the list by itself. Nothing is done to the marked post. One press on a
+post opens it, a mark under a post acts on that post, and pressing and holding a post says who
+wrote it, exactly when and for whom, and offers what its marks do. A timeline you come back to
+is where you left it.
+
+Pull a timeline down to read it again. While it reads, the reload mark is Stop. Press the top
+of the screen to go to the top of the list. On a narrow screen, swipe in from the edge to go
+back from an opened post, person or tag; on a wide one, Back is the button.
+
 ### What this device holds
 
 The Usage page is tabbed by purpose: Sources, Time, Keep, and Copies. Tab rotates them.

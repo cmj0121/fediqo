@@ -160,11 +160,19 @@ struct ReloadPullTests {
         #expect(made.times == first, "the list's content was made \(made.times) times")
     }
 
+    /// **That the header does not shift as the mark flips rests on the button's fixed frame**
+    /// (`ShellIconButton`), which no glyph changes; what is asked here is that it is one button
+    /// under two names, each its own.
     @Test("The reload mark and Stop are one size: the header does not shift as it flips")
     func oneSizeEitherWay() {
         let reload = NSHostingView(rootView: ShellIconButton(ReloadMark.reload.symbol, name: ReloadMark.reload.name, action: {})).fittingSize
         let stop = NSHostingView(rootView: ShellIconButton(ReloadMark.stop.symbol, name: ReloadMark.stop.name, action: {})).fittingSize
         #expect(reload == stop, "the reload mark is \(reload), Stop \(stop)")
+    }
+
+    @Test("The reload mark and Stop are the one button under two glyphs and two names")
+    func oneButtonTwoNames() {
+        #expect(ReloadMark.reload.symbol != ReloadMark.stop.symbol)
         #expect(ReloadMark.reload.name == "shortcut.reload" && ReloadMark.stop.name == "timeline.reload.stop")
     }
     #endif
@@ -252,7 +260,7 @@ struct ReloadPullTests {
         #expect(reload.touch == .press && reload.also == .pull)
         let dismiss = try #require(DummyShortcut.all.first { $0.name == "dismiss" })
         #expect(dismiss.touch == .partly && dismiss.also == .press)
-        #expect(DummyShortcut.all.filter { $0.also != nil }.map(\.name) == ["reload", "dismiss"])
+        #expect(DummyShortcut.all.filter { $0.also != nil }.map(\.name) == ["expand", "reload", "edit", "dismiss"])
     }
 
     @Test("Stop is named in each language the app ships")

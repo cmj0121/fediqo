@@ -41,8 +41,27 @@ struct PreferencesPane: View {
         case reach
         case hosts
         case move
+        /// What a finger does (#308). Only where there is no keyboard: with one, the keys' own
+        /// guide is the place.
+        case gestures
 
         var id: Self { self }
+
+        /// **The six pages every reader has.** The gestures are a seventh only where there is
+        /// no keyboard, so they are not among "all": what is counted, walked by Tab and named
+        /// in the keys' guide is the six.
+        static let allCases: [Purpose] = [.choices, .build, .work, .reach, .hosts, .move]
+
+        /// The pages offered: the six, and under a finger the gestures after them.
+        static func shown(touch: Bool) -> [Purpose] {
+            touch ? allCases + [.gestures] : allCases
+        }
+
+        /// The page drawn for the one asked for: itself where it is offered, and the first page
+        /// where it is not — a keyboard attached while the gestures were in front.
+        static func drawn(_ asked: Purpose, touch: Bool) -> Purpose {
+            shown(touch: touch).contains(asked) ? asked : .choices
+        }
 
         var titleKey: String {
             switch self {
@@ -52,6 +71,7 @@ struct PreferencesPane: View {
             case .reach: "prefs.tab.reach"
             case .hosts: "prefs.tab.hosts"
             case .move: "prefs.tab.move"
+            case .gestures: "prefs.tab.gestures"
             }
         }
 
@@ -63,6 +83,7 @@ struct PreferencesPane: View {
             case .reach: "checkmark.shield"
             case .hosts: "globe"
             case .move: "arrow.left.arrow.right"
+            case .gestures: "hand.draw"
             }
         }
     }
@@ -87,7 +108,9 @@ struct PreferencesPane: View {
     /// Where the detail is kept with no shell round the pane — a preview, a test.
     @State private var unhosted: Detail?
 
-    private var purpose: Purpose { session?.preferencesPurpose ?? .choices }
+    @Environment(\.shellTouch) private var touch
+
+    private var purpose: Purpose { Purpose.drawn(session?.preferencesPurpose ?? .choices, touch: touch) }
 
     /// The detail open, on the session where there is one, so Escape reaches it.
     private var opened: Binding<Detail?> {
@@ -117,6 +140,12 @@ struct PreferencesPane: View {
         .scrollIndicators(.never)
         .clearsFloatingCorner()
         .padding(ShellSpace.snug)
+        // A keyboard attached with the gestures in front: the page drawn is the first, and the
+        // session is told so, so that Tab, Escape and a detail all go by the page on screen.
+        .onChange(of: touch) { _, now in
+            guard let session, session.preferencesPurpose != Purpose.drawn(session.preferencesPurpose, touch: now) else { return }
+            session.preferencesPurpose = Purpose.drawn(session.preferencesPurpose, touch: now)
+        }
         .modifier(CarryFlow(session: session))
         .modifier(NearbyFlow(session: session))
     }
@@ -135,6 +164,7 @@ struct PreferencesPane: View {
                 returning: session?.preferencesReturning, onTyping: typing
             )
         case .move: move
+        case .gestures: GesturesSection()
         }
     }
 
@@ -225,7 +255,7 @@ struct PreferencesPane: View {
     /// The page's tabs (`ShellTabs`), in the Form so the grouped chrome is the page's own. Tab
     /// rotates them (`ShellSession.rotatePreferencesTab`).
     private var tabs: some View {
-        ShellTabs(Purpose.allCases, selected: purpose) { session?.preferencesPurpose = $0 }
+        ShellTabs(Purpose.shown(touch: touch), selected: purpose) { session?.preferencesPurpose = $0 }
     }
 
     /// Off is no latest date. Turning it on starts at today, the date that hides nothing yet.

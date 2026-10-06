@@ -42,7 +42,7 @@ struct ShellTabs<Tab: ShellTab>: View {
             // **A row that scrolls says so** (#302): the end with more beyond it fades out, so a
             // pill cut by the edge of the page reads as one that goes on rather than one that
             // was cut. An end with nothing beyond it is drawn whole.
-            ScrollView(.horizontal) { row }
+            ScrollView(.horizontal) { row.notToTop() }
                 .scrollIndicators(.never)
                 .onScrollGeometryChange(for: ShellTabsMore.self) { geometry in
                     ShellTabsMore(
