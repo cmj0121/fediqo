@@ -27,7 +27,7 @@ enum RuleBuilder {
         case .author(let handle):
             // A forum author is that forum's; the factory would make it so whatever was asked.
             let instance = Fold.handle(handle).split(separator: "@").last.map(String.init) ?? ""
-            if sources.contains(where: { $0.host == instance && $0.kind.isForum }) {
+            if sources.contains(where: { $0.host == instance && $0.kind.offers.authorsAreItsOwn }) {
                 return [.source(host: instance)]
             }
             return [.every] + every
@@ -35,15 +35,15 @@ enum RuleBuilder {
             switch category {
             case .board, .list:
                 return [.source(host: host)]
-            case .public, .home:
-                return [.every] + sources.filter(\.kind.hasTimelines).map { .source(host: $0.host) }
-            // A Discuz!'s ranking lists are its Trends; public and home are still never a forum's.
-            case .trends:
-                return [.every] + sources.filter(\.kind.hasTrends).map { .source(host: $0.host) }
+            // Every source, or one a category of this kind can mean — which is the source's
+            // own to say (`SourceOffers.serves`): public and Home where it has timelines, what
+            // is rising where it has that.
+            case .public, .home, .trends:
+                return [.every] + sources.filter { $0.kind.offers.serves(category) }.map { .source(host: $0.host) }
             }
         // Every source, or one whose kind declares the field: no other could match it.
         case .field(let name, _):
-            return [.every] + sources.filter { $0.kind.field(named: name) != nil }.map { .source(host: $0.host) }
+            return [.every] + sources.filter { $0.kind.offers.field(named: name) != nil }.map { .source(host: $0.host) }
         }
     }
 
@@ -51,7 +51,7 @@ enum RuleBuilder {
     /// (#287). What the editor offers a rule on — and nothing where no source here declares one.
     static func fields(in sources: [Source]) -> [SourceField] {
         var seen: Set<String> = []
-        return sources.flatMap(\.kind.fields).filter { seen.insert($0.name).inserted }
+        return sources.flatMap(\.kind.offers.fields).filter { seen.insert($0.name).inserted }
     }
 
     /// How many values of an open field are offered: the ones most held posts say.
@@ -67,7 +67,7 @@ enum RuleBuilder {
         case .options(let fixed, let open):
             guard open else { return fixed.map(FieldValue.option) }
             var counts: [String: Int] = [:]
-            let hosts = Set(sources.filter { $0.kind.field(named: field.name) != nil }.map(\.host))
+            let hosts = Set(sources.filter { $0.kind.offers.field(named: field.name) != nil }.map(\.host))
             for note in notes where hosts.contains(note.source.host) {
                 if case .option(let said)? = note.value(of: field.name) { counts[said, default: 0] += 1 }
             }
@@ -96,18 +96,17 @@ enum RuleBuilder {
         }
     }
 
-    /// The categories each source can be picked by: public and trends on a Mastodon, trends on a
-    /// Discuz! (its ranking lists), Home where it is signed in, every list chosen on it, a forum's subscribed boards, and any other its
-    /// held posts arrived through.
+    /// The categories each source can be picked by: what it can be read by now, as it offers
+    /// them (`SourceOffers.categories`) — its public timeline, what is rising, Home where it is
+    /// signed in, every list chosen on it, its subscribed boards — and any other its held
+    /// posts arrived through.
     static func categories(
         in sources: [Source], notes: [Note], signedIn: (String) -> Bool
     ) -> [(host: String, categories: [FediqoCore.Category])] {
         sources.compactMap { source in
-            var picked: [FediqoCore.Category] = source.kind.hasTimelines ? [.public] : []
-            if source.kind.hasTrends { picked.append(.trends) }
-            if source.kind.hasTimelines, signedIn(source.host) { picked.append(.home) }
-            picked += source.lists.map { .list(id: $0.id) }
-            picked += source.boards.map { .board(id: String($0.fid)) }
+            // What the source can be read by now, as it offers it — completed here with who is
+            // signed in to it, which only the caller knows.
+            var picked = source.kind.offers.categories(of: source, signedIn: signedIn(source.host))
             let held = Set(notes.filter { $0.source.host == source.host }.flatMap(\.categories))
             picked += held.subtracting(picked).sorted {
                 RuleText.categoryName($0, host: source.host, sources: sources)
