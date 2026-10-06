@@ -258,7 +258,7 @@ struct RefsLoadTests {
         #expect(Set(await http.paths) == ["/api/v1/statuses/1", "/api/v1/statuses/3"])
         #expect(session.notes.contains { $0.statusID == "1" })
         #expect(DummyItemRow.replyLine(try row("2", in: session), language: .english) == "Reply to @bob@social.example")
-        #expect(DummyItemRow.replyLine(try row("4", in: session), language: .english) == "Reply to @bob@social.example — that post is gone at its source")
+        #expect(DummyItemRow.replyLine(try row("4", in: session), language: .english) == "Reply to @bob@social.example — that post is gone or hidden at its source")
     }
 
     @Test("Signed in, what a search brought is the reader's: asked as the reader, and what it still owes goes when the sign-in ends, with nothing asked unsigned")
@@ -297,7 +297,7 @@ struct RefsLoadTests {
 
     // MARK: - Gone, and failing
 
-    @Test("A post that no longer exists is not held and not asked for again, and the reply's row says it is gone at its source", arguments: [404, 410])
+    @Test("A post that no longer exists is not held and not asked for again, and the reply's row says it is gone or hidden at its source — a source answers the same for a post it deleted and one it will not show", arguments: [404, 410])
     func gone(status: Int) async throws {
         let http = FixtureHTTP(["/api/v1/statuses/1": .text("{}", status: status)])
         let (session, _, _) = try await shell(unsigned: http)
@@ -310,8 +310,8 @@ struct RefsLoadTests {
         #expect(after.refs.first?.gone == true)
         let item = try row("2", in: session)
         #expect(item.owes.isEmpty && item.refsGone == [.answers])
-        #expect(DummyItemRow.replyLine(item, language: .english) == "Reply to @bob@social.example — that post is gone at its source")
-        #expect(DummyItemRow.replyLine(item, language: .taiwanese) == "回覆 @bob@social.example——那則貼文已從來源消失")
+        #expect(DummyItemRow.replyLine(item, language: .english) == "Reply to @bob@social.example — that post is gone or hidden at its source")
+        #expect(DummyItemRow.replyLine(item, language: .taiwanese) == "回覆 @bob@social.example——那則貼文在來源已消失或不公開")
     }
 
     @Test("A post said to be gone that a timeline brings after all: the row says only whom it answers, with nothing after it")
@@ -395,7 +395,7 @@ struct RefsLoadTests {
         #expect(DummyItemRow.replyLine(answer, language: .taiwanese) == "回覆 @bob@social.example——那則貼文已不再留著")
         #expect(QuoteBand.Loading(quote) == .unheld)
         #expect(QuoteBand.decorator(try #require(quote.quote), loading: .unheld, language: .english) == "quoted post no longer held")
-        #expect(QuoteBand.decorator(try #require(quote.quote), loading: .gone, language: .taiwanese) == "引用的貼文已從來源消失")
+        #expect(QuoteBand.decorator(try #require(quote.quote), loading: .gone, language: .taiwanese) == "引用的貼文在來源已消失或不公開")
         #expect(await http.paths.count == 1, "and it is not asked for again")
         for key in ["item.reply.gone", "item.reply.unheld", "quote.short.gone", "quote.short.unheld", "item.reply.onItsWay", "item.reply.stalled", "quote.short.onItsWay", "quote.short.stalled"] {
             for language in [DummyLanguage.english, .taiwanese] { #expect(L10n.t(key, language: language) != key) }

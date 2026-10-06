@@ -216,7 +216,7 @@ struct OpenedViewHostedTests {
     }
 
     @Test("A post its source says is gone, and one that could not be read this run: the line in its place says which", arguments: [
-        (FixtureHTTP.Outcome.text("{}", status: 404), "The post this answers is gone at its source", "這則回覆的那則貼文已從來源消失"),
+        (FixtureHTTP.Outcome.text("{}", status: 404), "The post this answers is gone or hidden at its source", "這則回覆的那則貼文在來源已消失或不公開"),
         (FixtureHTTP.Outcome.fail, "The post this answers could not be read for now", "這則回覆的那則貼文暫時讀不到"),
     ])
     func goneAndNotReadForNow(answer: FixtureHTTP.Outcome, english: String, taiwanese: String) async throws {

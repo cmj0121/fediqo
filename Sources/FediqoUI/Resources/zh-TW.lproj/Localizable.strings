@@ -271,13 +271,13 @@
 "item.reply.stalled" = "%@——那則貼文暫時讀不到";
 "quote.short.onItsWay" = "引用的貼文還在路上";
 "quote.short.stalled" = "引用的貼文暫時讀不到";
-"quote.short.gone" = "引用的貼文已從來源消失";
+"quote.short.gone" = "引用的貼文在來源已消失或不公開";
 "quote.short.unheld" = "引用的貼文已不再留著";
-"item.reply.gone" = "%@——那則貼文已從來源消失";
+"item.reply.gone" = "%@——那則貼文在來源已消失或不公開";
 "item.reply.unheld" = "%@——那則貼文已不再留著";
 "thread.above.onItsWay" = "這則回覆的那則貼文還在路上";
 "thread.above.stalled" = "這則回覆的那則貼文暫時讀不到";
-"thread.above.gone" = "這則回覆的那則貼文已從來源消失";
+"thread.above.gone" = "這則回覆的那則貼文在來源已消失或不公開";
 "thread.above.unheld" = "這則回覆的那則貼文已不再留著";
 "thread.above.notHere" = "回覆的那則貼文不在這裡";
 "thread.reblogs.between" = "、";

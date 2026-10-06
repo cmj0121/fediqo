@@ -61,7 +61,7 @@ private actor MastodonServer: HTTPSender {
                 return (Data(#"{"client_id":"cid","client_secret":"csecret"}"#.utf8), Self.answered(url, 200))
             }
             return (
-                Data(#"{"error":"Validation failed: Scopes doesn't match configured on the server."}"#.utf8),
+                Data(#"{"error":"Validation failed: Scopes doesn't match those configured on the server."}"#.utf8),
                 Self.answered(url, 422)
             )
         case .fail:

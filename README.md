@@ -358,7 +358,8 @@ once, and the line that names what it answers, or the quote, says that post is o
 until it has come. It is asked for once: read again, the post asks for nothing more, and a
 loaded post let go later is not brought back. Only the post referred to directly is read,
 never what that post refers to in turn. A post its source says no longer exists is not asked
-for again, and the line says it is gone at its source; a post that was read this way and
+for again, and the line says it is gone or hidden at its source — a source gives the same
+answer for a post it deleted and one it will not show you; a post that was read this way and
 later let go says it is no longer held; a read that fails is tried twice more, then left for this run and said so on the
 row, and asked again at the next launch. Each of these reads is listed with the others under
 Requests this run, is made only of your own source — as you, where you are signed in to it,
@@ -376,7 +377,7 @@ not hold shows none of that post's words and says it is no longer held.
 Opening a post shows what belongs with it, from what this device holds. Above it stands the
 post it answers, and the post that one answers, as far up as the posts held go; nothing is
 fetched by walking up. Where the next post up is on its way, could not be read for now, is
-gone at its source or is no longer held, a line in its place says so. Below it stand the held
+gone or hidden at its source or is no longer held, a line in its place says so. Below it stand the held
 posts that answer it, each under the one it answers, and after them the held posts that quote
 it, under a title of their own. Who reblogged it, as far as their reblogs are held, is one
 line under the post. The thread is still read from the source when you open a post, and what

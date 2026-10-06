@@ -266,9 +266,18 @@ struct BookmarkTests {
             _ = try await MastodonOAuth(host: host, sender: FixtureSender(["/api/v1/apps": outcome]))
                 .register(scopes: MastodonOAuth.scopes(writing: true))
         }
-        let refusal = #"{"error":"Validation failed: Scopes doesn't match configured on the server."}"#
+        let refusal = #"{"error":"Validation failed: Scopes doesn't match those configured on the server."}"#
         await #expect(throws: MastodonSignInError.invalidScope) { try await register(.json(refusal, status: 422)) }
         await #expect(throws: MastodonSignInError.invalidScope) { try await register(.json(#"{"error":"invalid_scope"}"#, status: 400)) }
+        // The same refusal as a Mastodon writes it for a device set to Chinese (#298): it names
+        // no scope this can read, and would be a plain failure — which is why the registration
+        // is asked for in English.
+        await #expect(throws: MastodonSignInError.http(422)) {
+            try await register(.json(#"{"error":"校驗失敗：範圍doesn't match those configured on the server."}"#, status: 422))
+        }
+        let sender = FixtureSender(["/api/v1/apps": .json(refusal, status: 422)])
+        _ = try? await MastodonOAuth(host: host, sender: sender).register(scopes: MastodonOAuth.scopes(writing: true))
+        #expect(await sender.requests.map { $0.value(forHTTPHeaderField: "Accept-Language") } == ["en"])
         // Not a scope refusal: a server failing, a refusal about something else, no word at all.
         await #expect(throws: MastodonSignInError.http(500)) { try await register(.json(refusal, status: 500)) }
         await #expect(throws: MastodonSignInError.http(422)) { try await register(.json(#"{"error":"Validation failed: Redirect URI is invalid"}"#, status: 422)) }

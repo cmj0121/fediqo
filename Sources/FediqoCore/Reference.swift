@@ -32,8 +32,11 @@ public struct Reference: Hashable, Sendable {
     /// Where a quote stands (`Quote.state`). Nothing on other kinds.
     public let state: Quote.State?
 
-    /// Whether the target's source said it no longer exists when it was asked for (#293): gone,
-    /// which is said where the reference is shown and never asked about again. A fact of this
+    /// Whether the target's source said there is no such post when it was asked for (#293):
+    /// said where the reference is shown, and never asked about again. **Gone, or not to be
+    /// seen by whoever asked** — a Mastodon answers the same 404, with the same words, for a
+    /// post it deleted and for one it will not show (#298), signed or not, so that is all this
+    /// can say and all the place that shows it says. A fact of this
     /// item's reference, learned once; nothing of the target is kept to remember it by.
     public let gone: Bool
 

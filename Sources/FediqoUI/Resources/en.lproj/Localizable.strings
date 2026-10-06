@@ -272,13 +272,13 @@
 "item.reply.stalled" = "%@ — that post could not be read for now";
 "quote.short.onItsWay" = "quoted post on its way";
 "quote.short.stalled" = "quoted post not read for now";
-"quote.short.gone" = "quoted post gone at its source";
+"quote.short.gone" = "quoted post gone or hidden at its source";
 "quote.short.unheld" = "quoted post no longer held";
-"item.reply.gone" = "%@ — that post is gone at its source";
+"item.reply.gone" = "%@ — that post is gone or hidden at its source";
 "item.reply.unheld" = "%@ — that post is no longer held";
 "thread.above.onItsWay" = "The post this answers is on its way";
 "thread.above.stalled" = "The post this answers could not be read for now";
-"thread.above.gone" = "The post this answers is gone at its source";
+"thread.above.gone" = "The post this answers is gone or hidden at its source";
 "thread.above.unheld" = "The post this answers is no longer held";
 "thread.above.notHere" = "Answers a post not held here";
 "thread.reblogs.between" = ", ";

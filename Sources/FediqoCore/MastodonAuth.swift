@@ -36,6 +36,14 @@ public enum MastodonSignInError: Error, Equatable, Sendable {
     case clientRejected
     /// The server answered `invalid_scope`: the registration was made for other scopes than
     /// this build asks for. It is dropped, so the next attempt registers afresh.
+    ///
+    /// **From the token exchange, or from a registration refused for its scopes — not, on a
+    /// Mastodon, from its sign-in page** (#298). Asked there for a scope the registration does
+    /// not include, a Mastodon 4.6 shows a page of its own (HTTP 400) and redirects nowhere:
+    /// no `error=invalid_scope` comes back to this app, and no `state`. The person closes the
+    /// page, which is a sign-in cancelled. `code(from:)` still reads the redirect for a server
+    /// that does send one; nothing here relies on a Mastodon doing so, because the page is
+    /// only ever asked for scopes its registration was made with.
     case invalidScope
 }
 
@@ -359,7 +367,8 @@ public struct MastodonOAuth: Sendable {
             let refusal = (try? JSONDecoder().decode(Refusal.self, from: body))?.error
             if refusal == "invalid_client" { throw MastodonSignInError.clientRejected }
             // The server's own word that it is the scopes it will not have: `invalid_scope` at
-            // the token, and a registration it refuses for them. Only a 4xx that says so — a
+            // the token, and a registration it refuses for them — a 422 whose sentence names
+            // them, which is read in English because it is asked for in English (`form`). Only a 4xx that says so — a
             // failed connection, a 5xx, or a refusal about anything else stays what it was.
             if (400..<500).contains(response.statusCode), let refusal,
                refusal.lowercased().contains("scope")
@@ -391,6 +400,13 @@ public struct MastodonOAuth: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setForm(fields)
+        // **Answered in English, whatever this device speaks** (#298). A Mastodon writes its
+        // refusal of a registration in the language the request asks for — "Validation failed:
+        // Scopes doesn't match those configured on the server." reads 校驗失敗：範圍… to a
+        // device set to Chinese — and that sentence is all that says the refusal is about the
+        // scopes (`post`). Left to the system's header, a reader in any language but English
+        // would have the refusal read as a plain failure, and the sign-in would not fall back.
+        request.setValue("en", forHTTPHeaderField: "Accept-Language")
         return request
     }
 }
