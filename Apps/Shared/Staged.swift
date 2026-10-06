@@ -22,6 +22,7 @@ import UIKit
 /// What a picture is of is said by three more variables:
 ///
 ///     FEDIQO_STAGED_SCREEN   timeline | post | compose | preferences | notice | link | signin
+///                            | swiped | ended | fresh — what a swipe to the next timeline leaves
 ///                            | named | lost | list — a timeline of the person's own in front, and the list of them
 ///     FEDIQO_STAGED_TIMELINES 1 — the person has written three timelines of their own
 ///                            | cut | returned | emptied — the list scrolled and switched, with what it reports written over it
@@ -46,7 +47,7 @@ enum Staged {
         ))
         return FediqoRootView(
             http: StagedHTTP(),
-            store: ItemStore(sources: [source], notes: notes + (screenName == "returned" ? rising : [])),
+            store: ItemStore(sources: [source], notes: notes + (screenName == "returned" || screenName == "fresh" ? rising : [])),
             forums: ForumSessions(),
             mastodon: MastodonSessions(tokens: tokens, sender: StagedHTTP()),
             deviceName: "Staged",
@@ -65,7 +66,7 @@ enum Staged {
         // every picture: the iPad's are laid beside ones taken before there were any.
         if ProcessInfo.processInfo.environment["FEDIQO_STAGED_TIMELINES"] == "1" {
             // Written, and then the first of them all in front again: writing one puts it in front.
-            staged.steps.insert(contentsOf: [.timelines, .go(0)], at: 0)
+            staged.steps.insert(contentsOf: [.timelines, .go(0), .unvisited], at: 0)
         }
         return staged
     }
@@ -82,6 +83,14 @@ enum Staged {
         case "named": ShellStaged(place: .timeline, steps: [.go(2)])
         case "lost": ShellStaged(place: .timeline, steps: [.go(3)])
         case "list": ShellStaged(place: .timeline, steps: [.go(2), .list])
+        // What a swipe leaves (#305), by the step a swipe takes: two timelines on; at the last
+        // one, a step on that goes nowhere; and a timeline never visited, come to from a list
+        // scrolled down to a row the two share, which opens at its own first post.
+        case "swiped": ShellStaged(place: .timeline, steps: [.next, .next], reports: true)
+        case "ended": ShellStaged(place: .timeline, steps: [.go(4), .next], reports: true)
+        // Rising posts are the last of All and all of Trends: All is scrolled to its end, among
+        // them, and Trends — never visited, and long enough to scroll — is come to.
+        case "fresh": ShellStaged(place: .timeline, steps: [.scroll(100_000), .trends], reports: true)
         case "cut": ShellStaged(place: .timeline, steps: [.scroll(90)], reports: true)
         case "returned": ShellStaged(place: .timeline, steps: [.scroll(700), .trends, .all], reports: true)
         case "emptied": ShellStaged(place: .timeline, steps: [.scroll(700), .empty, .all], reports: true)
@@ -134,7 +143,7 @@ enum Staged {
 
     /// Posts that are rising, for the one picture that needs a second timeline with posts in
     /// it. Older than every other, so they stand at the end of the timeline of everything.
-    private static let rising: [Note] = (1 ... 4).map { number in
+    private static let rising: [Note] = (1 ... (screenName == "fresh" ? 12 : 4)).map { number in
         Note(
             id: name("9\(number)"), source: source, author: "Rising \(number)", handle: "@rising@\(host)",
             body: "A post that is rising, number \(number).", postedAt: Date().addingTimeInterval(-Double(5000 + number) * 60),
@@ -231,7 +240,8 @@ private enum StagedScroll {
             scene.windows.forEach(look)
         }
         guard let found else { return }
-        found.setContentOffset(CGPoint(x: 0, y: down - found.adjustedContentInset.top), animated: false)
+        let end = max(0, found.contentSize.height - found.bounds.height + found.adjustedContentInset.bottom)
+        found.setContentOffset(CGPoint(x: 0, y: min(down, end) - found.adjustedContentInset.top), animated: false)
         #endif
     }
 }

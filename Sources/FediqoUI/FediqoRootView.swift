@@ -1308,6 +1308,9 @@ public struct FediqoRootView: View {
             }
         case .go(let index): session.goToTimeline(at: index)
         case .list: session.timelineListShown = true
+        case .unvisited: session.timelinePlaces = TimelinePlaces()
+        case .next: session.stepTimeline(by: 1)
+        case .previous: session.stepTimeline(by: -1)
         }
     }
 

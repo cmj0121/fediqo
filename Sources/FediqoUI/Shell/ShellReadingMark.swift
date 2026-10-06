@@ -43,16 +43,26 @@ final class ShellReadingMark {
     /// A keyboard that turns up before they have is one that was there all along (`handover`).
     private(set) var used = false
 
-    /// The row that was marked in a list whose rows have just been replaced, until the switch
-    /// that replaced them has asked for it. The list says its rows have changed and the pane
-    /// says the timeline has, in an order nobody promises: whichever comes first, the post the
-    /// timeline was left at is this one.
-    private var departing: String?
+    /// The row that was marked as the list in front became another timeline's, until the
+    /// switch that made it so has asked for it. The list says its rows have changed and the
+    /// pane says the timeline has, in an order nobody promises: whichever comes first, the post
+    /// the timeline was left at is this one.
+    ///
+    /// **Written down before anything of the new list is heard.** Two timelines can share
+    /// posts, and the mark would otherwise settle on one of the arriving list's rows and be
+    /// taken for where the last one was left (#305).
+    private var departing: String??
+    /// Which timeline the rows in front are of, as the list last said.
+    private var timeline: String?
+    /// The timeline a switch has just asked about and forgotten for, until the list says its
+    /// rows are that timeline's: the list coming second must not write the mark down again.
+    private var switched: String?
 
     /// The post the timeline in front was left at, asked once as it is switched away from.
     func left() -> String? {
         defer { departing = nil }
-        return id ?? departing
+        if let departing { return departing }
+        return id
     }
 
     /// The row a timeline returned to is put back at the top on, until the list has done it.
@@ -76,7 +86,6 @@ final class ShellReadingMark {
         guard row != id else { return }
         if let id { lamps[id]?.lit = false }
         if let row { lamps[row]?.lit = true }
-        if row != nil { departing = nil }
         id = row
     }
 
@@ -102,23 +111,27 @@ final class ShellReadingMark {
     ///
     /// **A lamp of a row that is still here is kept, the object itself** — a row already drawn
     /// holds it, and a new one in its place would be a lamp no row reads.
-    func list(_ rows: Set<String>) {
+    func list(_ rows: Set<String>, of timeline: String? = nil) {
+        if timeline != self.timeline {
+            // Only where the switch has not already asked: it then took the mark as it stood.
+            if self.timeline != nil, switched != timeline { departing = .some(id) }
+            self.timeline = timeline
+        }
+        switched = nil
         guard rows != self.rows else { return }
         self.rows = rows
         lamps = lamps.filter { rows.contains($0.key) }
         whole = whole.filter(rows.contains)
         visible = visible.filter(rows.contains)
         if let kept, !rows.contains(kept) { self.kept = nil }
-        if let id, !rows.contains(id) {
-            departing = id
-            mark(nil)
-        }
+        if let id, !rows.contains(id) { mark(nil) }
         remark()
     }
 
     /// Another timeline: nothing the last one said of its rows is true of this one's. The lamps
     /// are put out and kept, for `list(_:)` to let go of those whose rows have gone.
-    func forget() {
+    func forget(for timeline: String? = nil) {
+        switched = timeline
         kept = nil
         whole = []
         visible = []

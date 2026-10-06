@@ -1,6 +1,9 @@
 import AVKit
 import FediqoCore
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 /// The two marks in the timeline's header, and whether either has anything to do (#33).
 ///
@@ -234,6 +237,7 @@ struct TimelinePane: View {
                 underneath
             }
         }
+        .modifier(BacksFromEdge(touch: touch, opened: Self.backs(from: standing), back: onBack))
         .overlay(alignment: .bottom) {
             if let banner {
                 TimelineToastBanner(toast: banner, work: session.work, reading: session.reload.reading)
@@ -279,7 +283,7 @@ struct TimelinePane: View {
             // And the rows the mark was among are not this list's (#303).
             let mark = session.readingMark
             let wasReading = mark.left()
-            mark.forget()
+            mark.forget(for: arrived?.id ?? TimelineQuery.all.id)
             if !searching {
                 if !onTag {
                     // Under a finger the place kept is the post being read, and the one given
@@ -422,8 +426,25 @@ struct TimelinePane: View {
     /// Where a timeline returned to puts the post it was left at (#100, #303): in the middle
     /// where it is the selection, and at the top where it is the mark under a finger — the
     /// first row wholly on screen is then that post. Nothing for a timeline with no post kept.
-    static func arrival(selected: String?, returning: String?, touch: Bool) -> Landing? {
-        touch ? returning.map(Landing.top) : selected.map(Landing.centred)
+    ///
+    /// **And one with no post kept — never visited — at its first post, at the top** (#305):
+    /// `first` is that post. **With a keyboard or a pointer too, and meant**: there a timeline
+    /// keeps a post only while one is selected, so a switch with nothing selected opens the
+    /// timeline at its top. It did so already unless the two timelines shared a row. Left alone, the scroll view keeps a row the two timelines share
+    /// where it stood, and a timeline opens for the first time somewhere down its length.
+    static func arrival(selected: String?, returning: String?, touch: Bool, first: String? = nil) -> Landing? {
+        if let kept = touch ? returning.map(Landing.top) : selected.map(Landing.centred) { return kept }
+        return TimelineSwipe.opensAt(kept: nil, first: first).map(Landing.top)
+    }
+
+    /// Whether the page stood on is one opened over the list — a post, a person, a tag — which
+    /// a swipe in from the leading edge goes back from (#305). A page read out of a post is
+    /// somebody's own, and its edge is its own.
+    static func backs(from standing: ShellStep?) -> Bool {
+        switch standing {
+        case .person, .tag, .thread: true
+        case .link, nil: false
+        }
     }
 
     /// What a timeline switched to does about the post it kept (#303): the selection it becomes
@@ -533,15 +554,21 @@ struct TimelinePane: View {
                     if !searching { TrendsEndFoot(timeline: timeline, session: session) }
                 }
                 .scrollTargetLayout()
+                // A sideways swipe goes to the timeline beside this one (#305). Inside what
+                // scrolls, because that is how it finds the scroll view to listen on.
+                .modifier(SwipesToNeighbour(session: session, touch: touch, opened: standing != nil, searching: searching))
             }
             .scrollIndicators(.never)
+            // The list slid sideways by a swipe stays inside its own pane (#305): not over the
+            // rail beside it on a wide page.
+            .modifier(HoldsSlide(holds: touch))
             // The end of the list stops short of whatever floats over the page (#112).
             .clearsFloatingCorner()
             .modifier(KeepsTopRow(session: session))
             .modifier(HoldsPlace(session: session, proxy: proxy, touch: touch))
             // The rows the mark may be among, said when they change and not on every pass (#303).
             .onChange(of: items.map(\.id), initial: true) { _, ids in
-                session.readingMark.list(Set(ids))
+                session.readingMark.list(Set(ids), of: timeline.id)
             }
             .onAppear {
                 // A tick later: a lazy stack just built has not laid out the row to scroll to.
@@ -581,7 +608,14 @@ struct TimelinePane: View {
             .onChange(of: session.timelineID) { _, _ in
                 Task { @MainActor in
                     let mark = session.readingMark
-                    let arrival = Self.arrival(selected: selectedID, returning: mark.returning, touch: touch)
+                    // A timeline never visited opens at its first post (#305): the scroll view
+                    // otherwise keeps a row the two timelines share where it was.
+                    // Asked of the session now, and not of `items`: this closure was made for
+                    // the list that was in front, and its first post is that timeline's.
+                    let first = searching ? nil : session.timelineItems(latest: prefs.latestDate).first?.id
+                    let arrival = Self.arrival(
+                        selected: selectedID, returning: mark.returning, touch: touch, first: first
+                    )
                     mark.returning = nil
                     switch arrival {
                     case .centred(let id): proxy.scrollTo(id, anchor: .center)
@@ -734,6 +768,7 @@ struct TimelinePane: View {
             }
         }
         .accessibilityElement(children: .contain)
+        .modifier(ScrollsToNeighbour(session: session))
     }
 
     /// Quiet word that newer posts are held back by the latest date in Preferences (#22), so a
@@ -971,5 +1006,115 @@ struct FingerRoom: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// The swipe to the timeline beside this one, on an iPhone or iPad (#305). Nothing on a Mac.
+/// A modifier of its own for `KeepsTopRow`'s reason.
+struct SwipesToNeighbour: ViewModifier {
+    let session: ShellSession
+    let touch: Bool
+    let opened: Bool
+    let searching: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        let place = session.timelinePosition
+        content.background(TimelineSwipeCatcher(
+            enabled: TimelineSwipe.enabled(
+                touch: touch, opened: opened, searching: searching,
+                listShown: session.timelineListShown, editing: session.editing != nil
+            ),
+            hasNext: TimelineSwipe.target(from: place.index, count: place.count, step: 1) != nil,
+            hasPrevious: TimelineSwipe.target(from: place.index, count: place.count, step: -1) != nil,
+            reduceMotion: reduceMotion,
+            inFront: { session.currentTimeline.id },
+            step: { session.stepTimeline(by: $0) }
+        ))
+        #else
+        content
+        #endif
+    }
+}
+
+/// Keeps a list slid sideways inside its own pane, on an iPhone or iPad under a finger: not
+/// over the rail beside it on a wide page.
+///
+/// **One shape that either holds or does not**, and not a clip put on and taken off: a modifier
+/// that came and went with a keyboard would be another list each time, drawn afresh. And where
+/// it does not hold it cuts nothing — a list shows a few points past its own foot, and a clip
+/// at its edges changed that, measured on an iPad's picture.
+struct HoldsSlide: ViewModifier {
+    let holds: Bool
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.clipShape(SlideBounds(holds: holds))
+        #else
+        content
+        #endif
+    }
+}
+
+/// The pane's own sides where it holds, with nothing cut above or below; everything where not.
+struct SlideBounds: Shape {
+    let holds: Bool
+    static let beyond: CGFloat = 10_000
+
+    func path(in rect: CGRect) -> Path {
+        Path(rect.insetBy(dx: holds ? 0 : -Self.beyond, dy: -Self.beyond))
+    }
+}
+
+/// The swipe in from the leading edge that goes back from an opened page (#305). See
+/// `BackEdgeCatcher`. Nothing on a Mac.
+struct BacksFromEdge: ViewModifier {
+    let touch: Bool
+    let opened: Bool
+    let back: () -> Void
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.background(BackEdgeCatcher(enabled: TimelineSwipe.backHeard(touch: touch, opened: opened), back: back))
+        #else
+        content
+        #endif
+    }
+}
+
+/// The same for a reader who makes no gesture (#305): VoiceOver's scroll on the head of the
+/// timelines goes to the one beside, and says which it is and where it stands. The list of them
+/// all, behind the name, reaches any.
+struct ScrollsToNeighbour: ViewModifier {
+    let session: ShellSession
+
+    /// Which way a scroll toward `edge` goes: on for the trailing edge, back for the leading.
+    /// A three-finger swipe toward the leading edge scrolls toward the trailing one, so it is
+    /// the next timeline — the way the finger's own swipe goes.
+    static func step(toward edge: Edge) -> Int {
+        switch edge {
+        case .trailing: 1
+        case .leading: -1
+        case .top, .bottom: 0
+        }
+    }
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.accessibilityScrollAction { edge in
+            let step = Self.step(toward: edge)
+            guard step != 0 else { return }
+            // At an end nothing moves, and what is said is where the reader still is.
+            session.stepTimeline(by: step)
+            let place = session.timelinePosition
+            UIAccessibility.post(notification: .pageScrolled, argument: TimelineSwipe.announcement(
+                name: session.name(of: session.currentTimeline), position: place.index, count: place.count
+            ))
+        }
+        #else
+        content
+        #endif
     }
 }

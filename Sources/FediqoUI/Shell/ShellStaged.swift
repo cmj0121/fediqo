@@ -54,6 +54,12 @@ public struct ShellStaged: Sendable {
         case go(Int)
         /// The list of every timeline, up.
         case list
+        /// Every timeline as one never visited: writing them above put each in front in turn,
+        /// which no person did.
+        case unvisited
+        /// One timeline on, or back: what a swipe does once it is let go (#305).
+        case next
+        case previous
     }
 
     /// Whether the launch stands as a device with no keyboard: a simulator reports the keyboard

@@ -178,23 +178,41 @@ struct ReadingMarkTests {
     func thePostLeftAt() {
         // The switch asks first.
         let first = ShellReadingMark()
-        first.list(["a", "b"])
+        first.list(["a", "b"], of: "one")
         first.mark("b")
         #expect(first.left() == "b")
+        first.forget(for: "two")
+        first.list(["x", "y"], of: "two")
+        first.mark("x")
+        #expect(first.left() == "x", "and the list coming second writes nothing stale down")
         // The list's rows are replaced first, which puts the mark out.
         let second = ShellReadingMark()
-        second.list(["a", "b"])
+        second.list(["a", "b"], of: "one")
         second.mark("b")
-        second.list(["x", "y"])
+        second.list(["x", "y"], of: "two")
         #expect(second.id == nil)
         #expect(second.left() == "b", "the post left at is still known")
-        #expect(second.left() == nil, "once")
-        // A mark made since is the answer, not the one that went.
-        second.list(["a", "b"])
-        second.mark("a")
-        second.list(["x"])
         second.mark("x")
-        #expect(second.left() == "x")
+        #expect(second.left() == "x", "once")
+    }
+
+    @Test("Two timelines that share posts: the post one was left at is the one marked there, not a shared post the arriving list settled the mark on")
+    func thePostLeftAtWithSharedRows() {
+        let mark = ShellReadingMark()
+        mark.list(["a", "b", "shared"], of: "all")
+        mark.visible(["a", "b", "shared"])
+        mark.whole(["a", "b", "shared"])
+        #expect(mark.id == "a")
+        // The other timeline's rows arrive first; of what was on screen only the shared post is its own.
+        mark.list(["shared", "z"], of: "other")
+        #expect(mark.id == "shared", "the mark settles on a row of the arriving list")
+        #expect(mark.left() == "a", "and the timeline left was left at its own post")
+        // Rows changing within one timeline — newer posts landing — write nothing down.
+        mark.forget(for: "other")
+        mark.list(["shared", "z"], of: "other")
+        mark.mark("z")
+        mark.list(["new", "shared", "z"], of: "other")
+        #expect(mark.left() == "z")
     }
 
     @Test("The list being put somewhere is not the person scrolling it: only a hand on the list, and the glide after it, count")

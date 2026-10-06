@@ -147,6 +147,15 @@ extension ShellSession {
         return true
     }
 
+    /// One timeline on (`1`) or back (`-1`) from the one in front, and nothing past either end
+    /// (#305): what a swipe does, and what VoiceOver's scroll does for a reader who makes none.
+    @discardableResult
+    func stepTimeline(by step: Int) -> Bool {
+        let place = timelinePosition
+        guard let target = TimelineSwipe.target(from: place.index, count: place.count, step: step) else { return false }
+        return goToTimeline(at: target)
+    }
+
     /// The same by its place among them, from nought; nothing past either end.
     @discardableResult
     func goToTimeline(at index: Int) -> Bool {
