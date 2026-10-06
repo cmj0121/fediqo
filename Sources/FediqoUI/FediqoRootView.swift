@@ -478,6 +478,9 @@ public struct FediqoRootView: View {
             .overlay(alignment: .top) {
                 if staged?.reports == true { StagedReport(session: session) }
             }
+            .overlay {
+                if staged?.menus == true { StagedMenus(session: session) }
+            }
             .environment(\.locale, prefs.language.locale)
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)

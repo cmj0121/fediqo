@@ -91,6 +91,7 @@ enum Staged {
         // Rising posts are the last of All and all of Trends: All is scrolled to its end, among
         // them, and Trends — never visited, and long enough to scroll — is come to.
         case "fresh": ShellStaged(place: .timeline, steps: [.scroll(100_000), .trends], reports: true)
+        case "menu": ShellStaged(place: .timeline, menus: true)
         case "cut": ShellStaged(place: .timeline, steps: [.scroll(90)], reports: true)
         case "returned": ShellStaged(place: .timeline, steps: [.scroll(700), .trends, .all], reports: true)
         case "emptied": ShellStaged(place: .timeline, steps: [.scroll(700), .empty, .all], reports: true)

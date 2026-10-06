@@ -32,6 +32,10 @@ public struct ShellStaged: Sendable {
     /// How the list is scrolled, which only the app can do: it is the one with the device's
     /// own scroll view to reach. Nothing, and a step that scrolls does nothing.
     public var scroll: (@MainActor @Sendable (_ down: CGFloat) -> Void)?
+    /// Whether the picture is of what the rows' menus say (#306): for the first few posts, the
+    /// head and the acts, written out plainly. A menu cannot be raised without a press, so its
+    /// words are photographed this way; how the menu itself looks is the system's.
+    public var menus: Bool
     /// Whether the picture says, in a line over the page, which row the list reports at its
     /// top, which it reports as the first wholly on screen, and which is marked as being read
     /// (#303) — what a picture cannot otherwise show of a report nobody draws.
@@ -69,7 +73,7 @@ public struct ShellStaged: Sendable {
     public init(
         place: ShellPlace? = nil, opens: String? = nil, composing: Bool = false, says: String? = nil,
         reads: URL? = nil, signsIn: String? = nil, noKeyboard: Bool = false, steps: [Step] = [],
-        reports: Bool = false
+        reports: Bool = false, menus: Bool = false
     ) {
         self.place = place
         self.opens = opens
@@ -80,6 +84,7 @@ public struct ShellStaged: Sendable {
         self.noKeyboard = noKeyboard
         self.steps = steps
         self.reports = reports
+        self.menus = menus
     }
 }
 
@@ -112,5 +117,46 @@ struct StagedReport: View {
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+}
+
+/// What the menus of the first few rows say, written out (#306). Only a staged launch draws it.
+struct StagedMenus: View {
+    let session: ShellSession
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.shellSourcesHere) private var here
+
+    var body: some View {
+        let items = Array(session.timelineItems(latest: nil).prefix(3))
+        ScrollView {
+            VStack(alignment: .leading, spacing: ShellSpace.step) {
+                ForEach(items) { item in
+                    var acting = session.acting(on: item)
+                    let _ = acting.perform = { _ in }
+                    let _ = acting.keep = {}
+                    let _ = acting.ask = { _ in }
+                    VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                        Text(item.author).shellFont(.name, weight: .semibold)
+                        ForEach(ItemActs.head(for: item, here: here), id: \.self) { line in
+                            Text(line).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
+                        }
+                        ShellRule()
+                        ForEach(ItemActs.menu(on: item, acting: acting)) { mark in
+                            Label(mark.label, systemImage: mark.symbol).shellFont(.body)
+                        }
+                        if item.outwardURL != nil {
+                            ShellRule()
+                            Label(item.outwardName, systemImage: "arrow.up.forward.app").shellFont(.body)
+                        }
+                    }
+                    .padding(ShellSpace.step)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(ShellChrome.well(colorScheme), in: RoundedRectangle(cornerRadius: ShellSpace.step))
+                }
+            }
+            .padding(ShellSpace.pad)
+        }
+        .background(ShellChrome.page(colorScheme))
     }
 }

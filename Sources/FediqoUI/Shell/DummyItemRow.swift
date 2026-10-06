@@ -251,7 +251,14 @@ struct DummyItemRow: View {
             .contentShape(Rectangle())
             .onTapGesture { onSelect?() }
             .onHover { hovering = $0 }
-            .wayOut(named: item.outwardName, to: item.outwardURL)
+            // Pressed and held — or the pointer's other button — the row offers what its marks
+            // do, under what its parts tell a resting pointer (#306).
+            .modifier(RowMenu(
+                head: ItemActs.head(for: item, here: sourcesHere),
+                marks: ItemActs.menu(on: item, acting: acting),
+                press: press,
+                outward: item.outwardName, url: item.outwardURL
+            ))
             .accessibilityElement(children: .contain)
             .task(id: Asked(item: item, settled: catalogueSettled)) { await resolve() }
     }
@@ -501,7 +508,7 @@ struct DummyItemRow: View {
         return String(format: L10n.t("item.reblog.spoken", language: language), line, exact(item.postedAt))
     }
 
-    private static func exact(_ moment: Date) -> String {
+    static func exact(_ moment: Date) -> String {
         moment.formatted(.dateTime.year().month().day().hour().minute().second())
     }
 
@@ -1521,115 +1528,40 @@ struct DummyItemRow: View {
     ///
     /// **One height on every row**, because the line is a press's floor tall whatever the marks
     /// on it — so a row whose marks run long is not taller than its neighbours.
+    ///
+    /// **A mark and its count never touch the next mark** (#302): the gaps close no further
+    /// than `Box.markGap`, and past that each mark gives up its room and then its count.
     private var actions: some View {
-        // **A mark and its count never touch the next mark** (#302): the gaps close no further
-        // than `Box.markGap`, and past that each mark gives up its room and then its count.
-        MarksLine(spacing: ShellSpace.snug, least: Box.markGap) {
-            actMark(.answer)
-            actMark(.boost)
-            mark("quote.bubble", label: "item.act.quote", on: false) {
-                onToast(L10n.t("item.toast.quote"))
+        // **Made from the one list the row's menu is made from** (#306, `ItemActs.marks`).
+        let marks = ItemActs.marks(on: item, acting: acting)
+        return MarksLine(spacing: ShellSpace.snug, least: Box.markGap) {
+            ForEach(marks) { mark in
+                DummyMarkButton(symbol: mark.symbol, count: mark.count, label: mark.label, on: mark.on,
+                                quiet: !reading, glyph: glyph, countWidth: countBox, touch: touch) {
+                    press(mark.kind)
+                }
+                .modifier(ProbedMark(label: mark.label, probe: probe))
+                .layoutValue(key: MarkGap.self, value: ItemActs.gap(before: mark, among: marks))
             }
-            actMark(.favourite)
-            keep
             refusal
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder
-    private var keep: some View {
-        bookmarkMark
-            // The marks that keep a post stand a little apart from the ones that pass it on.
-            .layoutValue(key: MarkGap.self, value: ShellSpace.room)
-        keptMark
-            // And the keep mark opens that group where no bookmark is offered before it.
-            .layoutValue(key: MarkGap.self, value: drawsBookmark ? nil : ShellSpace.room)
-        actMark(.withdraw)
-        mark("ellipsis", label: "item.act.more", on: false) {
-            onToast(L10n.t("item.toast.more"))
-        }
-    }
-
-    /// Whether the asking bookmark mark is drawn: the act must be asked for, and there is
-    /// somewhere for the press to go.
-    private var asksBookmark: Bool { acting.acts.asks(.bookmark) && acting.ask != nil }
-
-    /// Whether `bookmarkMark` draws anything at all — read off the same two conditions it draws
-    /// by, so the gap that opens the group goes to whichever mark really is its first.
-    private var drawsBookmark: Bool {
-        asksBookmark || (acting.acts.offers(.bookmark) && acting.perform != nil)
-    }
-
-    /// The bookmark mark (#285): `actMark`'s where the sign-in may bookmark, and where it was made
-    /// before bookmarks were asked for, a mark that says so and asks — one press puts the
-    /// question, and nothing is sent until the reader has answered it on the source's own page.
-    /// Absent everywhere else, as every act the post does not offer is.
+    /// What a press on a mark does — and on the same act in the row's menu, which calls this
+    /// and nothing else (#306).
     ///
-    /// **Never filled on a press**: filled is what the source last said, so nothing looks
-    /// bookmarked that its source does not hold.
-    @ViewBuilder
-    private var bookmarkMark: some View {
-        if asksBookmark, let ask = acting.ask {
-            let label = ItemActs.askLine(.bookmark)
-            DummyMarkButton(symbol: "bookmark.slash", count: nil, label: label, on: false,
-                            quiet: !reading, glyph: glyph, countWidth: countBox, touch: touch) {
-                ask(.bookmark)
-            }
-            .modifier(ProbedMark(label: label, probe: probe))
-        } else {
-            actMark(.bookmark)
-        }
-    }
-
-    /// The keep mark (#284): whether the person keeps this row, and the press that changes it.
-    ///
-    /// **Read off the item, which is the store's word**, never off `marks`: a kept post is one
-    /// no limit lets go, and a mark that filled on a press the store did not take would be a
-    /// promise nothing keeps. So the press only asks (`ItemActing.keep`), and the mark fills when
-    /// the row is drawn again from what the store then holds.
-    ///
-    /// **Drawn on every row, as it was before it was real**, so the marks line is the same line
-    /// everywhere; in a list with nowhere for the press to go — a fixture, a preview — the press
-    /// changes nothing, and the mark goes on saying what the item says.
-    private var keptMark: some View {
-        // **Keep is the one mark on a reblog's row that is the reblog's** (#290): it keeps the item
-        // pressed, and says so by name. It already stands apart from the marks that go to the
-        // post, in the group that keeps things on this device.
-        mark(item.kept ? "archivebox.fill" : "archivebox",
-             label: Self.keepName(item), on: item.kept) {
-            acting.keep?()
-        }
-    }
-
-    /// One of #54's acts, as a mark under the post: answering (#108), boosting (#106),
-    /// favouriting (#107) and taking back what the reader wrote (#109).
-    ///
-    /// **Absent rather than disabled where the post does not offer it**, which is decision 4 on
-    /// this repo's controls and is what `DummyItem.outwardURL` argues at length: a mark the reader
-    /// cannot press is a question about this app, and the honest answer to "you are not signed in
-    /// here" is the sentence `refusal` draws, not a greyed arrow. **And absent where the list has
-    /// nowhere for the press to go** — a row drawn with no session behind it — for the same reason.
-    ///
-    /// Whether it is done is what the source the act goes through said — never what this device
-    /// remembers pressing, and on a row two sources carried, never the other source's word
-    /// (#136); `ItemActs.mark` reads it, the count beside it and its name. Boost and favourite are
-    /// one shape with two meanings, so a reader who learns one does not have to learn the other.
-    /// An answer and a take-back are never done: the reader may answer as often as they like, and
-    /// a post taken back is not on the row to be drawn. The take-back's press is the question and
-    /// never the act; on its way and failed every mark changes shape, and a failure is pressed
-    /// again to try again. Nothing is not a reading: a count of zero is left off rather than drawn
-    /// as a nought beside every glyph in the list.
-    @ViewBuilder
-    private func actMark(_ act: PostAct) -> some View {
-        if acting.acts.offers(act), let perform = acting.perform {
-            let shown = ItemActs.mark(act, on: item, acting: acting)
-            DummyMarkButton(symbol: shown.symbol, count: (shown.count ?? 0) > 0 ? shown.count : nil,
-                            label: shown.spoken, on: shown.done, quiet: !reading, glyph: glyph,
-                            countWidth: countBox, touch: touch) {
-                perform(act)
-            }
-            .modifier(ProbedMark(label: shown.spoken, probe: probe))
+    /// **Never filled on a press**: filled is what the source last said, and kept is what the
+    /// store holds, so nothing looks done that is not. The act a sign-in must be asked again for
+    /// (#285) only puts the question; keeping (#284) only asks the store. Each act goes to the
+    /// post this row shows, and on a reblog's row keeping alone is the reblog's (#290).
+    func press(_ kind: RowMark.Kind) {
+        switch kind {
+        case .act(let act): acting.perform?(act)
+        case .ask(let act): acting.ask?(act)
+        case .keep: acting.keep?()
+        case .quote: onToast(L10n.t("item.toast.quote"))
+        case .more: onToast(L10n.t("item.toast.more"))
         }
     }
 
@@ -1646,14 +1578,6 @@ struct DummyItemRow: View {
                 .layoutPriority(-1)
                 .accessibilityLabel(ItemActs.refusalLine(refused))
         }
-    }
-
-    private func mark(_ symbol: String, label: String, on: Bool,
-                      action: @escaping () -> Void) -> some View {
-        DummyMarkButton(symbol: symbol, count: nil, label: L10n.t(label),
-                        on: on, quiet: !reading, glyph: glyph,
-                        countWidth: countBox, touch: touch, action: action)
-            .modifier(ProbedMark(label: L10n.t(label), probe: probe))
     }
 
     // MARK: - The way out
@@ -1917,6 +1841,54 @@ extension View {
     }
 }
 
+/// The row's menu (#306): what the post is, then what can be done to it, then the way out to
+/// its own page.
+///
+/// **One menu.** It was the way out alone; a reader with a finger had no other place to find
+/// what a pointer finds by resting on the row, and a second thing to press and hold would have
+/// been two answers to one gesture. On a Mac it is the pointer's other button, and says the same.
+///
+/// **The head is lines that cannot be pressed** — the exact time, who may read it, that it was
+/// changed — in a section of their own, so they read as what the post is and not as acts.
+struct RowMenu: ViewModifier {
+    let head: [String]
+    let marks: [RowMark]
+    let press: (RowMark.Kind) -> Void
+    let outward: String
+    let url: URL?
+
+    @Environment(\.openURL) private var openURL
+
+    func body(content: Content) -> some View {
+        content.contextMenu {
+            Section {
+                ForEach(head, id: \.self) { line in
+                    Text(line)
+                }
+            }
+            Section {
+                ForEach(marks) { mark in
+                    Button {
+                        press(mark.kind)
+                    } label: {
+                        Label(mark.label, systemImage: mark.symbol)
+                    }
+                }
+            }
+            // The one door out, checked as `WayOut` checks it.
+            if let url = WayOut.checked(url) {
+                Section {
+                    Button {
+                        openURL(url)
+                    } label: {
+                        Label(outward, systemImage: "arrow.up.forward.app")
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct WayOut: ViewModifier {
     let name: String
 
@@ -1928,7 +1900,9 @@ private struct WayOut: ViewModifier {
     /// comment names as how a class of bug reached fourteen places. A third way-out surface
     /// inherits the check rather than having to remember it.
     let url: URL?
-    private var checked: URL? {
+    private var checked: URL? { Self.checked(url) }
+
+    static func checked(_ url: URL?) -> URL? {
         guard let url, Host.allowsFetch(url) else { return nil }
         return url
     }
