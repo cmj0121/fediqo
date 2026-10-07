@@ -25,7 +25,7 @@ CATALOG         := $(ROOT)/Sources/FediqoUI/Resources/Media.xcassets
 # hand-copied once while the unit that added them was running, and two of them were edited
 # twenty-four seconds later -- so the catalogue held a drawing that was already out of date, the
 # app drew it, and nothing anywhere said so.
-ARTWORK         := mascot:Mascot \
+ARTWORK         := mascot:Mascot octopus:Octopus \
                    kind-mastodon:KindMastodon kind-mastodon-small:KindMastodonSmall \
                    kind-discuz:KindDiscuz kind-discuz-small:KindDiscuzSmall
 # Where the UI run leaves what it did, and what the coverage is read out of.

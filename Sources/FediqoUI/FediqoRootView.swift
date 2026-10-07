@@ -28,11 +28,11 @@ public struct FediqoRootView: View {
     @State private var composing = false
     @State private var showingShortcuts = false
     @State private var shortcutTab: DummyShortcutGroup = .move
-    /// The launch overlay. Starts true; `LandingView` clears it after the flips, and
+    /// The launch overlay. Starts true; `LandingView` clears it after the jet, and
     /// `playsLanding` is false from the first frame when reduce motion is on.
     @State private var showingLanding = true
     /// Bumped so a press of `r` remounts the overlay from rest rather than showing a
-    /// view that has already flipped.
+    /// view that has already jetted.
     @State private var landingTick = 0
     #if os(macOS)
     /// Owns the sign-in window so that it outlives the body that opened it — a window held only
@@ -197,7 +197,7 @@ public struct FediqoRootView: View {
     private var availability: ShellAvailability { session.availability }
 
     /// Reduce motion never mounts the overlay, so a reader who asked for stillness does not
-    /// get one frame of a flip and then a skip.
+    /// get one frame of the jet and then a skip.
     private var playsLanding: Bool { showingLanding && !reduceMotion }
 
     /// Whether the join sheet is up, derived from the stage rather than stored beside it.
@@ -550,7 +550,7 @@ public struct FediqoRootView: View {
             return false
         }
         // The overlay is not a layer a press can leave, so dummy keys are swallowed until
-        // the flips finish rather than driving the shell underneath. Unmapped chords —
+        // the jet finishes rather than driving the shell underneath. Unmapped chords —
         // ⌘Q, ⌘C — have already returned false, so a quit still quits.
         if playsLanding { return true }
         // The editor is a sheet and owns its keys; nothing under it moves. Nor under the record
