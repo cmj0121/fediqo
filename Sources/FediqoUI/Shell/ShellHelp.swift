@@ -46,14 +46,14 @@ struct ShellHelpButton: View {
     let text: String
     let subject: String
     @Binding var shown: Bool
-    @ShellMetric(relativeTo: .caption) private var touch: CGFloat = 24
+
+    /// The side of the mark's box: smaller than a control's, since it sits inside a line of text.
+    static let box: CGFloat = 24
 
     var body: some View {
         Button(action: press) {
             ShellHelpMark(lit: shown)
-                .frame(minWidth: touch, minHeight: touch)
-                .contentShape(Rectangle())
-                .modifier(ShellTouchFloor(drawn: touch))
+                .modifier(ShellGlyphBox(Self.box))
         }
         .buttonStyle(.plain)
         .help(text)

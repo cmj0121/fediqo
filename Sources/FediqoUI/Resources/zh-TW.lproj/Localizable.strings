@@ -1265,3 +1265,13 @@
 "nearby.mark.ask.help" = "這個標記由你輸入的代碼和那部裝置的工作階段算出：只有顯示這組代碼的裝置會顯示這個標記。如果另一部裝置畫面上的不一樣，就是選錯了裝置，或代碼打錯了——說不一樣，就什麼都不會連線。";
 "nearby.mark.ask.same" = "一樣";
 "nearby.mark.ask.different" = "不一樣";
+
+/* The one control rule: a mark is always drawn, live or dim, and a dim one says why. Read as "<name>. <reason>". */
+"mark.dim.never" = "這個來源沒有這一項";
+"mark.dim.notNow" = "現在不行";
+"mark.dim.askAgain" = "要先再問一次這個登入";
+"mark.dim.said" = "%1$@。%2$@";
+"mark.dim.names" = "、";
+"mark.more" = "更多";
+"mark.more.one" = "更多：%@";
+"mark.more.said" = "它有話要說";

@@ -26,7 +26,6 @@ struct ShellIconButton: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isEnabled) private var isEnabled
-    @ShellMetric(relativeTo: .caption) private var touch: CGFloat = 32
 
     init(
         _ symbol: String, name nameKey: String, help helpKey: String? = nil, tone: Tone = .quiet,
@@ -42,11 +41,8 @@ struct ShellIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .shellFont(.meta, weight: .medium)
                 .foregroundStyle(ink)
-                .frame(minWidth: touch, minHeight: touch)
-                .contentShape(Rectangle())
-                .modifier(ShellTouchFloor(drawn: touch))
+                .modifier(ShellGlyphBox())
         }
         .buttonStyle(.plain)
         .help(Self.hover(name: name, help: help))
@@ -88,6 +84,24 @@ struct ShellTouchFloor: ViewModifier {
         max(0, (finger - drawn) / 2)
     }
 
+    /// The gap between two glyph-only controls side by side, each drawn in a box `drawn` wide.
+    ///
+    /// **Twice what a press spills past its box**, so two neighbours' presses meet and never
+    /// overlap: a 32pt box reaches 6pt past each edge to a finger's 44, and with no gap a mark
+    /// would share 12pt with the one either side of it. A box already a finger wide spills
+    /// nothing and needs no gap, so box and gap together are never under 44.
+    static func gap(drawn: CGFloat) -> CGFloat {
+        spill(drawn: drawn) * 2
+    }
+
+    /// What the first of a line of glyph-only controls stands off what is before it by, beyond
+    /// a `snug` spacing already there: whatever of its spill that spacing does not cover, so its
+    /// press and its neighbour's never overlap either. Nothing at the default size, where the
+    /// spill is 6 and the spacing 8.
+    static func lead(drawn: CGFloat) -> CGFloat {
+        max(0, spill(drawn: drawn) - ShellSpace.snug)
+    }
+
     func body(content: Content) -> some View {
         #if os(iOS)
         let spill = Self.spill(drawn: drawn)
@@ -98,6 +112,28 @@ struct ShellTouchFloor: ViewModifier {
         #else
         content
         #endif
+    }
+}
+
+/// The box a glyph-only control is drawn in, and the one place it is written: the caption's
+/// medium weight, a square that grows with the type, the whole square the press, and a finger's
+/// floor round it (`ShellTouchFloor`).
+struct ShellGlyphBox: ViewModifier {
+    /// The side of the box at the default type size — a mark's, a `…`'s and an icon button's.
+    static let box: CGFloat = 32
+
+    @ShellMetric private var side: CGFloat
+
+    init(_ base: CGFloat = ShellGlyphBox.box) {
+        _side = ShellMetric(wrappedValue: base, relativeTo: .caption)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .shellFont(.meta, weight: .medium)
+            .frame(minWidth: side, minHeight: side)
+            .contentShape(Rectangle())
+            .modifier(ShellTouchFloor(drawn: side))
     }
 }
 

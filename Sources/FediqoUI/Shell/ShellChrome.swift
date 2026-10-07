@@ -82,6 +82,20 @@ enum ShellChrome {
         ink(scheme).opacity(0.64)
     }
 
+    /// A control that is drawn and cannot be pressed for what it stands for: the same glyph as
+    /// its live look, a step down the ramp. **A graphical object, so `placeFloor` is its line** —
+    /// the reader has to see which control is there to know what the row would offer — and not
+    /// the 4.5:1 of text; the count beside a dim mark is text and takes `inkFaint` instead.
+    ///
+    /// The opacity is set by the hardest ground a row's control is drawn on, which is the wash of
+    /// a selected row over the page in both schemes: 3.21:1 there in light and 3.16:1 in dark
+    /// (0.41 in dark measured 2.94 on it), and 3.2–3.4 light, 3.2–3.8 dark on the other plates.
+    /// Live quiet is `inkDim`, 6.7:1 at its lowest, so the two looks are a clear step apart.
+    /// `MarkContrastTests` measures every plate rather than trusting this.
+    static func markDim(_ scheme: ColorScheme) -> Color {
+        ink(scheme).opacity(scheme == .dark ? 0.44 : 0.52)
+    }
+
     // MARK: The two hues
 
     /// The lamp. Where the reader is, and nothing else.

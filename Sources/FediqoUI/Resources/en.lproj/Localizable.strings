@@ -1303,3 +1303,13 @@
 "nearby.mark.ask.help" = "The mark is made from the code you typed and that device's session: only the device showing this code shows this mark. If the other screen shows a different one, you have picked another device, or the code was mistyped — say so and nothing joins.";
 "nearby.mark.ask.same" = "The same";
 "nearby.mark.ask.different" = "Not the same";
+
+/* The one control rule: a mark is always drawn, live or dim, and a dim one says why. Read as "<name>. <reason>". */
+"mark.dim.never" = "This source has none";
+"mark.dim.notNow" = "Not right now";
+"mark.dim.askAgain" = "This sign-in must be asked again first";
+"mark.dim.said" = "%1$@. %2$@";
+"mark.dim.names" = ", ";
+"mark.more" = "More";
+"mark.more.one" = "More: %@";
+"mark.more.said" = "It has something to say";
