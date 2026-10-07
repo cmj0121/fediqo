@@ -39,15 +39,15 @@ struct BuildStampSection: View {
         }
     }
 
-    /// The label and what this build says. A revision is set under its label rather than beside
-    /// it: forty characters beside a label on a phone would be squeezed into a column a few
-    /// characters wide. Each row is one element to VoiceOver, read label then value.
+    /// The label and what this build says. A revision is drawn short (`BuildStamp.shortRevision`)
+    /// and set under its label, in the face a hash is read in; Copy still takes the whole of
+    /// it. Each row is one element to VoiceOver, read label then what is drawn.
     @ViewBuilder
     private func line(_ row: BuildStamp.Row) -> some View {
         if row.isReading {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 Text(row.label)
-                Text(row.value)
+                Text(row.shown ?? row.value)
                     .shellFont(.reading)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
                     .textSelection(.enabled)

@@ -39,6 +39,33 @@ struct BuildStampTests {
         #expect(rows[1].value == "0")
     }
 
+    @Test("The page draws the first eight characters of the hash and keeps whatever follows it; what is stamped, and what is copied, is the whole of it")
+    func theRevisionIsDrawnShort() throws {
+        #expect(BuildStamp.shortRevision(hash) == "532ab495")
+        #expect(BuildStamp.shortRevision("532ab49") == "532ab49", "seven is already short")
+        #expect(BuildStamp.shortRevision("532ab495") == "532ab495")
+        #expect(BuildStamp.shortRevision("532ab4953") == "532ab495")
+        #expect(BuildStamp.shortRevision("") == "")
+        #expect(BuildStamp.shortRevision("unknown") == "unknown")
+        #expect(BuildStamp.shortRevision(hash + "-dirty") == "532ab495-dirty")
+        #expect(BuildStamp.shortRevision(hash + "+") == "532ab495+")
+        #expect(BuildStamp.shortRevision("532ab49-dirty") == "532ab49-dirty")
+        #expect(BuildStamp.shortRevision(hash.uppercased()) == "532AB495", "as it was written, and no fewer")
+        #expect(BuildStamp.shortRevision("not-a-hash-at-all-but-long") == "not-a-hash-at-all-but-long")
+        #expect(BuildStamp.shortRevision("５３２ａｂ４９５３３７") == "５３２ａｂ４９５３３７", "only a hash's own characters are a hash")
+        let rows = BuildStamp(info: stamped()).rows(language: .english)
+        #expect(rows.map(\.shown) == [nil, nil, "532ab495", nil])
+        #expect(rows[2].value == hash, "the value is the whole hash: it is what Copy takes")
+        #expect(BuildStamp(info: stamped()).copyText(language: .english).contains("Source: \(hash)\n"))
+        // And the page draws the short one where a row has one.
+        let section = try String(
+            contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Sources/FediqoUI/Shell/BuildStampSection.swift"),
+            encoding: .utf8
+        )
+        #expect(section.contains("Text(row.shown ?? row.value)") && section.contains("Self.put(stamp.copyText())"))
+    }
+
     @Test("A build from uncommitted changes says so")
     func dirtySaysSo() {
         let stamp = BuildStamp(info: stamped(dirty: "YES"))
