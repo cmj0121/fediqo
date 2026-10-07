@@ -264,7 +264,7 @@ struct TagPressTests {
                     selectedID: .constant(nil),
                     decks: .constant(ShellDecks()), playback: ShellPlayback(),
                     onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { _ in },
-                    onRetry: {}, jumpToTop: 0, onToast: { _ in }, onBack: {}
+                    onRetry: {}, jumpToTop: 0, onBack: {}
                 )
                 .frame(width: 390, height: 400)
                 .environment(\.colorScheme, scheme)

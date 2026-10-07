@@ -6,11 +6,12 @@ import SwiftUI
 /// Where the line is wider than the width there is, it gives way in this order and never wraps:
 /// the gaps between the marks close first, down to `least`; then every mark is narrowed in
 /// proportion to its width, and a narrowed mark gives up its touch room, then its count, then
-/// the size of its glyph (`DummyMarkButton`). Every mark is still there to press and still named
+/// the size of its glyph (`RowMarkFace`). Every mark is still there to press and still named
 /// to VoiceOver — it is only drawn smaller.
 ///
-/// **A subview with a negative layout priority is the sentence after the marks** (the refusal): it
-/// is not counted when the marks are fitted, and takes whatever is left over, cut short.
+/// **A subview with a negative layout priority is a sentence after the marks**: it is not counted
+/// when the marks are fitted, and takes whatever is left over, cut short. A post's row has none —
+/// why a mark cannot be pressed is said by the mark, dim — and the rule stays the layout's.
 ///
 /// The line is as tall as its tallest mark, which is a press's floor at every width — so the
 /// marks line is one line, of one height, on every row alike.

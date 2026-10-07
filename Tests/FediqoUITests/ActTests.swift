@@ -176,12 +176,12 @@ struct ActTests {
 
     @Test("The mark shows on its way and a failure by shape, not only by colour")
     func theMarkChangesShape() {
-        let settled = ItemActs.symbol(.boost, done: false, standing: nil)
-        #expect(ItemActs.symbol(.boost, done: true, standing: nil) == settled)
-        #expect(ItemActs.symbol(.boost, done: false, standing: .onItsWay) != settled)
-        #expect(ItemActs.symbol(.boost, done: false, standing: .failed) != settled)
-        #expect(ItemActs.symbol(.boost, done: false, standing: .failed)
-            != ItemActs.symbol(.boost, done: false, standing: .onItsWay))
+        let settled = ShellMark.drawn(ItemActs.glyph(.boost, standing: nil), on: false)
+        #expect(ShellMark.drawn(ItemActs.glyph(.boost, standing: nil), on: true) == settled)
+        #expect(ShellMark.drawn(ItemActs.glyph(.boost, standing: .onItsWay), on: false) != settled)
+        #expect(ShellMark.drawn(ItemActs.glyph(.boost, standing: .failed), on: false) != settled)
+        #expect(ShellMark.drawn(ItemActs.glyph(.boost, standing: .failed), on: false)
+            != ShellMark.drawn(ItemActs.glyph(.boost, standing: .onItsWay), on: false))
     }
 
     @Test("VoiceOver hears the mark, which way a press goes, and where the last press got to")
@@ -326,10 +326,10 @@ struct ActTests {
 
     @Test("The star fills when the source says it is done, and changes shape on its way")
     func theStar() {
-        #expect(ItemActs.symbol(.favourite, done: false, standing: nil) == "star")
-        #expect(ItemActs.symbol(.favourite, done: true, standing: nil) == "star.fill")
-        #expect(ItemActs.symbol(.favourite, done: true, standing: .onItsWay) != "star.fill")
-        #expect(ItemActs.symbol(.favourite, done: false, standing: .failed) != "star")
+        #expect(ShellMark.drawn(ItemActs.glyph(.favourite, standing: nil), on: false) == "star")
+        #expect(ShellMark.drawn(ItemActs.glyph(.favourite, standing: nil), on: true) == "star.fill")
+        #expect(ShellMark.drawn(ItemActs.glyph(.favourite, standing: .onItsWay), on: true) != "star.fill")
+        #expect(ShellMark.drawn(ItemActs.glyph(.favourite, standing: .failed), on: false) != "star")
         #expect(ItemActs.spoken(.favourite, done: false, standing: nil) == "Favourite")
         #expect(ItemActs.spoken(.favourite, done: true, standing: nil) == "Take the favourite back")
         #expect(ItemActs.spoken(.favourite, done: false, standing: .failed)

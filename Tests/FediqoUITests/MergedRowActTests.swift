@@ -214,7 +214,7 @@ struct MergedRowActTests {
         #expect(boost.done, "the second source says it is boosted, and that is where a press goes")
         #expect(boost.spoken == "Take the boost back through b.example")
         let favourite = ItemActs.mark(.favourite, on: row, acting: acting)
-        #expect(favourite.done && favourite.symbol == "star.fill")
+        #expect(favourite.done && ShellMark.drawn(favourite.glyph, on: favourite.done) == "star.fill")
         #expect(favourite.spoken == "Take the favourite back through b.example")
         #expect(ItemActs.mark(.answer, on: row, acting: acting).spoken == "Answer through b.example")
         for language in [DummyLanguage.english, .taiwanese] {
@@ -299,6 +299,37 @@ struct MergedRowActTests {
         #expect(deletes.first?.url?.path == "/api/v1/statuses/222")
         #expect(session.notes.isEmpty, "the row does not come back drawn as the other copy")
         #expect(await session.store.all().isEmpty)
+    }
+
+    @Test("Taking back is asked one way at a time: the menu's question is not put while the key's is up, the key's is not while the menu's is, and a yes refuses a taking back already on its way")
+    func oneQuestionAtATime() async throws {
+        let mine = "https://b.example/users/me/statuses/222"
+        let (session, server) = try await shell(
+            signed: [second],
+            holding: [
+                copy(on: first, "111", handle: "@me@b.example", id: mine),
+                copy(on: second, "222", handle: "@me@b.example", id: mine),
+            ],
+            routes: ["/api/v1/statuses/222": .json("{}")],
+            me: "me"
+        )
+        let row = try row(session)
+        let ask = ShellMoreAsk(question: ShellQuestion.withdraw(row), act: {})
+
+        #expect(session.askToWithdraw(row))
+        #expect(!session.putRowAsk(ask) && session.rowAsk == nil, "the key's question is up")
+        session.cancelWithdraw()
+
+        #expect(session.putRowAsk(ask) && session.rowAsk != nil)
+        #expect(!session.askToWithdraw(row) && session.withdrawing == nil, "the menu's question is up")
+        #expect(!session.putRowAsk(nil) && session.rowAsk == nil, "answered, it comes down")
+        #expect(session.askToWithdraw(row))
+        session.cancelWithdraw()
+
+        let copy = try #require(session.actingCopy(of: row, for: .withdraw))
+        #expect(session.acts.begin(copy.id, .withdraw))
+        #expect(!session.withdrawAsked(row), "already on its way")
+        #expect(await server.requests.filter { $0.httpMethod == "DELETE" }.isEmpty, "nothing was taken back")
     }
 
     // MARK: - Nothing to act through

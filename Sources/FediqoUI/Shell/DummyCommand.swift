@@ -569,9 +569,9 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
 
         // MARK: Act — what the reader does to a post, or writes
 
-        // The mark under the post, pressed — drawn on every row whose source can be written to
-        // and absent on the rest, which is why the line is `.press` and not `.partly`: where the
-        // mark is missing the key does nothing either, so there is no half of this a finger
+        // The mark under the post, pressed — drawn on every row, and grey where the post's
+        // source offers no boost, which is why the line is `.press` and not `.partly`: where the
+        // mark is grey the key does nothing either, so there is no half of this a finger
         // cannot reach.
         DummyShortcut(group: .act, keys: ["b"], name: "boost", commands: [.boost], touch: .press),
         // The star under the post, for `b`'s reason.
@@ -581,9 +581,11 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // The answer mark under a post in an open conversation. On the timeline the same mark
         // opens the conversation first, which is where the key is answered too.
         DummyShortcut(group: .act, keys: ["w"], name: "answer", commands: [.answer], touch: .press),
-        // The take-back mark, drawn on the reader's own posts only — and the key is refused on
-        // everyone else's, so there is no half of it a finger cannot reach.
-        DummyShortcut(group: .act, keys: ["d"], name: "withdraw", commands: [.withdraw], touch: .press),
+        // Behind the three dots under the post: a press on the dots, then Take back, the last
+        // item and the red one — and in the list a hold on the row opens, which is the same list.
+        // It is offered on the reader's own posts only, and the key is refused on everyone
+        // else's, so there is no half of it a finger cannot reach. It is not a mark of its own.
+        DummyShortcut(group: .act, keys: ["d"], name: "withdraw", commands: [.withdraw], touch: .press, also: .hold),
         DummyShortcut(group: .act, keys: ["c"], name: "compose", commands: [.compose], touch: .press),
         // A tab held, or double-clicked — `TimelinePane.queryPill`.
         // On a narrow page there is no row of tabs to hold: it is in the list the timeline's

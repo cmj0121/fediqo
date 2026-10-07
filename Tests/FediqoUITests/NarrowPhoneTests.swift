@@ -148,8 +148,7 @@ struct NarrowPhoneTests {
     ) -> RowBandProbe {
         let probe = RowBandProbe()
         let row = DummyItemRow(
-            item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), acting: acting, probe: probe,
-            onToast: { _ in }
+            item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), acting: acting, probe: probe
         )
         .environment(\.shellLayout, layout)
         .environment(\.shellSourcesHere, here)
@@ -317,7 +316,7 @@ struct NarrowPhoneTests {
         let probe = Self.laid(Self.crowded(), layout: .narrow, width: 320, type: type, acting: Self.everyAct)
         let band = try #require(probe.frames[.marks])
         let marks = probe.marks.values.sorted { $0.minX < $1.minX }
-        #expect(marks.count == 8, "every mark is laid out")
+        #expect(marks.count == 7, "every mark is laid out")
         let last = try #require(marks.last)
         #expect(last.maxX >= band.maxX - 1, "\(type): the marks stop at \(last.maxX) of a line \(band.maxX) wide, bunched at its start")
         // An even share of the line, less what the gaps may take, is what each is owed at least
@@ -342,7 +341,7 @@ struct NarrowPhoneTests {
         let probe = Self.laid(item, layout: .narrow, width: width, type: type, acting: Self.everyAct)
         let band = try #require(probe.frames[.marks])
         let marks = probe.marks.values.sorted { $0.minX < $1.minX }
-        #expect(marks.count == 8)
+        #expect(marks.count == 7)
         for (left, right) in zip(marks, marks.dropFirst()) {
             #expect(right.minX - left.maxX >= DummyItemRow.Box.markGap - 0.5, "\(width) \(type): two marks are \(right.minX - left.maxX) apart: \(left) and \(right)")
         }

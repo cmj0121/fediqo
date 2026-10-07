@@ -1094,12 +1094,43 @@ final class ShellSession {
     /// Asks whether to take `item` back. **Asked, never pressed** — the only act in #54 that asks
     /// first, because a post taken back does not come back. Refused where the post does not offer
     /// it, which is the same one rule the mark reads.
+    ///
+    /// **And refused while a row's menu has its own question up** (`rowAsk`): one question about
+    /// taking back at a time, whichever way it was asked.
     @discardableResult
     func askToWithdraw(_ item: DummyItem) -> Bool {
-        guard let copy = actingCopy(of: item, for: .withdraw),
+        guard rowAsk == nil, let copy = actingCopy(of: item, for: .withdraw),
               !acts.isOnItsWay(copy.id, .withdraw)
         else { return false }
         withdrawing = item
+        return true
+    }
+
+    /// The destructive item of a row's `…` that was chosen and not yet answered — taking a post
+    /// back, the one such item a post's menu has. **Held here and not by the row**, so one asker
+    /// on the pane puts it for every row it lists (`RowAsks`), and a row scrolled away and drawn
+    /// again cannot drop a question that is still open.
+    private(set) var rowAsk: ShellMoreAsk?
+
+    /// Puts the question a row's menu asks, or takes it down. **Refused while the key's own
+    /// question is up** (`withdrawing`), as `askToWithdraw` is refused while this one is: the
+    /// two are one question asked two ways, and never both at once. Returns whether it was put.
+    @discardableResult
+    func putRowAsk(_ ask: ShellMoreAsk?) -> Bool {
+        guard ask == nil || withdrawing == nil else { return false }
+        rowAsk = ask
+        return ask != nil
+    }
+
+    /// The menu's question answered yes. **Refused where `askToWithdraw` would refuse to ask**:
+    /// the post no longer offers it, or its taking back is already on its way. Returns whether
+    /// anything was sent for.
+    @discardableResult
+    func withdrawAsked(_ item: DummyItem) -> Bool {
+        guard let copy = actingCopy(of: item, for: .withdraw),
+              !acts.isOnItsWay(copy.id, .withdraw)
+        else { return false }
+        Task { await withdraw(item) }
         return true
     }
 

@@ -1237,7 +1237,7 @@ struct MastodonSignInTests {
         #expect(again.title.contains(host) && again.line.contains(word))
         #expect(again.help?.contains(host) == true)
         #expect(!again.warns, "nothing is lost by asking")
-        for key in ["account.sources.bookmarks.again", "account.sources.bookmarks.again.line", "item.act.ask", "item.act.unbookmark"] {
+        for key in ["account.sources.bookmarks.again", "account.sources.bookmarks.again.line", "item.act.unbookmark"] {
             #expect(L10n.t(key, language: language) != key, "\(key) is not written in \(language)")
         }
     }

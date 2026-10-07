@@ -358,7 +358,7 @@ struct TagTimelineTests {
                 selectedID: .constant(nil),
                 decks: .constant(ShellDecks()), playback: ShellPlayback(),
                 onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { _ in },
-                onRetry: {}, jumpToTop: 0, onToast: { _ in }, onBack: {}
+                onRetry: {}, jumpToTop: 0, onBack: {}
             )
             .frame(width: 320)
             .environment(\.colorScheme, scheme)

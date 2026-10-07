@@ -127,7 +127,6 @@ struct TagPane: View {
     /// Asks the sources again, after a failure.
     var onRetry: () -> Void
     var jumpToTop: Int
-    var onToast: (String) -> Void
     var onBack: () -> Void
 
     /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
@@ -311,8 +310,7 @@ struct TagPane: View {
                 onViewRow(item)
             },
             onTurn: { onTurnRow(item) },
-            onEnded: { playback.stop() },
-            onToast: onToast
+            onEnded: { playback.stop() }
         )
     }
 }

@@ -342,7 +342,7 @@ struct RevisionRowTests {
     // MARK: - The mark and the words
 
     private static func height(_ item: DummyItem, layout: ShellLayout) -> CGFloat {
-        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), onToast: { _ in })
+        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts())
             .environment(\.shellLayout, layout)
         let host = NSHostingView(rootView: row.frame(width: layout == .wide ? 720 : 390))
         host.layoutSubtreeIfNeeded()
@@ -370,7 +370,7 @@ struct RevisionRowTests {
         _ item: DummyItem, layout: ShellLayout, width: CGFloat, here: Set<String> = []
     ) -> [RowMetaPart: CGRect] {
         let probe = RowBandProbe()
-        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), probe: probe, onToast: { _ in })
+        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), probe: probe)
             .environment(\.shellLayout, layout)
             .environment(\.shellSourcesHere, here)
         let host = NSHostingView(rootView: row.frame(width: width))

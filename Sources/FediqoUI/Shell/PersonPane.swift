@@ -53,7 +53,6 @@ struct PersonPane: View {
     /// walk's own rule (#122) — the same closure the stream's rows are given.
     var onOpenThread: (String) -> Void
     var jumpToTop: Int
-    var onToast: (String) -> Void
     var onBack: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
@@ -236,8 +235,7 @@ struct PersonPane: View {
                 onViewRow(item)
             },
             onTurn: { onTurnRow(item) },
-            onEnded: { playback.stop() },
-            onToast: onToast
+            onEnded: { playback.stop() }
         )
     }
 }

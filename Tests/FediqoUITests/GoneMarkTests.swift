@@ -393,7 +393,7 @@ struct GoneMarkTests {
 @Suite("The gone mark keeps the row's height", .serialized)
 struct GoneMarkHostedTests {
     private static func height(_ item: DummyItem, width: CGFloat) -> CGFloat {
-        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(http: FixtureHTTP()), onToast: { _ in })
+        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(http: FixtureHTTP()))
         let host = NSHostingView(rootView: row.frame(width: width))
         host.layoutSubtreeIfNeeded()
         return host.fittingSize.height

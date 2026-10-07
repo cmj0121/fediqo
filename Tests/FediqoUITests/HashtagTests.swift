@@ -325,7 +325,7 @@ struct HashtagTests {
             handle: "@ada@author.example", body: body, postedAt: Date(timeIntervalSince1970: 0),
             categories: [.public]
         ))
-        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), onToast: { _ in })
+        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts())
             .frame(width: 720)
         let host = NSHostingView(rootView: row)
         host.layoutSubtreeIfNeeded()

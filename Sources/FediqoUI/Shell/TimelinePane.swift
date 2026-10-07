@@ -14,7 +14,8 @@ import UIKit
 /// the presses together, so a call site cannot pass one without the other.
 struct TimelineWays {
     /// Whether the search can be opened from where the reader is. False draws no mark at all:
-    /// decision 4's rule is a control that is absent rather than dead.
+    /// the head's own rule, and not a row's — a row's marks are all drawn, dim where they cannot
+    /// be pressed.
     var canSearch: Bool
     var onSearch: () -> Void
     /// Whether there is anything for `r` to ask for. A reload already running is still `true` —
@@ -148,7 +149,6 @@ struct TimelinePane: View {
                     onTurnRow: onTurnRow,
                     onOpenThread: onOpenThread,
                     jumpToTop: jumpToTop,
-                    onToast: showToast,
                     onBack: onBack
                 )
                 // One pane per person, so opening a second face from inside one draws afresh.
@@ -180,7 +180,6 @@ struct TimelinePane: View {
                         Task { await session.reload.tag(tag, timeline: timeline, in: session) }
                     },
                     jumpToTop: jumpToTop,
-                    onToast: showToast,
                     onBack: onBack
                 )
                 .id(HeldUnderTag.folded(tag))
@@ -216,7 +215,6 @@ struct TimelinePane: View {
                         onOpenThread: onOpenThread,
                         onOpenPerson: onOpenPerson,
                         jumpToTop: jumpToTop,
-                        onToast: showToast,
                         onBack: onBack
                     )
                     // Pulled down, the conversation is read again as `r` reads it there (#307):
@@ -265,6 +263,9 @@ struct TimelinePane: View {
             opened: Self.openedID(standing), searching: searching, back: onBack
         ))
         .modifier(HoldsSlide(holds: touch))
+        // One asker for the `…` of every row under this pane — the timeline, a conversation, a
+        // person's page, a tag's.
+        .modifier(RowAsks(session: session))
         .overlay(alignment: .bottom) {
             if let banner {
                 TimelineToastBanner(toast: banner, work: session.work, reading: session.reload.reading)
@@ -568,8 +569,7 @@ struct TimelinePane: View {
                                 onViewRow(item)
                             },
                             onTurn: { onTurnRow(item) },
-                            onEnded: { playback.stop() },
-                            onToast: showToast
+                            onEnded: { playback.stop() }
                         )
                         }
                         .id(item.id)
@@ -731,13 +731,23 @@ struct TimelinePane: View {
                 } else {
                     onOpenThread(item.id)
                 }
+            // No mark performs this: taking back is an item of the row's `…` (`withdraw`, below).
             case .withdraw:
-                session.askToWithdraw(item)
+                break
             }
         }
         // What `y` does (#284), and it says so itself: one act, one outcome, whichever asked.
         acting.keep = { Task { await session.toggleKept(item) } }
         acting.ask = { _ in session.askToBookmark(item) }
+        // Taking back is an item of the row's `…` (#109), built only where the post offers it:
+        // the question the key `d` asks, about the copy that goes, and a yes that refuses what
+        // that asking refuses.
+        if acting.acts.offers(.withdraw) {
+            acting.withdraw = ItemActing.Withdraw(
+                asks: { ShellQuestion.withdraw(session.actingCopy(of: item, for: .withdraw) ?? item) },
+                yes: { session.withdrawAsked(item) }
+            )
+        }
         return acting
     }
 
@@ -1267,5 +1277,27 @@ struct PullsToReload: ViewModifier {
         await Task.yield()
         try? await Task.sleep(for: .milliseconds(50))
         await settled()
+    }
+}
+
+/// The one asker for the menus of the rows a pane lists: it hands every row under it the way to
+/// put its menu's question (`shellRowAsk`) and puts that question itself, once, through
+/// `ShellMoreAsks`.
+///
+/// **On the pane and not on each row.** A row is drawn and let go as it scrolls, so a question
+/// held by a row would go with it; and a list of hundreds of rows would carry hundreds of
+/// presenters for a question one of them asks. What was chosen is the session's (`rowAsk`), which
+/// is also how this question and the key's own are never both up.
+struct RowAsks: ViewModifier {
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.shellRowAsk, RowAsk(put: { session.putRowAsk($0) }))
+            .modifier(ShellMoreAsks(asked: asked))
+    }
+
+    private var asked: Binding<ShellMoreAsk?> {
+        Binding(get: { session.rowAsk }, set: { session.putRowAsk($0) })
     }
 }

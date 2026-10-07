@@ -511,7 +511,7 @@ struct KeptRowTests {
     /// The names of the marks a row lays out.
     private static func marks(_ item: DummyItem) -> Set<String> {
         let probe = RowBandProbe()
-        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), probe: probe, onToast: { _ in })
+        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), probe: probe)
         let host = NSHostingView(rootView: row.frame(width: 720))
         host.frame = NSRect(origin: .zero, size: host.fittingSize)
         host.layoutSubtreeIfNeeded()

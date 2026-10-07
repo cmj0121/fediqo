@@ -58,7 +58,6 @@ struct DummyThreadPane: View {
     /// conversation is given the conversation back when they leave them.
     var onOpenPerson: (DummyPerson) -> Void
     var jumpToTop: Int
-    var onToast: (String) -> Void
     var onBack: () -> Void
     /// Where a test reads the places of what is drawn. Nothing in the app.
     var probe: ThreadPaneProbe?
@@ -294,8 +293,7 @@ struct DummyThreadPane: View {
                 onViewRow(item)
             },
             onTurn: { onTurnRow(item) },
-            onEnded: { playback.stop() },
-            onToast: onToast
+            onEnded: { playback.stop() }
         )
         .opacity(dimmed ? 0.85 : 1)
         .modifier(ProbedPlace(part: .row(item.id), probe: probe))

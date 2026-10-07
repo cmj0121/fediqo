@@ -264,7 +264,7 @@ struct OneHeightTests {
         acting: ItemActing = ItemActing(), inFull: Bool = false
     ) -> CGFloat {
         let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), acting: acting, inFull: inFull, bandAsked: asked,
-                               lifted: lifted, onToast: { _ in })
+                               lifted: lifted)
             .environment(\.shellLayout, layout)
         return height(row, size: size, width: layout == .wide ? 720 : 390)
     }
@@ -316,7 +316,7 @@ struct OneHeightTests {
     /// Lays a row out at its own height and reads back where each band went.
     private static func bands(_ item: DummyItem, layout: ShellLayout) -> [RowBand: CGRect] {
         let probe = RowBandProbe()
-        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), probe: probe, onToast: { _ in })
+        let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), probe: probe)
             .environment(\.shellLayout, layout)
         let host = NSHostingView(rootView: row.frame(width: layout == .wide ? 720 : 390))
         host.frame = NSRect(origin: .zero, size: host.fittingSize)
@@ -367,14 +367,14 @@ struct OneHeightTests {
     func marksOnOneLine(_ layout: ShellLayout, _ size: DynamicTypeSize) throws {
         let probe = RowBandProbe()
         let width: CGFloat = layout == .wide ? 720 : 390
-        let row = DummyItemRow(item: Self.counted(), catalogues: EmojiCatalogueStore(), posts: ForumPosts(), acting: Self.everyAct, probe: probe, onToast: { _ in })
+        let row = DummyItemRow(item: Self.counted(), catalogues: EmojiCatalogueStore(), posts: ForumPosts(), acting: Self.everyAct, probe: probe)
             .environment(\.shellLayout, layout)
             .dynamicTypeSize(size)
         let host = NSHostingView(rootView: row.frame(width: width))
         host.frame = NSRect(origin: .zero, size: host.fittingSize)
         host.layoutSubtreeIfNeeded()
         let marks = probe.marks
-        #expect(marks.count == 8, "every mark is laid out: \(marks.keys.sorted())")
+        #expect(marks.count == 7, "every mark is laid out: \(marks.keys.sorted())")
         let middles = Set(marks.values.map { ($0.midY * 2).rounded() / 2 })
         #expect(middles.count == 1, "\(layout) \(size): marks at \(marks.values.map(\.midY).sorted())")
         let band = try #require(probe.frames[.marks])
@@ -434,7 +434,7 @@ struct OneHeightTests {
     @Test("A post of pictures alone draws them where its words would be; any other post, beside them")
     func picturesAloneTakeTheColumn() {
         func place(_ item: DummyItem, inFull: Bool = false) -> DummyItemRow.PicturePlace? {
-            DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), inFull: inFull, onToast: { _ in }).picturePlace
+            DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), inFull: inFull).picturePlace
         }
         let pictures = [Self.picture("a"), Self.picture("b")]
         #expect(place(Self.note(body: "", attachments: pictures)) == .column)
@@ -490,7 +490,7 @@ struct OneHeightTests {
     @Test("A row that draws a decorator gives its words one line fewer; a row that draws none keeps it")
     func decoratorTakesALine() {
         func lines(_ item: DummyItem) -> Int {
-            DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), onToast: { _ in }).bodyLines
+            DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts()).bodyLines
         }
         #expect(lines(Self.note()) == 5, "the decorator's line is the words' where there is none")
         #expect(lines(Self.note(boostedBy: "Bob")) == 4)
