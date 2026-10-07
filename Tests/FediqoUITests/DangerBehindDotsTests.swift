@@ -79,7 +79,7 @@ struct DangerBehindDotsTests {
 
     @Test("A kept row draws its source's mark and its host as a name")
     func keptRowHasItsMark() throws {
-        let section = try Self.source("KeptSection")
+        let section = try ShellSource.shell("KeptSection")
         #expect(section.contains("UsageSourceMark(source: known[line.host] ?? Source(host: line.host, kind: .unknown))"))
         #expect(section.contains("Text(name)\n                    .shellFont(.name)"), "the host is not in the name face")
         #expect(section.contains(".truncationMode(.middle)"))
@@ -272,33 +272,44 @@ struct DangerBehindDotsTests {
 
     // MARK: - Nothing left standing
 
-    @Test("No alarm button, and no destructive button, stands on its own in the shell")
+    /// **A tripwire and not proof**: it reads the spellings it lists. The three glyphs that say
+    /// "this takes something away" are written only where a press asks first — as the glyph of a
+    /// `danger` item, or of the question itself — and at the sites named here, each stated.
+    @Test("No destructive button stands on its own in the shell, and the glyphs of taking away are written only where a press asks first")
     func nothingStandsOnItsOwn() throws {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/FediqoUI")
-        let files = try #require(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
+        // The tables a `danger` item's mark reads its glyph from, and the one ordinary item
+        // that wears the trash: taking a rule out of a draft, which nothing is lost by until
+        // the draft is saved (`RuleFormFoot`).
+        let stated: [String: [String]] = [
+            "ItemActs.swift": [#"case .withdraw: return "trash""#],
+            "SourceRow.swift": [#"case .clear: "eraser""#, #"case .remove: "trash""#],
+            "TimelineEditor.swift": [#".plain("trash", L10n.t("rule.action.remove""#],
+        ]
+        let files = try #require(FileManager.default.enumerator(at: ShellSource.root, includingPropertiesForKeys: nil))
         var read = 0
+        var found = 0
         for case let file as URL in files where file.pathExtension == "swift" {
+            let name = file.lastPathComponent
             let text = try String(contentsOf: file, encoding: .utf8)
             read += 1
-            #expect(!text.contains("tone: .alarm"), "\(file.lastPathComponent) draws an alarm button")
             // The two places a destructive role is given: an item of `…`, and a question's yes.
-            guard !["ShellMark.swift", "ShellConfirm.swift"].contains(file.lastPathComponent) else { continue }
-            #expect(!text.contains("Button(role: .destructive"), "\(file.lastPathComponent) draws a destructive button")
+            if !["ShellMark.swift", "ShellConfirm.swift"].contains(name) {
+                #expect(!text.contains("Button(role: .destructive"), "\(name) draws a destructive button")
+            }
+            guard name != "ShellQuestions.swift" else { continue }
+            for glyph in [#""trash""#, #""eraser""#, #""key.slash""#] {
+                var from = text.startIndex
+                while let at = text.range(of: glyph, range: from ..< text.endIndex) {
+                    from = at.upperBound
+                    found += 1
+                    let before = text[..<at.lowerBound]
+                    let asksFirst = before.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix(".danger(")
+                    let line = text[text.lineRange(for: at)]
+                    let isStated = stated[name, default: []].contains { line.contains($0) }
+                    #expect(asksFirst || isStated, "\(name) writes \(glyph) outside a danger item: \(line)")
+                }
+            }
         }
-        #expect(read > 50)
-        // The root asks neither Remove's question nor Clear's: each `…` asks its own.
-        let rootView = try String(contentsOf: root.appendingPathComponent("FediqoRootView.swift"), encoding: .utf8)
-        #expect(!rootView.contains("HostQuestion"))
-    }
-
-    private static func source(_ name: String) throws -> String {
-        try String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                .appendingPathComponent("Sources/FediqoUI/Shell/\(name).swift"),
-            encoding: .utf8
-        )
+        #expect(read > 50 && found >= 10, "the sweep read \(read) files and found \(found) glyphs")
     }
 }

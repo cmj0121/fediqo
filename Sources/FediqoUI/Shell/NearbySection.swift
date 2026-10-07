@@ -44,25 +44,19 @@ struct NearbySection: View {
         if let progress = Self.measured(nearby.step) {
             VStack(alignment: .leading, spacing: ShellSpace.hair) {
                 ProgressView(value: progress.fraction)
-                Text(Self.summaryLine(nearby.step, peer: nearby.peer ?? "", sending: nearby.side == .offering, since: nearby.since))
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                ShellStatusLine(Self.summaryLine(nearby.step, peer: nearby.peer ?? "", sending: nearby.side == .offering, since: nearby.since))
                 code
             }
         } else if let key = Self.statusKey(nearby.step, side: nearby.side) {
             VStack(alignment: .leading, spacing: ShellSpace.hair) {
                 HStack(spacing: ShellSpace.snug) {
                     ProgressView().controlSize(.small)
-                    Text(String(format: L10n.t(key), nearby.peer ?? ""))
-                        .shellFont(.meta)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    ShellStatusLine(String(format: L10n.t(key), nearby.peer ?? ""))
                 }
                 code
             }
         } else {
-            Text(L10n.t("nearby.idle"))
-                .shellFont(.reading)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            ShellStatusLine(L10n.t("nearby.idle"))
         }
     }
 
@@ -352,7 +346,7 @@ struct NearbyHoldSheet: View {
             ProgressView()
         } else {
             Text(NearbyCode.spaced(code))
-                .font(.system(.largeTitle, design: .rounded, weight: .semibold))
+                .shellFont(.code)
                 .monospacedDigit()
                 .tracking(4)
                 .foregroundStyle(ShellChrome.selectInk(colorScheme))
@@ -413,7 +407,7 @@ struct NearbyPickSheet: View {
             VStack(spacing: ShellSpace.hair) {
                 ForEach(peers) { peer in
                     ShellListRow(
-                        id: peer, title: peer.name, brief: L10n.t("nearby.pick.row.brief"),
+                        id: peer, title: peer.name, brief: L10n.t("nearby.pick.row.brief"), leads: false,
                         selection: $nearby.picked, onOpen: { focused = true }
                     ) {
                         Image(systemName: "antenna.radiowaves.left.and.right")
@@ -430,7 +424,7 @@ struct NearbyPickSheet: View {
     private var fields: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             TextField(L10n.t("nearby.pick.code"), text: $code)
-                .textFieldStyle(.roundedBorder)
+                .shellField(.alone)
                 .monospacedDigit()
                 .focused($focused)
                 .onSubmit(go)

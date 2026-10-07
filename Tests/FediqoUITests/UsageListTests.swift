@@ -103,7 +103,7 @@ struct UsageListTests {
     @Test("The long explanations are drawn only behind a (?), and every action is an icon")
     func footersAndActions() throws {
         let files = try ["UsagePane", "UsageSources", "GoneSection", "SpanSection", "KeptSection", "LimitAccountSection"]
-            .map(Self.source)
+            .map(ShellSource.shell)
         let all = files.joined()
         for (line, help) in [
             ("usage.cache.line", "prefs.cache.footer"), ("usage.drop.line", "prefs.drop.footer"),
@@ -130,7 +130,7 @@ struct UsageListTests {
 
     @Test("A source's row is given its host and nothing else to draw, cut in its middle")
     func rowDrawsOnlyTheHost() throws {
-        let sources = try Self.source("UsageSources")
+        let sources = try ShellSource.shell("UsageSources")
         let list = try #require(sources.range(of: "struct UsageSourceList"))
         let detail = try #require(sources.range(of: "struct UsageRemovedSourceDetail"))
         let body = sources[list.upperBound..<detail.lowerBound]
@@ -266,7 +266,7 @@ struct UsageListTests {
 
     @Test("A removed source's detail has nothing to do, and draws no …")
     func removedDetailHasNoMore() throws {
-        let sources = try Self.source("UsageSources")
+        let sources = try ShellSource.shell("UsageSources")
         let removed = try #require(sources.range(of: "struct UsageRemovedSourceDetail"))
         let detail = try #require(sources.range(of: "struct UsageSourceDetail"))
         let body = sources[removed.upperBound..<detail.lowerBound]
@@ -277,17 +277,17 @@ struct UsageListTests {
 
     @Test("The password line is a line, with no press beside it")
     func passwordIsALine() throws {
-        let sources = try Self.source("UsageSources")
+        let sources = try ShellSource.shell("UsageSources")
         let line = try #require(sources.range(of: "private var passwordLine: some View {"))
-        let next = try #require(sources.range(of: "private func reading", range: line.upperBound..<sources.endIndex))
+        let next = try #require(sources.range(of: "struct UsageSourceMark", range: line.upperBound..<sources.endIndex))
         let body = sources[line.upperBound..<next.lowerBound]
         #expect(body.contains("\"prefs.password.held\"") && !body.contains("Button") && !body.contains("HStack"))
     }
 
     @Test("No tab holds a list and a setting together")
     func oneStyleATab() throws {
-        let pane = try Self.source("UsagePane")
-        let sources = try Self.source("UsageSources")
+        let pane = try ShellSource.shell("UsagePane")
+        let sources = try ShellSource.shell("UsageSources")
         #expect(!sources.contains("Picker(") && !sources.contains("Toggle("), "the sources list holds a setting")
         let page = try #require(pane.range(of: "switch session.usagePurpose"))
         let time = try #require(pane.range(of: "case .time:", range: page.upperBound..<pane.endIndex))
@@ -333,16 +333,5 @@ struct UsageListTests {
                 #expect(image.width > 0 && image.height > 0)
             }
         }
-    }
-
-    private static func source(_ name: String) throws -> String {
-        try String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/FediqoUI/Shell/\(name).swift"),
-            encoding: .utf8
-        )
     }
 }

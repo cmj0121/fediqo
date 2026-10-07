@@ -17,7 +17,6 @@ import SwiftUI
 struct LimitAccountSection: View {
     let session: ShellSession
 
-    @Environment(\.colorScheme) private var colorScheme
     @State private var lit: UUID?
     @State private var opened: LimitAct?
 
@@ -47,9 +46,7 @@ struct LimitAccountSection: View {
         }
         HStack(spacing: ShellSpace.snug) {
             if listed.isEmpty {
-                Text(L10n.t("prefs.limits.none"))
-                    .shellFont(.reading)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                ShellReadingLine(L10n.t("prefs.limits.none"))
             }
             Spacer(minLength: ShellSpace.snug)
             ShellMoreButton(Self.more(lines: listed.count) {

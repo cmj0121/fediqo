@@ -259,7 +259,6 @@ extension TimelineDots {
 struct TimelineListSheet: View {
     @Bindable var session: ShellSession
 
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -295,12 +294,7 @@ struct TimelineListSheet: View {
             session.timelineListPressed = pressed
             dismiss()
         } label: {
-            Label(L10n.t(key), systemImage: symbol)
-                .shellFont(.name)
-                .foregroundStyle(ShellChrome.selectInk(colorScheme))
-                .padding(.horizontal, ShellSpace.step)
-                .padding(.vertical, ShellSpace.snug)
-                .frame(maxWidth: .infinity, minHeight: ShellTouchFloor.finger, alignment: .leading)
+            ShellListRowFace(title: L10n.t(key), brief: nil, figure: nil, selected: false, mark: Image(systemName: symbol))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -51,7 +51,6 @@ struct UsageSourceList: View {
         ) {
             UsageSourceMark(source: source)
         }
-        .listRowInsets(EdgeInsets())
     }
 
     /// What VoiceOver hears for a row, since the row draws only the host: the host, then what the
@@ -102,8 +101,6 @@ struct UsageRemovedSourceDetail: View {
     let session: ShellSession
     let source: Source
 
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
         Section {
             ShellDetailHead(source.host, back: "usage.source.back", onBack: { session.usageOpened = nil }) {
@@ -111,17 +108,11 @@ struct UsageRemovedSourceDetail: View {
             }
         }
         Section {
-            reading(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
-            reading(Text(L10n.t("usage.removed.line")))
+            ShellReadingLine(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
+            ShellReadingLine(Text(L10n.t("usage.removed.line")))
         } header: {
             ShellSectionHead(title: "prefs.cache", line: "item.left", help: "usage.removed.help")
         }
-    }
-
-    private func reading(_ text: Text) -> some View {
-        text
-            .shellFont(.reading)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 }
 
@@ -146,14 +137,12 @@ struct UsageSourceDetail: View {
     let cataloguesRead: Bool
     let onDisk: [String: Int]?
 
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
         Section { masthead }
         Section {
             if cataloguesRead { catalogueLine }
-            reading(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
-            reading(Text(UsagePane.picturesLine(source, in: session, onDisk: onDisk)))
+            ShellReadingLine(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
+            ShellReadingLine(Text(UsagePane.picturesLine(source, in: session, onDisk: onDisk)))
             postLine
             passwordLine
         } header: {
@@ -209,13 +198,13 @@ struct UsageSourceDetail: View {
     @ViewBuilder
     private var catalogueLine: some View {
         if let catalogue {
-            reading(
+            ShellReadingLine(
                 Text(String(format: L10n.t("prefs.cache.catalogue"), catalogue.count))
                     + Text(verbatim: " ")
                     + Text(catalogue.fetchedAt, format: .relative(presentation: .named))
             )
         } else {
-            reading(Text(L10n.t("prefs.cache.catalogue.none")))
+            ShellReadingLine(Text(L10n.t("prefs.cache.catalogue.none")))
         }
     }
 
@@ -226,9 +215,9 @@ struct UsageSourceDetail: View {
         if source.kind == .discuz {
             let held = session.posts.holding(host: source.host)
             if held.count == 0 {
-                reading(Text(L10n.t("prefs.cache.posts.none")))
+                ShellReadingLine(Text(L10n.t("prefs.cache.posts.none")))
             } else {
-                reading(
+                ShellReadingLine(
                     Text(L10n.count("prefs.cache.posts", held.count))
                         + Text(verbatim: " · ")
                         + Text(UsagePane.size(held.bytes))
@@ -243,14 +232,8 @@ struct UsageSourceDetail: View {
     @ViewBuilder
     private var passwordLine: some View {
         if session.forums.hasPassword(host: source.host) {
-            reading(Text(L10n.t("prefs.password.held")))
+            ShellReadingLine(Text(L10n.t("prefs.password.held")))
         }
-    }
-
-    private func reading(_ text: Text) -> some View {
-        text
-            .shellFont(.reading)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 }
 

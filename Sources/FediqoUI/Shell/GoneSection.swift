@@ -24,7 +24,6 @@ import SwiftUI
 /// this one can be read, and tested, alone.
 struct GoneSection: View {
     @Environment(DummyPrefs.self) private var prefs
-    @Environment(\.colorScheme) private var colorScheme
     let session: ShellSession
 
     /// What the last press let go, and nothing before a press — "none went" would be an answer
@@ -44,10 +43,10 @@ struct GoneSection: View {
                 }
             }
             if let line = Self.keepWinsLine(days: prefs.goneDays, keepingMonths: prefs.keepMonths) {
-                reading(line)
+                ShellReadingLine(line)
             }
             HStack(spacing: ShellSpace.snug) {
-                if let went { reading(Self.wentLine(went.posts, places: went.places)) }
+                if let went { ShellReadingLine(Self.wentLine(went.posts, places: went.places)) }
                 Spacer(minLength: ShellSpace.snug)
                 ShellMoreButton(Self.more(
                     count: { await session.goneHeld() },
@@ -136,12 +135,6 @@ struct GoneSection: View {
                 L10n.count("prefs.gone.places", places, language: language)
             )
         }
-    }
-
-    private func reading(_ line: String) -> some View {
-        Text(line)
-            .shellFont(.reading)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 }
 

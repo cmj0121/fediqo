@@ -45,7 +45,7 @@ struct TimelineEditor: View {
                 // A sheet is not told the arrangement of the page it was raised over.
                 .modifier(ShellSheetArranged())
                 .modifier(ProbedPane(part: .head))
-            Rectangle().fill(ShellChrome.hairline(colorScheme)).frame(height: ShellSpace.hair)
+            ShellRule()
             // What is under the tabs follows a sideways swipe; the head and the tabs stay (#305).
             Group {
                 switch flow.tab {
@@ -369,12 +369,12 @@ private struct EditorTimelineTab: View {
             // rest of the scale (#96).
             TextField(L10n.t("timeline.name.placeholder"), text: $draft.name)
                 .shellFont(.body)
-                .textFieldStyle(.roundedBorder)
+                .shellField(.alone)
                 .focused(focus, equals: .name)
                 .onSubmit { focus.wrappedValue = .keys }
             TextField(L10n.t("timeline.desc.placeholder"), text: $draft.desc)
                 .shellFont(.body)
-                .textFieldStyle(.roundedBorder)
+                .shellField(.alone)
                 .focused(focus, equals: .desc)
                 .onSubmit { focus.wrappedValue = .keys }
             placeLine
@@ -455,15 +455,8 @@ private struct EditorRulesList: View {
     }
 
     private func heading(_ band: EditorBands.Band, joined: Bool) -> some View {
-        Text((joined ? L10n.t("rule.band.and") + " " : "") + band.title())
+        ShellBandHead((joined ? L10n.t("rule.band.and") + " " : "") + band.title())
             .textCase(.uppercase)
-            .shellFont(.name)
-            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            .padding(.horizontal, ShellSpace.snug)
-            .padding(.vertical, ShellSpace.tight)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(ShellChrome.well(colorScheme), in: RoundedRectangle(cornerRadius: 6))
-            .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -478,7 +471,7 @@ private struct EditorKinds: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
-            ShellIconButton("chevron.backward", name: "rule.back") { onBack() }
+            ShellIconButton(ShellBackButton.symbol, name: "rule.back") { onBack() }
             ScrollView(.horizontal) {
                 HStack(spacing: ShellSpace.tight) {
                     ForEach(EditorAction.kinds, id: \.self) { tag in
@@ -561,7 +554,7 @@ private struct RuleForm: View {
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
             HStack(spacing: ShellSpace.tight) {
-                ShellIconButton("chevron.backward", name: changing == nil ? "rule.back.kinds" : "rule.back") { onBack() }
+                ShellIconButton(ShellBackButton.symbol, name: changing == nil ? "rule.back.kinds" : "rule.back") { onBack() }
                 Label(
                     draft.field.map { RuleText.fieldName($0) } ?? L10n.t(TimelineEditor.kindKey(draft.tag)),
                     systemImage: TimelineEditor.kindSymbol(draft.tag)
@@ -588,7 +581,7 @@ private struct RuleForm: View {
                 text: Binding(get: { draft.typed }, set: { draft.type($0, sources: sources) })
             )
             .shellFont(.body)
-            .textFieldStyle(.roundedBorder)
+            .shellField(.alone)
             .focused(focus, equals: .text)
             .onSubmit {
                 // Return confirms where the rule is whole, and otherwise hands the keys back.
@@ -614,10 +607,7 @@ private struct RuleForm: View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             ForEach(Array(choices.enumerated()), id: \.element) { index, choice in
                 if case .category(_, let host) = choice, index == 0 || Self.host(of: choices[index - 1]) != host {
-                    Text(host)
-                        .shellFont(.name)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        .accessibilityAddTraits(.isHeader)
+                    ShellBandHead(host)
                 }
                 row(choice)
             }
@@ -651,7 +641,7 @@ private struct RuleForm: View {
             }
             .padding(.horizontal, ShellSpace.snug)
             .padding(.vertical, ShellSpace.hair)
-            .background(picked ? ShellChrome.floatFill(colorScheme) : .clear, in: RoundedRectangle(cornerRadius: 4))
+            .background(picked ? ShellChrome.floatFill(colorScheme) : .clear, in: RoundedRectangle(cornerRadius: ShellRadius.chip))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

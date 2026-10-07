@@ -348,12 +348,7 @@ struct RowMenuTests {
     /// view is the row's one caller of `ItemActs.more`, and the row puts no question itself.
     @Test("The row's three dots and a long press both go through the one view that builds the menu, and the pane alone puts its question")
     func bothEntriesAreOneView() throws {
-        let shell = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/FediqoUI/Shell")
-        func source(_ name: String) throws -> String {
-            try String(contentsOf: shell.appendingPathComponent("\(name).swift"), encoding: .utf8)
-        }
+        func source(_ name: String) throws -> String { try ShellSource.shell(name) }
         func count(_ needle: String, in text: String) -> Int { text.components(separatedBy: needle).count - 1 }
         let row = try source("DummyItemRow")
         #expect(count("ItemActs.more(", in: row) == 1, "the menu is built in one place")

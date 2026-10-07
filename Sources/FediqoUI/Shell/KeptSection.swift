@@ -28,7 +28,7 @@ struct KeptSection: View {
         let lines = Self.lines(session.holdings, sources: session.sources.map(\.host))
         Section {
             if lines.isEmpty {
-                reading(L10n.t("usage.kept.none"))
+                ShellReadingLine(L10n.t("usage.kept.none"))
             } else {
                 row(
                     L10n.t("usage.span.every"), figure: Self.figure(session.holdings.kept),
@@ -47,7 +47,7 @@ struct KeptSection: View {
                     }
                 }
             }
-            if let went { reading(Self.wentLine(went)) }
+            if let went { ShellReadingLine(Self.wentLine(went)) }
         } header: {
             ShellSectionHead(title: "usage.kept", line: "usage.kept.line", help: "usage.kept.help")
         }
@@ -64,7 +64,7 @@ struct KeptSection: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                reading(figure)
+                ShellReadingLine(figure)
             }
             Spacer(minLength: ShellSpace.snug)
             ShellMoreButton(Self.more(
@@ -167,12 +167,6 @@ struct KeptSection: View {
         case (let ordinary?, let elsewhere?):
             return String(format: L10n.t("question.join", language: language), ordinary, elsewhere)
         }
-    }
-
-    private func reading(_ line: String) -> some View {
-        Text(line)
-            .shellFont(.reading)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 }
 

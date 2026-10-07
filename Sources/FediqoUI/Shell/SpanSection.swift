@@ -22,7 +22,6 @@ import SwiftUI
 ///
 /// A view of its own for `GoneSection`'s reason: one group per fact, read and tested alone.
 struct SpanSection: View {
-    @Environment(\.colorScheme) private var colorScheme
     let session: ShellSession
 
     /// The first and the last day of the span, both inside it. Today until the reader says.
@@ -49,7 +48,7 @@ struct SpanSection: View {
             DatePicker(L10n.t("usage.span.to"), selection: $to, in: from..., displayedComponents: .date)
             sourcePicker
             HStack(spacing: ShellSpace.snug) {
-                if let count { reading(Self.countLine(count)) }
+                if let count { ShellReadingLine(Self.countLine(count)) }
                 Spacer(minLength: ShellSpace.snug)
                 ShellMoreButton(Self.more(
                     SpanAsk(from: from, to: to, host: host), figure: count,
@@ -62,7 +61,7 @@ struct SpanSection: View {
                     }
                 ))
             }
-            if let went { reading(Self.wentLine(went)) }
+            if let went { ShellReadingLine(Self.wentLine(went)) }
         } header: {
             ShellSectionHead(title: "prefs.span", line: "usage.span.line", help: "prefs.span.footer")
         }
@@ -167,12 +166,6 @@ struct SpanSection: View {
     /// What the press says back: how many went.
     static func wentLine(_ count: Int, language: DummyLanguage? = nil) -> String {
         L10n.count("prefs.span.went", count, language: language)
-    }
-
-    private func reading(_ line: String) -> some View {
-        Text(line)
-            .shellFont(.reading)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 }
 

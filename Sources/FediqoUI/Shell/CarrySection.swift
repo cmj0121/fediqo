@@ -39,16 +39,12 @@ struct CarrySection: View {
         if let progress = session.carry.progress {
             VStack(alignment: .leading, spacing: ShellSpace.hair) {
                 ProgressView(value: progress.fraction)
-                Text(Self.progressLine(progress, reading: { if case .reading = session.carry.step { true } else { false } }()))
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                ShellStatusLine(Self.progressLine(progress, reading: { if case .reading = session.carry.step { true } else { false } }()))
             }
         } else if case .weighing = session.carry.step {
             ProgressView()
         } else {
-            Text(L10n.t("carry.idle"))
-                .shellFont(.reading)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            ShellStatusLine(L10n.t("carry.idle"))
         }
     }
 
@@ -282,12 +278,12 @@ struct CarryPasswordSheet: View {
     @ViewBuilder
     private var fields: some View {
         SecureField(L10n.t("carry.password.field"), text: $password)
-            .textFieldStyle(.roundedBorder)
+            .shellField(.alone)
             .focused($focused)
             .onSubmit(submit)
         if setting {
             SecureField(L10n.t("carry.password.again"), text: $again)
-                .textFieldStyle(.roundedBorder)
+                .shellField(.alone)
                 .onSubmit(submit)
         }
     }

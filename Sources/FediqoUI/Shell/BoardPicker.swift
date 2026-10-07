@@ -64,9 +64,7 @@ struct BoardPickerList: View {
                     Section {
                         ForEach(category.boards) { board in
                             row(board)
-                            Rectangle()
-                                .fill(ShellChrome.hairline(colorScheme))
-                                .frame(height: ShellSpace.hair)
+                            ShellRule()
                         }
                     } header: {
                         categoryHeader(category)
@@ -78,14 +76,7 @@ struct BoardPickerList: View {
     }
 
     private func categoryHeader(_ category: DiscuzCategory) -> some View {
-        Text(category.name)
-            .shellFont(.name)
-            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            .lineLimit(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, ShellSpace.pad)
-            .padding(.vertical, ShellSpace.snug)
-            .background(ShellChrome.well(colorScheme))
+        ShellBandHead(category.name, pinned: true)
     }
 
     /// How far a board under a board is set in.
@@ -137,11 +128,8 @@ struct BoardPickerList: View {
                 // started a rung in would be a smaller target than its parent for no reason a
                 // reader could see.
                 if board.depth > 0 {
-                    Rectangle()
-                        .fill(ShellChrome.hairline(colorScheme))
-                        .frame(width: ShellSpace.hair)
+                    ShellRule(.vertical)
                         .padding(.leading, Self.rung - ShellSpace.snug)
-                        .accessibilityHidden(true)
                 }
                 HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
                     tick(on)
@@ -285,10 +273,10 @@ struct PickTick: View {
 
     var body: some View {
         let drawn = BoardPickerList.tick(on, colorScheme)
-        RoundedRectangle(cornerRadius: 3, style: .continuous)
+        RoundedRectangle(cornerRadius: ShellRadius.well, style: .continuous)
             .fill(drawn.plate)
             .overlay {
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                RoundedRectangle(cornerRadius: ShellRadius.well, style: .continuous)
                     .stroke(drawn.border, lineWidth: ShellSpace.hair)
             }
             .overlay {
@@ -340,9 +328,7 @@ struct ListPickerList: View {
                 }
                 ForEach(offered) { list in
                     row(list)
-                    Rectangle()
-                        .fill(ShellChrome.hairline(colorScheme))
-                        .frame(height: ShellSpace.hair)
+                    ShellRule()
                 }
             }
         }

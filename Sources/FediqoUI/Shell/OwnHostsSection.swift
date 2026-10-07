@@ -181,18 +181,8 @@ struct OwnHostAdding: View {
         Picker(L10n.t("allow.own.source"), selection: source) {
             ForEach(sources, id: \.self) { Text($0).tag($0) }
         }
-        HStack(spacing: ShellSpace.snug) {
-            TextField(L10n.t("allow.own.host"), text: $typed)
-                .textFieldStyle(.plain)
-                .focused($typing)
-                .onSubmit(add)
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.URL)
-                #endif
-                .autocorrectionDisabled()
-                .accessibilityLabel(L10n.t("allow.own.host"))
-            Button(L10n.t("allow.own.add"), action: add)
+        ShellHostField(L10n.t("allow.own.host"), text: $typed, focus: $typing, onSubmit: add) {
+            ShellIconButton("plus", name: "allow.own.add", action: add)
                 .disabled(typed.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .modifier(TypingTold(typing: typing, onTyping: onTyping))

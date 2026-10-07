@@ -226,10 +226,7 @@ struct TagPane: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Button(L10n.t("tag.retry"), action: onRetry)
-                    .buttonStyle(.plain)
-                    .shellFont(.meta, weight: .semibold)
-                    .foregroundStyle(ShellChrome.selectInk(colorScheme))
+                ShellLinkButton(L10n.t("tag.retry"), action: onRetry)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

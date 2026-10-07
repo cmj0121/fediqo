@@ -32,7 +32,7 @@ struct RailView: View {
         /// macOS minimum page stays 318 — which is what every threshold in the source row is
         /// computed against.
         static let iconSize: CGFloat = well - ShellSpace.snug
-        static let wellRadius: CGFloat = 3
+        static let wellRadius = ShellRadius.well
         static let rowInnerHeight: CGFloat = well
         static let collapsedWidth: CGFloat = side + well + side
         static let expandedWidth: CGFloat = side + well + pad + 148 + side
@@ -93,9 +93,7 @@ struct RailView: View {
 
             Spacer(minLength: Metrics.pad)
 
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: 1)
+            ShellRule()
                 .padding(.vertical, Metrics.pad)
                 .padding(.horizontal, Metrics.well / 4)
 
@@ -118,9 +116,7 @@ struct RailView: View {
         .clipped()
         .background(ShellChrome.rail(colorScheme))
         .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(width: 1)
+            ShellRule(.vertical)
         }
     }
 

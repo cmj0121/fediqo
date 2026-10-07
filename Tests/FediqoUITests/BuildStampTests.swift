@@ -66,6 +66,28 @@ struct BuildStampTests {
         #expect(section.contains("Text(row.shown ?? row.value)") && section.contains("Self.put(stamp.copyText())"))
     }
 
+    /// The person's own example: Source was set under its label in a small dim face while
+    /// Version sat beside its own. No view inspector here, so the page is pinned by what its
+    /// file says: one row, built once, and the hash's face is a font on the value.
+    @Test("The source is laid out exactly as the version is: one row shape for every row, and a hash's face is a font on its value")
+    func everyRowIsOneShape() throws {
+        let section = try String(
+            contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Sources/FediqoUI/Shell/BuildStampSection.swift"),
+            encoding: .utf8
+        )
+        #expect(section.components(separatedBy: "LabeledContent(row.label)").count == 2, "a row is built in more than one place")
+        // What `line(_:)` itself says, from its signature to the next member.
+        let start = try #require(section.range(of: "private func line(_ row: BuildStamp.Row)"))
+        let end = try #require(section.range(of: "private func copy()", range: start.upperBound..<section.endIndex))
+        let line = String(section[start.lowerBound..<end.lowerBound])
+        #expect(!line.contains("if row.isReading"), "a revision is laid out its own way")
+        #expect(!line.contains("VStack") && !line.contains("inkDim") && !line.contains("shellFont("))
+        #expect(line.contains(".fontDesign(row.isReading ? .monospaced : nil)"))
+        // One rule for a value that does not fit, on every row: it wraps, and is not cut.
+        #expect(line.contains(".fixedSize(horizontal: false, vertical: true)") && !line.contains("lineLimit"))
+    }
+
     @Test("A build from uncommitted changes says so")
     func dirtySaysSo() {
         let stamp = BuildStamp(info: stamped(dirty: "YES"))

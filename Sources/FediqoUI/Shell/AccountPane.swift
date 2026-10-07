@@ -71,7 +71,7 @@ struct AccountPane: View {
         static let field: CGFloat = 520
         /// The promise is a sentence, not a row: it wraps where a sentence should.
         static let saying: CGFloat = 560
-        static let fieldRadius: CGFloat = 6
+        static let fieldRadius = ShellRadius.field
         static let icon: CGFloat = 18
         /// The one orchestrated moment on this page, and it answers the reader's own press: it
         /// shows them what changed. There is no other motion here that a press did not ask for.
@@ -417,19 +417,10 @@ struct AccountPane: View {
     }
 
     private var searchField: some View {
-        HStack(alignment: .center, spacing: ShellSpace.snug) {
-            TextField(L10n.t("account.search.placeholder"), text: $session.hostname)
-                .shellFont(.body)
-                .textFieldStyle(.plain)
-                .focused($searchFocused)
-                .disabled(busy)
-                .onSubmit { Task { await typedHost() } }
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.URL)
-                #endif
-                .autocorrectionDisabled()
-                .accessibilityLabel(L10n.t("account.search.placeholder"))
+        ShellHostField(
+            L10n.t("account.search.placeholder"), text: $session.hostname, focus: $searchFocused,
+            onSubmit: { Task { await typedHost() } }
+        ) {
             Button {
                 Task { await typedHost() }
             } label: {
@@ -439,10 +430,10 @@ struct AccountPane: View {
                     .foregroundStyle(searchInk)
             }
             .buttonStyle(.plain)
-            .disabled(busy)
             .accessibilityLabel(L10n.t("account.search"))
             .help(L10n.t("account.search"))
         }
+        .disabled(busy)
         .padding(.horizontal, ShellSpace.step)
         .padding(.vertical, ShellSpace.snug)
         .frame(maxWidth: Metrics.field, alignment: .leading)
@@ -567,10 +558,9 @@ struct AccountPane: View {
     @ViewBuilder
     private var offer: some View {
         if let host = session.offerSignIn {
-            Button(String(format: L10n.t("account.refuse.signin"), host)) {
+            ShellLinkButton(String(format: L10n.t("account.refuse.signin"), host)) {
                 Task { await offeredSignIn(host) }
             }
-            .shellFont(.meta)
             .accessibilityLabel(Text(String(format: L10n.t("account.refuse.signin.label"), host)))
         }
     }
@@ -691,8 +681,7 @@ struct AccountPane: View {
                 // sign-in, and a single control would have to ask which — which is the dialog
                 // asked twice.
                 ForEach(hosts, id: \.self) { host in
-                    Button(String(format: L10n.t(chooseKey), host)) { press(host) }
-                        .shellFont(.meta)
+                    ShellLinkButton(String(format: L10n.t(chooseKey), host)) { press(host) }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

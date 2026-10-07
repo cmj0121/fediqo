@@ -265,10 +265,10 @@ struct UsagePane: View {
             )
             // What changed posts said before (#286): held with them, so counted with them.
             if let earlier = Self.earlierFigure(holdings.earlier) {
-                stretch(reading(Text(L10n.t("prefs.held.earlier"))), figure: earlier)
+                stretch(ShellReadingLine(Text(L10n.t("prefs.held.earlier"))), figure: earlier)
             }
             ForEach(holdings.byPeriod.prefix(Self.stretchesShown), id: \.start) { bucket in
-                stretch(reading(Text(Self.stretchLabel(bucket.start, period: session.heldPeriod))),
+                stretch(ShellReadingLine(Text(Self.stretchLabel(bucket.start, period: session.heldPeriod))),
                         figure: Self.postsLine(bucket.posts))
             }
         } header: {
@@ -281,7 +281,7 @@ struct UsagePane: View {
         HStack {
             label
             Spacer()
-            reading(Text(figure))
+            ShellReadingLine(Text(figure))
         }
     }
 
@@ -310,10 +310,10 @@ struct UsagePane: View {
             if let line = Self.roomLine(
                 index: session.storeBytes, copies: onDisk.map { $0.values.reduce(0, +) }, room: prefs.roomBytes
             ) {
-                reading(Text(line))
+                ShellReadingLine(Text(line))
             }
             if let line = Self.roomKeptLine(heldByKept: session.roomHeldByKept) {
-                reading(Text(line))
+                ShellReadingLine(Text(line))
             }
         } header: {
             ShellSectionHead(title: "prefs.keep", line: "prefs.keep.line", help: "prefs.keep.help")
@@ -366,7 +366,7 @@ struct UsagePane: View {
         let disk = onDisk.map { $0.values.reduce(0, +) }
         return Section {
             HStack(spacing: ShellSpace.snug) {
-                reading(Text(Self.picturesLine(count: memory.count, bytes: memory.bytes, disk: disk)))
+                ShellReadingLine(Text(Self.picturesLine(count: memory.count, bytes: memory.bytes, disk: disk)))
                 Spacer(minLength: ShellSpace.snug)
                 ShellMoreButton(Self.copiesMore {
                     session.dropCopies()
@@ -464,12 +464,6 @@ struct UsagePane: View {
 
     static func size(_ bytes: Int, language: DummyLanguage? = nil) -> String {
         Int64(bytes).formatted(.byteCount(style: .file).locale(L10n.locale(language)))
-    }
-
-    private func reading(_ text: Text) -> some View {
-        text
-            .shellFont(.reading)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 
     /// Reads each source's catalogue, **waiting first on a fetch already on its way for it**.

@@ -6,7 +6,7 @@ import AppKit
 import UIKit
 #endif
 
-/// The type scale. Eight roles, and every piece of copy in the shell picks one of them.
+/// The type scale. Nine roles, and every piece of copy in the shell picks one of them.
 ///
 /// What is chosen here is which role a line plays and what weight it carries — not how many
 /// points it happens to be.
@@ -48,6 +48,11 @@ enum ShellType: Hashable, Sendable, CaseIterable {
     case reading
     /// A key, written as the cap it is printed on.
     case keycap
+    /// A code read off one screen and typed into another: the largest thing the shell sets, in
+    /// the rounded face, so six digits are read across a table. Nearby's and nothing else's —
+    /// it was a literal `.largeTitle` there, the one font in the shell no role stated, and so
+    /// the one line on a Mac the type-size preference did not move.
+    case code
 
     /// The semantic style this role is built on. **The one place the scale is stated**: every
     /// platform reads its own idea of what the style measures out of this.
@@ -61,6 +66,7 @@ enum ShellType: Hashable, Sendable, CaseIterable {
         case .mark: .caption2
         case .reading: .caption
         case .keycap: .body
+        case .code: .largeTitle
         }
     }
 
@@ -68,16 +74,18 @@ enum ShellType: Hashable, Sendable, CaseIterable {
     /// its name heavier than one that is not — and most do not.
     var weight: Font.Weight {
         switch self {
-        case .display, .pane, .name: .semibold
+        case .display, .pane, .name, .code: .semibold
         case .body, .meta, .mark, .reading, .keycap: .regular
         }
     }
 
-    /// Monospaced where a column of these has to line up, proportional otherwise.
+    /// Monospaced where a column of these has to line up, rounded for the code, proportional
+    /// otherwise.
     var design: Font.Design {
         switch self {
         case .reading, .keycap: .monospaced
         case .display, .pane, .name, .body, .meta, .mark: .default
+        case .code: .rounded
         }
     }
 

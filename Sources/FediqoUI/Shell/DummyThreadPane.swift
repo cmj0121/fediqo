@@ -98,13 +98,11 @@ struct DummyThreadPane: View {
             .padding(.horizontal, ShellSpace.pad)
             .padding(.vertical, ShellSpace.snug)
 
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: ShellSpace.hair)
+            ShellRule()
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 6) {
+                    LazyVStack(alignment: .leading, spacing: ShellSpace.snug) {
                         // What a read said stands above a post that is not here, the start first.
                         ForEach(Array(conversation.beyond.enumerated()), id: \.element.id) { step in
                             threaded(step.element, dimmed: true, depth: step.offset)
@@ -160,8 +158,8 @@ struct DummyThreadPane: View {
                             around(answered: !conversation.descendants.isEmpty)
                         }
                     }
-                    .padding(.vertical, 8)
-                    .padding(.trailing, 8)
+                    .padding(.vertical, ShellSpace.snug)
+                    .padding(.trailing, ShellSpace.snug)
                     .scrollTargetLayout()
                     .coordinateSpace(.named(ThreadPaneProbe.space))
                 }
@@ -366,9 +364,7 @@ struct DummyThreadPane: View {
         // Read in `body`, so this pane's interest in the replies is stamped on every pass. I8.
         let standing = posts.standing(of: thread)
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: ShellSpace.hair)
+            ShellRule()
             // **No `default:`.** A sixth standing has to be given a shape here.
             switch standing {
             // `unasked` is on its way while the pane opening asks (#198) — `around`'s rule — and
@@ -410,7 +406,7 @@ struct DummyThreadPane: View {
                     ForumReplyRow(post: reply, host: thread.host)
                         .background(
                             id == selectedID ? ShellChrome.floatFill(colorScheme) : .clear,
-                            in: RoundedRectangle(cornerRadius: 4)
+                            in: RoundedRectangle(cornerRadius: ShellRadius.chip)
                         )
                         .accessibilityAddTraits(id == selectedID ? .isSelected : [])
                         .modifier(ProbedPlace(part: .row(id), probe: probe))
@@ -602,12 +598,7 @@ struct DummyThreadPane: View {
     /// never asked for; this is a second attempt at one that was, and giving it the same cap
     /// would teach the letter for a thing it does not do here.
     private var wayAround: some View {
-        Button(action: onAskAround) {
-            Label(L10n.t("thread.around.again"), systemImage: "arrow.clockwise")
-                .shellFont(.meta, weight: .medium)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(ShellChrome.selectInk(colorScheme))
+        ShellLinkButton(L10n.t("thread.around.again"), symbol: "arrow.clockwise", action: onAskAround)
     }
 
     /// The way in to the rest of the topic — **the pointer's half of the key `s`**.
@@ -771,11 +762,9 @@ struct DummyThreadPane: View {
     @ViewBuilder
     private func rail(_ depth: Int) -> some View {
         if depth > 0 {
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(width: ShellSpace.hair)
+            ShellRule(.vertical)
                 .padding(.leading, indent(depth) - ShellSpace.snug)
-                .padding(.vertical, 6)
+                .padding(.vertical, ShellSpace.snug)
         }
     }
 }
@@ -831,12 +820,7 @@ struct ThreadFoot: View {
             case .more, .coming:
                 ForumWaiting(line: L10n.t("thread.more.loading"))
             case .held:
-                Button(action: ask) {
-                    Label(L10n.t("thread.more.read"), systemImage: "arrow.down.circle")
-                        .shellFont(.meta, weight: .medium)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(ShellChrome.selectInk(colorScheme))
+                ShellLinkButton(L10n.t("thread.more.read"), symbol: "arrow.down.circle", action: ask)
             case .end:
                 HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
                     Image(systemName: "checkmark.circle")
@@ -863,12 +847,7 @@ struct ThreadFoot: View {
                         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                     if again {
-                        Button(action: ask) {
-                            Label(L10n.t("thread.more.again"), systemImage: "arrow.clockwise")
-                                .shellFont(.meta, weight: .medium)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(ShellChrome.selectInk(colorScheme))
+                        ShellLinkButton(L10n.t("thread.more.again"), symbol: "arrow.clockwise", action: ask)
                     }
                 }
             }
@@ -1231,9 +1210,7 @@ struct ForumQuotation: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, ShellSpace.snug)
             .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(ShellChrome.hairline(colorScheme))
-                    .frame(width: ShellSpace.hair)
+                ShellRule(.vertical)
             }
         }
     }

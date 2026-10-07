@@ -74,3 +74,85 @@ struct ShellSectionHead: View {
         }
     }
 }
+
+/// A heading inside a list: the band a run of rows is under — a rule band in the editor, a host
+/// over its categories, a forum's category over its boards. Smaller than a section's head and
+/// said once: the name, in the quiet ink, on the well.
+///
+/// Three sites drew this three ways — a rounded plate, no plate at all, a square band — and the
+/// reader met the same kind of line as three kinds. **One face, and one difference that is
+/// stated**: a band `pinned` to the top of a scrolling list is square and reaches both edges at
+/// the page's own margin, because rows pass under it and a rounded plate would show them at its
+/// corners; anywhere else it is a rounded plate set in by a row's own inset.
+struct ShellBandHead: View {
+    let title: String
+    let pinned: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(_ title: String, pinned: Bool = false) {
+        self.title = title
+        self.pinned = pinned
+    }
+
+    var body: some View {
+        // Pinned over a scrolling list it is square and set in by the page's margin; anywhere
+        // else it is a rounded plate.
+        let inset = pinned
+            ? CGSize(width: ShellSpace.pad, height: ShellSpace.snug)
+            : CGSize(width: ShellSpace.snug, height: ShellSpace.tight)
+        Text(title)
+            .shellFont(.name)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, inset.width)
+            .padding(.vertical, inset.height)
+            .background(ShellChrome.well(colorScheme), in: RoundedRectangle(cornerRadius: pinned ? 0 : ShellRadius.field))
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// What a section is doing, or what it is for while it is doing nothing: the one line under a
+/// section's head that changes as the work goes. `.meta` in the quiet ink, whichever it says.
+///
+/// Carry and Nearby each drew the idle sentence as a `.reading` in the faint ink and the
+/// progress sentence as `.meta` in the dim one — so the same slot changed face when the work
+/// began, and a sentence was set in the face a figure is read in. It is a sentence both times.
+struct ShellStatusLine: View {
+    let text: String
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+    }
+}
+
+/// A figure or a fact a section reads out — how many posts, that nothing is held — as a line of
+/// its own: `.reading` in the faintest ink. Where a line says what the section is *doing*, it
+/// is a `ShellStatusLine`.
+struct ShellReadingLine: View {
+    let text: Text
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(_ line: String) {
+        text = Text(line)
+    }
+
+    /// A line already put together from parts — a count, and a date set in the reader's locale.
+    init(_ text: Text) {
+        self.text = text
+    }
+
+    var body: some View {
+        text
+            .shellFont(.reading)
+            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+    }
+}

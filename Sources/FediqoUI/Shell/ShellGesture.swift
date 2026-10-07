@@ -51,7 +51,7 @@ public enum ShellGesture: String, CaseIterable, Identifiable, Sendable {
         case .top: "arrow.up.to.line"
         case .name: "list.bullet"
         case .swipe: "arrow.left.arrow.right"
-        case .back: "chevron.left"
+        case .back: ShellBackButton.symbol
         case .pill: "capsule"
         case .pillHold: "pencil"
         }
@@ -85,8 +85,7 @@ struct GesturesSection: View {
                 GestureRow(gesture: gesture)
             }
         } header: {
-            Text(L10n.t("gesture.head"))
-                .textCase(nil)
+            ShellSectionHead(title: "gesture.title", line: "gesture.head")
         }
     }
 }

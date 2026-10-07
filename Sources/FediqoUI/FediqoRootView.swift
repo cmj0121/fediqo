@@ -1691,9 +1691,7 @@ public struct FediqoRootView: View {
                     composing = true
                 }
             )
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(width: ShellSpace.hair)
+            ShellRule(.vertical)
             page
         }
         .background(ShellChrome.page(colorScheme))

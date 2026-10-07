@@ -122,9 +122,7 @@ struct TimelinePane: View {
                 .headOfPage()
                 .modifier(ProbedPane(part: .head))
 
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: ShellSpace.hair)
+            ShellRule()
 
             Group {
             // **Whatever step the reader is standing on** (#122). A face pressed inside a
@@ -581,9 +579,7 @@ struct TimelinePane: View {
                         ))
                         .modifier(TimelineGapMarked(marks: gaps[item.id], session: session))
                         if !isLast {
-                            Rectangle()
-                                .fill(ShellChrome.hairline(colorScheme))
-                                .frame(height: ShellSpace.hair)
+                            ShellRule()
                         }
                         }
                     }

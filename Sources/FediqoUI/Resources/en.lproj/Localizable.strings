@@ -439,6 +439,7 @@
 "preferences.empty.title" = "Preferences";
 "preferences.empty.detail" = "Sources and appearance will live here.";
 
+"prefs.look.head" = "Language and look";
 "prefs.language" = "Language";
 "prefs.language.system" = "System";
 "prefs.language.english" = "English";
@@ -1008,6 +1009,7 @@
 "prefs.tab.hosts" = "Your hosts";
 "prefs.tab.move" = "Move";
 "prefs.tab.gestures" = "Gestures";
+"gesture.title" = "Gestures";
 "gesture.head" = "What a finger does here. With a keyboard attached, the keys are listed instead.";
 "gesture.press" = "Press a post";
 "gesture.press.detail" = "Opens it, with what was said around it.";

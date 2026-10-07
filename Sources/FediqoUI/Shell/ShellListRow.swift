@@ -47,6 +47,8 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
     /// Where a title too long for its line is cut: at its end, or — for a host, whose start and
     /// end are both its identity — in its middle.
     let cut: Text.TruncationMode
+    /// Whether the press leads somewhere: see `ShellListRowFace.leads`.
+    let leads: Bool
     @Binding var selection: ID?
     let onOpen: () -> Void
     /// ↑ is −1 and ↓ is +1. Nothing where the list walks itself.
@@ -60,7 +62,8 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
 
     init(
         id: ID, title: String, brief: String? = nil, figure: String? = nil, spoken: String? = nil,
-        cut: Text.TruncationMode = .tail, selection: Binding<ID?>, onOpen: @escaping () -> Void, onStep: ((Int) -> Void)? = nil,
+        cut: Text.TruncationMode = .tail, leads: Bool = true, selection: Binding<ID?>, onOpen: @escaping () -> Void,
+        onStep: ((Int) -> Void)? = nil,
         @ViewBuilder mark: () -> Mark, @ViewBuilder control: () -> Control
     ) {
         self.id = id
@@ -69,6 +72,7 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
         self.figure = figure
         self.spoken = spoken
         self.cut = cut
+        self.leads = leads
         _selection = selection
         self.onOpen = onOpen
         self.onStep = onStep
@@ -87,10 +91,17 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
         .background(plate)
         .overlay(alignment: .leading) { lamp }
         .onHover { hovering = $0 }
+        // **The row's own inset, not the Form's on top of it.** The face is already set in by
+        // `ShellSpace.step`, and its plate and lamp are drawn to the row's edge; inside a Form
+        // the cell's margin would set both in a second time, and one list (Usage's) had
+        // cancelled that at its call site while the five others in a Form (Limits, Allowed, Your
+        // hosts, In flight, Activity's way in) had not. Stated here, every list of
+        // these rows is set in once. Outside a List or a Form it does nothing.
+        .listRowInsets(EdgeInsets())
     }
 
     private var entry: some View {
-        ShellListRowFace(title: title, brief: brief, figure: figure, cut: cut, selected: selected, mark: mark)
+        ShellListRowFace(title: title, brief: brief, figure: figure, cut: cut, leads: leads, selected: selected, mark: mark)
             .contentShape(Rectangle())
             .onTapGesture(perform: press)
             .focusable()
@@ -179,11 +190,12 @@ extension ShellListRow where Control == EmptyView {
     /// A row with nothing of its own after the chevron.
     init(
         id: ID, title: String, brief: String? = nil, figure: String? = nil, spoken: String? = nil,
-        cut: Text.TruncationMode = .tail, selection: Binding<ID?>, onOpen: @escaping () -> Void, onStep: ((Int) -> Void)? = nil,
+        cut: Text.TruncationMode = .tail, leads: Bool = true, selection: Binding<ID?>, onOpen: @escaping () -> Void,
+        onStep: ((Int) -> Void)? = nil,
         @ViewBuilder mark: () -> Mark
     ) {
         self.init(
-            id: id, title: title, brief: brief, figure: figure, spoken: spoken, cut: cut, selection: selection,
+            id: id, title: title, brief: brief, figure: figure, spoken: spoken, cut: cut, leads: leads, selection: selection,
             onOpen: onOpen, onStep: onStep, mark: mark, control: { EmptyView() }
         )
     }
@@ -207,6 +219,10 @@ struct ShellListRowFace<Mark: View>: View {
     let figure: String?
     /// Where a long title is cut (`ShellListRow.cut`).
     var cut: Text.TruncationMode = .tail
+    /// Whether the chevron is drawn. **A chevron says the press leads somewhere** — a detail, a
+    /// page, a sheet. A row whose press picks it where it stands (a peer to receive from, a page
+    /// to stand on as the list closes) leads nowhere and draws none; it is lit instead.
+    var leads = true
     let selected: Bool
     let mark: Mark
 
@@ -226,10 +242,12 @@ struct ShellListRowFace<Mark: View>: View {
             words(stacked: stacked)
             Spacer(minLength: ShellSpace.snug)
             if !stacked { figureText }
-            Image(systemName: "chevron.right")
-                .shellFont(.mark, weight: .semibold)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .accessibilityHidden(true)
+            if leads {
+                Image(systemName: "chevron.right")
+                    .shellFont(.mark, weight: .semibold)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, ShellSpace.step)
         .padding(.vertical, ShellSpace.snug)

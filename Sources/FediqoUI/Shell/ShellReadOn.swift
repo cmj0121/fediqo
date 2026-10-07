@@ -273,9 +273,7 @@ struct TimelineGapRows: View {
     }
 
     private var hairline: some View {
-        Rectangle()
-            .fill(ShellChrome.hairline(colorScheme))
-            .frame(height: ShellSpace.hair)
+        ShellRule()
     }
 }
 

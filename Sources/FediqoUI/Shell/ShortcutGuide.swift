@@ -69,13 +69,13 @@ struct ShortcutGuide: View {
             .padding(ShellSpace.pad)
             .frame(maxWidth: Metrics.plate.width, alignment: .topLeading)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: ShellRadius.card, style: .continuous)
                     .fill(ShellChrome.page(colorScheme))
                     .shadow(color: .black.opacity(0.22), radius: 18, y: 8)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(ShellChrome.hairline(colorScheme), lineWidth: 1)
+                RoundedRectangle(cornerRadius: ShellRadius.card, style: .continuous)
+                    .strokeBorder(ShellChrome.hairline(colorScheme), lineWidth: ShellSpace.hair)
             )
         }
 
@@ -118,7 +118,7 @@ struct ShortcutGuide: View {
         }
 
         private func keys(of line: DummyShortcut) -> some View {
-            HStack(spacing: 4) {
+            HStack(spacing: ShellSpace.tight) {
                 ForEach(line.keys, id: \.self) { cap in
                     Text(cap)
                         .shellFont(.keycap)

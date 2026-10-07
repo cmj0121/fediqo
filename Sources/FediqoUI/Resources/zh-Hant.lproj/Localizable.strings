@@ -438,6 +438,7 @@
 "preferences.empty.title" = "偏好";
 "preferences.empty.detail" = "來源與外觀會放在這裡。";
 
+"prefs.look.head" = "語言與外觀";
 "prefs.language" = "語言";
 "prefs.language.system" = "系統";
 "prefs.language.english" = "English";
@@ -983,6 +984,7 @@
 "prefs.tab.hosts" = "自訂主機";
 "prefs.tab.move" = "搬移";
 "prefs.tab.gestures" = "手勢";
+"gesture.title" = "手勢";
 "gesture.head" = "手指在這裡能做的事。接上鍵盤時，改列出按鍵。";
 "gesture.press" = "按一則貼文";
 "gesture.press.detail" = "打開它，以及圍繞它說的話。";

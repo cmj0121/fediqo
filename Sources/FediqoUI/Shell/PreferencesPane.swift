@@ -201,20 +201,24 @@ struct PreferencesPane: View {
     @ViewBuilder
     private var choices: some View {
         @Bindable var prefs = prefs
-        Picker(L10n.t("prefs.language"), selection: $prefs.language) {
-            ForEach(DummyLanguage.allCases) { language in
-                Text(L10n.t("prefs.language.\(language.labelKey)")).tag(language)
+        Section {
+            Picker(L10n.t("prefs.language"), selection: $prefs.language) {
+                ForEach(DummyLanguage.allCases) { language in
+                    Text(L10n.t("prefs.language.\(language.labelKey)")).tag(language)
+                }
             }
-        }
-        Picker(L10n.t("prefs.theme"), selection: $prefs.theme) {
-            ForEach(DummyTheme.allCases) { theme in
-                Text(L10n.t("prefs.theme.\(theme.rawValue)")).tag(theme)
+            Picker(L10n.t("prefs.theme"), selection: $prefs.theme) {
+                ForEach(DummyTheme.allCases) { theme in
+                    Text(L10n.t("prefs.theme.\(theme.rawValue)")).tag(theme)
+                }
             }
-        }
-        Picker(L10n.t("prefs.fontSize"), selection: $prefs.fontSize) {
-            ForEach(DummyFontSize.allCases) { size in
-                Text(L10n.t("prefs.fontSize.\(size.rawValue)")).tag(size)
+            Picker(L10n.t("prefs.fontSize"), selection: $prefs.fontSize) {
+                ForEach(DummyFontSize.allCases) { size in
+                    Text(L10n.t("prefs.fontSize.\(size.rawValue)")).tag(size)
+                }
             }
+        } header: {
+            ShellSectionHead(title: "prefs.look.head")
         }
         askAgain
         removed
