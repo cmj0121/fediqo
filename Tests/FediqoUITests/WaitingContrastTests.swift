@@ -62,13 +62,13 @@ struct WaitingContrastTests {
         for scheme in [ColorScheme.light, .dark] {
             let ink = ShellWaiting.ink(scheme, on: .chassis)
             for (named, ground) in Self.grounds(scheme) {
-                let floor = Self.contrast(ink, at: ShellWaiting.banked, on: ground, scheme)
+                let floor = ShellContrast.ratio(ink, at: ShellWaiting.banked, on: ground, scheme)
                 #expect(floor >= ShellChrome.placeFloor, """
                     the waiting plate banks to \(floor):1 on \(named) in \(scheme)
                     """)
                 for instant in Self.instants {
                     let glow = ShellWaiting.glow(at: instant)
-                    let ratio = Self.contrast(ink, at: glow, on: ground, scheme)
+                    let ratio = ShellContrast.ratio(ink, at: glow, on: ground, scheme)
                     #expect(ratio >= ShellChrome.placeFloor, """
                         at \(instant)s the waiting plate is \(ratio):1 on \(named) in \(scheme)
                         """)
@@ -84,7 +84,7 @@ struct WaitingContrastTests {
         for scheme in [ColorScheme.light, .dark] {
             let ink = ShellWaiting.ink(scheme, on: .stage)
             for instant in Self.instants {
-                let ratio = Self.contrast(ink, at: ShellWaiting.glow(at: instant), on: Self.stage(scheme), scheme)
+                let ratio = ShellContrast.ratio(ink, at: ShellWaiting.glow(at: instant), on: Self.stage(scheme), scheme)
                 #expect(ratio >= ShellChrome.placeFloor, """
                     at \(instant)s the stage plate is \(ratio):1 in \(scheme)
                     """)
@@ -92,7 +92,7 @@ struct WaitingContrastTests {
             // The chassis plate would not have done, which is why the stage has its own.
             if scheme == .light {
                 let chassis = ShellWaiting.ink(scheme, on: .chassis)
-                #expect(Self.contrast(chassis, at: 1, on: Self.stage(scheme), scheme) < ShellChrome.placeFloor)
+                #expect(ShellContrast.ratio(chassis, at: 1, on: Self.stage(scheme), scheme) < ShellChrome.placeFloor)
             }
         }
         #expect(RemoteImage.waitingPlate(on: .stage).ground == .stage)
@@ -107,7 +107,7 @@ struct WaitingContrastTests {
         let still = ShellWaiting.glow(at: 0)
         for scheme in [ColorScheme.light, .dark] {
             for (named, ground) in Self.grounds(scheme) {
-                let ratio = Self.contrast(ShellWaiting.ink(scheme, on: .chassis), at: still, on: ground, scheme)
+                let ratio = ShellContrast.ratio(ShellWaiting.ink(scheme, on: .chassis), at: still, on: ground, scheme)
                 #expect(ratio >= ShellChrome.placeFloor, "the still plate is \(ratio):1 on \(named) in \(scheme)")
             }
         }
@@ -123,7 +123,7 @@ struct WaitingContrastTests {
             for (named, ground) in Self.grounds(scheme) {
                 for instant in Self.instants {
                     for plate in 0..<ForumWaiting.plates {
-                        let ratio = Self.contrast(ink, at: ForumWaiting.glow(plate, at: instant), on: ground, scheme)
+                        let ratio = ShellContrast.ratio(ink, at: ForumWaiting.glow(plate, at: instant), on: ground, scheme)
                         #expect(ratio >= ShellChrome.placeFloor, """
                             plate \(plate) at \(instant)s is \(ratio):1 on \(named) in \(scheme)
                             """)
@@ -142,7 +142,7 @@ struct WaitingContrastTests {
         for scheme in [ColorScheme.light, .dark] {
             #expect(ForumPostBand.plateInk(scheme) == ShellWaiting.ink(scheme, on: .chassis))
             for (named, ground) in Self.grounds(scheme) {
-                let ratio = Self.contrast(ForumPostBand.plateInk(scheme), at: 1, on: ground, scheme)
+                let ratio = ShellContrast.ratio(ForumPostBand.plateInk(scheme), at: 1, on: ground, scheme)
                 #expect(ratio >= ShellChrome.placeFloor, "the band's plate is \(ratio):1 on \(named) in \(scheme)")
             }
         }
@@ -156,14 +156,14 @@ struct WaitingContrastTests {
         for scheme in [ColorScheme.light, .dark] {
             let edge = ShellChrome.vacantEdge(scheme)
             for (named, ground) in Self.grounds(scheme) {
-                let ratio = Self.contrast(edge, at: 1, on: ground, scheme)
+                let ratio = ShellContrast.ratio(edge, at: 1, on: ground, scheme)
                 #expect(ratio >= ShellChrome.placeFloor, "the empty edge is \(ratio):1 on \(named) in \(scheme)")
             }
-            let inside = Self.contrast(edge, at: 1, on: [ShellChrome.well(scheme)], scheme)
+            let inside = ShellContrast.ratio(edge, at: 1, on: [ShellChrome.well(scheme)], scheme)
             #expect(inside >= ShellChrome.placeFloor, "the edge is \(inside):1 against its own fill in \(scheme)")
 
-            let fill = Self.contrast(ShellChrome.well(scheme), at: 1, on: Self.stage(scheme), scheme)
-            let ring = Self.contrast(edge, at: 1, on: Self.stage(scheme), scheme)
+            let fill = ShellContrast.ratio(ShellChrome.well(scheme), at: 1, on: Self.stage(scheme), scheme)
+            let ring = ShellContrast.ratio(edge, at: 1, on: Self.stage(scheme), scheme)
             #expect(max(fill, ring) >= ShellChrome.placeFloor, """
                 on the stage in \(scheme) the empty place is \(fill):1 by its fill and \(ring):1 by its edge
                 """)
@@ -175,7 +175,7 @@ struct WaitingContrastTests {
     @Test("The glyph in an empty place is legible on its fill")
     func theEmptyGlyphIsLegible() {
         for scheme in [ColorScheme.light, .dark] {
-            let ratio = Self.contrast(ShellChrome.inkFaint(scheme), at: 1, on: [ShellChrome.well(scheme)], scheme)
+            let ratio = ShellContrast.ratio(ShellChrome.inkFaint(scheme), at: 1, on: [ShellChrome.well(scheme)], scheme)
             #expect(ratio >= ShellChrome.placeFloor, "the glyph is \(ratio):1 on its fill in \(scheme)")
         }
     }
@@ -191,7 +191,7 @@ struct WaitingContrastTests {
         for scheme in [ColorScheme.light, .dark] {
             let well = [ShellChrome.page(scheme), ShellChrome.well(scheme)]
             for instant in Self.instants {
-                let ratio = Self.contrast(
+                let ratio = ShellContrast.ratio(
                     ShellWaiting.ink(scheme, on: .chassis), at: ShellWaiting.glow(at: instant), on: well, scheme)
                 #expect(ratio >= ShellChrome.placeFloor, """
                     at \(instant)s a waiting plate is \(ratio):1 from an empty one in \(scheme)
@@ -203,47 +203,5 @@ struct WaitingContrastTests {
         #expect(ShellVacant.glyph(.picture) == "photo")
         // A picture that will never come is the empty place, not a plate that waits for ever.
         #expect(RemoteImage.fill(have: false, url: nil, missing: false) == .absent)
-    }
-
-    // MARK: - Measuring
-
-    /// The WCAG 2.1 contrast ratio of `ink`, drawn at `opacity` over the layered `ground`, against
-    /// that ground.
-    ///
-    /// Composited in the encoded sRGB space a renderer blends in, with the linearisation applied
-    /// once afterwards — the choice `BoardChoiceTests.contrast(_:on:_:)` argues, extended to a
-    /// ground made of more than one layer and an ink drawn at an opacity of its own.
-    private static func contrast(
-        _ ink: Color, at opacity: Double, on ground: [Color], _ scheme: ColorScheme
-    ) -> Double {
-        var environment = EnvironmentValues()
-        environment.colorScheme = scheme
-        var under = (red: 0.0, green: 0.0, blue: 0.0)
-        for layer in ground {
-            under = over(layer.resolve(in: environment), under, alpha: 1)
-        }
-        let drawn = over(ink.resolve(in: environment), under, alpha: opacity)
-        let first = luminance(drawn.red, drawn.green, drawn.blue)
-        let second = luminance(under.red, under.green, under.blue)
-        return (max(first, second) + 0.05) / (min(first, second) + 0.05)
-    }
-
-    private static func over(
-        _ front: Color.Resolved, _ back: (red: Double, green: Double, blue: Double), alpha: Double
-    ) -> (red: Double, green: Double, blue: Double) {
-        let a = Double(front.opacity) * alpha
-        return (
-            red: Double(front.red) * a + back.red * (1 - a),
-            green: Double(front.green) * a + back.green * (1 - a),
-            blue: Double(front.blue) * a + back.blue * (1 - a)
-        )
-    }
-
-    /// WCAG 2.1 relative luminance, from sRGB components as they are encoded.
-    private static func luminance(_ red: Double, _ green: Double, _ blue: Double) -> Double {
-        func linear(_ channel: Double) -> Double {
-            channel <= 0.04045 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
-        }
-        return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
     }
 }

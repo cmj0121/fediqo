@@ -236,10 +236,18 @@ struct FediqoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            #if DEBUG
-            if Staged.isOn { Staged.root } else { live }
-            #else
-            live
+            Group {
+                #if DEBUG
+                if Staged.isOn { Staged.root } else { live }
+                #else
+                live
+                #endif
+            }
+            // The window's own ground is the page's, so what shows before the first frame and
+            // at the edge of a window being dragged wider is not the system's grey. `Ground` is
+            // the catalogue's copy of `ShellChrome.page`, the one a phone's launch screen names.
+            #if os(macOS)
+            .containerBackground(Color("Ground"), for: .window)
             #endif
         }
         #if os(macOS)

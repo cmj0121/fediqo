@@ -1717,8 +1717,6 @@ public struct FediqoRootView: View {
                 .fill(ShellChrome.hairline(colorScheme))
                 .frame(width: ShellSpace.hair)
             page
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(ShellChrome.page(colorScheme))
         }
         .background(ShellChrome.page(colorScheme))
     }
@@ -1781,6 +1779,8 @@ public struct FediqoRootView: View {
         .overlay(alignment: .bottomTrailing) {
             if availability.canCompose { composeButton }
         }
+        // Behind the folded places' own bar, which is no page's.
+        .background(ShellChrome.page(colorScheme))
     }
 
     /// Tabs instead of a rail, and only for the places it can enter. Drawn on a Mac as well
@@ -1878,9 +1878,15 @@ public struct FediqoRootView: View {
     /// **Per page rather than once at the root**, because on a compact `TabView` every tab stays
     /// alive and a value set above them all would be true in the tab nobody can see. See
     /// `EnvironmentValues.shellPlaceIsActive`.
+    ///
+    /// **Each page brings the ground with it**, in the narrow arrangement as in the wide one: a
+    /// tab is drawn on the system's own background unless its page covers it, and the chassis
+    /// has one ground whatever is drawn around the page.
     @ViewBuilder
     private func placedPage(_ item: ShellPlace) -> some View {
         pageFor(item)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(ShellChrome.page(colorScheme))
             .environment(\.shellPlaceIsActive, item == place)
     }
 }

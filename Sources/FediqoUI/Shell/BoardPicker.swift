@@ -162,7 +162,7 @@ struct BoardPickerList: View {
                                     : ShellChrome.ink(colorScheme)
                             )
                             .modifier(PickName())
-                        figures(board)
+                        figures(board, on: on)
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -232,16 +232,23 @@ struct BoardPickerList: View {
     /// which is true, and is not the same row as one reading "0 threads · 9 posts". Where nothing
     /// at all was stated the row says that in words, so the gap is a fact rather than a blank.
     @ViewBuilder
-    private func figures(_ board: DiscuzBoard) -> some View {
+    private func figures(_ board: DiscuzBoard, on: Bool) -> some View {
         if board.threads == nil, board.posts == nil, board.lastPostAt == nil {
             Text(L10n.t("board.choose.unstated"))
                 .shellFont(.reading)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .foregroundStyle(Self.figuresInk(on: on, colorScheme))
         } else {
             stated(board)
                 .shellFont(.reading)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .foregroundStyle(Self.figuresInk(on: on, colorScheme))
         }
+    }
+
+    /// The ink of a board's figures: the faintest, and a step up the ramp once the board is
+    /// chosen. A chosen row lies on `selectFill`, and the faintest ink is 4.47:1 on that wash in
+    /// light — under what small type needs — where `inkDim` is 7.2:1.
+    static func figuresInk(on: Bool, _ scheme: ColorScheme) -> Color {
+        on ? ShellChrome.inkDim(scheme) : ShellChrome.inkFaint(scheme)
     }
 
     /// The stated figures, joined. `Text` concatenation rather than a formatted `String` so the
