@@ -215,6 +215,62 @@ struct ReadingMarkTests {
         #expect(mark.left() == "z")
     }
 
+    /// **What was seen on a simulator**: All in front at its first post, and a timeline of one
+    /// author pressed. Before the list said its rows were another's, and before the switch
+    /// asked where All was left, the list reported the rows on screen as `109, 110` — All's
+    /// second post named first — and All came back a post down.
+    @Test("What the list says of its rows once another timeline is in front is not heard as the last one's: a timeline left at its first post is left there, whatever the list said on its way out and in whatever order")
+    func aReportMadeOnTheWayOut() {
+        #expect(ShellReadingMark.hears(reportOf: "all", rowsOf: "all"))
+        #expect(!ShellReadingMark.hears(reportOf: "other", rowsOf: "all"))
+        #expect(ShellReadingMark.hears(reportOf: nil, rowsOf: "all") && ShellReadingMark.hears(reportOf: "all", rowsOf: nil), "where either is not known it is heard")
+
+        let mark = ShellReadingMark()
+        mark.list(["first", "second", "third"], of: "all")
+        mark.visible(["first", "second"], of: "all")
+        mark.whole(["first", "second"], of: "all")
+        #expect(mark.id == "first")
+        // The other timeline is in front, and the list reports before anything else is said.
+        mark.whole(["second", "first", "theirs"], of: "other")
+        mark.visible(["second", "first", "theirs"], of: "other")
+        #expect(mark.id == "first" && mark.whole == ["first", "second"] && mark.visible == ["first", "second"], "neither the mark nor what it holds moved")
+        mark.list(["first", "theirs"], of: "other")
+        #expect(mark.left() == "first", "All was left at its first post")
+        mark.forget(for: "other")
+        mark.list(["first", "theirs"], of: "other")
+        // And from here the list is this timeline's, and is heard.
+        mark.whole(["first", "theirs"], of: "other")
+        #expect(mark.id == "first")
+        mark.whole(["theirs"], of: "other")
+        #expect(mark.id == "theirs")
+    }
+
+    @Test("Two timelines holding the very same posts: the list has no change of rows to say the switch by, and what it says next is still heard")
+    func theSameRowsInTwoTimelines() {
+        let mark = ShellReadingMark()
+        mark.list(["a", "b"], of: "all")
+        mark.whole(["a", "b"], of: "all")
+        #expect(mark.left() == "a")
+        mark.forget(for: "twin")
+        // No `list`: the rows are the same, so the list has nothing new to say of them.
+        mark.whole(["b"], of: "twin")
+        #expect(mark.id == "b", "the switch said whose the rows are")
+        mark.whole(["a", "b"], of: "all")
+        #expect(mark.id == "b", "and a late word from the timeline left is not this one's")
+    }
+
+    @Test("The list says which timeline is in front with every report of its rows")
+    func theReportsSayTheirTimeline() throws {
+        let pane = try String(
+            contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Sources/FediqoUI/Shell/TimelinePane.swift"),
+            encoding: .utf8
+        )
+        #expect(pane.contains("session.readingMark.visible(visible, of: session.currentTimeline.id)"))
+        #expect(pane.contains("session.readingMark.whole(whole, of: session.currentTimeline.id)"))
+        #expect(pane.contains("mark.forget(for: arrived?.id ?? TimelineQuery.all.id)"))
+    }
+
     @Test("The list being put somewhere is not the person scrolling it: only a hand on the list, and the glide after it, count")
     func whatScrollingByHandIs() {
         #expect(ShellReadingMark.byHand(.interacting) && ShellReadingMark.byHand(.decelerating))
@@ -358,7 +414,9 @@ struct ReadingMarkTests {
         }
     }
 
-    private func hosted(touch: Bool, rising: Bool = true) async -> Hosted {
+    private func hosted(
+        touch: Bool, rising: Bool = true, width: CGFloat = 390, type: DynamicTypeSize? = nil, layout: ShellLayout? = nil
+    ) async -> Hosted {
         let session = ShellSession(http: FixtureHTTP([:]), timelines: WrittenTimelineStore(defaults: MarkDefaults()))
         session.sources = [microblog]
         session.rebuildQueries()
@@ -369,11 +427,47 @@ struct ReadingMarkTests {
         session.timelineID = .all
         let seen = Seen()
         seen.touch = touch
-        let view = NSHostingView(rootView: Host(session: session, seen: seen))
-        view.frame = NSRect(x: 0, y: 0, width: 390, height: 700)
+        // At a size of text and in an arrangement, where a test says; as it always was, where not.
+        let host = Host(session: session, seen: seen)
+        let view: NSView = if let type, let layout {
+            NSHostingView(rootView: host.dynamicTypeSize(type).environment(\.shellLayout, layout))
+        } else {
+            NSHostingView(rootView: host)
+        }
+        view.frame = NSRect(x: 0, y: 0, width: width, height: 700)
         let hosted = Hosted(session: session, seen: seen, view: view)
         await hosted.settle()
         return hosted
+    }
+
+    /// **Why not exactly all of a row.** At the default size of text on a phone 375 and 440
+    /// points wide, the first post of a timeline — at the top, with nothing cut — was reported
+    /// as a hair under all on screen, so it was never whole: the second post was marked, and a
+    /// timeline left and come back to opened a post down. Seen on a simulator, where asking
+    /// for 0.99999 of a row was already enough.
+    @Test("A row is wholly on screen when all of it is, to within what its own arithmetic can be out by: never asked for as exactly one, and never so loosely that a point cut from a tall row passes")
+    func wholeIsNotExactlyAll() throws {
+        #expect(ShellReadingMark.wholeShare < 1, "exactly all of a row is a share a row with nothing cut can fall short of")
+        #expect(ShellReadingMark.wholeShare <= 0.9999, "with room to spare over the 0.99999 that was seen to be enough")
+        #expect((1 - ShellReadingMark.wholeShare) * 1000 <= 1.0000001, "and a row a thousand points tall is whole only to within a point")
+        let pane = try String(
+            contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Sources/FediqoUI/Shell/TimelinePane.swift"),
+            encoding: .utf8
+        )
+        #expect(pane.contains(".onScrollTargetVisibilityChange(idType: String.self, threshold: ShellReadingMark.wholeShare) { whole in"))
+        #expect(!pane.contains("threshold: 1)"))
+    }
+
+    @Test("At every size of text and every width of phone the first post of a timeline just opened is wholly on screen, and is the one marked",
+          arguments: [DynamicTypeSize.small, .medium, .large, .xLarge, .xxLarge, .xxxLarge])
+    func theFirstPostIsWhole(_ type: DynamicTypeSize) async throws {
+        for width in [320, 375, 390, 393, 402, 430, 440] as [CGFloat] {
+            let finger = await hosted(touch: true, width: width, type: type, layout: .narrow)
+            let first = try #require(finger.rows(of: TimelineQuery.all).first)
+            #expect(finger.session.readingMark.whole.first == first, "\(type) at \(width): whole \(finger.session.readingMark.whole.prefix(2))")
+            #expect(finger.session.readingMark.id == first, "\(type) at \(width): marked \(finger.session.readingMark.id ?? "none")")
+        }
     }
 
     @Test("Under a finger a timeline returned to has the post it was left at marked, at the top of the list, lit on the lamp its row holds, and selects nothing; with a keyboard it selects it, as it did")

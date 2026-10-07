@@ -1325,6 +1325,9 @@ public struct FediqoRootView: View {
                 draft.position = session.written.count
                 session.commit(draft)
             }
+            // Writing one puts it in front; the one that was in front is put back before
+            // anything is drawn, so no timeline is switched to that nobody pressed for.
+            session.goToTimeline(at: 0)
         case .go(let index): session.goToTimeline(at: index)
         case .list: session.timelineListShown = true
         case .unvisited: session.timelinePlaces = TimelinePlaces()

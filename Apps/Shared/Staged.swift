@@ -73,8 +73,9 @@ enum Staged {
         // Timelines of the person's own, for a phone's pictures (#304). Asked for, and not in
         // every picture: the iPad's are laid beside ones taken before there were any.
         if ProcessInfo.processInfo.environment["FEDIQO_STAGED_TIMELINES"] == "1" {
-            // Written, and then the first of them all in front again: writing one puts it in front.
-            staged.steps.insert(contentsOf: [.timelines, .go(0), .unvisited], at: 0)
+            // Written with the timeline in front left in front (`.timelines` puts it back as it
+            // writes): a picture is then of a timeline nobody has switched away from.
+            staged.steps.insert(contentsOf: [.timelines, .unvisited], at: 0)
         }
         return staged
     }
@@ -163,6 +164,14 @@ enum Staged {
         case "usage": return ShellStaged(place: .usage)
         case "usagenext": return ShellStaged(place: .usage, steps: [.usageNext])
         case "menu": return ShellStaged(place: .timeline, menus: true)
+        // The timeline as it opens, with what the list reports written over it; and All left
+        // for Trends and come back to with nothing scrolled — what a person does with two presses.
+        case "opened": return ShellStaged(place: .timeline, reports: true)
+        // And All left for one of the person's own timelines, which holds posts All holds
+        // too — the first of them, of one author, and the last — and come back to.
+        case "ownback": return ShellStaged(place: .timeline, steps: [.go(2), .go(0)], reports: true)
+        case "lastback": return ShellStaged(place: .timeline, steps: [.go(4), .go(0)], reports: true)
+        case "back": return ShellStaged(place: .timeline, steps: [.trends, .all], reports: true)
         case "cut": return ShellStaged(place: .timeline, steps: [.scroll(90)], reports: true)
         case "returned": return ShellStaged(place: .timeline, steps: [.scroll(700), .trends, .all], reports: true)
         case "emptied": return ShellStaged(place: .timeline, steps: [.scroll(700), .empty, .all], reports: true)

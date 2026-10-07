@@ -81,6 +81,22 @@ final class ShellReadingMark {
         return lamp
     }
 
+    /// How much of a row has to be on screen for it to be wholly on screen: all of it, less
+    /// what its own arithmetic can be out by.
+    ///
+    /// **Not exactly all of it.** The list says how much of a row is on screen as a share worked
+    /// out from the row's height, and a height that is not a whole number of points — which is
+    /// what a size of text gives it, on some widths and not others — comes out a hair under
+    /// one for a row with nothing cut at all. Asked for exactly one, the first post of a
+    /// timeline was then never wholly on screen: the second was marked as the one being read,
+    /// and a timeline left and come back to opened a post down. Seen at the default size on a
+    /// phone 375 and 440 points wide, where the share fell short by less than a hundred
+    /// thousandth.
+    ///
+    /// A thousandth is a hundred times that, and still nothing a person could see: a point of
+    /// a row a thousand points tall.
+    nonisolated static let wholeShare: Double = 0.999
+
     /// Moves the mark, telling the row that lost it and the row that gained it and no other.
     func mark(_ row: String?) {
         guard row != id else { return }
@@ -110,14 +126,33 @@ final class ShellReadingMark {
         mark(Self.marked(whole: whole, visible: visible, standing: id, kept: kept))
     }
 
-    /// The rows wholly on screen changed.
-    func whole(_ reported: [String]) {
+    /// Whether what the list says of its rows is heard: only while the timeline in front is
+    /// the one the rows held are of.
+    ///
+    /// **A timeline switched away from reports once more before anybody has said it was left.**
+    /// The list is told to draw the new timeline's rows and says which are on screen while it
+    /// is at it — the old ones and the new together, and in no order — before the list has
+    /// said its rows are another's and before the switch has asked where the last one was
+    /// left. Where the two timelines share posts those are rows the mark holds, so it moved to
+    /// whichever the report named first, and that was written down as the place left: All left
+    /// at its first post for a timeline of one author came back a post down.
+    ///
+    /// Where either is not known — a list that never said whose its rows are — it is heard.
+    nonisolated static func hears(reportOf front: String?, rowsOf held: String?) -> Bool {
+        guard let front, let held else { return true }
+        return front == held
+    }
+
+    /// The rows wholly on screen changed, with `front` the timeline in front as it was said.
+    func whole(_ reported: [String], of front: String? = nil) {
+        guard Self.hears(reportOf: front, rowsOf: timeline) else { return }
         whole = reported.filter(rows.contains)
         remark()
     }
 
-    /// The rows at least half on screen changed.
-    func visible(_ reported: [String]) {
+    /// The rows at least half on screen changed, with `front` the timeline in front.
+    func visible(_ reported: [String], of front: String? = nil) {
+        guard Self.hears(reportOf: front, rowsOf: timeline) else { return }
         visible = reported.filter(rows.contains)
         remark()
     }
@@ -149,6 +184,10 @@ final class ShellReadingMark {
     /// are put out and kept, for `list(_:)` to let go of those whose rows have gone.
     func forget(for timeline: String? = nil) {
         switched = timeline
+        // The rows to come are this timeline's from here on, whether or not the list has a
+        // change of rows to say so by: two timelines can hold the very same posts, and what
+        // the list says of them next is then heard (`hears`).
+        if let timeline { self.timeline = timeline }
         kept = nil
         whole = []
         visible = []

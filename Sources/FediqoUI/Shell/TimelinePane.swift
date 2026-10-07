@@ -970,14 +970,18 @@ struct KeepsTopRow: ViewModifier {
             // The reading mark is worked out from the same report (#303), and from the rows
             // wholly on screen, said below. Kept whether or not a finger is all there is, so a
             // keyboard taken away finds the mark where the list is; nothing reads it till then.
-            session.readingMark.visible(visible)
+            // Said with the timeline in front, so a report made of the one just left is not
+            // taken for this one's (`ShellReadingMark.hears`).
+            session.readingMark.visible(visible, of: session.currentTimeline.id)
             // What the rows on screen still owe goes first in its source's line (#293).
             // Only rows that owe: a screen of rows that owe nothing asks nothing of anybody.
             let owing = visible.filter(session.owingRows.contains)
             if !owing.isEmpty { Task { await session.refs.near(owing, in: session) } }
         }
-        .onScrollTargetVisibilityChange(idType: String.self, threshold: 1) { whole in
-            session.readingMark.whole(whole)
+        // Wholly on screen, to within what a row's own arithmetic can be out by
+        // (`ShellReadingMark.wholeShare`) — never asked for as exactly all of it.
+        .onScrollTargetVisibilityChange(idType: String.self, threshold: ShellReadingMark.wholeShare) { whole in
+            session.readingMark.whole(whole, of: session.currentTimeline.id)
         }
         // The person moving the list, as against the list being moved: what a timeline
         // returned to was kept on gives way to what is on screen only for the first (#303).
