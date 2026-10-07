@@ -68,7 +68,6 @@ struct ShellPiecesTests {
         let row = HStack {
             ShellIconButton("magnifyingglass", name: "shortcut.search") {}
             ShellIconButton("line.3.horizontal.decrease", name: "shortcut.search", tone: .lit) {}
-            ShellIconButton("trash", name: "shortcut.search", tone: .alarm) {}
         }
         try draws(row, scheme)
         try draws(row, scheme, size: .accessibility5)

@@ -176,7 +176,6 @@
 "timeline.rules.empty" = "還沒有規則：這條時間軸和「全部」一樣，什麼都顯示。";
 "timeline.rule.written" = "你的 %d 條規則，時間序。";
 "timeline.remove" = "移除時間軸";
-"timeline.remove.help" = "會先問過你。規則跟著移除，貼文仍留在「全部」。";
 "timeline.remove.title" = "移除「%@」？";
 "timeline.remove.detail" = "規則會一起移除，貼文還在「全部」裡。";
 "timeline.remove.confirm" = "移除";
@@ -203,7 +202,6 @@
 "rule.missing.help" = "這已經不在了，規則仍套用在這台裝置留著的貼文上。";
 "rule.missing.spoken" = "已不在：規則仍套用在這台裝置留著的貼文上。";
 "rule.action.remove" = "移除規則";
-"rule.remove.help" = "拿掉這條規則。按「完成」之前什麼都不會變。";
 "rule.add" = "加一條規則";
 "rule.add.help" = "先選種類，再選它指的是什麼。";
 "rule.add.confirm" = "加入規則";
@@ -399,8 +397,6 @@
 "usage.drop.line" = "除非你另作選擇都會保留；磁碟上最舊的副本會先移除。";
 "usage.gone.line" = "只有來源表示已不在的貼文才會被標記。";
 "usage.source.back" = "回到來源";
-"usage.drop.copies.help" = "會先詢問，再捨棄記憶體與磁碟上所有的圖片副本。";
-"usage.gone.now.help" = "會先詢問，再立即放下所有來源已刪除的貼文與標記，不論等待多久。";
 
 "store.unreachable.title" = "這台裝置的 store 打不開";
 "store.unreachable.inUse.line" = "另一份 Fediqo 正在使用它。沒有任何改變。";
@@ -940,6 +936,9 @@
 "allow.own.host" = "主機，例如 img.example.com";
 "allow.own.add" = "加入";
 "allow.own.remove" = "移除 %@";
+"allow.own.remove.title" = "把 %@ 從你加入的主機移除？";
+"allow.own.remove.line" = "它為來源放行的東西，從現在起會被拒絕。";
+"allow.own.remove.detail" = "這台主機會從清單上拿掉，這台裝置不會再為那個來源連到它。已經存在這台裝置上的東西都不會動，之後也可以再加回來。";
 "allow.own.name" = "%@（你加的）";
 "allow.own.what" = "%1$@ 的頁面從這個主機載入的內容，以及 %1$@ 指向這裡的東西";
 "allow.own.why" = "你加入的。";
@@ -1054,7 +1053,7 @@
 "usage.kept.figure" = "%1$@ · 文字 %2$@";
 "usage.kept.posts" = "留下 %d 則";
 "usage.kept.stop" = "不再留下";
-"usage.kept.stop.help" = "不再留下這些貼文。會先問過。";
+"usage.kept.stop.from" = "不再留下 %@ 的貼文";
 "usage.kept.went" = "%d 則貼文不再留下。";
 "usage.kept.went.none" = "沒有留下的貼文。";
 "usage.kept.elsewhere" = "有 %d 則還透過另一個來源留著。";
@@ -1077,7 +1076,6 @@
 "prefs.limits.both" = "%1$@ 與 %2$@";
 "prefs.limits.brief.from" = "%1$@ · 來自 %2$@";
 "prefs.limits.clear" = "清除紀錄";
-"prefs.limits.clear.help" = "會先詢問，再清除這些紀錄。不會放下其他內容。";
 "prefs.limits.clear.title" = "清除紀錄？";
 "prefs.limits.clear.line" = "只清除這些紀錄；所有貼文與副本都保留。";
 "prefs.limits.clear.detail" = "這些紀錄說明各個上限放下了什麼，清除它們不會讓任何內容回來。這台裝置持有的內容與各個上限都不會改變。";
@@ -1167,7 +1165,6 @@
 "usage.span.between" = "%1$@ 到 %2$@";
 "usage.span.none" = "這幾天沒有貼文";
 "usage.span.now" = "放下這些貼文";
-"usage.span.now.help" = "會先詢問，再放下這幾天內、所選來源的每一則貼文。";
 "prefs.span.ask" = "要放下 %d 則貼文嗎？";
 "prefs.span.ask.detail.counted" = "這幾天發佈、來自所選來源的每一則貼文都會立即從這台裝置移除，不再出現在任何畫面或計數裡。這段日期以外的貼文、其他來源的貼文都不受影響，每個來源仍保持加入。你留下的貼文不算在這個數字裡。";
 "prefs.span.ask.line" = "發佈於 %1$@，來源：%2$@。放下後不會回來。";

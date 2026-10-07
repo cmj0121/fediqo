@@ -271,9 +271,9 @@ struct TimelineEditorListTests {
     func pressesNameThemselves() {
         let keys = [
             "editor.cancel", "editor.cancel.help", "timeline.done", "timeline.done.help",
-            "timeline.earlier", "timeline.later", "timeline.remove", "timeline.remove.help",
+            "timeline.earlier", "timeline.later", "timeline.remove",
             "rule.add", "rule.add.help", "rule.back", "rule.back.kinds", "rule.add.confirm",
-            "rule.change.confirm", "rule.action.remove", "rule.remove.help",
+            "rule.change.confirm", "rule.action.remove",
         ]
         for key in keys {
             let english = L10n.t(key, language: .english)

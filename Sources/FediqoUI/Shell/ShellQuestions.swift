@@ -251,14 +251,15 @@ enum ShellQuestion {
         )
     }
 
-    /// Clearing the limits' account (#251). **Plain, not a loss**: only the lines go, and they
-    /// were about posts already gone; nothing held goes with them.
+    /// Clearing the limits' account (#251). **Not a loss, and not drawn as one**: only the lines
+    /// go, and they were about posts already gone; nothing held goes with them. Keyed, as
+    /// Clear's yes is, so the question has the one yes a `…` item acts on (⌘Return).
     static func clearAccount(language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellConfirmation(
             symbol: "eraser", title: L10n.t("prefs.limits.clear.title", language: language),
             line: L10n.t("prefs.limits.clear.line", language: language),
             help: L10n.t("prefs.limits.clear.detail", language: language),
-            choices: [.init(yes, L10n.t("prefs.limits.clear.confirm", language: language), role: .plain)],
+            choices: [.init(yes, L10n.t("prefs.limits.clear.confirm", language: language), role: .keyed)],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
     }
@@ -305,6 +306,18 @@ enum ShellQuestion {
             line: line,
             help: help,
             choices: [.init(yes, L10n.t("prefs.gone.confirm", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Removing a host the person added for one of their sources. **A loss**: what it let
+    /// through for that source is refused from the yes on. Nothing held goes with it.
+    static func removeOwnHost(_ host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "trash", title: String(format: L10n.t("allow.own.remove.title", language: language), host),
+            line: L10n.t("allow.own.remove.line", language: language),
+            help: L10n.t("allow.own.remove.detail", language: language),
+            choices: [.init(yes, L10n.t("allow.own.removeIt", language: language), role: .destructive)],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
     }

@@ -2,7 +2,8 @@ import FediqoCore
 import SwiftUI
 
 /// Posts their source deleted (#179), where this device says what it holds and for how long: the
-/// wait after which they go, and a press that lets them all go now.
+/// wait after which they go, and — behind the section's `…` — the press that lets them all go
+/// now.
 ///
 /// **Beside the keep-for window, on the same tab, because it is the same question** — how long
 /// a post stays here — asked of the posts a source has since let go. Where the two disagree the
@@ -12,6 +13,12 @@ import SwiftUI
 /// **And the places a read down settled** (#204), where a timeline's source no longer has what lay
 /// between two posts: the same wait and the same press let their marks go, and count them apart
 /// from the posts, so the press never says it let go of posts it did not.
+///
+/// **Let go now is a destructive item of `…`, and has no button of its own.** It counts at the
+/// press, as the button it replaces did — nothing here moves when a source deletes a post, so a
+/// count taken any earlier could be stale: where there is something to let go the question is put
+/// at once, naming what was just counted; where there is nothing that is said at once, and
+/// nothing is asked. A press is never left unanswered.
 ///
 /// A view of its own rather than more of `UsagePane`, so the page keeps one section per fact and
 /// this one can be read, and tested, alone.
@@ -23,11 +30,6 @@ struct GoneSection: View {
     /// What the last press let go, and nothing before a press — "none went" would be an answer
     /// to a question nobody asked yet.
     @State private var went: WentGone?
-    /// The press has counted what it would let go and is asking first, as every other drop on
-    /// this page does; what it counted is what the question names.
-    @State private var asking: WentGone?
-    /// How many posts marked gone the person keeps, counted with `asking`: they stay (#294).
-    @State private var askingKept = 0
 
     /// The waits offered, in days. Never, the default, is offered beside them.
     static let dayChoices = [1, 7, 30, 90]
@@ -47,25 +49,45 @@ struct GoneSection: View {
             HStack(spacing: ShellSpace.snug) {
                 if let went { reading(Self.wentLine(went.posts, places: went.places)) }
                 Spacer(minLength: ShellSpace.snug)
-                ShellIconButton("trash", name: "prefs.gone.now", help: "usage.gone.now.help", tone: .alarm) {
-                    Task {
-                        // Nothing to let go is said at once; anything is asked about first.
-                        let counted = await session.goneHeld()
-                        if counted.isNone {
-                            went = counted
-                        } else {
-                            askingKept = await session.goneKept()
-                            asking = counted
-                        }
-                    }
-                }
+                ShellMoreButton(Self.more(
+                    count: { await session.goneHeld() },
+                    kept: { await session.goneKept() },
+                    none: { went = $0 },
+                    go: { Task { went = await session.letAllGoneGo() } }
+                ))
             }
         } header: {
             ShellSectionHead(title: "prefs.gone", line: "usage.gone.line", help: "prefs.gone.footer")
         }
-        .shellConfirm($asking, question: { ShellQuestion.letGo(posts: $0.posts, places: $0.places, kept: askingKept) }) { _, _ in
-            Task { went = await session.letAllGoneGo() }
-        }
+    }
+
+    /// The section's `…`: the one item that lets everything deleted at its source go now.
+    ///
+    /// **Destructive, and its question is counted at the press** (`ShellMoreItem.danger(counts:)`):
+    /// `count` is asked when the item is chosen, and what it finds is what `ShellQuestion.letGo`
+    /// names, with how many of those posts are `kept`. Where it finds nothing, `none` is told so
+    /// the section says none went, and no question is put.
+    static func more(
+        count: @escaping @MainActor () async -> WentGone, kept: @escaping @MainActor () async -> Int,
+        none: @escaping @MainActor (WentGone) -> Void, go: @escaping () -> Void,
+        language: DummyLanguage? = nil
+    ) -> ShellMore {
+        ShellMore(items: [
+            .danger(
+                "trash", L10n.t("prefs.gone.now", language: language),
+                counts: {
+                    let counted = await count()
+                    guard !counted.isNone else {
+                        none(counted)
+                        return nil
+                    }
+                    return ShellQuestion.letGo(
+                        posts: counted.posts, places: counted.places, kept: await kept(), language: language
+                    )
+                },
+                act: go
+            ),
+        ])
     }
 
     /// What the press asks before it lets `count` posts and `places` settled places go (#204):

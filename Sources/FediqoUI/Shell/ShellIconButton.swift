@@ -9,13 +9,12 @@ import SwiftUI
 ///
 /// **The timeline's header marks, lifted.** One glyph at the caption size, quiet ink, a finger's
 /// worth of room round it whatever size the glyph is drawn. `tone` is the one thing a caller
-/// chooses about how it looks: quiet, lit where the reader is, or the alarm a press that removes
-/// something wears.
+/// chooses about how it looks: quiet, or lit where the reader is. There is no alarm tone: a press
+/// that removes something is an item of a `…` menu (`ShellMoreItem.danger`) and never a button.
 struct ShellIconButton: View {
     enum Tone: Equatable {
         case quiet
         case lit
-        case alarm
     }
 
     let symbol: String
@@ -65,7 +64,6 @@ struct ShellIconButton: View {
         switch tone {
         case .quiet: return ShellChrome.inkDim(colorScheme)
         case .lit: return ShellChrome.selectInk(colorScheme)
-        case .alarm: return ShellChrome.alarm(colorScheme)
         }
     }
 }

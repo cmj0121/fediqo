@@ -81,7 +81,7 @@ struct LimitAccountTests {
     func words(language: DummyLanguage) throws {
         let keys = [
             "prefs.limits", "prefs.limits.line", "prefs.limits.help", "prefs.limits.none", "prefs.limits.copies",
-            "prefs.limits.both", "prefs.limits.brief.from", "prefs.limits.clear", "prefs.limits.clear.help",
+            "prefs.limits.both", "prefs.limits.brief.from", "prefs.limits.clear",
             "prefs.limits.clear.title", "prefs.limits.clear.line", "prefs.limits.clear.detail",
             "prefs.limits.clear.confirm", "prefs.limits.detail.time", "prefs.limits.detail.posts",
             "prefs.limits.detail.copies", "prefs.limits.detail.sources", "prefs.limits.detail.sources.none",
@@ -113,11 +113,42 @@ struct LimitAccountTests {
         #expect(LimitAccountSection.brief(LimitAct(limit: .months, at: origin, posts: 3, sources: []), language: .english) == "3 posts")
     }
 
-    @Test("Clearing the account is a plain press with a way out")
-    func clearIsPlain() {
+    @Test("Clearing the account is not drawn as a loss, has a way out, and has the one yes a … item needs")
+    func clearIsNotALoss() {
         let clear = ShellQuestion.clearAccount(language: .english)
-        #expect(clear.choices.map(\.role) == [.plain])
+        #expect(clear.choices.map(\.role) == [.keyed])
+        #expect(!clear.warns)
+        #expect(clear.chorded?.id == ShellQuestion.yes)
         #expect(clear.cancel != nil)
         #expect(clear.title == "Clear the account?")
+    }
+
+    @Test("Clear is the one item of the list's …, under the eraser, asking first; dim with no line")
+    func clearIsBehindTheDots() async {
+        var cleared = 0
+        let more = LimitAccountSection.more(lines: 2, language: .english) { cleared += 1 }
+        #expect(more.items.map(\.symbol) == ["eraser"])
+        #expect(more.dangers.count == 1)
+        #expect(more.label(language: .english) == "More: Clear the account")
+        var put: [ShellMoreAsk] = []
+        more.items[0].press { put.append($0) }
+        #expect(put.first?.question == ShellQuestion.clearAccount(language: .english))
+        #expect(cleared == 0)
+        put.first?.answered("not the yes")
+        #expect(cleared == 0)
+        put.first?.answered(ShellQuestion.yes)
+        #expect(cleared == 1)
+
+        #expect(more.head.isEmpty)
+        // With no line the reason is the truth — no limit has acted — and not "not right now".
+        for language in [DummyLanguage.english, .taiwanese] {
+            let empty = LimitAccountSection.more(lines: 0, language: language) {}
+            #expect(empty.head == [L10n.t("prefs.limits.none", language: language)])
+            #expect(empty.items[0].title(language: language) == L10n.t("prefs.limits.clear", language: language))
+        }
+        let none = LimitAccountSection.more(lines: 0, language: .english) { cleared += 1 }.items[0]
+        #expect(none.look == .dim(.notNow) && !none.answers)
+        none.press { put.append($0) }
+        #expect(put.count == 1 && cleared == 1)
     }
 }

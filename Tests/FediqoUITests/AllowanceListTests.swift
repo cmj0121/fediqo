@@ -409,7 +409,11 @@ struct AllowanceListTests {
         #expect(builtIn.contains(".accessibilityLabel(String(format: L10n.t(\"allow.detail.on.spoken\"), entry.title()))"))
         #expect(L10n.t("allow.detail.on.spoken", language: .english) == "Let %@ through")
         #expect(own.contains("ShellListRow("))
-        #expect(own.contains(".accessibilityLabel(String(format: L10n.t(\"allow.own.remove\"), entry.title()))"))
+        // Remove is the one item of the detail head's `…`, so the menu is named with the host
+        // it removes ("More: Remove img.example").
+        let remove = OwnHostDetail.more(Allowance.own(host: "img.example", for: "forum.example"), language: .english) {}
+        #expect(remove.label(language: .english) == "More: Remove img.example")
+        #expect(own.contains("ShellMoreButton(Self.more(entry, remove: onRemove))"))
         for reach in ["http", "begin(", "note(", "URLSession"] {
             #expect(!builtIn.contains(reach), "the list reaches for \(reach)")
             #expect(!own.contains(reach), "the hosts reach for \(reach)")

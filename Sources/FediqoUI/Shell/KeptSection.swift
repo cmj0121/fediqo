@@ -3,24 +3,24 @@ import SwiftUI
 
 /// What the person keeps (#284), where this device says what it holds (#294): how many posts and
 /// what their words weigh, every source together and each by its name — a source that has been
-/// removed among them, since a kept post outlives its source — and a press beside each figure
-/// that stops keeping all of it.
+/// removed among them, since a kept post outlives its source.
 ///
 /// **On the Keep tab, beside the limits, because it is what the limits cannot reach.** The Room
 /// line above already says when kept posts alone hold the store over its room; this is where the
 /// reader sees how many those are, whose they are, and can let them be ordinary posts again.
 ///
-/// **Stop keeping asks first, and lets nothing go.** The question names the count; a yes takes
-/// the mark off and nothing else. The posts are then what any post is, and the next limit, or the
-/// next letting go, may take them — which the question says, since that is what the yes costs.
+/// **A row is a source's mark, its name, its figure and `…`; stopping is behind the dots.** Stop
+/// keeping takes a mark away that does not come back by itself, so it is a destructive item of
+/// the row's menu and has no button of its own. It asks first and lets nothing go: the question
+/// names the count, a yes takes the mark off and nothing else. The posts are then what any post
+/// is, and the next limit, or the next letting go, may take them — which the question says,
+/// since that is what the yes costs.
 ///
 /// A view of its own, as `GoneSection` is, so the page keeps one section per fact.
 struct KeptSection: View {
     @Environment(\.colorScheme) private var colorScheme
     let session: ShellSession
 
-    /// The press has its count and is asking first.
-    @State private var asking: KeptAsk?
     /// What the last press did, and nothing before one.
     @State private var went: StoppedKeeping?
 
@@ -33,38 +33,82 @@ struct KeptSection: View {
                 row(
                     L10n.t("usage.span.every"), figure: Self.figure(session.holdings.kept),
                     ask: KeptAsk(host: nil, posts: session.holdings.kept.posts)
-                )
+                ) {
+                    Image(systemName: UsagePane.Purpose.source.symbol)
+                        .shellFont(.name)
+                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                        .accessibilityHidden(true)
+                }
+                // Every source a line may name, looked up once for the list and not once a line.
+                let known = Self.sources(in: session)
                 ForEach(lines) { line in
-                    row(Self.name(line), figure: Self.figure(line.kept), ask: Self.ask(line))
+                    row(Self.name(line), figure: Self.figure(line.kept), ask: Self.ask(line)) {
+                        UsageSourceMark(source: known[line.host] ?? Source(host: line.host, kind: .unknown))
+                    }
                 }
             }
             if let went { reading(Self.wentLine(went)) }
         } header: {
             ShellSectionHead(title: "usage.kept", line: "usage.kept.line", help: "usage.kept.help")
         }
-        .shellConfirm($asking, question: { ShellQuestion.stopKeeping($0) }) { ask, _ in
-            Task { went = await session.stopKeeping(host: ask.host) }
-        }
     }
 
-    /// One figure and the press that stops keeping what it counts.
-    private func row(_ name: String, figure: String, ask: KeptAsk) -> some View {
+    /// One row: the mark, the name over its figure, and the `…` that holds stopping.
+    private func row(_ name: String, figure: String, ask: KeptAsk, @ViewBuilder mark: () -> some View) -> some View {
         HStack(spacing: ShellSpace.snug) {
+            mark()
             VStack(alignment: .leading, spacing: 0) {
-                Text(name).shellFont(.reading)
+                // A host is a name like any other row's: one line, and its middle goes first.
+                Text(name)
+                    .shellFont(.name)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 reading(figure)
             }
             Spacer(minLength: ShellSpace.snug)
-            ShellIconButton("bookmark.slash", name: "usage.kept.stop", help: "usage.kept.stop.help", tone: .alarm) {
-                // A source whose every kept post is kept through another source too has nothing
-                // this press would make ordinary: said at once, and nothing is asked or done.
-                if ask.posts == 0 {
-                    went = StoppedKeeping(ordinary: 0, elsewhere: ask.elsewhere)
-                } else {
-                    asking = ask
-                }
-            }
+            ShellMoreButton(Self.more(
+                ask,
+                said: { went = $0 },
+                stop: { Task { went = await session.stopKeeping(host: ask.host) } }
+            ))
         }
+    }
+
+    /// A row's `…`: the one item that stops keeping what the row counts.
+    ///
+    /// **Destructive, and asking `ShellQuestion.stopKeeping` first, wherever a press would make a
+    /// post ordinary.** A source whose every kept post is kept through another source too has
+    /// nothing this press would make ordinary: the item is then an ordinary one, since it takes
+    /// nothing away, and choosing it says so at once (`said`) — nothing is asked or done.
+    static func more(
+        _ ask: KeptAsk, said: @escaping (StoppedKeeping) -> Void, stop: @escaping () -> Void,
+        language: DummyLanguage? = nil
+    ) -> ShellMore {
+        let name = String(
+            format: L10n.t("usage.kept.stop.from", language: language),
+            SpanSection.whereLabel(ask.host, language: language)
+        )
+        guard ask.posts > 0 else {
+            return ShellMore(items: [
+                .plain(stopSymbol, name) { said(StoppedKeeping(ordinary: 0, elsewhere: ask.elsewhere)) },
+            ])
+        }
+        return ShellMore(items: [
+            .danger(stopSymbol, name, asks: ShellQuestion.stopKeeping(ask, language: language), act: stop),
+        ])
+    }
+
+    static let stopSymbol = "bookmark.slash"
+
+    /// The source each line is about, for its mark, by host: one here, or one removed whose
+    /// posts stayed (`UsageSourceList.source`'s order). A host in neither is drawn as the host
+    /// alone, since nothing remembers its kind.
+    static func sources(in session: ShellSession) -> [String: Source] {
+        Dictionary(
+            (session.sources + UsageSourceList.removed(session)).map { ($0.host, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     /// What is kept from one source.

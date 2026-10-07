@@ -93,7 +93,7 @@ struct UsageListTests {
                 #expect(long.count > short.count, "\(help) says less than \(line)")
             }
         }
-        for key in ["usage.gone.now.help", "usage.source.back", "usage.drop.copies.help", "usage.tab.keep"] {
+        for key in ["usage.source.back", "usage.tab.keep"] {
             for language in [DummyLanguage.english, .taiwanese] {
                 #expect(L10n.t(key, language: language) != key, "\(key) is missing in \(language)")
             }
@@ -102,7 +102,8 @@ struct UsageListTests {
 
     @Test("The long explanations are drawn only behind a (?), and every action is an icon")
     func footersAndActions() throws {
-        let files = try ["UsagePane", "UsageSources", "GoneSection", "SpanSection"].map(Self.source)
+        let files = try ["UsagePane", "UsageSources", "GoneSection", "SpanSection", "KeptSection", "LimitAccountSection"]
+            .map(Self.source)
         let all = files.joined()
         for (line, help) in [
             ("usage.cache.line", "prefs.cache.footer"), ("usage.drop.line", "prefs.drop.footer"),
@@ -111,19 +112,18 @@ struct UsageListTests {
             #expect(all.contains("line: \"\(line)\", help: \"\(help)\")"), "\(help) is not behind its heading's (?)")
             #expect(!all.contains("L10n.t(\"\(help)\")"), "\(help) is still drawn inline")
         }
-        // The questions' own buttons are #238's; every press on the page itself is an icon.
-        for name in ["prefs.drop.copies", "prefs.gone.now", "usage.span.now"] {
-            #expect(all.contains("name: \"\(name)\""), "\(name) is not an icon button")
-            #expect(!all.contains("Button(L10n.t(\"\(name)\")"), "\(name) is still a text button")
-        }
-        // What takes something away from one source is an item of its detail's `…`, never a
-        // button of its own.
-        let sources = try Self.source("UsageSources")
-        for name in ["prefs.cache.clear", "prefs.password.forget"] {
-            #expect(sources.contains("L10n.t(\"\(name)\", language: language)"), "\(name) is not offered")
+        // The questions' own buttons are #238's. Every press on the page that takes something
+        // away is an item of a `…`, named there, and never a button of its own.
+        for name in [
+            "prefs.cache.clear", "prefs.password.forget", "prefs.drop.copies", "prefs.gone.now", "usage.span.now",
+            "usage.kept.stop.from", "prefs.limits.clear",
+        ] {
+            #expect(all.contains("L10n.t(\"\(name)\", language: language)"), "\(name) is not offered")
             #expect(!all.contains("name: \"\(name)\""), "\(name) is still a button of its own")
+            #expect(!all.contains("Button(L10n.t(\"\(name)\")"), "\(name) is a text button")
         }
-        #expect(!sources.contains("ShellIconButton("), "the Sources tab draws a button of its own")
+        #expect(!all.contains("ShellIconButton("), "Usage draws a button of its own")
+        #expect(!all.contains(".shellConfirm($asking") && !all.contains("droppingCopies"), "a question is put outside a …")
     }
 
     // MARK: - The list row (quiet rows, U7)

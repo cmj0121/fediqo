@@ -177,7 +177,6 @@
 "timeline.rule.written" = "%d rules of yours, in time order.";
 "timeline.rule.written.one" = "%d rule of yours, in time order.";
 "timeline.remove" = "Remove timeline";
-"timeline.remove.help" = "Asks first. Its rules go with it; the posts stay under All.";
 "timeline.remove.title" = "Remove \"%@\"?";
 "timeline.remove.detail" = "Its rules go with it. The posts stay under All.";
 "timeline.remove.confirm" = "Remove";
@@ -204,7 +203,6 @@
 "rule.missing.help" = "This is gone. The rule still applies to posts this device holds.";
 "rule.missing.spoken" = "Missing: it still applies to posts this device holds.";
 "rule.action.remove" = "Remove rule";
-"rule.remove.help" = "Takes this rule out. Nothing changes until Done.";
 "rule.add" = "Add a rule";
 "rule.add.help" = "Pick a kind, then what it names.";
 "rule.add.confirm" = "Add rule";
@@ -400,8 +398,6 @@
 "usage.drop.line" = "Kept until you choose otherwise; the oldest copies on disk go first.";
 "usage.gone.line" = "Only posts their source says are gone are marked.";
 "usage.source.back" = "Back to sources";
-"usage.drop.copies.help" = "Asks first, then drops every picture copy in memory and on disk.";
-"usage.gone.now.help" = "Asks first, then lets go now of every post and place deleted at its source, whatever the wait.";
 
 "store.unreachable.title" = "This device's store could not be opened";
 "store.unreachable.inUse.line" = "Another copy of Fediqo is using it. Nothing was changed.";
@@ -965,6 +961,9 @@
 "allow.own.host" = "Host, such as img.example.com";
 "allow.own.add" = "Add";
 "allow.own.remove" = "Remove %@";
+"allow.own.remove.title" = "Remove %@ from your hosts?";
+"allow.own.remove.line" = "What it let through for its source is refused from now on.";
+"allow.own.remove.detail" = "The host leaves this list, and this device stops reaching it for that source. Nothing already held on this device goes, and you can add it again.";
 "allow.own.name" = "%@ (yours)";
 "allow.own.what" = "What %1$@'s pages pull in from this host, and what %1$@ points to on it";
 "allow.own.why" = "You added it.";
@@ -1079,7 +1078,7 @@
 "usage.kept.figure" = "%1$@ · %2$@ of words";
 "usage.kept.posts" = "%d kept";
 "usage.kept.stop" = "Stop keeping";
-"usage.kept.stop.help" = "Stop keeping these posts. It asks first.";
+"usage.kept.stop.from" = "Stop keeping posts from %@";
 "usage.kept.went" = "%d posts are no longer kept.";
 "usage.kept.went.one" = "%d post is no longer kept.";
 "usage.kept.went.none" = "None was kept.";
@@ -1108,7 +1107,6 @@
 "prefs.limits.both" = "%1$@ and %2$@";
 "prefs.limits.brief.from" = "%1$@ · from %2$@";
 "prefs.limits.clear" = "Clear the account";
-"prefs.limits.clear.help" = "Asks first, then clears these lines. Nothing else goes.";
 "prefs.limits.clear.title" = "Clear the account?";
 "prefs.limits.clear.line" = "Only these lines go; every post and copy stays.";
 "prefs.limits.clear.detail" = "The lines say what the limits let go of, and nothing of that comes back by clearing them. Nothing held on this device changes, and no limit does.";
@@ -1200,7 +1198,6 @@
 "usage.span.between" = "%1$@ – %2$@";
 "usage.span.none" = "No posts on these days";
 "usage.span.now" = "Let these go";
-"usage.span.now.help" = "Asks first, then lets go of every post from these days and the source chosen.";
 "prefs.span.ask" = "Let go of %d posts?";
 "prefs.span.ask.one" = "Let go of %d post?";
 "prefs.span.ask.detail.counted" = "Every post from those days and that source goes from this device now, from every screen and every count. Nothing outside those days, and nothing from another source, is touched. Every source stays joined. The posts you keep are not in that count.";

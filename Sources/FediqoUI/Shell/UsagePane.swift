@@ -9,8 +9,12 @@ import SwiftUI
 /// decision 14's screen. Three caches hold a server's copy between them and none of them is
 /// visible from anywhere else in the app, so this is the only place a reader can see what has
 /// accumulated in their name, and the only place they can drop it. A source is one row — its
-/// posts as the figure, in the type scale's monospaced `reading` role so a column of servers lines
-/// up — and entering it opens everything held for it, where it is cleared (`UsageSourceDetail`).
+/// mark, its host and the way in — and entering it opens everything held for it, each figure a
+/// line, where it is cleared from the masthead's `…` (`UsageSourceDetail`).
+///
+/// **Nothing that takes something away is a button of its own on this page.** Clear, forgetting
+/// a password, stop keeping, letting go, clearing the limits' account and dropping the copies are
+/// each an item of a `…` on the row or section they act on, and each asks first.
 ///
 /// **The section says what it is, in its header, because the figures under it would otherwise
 /// lie.** What is held here outlives a relaunch: the posts are in the store on disk, pictures are
@@ -83,9 +87,6 @@ struct UsagePane: View {
     /// What each source's picture copies weigh on disk, by folded host. Optional for the reason
     /// `catalogues` is: until the first read lands, "nothing on disk" would be a guess.
     @State private var onDisk: [String: Int]?
-
-    /// The drop by cache has been pressed and not yet answered for.
-    @State private var droppingCopies = false
 
     /// A narrower window the reader picked and not yet confirmed: it would drop posts, so it asks
     /// first. A wider one, or forever, drops nothing and applies at once.
@@ -165,10 +166,6 @@ struct UsagePane: View {
         )) {
             await readCatalogues()
             await readDisk()
-        }
-        .shellConfirm($droppingCopies, question: ShellQuestion.dropCopies()) { _ in
-            session?.dropCopies()
-            Task { await readDisk() }
         }
         .shellConfirm($shortening, question: { ShellQuestion.shorten(months: $0) }) { months, _ in
             prefs.keepMonths = months
@@ -362,7 +359,8 @@ struct UsagePane: View {
         heldByKept ? L10n.t("prefs.room.kept", language: language) : nil
     }
 
-    /// Picture copies, all sources together, and the drop that takes them (#7, by cache).
+    /// Picture copies, all sources together, and — behind the line's `…` — the drop that takes
+    /// them (#7, by cache).
     private func copies(_ session: ShellSession) -> some View {
         let memory = Self.memory(session.sources.map(\.host), in: session)
         let disk = onDisk.map { $0.values.reduce(0, +) }
@@ -370,14 +368,26 @@ struct UsagePane: View {
             HStack(spacing: ShellSpace.snug) {
                 reading(Text(Self.picturesLine(count: memory.count, bytes: memory.bytes, disk: disk)))
                 Spacer(minLength: ShellSpace.snug)
-                ShellIconButton("trash", name: "prefs.drop.copies", help: "usage.drop.copies.help", tone: .alarm) {
-                    droppingCopies = true
-                }
+                ShellMoreButton(Self.copiesMore {
+                    session.dropCopies()
+                    Task { await readDisk() }
+                })
             }
             .padding(.vertical, ShellSpace.tight)
         } header: {
             ShellSectionHead(title: "prefs.held.total", line: "usage.drop.line", help: "prefs.drop.footer")
         }
+    }
+
+    /// The copies line's `…`: the one item that drops every picture copy — destructive, asking
+    /// `ShellQuestion.dropCopies` first.
+    static func copiesMore(language: DummyLanguage? = nil, drop: @escaping () -> Void) -> ShellMore {
+        ShellMore(items: [
+            .danger(
+                "trash", L10n.t("prefs.drop.copies", language: language),
+                asks: ShellQuestion.dropCopies(language: language), act: drop
+            ),
+        ])
     }
 
     /// The Keep picker's binding: a window that would drop posts waits on `shortening`'s question;

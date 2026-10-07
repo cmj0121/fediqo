@@ -31,6 +31,7 @@ struct QuestionTests {
             ShellQuestion.letGo(SpanAsk(posts: 3, from: Date(), to: Date(), host: nil), language: language),
             ShellQuestion.letGo(SpanAsk(posts: 1, from: Date(), to: Date(), host: "a.example"), language: language),
             ShellQuestion.removeTimeline(named: "Art", language: language),
+            ShellQuestion.removeOwnHost("img.example", language: language),
             ShellQuestion.tighten(room: 250_000_000, language: language),
             ShellQuestion.clearAccount(language: language),
             ShellQuestion.storeNewer(language: language),
@@ -171,6 +172,7 @@ struct QuestionTests {
             "account.remove.line.stay", "account.remove.line.stay.boards", "confirm.destructive.hint",
             "prefs.password.forget.title", "prefs.password.forget.line", "prefs.password.forget.detail",
             "prefs.password.forget.confirm",
+            "allow.own.remove.title", "allow.own.remove.line", "allow.own.remove.detail", "usage.kept.stop.from",
         ] + Self.clearKeys.map(ShellQuestion.clearLineKey)
         for lproj in ["en", "zh-TW", "zh-Hant"] {
             let strings = try String(

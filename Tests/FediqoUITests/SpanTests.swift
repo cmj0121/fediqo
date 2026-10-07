@@ -134,7 +134,7 @@ struct SpanTests {
         #expect(!one.line.contains(L10n.t("usage.span.between", language: language).prefix(4)), "one day is named once")
 
         for key in ["prefs.span", "usage.span.line", "prefs.span.footer", "usage.span.from", "usage.span.to",
-                    "usage.span.source", "usage.span.every", "usage.span.every.line", "usage.span.none", "usage.span.now", "usage.span.now.help"] {
+                    "usage.span.source", "usage.span.every", "usage.span.every.line", "usage.span.none", "usage.span.now"] {
             #expect(L10n.t(key, language: language) != key, "\(key) in \(language)")
         }
         #expect(SpanSection.countLine(0, language: language) == L10n.t("usage.span.none", language: language))

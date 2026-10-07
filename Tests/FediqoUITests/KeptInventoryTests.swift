@@ -76,7 +76,7 @@ struct KeptInventoryTests {
     func theWords(_ language: DummyLanguage) {
         for key in [
             "usage.kept", "usage.kept.line", "usage.kept.help", "usage.kept.none", "usage.kept.stop",
-            "usage.kept.stop.help", "usage.kept.went.none", "usage.kept.ask.detail",
+            "usage.kept.stop.from", "usage.kept.went.none", "usage.kept.ask.detail",
         ] {
             #expect(L10n.t(key, language: language) != key, "\(key) has no words in \(language)")
         }
