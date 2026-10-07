@@ -344,7 +344,7 @@ struct InventoryTests {
         for stem in ["prefs.cache", "prefs.held", "prefs.drop", "prefs.keep", "prefs.password"] {
             #expect(!preferences.contains("\"\(stem)"), "Preferences still draws \(stem)")
         }
-        #expect(usage.contains("session.clearing = source.host"), "a row's Clear no longer asks the same question")
+        #expect(usage.contains("asks: session.clearQuestion(host: host)"), "a source's Clear no longer asks the same question")
 
         for language in [DummyLanguage.english, .taiwanese] {
             let usageTitle = L10n.t("shell.usage.title", language: language)

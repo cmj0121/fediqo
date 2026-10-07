@@ -389,11 +389,9 @@ public struct FediqoRootView: View {
             .sheet(item: $session.editing) { draft in
                 TimelineEditor(session: session, draft: draft)
             }
-            // Clear's question as Usage asks it, and the notice that a server ended a sign-in: each
-            // a modifier of its own rather than spelled here. See `HostQuestion` for why. Remove's
-            // question is not on the root: it is asked by the `…` it is chosen from
-            // (`ShellMoreAsks`), as a source row's Clear is.
-            .modifier(HostQuestion.clear(session))
+            // The notice that a server ended a sign-in: a modifier of its own rather than spelled
+            // here. See `WithdrawQuestion` for why. Remove's question and Clear's are not on the
+            // root: each is asked by the `…` it is chosen from (`ShellMoreAsks`).
             .modifier(EndedSignInNotice(session: session))
             .modifier(ActivitySheet(session: session))
             .modifier(StoreNewerNotice(shown: $storeIsNewer, seen: storeNoticeSeen))
@@ -487,27 +485,6 @@ public struct FediqoRootView: View {
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
             .id(prefs.language)
-    }
-
-    /// How many boards Remove would take from `host` — what its question's line names where there
-    /// are any, since they are the one part of Remove that does not come back.
-    ///
-    /// **Two whole sentences and two keys, not one sentence with a clause appended.** "the 3 boards
-    /// you picked" must never appear over a microblog, and a second half joined on with `+` is a
-    /// half no translator can put first. `ShellSession.clear` argues why the boards are the part
-    /// worth naming: pictures come back by themselves, a pick of eight boards out of forty does
-    /// not. See `ShellQuestion.remove`.
-    static func boards(of host: String, in sources: [Source]) -> Int {
-        sources.first { $0.host == host }?.boards.count ?? 0
-    }
-
-    /// The question before `host` is removed, with what this session holds for it read here: the
-    /// boards it takes, and how many of its posts the person keeps, which stay (#294).
-    static func removeQuestion(_ host: String, in session: ShellSession, postsStay: Bool) -> ShellConfirmation {
-        ShellQuestion.remove(
-            host: host, boards: boards(of: host, in: session.sources), postsStay: postsStay,
-            kept: session.holdings.kept(host: host).posts
-        )
     }
 
     /// A forum's own page closed, on the window a Mac opens it in or the sheet elsewhere — **one
@@ -1925,68 +1902,7 @@ private struct WithdrawQuestion: ViewModifier {
     }
 }
 
-/// Clear's question as Usage asks it (decision 29), as a modifier of its own.
-///
-/// **Out of `FediqoRootView`'s chain, and the presenters below with it.** Each built a `Binding`
-/// and a `presenting:` presenter with closures inside one very long modifier chain, and Xcode
-/// 26.6's Swift gave up type-checking that chain on the runner — while the compiler this is
-/// written with solved it in three seconds without a word. A local timing predicts nothing about
-/// another compiler's solver, so the chain is kept to one plain `.modifier(…)` per presenter
-/// instead, which is a cost no compiler has to solve against the rest of it. See
-/// `WithdrawQuestion`.
-///
-/// **On the root beside the other presenters**, and for the same documented reason: one
-/// presenter driven by one piece of session state survives a second call site.
-private struct HostQuestion: ViewModifier {
-    let session: ShellSession
-    /// The host being asked about, where one is; the question is presented from it.
-    let asking: ReferenceWritableKeyPath<ShellSession, String?>
-    let question: @MainActor (String) -> ShellConfirmation
-    let act: @MainActor (String) async -> Void
-
-    /// The host, and the question as it read when asked — so a sheet sliding away after the act
-    /// has begun still says what was asked, not what the act has since changed.
-    struct Asked {
-        let host: String
-        let question: ShellConfirmation
-    }
-
-    /// **The Clear question.** One presenter and one piece of session state for `UsagePane`'s
-    /// row, which presses for the same call a source row's `…` does and must therefore ask the
-    /// same question.
-    ///
-    /// **It exists because Clear is not reversible, whatever the row looks like.** It drops the
-    /// pictures, the emoji names and the first posts, all of which come back — and it calls
-    /// `ForumSessions.forget(host:)`, which deletes the saved Keychain password and signs the
-    /// reader out of the forum. The Account row says neither of those before the press, so this
-    /// is the one place they are said: the line names what does not come back, the (?) the rest.
-    ///
-    /// **The question is `ShellSession.clearQuestion`**, the function a source row's `…` reads
-    /// for the question its Clear carries — so what the menu says it will ask and what is asked
-    /// are one value, and a test drives it for a host with a password and one without.
-    static func clear(_ session: ShellSession) -> HostQuestion {
-        HostQuestion(
-            session: session, asking: \.clearing,
-            question: { session.clearQuestion(host: $0) },
-            act: { await session.clear(host: $0) }
-        )
-    }
-
-    func body(content: Content) -> some View {
-        content.shellConfirm(asked, question: \.question) { asked, _ in
-            Task { await act(asked.host) }
-        }
-    }
-
-    private var asked: Binding<Asked?> {
-        Binding(
-            get: { session[keyPath: asking].map { Asked(host: $0, question: question($0)) } },
-            set: { if $0 == nil { session[keyPath: asking] = nil } }
-        )
-    }
-}
-
-/// A server ended a sign-in on its own side, said — out of the chain for `HostQuestion`'s reason.
+/// A server ended a sign-in on its own side, said — out of the chain for `WithdrawQuestion`'s reason.
 /// The row already reads signed out, and this says why rather than leaving a timeline to go quiet.
 private struct EndedSignInNotice: ViewModifier {
     let session: ShellSession

@@ -834,9 +834,9 @@ struct SourcePageTests {
         #expect(L10n.t("account.clear.title", language: .english) == "Clear what %@ left here?")
     }
 
-    /// **The wiring, which is the half risk 12 counts.** Both entrances set the same piece of
-    /// session state and neither empties anything by itself; only the dialog's confirm reaches
-    /// `clear(host:)`, and that call clears the question behind it.
+    /// **The wiring, which is the half risk 12 counts.** Both entrances are a destructive item
+    /// of a `…` carrying one question, and neither empties anything by itself; only the
+    /// question's yes reaches `clear(host:)`.
     @Test("Both Clears ask the same question, and neither empties anything by asking")
     func bothClearsAsk() async throws {
         let session = self.session()
@@ -844,22 +844,22 @@ struct SourcePageTests {
         let pane = AccountPane(session: session)
         let row = try #require(session.rows.first)
 
-        // Usage's entrance sets the session's state, which the root's presenter asks from; the
-        // row's `…` asks the same question itself (`aRowsClearAndRemoveReachTheRightThings`).
-        // One function builds it for both.
-        session.clearing = Self.forum
+        // Usage's entrance is its detail's `…`; the row's `…` asks the same question itself
+        // (`aRowsClearAndRemoveReachTheRightThings`). One function builds it for both.
+        var put: [ShellMoreAsk] = []
+        let usage = UsageSourceDetail.more(row.source, in: session).items[0]
+        #expect(usage.isDanger)
+        usage.press { put.append($0) }
+        #expect(put.first?.question == session.clearQuestion(host: row.source.host))
         #expect(session.cleared == 0, "asking emptied something before it was answered")
 
-        // The confirm, and the question going with it — the same call from either page.
+        // The confirm — the same call from either page.
         await pane.clear(row)
         #expect(session.cleared == 1)
-        #expect(session.clearing == nil, "the question outlived the decision it was asking about")
 
-        // **Remove answers a pending Clear too**, or a dialog would be left standing over a row
-        // that has gone: `remove` reaches `clear` on its way out.
-        session.clearing = Self.forum
+        // **Remove clears on its way out**: `remove` reaches `clear`.
         await session.remove(host: Self.forum)
-        #expect(session.clearing == nil)
+        #expect(session.cleared == 2)
     }
 
     // MARK: - A number is in the shell's language, not the device's

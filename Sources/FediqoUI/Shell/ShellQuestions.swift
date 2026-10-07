@@ -164,6 +164,20 @@ enum ShellQuestion {
         )
     }
 
+    /// Forgetting the password saved for a forum, and nothing else of it. **A loss**: the
+    /// password does not come back, and is typed again the next time the forum asks. The sign-in
+    /// it made stays until that ends, which the (?) says.
+    static func forgetPassword(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "key.slash",
+            title: String(format: L10n.t("prefs.password.forget.title", language: language), host),
+            line: L10n.t("prefs.password.forget.line", language: language),
+            help: L10n.t("prefs.password.forget.detail", language: language),
+            choices: [.init(yes, L10n.t("prefs.password.forget.confirm", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     /// The line beside each of Clear's three long texts.
     static func clearLineKey(_ detailKey: String) -> String {
         detailKey.replacingOccurrences(of: "account.clear.detail", with: "account.clear.line")

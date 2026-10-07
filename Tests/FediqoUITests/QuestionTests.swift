@@ -22,6 +22,7 @@ struct QuestionTests {
             ShellQuestion.signIn(host: "a.example", language: language),
             ShellQuestion.bookmarks(host: "a.example", language: language),
             ShellQuestion.dropCopies(language: language),
+            ShellQuestion.forgetPassword(host: "a.example", language: language),
             ShellQuestion.shorten(months: 6, language: language),
             ShellQuestion.shorten(months: 1, language: language),
             ShellQuestion.letGo(posts: 4, places: 0, language: language),
@@ -168,6 +169,8 @@ struct QuestionTests {
             "prefs.drop.copies.line", "prefs.keep.shorten.line", "prefs.gone.ask.line", "prefs.span.ask.line",
             "prefs.gone.ask.line.places", "prefs.gone.ask.line.placesonly", "account.remove.line.boards",
             "account.remove.line.stay", "account.remove.line.stay.boards", "confirm.destructive.hint",
+            "prefs.password.forget.title", "prefs.password.forget.line", "prefs.password.forget.detail",
+            "prefs.password.forget.confirm",
         ] + Self.clearKeys.map(ShellQuestion.clearLineKey)
         for lproj in ["en", "zh-TW", "zh-Hant"] {
             let strings = try String(

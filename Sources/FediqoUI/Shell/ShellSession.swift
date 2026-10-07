@@ -116,23 +116,6 @@ final class ShellSession {
     /// message "tells the reader what happened and offers them nothing to do about it".
     var offerSignIn: String?
 
-    /// The server the reader has pressed Clear on and not yet answered for, or nothing.
-    ///
-    /// **Nothing is emptied while this is set**, for a reason decision 29
-    /// only half states. The colour is the user's overstatement; the confirmation is closing a
-    /// real hole. `clear(host:)` reaches `ForumSessions.forget(host:)`, which drops the forum's
-    /// cookies **and deletes the saved password from the Keychain** — and `forget`'s own doc makes
-    /// the fairness of that conditional on one thing: *"the row says a password is held before the
-    /// button is pressed"*. `UsagePane` draws `passwordLine` and meets it. An Account row
-    /// draws no inventory line at all, by `DESIGN.md` §3.6's own rule, so until now this device
-    /// deleted a password with nothing on screen having said one was held — and signed the reader
-    /// out of a forum, changing the state of the icon beside the one they pressed.
-    ///
-    /// **One presenter, both entrances.** `prefs.cache.clear` is one word for one call, so a Clear
-    /// that confirms on Account and fires straight on Usage would be the same word doing two
-    /// different things two panes apart. `UsagePane` sets this too.
-    var clearing: String?
-
     /// What takes this device's store away and reads one back (#247), or nothing where the app
     /// handed none in — a preview, a test — and then Preferences offers neither.
     @ObservationIgnored var carrier: (any StoreCarrier)?
@@ -2611,11 +2594,6 @@ final class ShellSession {
 
     private func clearNow(host: String, keepingRows: Bool) async {
         let host = host.lowercased()
-        // The question has been answered, so nothing is pending any more — set before the awaits,
-        // so no dialog state outlives the decision it was asking about. Unconditional, because `remove` reaches this too and a Remove answered while
-        // a Clear was pending would otherwise leave that Clear's question standing over a row that
-        // has gone.
-        clearing = nil
         // Before the first await: Home posts read before the Clear must not land after it.
         stopReadingAsYou(host: host)
         // What waits in the source's line of loads goes too (#293) — here for a Clear, and for a

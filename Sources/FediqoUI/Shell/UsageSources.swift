@@ -1,9 +1,15 @@
 import FediqoCore
 import SwiftUI
 
-/// Usage's Sources tab (#234): one `ShellListRow` a source, its posts as the figure and its
-/// pictures as the brief — and entering a row opens `UsageSourceDetail`, where everything this
-/// device holds from that source is read out and cleared.
+/// Usage's Sources tab (#234): one `ShellListRow` a source — **its mark, its host and the
+/// chevron, and nothing else at any width.** The chevron is the way in to the rest: entering a
+/// row opens `UsageSourceDetail`, where everything this device holds from that source is read out
+/// and cleared.
+///
+/// **No figure on the row, and the figures are not lost.** How many posts and pictures a source
+/// holds is the detail's to say, line by line; the row says them only to VoiceOver (`spoken`),
+/// whose reader does not see a chevron and should not have to enter a row to learn it is empty.
+/// A host too long for the row loses its middle, so its start and its end are both still read.
 ///
 /// **The readings are handed in, not read here.** `UsagePane` owns the catalogue and disk reads
 /// and their `.task`, so the list and the detail are answers about the same reading.
@@ -19,38 +25,44 @@ struct UsageSourceList: View {
     var body: some View {
         Section {
             ForEach(session.sources) { source in
-                ShellListRow(
-                    id: source.host, title: source.host,
-                    brief: UsagePane.picturesLine(source, in: session, onDisk: onDisk),
-                    figure: UsagePane.postsLine(session.holdings.posts(host: source.host)),
-                    selection: $lit,
-                    onOpen: { session.usageOpened = source.host },
-                    onStep: step
-                ) {
-                    UsageSourceMark(source: source)
-                }
-                .listRowInsets(EdgeInsets())
+                row(source, removed: false)
             }
             // The sources removed whose posts stayed (#250), after the ones here: one row each,
-            // so the rows still sum to the total on Time. What the row briefs is the one fact
-            // about it, and its detail says what it holds and how it goes.
+            // so the rows still sum to the total on Time. That a source is removed is its
+            // detail's to say, with what it holds and how it goes.
             ForEach(Self.removed(session)) { source in
-                ShellListRow(
-                    id: source.host, title: source.host,
-                    brief: L10n.t("item.left"),
-                    figure: UsagePane.postsLine(session.holdings.posts(host: source.host)),
-                    selection: $lit,
-                    onOpen: { session.usageOpened = source.host },
-                    onStep: step
-                ) {
-                    UsageSourceMark(source: source)
-                }
-                .listRowInsets(EdgeInsets())
+                row(source, removed: true)
             }
             .onAppear { if let returning { lit = returning } }
         } header: {
             ShellSectionHead(title: "prefs.cache", line: "usage.cache.line", help: "prefs.cache.footer")
         }
+    }
+
+    /// One source's row: the same three things whether the source is here or removed.
+    private func row(_ source: Source, removed: Bool) -> some View {
+        ShellListRow(
+            id: source.host, title: source.host,
+            spoken: Self.spoken(source, in: session, onDisk: onDisk, removed: removed),
+            cut: .middle,
+            selection: $lit,
+            onOpen: { session.usageOpened = source.host },
+            onStep: step
+        ) {
+            UsageSourceMark(source: source)
+        }
+        .listRowInsets(EdgeInsets())
+    }
+
+    /// What VoiceOver hears for a row, since the row draws only the host: the host, then what the
+    /// detail would say first — the posts held and the pictures, or, of a source removed, that it
+    /// was and the posts that stayed.
+    static func spoken(_ source: Source, in session: ShellSession, onDisk: [String: Int]?, removed: Bool) -> String {
+        let posts = UsagePane.postsLine(session.holdings.posts(host: source.host))
+        let rest = removed
+            ? [L10n.t("item.left"), posts]
+            : [posts, UsagePane.picturesLine(source, in: session, onDisk: onDisk)]
+        return ([source.host] + rest).joined(separator: L10n.t("mark.dim.names"))
     }
 
     /// The sources no longer here that this device still holds posts from (#250), by host: the
@@ -82,9 +94,10 @@ struct UsageSourceList: View {
     }
 }
 
-/// What this device holds from a source removed whose posts stayed (#250): the posts, and how
-/// they go. Nothing to clear — Remove took everything else with the source — so there is no
-/// press here; the posts go by the window, or by a later limit, like any other post.
+/// What this device holds from a source removed whose posts stayed (#250): that it was removed,
+/// the posts, and how they go. **Nothing to do here, so no `…` is drawn** — Remove took
+/// everything else with the source, and the posts go by the window, or by a later limit, like
+/// any other post.
 struct UsageRemovedSourceDetail: View {
     let session: ShellSession
     let source: Source
@@ -112,12 +125,16 @@ struct UsageRemovedSourceDetail: View {
     }
 }
 
-/// Everything this device holds from one source, and the Clear that lets it go (#234). Its posts
-/// are everything the store holds from it, and the ones no timeline shows are said apart (#194).
+/// Everything this device holds from one source (#234), each figure a line of its own: its
+/// posts, its pictures, its emoji names, a forum's first posts, and that a password is held.
+/// Its posts are everything the store holds from it, and the ones no timeline shows are said
+/// apart (#194).
 ///
-/// **Clear asks, rather than fires** (decision 29): it sets `session.clearing`, the one presenter
-/// on `FediqoRootView`, so a Clear here and on Account are one question. The password line is
-/// drawn above the press, so a reader has been told a password goes with it before they ask.
+/// **What takes something away is behind the masthead's `…`, and asks first.** Clear puts the
+/// question a source row's Clear puts on Account (`ShellSession.clearQuestion`), so the two
+/// are one question; Forget password puts its own (`ShellQuestion.forgetPassword`), and is drawn
+/// dim on a source that holds none. Neither is a button of its own. The password line is drawn
+/// on the page, so a reader has been told a password goes with a Clear before they ask.
 ///
 /// Nothing here is a stranger's words but the **host**, which went through `Host.parse` — see
 /// `UsagePane`'s note on the emoji-height rule.
@@ -144,15 +161,48 @@ struct UsageSourceDetail: View {
         }
     }
 
-    /// Back, the source's mark and host, and Clear.
+    /// Back, the source's mark and host, and `…`.
     private var masthead: some View {
         ShellDetailHead(source.host, back: "usage.source.back", onBack: { session.usageOpened = nil }) {
             UsageSourceMark(source: source)
         } trailing: {
-            ShellIconButton("trash", name: "prefs.cache.clear", help: "usage.source.clear.help", tone: .alarm) {
-                session.clearing = source.host
-            }
+            ShellMoreButton(Self.more(source, in: session))
         }
+    }
+
+    /// The masthead's `…`: Clear, and Forget password — both take something away, so both are
+    /// destructive items that ask first, and a yes is the only way to either act.
+    ///
+    /// Forget password is always listed: the menu is the same two items on every source, as a
+    /// row's marks are. **Dim for one of two reasons, and each is said as itself.** A kind that
+    /// never saves a password says this source has none. A forum, which can, and holds none
+    /// just now says at the head that no password is saved for it — "this source has none"
+    /// would read there as the forum having no such thing.
+    static func more(_ source: Source, in session: ShellSession, language: DummyLanguage? = nil) -> ShellMore {
+        let host = source.host
+        let held = session.forums.hasPassword(host: host)
+        let unsaved = !held && savesPassword(source.kind)
+        let clear = ShellMoreItem.danger(
+            SourceRow.symbol(.clear), L10n.t("prefs.cache.clear", language: language),
+            asks: session.clearQuestion(host: host),
+            act: { Task { await session.clear(host: host) } }
+        )
+        let forget = ShellMoreItem.danger(
+            "key.slash", L10n.t("prefs.password.forget", language: language),
+            look: held ? .live : unsaved ? .dim(.notNow) : .dim(.never),
+            asks: ShellQuestion.forgetPassword(host: host, language: language),
+            act: { session.forums.forgetPassword(host: host) }
+        )
+        return .ending(
+            in: forget, dimFor: unsaved ? L10n.t("prefs.password.none", language: language) : nil,
+            after: [clear]
+        )
+    }
+
+    /// Whether a source of this kind can have a password saved on this device: a forum signed in
+    /// to on its own page (`ForumSessions`), the one kind `postLine` holds anything else for too.
+    static func savesPassword(_ kind: ProtocolKind) -> Bool {
+        kind == .discuz
     }
 
     /// How many names this server registered and when they were read, in the shell's locale.
@@ -187,18 +237,13 @@ struct UsageSourceDetail: View {
         }
     }
 
-    /// A password held for this server, and a Forget of its own for a reader who wants only that.
-    /// Read off `savedHosts` through the session, not off the Keychain, on every draw.
+    /// That a password is held for this server: a line, and no press beside it — forgetting it
+    /// is behind `…`. Read off `savedHosts` through the session, not off the Keychain, on every
+    /// draw.
     @ViewBuilder
     private var passwordLine: some View {
         if session.forums.hasPassword(host: source.host) {
-            HStack(spacing: ShellSpace.snug) {
-                reading(Text(L10n.t("prefs.password.held")))
-                Spacer(minLength: ShellSpace.snug)
-                ShellIconButton("key.slash", name: "prefs.password.forget", tone: .alarm) {
-                    session.forums.forgetPassword(host: source.host)
-                }
-            }
+            reading(Text(L10n.t("prefs.password.held")))
         }
     }
 

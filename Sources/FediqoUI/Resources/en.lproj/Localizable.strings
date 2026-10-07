@@ -400,7 +400,6 @@
 "usage.drop.line" = "Kept until you choose otherwise; the oldest copies on disk go first.";
 "usage.gone.line" = "Only posts their source says are gone are marked.";
 "usage.source.back" = "Back to sources";
-"usage.source.clear.help" = "Asks first, then lets go of this source's pictures, emoji names, first posts and sign-in. Its posts stay, and it stays added.";
 "usage.drop.copies.help" = "Asks first, then drops every picture copy in memory and on disk.";
 "usage.gone.now.help" = "Asks first, then lets go now of every post and place deleted at its source, whatever the wait.";
 
@@ -652,6 +651,11 @@
 "forum.unforgotten" = "The username and password kept for this forum could not be deleted: %@.";
 "prefs.password.held" = "Password held on this device";
 "prefs.password.forget" = "Forget the password";
+"prefs.password.none" = "No password is saved for this forum.";
+"prefs.password.forget.title" = "Forget the password for %@?";
+"prefs.password.forget.line" = "It is deleted from this device; you type it again next time.";
+"prefs.password.forget.detail" = "The password saved for this forum is deleted from this device's Keychain and does not come back. You stay signed in until that sign-in ends, and everything else this device holds for it stays.";
+"prefs.password.forget.confirm" = "Forget";
 
 /* Unit F4 — choosing boards. */
 "board.choose.title" = "Boards on %@";

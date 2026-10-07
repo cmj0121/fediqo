@@ -20,6 +20,9 @@ enum ShellListEntry {
 ///     [mark]  title                              figure  ›  [control]
 ///             one brief line, cut at its end
 ///
+/// The brief and the figure are the list's to give: Usage's sources give neither, and say them
+/// in the detail and to VoiceOver (`spoken`), so that row is its mark, its host and the chevron.
+///
 /// **Entering, three ways, one outcome.** A press lights the row and a second press opens it
 /// (`ShellListEntry.pressed`). Return opens the lit row, and ↑ and ↓ hand the list a step where
 /// it takes one (`onStep`); the keyboard's focus follows the lamp. VoiceOver, whose reader activates once,
@@ -41,6 +44,9 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
     /// What VoiceOver says for the row where its parts read together would not say it whole — a
     /// rule's kind, which the row shows only as its mark. Nothing reads the parts.
     let spoken: String?
+    /// Where a title too long for its line is cut: at its end, or — for a host, whose start and
+    /// end are both its identity — in its middle.
+    let cut: Text.TruncationMode
     @Binding var selection: ID?
     let onOpen: () -> Void
     /// ↑ is −1 and ↓ is +1. Nothing where the list walks itself.
@@ -54,7 +60,7 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
 
     init(
         id: ID, title: String, brief: String? = nil, figure: String? = nil, spoken: String? = nil,
-        selection: Binding<ID?>, onOpen: @escaping () -> Void, onStep: ((Int) -> Void)? = nil,
+        cut: Text.TruncationMode = .tail, selection: Binding<ID?>, onOpen: @escaping () -> Void, onStep: ((Int) -> Void)? = nil,
         @ViewBuilder mark: () -> Mark, @ViewBuilder control: () -> Control
     ) {
         self.id = id
@@ -62,6 +68,7 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
         self.brief = brief
         self.figure = figure
         self.spoken = spoken
+        self.cut = cut
         _selection = selection
         self.onOpen = onOpen
         self.onStep = onStep
@@ -83,7 +90,7 @@ struct ShellListRow<ID: Hashable, Mark: View, Control: View>: View {
     }
 
     private var entry: some View {
-        ShellListRowFace(title: title, brief: brief, figure: figure, selected: selected, mark: mark)
+        ShellListRowFace(title: title, brief: brief, figure: figure, cut: cut, selected: selected, mark: mark)
             .contentShape(Rectangle())
             .onTapGesture(perform: press)
             .focusable()
@@ -172,11 +179,11 @@ extension ShellListRow where Control == EmptyView {
     /// A row with nothing of its own after the chevron.
     init(
         id: ID, title: String, brief: String? = nil, figure: String? = nil, spoken: String? = nil,
-        selection: Binding<ID?>, onOpen: @escaping () -> Void, onStep: ((Int) -> Void)? = nil,
+        cut: Text.TruncationMode = .tail, selection: Binding<ID?>, onOpen: @escaping () -> Void, onStep: ((Int) -> Void)? = nil,
         @ViewBuilder mark: () -> Mark
     ) {
         self.init(
-            id: id, title: title, brief: brief, figure: figure, spoken: spoken, selection: selection,
+            id: id, title: title, brief: brief, figure: figure, spoken: spoken, cut: cut, selection: selection,
             onOpen: onOpen, onStep: onStep, mark: mark, control: { EmptyView() }
         )
     }
@@ -198,6 +205,8 @@ struct ShellListRowFace<Mark: View>: View {
     let title: String
     let brief: String?
     let figure: String?
+    /// Where a long title is cut (`ShellListRow.cut`).
+    var cut: Text.TruncationMode = .tail
     let selected: Bool
     let mark: Mark
 
@@ -257,6 +266,7 @@ struct ShellListRowFace<Mark: View>: View {
                 .shellFont(.name)
                 .foregroundStyle(selected ? ShellChrome.selectInk(colorScheme) : ShellChrome.ink(colorScheme))
                 .lineLimit(1)
+                .truncationMode(cut)
             briefLine(stacked: stacked)
         }
     }

@@ -399,7 +399,6 @@
 "usage.drop.line" = "除非你另作選擇都會保留；磁碟上最舊的副本會先移除。";
 "usage.gone.line" = "只有來源表示已不在的貼文才會被標記。";
 "usage.source.back" = "回到來源";
-"usage.source.clear.help" = "會先詢問，再清除這台裝置存的這個來源的圖片、表情符號名稱、主文與登入資料。貼文會留下，來源也仍保持加入。";
 "usage.drop.copies.help" = "會先詢問，再捨棄記憶體與磁碟上所有的圖片副本。";
 "usage.gone.now.help" = "會先詢問，再立即放下所有來源已刪除的貼文與標記，不論等待多久。";
 
@@ -636,6 +635,11 @@
 "forum.unforgotten" = "為這個論壇存起來的帳號與密碼刪不掉：%@。";
 "prefs.password.held" = "這台裝置存著密碼";
 "prefs.password.forget" = "忘掉密碼";
+"prefs.password.none" = "這個論壇沒有存密碼。";
+"prefs.password.forget.title" = "忘掉 %@ 的密碼？";
+"prefs.password.forget.line" = "它會從這台裝置刪掉；下次要再打一次。";
+"prefs.password.forget.detail" = "為這個論壇存的密碼會從這台裝置的鑰匙圈刪掉，而且不會回來。這次登入結束之前，你仍是登入狀態，這台裝置為它存的其他東西也都還在。";
+"prefs.password.forget.confirm" = "忘掉";
 
 /* Unit F4 — choosing boards. */
 "board.choose.title" = "%@ 的版塊";
