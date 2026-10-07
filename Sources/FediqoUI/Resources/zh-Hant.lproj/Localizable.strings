@@ -765,9 +765,10 @@
 "account.sources.detail"         = "這個裝置讀的全部。按一列，看那個來源怎麼說它自己——它的名字、它的規模、它的版塊。移除其中一個，它的版塊和它的文章都會跟著走。";
 "account.sources.held"           = "每一個在這個裝置上還留著什麼，在「用量」裡。";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
-"account.sources.marks"          = "一列只帶它自己那個來源有的標記：登入、換版塊或列表、清除它留在這裡的東西、移除它。";
+"account.sources.marks"          = "每一列都帶同樣的標記。鑰匙是登入：登入之後是實心的，那個來源不提供登入的話是灰的。⋯ 裡面是其他的：這一列要說的話、換版塊或列表、清除它留在這裡的東西、移除它。來源沒有的那一項在裡面也是灰的，並且說為什麼。紅色的 ⋯ 是有話要說。";
 /* #69 — what may be done on a source, said on its row and explained once for the list. */
-"account.sources.writing"        = "每一列也會說那個來源上可以做什麼：讀、讀與寫，或者唯讀——那個協定在 Fediqo 裡根本沒有「寫」這件事。寫入被拒是說有一次寫入被擋了下來；再登入那個來源一次。";
+"account.sources.writing"        = "帶驚嘆號的鎖是說那個登入要再問一次，才會提供它還能做的事：有一次寫入被擋了下來，或者它登入的時候 Fediqo 還沒問過寫入或書籤。按它就會問；不會把誰登出。";
+"account.source.permission"      = "要再問一次 %@ 的登入，才會提供它還能做的事";
 "account.source.writing.never"   = "唯讀";
 "account.source.writing.read"    = "讀";
 "account.source.writing.write"   = "讀與寫";
@@ -820,10 +821,6 @@
 
 /* Pressing a row. Decision 31: the row opens what that server says about itself. */
 "account.source.open"             = "%@ 怎麼介紹自己";
-"account.source.more" = "這個來源的其他動作";
-"account.source.more.said" = "這個來源的其他動作。它有話要說";
-"account.source.state.trouble" = "需要看一下";
-"account.source.state.waiting" = "等待中";
 "account.source.open.hint"        = "打開這個來源怎麼介紹自己。";
 
 /* The detail: the same evidence, and the three sentences a preview says that are false here. */

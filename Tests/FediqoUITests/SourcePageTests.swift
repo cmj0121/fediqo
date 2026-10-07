@@ -160,7 +160,11 @@ struct SourcePageTests {
             profile: .unasked(host: "f.example", kind: .discourse)
         )
         #expect(discuz.canSignIn)
-        #expect(!discourse.canSignIn, "absent, never disabled — a grey control for nine in ten")
+        #expect(!discourse.canSignIn)
+        // **Drawn dim where it is false, and no longer absent** — decision 4 was withdrawn on
+        // 2026-10-07: the same key on every row, only its colour different.
+        #expect(Self.drawn(discourse).key.look == .dim(.never))
+        #expect(Self.drawn(discuz).key.look == .live)
     }
 
     /// Decision 13, at the row. The toggle's two states and their two labels, and Sign in reusing
@@ -210,6 +214,26 @@ struct SourcePageTests {
         #expect(!forums.reachedSignIn(host: Self.forum), "the press did not sign the reader out")
         #expect(session.signingIn == nil, "signing out opened a sign-in sheet")
         #expect(session.sources.map(\.host) == [Self.forum], "signing out removed the source")
+    }
+
+    /// Remove's question and its yes read one value, and where the page has no preferences to
+    /// read that value is the one that takes less.
+    @Test("Without the preferences a removed source's posts stay; with them it is the reader's choice")
+    func absentPreferencesKeepThePosts() throws {
+        #expect(AccountPane.postsStay(nil), "not knowing fell on the side that deletes")
+        #expect(!AccountPane.postsStay(false))
+        #expect(AccountPane.postsStay(true))
+        // The question and its yes read that one closure, and a press with none handed in
+        // falls the same way.
+        let pane = try String(
+            contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Sources/FediqoUI/Shell/AccountPane.swift"),
+            encoding: .utf8
+        )
+        #expect(pane.contains("return { Self.postsStay(prefs?.removedPostsStay) }"))
+        #expect(pane.contains("removeAsks: { session.removeQuestion(host: row.source.host, postsStay: postsStay()) }"))
+        #expect(pane.contains("presses: presses(row, postsStay: postsStay)"))
+        #expect(pane.contains("postsStay: @escaping () -> Bool = { AccountPane.postsStay(nil) }"))
     }
 
     /// **The two errands that end at the same callback, told apart.** Unit 4 wrote
@@ -420,9 +444,9 @@ struct SourcePageTests {
         let identity = String(
             format: L10n.t("source.spoken"), "f.example", "Discourse", DummyItem.shapeWord(.forum)
         )
-        // **The writing word is the second part now** (#69) — the row draws it on the hostname's
-        // own line and the sentence says it there. A Discourse reads only, and for a reason that
-        // is about the protocol: this app cannot write to a forum at all.
+        // **The writing word is the second part** (#69). The row stopped drawing it on
+        // 2026-10-07 and the sentence still says it. A Discourse reads only, and for a reason
+        // that is about the protocol: this app cannot write to a forum at all.
         let writing = L10n.t(SourceRow.writingKey(.never))
         let expected = ([identity, writing] + SourcePreviewView.figurePieces(profile)
             + ["1 boards: General"]).joined(separator: ", ")
@@ -579,6 +603,10 @@ struct SourcePageTests {
     /// confirm reaches `clear(host:)` or `remove(host:)`.
     ///
     /// Clear's half of that is decision 29 and is a declared change: it used to empty on the press.
+    ///
+    /// **Asked from the row's `…` since 2026-10-07**, where they are destructive items: choosing
+    /// one hands over its question and nothing else, and the pane's `clear(_:)` and
+    /// `remove(_:keepingPosts:)` are what its yes does.
     @Test("A row's Clear and its Remove both only ask")
     func aRowsClearAndRemoveReachTheRightThings() async {
         let session = session()
@@ -588,20 +616,36 @@ struct SourcePageTests {
             Source(host: Self.forum, kind: .discuz),
         ])
         let rows = session.rows
+        func menu(_ row: SourceRow) -> ShellMore {
+            SourceRowView(
+                row: row, actsLive: true, waiting: nil, refusal: nil,
+                clearAsks: { session.clearQuestion(host: row.source.host) }, removeAsks: { session.removeQuestion(host: row.source.host, postsStay: false) },
+                presses: pane.presses(row)
+            ).more
+        }
+        var asked: [ShellMoreAsk] = []
 
-        pane.askClear(rows[0])
-        #expect(session.clearing == Self.micro)
+        menu(rows[0]).dangers[0].press { asked.append($0) }
+        #expect(asked.last?.question == session.clearQuestion(host: Self.micro))
         #expect(session.cleared == 0, "Clear emptied a server before the question was answered")
 
-        pane.askRemove(rows[1])
-        #expect(session.removing == Self.forum)
+        menu(rows[1]).dangers[1].press { asked.append($0) }
+        #expect(asked.last?.question == session.removeQuestion(host: Self.forum, postsStay: false))
+        #expect(asked.count == 2)
         #expect(session.sources.count == 2, "the question destroyed something before it was answered")
         #expect(await session.store.sources().count == 2)
+        // One question an act: the menu's own. Nothing on the root asks beside it.
+        // Any answer but the yes changes nothing.
+        asked[1].answered("not the yes")
+        await Task.yield()
+        #expect(session.sources.count == 2)
 
         // And the confirms, which are where the two acts actually differ.
-        await session.clear(host: Self.micro)
+        await pane.clear(rows[0])
         #expect(session.cleared == 1)
         #expect(session.sources.count == 2, "Clear removed a source; it empties, it does not remove")
+        await pane.remove(rows[1], keepingPosts: false)
+        #expect(session.sources.map(\.host) == [Self.micro])
     }
 
     /// The row's fourth control, driven through the pane like the other three.
@@ -659,13 +703,16 @@ struct SourcePageTests {
                 with it.
                 """
         )
-        // The legend, and its first clause is the load-bearing one: decision 33 makes *absence*
-        // meaningful, so a reader looking at a two-mark row above a four-mark one has no other way
-        // to learn that the short row is short on purpose.
+        // The legend, and its first clause is the load-bearing one: every row draws the same
+        // marks (decision 33's absence was withdrawn on 2026-10-07), so what a reader has to be
+        // told is what grey means and where the rest went.
         #expect(
             L10n.t("account.sources.marks", language: .english) == """
-                A row carries only the marks its own server has: sign in, change boards or \
-                lists, clear what it left here, and remove it.
+                Every row carries the same marks. The key is the sign-in: filled once you are \
+                signed in, grey where that source has none. ⋯ holds the rest: what the row has \
+                to say, changing boards or lists, clearing what the source left here, and \
+                removing it. What a source does not have is grey there too, and says why. A red ⋯ \
+                has something to say.
                 """
         )
         #expect(L10n.t("account.source.boards", language: .english) == "%1$d boards: %2$@")
@@ -684,7 +731,7 @@ struct SourcePageTests {
 
         let keys = [
             "account.sources.title", "account.sources.detail", "account.sources.held",
-            "account.sources.marks",
+            "account.sources.marks", "account.source.permission",
             "account.source.boards", "account.source.unread",
             "account.source.remove.label", "account.source.signout.label", "shell.account.summary",
             "source.said.asOf",
@@ -710,6 +757,10 @@ struct SourcePageTests {
         // restores decision 4, so such a control is absent. Nothing is struck, nothing has a
         // reason to give, and three sentences about why a control is refused describe a control
         // that is not drawn.
+        //
+        // **They stay gone though decision 33 is itself withdrawn** (2026-10-07): a control a
+        // source lacks is drawn again, dim, and its reason is the shared `mark.dim.*`, one
+        // sentence for every row and every post rather than three of this page's own.
         let gone = [
             "account.source.remove", "account.source.signin", "account.source.signout",
             "timeline.sources", "source.unsigned", "source.signedIn",
@@ -793,12 +844,14 @@ struct SourcePageTests {
         let pane = AccountPane(session: session)
         let row = try #require(session.rows.first)
 
-        pane.askClear(row)
-        #expect(session.clearing == Self.forum, "the row's Clear did not raise the question")
-        #expect(session.cleared == 0, "the row's Clear emptied something before it was answered")
+        // Usage's entrance sets the session's state, which the root's presenter asks from; the
+        // row's `…` asks the same question itself (`aRowsClearAndRemoveReachTheRightThings`).
+        // One function builds it for both.
+        session.clearing = Self.forum
+        #expect(session.cleared == 0, "asking emptied something before it was answered")
 
-        // The confirm, and the question going with it.
-        await session.clear(host: Self.forum)
+        // The confirm, and the question going with it — the same call from either page.
+        await pane.clear(row)
         #expect(session.cleared == 1)
         #expect(session.clearing == nil, "the question outlived the decision it was asking about")
 
@@ -887,183 +940,19 @@ struct SourcePageTests {
         #expect(SourceMark.symbol(DummyItem.shape(of: .discourse)) == "text.bubble")
     }
 
-    // MARK: - The two arrangements, and the numbers that are no longer constants
+    // MARK: - The row's metrics
     //
-    // **This is the part of the row a test has to carry alone.** A layout that depends on a
-    // measured width is wiring no test can see, and this branch has now shipped four defects of
-    // exactly that class under a fully green suite (risk 12). So the decision is a pure function
-    // and it is driven here across both arrangements, the unmeasured first frame and the boundary.
-    // What is *not* reachable is named in `SourceRowView`'s own doc comment: `AccountPane`'s
-    // `onGeometryChange`, which is SwiftUI's own measurement.
-    //
-    // **They stopped being `static let`s, and the test is stronger for it.** Decision 33 made the
-    // control count per-protocol, so `furniture` and `controlLine` are functions of a stated
-    // control set — which means every expectation below now states *which row* it is about, where
-    // before it could only state a sum.
+    // The two arrangements, their threshold and the arithmetic that chose between them were
+    // withdrawn on 2026-10-07: a row is one layout at every width (`SourceLineTests` hosts it).
+    // What is left of the numbers is the leading mark's size and its ceiling.
 
-    /// The four controls a Discuz! carries, and the two a microblog does. Named once so every
-    /// expectation below says which row it is about.
-    private static let discuzControls: [SourceRow.Control] = [.signIn, .boards, .clear, .remove]
-    private static let microControls: [SourceRow.Control] = [.clear, .remove]
-    /// What a Mastodon carries since it can be signed in to (#24).
-    private static let mastodonControls: [SourceRow.Control] = [.signIn, .clear, .remove]
-
-    /// **Every term of the row as it is drawn, restated rather than trusted.** The threshold's
-    /// whole claim is that the number is arithmetic and not taste, so if somebody moves
-    /// `ShellSpace.step`, `ShellSpace.tight`, `ShellSpace.snug` or the touch floor, the row moved
-    /// with them and this is where that is noticed.
-    ///
-    /// **Four targets have three gaps, and leaving them out is how this shipped wrong once.** Unit
-    /// B computed 176 from three targets and no gaps between them, and the test recited the same
-    /// omission — so the constant described a row nobody drew and stayed green while the drawn row
-    /// moved. Every gap is named here, including which token spaces which pair.
-    @Test("The furniture is every gap and target in the row as it is actually drawn")
-    func furnitureIsArithmeticAndNotATasteNumber() {
-        // **The structure, which is what the numbers are summed from.** Each of these is a symbol
-        // the drawn row reads: `SourceRowView` frames its leading mark at `markBase`, and its
-        // `actions` loop iterates `controls(of:)` and pads by each control's own `lead`.
-        #expect(SourceRow.markBase == 24)
-        #expect(SourceRow.touch == 44, "the 44pt floor is what 176 of a four-control line is")
-        #expect(SourceRow.hostFloor == 132)
-        #expect(SourceRow.hostFloor == SourceRow.touch * 3, """
-            The hostname's floor stopped being derived from the touch target. It is a recognition \
-            floor, and `touch` is the only fixed metric in this row that already carries a \
-            what-a-human-needs argument.
-            """)
-        #expect(SourceRow.Control.allCases.count == 5)
-
-        // **The gap is a property of the control now, not an index into a list.** `gaps[index - 1]`
-        // was correct only while every row drew all four: a Mastodon drawing [clear, remove] would
-        // have read `gaps[0]` — `tight` — for a pair the design deliberately separates.
-        let leads: [SourceRow.Control: CGFloat] = [
-            .signIn: ShellSpace.snug, .boards: ShellSpace.tight, .lists: ShellSpace.tight,
-            .clear: ShellSpace.snug, .remove: ShellSpace.snug,
-        ]
-        #expect(Set(leads.keys) == Set(SourceRow.Control.allCases), """
-            A control was added and this table was not asked about it. There is no `gaps.count` \
-            check left to trap it at its first layout, so it has to be caught here.
-            """)
-        for control in SourceRow.Control.allCases {
-            #expect(control.lead == leads[control], "\(control)")
-        }
-        // The one grouping the gaps say: Sign in and Boards are the two acts that change what this
-        // device reads, and Remove is deliberately not tight against Clear.
-        #expect(SourceRow.Control.boards.lead < SourceRow.Control.remove.lead)
-
-        // **244, and nothing regresses**: a Discuz! row's control line is identical to the 196 that
-        // shipped. What moved is the leading mark, 20 → 24, and the threshold's second term.
-        #expect(SourceRow.furniture(Self.discuzControls, mark: 24) == 244)
-        #expect(SourceRow.furniture(Self.discuzControls, mark: 24)
-            == SourceRow.controlLine(Self.discuzControls) + SourceRow.markBase + ShellSpace.step * 2)
-        #expect(SourceRow.furniture(Self.microControls, mark: 24) == 144)
-    }
-
-    /// **The mutation the previous version of these tests could not see.** Both numbers used to be
-    /// literals whose terms lived in a doc comment, and the test restated the same literals — so it
-    /// agreed with the row by hand rather than deriving from it. QA proved it twice: the leading
-    /// glyph's width changed 20 → 28 and the suite passed; a drawn gap was re-tokened `tight` →
-    /// `snug`, the real group became 200pt, and `controlLine == 196` stayed green while being false.
-    @Test("Both sums are computed from the structure the row draws, not stated beside it")
-    func theConstantsAreDerivedFromTheDrawnRow() {
-        // **196, identical to what shipped** — the four-control line did not move.
-        #expect(SourceRow.controlLine(Self.discuzControls) == 196)
-        #expect(SourceRow.controlLine(Self.discuzControls)
-            == SourceRow.touch * 4 + ShellSpace.tight + ShellSpace.snug * 2)
-        // And the two-control line, which nothing computed before decision 33 and which is the one
-        // that ships the ragged trailing edge. A test that pinned only the four-control case would
-        // leave this path unpinned entirely — §10's named hazard.
-        #expect(SourceRow.controlLine(Self.microControls) == 96)
-        #expect(SourceRow.controlLine(Self.microControls)
-            == SourceRow.touch * 2 + SourceRow.Control.remove.lead)
-
-        // **The first control's `lead` is dropped, whichever control turns out to be first.** A
-        // Lemmy with communities and no sign-in draws [boards, clear, remove], and boards' `tight`
-        // must not appear: 132 + 8 + 8, not 132 + 4 + 8 + 8.
-        #expect(SourceRow.controlLine([.boards, .clear, .remove]) == 148)
-
-        // A control added or taken away moves the line by a target and a gap, visibly.
-        #expect(SourceRow.controlLine(Self.discuzControls)
-            - SourceRow.controlLine([.boards, .clear, .remove]) == SourceRow.touch + ShellSpace.tight)
-
-        // An empty set is no targets and no gaps, not a negative sum from `dropFirst`.
-        #expect(SourceRow.controlLine([]) == 0)
-    }
-
-    /// Which controls a source actually carries — decision 33, which withdraws decision 28 and
-    /// restores decision 4. **A total map over the protocols**, in the shape `DummyItemTests`
-    /// established: a set of the true ones would say nothing about the kinds left out.
-    @Test("A row carries only the controls its own source has, and every protocol has an answer")
-    func aRowCarriesOnlyItsOwnControls() {
-        for kind in ProtocolKind.allCases {
-            let bare = Source(host: "a.example", kind: kind)
-            let expected: [SourceRow.Control] =
-                SourceRow.canSignIn(kind) ? [.signIn, .clear, .remove] : [.clear, .remove]
-            #expect(SourceRow.controls(of: bare) == expected, "\(kind)")
-            // Clear and Remove are on every row of every protocol: every source this device holds
-            // can be emptied and let go of.
-            #expect(SourceRow.controls(of: bare).suffix(2) == [.clear, .remove], "\(kind)")
-        }
-
-        // **Boards is refused on two different facts and both are asked.** A protocol with no
-        // picker at all, and a source with nothing to pick.
-        let bareForum = Source(host: Self.forum, kind: .discuz)
-        #expect(SourceRow.controls(of: bareForum) == [.signIn, .clear, .remove], """
-            A forum with no boards drew a control that opens a sheet with nothing in it.
-            """)
-        let forum = Source(
-            host: Self.forum, kind: .discuz, boards: [BoardSubscription(fid: 33, name: "閒聊")]
-        )
-        #expect(SourceRow.controls(of: forum) == Self.discuzControls)
-        // A Discourse carrying boards still has no picker — unit 7 answers this at
-        // `canChangeBoards`, not here.
-        let discourse = Source(
-            host: "f.example", kind: .discourse, boards: [BoardSubscription(fid: 1, name: "x")]
-        )
-        #expect(SourceRow.controls(of: discourse) == [.clear, .remove])
-
-        // **The declared order is the drawn order and the suffix property falls out of it.** A
-        // later hand reordering the enum to put Remove first would destroy the property that Clear
-        // and Remove stand in the same two columns on every row, silently.
-        #expect(SourceRow.Control.allCases == [.signIn, .boards, .lists, .clear, .remove])
-    }
-
-    /// **One threshold for the whole list, computed from the widest row in it** — decision 33's
-    /// rule, and the cost the user accepted with it.
-    @Test("The threshold is the widest row in this list, and every row is drawn to it")
-    func oneThresholdForTheWholeList() {
-        let micro = SourceRow(
-            source: Source(host: Self.micro, kind: .mastodon),
-            profile: .unasked(host: Self.micro, kind: .mastodon)
-        )
-        let forum = SourceRow(
-            source: Source(
-                host: Self.forum, kind: .discuz, boards: [BoardSubscription(fid: 33, name: "閒聊")]
-            ),
-            profile: .unasked(host: Self.forum, kind: .discuz)
-        )
-        #expect(SourceRow.widest([micro, micro, micro]) == Self.mastodonControls)
-        #expect(SourceRow.widest([micro, forum, micro]) == Self.discuzControls, """
-            One forum in a list of microblogs did not widen the list. Every row must restack \
-            together or the list reads as broken.
-            """)
-        // No rows is no widest row, and no block is drawn either.
-        #expect(SourceRow.widest([]).isEmpty)
-
-        // **The stated cost, pinned so it is a decision and not a surprise.** Three Mastodons on a
-        // 393pt phone are one-line rows; adding a Discuz! restacks all four.
-        let phone: CGFloat = 393 - ShellSpace.pad * 2
-        let before = SourceRow.threshold(SourceRow.widest([micro, micro, micro]), mark: 24, host: 132)
-        let after = SourceRow.threshold(SourceRow.widest([micro, micro, micro, forum]), mark: 24, host: 132)
-        #expect(before == 328 && after == 376)
-        #expect(SourceRow.regime(width: phone, threshold: before) == .trailing)
-        #expect(SourceRow.regime(width: phone, threshold: after) == .beneath)
-    }
-
-    /// **The ceiling is what makes every sum above true rather than hopeful.** A mark is allowed to
-    /// grow with the type until it would reach the edges of the 44pt target it sits in, and then it
-    /// stops — so a control group cannot widen past its own targets at any Dynamic Type rung.
+    /// The leading mark is allowed to grow with the type until it would reach the edges of the
+    /// 44pt line it sits in, and then it stops — so a large type size never makes a row taller
+    /// for its mark.
     @Test("A mark stops growing before it reaches the edges of its own target")
     func theGlyphIsCappedBelowItsTarget() {
+        #expect(SourceRow.markBase == 24)
+        #expect(SourceRow.touch == 44)
         #expect(SourceRow.symbolPoints(24) == 24, "at the default rung nothing is capped")
         #expect(SourceRow.symbolPoints(36) == 36, "the ceiling itself is not below it")
         #expect(SourceRow.symbolPoints(60) == 36, "a large rung grew the mark out of its target")
@@ -1072,212 +961,9 @@ struct SourcePageTests {
         #expect(SourceRow.touch - ShellSpace.snug == 36)
         for scaled in [CGFloat(16), 24, 36, 48, 96] {
             #expect(SourceRow.symbolPoints(scaled) <= SourceRow.touch, """
-                A mark reached its own target's edge, so the control group is wider than \
-                `SourceRow.controlLine` says and the narrow case is no longer proved.
+                A mark reached the edge of the line it sits in, so a row grew taller for it.
                 """)
         }
-    }
-
-    /// **The first frame, before anything has been measured.** `onGeometryChange` has not fired, so
-    /// the width is zero — and zero is not a narrow row, it is no answer at all.
-    @Test("An unmeasured row is drawn beneath, and a negative one too")
-    func theFirstFrameGetsTheSafeRegime() {
-        for threshold in [CGFloat(276), 376] {
-            #expect(SourceRow.regime(width: 0, threshold: threshold) == .beneath)
-            // A layout pass that reports a negative width is not a row to draw marks in either.
-            #expect(SourceRow.regime(width: -10, threshold: threshold) == .beneath)
-        }
-    }
-
-    /// **376 and 276, and the rule behind them is no longer "the words get at least half the row".**
-    /// That rule was argued for a content column holding four lines of prose; decision 34 deletes
-    /// all four but the hostname, and a hostname is one unbreakable token that truncates from the
-    /// tail. What it needs is a floor, and `hostFloor` is it.
-    ///
-    /// Pinned from both sides and *at* the boundary, because an off-by-one here is a row that
-    /// crowds on the one width where it was most carefully argued that it would not.
-    @Test("The threshold is the furniture plus the hostname's floor, and the boundary is trailing")
-    func theBoundaryIsFurniturePlusTheFloor() {
-        let forum = SourceRow.threshold(Self.discuzControls, mark: 24, host: 132)
-        let micro = SourceRow.threshold(Self.microControls, mark: 24, host: 132)
-        #expect(forum == 376)
-        #expect(micro == 276)
-        #expect(SourceRow.threshold([.boards, .clear, .remove], mark: 24, host: 132) == 328)
-
-        // **The property this buys, and it is the reason the rule was replaced rather than
-        // re-measured:** at the boundary the hostname has exactly its floor, and above it more.
-        // So the hostname never truncates below `hostFloor` in the trailing regime, at any width.
-        // Paired rather than recovered by comparing two `CGFloat`s: if the two thresholds ever
-        // coincided, an equality branch would silently test the same row twice.
-        for (threshold, controls) in [(forum, Self.discuzControls), (micro, Self.microControls)] {
-            #expect(threshold - SourceRow.furniture(controls, mark: 24) == SourceRow.hostFloor)
-            #expect(SourceRow.regime(width: threshold, threshold: threshold) == .trailing,
-                    "at the boundary the hostname gets exactly its floor, which is the rule met")
-            #expect(SourceRow.regime(width: threshold - 0.5, threshold: threshold) == .beneath)
-            #expect(SourceRow.regime(width: threshold + 0.5, threshold: threshold) == .trailing)
-        }
-    }
-
-    /// **Where each real context lands, and every row in the table moved.** Revision 2's arithmetic
-    /// was 714pt of macOS window for a forum and "no iPhone in portrait ever draws them"; this is
-    /// 610pt, below the minimum entirely with the rail collapsed, and **every phone draws the
-    /// one-line row for a list without a forum**. That last is decision 33's dividend rather than
-    /// decision 34's, and it is the real gain.
-    ///
-    /// The macOS page is window − rail − hairline; the row is the page less `ShellSpace.pad` either
-    /// side. Both are restated here rather than quoted, so a rail metric that moves lands here.
-    @Test("Where each real context lands, including the macOS minimum window")
-    func theRealContextsLandWhereTheyWereMeasured() {
-        let forum = SourceRow.threshold(Self.discuzControls, mark: 24, host: 132)
-        let micro = SourceRow.threshold(Self.microControls, mark: 24, host: 132)
-
-        let openRail = RailView.Metrics.expandedWidth + ShellSpace.hair
-        let shutRail = RailView.Metrics.collapsedWidth + ShellSpace.hair
-        func row(page: CGFloat) -> CGFloat { page - ShellSpace.pad * 2 }
-
-        // **Rounded, and the rounding is the fact worth recording.** `Metrics.pad` is `rem * 0.3`
-        // = 4.8, so the expanded rail is **200.8** and not the 201 that `PLAN.md`, `DESIGN-R2.md`
-        // and `DESIGN-TAIL.md` all quote — which makes the macOS minimum page 318.2 and the row
-        // 286.2. The fifth of a point changes no regime anywhere and every document is right to
-        // the point; pinning the exact value would pin a float sum instead, and pinning nothing
-        // would let a real rail change through.
-        #expect(shutRail == 49, "the collapsed rail moved; every figure below is stale")
-        #expect(openRail.rounded() == 202, "the expanded rail moved; every figure below is stale")
-        #expect(row(page: 520 - openRail).rounded() == 286,
-                "the macOS minimum window with the rail open")
-
-        let contexts: [(String, CGFloat, SourceRow.Regime, SourceRow.Regime)] = [
-            // context, row width, with a forum in the list, without one
-            ("macOS 520pt minimum, rail open", row(page: 520 - openRail), .beneath, .trailing),
-            ("macOS 520pt minimum, rail collapsed", row(page: 520 - shutRail), .trailing, .trailing),
-            ("macOS 700pt, rail open", row(page: 700 - openRail), .trailing, .trailing),
-            ("macOS 610pt, rail open — a forum's own boundary", row(page: 610 - openRail), .trailing, .trailing),
-            ("iPhone SE, 375pt", row(page: 375), .beneath, .trailing),
-            ("iPhone 15/16, 393pt", row(page: 393), .beneath, .trailing),
-            ("iPhone 15 Pro Max, 430pt", row(page: 430), .trailing, .trailing),
-            ("iPhone landscape, 852pt", row(page: 852), .trailing, .trailing),
-            ("iPad 11in portrait, rail open", row(page: 834 - openRail), .trailing, .trailing),
-            ("iPad half-width Split View, rail open", row(page: 507 - openRail), .beneath, .beneath),
-        ]
-        for (context, width, withForum, withoutOne) in contexts {
-            #expect(SourceRow.regime(width: width, threshold: forum) == withForum,
-                    "\(context) at \(width)pt of row is drawn in the wrong arrangement with a forum")
-            #expect(SourceRow.regime(width: width, threshold: micro) == withoutOne,
-                    "\(context) at \(width)pt of row is wrong for a list of microblogs")
-
-            // **The property the rule guarantees, at the default rung.** Trailing, the hostname
-            // has at least its floor *by construction*, at every rung — the threshold is the
-            // furniture plus the floor. Beneath, it has the whole row less the mark and one gap,
-            // which is a different kind of claim: it is arithmetic about a real width, and
-            // `theStackedFloorHoldsToTheTopOfTheLadder` below is where it is taken up the ladder.
-            let beneathRoom = width - SourceRow.markBase - ShellSpace.step
-            #expect(beneathRoom >= SourceRow.hostFloor, """
-                \(context): the hostname is below its recognition floor even stacked, which is the \
-                one thing neither arrangement is allowed to do.
-                """)
-        }
-
-        // Collapsing the rail is enough at every window size a Mac can be, which is the one lever
-        // a reader has: 457pt of window is below `minWidth: 520`.
-        #expect(457 - shutRail - ShellSpace.pad * 2 == forum)
-    }
-
-    /// **The threshold scales with the type, and that is a reversal made deliberately.** The
-    /// shipped `Regime` deleted the Dynamic Type gate on the grounds that "both arrangements draw
-    /// the same four glyphs, and a glyph has no string length and no type size". That was true of
-    /// the *controls*, and QA was right that the gate restacked a 791pt iPad wrongly.
-    ///
-    /// The new term points the other way: the content column now holds **nothing but text**, so at
-    /// `.accessibility1` a fixed 132pt floor would show four characters of hostname. The fix is not
-    /// a second gate — it is that `markBase` and `hostFloor` are read through `@ScaledMetric` and
-    /// passed in. **One axis, one scaling term, no `#if os(macOS)`, and nothing asks what platform
-    /// it is on.**
-    @Test("The type size reaches the threshold through one scaling term, and nothing else")
-    func theThresholdScalesWithTheType() {
-        let forum = Self.discuzControls
-        // Roughly `.accessibility1`: about 1.6× a callout.
-        let large = SourceRow.threshold(forum, mark: SourceRow.symbolPoints(24 * 1.6), host: 132 * 1.6)
-        let base = SourceRow.threshold(forum, mark: 24, host: 132)
-        #expect(large > base, "the hostname's floor stopped scaling, so large type shows four letters")
-
-        // **Both parameters, because only one of them was pinned.** Substituting `hostFloor` for
-        // `host` fails the line above; substituting `markBase` for `mark` left the whole suite
-        // green, so a comment was the only thing standing over the mark term — which is what this
-        // branch has already shipped once as a constant agreeing with the row by hand.
-        #expect(SourceRow.threshold(forum, mark: 36, host: 132)
-            == SourceRow.threshold(forum, mark: 24, host: 132) + 12)
-        #expect(SourceRow.threshold(forum, mark: 24, host: 200)
-            == SourceRow.threshold(forum, mark: 24, host: 132) + 68)
-
-        // **The iPad case the deleted gate got wrong, and it stays right.** 791pt of row has room
-        // for the control line at every rung and no reason to restack.
-        #expect(SourceRow.regime(width: 791, threshold: large) == .trailing, """
-            An iPad page has room for the control line at every rung. A gate that restacked it was \
-            firing where firing was wrong, which is why there is one axis and it is width.
-            """)
-        // On a phone it rises past the row, which is right: the hostname needs the width.
-        #expect(SourceRow.regime(width: 361, threshold: large) == .beneath)
-
-        // The mark scales too, and is capped, so a large rung cannot widen the row's own furniture
-        // without limit — which is what keeps the threshold a number and not a runaway.
-        #expect(SourceRow.symbolPoints(24 * 1.6) == 36)
-        #expect(DummyFontSize.allCases.count == 5, "the ladder changed and nothing re-read it")
-    }
-
-    /// **The one assertion the old suite took at a scaled rung, restored — and it turns out to be
-    /// the assertion that bounds the claim.** `theControlLineCannotMove`'s last two lines ran the
-    /// narrow case at a grown gutter; nothing carried that over, so "the hostname never truncates
-    /// below the floor, at any width, in either regime" was proved at the default rung alone.
-    ///
-    /// **Trailing is fine at every rung by construction** — the threshold *is* the furniture plus
-    /// the floor, so the floor is met by definition whatever the two terms scale to. **Beneath is
-    /// arithmetic**, and it is the half that can fail: the stacked hostname gets the whole row less
-    /// the mark and one gap, and that does not grow with the type while the floor does.
-    ///
-    /// So the claim is now stated as what is true: it holds to the top of **this app's own
-    /// ladder**, and the margin is named rather than assumed. `DummyPrefs` sets
-    /// `dynamicTypeSize` on the whole tree from its own preference, and `DummyFontSize.largest` is
-    /// `.accessibility1` — about 1.63x a `.callout` metric against the `.large` base
-    /// `@ScaledMetric` scales from. Past that it stops holding, and this test says where.
-    @Test("The stacked hostname keeps its floor to the top of this app's type ladder")
-    func theStackedFloorHoldsToTheTopOfTheLadder() {
-        // The narrowest row a reader can actually be in: the macOS minimum window, rail open.
-        let narrowest: CGFloat = 286
-
-        func stackedRoom(at rung: CGFloat) -> CGFloat {
-            narrowest - SourceRow.symbolPoints(SourceRow.markBase * rung) - ShellSpace.step
-        }
-        func floor(at rung: CGFloat) -> CGFloat { SourceRow.hostFloor * rung }
-
-        // `DummyFontSize.largest` is `.accessibility1`; five rungs, one above the system default.
-        #expect(DummyFontSize.allCases.count == 5, "the ladder changed and nothing re-read it")
-        #expect(DummyFontSize.largest.dynamicType == .accessibility1, """
-            The top of the ladder moved. The margin below is measured against it, so it is now \
-            measuring something else.
-            """)
-        let topRung: CGFloat = 1.63
-
-        for rung in [CGFloat(1), 1.2, 1.4, topRung] {
-            #expect(stackedRoom(at: rung) >= floor(at: rung), """
-                At \(rung)x the stacked hostname is below its recognition floor on the narrowest \
-                row a reader can be in. `SourceRowView.said` and DESIGN-R4 §1.5 both claim it \
-                never is.
-                """)
-        }
-        // The margin at the top rung, named so a change that eats it is visible rather than silent.
-        #expect(stackedRoom(at: topRung) - floor(at: topRung) >= 20, """
-            The headroom at the top of the ladder has gone under 20pt. It is not a cliff far away: \
-            the claim stops holding just past this rung.
-            """)
-        // And where it stops, stated rather than left to be discovered. This is *outside* what
-        // this app can produce — but not by much, which is the honest shape of the claim.
-        #expect(stackedRoom(at: 1.9) < floor(at: 1.9), """
-            The stacked floor now holds past 1.9x. That is better than it was, and this test has \
-            stopped describing the boundary — restate where it actually falls.
-            """)
-        // The mark's cap is what keeps the stacked room from shrinking without limit, so it is
-        // part of this proof rather than a neighbouring fact.
-        #expect(SourceRow.symbolPoints(SourceRow.markBase * topRung) == 36)
     }
 
     /// **Decision 37's *absence*, pinned.** The Account page contacts nobody on appearing because
@@ -1306,18 +992,16 @@ struct SourcePageTests {
         #expect(!SourceRow.figures(published.profile).isEmpty)
         #expect(SourceRow.figures(unasked.profile).isEmpty)
 
-        for width in [CGFloat(286), 900] {
-            let withPicture = Self.drawn(published, at: width)
-            let without = Self.drawn(unasked, at: width)
-            #expect(withPicture.markName == without.markName, """
-                The leading mark changed with what the server published, which is a picture tier \
-                reintroduced above the protocol mark — and with it N requests to N servers on the \
-                app's launch screen.
-                """)
-            #expect(withPicture.markName == "KindMastodon" || withPicture.markName == "KindMastodonSmall")
-            #expect(withPicture.hasKindMark == without.hasKindMark)
-            #expect(withPicture.markInk == without.markInk)
-        }
+        let withPicture = Self.drawn(published)
+        let without = Self.drawn(unasked)
+        #expect(withPicture.markName == without.markName, """
+            The leading mark changed with what the server published, which is a picture tier \
+            reintroduced above the protocol mark — and with it N requests to N servers on the \
+            app's launch screen.
+            """)
+        #expect(withPicture.markName == "KindMastodon" || withPicture.markName == "KindMastodonSmall")
+        #expect(withPicture.hasKindMark == without.hasKindMark)
+        #expect(withPicture.markInk == without.markInk)
     }
 
     // MARK: - The leading mark
@@ -1489,151 +1173,27 @@ struct SourcePageTests {
         #expect(Self.drawingExists("Mascot"))
     }
 
-    // MARK: - Decision 33 — the controls a source has, and two looks
+    // MARK: - The row as it is drawn
 
     private static let microRow = SourceRow(
         source: Source(host: micro, kind: .mastodon),
         profile: .unasked(host: micro, kind: .mastodon)
     )
 
-    private static let forumRow = SourceRow(
-        source: Source(
-            host: forum, kind: .discuz, boards: [BoardSubscription(fid: 33, name: "閒聊")]
-        ),
-        profile: .unasked(host: forum, kind: .discuz)
-    )
-
-    static func drawn(
-        _ row: SourceRow, at width: CGFloat,
-        widest: [SourceRow.Control]? = nil, actsLive: Bool = true, signedIn: Bool = false
-    ) -> SourceRowView {
+    /// A row as the page draws it, with presses that go nowhere. What it asks before Clear and
+    /// Remove is the page's to hand in, and any question does for a test that is not about it.
+    static func drawn(_ row: SourceRow, actsLive: Bool = true) -> SourceRowView {
         SourceRowView(
-            row: row, signedIn: signedIn, width: width,
-            // The default is this row's own set, which is the single-row list. A test about the
-            // list's threshold states it instead.
-            widest: widest ?? SourceRow.controls(of: row.source),
-            actsLive: actsLive, waiting: nil, refusal: nil,
-            signIn: {}, clear: {}, remove: {}, changeBoards: {}, open: {}
+            row: row, actsLive: actsLive, waiting: nil, refusal: nil,
+            clearAsks: { ShellQuestion.clear(host: row.source.host, detailKey: "account.clear.detail") },
+            removeAsks: { ShellQuestion.remove(host: row.source.host, boards: row.source.boards.count) },
+            presses: SourceRow.Presses()
         )
     }
 
-    /// **The view's own application of the rule.** `SourceRow.regime` being right proves nothing
-    /// about the row unless the row asks it the right question, and a width hardcoded in
-    /// `SourceRowView.regime` — or the height read where the width was meant — is precisely the
-    /// wiring-unreachable defect this branch has shipped four times (risk 12).
-    ///
-    /// **And now a second question, which is risk 14's fourth shape.** The threshold depends on the
-    /// widest row in the *list*, and a row deriving it from its own source would give each row a
-    /// different one under a green suite. So the row is *told*, and the last two expectations are
-    /// that being told is what decides.
-    @Test("The row asks the rule about its own width and the list's own widest row")
-    func theRowPassesItsWidthToTheRule() {
-        #expect(Self.drawn(Self.microRow, at: 0).regime == .beneath,
-                "the unmeasured first frame is not a wide row")
-        #expect(Self.drawn(Self.microRow, at: 270).regime == .beneath)
-        #expect(Self.drawn(Self.microRow, at: 322).regime == .beneath)
-        #expect(Self.drawn(Self.microRow, at: 328).regime == .trailing,
-                "a list of Mastodons reaches the one-line row at 328pt")
-        #expect(Self.drawn(Self.forumRow, at: 300).regime == .beneath)
-        #expect(Self.drawn(Self.forumRow, at: 376).regime == .trailing)
-
-        // **The threshold is the list's and not the row's.** A Mastodon in a list containing a
-        // Discuz! stacks with it at 300pt; the same Mastodon alone does not.
-        #expect(Self.drawn(Self.microRow, at: 300, widest: Self.discuzControls).regime == .beneath, """
-            A microblog row computed its own threshold, so it stayed trailing while the forum \
-            below it stacked — which is the one arrangement decision 33 forbids.
-            """)
-        #expect(Self.drawn(Self.microRow, at: 300, widest: Self.microControls).regime == .trailing)
-
-        // And both scaling terms reach the sum, through the row's own metrics.
-        let row = Self.drawn(Self.forumRow, at: 376)
-        #expect(row.mark == SourceRow.markBase, "the leading mark is not the size the sum counts")
-        #expect(row.threshold == 376)
-        #expect(row.controls == Self.discuzControls)
-    }
-
-    /// **The pane's half of the one-threshold rule, which is the half risk 12 counts.**
-    /// `SourceRow.widest` being right proves nothing unless the pane asks it about the list it
-    /// actually draws and hands the answer to every row. That value used to not exist at all, and
-    /// a value computed inside a `View` body is reachable from nothing — which is how all four of
-    /// the defects risk 12 lists survived a green suite.
-    @Test("The pane computes one threshold from the list it draws, and every row gets that one")
-    func thePaneHandsOneWidestToEveryRow() async {
-        let session = self.session()
-        await seed(session, [
-            Source(host: Self.micro, kind: .mastodon),
-            Source(
-                host: Self.forum, kind: .discuz,
-                boards: [BoardSubscription(fid: 33, name: "閒聊")]
-            ),
-        ])
-        let pane = AccountPane(session: session)
-        #expect(pane.widest(session.rows) == Self.discuzControls, """
-            The pane did not read the forum in its own list, so the Mastodon row above it would \
-            have been drawn trailing while the forum below it stacked.
-            """)
-        // **From `session.rows` and not `session.sources`**, so the list the threshold is computed
-        // from is the list that is drawn.
-        #expect(pane.widest(session.rows) == SourceRow.widest(session.rows))
-
-        // A list with no forum in it is narrower, and that is the whole gain: every phone draws
-        // the one-line row for a list of microblogs.
-        let micro = self.session()
-        await seed(micro, [Source(host: Self.micro, kind: .mastodon)])
-        #expect(AccountPane(session: micro).widest(micro.rows) == Self.mastodonControls)
-    }
-
-    /// **Two looks, two meanings, and the third is gone.** Decision 33 withdraws decision 28: a
-    /// control for a protocol that has no such thing is **absent**, not struck. So there is no
-    /// third state to draw, no reason for one to give, and `state(of:source:actsLive:)` is deleted
-    /// rather than reduced — with `.struck` withdrawn it was a function of `actsLive` alone and no
-    /// longer read `source` at all, which is a signature that lies about what decides.
-    ///
-    /// **A colour can only arrive inside `.live`**, so a dimmed control cannot be handed one. That
-    /// is what the `.dimmed` expectations below are: not "it is grey" but "there is nowhere to put
-    /// a colour".
-    @Test("The row maps every control it draws to a state, and a hue reaches only a live one")
-    func theRowReadsTheRuleForEveryControlItDraws() {
-        // Outside a rendered tree `@Environment(\.colorScheme)` hands back `.light`, which is what
-        // makes the hue readable as a value here at all.
-        let light = ColorScheme.light
-
-        for width in [CGFloat(286), 900] {
-            let live = Self.drawn(Self.forumRow, at: width, actsLive: true)
-            #expect(live.controls == Self.discuzControls, "at \(width)")
-            #expect(live.state(.signIn) == .live(ShellChrome.inkDim(light)), "at \(width)")
-            #expect(live.state(.boards) == .live(ShellChrome.inkDim(light)), "at \(width)")
-            // Decision 29: both of these carry the alarm the user chose, in both arrangements.
-            #expect(live.state(.clear) == .live(ShellChrome.alarm(light)), "at \(width)")
-            #expect(live.state(.remove) == .live(ShellChrome.alarm(light)), "at \(width)")
-
-            // Nothing on this row is live, and no hue is reachable to make one look as though it
-            // were.
-            let held = Self.drawn(Self.forumRow, at: width, actsLive: false)
-            for control in held.controls {
-                #expect(held.state(control) == .dimmed, "\(control) at \(width)")
-            }
-        }
-
-        // `filament` is what a mark turns once the reader has switched it on, and the sign-in is
-        // the one control that changes hue without being pressed.
-        #expect(
-            Self.drawn(Self.forumRow, at: 900, signedIn: true).state(.signIn)
-                == .live(ShellChrome.filament(light))
-        )
-
-        // **A microblog draws two marks and not four**, which is the whole of decision 33 at the
-        // view: what it lacks is absent rather than struck, and there is no state left that a
-        // control not drawn could be in.
-        let micro = Self.drawn(Self.microRow, at: 900)
-        #expect(micro.controls == Self.mastodonControls)
-        #expect(micro.state(.clear) == .live(ShellChrome.alarm(light)))
-        #expect(micro.state(.remove) == .live(ShellChrome.alarm(light)))
-    }
-
-    /// **The label is the act and nothing else now.** With nothing struck there is no reason branch
-    /// left, so a control's `.help()` and its spoken label are its own verb — the four the footer
-    /// legend names, which is what keeps an act's name the same across the whole surface.
+    /// **The label is the act and nothing else.** Why a dim one is dim is `ShellMark.spoken`'s to
+    /// add after it, so a control's name is its own verb wherever it is offered — on the row or
+    /// in its `…`.
     @Test("A control says its own act, in the same words the legend uses")
     func aControlSaysItsOwnAct() {
         let forum = Source(
@@ -1742,8 +1302,8 @@ struct SourcePageTests {
 
     /// **The wash is the whole of what says this row is pressable**, so a row whose press is
     /// refused must not draw it. `.buttonStyle(.plain)` supplies no dimming of its own and there is
-    /// no glyph, plate or tint on the row's body to dim — so the S1 pattern is closed the way
-    /// `RowActionState` closes it, by making the colour unreachable rather than by remembering.
+    /// no glyph, plate or tint on the row's body to dim — so the S1 pattern is closed by making
+    /// the colour unreachable rather than by remembering.
     @Test("A refused row cannot be given the wash that says it is pressable")
     func aRefusedRowHasNoWash() {
         let light = ColorScheme.light
@@ -1760,8 +1320,8 @@ struct SourcePageTests {
         #expect(SourceRow.press(hovering: true, actsLive: false, scheme: light).wash == nil)
 
         // And the row asks the rule rather than the rule being right where nothing reads it.
-        #expect(Self.drawn(Self.microRow, at: 900, actsLive: true).pressed == .live(nil))
-        #expect(Self.drawn(Self.microRow, at: 900, actsLive: false).pressed == .inert)
+        #expect(Self.drawn(Self.microRow, actsLive: true).pressed == .live(nil))
+        #expect(Self.drawn(Self.microRow, actsLive: false).pressed == .inert)
     }
 
     /// **The evidence is identical and three sentences are not.** What the server said does not

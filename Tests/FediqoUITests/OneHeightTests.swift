@@ -190,9 +190,10 @@ struct OneHeightTests {
         let row = SourceRow(source: source, profile: .unasked(host: "forum.example", kind: .discuz))
         func drawn(waiting: String? = nil, refusal: (host: String, key: String)? = nil, notice: String? = nil) -> some View {
             SourceRowView(
-                row: row, signedIn: false, width: width, widest: SourceRow.controls(of: source),
-                actsLive: true, waiting: waiting, refusal: refusal, notice: notice,
-                signIn: {}, clear: {}, remove: {}, changeBoards: {}, open: {}
+                row: row, actsLive: true, waiting: waiting, refusal: refusal, notice: notice,
+                clearAsks: { ShellQuestion.clear(host: source.host, detailKey: "account.clear.detail") },
+                removeAsks: { ShellQuestion.remove(host: source.host, boards: 0) },
+                presses: SourceRow.Presses()
             )
         }
         let heights = Set([

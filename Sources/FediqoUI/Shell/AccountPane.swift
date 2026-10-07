@@ -16,11 +16,24 @@ struct AccountPane: View {
     /// who pressed Return in the field is left with focus on a field while a screenful of new
     /// content has appeared below it.
     @AccessibilityFocusState private var previewFocused: Bool
-    /// What the source list measured itself to be. **Zero until the first measurement lands**, and
-    /// `SourceRow.regime(width:threshold:)` reads that zero as "not measured yet" rather than as a
-    /// narrow row.
-    @State private var rowWidth: CGFloat = 0
     @Environment(\.colorScheme) private var colorScheme
+    /// What Remove's question says of a source's posts — the reader's standing choice (#250).
+    /// Optional, so a page hosted without the preferences still draws.
+    @Environment(DummyPrefs.self) private var prefs: DummyPrefs?
+
+    /// Whether a removed source's posts stay, as things stand when it is asked: once for
+    /// Remove's question and again for its yes, so the line and the act agree.
+    private var postsStay: () -> Bool {
+        let prefs = prefs
+        return { Self.postsStay(prefs?.removedPostsStay) }
+    }
+
+    /// The reader's choice, or — where the page was hosted without the preferences — **that the
+    /// posts stay**. Not knowing falls on the side that takes less: a Remove that kept posts
+    /// nobody asked to keep can be put right from Usage, and one that deleted them cannot.
+    static func postsStay(_ chosen: Bool?) -> Bool {
+        chosen ?? true
+    }
     /// The system's sign-in sheet, which a Mastodon row's Sign in opens on the server's own page.
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
@@ -390,8 +403,8 @@ struct AccountPane: View {
     /// `.buttonStyle(.plain)` supplies no dimming of its own and an explicit `.foregroundStyle`
     /// overrides the one `.disabled` would supply — so this button was refused behind a sheet and
     /// looked exactly as pressable as before. **The fourth instance of that defect on this
-    /// branch**, and the one on the page whose other controls this unit had just fixed: the row's
-    /// four glyphs went through `RowActionState`, `ShellChrome.well` left this pane with the
+    /// branch**, and the one on the page whose other controls had just been fixed: the row's
+    /// glyphs took a look that carries their ink, `ShellChrome.well` left this pane with the
     /// boards plate, and this control went on saying press-me.
     ///
     /// **Internal rather than private so a test can read it**, on the same grounds as `busy` and
@@ -563,7 +576,7 @@ struct AccountPane: View {
     /// The sources this device reads, one row each.
     ///
     /// **This list and `UsagePane`'s answer different questions and are kept visibly apart.**
-    /// This one is *what am I reading* — a mark, a hostname, and what can be done about it. That
+    /// This one is *what am I reading* — a mark, a hostname, its sign-in, and `…`. That
     /// one is *what is this device holding* — an inventory, every line of it with a byte count or a
     /// date. So **no byte figure and no date appears on a row here, ever**, and the footnote below
     /// names the other list and its job rather than repeating it. Clear is in both, which is one
@@ -583,8 +596,8 @@ struct AccountPane: View {
     private var sources: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             // The list's heading (#244): one short line, and behind its (?) which question this
-            // list answers, what Remove costs, what the marks and the word on a row mean, and
-            // where what a source left is counted — the lines that stood under the list.
+            // list answers, what Remove costs, what the marks on a row mean, and where what a
+            // source left is counted — the lines that stood under the list.
             ShellSectionHead(
                 L10n.t("account.sources.title"), line: L10n.t("account.sources.line"), help: Self.sourcesHelp()
             )
@@ -595,73 +608,29 @@ struct AccountPane: View {
             // for the list rather than once per row.
             let actsLive = ShellSession.rowActsLive(at: session.stage, checking: session.checking)
             // **Read once for the list, beside `actsLive` and for its reason.** `session.rows` is
-            // a computed property that allocates a fresh `[SourceRow]`, and `widest` folds the
-            // whole of it — so referenced from inside the `ForEach` they are O(n²) on the app's
-            // launch screen, and the sentence below would have read as though it were true while
-            // being false.
+            // a computed property that allocates a fresh `[SourceRow]`.
             let rows = session.rows
-            // **The method, not a second call to the same function.** They agreed by being the
-            // same expression, so changing the body alone would have left
-            // `thePaneHandsOneWidestToEveryRow` green while every row was drawn to a threshold
-            // nothing had pinned — the risk-12 shape with the test on the wrong side of it.
-            //
-            // **Handed the rows the list is drawn from.** It used to read `session.rows` itself,
-            // so the comment above — which says the list is built once — was false the line after
-            // it was written: the fold ran over a second, freshly allocated array.
-            let widest = widest(rows)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(rows) { row in
                     SourceRowView(
                         row: row,
-                        signedIn: session.isSignedIn(host: row.source.host),
-                        width: rowWidth,
-                        // **Handed down, never derived per row.** Decision 33 made the control
-                        // count per-protocol, so the widest row is a property of the list; a row
-                        // asking `controls(of:)` about itself would give a Mastodon one threshold
-                        // and the Discuz! beside it another, and a list where one row is trailing
-                        // and the row above it is beneath at the same width reads as broken.
-                        // Risk 14's generalised fix: the caller states the answer, the callee
-                        // never looks around for it.
-                        widest: widest,
                         actsLive: actsLive,
-                        // **The comparison moved to a named function and the fold went with
-                        // it.** It used to be written here, folding case on both sides against a
-                        // guarantee three files away that nothing at this site stated — the shape
-                        // `ShellSession.remove` names as how a bug class reaches fourteen places.
+                        // **The comparison is a named function and the fold went with it.**
                         // `ProgressOwner.row` carries the host already folded by whoever set it.
                         waiting: SourceRow.waitingLine(
                             session.progress, drawnAs: session.stage, host: row.source.host
                         ),
                         refusal: session.rowRefusal,
                         notice: session.forums.notice(host: row.source.host)?.sentence(),
-                        signIn: { Task { await press(row) } },
-                        clear: { askClear(row) },
-                        remove: { askRemove(row) },
-                        changeBoards: { Task { await changeBoards(row) } },
-                        chooseLists: { Task { await changeLists(row) } },
-                        open: { openSource(row) }
+                        clearAsks: { session.clearQuestion(host: row.source.host) },
+                        removeAsks: { session.removeQuestion(host: row.source.host, postsStay: postsStay()) },
+                        presses: presses(row, postsStay: postsStay)
                     )
                     // **Between rows and not after every one.** A rule under the last row is a
-                    // list that looks cut off rather than finished, with the footnote below it
-                    // hanging off the end of a table.
+                    // list that looks cut off rather than finished.
                     if row.id != rows.last?.id { ShellRule() }
                 }
             }
-            // **One reader for the whole list, not one per row.** Every row in it is the same
-            // width, and `SourceRow.regime` is a function of that width and of the list's own
-            // widest control set, so measuring it once and
-            // handing it down keeps each row a function of its inputs — which is what the row's
-            // own doc comment demands and what makes the decision drivable from a test.
-            //
-            // **This line is not reachable from a test, and it is now one of exactly two such
-            // seams left on this page** (risk 12). Nothing verifies that the number arriving in
-            // `rowWidth` is the row's width, and nothing can without a UI test target. The other
-            // is `FediqoRootView`'s `message:` closure, which feeds `SourceRow.clearDetailKey`.
-            // Every other decision on this page is a named value a test reads.
-            // On DESIGN-TAIL §6.3 and §6.4: whether it fires before first paint, and whether it
-            // fires when the macOS rail is expanded or collapsed — which moves the page by about
-            // 150pt and should flip the regime.
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
         }
     }
 
@@ -729,8 +698,8 @@ struct AccountPane: View {
     }
 
     /// What the sources list's (?) says: which question the list answers and what Remove costs,
-    /// what the marks on a row mean, what the word beside a host says, and where what each source
-    /// left is counted — four keys, one bubble.
+    /// what the key and `…` on a row are, what the lock beside them means, and where what each
+    /// source left is counted — four keys, one bubble.
     static func sourcesHelp(language: DummyLanguage? = nil) -> String {
         [
             "account.sources.detail", "account.sources.marks", "account.sources.writing", "account.sources.held",
@@ -747,7 +716,7 @@ struct AccountPane: View {
     ///
     /// **`session.sources` and not `session.rows`**: this needs hostnames, and `rows` builds a
     /// fresh `[SourceRow]` the list already builds twice. Internal so a test reads it, on
-    /// `widest`'s grounds.
+    /// `busy`'s grounds.
     static func askedAgain(_ sources: [Source], in mastodon: MastodonSessions) -> [String] {
         sources.map(\.host).filter { mastodon.grants[$0] == .unasked }
     }
@@ -759,22 +728,18 @@ struct AccountPane: View {
         sources.map(\.host).filter { mastodon.bookmarks(host: $0) == .unasked }
     }
 
-    /// The control set of the widest row in this list — decision 33's one-threshold rule.
-    ///
-    /// **Internal rather than private so a test can read it**, on the same grounds as `busy` and
-    /// `searchInk`: this value decides the arrangement of *every* row on the page, and a value
-    /// computed inside a `View` body is reachable from nothing — which is precisely how the four
-    /// defects risk 12 counts all survived a green suite.
-    ///
-    /// **Handed the rows rather than reading them**, so the threshold is folded over the very
-    /// array the `ForEach` draws — not a second one built from the same source. As a property it
-    /// allocated a fresh `[SourceRow]` on every body evaluation, beside the one the list already
-    /// held, under a comment saying the list was read once.
-    ///
-    /// **Still `session.rows` at the call site and not `session.sources`**, so the list the
-    /// threshold is computed from is the list that is drawn.
-    func widest(_ rows: [SourceRow]) -> [SourceRow.Control] {
-        SourceRow.widest(rows)
+    /// Every press of one row, each a named method of this page and nothing else — so a row's
+    /// closures do nothing but call one. `postsStay` is read when Remove's yes is pressed.
+    func presses(_ row: SourceRow, postsStay: @escaping () -> Bool = { AccountPane.postsStay(nil) }) -> SourceRow.Presses {
+        SourceRow.Presses(
+            signIn: { Task { await press(row) } },
+            askAgain: { askAgain(row) },
+            changeBoards: { Task { await changeBoards(row) } },
+            chooseLists: { Task { await changeLists(row) } },
+            clear: { Task { await clear(row) } },
+            remove: { Task { await remove(row, keepingPosts: postsStay()) } },
+            open: { openSource(row) }
+        )
     }
 
     // MARK: - What every control on this page actually does
@@ -839,7 +804,7 @@ struct AccountPane: View {
     /// **A sign-in that could carry writing asks first** (#69). The question is the reader's to
     /// answer before the server's page opens, so nothing is asked of the server and nothing is
     /// opened until they have; a protocol this app cannot write on has no question to put and goes
-    /// straight through, which is decision 4's rule about absent controls applied to a dialog.
+    /// straight through.
     func press(_ row: SourceRow) async {
         if session.isSignedIn(host: row.source.host) {
             await session.signOut(host: row.source.host)
@@ -863,6 +828,27 @@ struct AccountPane: View {
     /// second surface for the question and not a third behaviour on the first.
     func askWriting(_ host: String) {
         session.signInChoice = host
+    }
+
+    /// The permission glyph's press: the question this row's sign-in is owed, and **nobody is
+    /// signed out to put it** — `askWriting`'s argument, which is why this is not the key's own
+    /// press: on a signed-in row the key signs out, and a sign-out revokes the token.
+    ///
+    /// A sign-in that only lacks bookmarks is asked for those, the one question a post's row
+    /// puts; a write turned away, or a sign-in made before writing was asked for, is asked what
+    /// it may do. Nothing where the row owes nothing.
+    func askAgain(_ row: SourceRow) {
+        let host = row.source.host
+        switch row.owed {
+        case .nothing: return
+        case .refused: askWriting(host)
+        case .asking:
+            if session.mastodon.bookmarks(host: host) == .unasked {
+                askBookmarks(host)
+            } else {
+                askWriting(host)
+            }
+        }
     }
 
     /// The bookmark sentence's own control (#285): it puts the bookmark question about `host`,
@@ -890,13 +876,11 @@ struct AccountPane: View {
         )
     }
 
-    /// A row's Clear. **Empties nothing** — it raises the question, and only the question's yes
-    /// reaches `clear(host:)`. Decision 29, and `askRemove`'s shape for its reason.
-    ///
-    /// The same act, and the same key, as the one on Usage — which now asks the same
-    /// question through the same presenter, or one word would do two things two panes apart.
-    func askClear(_ row: SourceRow) {
-        session.clearing = row.source.host
+    /// The yes to a row's Clear (decision 29: the press itself only asks, and the row's `…` is
+    /// what asks). **`ShellSession.clear(host:)` and nothing beside it** — the one call the yes
+    /// to Usage's Clear makes too, so one act is one function whichever page it was asked on.
+    func clear(_ row: SourceRow) async {
+        await session.clear(host: row.source.host)
     }
 
     /// A row's boards control. **Changes nothing by itself** — it reads the forum's index and
@@ -912,10 +896,11 @@ struct AccountPane: View {
         await session.changeLists(host: row.source.host)
     }
 
-    /// A row's Remove. **Destroys nothing** — it raises the question, and only the question's
-    /// confirm reaches `remove(host:)`.
-    func askRemove(_ row: SourceRow) {
-        session.removing = row.source.host
+    /// The yes to a row's Remove, which the row's `…` asks first. **`ShellSession.remove(host:
+    /// keepingPosts:)` and nothing beside it**, with the reader's standing choice about its
+    /// posts (#250) as it stands at the yes.
+    func remove(_ row: SourceRow, keepingPosts: Bool) async {
+        await session.remove(host: row.source.host, keepingPosts: keepingPosts)
     }
 
     /// The row's own press — decision 31. **Asks nobody anything**: the profile is already in

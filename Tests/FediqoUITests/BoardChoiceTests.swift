@@ -1183,36 +1183,34 @@ struct BoardChoiceTests {
 
     /// **A control that cannot be pressed must not look pressable.** `.disabled` dims a control by
     /// supplying a foreground style, which an explicit `.foregroundStyle` overrides — so a refused
-    /// control went on saying press-me at full strength. That defect shipped twice on this branch,
-    /// and `RowActionButton`'s own doc predicted it for these four. The tint is a function of the
-    /// state now, so a colour cannot be set on a control that is not live.
+    /// control went on saying press-me at full strength. That defect shipped twice on this branch.
+    /// The look carries the ink now (`MarkLook`), so a colour cannot be set on a control that is
+    /// not live.
     ///
-    /// **The plate this used to be about is gone** (decision 30): the boards line is no longer the
-    /// affordance, so `ShellChrome.well` leaves `AccountPane` entirely and what is pinned here is
-    /// the rule the four glyphs are drawn from instead.
+    /// **The plate this used to be about is gone** (decision 30), and since 2026-10-07 the boards
+    /// control is an item of the row's `…`: what is pinned here is the look that item is given,
+    /// and that a menu draws a dim one as one that does not answer.
     @Test("A row's boards control stops looking pressable exactly when it stops being pressable")
     func theBoardsControlLooksRefusedWhenItIsRefused() {
         let source = Source(
             host: Self.host, kind: .discuz,
             boards: [BoardSubscription(fid: 33, name: "启动盘工具")]
         )
-        // **`SourceRow.state(of:source:actsLive:)` is gone, and this reads the view's rule
-        // directly — which is the stronger of the two anyway.** With decision 33 withdrawing the
-        // strike, that function was a function of `actsLive` alone and no longer read `source` at
-        // all: a signature that lies about what decides. The rule now lives in one place, on the
-        // view, where the drawing is.
+        // Read off the view's own menu, so the rule and the row that asks it are both pinned.
         let row = SourceRow(source: source, profile: .unasked(host: Self.host, kind: .discuz))
-        func drawn(live: Bool) -> SourceRowView {
+        func boards(live: Bool) -> ShellMoreItem {
             SourceRowView(
-                row: row, signedIn: false, width: 900,
-                widest: SourceRow.controls(of: source),
-                actsLive: live, waiting: nil, refusal: nil,
-                signIn: {}, clear: {}, remove: {}, changeBoards: {}, open: {}
-            )
+                row: row, actsLive: live, waiting: nil, refusal: nil,
+                clearAsks: { ShellQuestion.clear(host: Self.host, detailKey: "account.clear.detail") },
+                removeAsks: { ShellQuestion.remove(host: Self.host, boards: 1) },
+                presses: SourceRow.Presses()
+            ).more.items[0]
         }
-        #expect(drawn(live: true).state(.boards) == .live(ShellChrome.inkDim(.light)))
-        #expect(drawn(live: false).state(.boards) == .dimmed, """
-            The control drew live while the rule said the row was not the reader's, which is a \
+        #expect(boards(live: true).symbol == "checklist")
+        #expect(boards(live: true).look == .live && boards(live: true).answers)
+        #expect(boards(live: false).look == .dim(.notNow))
+        #expect(!boards(live: false).answers, """
+            The control answered while the rule said the row was not the reader's, which is a \
             press the reader can see and cannot make.
             """)
     }
@@ -1592,7 +1590,7 @@ struct BoardChoiceTests {
 
     /// **The state carries the mark, so a box with nothing in it cannot be given one.**
     ///
-    /// `RowActionState`'s shape, applied to the other control this branch shipped invisible: the
+    /// The state carries its inks: the
     /// three colours are chosen together in one `static func` a test can drive, and the mark's ink
     /// exists only in the ticked case. The previous spelling picked all three inside a `View` body
     /// with two ternaries, which is reachable from no test at all — and that is how the defect

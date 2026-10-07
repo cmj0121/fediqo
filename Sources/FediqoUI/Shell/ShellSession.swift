@@ -116,21 +116,9 @@ final class ShellSession {
     /// message "tells the reader what happened and offers them nothing to do about it".
     var offerSignIn: String?
 
-    /// The server the reader has pressed Remove on and not yet answered for, or nothing.
-    ///
-    /// **Nothing is destroyed while this is set.** Remove takes the boards the reader picked, and
-    /// `clear`'s own comment is the argument for why that is worth a question first: pictures come
-    /// back by themselves and a pick of eight boards out of forty does not. So the press sets this,
-    /// the dialog says what goes, and only the confirm reaches `remove(host:)`.
-    ///
-    /// A host and not a `Source`, because the dialog needs the host to name it and the count of
-    /// boards to pick its sentence, and both are readable off `sources` — a second copy of a source
-    /// held here would be a copy that goes stale the moment the reader changes their boards.
-    var removing: String?
-
     /// The server the reader has pressed Clear on and not yet answered for, or nothing.
     ///
-    /// **Nothing is emptied while this is set** — `removing`'s shape, for a reason decision 29
+    /// **Nothing is emptied while this is set**, for a reason decision 29
     /// only half states. The colour is the user's overstatement; the confirmation is closing a
     /// real hole. `clear(host:)` reaches `ForumSessions.forget(host:)`, which drops the forum's
     /// cookies **and deletes the saved password from the Keychain** — and `forget`'s own doc makes
@@ -168,8 +156,8 @@ final class ShellSession {
     /// page will ask the reader to agree to — a choice made afterwards would be this app deciding
     /// and the server reporting. Cancelling it opens nothing and changes nothing.
     ///
-    /// `removing`'s shape, and a host for its reason: the dialog names it, and a copy of the
-    /// source held here would be one that goes stale. **Not `signingIn`**, which is the forum
+    /// A host and not a `Source`: the dialog names it, and a copy of the source held here would
+    /// be one that goes stale. **Not `signingIn`**, which is the forum
     /// sign-in already running in a web view — this is a question, and nothing is running.
     var signInChoice: String?
     /// The source whose sign-in is being asked to allow bookmarks, where one is (#285). Observed,
@@ -243,14 +231,20 @@ final class ShellSession {
     /// beside `sources` is a copy that goes stale the moment a board is picked.
     var rows: [SourceRow] {
         sources.map { source in
-            SourceRow(
+            // From the session and never from the row, because two of the three facts that
+            // decide it — what the sign-in bought and what the source has refused since —
+            // are held here.
+            let writing = mastodon.writing(host: source.host, kind: source.kind)
+            return SourceRow(
                 source: source,
                 profile: profiles[source.host] ?? .unasked(host: source.host, kind: source.kind),
                 signedIn: isSignedIn(host: source.host),
-                // From the session and never from the row, because two of the three facts that
-                // decide it — what the sign-in bought and what the source has refused since —
-                // are held here.
-                writing: mastodon.writing(host: source.host, kind: source.kind)
+                writing: writing,
+                // Handed in for `writing`'s reason: what the sign-in was asked for is held here.
+                unasked: SourceRow.unasked(
+                    grant: mastodon.grants[source.host.lowercased()],
+                    bookmarks: mastodon.bookmarks(host: source.host)
+                )
             )
         }
     }
@@ -1977,7 +1971,7 @@ final class ShellSession {
     ///
     /// **One function, because the alternative is the defect risk 12 counts.** A control that is
     /// drawn live and refused by a guard somewhere else is a button that does nothing, and this
-    /// branch has now shipped four of those. `SourceRowView` dims all four on this and
+    /// branch has now shipped four of those. `SourceRow.look` dims every mark on this and
     /// `changeBoards(host:)` refuses on this, so they cannot come to disagree.
     ///
     /// **`rowActsLive` and not `boardsLive`, which is a rename and not a widening of the rule.**
@@ -1996,8 +1990,8 @@ final class ShellSession {
     /// and both of these break in silence:
     ///
     /// - **`PreviewOrigin.joined` carries a `Source` and is safe from going stale because of this
-    ///   term.** `removing` refuses to hold a copy for exactly that reason; the detail may hold
-    ///   one because no row control can change a source's boards while a stage is up, and
+    ///   term.** A question holds a host and never a copy for exactly that reason; the detail
+    ///   may hold one because no row control can change a source's boards while a stage is up, and
     ///   `stage == nil` is the whole of why.
     /// - **A row is always visible while its own errand runs**, which is what lets
     ///   `reporting(_:drawnAs:)` hand `.row` straight back. `changeBoards` and `subscribe` both
@@ -2009,9 +2003,9 @@ final class ShellSession {
     /// Whether the **page's** three add controls may be acted on: the hostname field, the
     /// magnifier and Browse.
     ///
-    /// **`rowActsLive`'s twin, and it exists for the same reason.** The row's four controls were
-    /// drawn on one question and pressed on another until `RowActionState` made the pair
-    /// unspellable. The page's three had the same split and kept it: `AccountPane.busy` asked
+    /// **`rowActsLive`'s twin, and it exists for the same reason.** The row's controls were
+    /// drawn on one question and pressed on another until their look carried both
+    /// (`MarkLook`, whose ink and whose press are one value). The page's three had the same split and kept it: `AccountPane.busy` asked
     /// `stage?.surface == .sheet` while `look()` and `browse()` asked
     /// `stage?.admitsASecondLook`. Two exhaustive switches over the same five shapes, agreeing
     /// **by coincidence** — `surface == .pane` and `admitsASecondLook` happen to answer alike for
@@ -2618,8 +2612,7 @@ final class ShellSession {
     private func clearNow(host: String, keepingRows: Bool) async {
         let host = host.lowercased()
         // The question has been answered, so nothing is pending any more — set before the awaits,
-        // so no dialog state outlives the decision it was asking about. `remove`'s own line, for
-        // its reason. Unconditional, because `remove` reaches this too and a Remove answered while
+        // so no dialog state outlives the decision it was asking about. Unconditional, because `remove` reaches this too and a Remove answered while
         // a Clear was pending would otherwise leave that Clear's question standing over a row that
         // has gone.
         clearing = nil
@@ -2847,6 +2840,38 @@ final class ShellSession {
         jar.forget(host: host, keeping: sources.map(\.host))
     }
 
+    /// How many boards Remove would take from `host` — what its question's line names where there
+    /// are any, since they are the one part of Remove that does not come back.
+    ///
+    /// **Two whole sentences and two keys, not one sentence with a clause appended.** "the 3 boards
+    /// you picked" must never appear over a microblog, and a second half joined on with `+` is a
+    /// half no translator can put first. `clear` argues why the boards are the part worth naming:
+    /// pictures come back by themselves, a pick of eight boards out of forty does not. See
+    /// `ShellQuestion.remove`.
+    static func boards(of host: String, in sources: [Source]) -> Int {
+        sources.first { $0.host == host }?.boards.count ?? 0
+    }
+
+    /// The question before `host` is removed, with what this session holds for it read here: the
+    /// boards it takes, and how many of its posts the person keeps, which stay (#294).
+    func removeQuestion(host: String, postsStay: Bool) -> ShellConfirmation {
+        ShellQuestion.remove(
+            host: host, boards: Self.boards(of: host, in: sources), postsStay: postsStay,
+            kept: holdings.kept(host: host).posts
+        )
+    }
+
+    /// The question before what `host` left here is cleared, with what this session holds for it
+    /// read here: whether a saved password goes with it, and whether a sign-in does. One function
+    /// for the two places Clear is offered — a source row's `…` on Account and the `…` of a
+    /// source's detail on Usage — so the two ask one question.
+    func clearQuestion(host: String) -> ShellConfirmation {
+        ShellQuestion.clear(host: host, detailKey: SourceRow.clearDetailKey(
+            hasPassword: forums.hasPassword(host: host),
+            reachedSignIn: isSignedIn(host: host)
+        ))
+    }
+
     /// Whether this device holds a sign-in for that source, whichever protocol it is.
     func isSignedIn(host: String) -> Bool {
         forums.reachedSignIn(host: host) || mastodon.isSignedIn(host: host)
@@ -3031,9 +3056,6 @@ final class ShellSession {
 
     private func removeNow(host raw: String, keepingPosts: Bool) async {
         let host = raw.lowercased()
-        // The question has been answered, so nothing is pending any more — set before the awaits,
-        // so no dialog state outlives the decision it was asking about.
-        removing = nil
         if usageOpened?.lowercased() == host { usageOpened = nil }
         stopReadingAsYou(host: host)
         // Every read of it a reload has on its way ends here, signed in or not, and an open thread

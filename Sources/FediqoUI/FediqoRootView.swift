@@ -389,9 +389,10 @@ public struct FediqoRootView: View {
             .sheet(item: $session.editing) { draft in
                 TimelineEditor(session: session, draft: draft)
             }
-            // Remove's question, Clear's, and the notice that a server ended a sign-in: each a
-            // modifier of its own rather than spelled here. See `HostQuestion` for why.
-            .modifier(HostQuestion.remove(session, prefs: prefs))
+            // Clear's question as Usage asks it, and the notice that a server ended a sign-in: each
+            // a modifier of its own rather than spelled here. See `HostQuestion` for why. Remove's
+            // question is not on the root: it is asked by the `…` it is chosen from
+            // (`ShellMoreAsks`), as a source row's Clear is.
             .modifier(HostQuestion.clear(session))
             .modifier(EndedSignInNotice(session: session))
             .modifier(ActivitySheet(session: session))
@@ -1924,9 +1925,7 @@ private struct WithdrawQuestion: ViewModifier {
     }
 }
 
-/// Remove's question and Clear's (decision 29), each as a modifier of its own — one shape for
-/// the two, since they differ only in what they ask about, how heavy the confirm is, what it does
-/// and what the detail says.
+/// Clear's question as Usage asks it (decision 29), as a modifier of its own.
 ///
 /// **Out of `FediqoRootView`'s chain, and the presenters below with it.** Each built a `Binding`
 /// and a `presenting:` presenter with closures inside one very long modifier chain, and Xcode
@@ -1952,27 +1951,9 @@ private struct HostQuestion: ViewModifier {
         let question: ShellConfirmation
     }
 
-    /// **The Remove question.** Remove is asked from a source row today and will be asked from
-    /// the source page's own header the day that grows one.
-    ///
-    /// It is asked at all because Remove takes the board picks the reader made, and
-    /// `ShellSession.clear`'s comment is the argument: pictures come back by themselves, a pick
-    /// of eight boards out of forty does not.
-    ///
-    /// **What happens to its posts is `prefs`' standing choice** (#250), read when the question
-    /// is asked and again when it is answered, so the line and the act agree: the reader is not
-    /// asked twice, and the one line says which of the two it will be.
-    static func remove(_ session: ShellSession, prefs: DummyPrefs) -> HostQuestion {
-        HostQuestion(
-            session: session, asking: \.removing,
-            question: { FediqoRootView.removeQuestion($0, in: session, postsStay: prefs.removedPostsStay) },
-            act: { await session.remove(host: $0, keepingPosts: prefs.removedPostsStay) }
-        )
-    }
-
-    /// **The Clear question, beside Remove's and driven the same way.** One presenter, one piece
-    /// of session state, two entrances: a source row and `UsagePane`'s row, which press the same
-    /// key for the same call and must therefore ask the same question.
+    /// **The Clear question.** One presenter and one piece of session state for `UsagePane`'s
+    /// row, which presses for the same call a source row's `…` does and must therefore ask the
+    /// same question.
     ///
     /// **It exists because Clear is not reversible, whatever the row looks like.** It drops the
     /// pictures, the emoji names and the first posts, all of which come back — and it calls
@@ -1980,20 +1961,13 @@ private struct HostQuestion: ViewModifier {
     /// reader out of the forum. The Account row says neither of those before the press, so this
     /// is the one place they are said: the line names what does not come back, the (?) the rest.
     ///
-    /// **The detail is the one seam a test cannot reach** (risk 12). `clearDetailKey` and
-    /// `ShellQuestion.clear` are pure and driven across every combination; what nothing verifies
-    /// is that *this* closure asks with `hasPassword` and `reachedSignIn` for the host being
-    /// confirmed, because it runs only inside a presented sheet. Named here rather than left to
-    /// be discovered.
+    /// **The question is `ShellSession.clearQuestion`**, the function a source row's `…` reads
+    /// for the question its Clear carries — so what the menu says it will ask and what is asked
+    /// are one value, and a test drives it for a host with a password and one without.
     static func clear(_ session: ShellSession) -> HostQuestion {
         HostQuestion(
             session: session, asking: \.clearing,
-            question: { host in
-                ShellQuestion.clear(host: host, detailKey: SourceRow.clearDetailKey(
-                    hasPassword: session.forums.hasPassword(host: host),
-                    reachedSignIn: session.isSignedIn(host: host)
-                ))
-            },
+            question: { session.clearQuestion(host: $0) },
             act: { await session.clear(host: $0) }
         )
     }

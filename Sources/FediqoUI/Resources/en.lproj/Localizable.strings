@@ -789,9 +789,10 @@
 "account.sources.detail"         = "Everything this device reads. Press a row for what that server says about itself — its name, its size, its boards. Removing one takes its boards and its posts with it.";
 "account.sources.held"           = "What each one has left on this device is on Usage.";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
-"account.sources.marks"          = "A row carries only the marks its own server has: sign in, change boards or lists, clear what it left here, and remove it.";
+"account.sources.marks"          = "Every row carries the same marks. The key is the sign-in: filled once you are signed in, grey where that source has none. ⋯ holds the rest: what the row has to say, changing boards or lists, clearing what the source left here, and removing it. What a source does not have is grey there too, and says why. A red ⋯ has something to say.";
 /* #69 — what may be done on a source, said on its row and explained once for the list. */
-"account.sources.writing"        = "A row also says what may be done on that source: read, read and write, or read only where the protocol has no writing in Fediqo at all. Write refused means a write was turned away; sign in to that source again.";
+"account.sources.writing"        = "A lock with an exclamation mark means that sign-in must be asked again before everything it could do is offered: a write was turned away, or it signed in before Fediqo asked to write or for bookmarks. Press it to be asked; nobody is signed out.";
+"account.source.permission"      = "%@'s sign-in must be asked again before everything it could do is offered";
 "account.source.writing.never"   = "read only";
 "account.source.writing.read"    = "read";
 "account.source.writing.write"   = "read and write";
@@ -844,10 +845,6 @@
 
 /* Pressing a row. Decision 31: the row opens what that server says about itself. */
 "account.source.open"             = "What %@ says about itself";
-"account.source.more" = "More for this source";
-"account.source.more.said" = "More for this source. It has something to say";
-"account.source.state.trouble" = "needs a look";
-"account.source.state.waiting" = "waiting";
 "account.source.open.hint"        = "Opens what this server says about itself.";
 
 /* The detail: the same evidence, and the three sentences a preview says that are false here. */

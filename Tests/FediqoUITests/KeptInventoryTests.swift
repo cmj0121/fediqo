@@ -201,10 +201,10 @@ struct KeptInventoryTests {
     @Test("Removing a source with kept posts says how many will stay, read off what the session holds; with none kept, or where its posts all stay, the question is as it was")
     func removingASource() async {
         let session = await shell()
-        let asked = FediqoRootView.removeQuestion(Self.one.host, in: session, postsStay: false)
+        let asked = session.removeQuestion(host: Self.one.host, postsStay: false)
         #expect(asked.line == "Its posts and what is held for it go; the 3 you keep stay.")
         #expect(asked.help == "Its posts and what this device holds for it go.", "and the (?) says the rest, once")
-        #expect(FediqoRootView.removeQuestion(Self.two.host, in: session, postsStay: false).line
+        #expect(session.removeQuestion(host: Self.two.host, postsStay: false).line
             == "Its posts and what is held for it go; the one you keep stays.")
         let boards = ShellQuestion.remove(host: "a.example", boards: 8, kept: 3, language: .english)
         #expect(boards.line == "Its posts and the 8 boards you picked go; the 3 you keep stay.")
@@ -212,7 +212,7 @@ struct KeptInventoryTests {
 
         let plain = ShellQuestion.remove(host: "a.example", boards: 0, language: .english)
         #expect(ShellQuestion.remove(host: "a.example", boards: 0, kept: 0, language: .english) == plain)
-        #expect(FediqoRootView.removeQuestion(Self.one.host, in: session, postsStay: true)
+        #expect(session.removeQuestion(host: Self.one.host, postsStay: true)
             == ShellQuestion.remove(host: Self.one.host, boards: 0, postsStay: true))
     }
 

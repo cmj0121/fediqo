@@ -638,6 +638,12 @@ struct MastodonSignInTests {
         session.mastodon.refresh()
         #expect(AccountPane.askedAgain(session.sources, in: session.mastodon) == [host])
 
+        // The row says so too, with its one permission glyph — whose press is this same asking.
+        #expect(row(session, host).owed == .asking)
+        AccountPane(session: session).askAgain(row(session, host))
+        #expect(session.signInChoice == host && session.bookmarkAsk == nil)
+        session.signInChoice = nil
+
         AccountPane(session: session).askWriting(host)
         #expect(session.signInChoice == host, "the question was not put")
         #expect(session.isSignedIn(host: host), "asking signed the reader out")
@@ -715,15 +721,22 @@ struct MastodonSignInTests {
 
         session.mastodon.refusedWrite(host: host)
         #expect(row(session, host).writing == .refused)
-        #expect(SourceRow.marksWriting(.refused))
-        #expect(!SourceRow.marksWriting(.writes))
+        // The row draws no word for it now: it owes the permission glyph, in the alarm.
+        #expect(row(session, host).owed == .refused)
+        #expect(SourceRow.permissionInk(.refused, look: .live, .light) == ShellChrome.alarm(.light))
         #expect(session.isSignedIn(host: host), "a refused write signed the reader out")
         #expect(SourceRow.spoken(row(session, host))
             .contains(L10n.t("account.source.writing.refused")))
 
+        // The glyph's press asks what the sign-in may do, and signs nobody out to ask.
+        AccountPane(session: session).askAgain(row(session, host))
+        #expect(session.signInChoice == host && session.isSignedIn(host: host))
+        session.signInChoice = nil
+
         // Signing in again is what clears it, which is what the row says to do.
         await session.signIn(host: host, through: Page(), writing: true)
         #expect(row(session, host).writing == .writes)
+        #expect(row(session, host).owed != .refused)
 
         // And a sign-out spends it too: there is nothing left for a write to use.
         session.mastodon.refusedWrite(host: host)
@@ -1084,6 +1097,12 @@ struct MastodonSignInTests {
             host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret", scopes: Self.before
         ))
         session.mastodon.refresh()
+
+        // The row owes its permission glyph for it, and the glyph's press is this one question.
+        #expect(row(session, host).owed == .asking)
+        AccountPane(session: session).askAgain(row(session, host))
+        #expect(session.bookmarkAsk == host && session.signInChoice == nil)
+        session.bookmarkAsk = nil
 
         AccountPane(session: session).askBookmarks(host)
 

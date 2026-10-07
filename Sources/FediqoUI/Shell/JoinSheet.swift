@@ -45,12 +45,12 @@ enum PreviewOrigin: Equatable {
     /// when they added it, and this costs **no request**. `ShellSession.openSource(host:)` is the
     /// entrance.
     ///
-    /// **It carries the source, and that is not the copy `removing` refuses to hold.** The whole
+    /// **It carries the source, and that is not the copy a question refuses to hold.** The whole
     /// board list is the one thing this screen has that the row does not — the row clips at two
     /// lines — and it is not in `SourcePreview`, whose `boards` is the forum's *index*. A copy
     /// held here cannot go stale while it is held: this is a stage, and `rowActsLive` refuses
     /// every control on every row while a stage is up, so the reader cannot change their boards
-    /// underneath it. `removing` is a dialog, which leaves the rows live, and that is the
+    /// underneath it. A question is a dialog, which leaves the rows live, and that is the
     /// difference.
     case joined(Source)
 
