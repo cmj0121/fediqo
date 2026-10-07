@@ -1,7 +1,7 @@
 import FediqoCore
 import Foundation
 
-/// A post its source deleted: kept, marked, and let go on the reader's wait or press (#179).
+/// A post its source deleted: kept, marked, and let go on the reader's wait (#179).
 /// A place in a timeline whose source no longer has what lay there is let go the same way (#204):
 /// its mark goes, and the post it sits by stays.
 ///
@@ -47,26 +47,8 @@ extension ShellSession {
         return await letGoneGo(markedBy: cutoff)
     }
 
-    /// What is marked gone from its source, a forum topic's reply included — the posts, and the places whose
-    /// source no longer has what lay there (#204). What the press asks about before it lets go.
-    func goneHeld() async -> WentGone {
-        WentGone(posts: await store.goneCount(), places: await store.settledCount())
-    }
-
-    /// How many posts marked gone the person keeps: what the press leaves (#294).
-    func goneKept() async -> Int {
-        await store.keptGoneCount()
-    }
-
-    /// Lets go of everything marked gone from its source, now — the reader's press. Returns what
-    /// went, which is what the press says back.
-    @discardableResult
-    func letAllGoneGo() async -> WentGone {
-        await letGoneGo(markedBy: nil)
-    }
-
     /// The posts first: a place on a post that goes goes with it, and is not counted twice.
-    private func letGoneGo(markedBy cutoff: Date?) async -> WentGone {
+    private func letGoneGo(markedBy cutoff: Date) async -> WentGone {
         let posts = await store.letGoneGo(markedBy: cutoff)
         let went = WentGone(posts: posts, places: await store.letSettledGo(markedBy: cutoff))
         guard !went.isNone else { return went }
@@ -77,8 +59,8 @@ extension ShellSession {
     }
 }
 
-/// What is marked gone from its source, counted (#179, #204): posts, and the places in a timeline
-/// whose source no longer has what lay there. Counted apart, so what the press says stays true.
+/// What a letting go took of what was marked gone from its source (#179, #204): posts, and the
+/// places in a timeline whose source no longer has what lay there, counted apart.
 struct WentGone: Equatable, Sendable {
     var posts = 0
     var places = 0

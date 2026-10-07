@@ -307,24 +307,23 @@ struct KeptRowTests {
 
     // MARK: - Gone from its source
 
-    @Test("Kept and said gone by its source: still there after everything marked is let go, and the question counted only the other")
+    @Test("Kept and said gone by its source: still there after everything marked has waited and is let go")
     func goneLeavesKept() async throws {
         let session = await Self.shell([Self.note("kept"), Self.note("other"), Self.note("fine")])
         await session.setKept(true, on: try Self.row(session, "kept"))
         await session.markGone(Self.note("kept").key, at: Self.origin)
         await session.markGone(Self.note("other").key, at: Self.origin)
 
-        #expect(await session.goneHeld() == WentGone(posts: 1))
-        #expect(await session.letAllGoneGo() == WentGone(posts: 1))
+        let later = Self.origin.addingTimeInterval(9 * 86_400)
+        #expect(await session.letGoneGo(waitingDays: 1, keepingMonths: nil, from: later) == WentGone(posts: 1))
 
         #expect(Set(session.notes.map(\.id)) == ["kept", "fine"])
         let row = try Self.row(session, "kept")
         #expect(row.kept && row.goneEverywhere, "still kept, still marked")
-        #expect(await session.letGoneGo(waitingDays: 1, keepingMonths: nil, from: Self.origin.addingTimeInterval(9 * 86_400)).isNone)
+        #expect(await session.letGoneGo(waitingDays: 1, keepingMonths: nil, from: later).isNone)
         // Un-kept, it is an ordinary marked post, and goes with the next letting go.
         #expect(await session.toggleKept(row) == false)
-        #expect(await session.goneHeld() == WentGone(posts: 1))
-        #expect(await session.letAllGoneGo() == WentGone(posts: 1))
+        #expect(await session.letGoneGo(waitingDays: 1, keepingMonths: nil, from: later) == WentGone(posts: 1))
         #expect(session.notes.map(\.id) == ["fine"])
     }
 

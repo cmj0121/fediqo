@@ -28,9 +28,6 @@ struct QuestionTests {
             ShellQuestion.forgetPassword(host: "a.example", language: language),
             ShellQuestion.shorten(months: 6, language: language),
             ShellQuestion.shorten(months: 1, language: language),
-            ShellQuestion.letGo(posts: 4, places: 0, language: language),
-            ShellQuestion.letGo(posts: 4, places: 2, language: language),
-            ShellQuestion.letGo(posts: 0, places: 2, language: language),
             ShellQuestion.letGo(SpanAsk(posts: 3, from: Date(), to: Date(), host: nil), language: language),
             ShellQuestion.letGo(SpanAsk(posts: 1, from: Date(), to: Date(), host: "a.example"), language: language),
             ShellQuestion.removeTimeline(named: "Art", language: language),
@@ -100,10 +97,6 @@ struct QuestionTests {
             == L10n.t("prefs.keep.shorten.detail", language: english))
         #expect(ShellQuestion.shorten(months: 6, language: english).title
             == L10n.count("prefs.keep.shorten.title", 6, language: english))
-        #expect(ShellQuestion.letGo(posts: 4, places: 2, language: english).help
-            == GoneSection.askDetail(posts: 4, places: 2, language: english))
-        #expect(ShellQuestion.letGo(posts: 4, places: 2, language: english).title
-            == GoneSection.askLine(4, places: 2, language: english))
         #expect(ShellQuestion.storeNewer(language: english).help == L10n.t("store.newer.detail", language: english))
         let ended = ShellQuestion.signedOut(hosts: ["a.example"], language: english)
         #expect(ended.line.contains("a.example") && ended.help?.contains("a.example") == true)
@@ -198,8 +191,8 @@ struct QuestionTests {
             .appendingPathComponent("Sources/FediqoUI/Resources")
         let keys = [
             "withdraw.line", "store.newer.line", "account.signin.ask.line", "account.mastodon.ended.line",
-            "prefs.drop.copies.line", "prefs.keep.shorten.line", "prefs.gone.ask.line", "prefs.span.ask.line",
-            "prefs.gone.ask.line.places", "prefs.gone.ask.line.placesonly", "account.remove.line.boards",
+            "prefs.drop.copies.line", "prefs.keep.shorten.line", "prefs.span.ask.line",
+            "account.remove.line.boards",
             "account.remove.line.stay", "account.remove.line.stay.boards", "confirm.destructive.hint",
             "prefs.password.forget.title", "prefs.password.forget.line", "prefs.password.forget.detail",
             "prefs.password.forget.confirm",

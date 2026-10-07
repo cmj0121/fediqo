@@ -122,11 +122,12 @@ struct ReadDownTests {
         #expect(await server.cursors.filter { $0 == "max_id=31" }.count == asked + 1, "once")
     }
 
-    @Test("A settled place is counted with what the press lets go, and goes by the wait and by the press; its post stays")
+    @Test("A settled place is counted apart from posts and goes by the wait; its post stays")
     func settledLetGo() async throws {
-        let (session, server) = await marked()
+        let (session, _) = await marked()
         await session.reload.readDown(Self.stretch, below: Self.key(31), in: session)
-        #expect(await session.goneHeld() == WentGone(posts: 0, places: 1))
+        #expect(await session.store.goneCount() == 0)
+        #expect(await session.store.settledCount() == 1)
         let now = Date()
         #expect(await session.letGoneGo(waitingDays: 7, keepingMonths: nil, from: now) == WentGone())
         #expect(await session.letGoneGo(waitingDays: nil, keepingMonths: nil, from: now + 400 * Self.day) == WentGone(),
@@ -135,41 +136,16 @@ struct ReadDownTests {
                 == WentGone(places: 1))
         #expect(marks(session).isEmpty)
         #expect(drawn(session).contains(31), "the mark went, the post it sat by stays")
-
-        // Settled again below the next place, and let go by the press this time.
-        await server.keep(from: 70)
-        await server.post(70...200)
-        await session.reload.timeline(.all, in: session)
-        let post = try #require(marks(session).values.first { !$0.below.isEmpty }?.posts[Self.one],
-                                "the premise: a new place below what the source still has")
-        await session.reload.readDown(Self.stretch, below: post, in: session)
-        #expect(await session.goneHeld() == WentGone(places: 1))
-        #expect(await session.letAllGoneGo() == WentGone(places: 1))
-        #expect(await session.goneHeld() == WentGone())
     }
 
-    @Test("The press says posts and places apart, in English and in 中文, in every bundle")
+    @Test("A settled place has its words, in English and in 中文, in every bundle")
     func words() throws {
         for language in [DummyLanguage.english, .taiwanese] {
             let settled = TimelineGapRow.words(.settled, host: Self.one, language: language)
             #expect(settled.contains(Self.one))
             #expect(settled.hasPrefix(DummyItemRow.goneWord(language: language)), "heard as a deleted post is")
             #expect(TimelineGapRow.symbol(.settled) == "xmark.bin")
-            let both = GoneSection.askLine(3, places: 2, language: language)
-            #expect(both.contains("3") && both.contains("2"))
-            #expect(GoneSection.askLine(0, places: 2, language: language).contains("2"))
-            #expect(GoneSection.askLine(3, places: 0, language: language) == GoneSection.askLine(3, language: language))
-            let went = GoneSection.wentLine(3, places: 2, language: language)
-            #expect(went.contains("3") && went.contains("2"))
-            #expect(GoneSection.wentLine(0, places: 1, language: language).contains("1"))
-            let details = Set([(1, 0), (1, 1), (0, 1)].map {
-                GoneSection.askDetail(posts: $0.0, places: $0.1, language: language)
-            })
-            #expect(details.count == 3, "posts only, both, and places only each say what goes")
-            for key in ["timeline.gap.settled", "prefs.gone.ask.both", "prefs.gone.went.both", "prefs.gone.ask.detail.places",
-                        "prefs.gone.ask.detail.placesonly"] {
-                #expect(L10n.t(key, language: language) != key, "\(key) in \(language)")
-            }
+            #expect(L10n.t("timeline.gap.settled", language: language) != "timeline.gap.settled", "\(language)")
         }
         let resources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -178,11 +154,7 @@ struct ReadDownTests {
             let strings = try String(
                 contentsOf: resources.appendingPathComponent("\(lproj).lproj/Localizable.strings"), encoding: .utf8
             )
-            for key in ["timeline.gap.settled", "prefs.gone.ask.both", "prefs.gone.ask.places", "prefs.gone.went.both",
-                        "prefs.gone.went.places", "prefs.gone.posts", "prefs.gone.places", "prefs.gone.ask.detail.places",
-                        "prefs.gone.ask.detail.placesonly"] {
-                #expect(strings.contains("\"\(key)\""), "\(key) in \(lproj)")
-            }
+            #expect(strings.contains("\"timeline.gap.settled\""), "timeline.gap.settled in \(lproj)")
         }
     }
 }

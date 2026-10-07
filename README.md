@@ -278,8 +278,8 @@ sign in to it again.
 
 Whatever takes something away, signing out aside, is behind three dots on the row or the
 section it acts on, and asks first: Clear and Remove on a source's row, Clear and Forget
-password in a source's detail on Usage, Stop keeping, letting go by dates or of what a source
-deleted, dropping picture copies, removing a timeline or a host you added, and taking back a
+password in a source's detail on Usage, Stop keeping, letting go by dates, dropping picture
+copies, removing a timeline or a host you added, and taking back a
 post of your own. Signing out is the key itself, and asks first too. One is not asked: removing
 a rule from a timeline being edited is behind the dots as well, but it is only a draft, and
 nothing is kept until Done.
@@ -541,7 +541,7 @@ first and names the count, and it lets nothing go: they are ordinary posts from 
 next limit or letting go may take them. A post two sources carry stays kept through the other
 source's copy; one source's Stop keeping counts only the posts it makes ordinary and says how
 many stay kept that way, and Every source reaches them all. A question that lets posts go —
-removing a source, letting go by dates, letting go of what was deleted at its source — says
+removing a source, letting go by dates — says
 how many kept posts stay. Reading back a store, and holding or moving one nearby, says how
 many of the posts it brings are kept before you agree, and a package whose store does not
 bear that number out is refused before anything here changes. One from a version that did not

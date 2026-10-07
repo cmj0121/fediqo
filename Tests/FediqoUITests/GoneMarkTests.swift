@@ -107,7 +107,7 @@ struct GoneMarkTests {
         #expect(try row(session).goneSince != nil)
     }
 
-    @Test("A post missing from a listing merely did not arrive: it is not marked, and no press lets it go")
+    @Test("A post missing from a listing merely did not arrive: it is not marked, and no wait lets it go")
     func notArrivedIsNotMarked() async throws {
         let (session, _) = await shell(routes: [
             "https://\(Self.host)/api/v1/timelines/public?limit=40": .text("[" + Self.status("10") + "]"),
@@ -120,7 +120,7 @@ struct GoneMarkTests {
         await session.reload.timeline(.all, in: session)
         #expect(session.notes.contains { $0.statusID == "10" }, "the premise: the listing landed without 9")
         #expect(session.notes.allSatisfy { $0.goneSince == nil })
-        #expect(await session.letAllGoneGo() == WentGone(posts: 0))
+        #expect(await session.letGoneGo(waitingDays: 1, keepingMonths: nil, from: Date().addingTimeInterval(400 * 86_400)) == WentGone(posts: 0))
         #expect(session.notes.count == 2)
     }
 
@@ -310,18 +310,19 @@ struct GoneMarkTests {
 
     // MARK: - Letting go
 
-    @Test("The press lets every marked post go, says how many, and nothing else moves")
-    func pressLetsGo() async throws {
+    @Test("The wait lets every marked post that waited go, says how many, and nothing else moves")
+    func waitLetsEveryMarkedGo() async throws {
         let (session, _) = await shell([Self.note(), Self.note("8"), Self.note("7")])
         await session.markGone(Self.note().key, at: Self.posted)
         await session.markGone(Self.note("7").key, at: Self.posted)
         let kept = try row(session, "8")
-        #expect(await session.letAllGoneGo() == WentGone(posts: 2))
+        let later = Self.posted.addingTimeInterval(8 * 86_400)
+        #expect(await session.letGoneGo(waitingDays: 7, keepingMonths: nil, from: later) == WentGone(posts: 2))
         #expect(session.held(Self.note().key.rowID) == nil, "gone from the timeline and the thread")
         #expect(session.timelineItems(latest: nil).map(\.id) == [kept.id])
         #expect(try row(session, "8") == kept)
         #expect(await session.store.snapshot().notes.map(\.statusID) == ["8"], "and from what a save writes")
-        #expect(await session.letAllGoneGo() == WentGone(posts: 0))
+        #expect(await session.letGoneGo(waitingDays: 7, keepingMonths: nil, from: later) == WentGone(posts: 0))
     }
 
     @Test("The wait lets go what has waited long enough, and never keeps them all")
@@ -366,23 +367,13 @@ struct GoneMarkTests {
 
     @Test("Every line the section says has words in every language")
     func sectionWords() {
-        let keys = [
-            "prefs.gone", "prefs.gone.wait", "prefs.gone.never", "prefs.gone.now",
-            "prefs.gone.went.none", "prefs.gone.footer",
-        ]
+        let keys = ["prefs.gone", "prefs.gone.wait", "prefs.gone.never", "prefs.gone.footer"]
         for language in [DummyLanguage.english, .taiwanese] {
             for key in keys {
                 #expect(L10n.t(key, language: language) != key, "\(key) in \(language)")
             }
-            #expect(GoneSection.wentLine(3, language: language).contains("3"))
-            #expect(GoneSection.wentLine(0, language: language) == L10n.t("prefs.gone.went.none", language: language))
             #expect(L10n.count("prefs.gone.days", 7, language: language).contains("7"))
             #expect(GoneSection.keepWinsLine(days: nil, keepingMonths: 3, language: language)?.contains("3") == true)
-            #expect(GoneSection.askLine(4, language: language).contains("4"))
-            #expect(GoneSection.askLine(1, language: language).contains("1"))
-            for key in ["prefs.gone.ask.detail", "prefs.gone.confirm"] {
-                #expect(L10n.t(key, language: language) != key, "\(key) in \(language)")
-            }
         }
     }
 }

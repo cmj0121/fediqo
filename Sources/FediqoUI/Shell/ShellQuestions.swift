@@ -292,29 +292,6 @@ enum ShellQuestion {
         )
     }
 
-    /// Letting go now of `posts` posts deleted at their source and `places` settled places (#179,
-    /// #204): each counted apart in the title, and the line saying only what goes of each.
-    ///
-    /// `kept` is how many posts marked so the person keeps (#294): they stay, and the question
-    /// says how many — where any post goes at all.
-    static func letGo(posts: Int, places: Int, kept: Int = 0, language: DummyLanguage? = nil) -> ShellConfirmation {
-        let key = places == 0 ? "prefs.gone.ask.line"
-            : posts == 0 ? "prefs.gone.ask.line.placesonly" : "prefs.gone.ask.line.places"
-        let (line, help) = saying(
-            posts == 0 ? nil : keptStay(kept, language: language),
-            line: L10n.t(key, language: language),
-            help: GoneSection.askDetail(posts: posts, places: places, counted: posts > 0 && kept > 0, language: language),
-            language: language
-        )
-        return ShellConfirmation(
-            symbol: "trash", title: GoneSection.askLine(posts, places: places, language: language),
-            line: line,
-            help: help,
-            choices: [.init(yes, L10n.t("prefs.gone.confirm", language: language), role: .destructive)],
-            cancel: L10n.t("board.choose.cancel", language: language)
-        )
-    }
-
     /// Letting go of the posts of a span of days, from one source or every one (#248): the title
     /// counts them, the line names the days and where they come from and that they do not come
     /// back, and the (?) says what stays.

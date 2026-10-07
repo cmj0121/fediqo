@@ -91,7 +91,7 @@ struct DangerBehindDotsTests {
         #expect(known["gone.example"] == nil, "a host nothing remembers is drawn as the host alone")
     }
 
-    // MARK: - Span, Gone, Copies
+    // MARK: - Span, Copies
 
     /// The one item of `more` is destructive and counted: nothing is done by choosing it but
     /// the count, and what comes back is the question to put.
@@ -180,40 +180,6 @@ struct DangerBehindDotsTests {
         read.cancel()
         await gate.open()
         #expect(await read.value == nil)
-    }
-
-    @Test("Let them all go now counts at the press and puts the question at once", arguments: [DummyLanguage.english, .taiwanese])
-    func goneLetGo(_ language: DummyLanguage) async {
-        var went = 0
-        var said: [WentGone] = []
-        // Nothing was marked gone when the section was drawn; by the press four posts and two
-        // places are. The press must not be swallowed: it asks about what it just counted.
-        var held = WentGone()
-        let more = GoneSection.more(
-            count: { held }, kept: { 1 }, none: { said.append($0) }, go: { went += 1 }, language: language
-        )
-        held = WentGone(posts: 4, places: 2)
-        let put = await counted(more, symbol: "trash", named: L10n.t("prefs.gone.now", language: language), language: language)
-        #expect(put?.question == ShellQuestion.letGo(posts: 4, places: 2, kept: 1, language: language))
-        #expect(said.isEmpty && went == 0)
-        put?.answered("not the yes")
-        #expect(went == 0)
-        put?.answered(ShellQuestion.yes)
-        #expect(went == 1)
-    }
-
-    @Test("With nothing to let go at the press, the press says none went and asks nothing")
-    func goneWithNothing() async {
-        var went = 0
-        var said: [WentGone] = []
-        var keptAsked = 0
-        let more = GoneSection.more(
-            count: { WentGone() }, kept: { keptAsked += 1; return 0 }, none: { said.append($0) }, go: { went += 1 }
-        )
-        #expect(more.dangers.count == 1 && more.items[0].answers, "the item is not there to be pressed")
-        #expect(await more.items[0].counted() == nil)
-        #expect(said == [WentGone()], "the press was swallowed")
-        #expect(went == 0 && keptAsked == 0)
     }
 
     @Test("Drop picture copies is the one item of the copies line's …", arguments: [DummyLanguage.english, .taiwanese])

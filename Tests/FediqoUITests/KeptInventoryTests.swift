@@ -220,10 +220,6 @@ struct KeptInventoryTests {
     func whatStays(_ language: DummyLanguage) throws {
         let ask = SpanAsk(from: Self.origin, to: Self.origin, host: "a.example").counting(4, kept: 2)
         let questions: [(ShellConfirmation, ShellConfirmation, Int)] = [
-            (ShellQuestion.letGo(posts: 3, places: 0, kept: 2, language: language),
-             ShellQuestion.letGo(posts: 3, places: 0, language: language), 2),
-            (ShellQuestion.letGo(posts: 3, places: 2, kept: 12, language: language),
-             ShellQuestion.letGo(posts: 3, places: 2, language: language), 12),
             (ShellQuestion.letGo(ask, language: language),
              ShellQuestion.letGo(ask.counting(4), language: language), 2),
         ]
@@ -247,9 +243,6 @@ struct KeptInventoryTests {
             #expect(counted.title == plain.title && counted.choices == plain.choices && counted.help != counted.line)
             try saidOnce(counted, language)
         }
-        // Where only places go no post goes, so there is nothing to say stays.
-        #expect(ShellQuestion.letGo(posts: 0, places: 2, kept: 5, language: language)
-            == ShellQuestion.letGo(posts: 0, places: 2, language: language))
     }
 
     /// The question says once that kept posts stay: the counted sentence, and not the uncounted
@@ -289,17 +282,13 @@ struct KeptInventoryTests {
         #expect(ShellQuestion.saying("二。", line: "一。", help: nil, language: .taiwanese).line == "一。二。")
     }
 
-    @Test("What a span and what is marked gone would leave for being kept is counted at the press")
+    @Test("What a span would leave for being kept is counted at the press")
     func countedAtThePress() async {
         let session = await shell()
         let span = Self.origin..<Self.origin.addingTimeInterval(10 * 86_400)
         #expect(await session.spanHeld(span, host: nil) == 2)
         #expect(await session.spanKept(span, host: nil) == 4)
         #expect(await session.spanKept(span, host: Self.two.host) == 1)
-        #expect(await session.goneKept() == 0)
-        for note in session.notes where note.source.host == Self.one.host { await session.store.markGone(note.key) }
-        #expect(await session.goneKept() == 3)
-        #expect(await session.goneHeld().posts == 1)
     }
 
     // MARK: - What a question that brings posts in says of them

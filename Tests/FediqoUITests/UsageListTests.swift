@@ -115,7 +115,7 @@ struct UsageListTests {
         // The questions' own buttons are #238's. Every press on the page that takes something
         // away is an item of a `…`, named there, and never a button of its own.
         for name in [
-            "prefs.cache.clear", "prefs.password.forget", "prefs.drop.copies", "prefs.gone.now", "usage.span.now",
+            "prefs.cache.clear", "prefs.password.forget", "prefs.drop.copies", "usage.span.now",
             "usage.kept.stop.from", "prefs.limits.clear",
         ] {
             #expect(all.contains("L10n.t(\"\(name)\", language: language)"), "\(name) is not offered")
