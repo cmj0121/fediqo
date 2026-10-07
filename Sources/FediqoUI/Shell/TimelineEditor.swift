@@ -17,7 +17,9 @@ import SwiftUI
 struct TimelineEditor: View {
     @Bindable var session: ShellSession
     @State private var flow: EditorFlow
-    @State private var confirmingRemove = false
+    /// The question before the timeline is removed, while it is asked — by ⌘⌫ or by the `…` of
+    /// the timeline tab, which put one question in one place.
+    @State private var removeAsk: ShellMoreAsk?
     @FocusState private var focus: Focus?
     @Environment(\.colorScheme) private var colorScheme
 
@@ -43,7 +45,7 @@ struct TimelineEditor: View {
                 // A sheet is not told the arrangement of the page it was raised over.
                 .modifier(ShellSheetArranged())
                 .modifier(ProbedPane(part: .head))
-            Rectangle().fill(ShellChrome.hairline(colorScheme)).frame(height: ShellSpace.hair)
+            ShellRule()
             // What is under the tabs follows a sideways swipe; the head and the tabs stay (#305).
             Group {
                 switch flow.tab {
@@ -92,11 +94,15 @@ struct TimelineEditor: View {
         // the only place it does (`EditorAction.escapeIsExitCommand`).
         .onExitCommand { perform(EditorAction.escape(at: flow.stage)) }
         #endif
-        .shellConfirm(
-            $confirmingRemove, question: ShellQuestion.removeTimeline(named: session.removeName(of: draft))
-        ) { _ in
-            session.removeTimeline(draft.id)
-        }
+        .modifier(ShellMoreAsks(asked: $removeAsk))
+    }
+
+    /// The timeline tab's `…`, which ⌘⌫ chooses the one item of.
+    private var removeMenu: ShellMore {
+        Self.removeMore(
+            asks: { ShellQuestion.removeTimeline(named: session.removeName(of: draft)) },
+            remove: { session.removeTimeline(draft.id) }
+        )
     }
 
     private func select(_ picked: EditorTab) {
@@ -123,7 +129,7 @@ struct TimelineEditor: View {
             flow.openLit(sources: sources, choices: kindChoices)
             handFocus()
         case .removeTimeline:
-            if !draft.isNew { confirmingRemove = true }
+            if !draft.isNew { removeMenu.items.first?.press { removeAsk = $0 } }
         case .focusName:
             flow.tab = .timeline
             handFocus(to: .name)
@@ -216,7 +222,8 @@ struct TimelineEditor: View {
             draft: $flow.draft,
             focus: $focus,
             onMove: { perform($0 < 0 ? .earlier : .later) },
-            onRemove: { perform(.removeTimeline) }
+            remove: removeMenu,
+            removeAsk: $removeAsk
         )
     }
 
@@ -250,6 +257,22 @@ struct TimelineEditor: View {
                 onRemove: { perform(.removeRule) }
             )
         }
+    }
+
+    /// The timeline tab's `…`: the one item that removes the timeline — destructive, asking
+    /// `asks` first.
+    static func removeMore(
+        asks: @escaping () -> ShellConfirmation, language: DummyLanguage? = nil, remove: @escaping () -> Void
+    ) -> ShellMore {
+        ShellMore(items: [
+            .danger("trash", L10n.t("timeline.remove", language: language), asks: asks(), act: remove),
+        ])
+    }
+
+    /// The rule form's `…`: the one item that takes the rule out of the draft. Ordinary, and
+    /// unasked — see `RuleFormFoot`.
+    static func ruleMore(language: DummyLanguage? = nil, remove: @escaping () -> Void) -> ShellMore {
+        ShellMore(items: [.plain("trash", L10n.t("rule.action.remove", language: language), act: remove)])
     }
 
     static func bandKey(_ tag: RuleKind.Tag) -> String {
@@ -320,12 +343,24 @@ struct EditorBands {
 
 /// The timeline tab: what it is called, what it is about, where it sits among the reader's
 /// timelines and the two moves — reordering lives here only (Decision 22) — and, for one already
-/// kept, its removal.
+/// kept, a `…` at the end of the place line that holds its removal.
+///
+/// **Remove timeline is a destructive item of that `…`, and has no button of its own.** It asks
+/// the question ⌘⌫ asks (`ShellQuestion.removeTimeline`), and only its yes removes.
+///
+/// **At the end of the place line and not in a head, on purpose** — the one detail whose
+/// removal is not in its head's `…` (the audit's finding 22). The editor's head is the sheet's
+/// own: Cancel, the title and Done, over both tabs, and a `…` there would sit beside Done and
+/// offer to remove the timeline from the rules tab too. Removal is about the timeline, so it is
+/// on the timeline tab, on the one row of controls that tab has, in the last column as on any
+/// other row.
 private struct EditorTimelineTab: View {
     @Binding var draft: TimelineDraft
     var focus: FocusState<TimelineEditor.Focus?>.Binding
     let onMove: (Int) -> Void
-    let onRemove: () -> Void
+    /// The `…` that holds removing the timeline, and where the editor puts its question.
+    let remove: ShellMore
+    @Binding var removeAsk: ShellMoreAsk?
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -334,21 +369,16 @@ private struct EditorTimelineTab: View {
             // rest of the scale (#96).
             TextField(L10n.t("timeline.name.placeholder"), text: $draft.name)
                 .shellFont(.body)
-                .textFieldStyle(.roundedBorder)
+                .shellField(.alone)
                 .focused(focus, equals: .name)
                 .onSubmit { focus.wrappedValue = .keys }
             TextField(L10n.t("timeline.desc.placeholder"), text: $draft.desc)
                 .shellFont(.body)
-                .textFieldStyle(.roundedBorder)
+                .shellField(.alone)
                 .focused(focus, equals: .desc)
                 .onSubmit { focus.wrappedValue = .keys }
             placeLine
             Spacer(minLength: 0)
-            if !draft.isNew {
-                ShellIconButton("trash", name: "timeline.remove", help: "timeline.remove.help", tone: .alarm) {
-                    onRemove()
-                }
-            }
         }
     }
 
@@ -362,6 +392,10 @@ private struct EditorTimelineTab: View {
                 .disabled(!draft.canMoveEarlier)
             ShellIconButton("arrow.forward", name: "timeline.later") { onMove(1) }
                 .disabled(!draft.canMoveLater)
+            // Only a timeline already kept can be removed; a new one is put down by Cancel.
+            if !draft.isNew {
+                ShellMoreButton(remove, asks: $removeAsk)
+            }
         }
     }
 }
@@ -421,15 +455,8 @@ private struct EditorRulesList: View {
     }
 
     private func heading(_ band: EditorBands.Band, joined: Bool) -> some View {
-        Text((joined ? L10n.t("rule.band.and") + " " : "") + band.title())
+        ShellBandHead((joined ? L10n.t("rule.band.and") + " " : "") + band.title())
             .textCase(.uppercase)
-            .shellFont(.name)
-            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            .padding(.horizontal, ShellSpace.snug)
-            .padding(.vertical, ShellSpace.tight)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(ShellChrome.well(colorScheme), in: RoundedRectangle(cornerRadius: 6))
-            .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -444,7 +471,7 @@ private struct EditorKinds: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
-            ShellIconButton("chevron.backward", name: "rule.back") { onBack() }
+            ShellIconButton(ShellBackButton.symbol, name: "rule.back") { onBack() }
             ScrollView(.horizontal) {
                 HStack(spacing: ShellSpace.tight) {
                     ForEach(EditorAction.kinds, id: \.self) { tag in
@@ -527,7 +554,7 @@ private struct RuleForm: View {
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
             HStack(spacing: ShellSpace.tight) {
-                ShellIconButton("chevron.backward", name: changing == nil ? "rule.back.kinds" : "rule.back") { onBack() }
+                ShellIconButton(ShellBackButton.symbol, name: changing == nil ? "rule.back.kinds" : "rule.back") { onBack() }
                 Label(
                     draft.field.map { RuleText.fieldName($0) } ?? L10n.t(TimelineEditor.kindKey(draft.tag)),
                     systemImage: TimelineEditor.kindSymbol(draft.tag)
@@ -554,7 +581,7 @@ private struct RuleForm: View {
                 text: Binding(get: { draft.typed }, set: { draft.type($0, sources: sources) })
             )
             .shellFont(.body)
-            .textFieldStyle(.roundedBorder)
+            .shellField(.alone)
             .focused(focus, equals: .text)
             .onSubmit {
                 // Return confirms where the rule is whole, and otherwise hands the keys back.
@@ -580,10 +607,7 @@ private struct RuleForm: View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             ForEach(Array(choices.enumerated()), id: \.element) { index, choice in
                 if case .category(_, let host) = choice, index == 0 || Self.host(of: choices[index - 1]) != host {
-                    Text(host)
-                        .shellFont(.name)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        .accessibilityAddTraits(.isHeader)
+                    ShellBandHead(host)
                 }
                 row(choice)
             }
@@ -617,7 +641,7 @@ private struct RuleForm: View {
             }
             .padding(.horizontal, ShellSpace.snug)
             .padding(.vertical, ShellSpace.hair)
-            .background(picked ? ShellChrome.floatFill(colorScheme) : .clear, in: RoundedRectangle(cornerRadius: 4))
+            .background(picked ? ShellChrome.floatFill(colorScheme) : .clear, in: RoundedRectangle(cornerRadius: ShellRadius.chip))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -627,7 +651,11 @@ private struct RuleForm: View {
 }
 
 /// The foot of the rule form: its effect, its scope, the confirm press, and — for a rule being
-/// changed — its removal, beside the rule it removes.
+/// changed — the rule as it was kept, with a `…` in the last column that holds its removal.
+///
+/// **Remove rule is in `…` and is an ordinary item, not a destructive one**: a rule leaves only
+/// the draft, nothing is kept until Done and Cancel puts it back, so there is no loss to ask
+/// about — and an item is red only with a question (`ShellMoreItem.danger`).
 private struct RuleFormFoot: View {
     @Binding var draft: RuleDraft
     let sources: [Source]
@@ -660,7 +688,7 @@ private struct RuleFormFoot: View {
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
             }
             HStack(alignment: .center, spacing: ShellSpace.snug) {
-                if let changing { removal(changing) }
+                if let changing { kept(changing) }
                 Spacer()
                 ShellIconButton(
                     changing == nil ? "plus" : "checkmark",
@@ -669,6 +697,12 @@ private struct RuleFormFoot: View {
                     action: onConfirm
                 )
                 .disabled(draft.rule(sources) == nil)
+                if let changing {
+                    // The menu's name says what it holds; its value is the rule it would take
+                    // out, so the press is heard with what it removes.
+                    ShellMoreButton(TimelineEditor.ruleMore(remove: onRemove))
+                        .accessibilityValue(RuleText.spoken(changing, status: .present, sources: sources))
+                }
             }
         }
     }
@@ -679,17 +713,13 @@ private struct RuleFormFoot: View {
         }
     }
 
-    /// The bin, and the rule it takes away as it was kept — one element to VoiceOver, so the
-    /// press is heard with what it removes.
-    private func removal(_ rule: Rule) -> some View {
-        HStack(spacing: ShellSpace.tight) {
-            ShellIconButton("trash", name: "rule.action.remove", help: "rule.remove.help", tone: .alarm, action: onRemove)
-            Text(RuleText.spoken(rule, status: .present, sources: sources))
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .lineLimit(2)
-        }
-        .accessibilityElement(children: .combine)
+    /// The rule being changed, as it was kept. Unspoken here: `…` says it as its value.
+    private func kept(_ rule: Rule) -> some View {
+        Text(RuleText.spoken(rule, status: .present, sources: sources))
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .lineLimit(2)
+            .accessibilityHidden(true)
     }
 
     static func scopeLabel(_ scope: RuleScope) -> String {

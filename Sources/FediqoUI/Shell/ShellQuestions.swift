@@ -164,6 +164,20 @@ enum ShellQuestion {
         )
     }
 
+    /// Forgetting the password saved for a forum, and nothing else of it. **A loss**: the
+    /// password does not come back, and is typed again the next time the forum asks. The sign-in
+    /// it made stays until that ends, which the (?) says.
+    static func forgetPassword(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "key.slash",
+            title: String(format: L10n.t("prefs.password.forget.title", language: language), host),
+            line: L10n.t("prefs.password.forget.line", language: language),
+            help: L10n.t("prefs.password.forget.detail", language: language),
+            choices: [.init(yes, L10n.t("prefs.password.forget.confirm", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     /// The line beside each of Clear's three long texts.
     static func clearLineKey(_ detailKey: String) -> String {
         detailKey.replacingOccurrences(of: "account.clear.detail", with: "account.clear.line")
@@ -181,6 +195,34 @@ enum ShellQuestion {
                 .init(signInRead, L10n.t("account.signin.ask.read", language: language), role: .keyed),
                 .init(signInWrite, L10n.t("account.signin.ask.write", language: language), role: .plain),
             ],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Signing out of a source, asked when its key is pressed while signed in. The title names
+    /// the host; the line and the (?) say what goes, which is not the same for the two kinds a
+    /// sign-in exists for.
+    ///
+    /// A Mastodon (`mastodon`): the token leaves this device and the server is asked to end it,
+    /// so reading as the person and everything the sign-in allowed stop. A forum: its session on
+    /// this device goes — and with it the saved password, where one is held (`hasPassword`).
+    ///
+    /// **Keyed and not destructive, as Clear is and for its reason**: signing in again brings
+    /// the sign-in back. **Except where a saved password goes**: that does not come back, so
+    /// that sign-out is a loss, drawn and chorded as one.
+    static func signOut(
+        host: String, mastodon: Bool, hasPassword: Bool = false, language: DummyLanguage? = nil
+    ) -> ShellConfirmation {
+        let key = mastodon ? "account.signout.ask.mastodon"
+            : hasPassword ? "account.signout.ask.forum.password" : "account.signout.ask.forum"
+        return ShellConfirmation(
+            symbol: "key", title: String(format: L10n.t("account.signout.ask.title", language: language), host),
+            line: L10n.t(key + ".line", language: language),
+            help: L10n.t(key + ".detail", language: language),
+            choices: [.init(
+                yes, L10n.t("account.signout.ask.confirm", language: language),
+                role: !mastodon && hasPassword ? .destructive : .keyed
+            )],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
     }
@@ -237,37 +279,15 @@ enum ShellQuestion {
         )
     }
 
-    /// Clearing the limits' account (#251). **Plain, not a loss**: only the lines go, and they
-    /// were about posts already gone; nothing held goes with them.
+    /// Clearing the limits' account (#251). **Not a loss, and not drawn as one**: only the lines
+    /// go, and they were about posts already gone; nothing held goes with them. Keyed, as
+    /// Clear's yes is, so the question has the one yes a `…` item acts on (⌘Return).
     static func clearAccount(language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellConfirmation(
             symbol: "eraser", title: L10n.t("prefs.limits.clear.title", language: language),
             line: L10n.t("prefs.limits.clear.line", language: language),
             help: L10n.t("prefs.limits.clear.detail", language: language),
-            choices: [.init(yes, L10n.t("prefs.limits.clear.confirm", language: language), role: .plain)],
-            cancel: L10n.t("board.choose.cancel", language: language)
-        )
-    }
-
-    /// Letting go now of `posts` posts deleted at their source and `places` settled places (#179,
-    /// #204): each counted apart in the title, and the line saying only what goes of each.
-    ///
-    /// `kept` is how many posts marked so the person keeps (#294): they stay, and the question
-    /// says how many — where any post goes at all.
-    static func letGo(posts: Int, places: Int, kept: Int = 0, language: DummyLanguage? = nil) -> ShellConfirmation {
-        let key = places == 0 ? "prefs.gone.ask.line"
-            : posts == 0 ? "prefs.gone.ask.line.placesonly" : "prefs.gone.ask.line.places"
-        let (line, help) = saying(
-            posts == 0 ? nil : keptStay(kept, language: language),
-            line: L10n.t(key, language: language),
-            help: GoneSection.askDetail(posts: posts, places: places, counted: posts > 0 && kept > 0, language: language),
-            language: language
-        )
-        return ShellConfirmation(
-            symbol: "trash", title: GoneSection.askLine(posts, places: places, language: language),
-            line: line,
-            help: help,
-            choices: [.init(yes, L10n.t("prefs.gone.confirm", language: language), role: .destructive)],
+            choices: [.init(yes, L10n.t("prefs.limits.clear.confirm", language: language), role: .keyed)],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
     }
@@ -291,6 +311,18 @@ enum ShellQuestion {
             line: line,
             help: help,
             choices: [.init(yes, L10n.t("prefs.gone.confirm", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Removing a host the person added for one of their sources. **A loss**: what it let
+    /// through for that source is refused from the yes on. Nothing held goes with it.
+    static func removeOwnHost(_ host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "trash", title: String(format: L10n.t("allow.own.remove.title", language: language), host),
+            line: L10n.t("allow.own.remove.line", language: language),
+            help: L10n.t("allow.own.remove.detail", language: language),
+            choices: [.init(yes, L10n.t("allow.own.removeIt", language: language), role: .destructive)],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
     }

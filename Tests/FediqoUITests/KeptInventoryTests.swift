@@ -76,7 +76,7 @@ struct KeptInventoryTests {
     func theWords(_ language: DummyLanguage) {
         for key in [
             "usage.kept", "usage.kept.line", "usage.kept.help", "usage.kept.none", "usage.kept.stop",
-            "usage.kept.stop.help", "usage.kept.went.none", "usage.kept.ask.detail",
+            "usage.kept.stop.from", "usage.kept.went.none", "usage.kept.ask.detail",
         ] {
             #expect(L10n.t(key, language: language) != key, "\(key) has no words in \(language)")
         }
@@ -201,10 +201,10 @@ struct KeptInventoryTests {
     @Test("Removing a source with kept posts says how many will stay, read off what the session holds; with none kept, or where its posts all stay, the question is as it was")
     func removingASource() async {
         let session = await shell()
-        let asked = FediqoRootView.removeQuestion(Self.one.host, in: session, postsStay: false)
+        let asked = session.removeQuestion(host: Self.one.host, postsStay: false)
         #expect(asked.line == "Its posts and what is held for it go; the 3 you keep stay.")
         #expect(asked.help == "Its posts and what this device holds for it go.", "and the (?) says the rest, once")
-        #expect(FediqoRootView.removeQuestion(Self.two.host, in: session, postsStay: false).line
+        #expect(session.removeQuestion(host: Self.two.host, postsStay: false).line
             == "Its posts and what is held for it go; the one you keep stays.")
         let boards = ShellQuestion.remove(host: "a.example", boards: 8, kept: 3, language: .english)
         #expect(boards.line == "Its posts and the 8 boards you picked go; the 3 you keep stay.")
@@ -212,7 +212,7 @@ struct KeptInventoryTests {
 
         let plain = ShellQuestion.remove(host: "a.example", boards: 0, language: .english)
         #expect(ShellQuestion.remove(host: "a.example", boards: 0, kept: 0, language: .english) == plain)
-        #expect(FediqoRootView.removeQuestion(Self.one.host, in: session, postsStay: true)
+        #expect(session.removeQuestion(host: Self.one.host, postsStay: true)
             == ShellQuestion.remove(host: Self.one.host, boards: 0, postsStay: true))
     }
 
@@ -220,10 +220,6 @@ struct KeptInventoryTests {
     func whatStays(_ language: DummyLanguage) throws {
         let ask = SpanAsk(from: Self.origin, to: Self.origin, host: "a.example").counting(4, kept: 2)
         let questions: [(ShellConfirmation, ShellConfirmation, Int)] = [
-            (ShellQuestion.letGo(posts: 3, places: 0, kept: 2, language: language),
-             ShellQuestion.letGo(posts: 3, places: 0, language: language), 2),
-            (ShellQuestion.letGo(posts: 3, places: 2, kept: 12, language: language),
-             ShellQuestion.letGo(posts: 3, places: 2, language: language), 12),
             (ShellQuestion.letGo(ask, language: language),
              ShellQuestion.letGo(ask.counting(4), language: language), 2),
         ]
@@ -247,9 +243,6 @@ struct KeptInventoryTests {
             #expect(counted.title == plain.title && counted.choices == plain.choices && counted.help != counted.line)
             try saidOnce(counted, language)
         }
-        // Where only places go no post goes, so there is nothing to say stays.
-        #expect(ShellQuestion.letGo(posts: 0, places: 2, kept: 5, language: language)
-            == ShellQuestion.letGo(posts: 0, places: 2, language: language))
     }
 
     /// The question says once that kept posts stay: the counted sentence, and not the uncounted
@@ -289,17 +282,13 @@ struct KeptInventoryTests {
         #expect(ShellQuestion.saying("二。", line: "一。", help: nil, language: .taiwanese).line == "一。二。")
     }
 
-    @Test("What a span and what is marked gone would leave for being kept is counted at the press")
+    @Test("What a span would leave for being kept is counted at the press")
     func countedAtThePress() async {
         let session = await shell()
         let span = Self.origin..<Self.origin.addingTimeInterval(10 * 86_400)
         #expect(await session.spanHeld(span, host: nil) == 2)
         #expect(await session.spanKept(span, host: nil) == 4)
         #expect(await session.spanKept(span, host: Self.two.host) == 1)
-        #expect(await session.goneKept() == 0)
-        for note in session.notes where note.source.host == Self.one.host { await session.store.markGone(note.key) }
-        #expect(await session.goneKept() == 3)
-        #expect(await session.goneHeld().posts == 1)
     }
 
     // MARK: - What a question that brings posts in says of them

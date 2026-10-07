@@ -488,9 +488,10 @@ struct AccountMarkTests {
         // the reader has switched this device's relationship on, and never anywhere else.
         for kind in [ProtocolKind.discuz, .discourse] {
             for signedIn in [false, true] {
+                // The row carries whether it is signed in; the view no longer takes it twice.
                 let row = SourceRow(source: Source(host: "a.example", kind: kind),
-                                    profile: .unasked(host: "a.example", kind: kind))
-                let drawn = SourcePageTests.drawn(row, at: 900, signedIn: signedIn)
+                                    profile: .unasked(host: "a.example", kind: kind), signedIn: signedIn)
+                let drawn = SourcePageTests.drawn(row)
                 let glance = SourceMarkRow.ink(
                     AccountPane.mark(row, signedIn: signedIn), scheme: .light
                 )

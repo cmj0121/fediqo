@@ -29,9 +29,7 @@ struct SearchBar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: ShellSpace.hair)
+            ShellRule()
             HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
                 Text(verbatim: "/")
                     .shellFont(.keycap, weight: .semibold)
@@ -102,7 +100,7 @@ struct SearchBar: View {
     private var field: some View {
         TextField(String(format: L10n.t("search.placeholder"), timeline), text: $search.text)
             .shellFont(.keycap)
-            .textFieldStyle(.plain)
+            .shellField(.framed)
             .foregroundStyle(ShellChrome.ink(colorScheme))
             .focused($focused)
             .autocorrectionDisabled()

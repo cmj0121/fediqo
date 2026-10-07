@@ -157,7 +157,9 @@ struct PreferencesBriefTests {
         let allowed = try String(contentsOf: Self.shell.appendingPathComponent("Shell/AllowanceSection.swift"), encoding: .utf8)
         #expect(pane.contains("session?.searchFocused = now"))
         #expect(pane.contains("onTyping: typing"))
-        #expect(hosts.contains(".focused($typing)"))
+        // The field is the shared hostname field's, handed this page's focus to hold.
+        let field = try String(contentsOf: Self.shell.appendingPathComponent("Shell/ShellField.swift"), encoding: .utf8)
+        #expect(hosts.contains("focus: $typing") && field.contains(".focused(focus)"))
         #expect(hosts.contains(".modifier(TypingTold(typing: typing, onTyping: onTyping))"))
         #expect(hosts.contains(".onChange(of: typing) { _, now in onTyping(now) }"))
         #expect(hosts.contains(".onDisappear { onTyping(false) }"))

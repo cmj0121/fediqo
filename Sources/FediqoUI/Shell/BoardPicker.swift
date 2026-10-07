@@ -47,8 +47,8 @@ struct BoardPickerList: View {
     /// as a control. 20 at the default rung, one point over the name's cap height, so the box is
     /// the loudest thing on the row at every rung rather than only at the smallest.
     @ShellMetric(relativeTo: .callout) private var tickSize: CGFloat = 20
-    /// Half a callout's cap height, scaling with it — `SourceRowView.capHalf`'s value and its
-    /// reason, one file over. See `row(_:)`.
+    /// Half a callout's cap height, scaling with it: what the tick's centre is set against, so
+    /// it sits on the name's first line at every rung. See `row(_:)`.
     @ShellMetric(relativeTo: .callout) private var capHalf: CGFloat = 6
 
     var body: some View {
@@ -64,9 +64,7 @@ struct BoardPickerList: View {
                     Section {
                         ForEach(category.boards) { board in
                             row(board)
-                            Rectangle()
-                                .fill(ShellChrome.hairline(colorScheme))
-                                .frame(height: ShellSpace.hair)
+                            ShellRule()
                         }
                     } header: {
                         categoryHeader(category)
@@ -78,14 +76,7 @@ struct BoardPickerList: View {
     }
 
     private func categoryHeader(_ category: DiscuzCategory) -> some View {
-        Text(category.name)
-            .shellFont(.name)
-            .foregroundStyle(ShellChrome.inkDim(colorScheme))
-            .lineLimit(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, ShellSpace.pad)
-            .padding(.vertical, ShellSpace.snug)
-            .background(ShellChrome.well(colorScheme))
+        ShellBandHead(category.name, pinned: true)
     }
 
     /// How far a board under a board is set in.
@@ -121,7 +112,6 @@ struct BoardPickerList: View {
         let on = picked.contains(board.fid)
         // Read out before the `alignmentGuide` closure: that closure is `@Sendable` and a
         // `@ScaledMetric` is main-actor isolated, so the number crosses rather than the property.
-        // `SourceRowView.actionsTrailing` states the same rule one file over.
         let anchor = capHalf
         return Button {
             if on { picked.remove(board.fid) } else { picked.insert(board.fid) }
@@ -137,17 +127,13 @@ struct BoardPickerList: View {
                 // started a rung in would be a smaller target than its parent for no reason a
                 // reader could see.
                 if board.depth > 0 {
-                    Rectangle()
-                        .fill(ShellChrome.hairline(colorScheme))
-                        .frame(width: ShellSpace.hair)
+                    ShellRule(.vertical)
                         .padding(.leading, Self.rung - ShellSpace.snug)
-                        .accessibilityHidden(true)
                 }
                 HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
                     tick(on)
                         // The tick has no baseline of its own, so its own centre is mapped onto
-                        // the name's — the guide `SourceRowView` uses for the row's trailing
-                        // group, and for the same reason.
+                        // the name's.
                         .alignmentGuide(.firstTextBaseline) {
                             $0[VerticalAlignment.center] + anchor
                         }
@@ -162,7 +148,7 @@ struct BoardPickerList: View {
                                     : ShellChrome.ink(colorScheme)
                             )
                             .modifier(PickName())
-                        figures(board)
+                        figures(board, on: on)
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -232,16 +218,23 @@ struct BoardPickerList: View {
     /// which is true, and is not the same row as one reading "0 threads · 9 posts". Where nothing
     /// at all was stated the row says that in words, so the gap is a fact rather than a blank.
     @ViewBuilder
-    private func figures(_ board: DiscuzBoard) -> some View {
+    private func figures(_ board: DiscuzBoard, on: Bool) -> some View {
         if board.threads == nil, board.posts == nil, board.lastPostAt == nil {
             Text(L10n.t("board.choose.unstated"))
                 .shellFont(.reading)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .foregroundStyle(Self.figuresInk(on: on, colorScheme))
         } else {
             stated(board)
                 .shellFont(.reading)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                .foregroundStyle(Self.figuresInk(on: on, colorScheme))
         }
+    }
+
+    /// The ink of a board's figures: the faintest, and a step up the ramp once the board is
+    /// chosen. A chosen row lies on `selectFill`, and the faintest ink is 4.47:1 on that wash in
+    /// light — under what small type needs — where `inkDim` is 7.2:1.
+    static func figuresInk(on: Bool, _ scheme: ColorScheme) -> Color {
+        on ? ShellChrome.inkDim(scheme) : ShellChrome.inkFaint(scheme)
     }
 
     /// The stated figures, joined. `Text` concatenation rather than a formatted `String` so the
@@ -278,10 +271,10 @@ struct PickTick: View {
 
     var body: some View {
         let drawn = BoardPickerList.tick(on, colorScheme)
-        RoundedRectangle(cornerRadius: 3, style: .continuous)
+        RoundedRectangle(cornerRadius: ShellRadius.well, style: .continuous)
             .fill(drawn.plate)
             .overlay {
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                RoundedRectangle(cornerRadius: ShellRadius.well, style: .continuous)
                     .stroke(drawn.border, lineWidth: ShellSpace.hair)
             }
             .overlay {
@@ -333,9 +326,7 @@ struct ListPickerList: View {
                 }
                 ForEach(offered) { list in
                     row(list)
-                    Rectangle()
-                        .fill(ShellChrome.hairline(colorScheme))
-                        .frame(height: ShellSpace.hair)
+                    ShellRule()
                 }
             }
         }
@@ -372,7 +363,7 @@ struct ListPickerList: View {
 
 /// How the board picker's tick is drawn, in whichever of its two states it is in.
 ///
-/// **`RowActionState`'s shape, applied to the other control this branch shipped invisible.** The
+/// **The state carries its inks**, so the three are chosen together and never one by one. The
 /// mark's ink exists only in `.on`, so **a mark on an unticked box cannot be spelled**.
 ///
 /// **What the type does not prevent, said plainly rather than claimed away**: `.on(plate: p,

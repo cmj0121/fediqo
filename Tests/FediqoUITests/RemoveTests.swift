@@ -358,20 +358,31 @@ struct RemoveTests {
         let session = ShellSession(http: FixtureHTTP(), pictures: ShellPictures(http: FixtureHTTP()))
         let source = Source(host: alpha, kind: .mastodon)
         await seed(session, sources: [source], notes: [note("one", from: source)])
-        #expect(session.removing == nil)
-
-        session.removing = alpha
+        // The row's own `…`, built as the page builds it: Remove is its last destructive item,
+        // and choosing it only hands over the page's question.
+        let pane = AccountPane(session: session)
+        let row = session.rows[0]
+        let remove = SourceRow.more(
+            row, actsLive: true, said: [],
+            clearAsks: { session.clearQuestion(host: row.source.host) }, removeAsks: { session.removeQuestion(host: row.source.host, postsStay: false) },
+            presses: pane.presses(row)
+        ).dangers[1]
+        #expect(remove.symbol == SourceRow.symbol(.remove))
+        var put: [ShellMoreAsk] = []
+        remove.press { put.append($0) }
+        #expect(put.count == 1)
+        #expect(put.first?.question == session.removeQuestion(host: alpha, postsStay: false))
         #expect(session.sources.map(\.host) == [alpha])
         #expect(session.notes.count == 1)
         #expect(session.cleared == 0, "the question cleared a cache")
 
         // Cancel is a complete undo, because nothing happened.
-        session.removing = nil
+        put[0].answered("not the yes")
         #expect(session.sources.map(\.host) == [alpha])
 
-        session.removing = alpha
-        await session.remove(host: alpha)
-        #expect(session.removing == nil, "the dialog would still be asking about a server that is gone")
+        // Only the yes reaches the page's Remove.
+        put[0].answered(ShellQuestion.yes)
+        #expect(await spun { session.sources.isEmpty }, "the yes did not remove the source")
         #expect(session.sources.isEmpty)
     }
 
@@ -389,7 +400,7 @@ struct RemoveTests {
 
         func asked(_ host: String) -> ShellConfirmation {
             ShellQuestion.remove(
-                host: host, boards: FediqoRootView.boards(of: host, in: sources), language: .english
+                host: host, boards: ShellSession.boards(of: host, in: sources), language: .english
             )
         }
         #expect(asked(alpha).line == L10n.t("account.remove.detail", language: .english))

@@ -61,7 +61,7 @@ struct TouchTests {
         #expect(Self.line("edit").touch == .hold)
         #expect(Self.line("search").touch == .press)
         #expect(Self.line("reload").touch == .press)
-        // The boost mark under the post (#106). Absent where the post cannot be boosted, and the
+        // The boost mark under the post (#106). Grey where the post cannot be boosted, and the
         // key is refused there too, so there is no half of it a finger cannot reach.
         #expect(Self.line("boost").touch == .press)
         // The star under the post (#107), for the boost's reason.
@@ -69,8 +69,10 @@ struct TouchTests {
         // The answer mark (#108): inside a conversation it opens the answer, and on the timeline
         // it opens the conversation first, which is where the key is answered too.
         #expect(Self.line("answer").touch == .press)
-        // Taking back (#109): the mark on the reader's own posts, which asks before anything goes.
+        // Taking back (#109): behind the three dots under the reader's own posts — pressed, or
+        // the same list held open on the row — and it asks before anything goes.
         #expect(Self.line("withdraw").touch == .press)
+        #expect(Self.line("withdraw").also == .hold)
         // Whoever wrote it (#140): the face or the name at the head of the row, pressed (#99).
         #expect(Self.line("person").touch == .press)
         #expect(Self.line("tag").touch == .press)
@@ -252,7 +254,7 @@ struct TouchTests {
         // `onOpen` carries the post, which is what keeps the root off a state read.
         _ = DummyItemRow(
             item: Self.post, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
-            onOpen: {}, onView: {}, onTurn: {}, onToast: { _ in }
+            onOpen: {}, onView: {}, onTurn: {}
         )
         // The header's two, which cannot be handed a press without the answer that goes with it.
         let ways = TimelineWays(canSearch: true, onSearch: {}, canReload: true, onReload: {})

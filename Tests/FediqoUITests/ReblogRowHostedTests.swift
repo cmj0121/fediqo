@@ -62,7 +62,7 @@ struct ReblogRowHostedTests {
         let probe = RowBandProbe()
         let row = DummyItemRow(
             item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), acting: acting, probe: probe,
-            onOpenPerson: { _ in }, onToast: { _ in }
+            onOpenPerson: { _ in }
         )
         .environment(\.shellLayout, layout)
         .environment(\.shellSourcesHere, here)
@@ -233,7 +233,10 @@ struct ReblogRowHostedTests {
             let header = try #require(laid.probe.frames[.header])
             #expect(notice.minY >= header.maxY - 0.5, "it stands where the post's words would")
             #expect(laid.probe.marks[L10n.t("item.act.keep.reblog")] != nil, "the reblog can still be kept")
-            #expect(laid.probe.marks.keys.allSatisfy { !$0.hasPrefix(L10n.t("item.act.favourite")) })
+            // Drawn as on every row, and dim: there is no post here for a favourite to reach.
+            #expect(laid.probe.marks.keys.contains { $0.hasPrefix(L10n.t("item.act.favourite")) })
+            let favourite = try #require(ItemActs.marks(on: item, acting: ItemActing()).first { $0.kind == .act(.favourite) })
+            #expect(favourite.mark.look == .dim(.notNow))
         }
     }
 

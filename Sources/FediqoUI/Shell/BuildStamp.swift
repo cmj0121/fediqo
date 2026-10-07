@@ -79,7 +79,8 @@ struct BuildStamp: Equatable, Sendable {
     struct Row: Equatable, Sendable {
         let label: String
         let value: String
-        /// Drawn in the monospaced reading face: a hash is read character by character.
+        /// Drawn in a monospaced face: a hash is read character by character. A font on the
+        /// value and nothing else — the row is laid out as every other row is.
         var isReading = false
         /// What the page draws, where that is less than the value: the value is what is copied.
         var shown: String? = nil

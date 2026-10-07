@@ -353,10 +353,7 @@ struct SourcePreviewView: View {
     /// Monospaced so a column of 1–9 does not wobble.
     private func rules(_ rules: [String]) -> some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            Text(L10n.t("join.preview.rules"))
-                .shellFont(.name)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
+            ShellSectionHead(title: "join.preview.rules")
             ForEach(Array(rules.enumerated()), id: \.offset) { index, rule in
                 HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
                     Text(verbatim: "\(index + 1)")

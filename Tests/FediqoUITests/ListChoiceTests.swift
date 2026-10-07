@@ -128,7 +128,8 @@ struct ListChoiceTests {
         #expect(session.stage == nil)
         let row = try #require(session.rows.first)
         #expect(!row.signedIn)
-        #expect(SourceRow.controls(of: row.source, signedIn: row.signedIn) == [.signIn, .clear, .remove])
+        // Drawn all the same, dim for now: signing in is what brings the lists.
+        #expect(SourceRow.look(.lists, source: row.source, signedIn: row.signedIn, actsLive: true) == .dim(.notNow))
     }
 
     @Test("A 401 on Home the server confirms signs the row out and says so once")
@@ -221,16 +222,14 @@ struct ListChoiceTests {
 
     // MARK: - Choosing lists
 
-    @Test("A signed-in Mastodon row carries the lists control, bound to Sign in")
+    @Test("A signed-in Mastodon row's lists control is live, and it is in the row's menu")
     func control() async throws {
         let (session, _, _) = try await shell()
         let row = try #require(session.rows.first)
         #expect(row.signedIn)
-        let controls = SourceRow.controls(of: row.source, signedIn: true)
-        #expect(controls == [.signIn, .lists, .clear, .remove])
-        #expect(SourceRow.widest(session.rows) == controls, "the list's threshold missed the lists control")
-        #expect(SourceRow.controlLine(controls)
-            == SourceRow.controlLine([.signIn, .boards, .clear, .remove]))
+        #expect(SourceRow.look(.lists, source: row.source, signedIn: true, actsLive: true) == .live)
+        #expect(SourceRow.look(.lists, source: row.source, signedIn: true, actsLive: false) == .dim(.notNow))
+        #expect(SourceRow.inMore.contains(.lists) && !SourceRow.onRow.contains(.lists))
         for kind in ProtocolKind.allCases {
             #expect(SourceRow.canChooseLists(kind) == (kind == .mastodon), "\(kind)")
         }

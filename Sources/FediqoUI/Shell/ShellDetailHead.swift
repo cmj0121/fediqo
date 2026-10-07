@@ -35,7 +35,7 @@ struct ShellDetailHead<Mark: View, Trailing: View>: View {
 
     var body: some View {
         HStack(spacing: ShellSpace.snug) {
-            ShellIconButton("chevron.left", name: backName, action: onBack)
+            ShellIconButton(ShellBackButton.symbol, name: backName, action: onBack)
                 .keyboardShortcut(escapes ? .cancelAction : nil)
             mark
                 .foregroundStyle(ShellChrome.selectInk(colorScheme))

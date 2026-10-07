@@ -74,7 +74,7 @@ struct ThreadReadingTests {
     }
 
     private static func row(_ item: DummyItem, posts: ForumPosts, inFull: Bool = false) -> DummyItemRow {
-        DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: posts, inFull: inFull, onToast: { _ in })
+        DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: posts, inFull: inFull)
     }
 
     /// The longest thing a forum can hand this app: a post nobody would read in three lines.

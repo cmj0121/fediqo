@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The one launch motion: the mascot flips up-down, then left-right, then the shell is the page.
+/// The one launch motion: the octopus alone gathers itself, pushes off, coasts back to rest and
+/// fades, then the shell is the page. A jet, which is how this animal moves.
 ///
 /// **Not a `DummyLayer`.** A layer is something the reader opened and a press to leave takes
 /// away. This is the first frame of a process, and it takes itself away. Putting it on that
@@ -9,35 +10,61 @@ import SwiftUI
 ///
 /// **Reduce motion skips it outright**, the same structural skip as `ForumWaiting.clock`:
 /// `start(reduceMotion: true)` is already dismissed, so nothing is asked to tick. A
-/// zero-speed flip would still be a flip.
+/// zero-speed jet would still be a jet.
 ///
-/// The turns themselves are a value a test can drive. SwiftUI interpolates `pitch` and `yaw`;
-/// the suite never has to stand a view up to know that up-down is X and left-right is Y.
+/// The steps themselves are a value a test can drive. SwiftUI interpolates `squeeze`, `lift`
+/// and `opacity`; the suite never has to stand a view up to know that gathering is wider,
+/// shorter and lower, and that pushing off is narrower, taller and higher.
 struct Landing: Equatable, Sendable {
-    /// Degrees about X. 360 is one up-down flip, landing the right way up.
-    var pitch: Double
-    /// Degrees about Y. 360 is one left-right flip, landing the right way up.
-    var yaw: Double
+    /// The scale on each axis. 1 × 1 is the drawing as it is.
+    var squeeze: CGSize
+    /// Points above rest; a negative lift is below it.
+    var lift: CGFloat
+    var opacity: Double
     var showing: Bool
 
-    /// Larger than the Account hero's 72, because this is the whole window for a moment.
-    static let mark: CGFloat = 144
-    static let flip: Double = 360
-    /// Slower than a control's 0.18 so the mascot is readable mid-turn.
-    static let duration: TimeInterval = 0.45
-    /// A beat at rest so the mascot is seen before it moves.
-    static let hold: TimeInterval = 0.2
+    /// Larger than the Account hero's 72, because this is the whole window for a moment — and
+    /// larger than a tile would need, because without one the animal fills 82% of its box.
+    static let mark: CGFloat = 200
+    static let rest = CGSize(width: 1, height: 1)
+    /// Wider, shorter and a little lower: the mantle fills.
+    static let gathered = CGSize(width: 1.07, height: 0.90)
+    static let sink: CGFloat = -7
+    /// Narrower, taller and well above rest: the water is out.
+    static let pushed = CGSize(width: 0.97, height: 1.05)
+    static let rise: CGFloat = 28
+
+    /// A beat at rest so the octopus is seen before it moves.
+    static let hold: TimeInterval = 0.20
+    static let gatherTime: TimeInterval = 0.16
+    static let pushOffTime: TimeInterval = 0.26
+    /// The spring's response as well as the wait: the coast is one settle, not a bounce.
+    static let coastTime: TimeInterval = 0.34
+    static let coastDamping: Double = 0.8
+    /// A control's 0.18: by now the octopus is at rest and only has to go.
+    static let leaveTime: TimeInterval = 0.18
 
     static func start(reduceMotion: Bool) -> Landing {
-        Landing(pitch: 0, yaw: 0, showing: !reduceMotion)
+        Landing(squeeze: rest, lift: 0, opacity: 1, showing: !reduceMotion)
     }
 
-    mutating func flipVertical() {
-        pitch += Self.flip
+    mutating func gather() {
+        squeeze = Self.gathered
+        lift = Self.sink
     }
 
-    mutating func flipHorizontal() {
-        yaw += Self.flip
+    mutating func pushOff() {
+        squeeze = Self.pushed
+        lift = Self.rise
+    }
+
+    mutating func coast() {
+        squeeze = Self.rest
+        lift = 0
+    }
+
+    mutating func leave() {
+        opacity = 0
     }
 
     mutating func dismiss() {
@@ -55,20 +82,17 @@ struct LandingView: View {
     var body: some View {
         ZStack {
             ShellChrome.page(colorScheme)
-            Image("Mascot", bundle: .module)
+            // A template, so one drawing is the ink of whichever ground it is on: the tile's
+            // navy body vanished on a dark page and its pale rim on a light one.
+            Image("Octopus", bundle: .module)
+                .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
+                .foregroundStyle(ShellChrome.ink(colorScheme))
                 .frame(width: Landing.mark, height: Landing.mark)
-                .rotation3DEffect(
-                    .degrees(landing.pitch),
-                    axis: (x: 1, y: 0, z: 0),
-                    perspective: 0.55
-                )
-                .rotation3DEffect(
-                    .degrees(landing.yaw),
-                    axis: (x: 0, y: 1, z: 0),
-                    perspective: 0.55
-                )
+                .scaleEffect(landing.squeeze)
+                .offset(y: -landing.lift)
+                .opacity(landing.opacity)
                 .accessibilityHidden(true)
         }
         .ignoresSafeArea()
@@ -83,14 +107,22 @@ struct LandingView: View {
         }
         do {
             try await Task.sleep(for: .seconds(Landing.hold))
-            withAnimation(.easeInOut(duration: Landing.duration)) {
-                landing.flipVertical()
+            withAnimation(.easeIn(duration: Landing.gatherTime)) {
+                landing.gather()
             }
-            try await Task.sleep(for: .seconds(Landing.duration))
-            withAnimation(.easeInOut(duration: Landing.duration)) {
-                landing.flipHorizontal()
+            try await Task.sleep(for: .seconds(Landing.gatherTime))
+            withAnimation(.easeOut(duration: Landing.pushOffTime)) {
+                landing.pushOff()
             }
-            try await Task.sleep(for: .seconds(Landing.duration))
+            try await Task.sleep(for: .seconds(Landing.pushOffTime))
+            withAnimation(.spring(response: Landing.coastTime, dampingFraction: Landing.coastDamping)) {
+                landing.coast()
+            }
+            try await Task.sleep(for: .seconds(Landing.coastTime))
+            withAnimation(.easeIn(duration: Landing.leaveTime)) {
+                landing.leave()
+            }
+            try await Task.sleep(for: .seconds(Landing.leaveTime))
             landing.dismiss()
             onFinished()
         } catch {

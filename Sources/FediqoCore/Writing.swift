@@ -117,15 +117,15 @@ public enum PostActRefusal: Sendable, Hashable, CaseIterable {
 
 /// What may be done to one post, and why not where nothing may.
 ///
-/// **The two halves are one value on purpose.** "Which marks are drawn" and "what the row says
-/// instead" are one question with one answer, and the milestone has already shipped three
+/// **The two halves are one value on purpose.** "Which acts are offered" and "why the rest are
+/// not" are one question with one answer, and the milestone has already shipped three
 /// controls whose *whether* and whose *what* were decided in two places — see
 /// `DummyItem.outwardURL`, which says so at length. Answered here, both can be asserted without
 /// standing a view up.
 public struct PostActs: Sendable, Hashable {
     /// The acts this post offers. Empty where `refused` says why.
     public let offered: Set<PostAct>
-    /// Why the acts are absent, where they are. Nothing where they are there to press.
+    /// Why no act is offered, where none is. Nothing where they are there to press.
     public let refused: PostActRefusal?
     /// The acts this post would offer once its sign-in is asked again (#285): never one it
     /// offers, and empty on nearly every post. A mark for one of these asks; it does not act.
@@ -155,12 +155,12 @@ public struct PostActs: Sendable, Hashable {
     ///
     /// `gone` is whether its source has said it no longer has the post (#179). **Asked first, and
     /// answered with nothing to say**: every act here reaches the source with the post, and there
-    /// is no post there for it to reach. The row's own mark already says why, so a refusal line
-    /// under it would be saying it twice.
+    /// is no post there for it to reach. The row's own mark already says why, so a refusal on top
+    /// of it would be saying it twice.
     ///
     /// `bookmarks` is whether that sign-in may bookmark (#285). **Not known is not allowed**, as
     /// `mine` is: the mark is offered where the sign-in bought it, asks where the sign-in was
-    /// made before it could be bought, and is absent where the source would not grant it. Every
+    /// made before it could be bought, and is not offered where the source would not grant it. Every
     /// other act is as it was, whichever of the three.
     ///
     /// **No `default:`**, this package's standing rule: a fifth `SourceWriting` has to say what a

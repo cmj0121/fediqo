@@ -2,13 +2,19 @@ import FediqoCore
 import SwiftUI
 
 /// Part of what this device holds, let go on purpose (#248): the posts of a span of days, from
-/// one source or from every one, and a press that lets exactly those go.
+/// one source or from every one, and — behind the row's `…` — the press that lets exactly those go.
 ///
 /// **On the Keep tab, beside the window and the wait, because it is the same question asked the
 /// other way round.** The window and the wait say how long a post stays; this says which posts
-/// go now, and the person is the one saying it. The figure on the press's row is live — it is
-/// the store's count for the days and the source picked, read again as either moves — so what the
-/// question then names is what the reader already saw.
+/// go now, and the person is the one saying it. The figure on the row is live — it is the
+/// store's count for the days and the source picked, read again as either moves or as what is
+/// held does. A read overtaken by a newer pick is dropped, so an old span's figure never lands
+/// on a new one.
+///
+/// **Let go is a destructive item of the row's `…`, and has no button of its own.** It counts
+/// again at the press, as the button it replaces did, so the number the question names is the
+/// number at the press and never a figure the screen drew before the store moved under it.
+/// Where the days and source hold nothing it is dim, and the menu's head says so.
 ///
 /// **Every host with a post held is offered**, not only the sources joined: a source removed
 /// while its posts were kept (#250) is a host `Holdings` still counts, and its posts are as much
@@ -16,7 +22,6 @@ import SwiftUI
 ///
 /// A view of its own for `GoneSection`'s reason: one group per fact, read and tested alone.
 struct SpanSection: View {
-    @Environment(\.colorScheme) private var colorScheme
     let session: ShellSession
 
     /// The first and the last day of the span, both inside it. Today until the reader says.
@@ -27,9 +32,6 @@ struct SpanSection: View {
     /// The store's count for the span and host, nil until the first read lands — a "0" drawn
     /// before anything was counted would be a figure about nothing.
     @State private var count: Int?
-    /// The press has counted again and is asking first; what it counted is what the question
-    /// names, never a figure the screen drew before the store moved under it.
-    @State private var asking: SpanAsk?
     /// What the last press let go, and nothing before a press.
     @State private var went: Int?
 
@@ -46,38 +48,71 @@ struct SpanSection: View {
             DatePicker(L10n.t("usage.span.to"), selection: $to, in: from..., displayedComponents: .date)
             sourcePicker
             HStack(spacing: ShellSpace.snug) {
-                if let count { reading(Self.countLine(count)) }
+                if let count { ShellReadingLine(Self.countLine(count)) }
                 Spacer(minLength: ShellSpace.snug)
-                ShellIconButton("trash", name: "usage.span.now", help: "usage.span.now.help", tone: .alarm) {
-                    let ask = SpanAsk(from: from, to: to, host: host)
-                    Task {
-                        // Counted at the press, as `GoneSection` counts: nothing to let go is
-                        // said on the row, anything is asked about by its count now.
-                        let counted = await session.spanHeld(ask.span, host: ask.host)
-                        if counted == 0 {
-                            count = 0
-                        } else {
-                            asking = ask.counting(counted, kept: await session.spanKept(ask.span, host: ask.host))
-                        }
+                ShellMoreButton(Self.more(
+                    SpanAsk(from: from, to: to, host: host), figure: count,
+                    count: { ask in
+                        (await session.spanHeld(ask.span, host: ask.host), await session.spanKept(ask.span, host: ask.host))
+                    },
+                    none: { count = 0 },
+                    go: { [from, to, host] in
+                        Task { went = await session.letGo(span: Self.span(from: from, to: to), host: host) }
                     }
-                }
-                .disabled((count ?? 0) == 0)
+                ))
             }
-            if let went { reading(Self.wentLine(went)) }
+            if let went { ShellReadingLine(Self.wentLine(went)) }
         } header: {
             ShellSectionHead(title: "prefs.span", line: "usage.span.line", help: "prefs.span.footer")
         }
         .task(id: Probe(span: span, host: host, holdings: session.holdings)) {
             // Nothing until this read lands, so the press is never made on a stale figure.
             count = nil
-            count = await session.spanHeld(span, host: host)
+            // Dropped where a newer pick has cancelled this read: its figure is another span's.
+            if let read = await Self.landed({ await session.spanHeld(span, host: host) }) { count = read }
         }
         .onChange(of: hosts) { _, hosts in
             if let host, !hosts.contains(host) { self.host = nil }
         }
-        .shellConfirm($asking, question: { ShellQuestion.letGo($0) }) { ask, _ in
-            Task { went = await session.letGo(span: ask.span, host: ask.host) }
-        }
+    }
+
+    /// What a read came to, or nothing where the task it ran in was cancelled while it was out
+    /// — the pickers moved, and the answer is about days or a source no longer picked.
+    static func landed<Value: Sendable>(_ read: @MainActor () async -> Value) async -> Value? {
+        let value = await read()
+        return Task.isCancelled ? nil : value
+    }
+
+    /// The row's `…`: the one item that lets the posts of `ask`'s days and source go.
+    ///
+    /// **Destructive, and its question is counted at the press** (`ShellMoreItem.danger(counts:)`):
+    /// `count` is asked for the posts and the kept ones among them when the item is chosen, and
+    /// `ShellQuestion.letGo` names that count — not `figure`, which is only what the row drew.
+    /// Where the count is none, `none` is told so the row says so, and nothing is asked.
+    ///
+    /// Dim while `figure` is none or not yet read, and then the head says why in its own words:
+    /// there is nothing on these days, which "not right now" would not say.
+    static func more(
+        _ ask: SpanAsk, figure: Int?,
+        count: @escaping @MainActor (SpanAsk) async -> (posts: Int, kept: Int),
+        none: @escaping @MainActor () -> Void, go: @escaping () -> Void,
+        language: DummyLanguage? = nil
+    ) -> ShellMore {
+        let live = (figure ?? 0) > 0
+        let item = ShellMoreItem.danger(
+            "trash", L10n.t("usage.span.now", language: language),
+            look: live ? .live : .dim(.notNow),
+            counts: {
+                let counted = await count(ask)
+                guard counted.posts > 0 else {
+                    none()
+                    return nil
+                }
+                return ShellQuestion.letGo(ask.counting(counted.posts, kept: counted.kept), language: language)
+            },
+            act: go
+        )
+        return .ending(in: item, dimFor: live ? nil : L10n.t("usage.span.none", language: language))
     }
 
     /// Every source, then each host holding a post, in one order whoever joined them.
@@ -131,12 +166,6 @@ struct SpanSection: View {
     /// What the press says back: how many went.
     static func wentLine(_ count: Int, language: DummyLanguage? = nil) -> String {
         L10n.count("prefs.span.went", count, language: language)
-    }
-
-    private func reading(_ line: String) -> some View {
-        Text(line)
-            .shellFont(.reading)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 }
 

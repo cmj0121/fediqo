@@ -71,7 +71,7 @@ struct ActivityPanel: View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             HStack(spacing: ShellSpace.step) {
                 Text(L10n.t("activity.title"))
-                    .shellFont(.body, weight: .semibold)
+                    .shellFont(.pane)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)

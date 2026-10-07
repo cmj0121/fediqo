@@ -238,16 +238,16 @@ write at all, so refusing the writing part changes nothing about reading. Signin
 how you change your answer.
 
 If you signed in before Fediqo could write, that sign-in still only reads, and Fediqo writes
-nothing with it. Account says so, names the source, and puts the choice there beside it: one
-press asks the same question, without signing you out first. Cancel on the server's page and
-the sign-in you already had is still the one in use. What you already agreed to is never
-widened behind your back.
+nothing with it. That source's row on Account says so, with a lock and the words Update
+permission before its key: one press asks the same question, without signing you out first.
+Cancel on the server's page and the sign-in you already had is still the one in use. What you
+already agreed to is never widened behind your back.
 
 If you signed in to read and write before Fediqo could bookmark, that sign-in posts, replies,
 boosts and favourites exactly as it did; only bookmarking waits. The bookmark under a post
 there says it has to be asked for, and Account names the source: one press on either asks, on
 a page that names bookmarks, without signing you out first. A server that has no bookmarks to
-grant leaves you signed in to read and write, and the bookmark is not offered there.
+grant leaves you signed in to read and write, and the bookmark is drawn grey there.
 
 A bookmark is kept at the source. The mark under a post is what its source last said — filled
 where it holds your bookmark, and never filled by a press that did not land — so it reads the
@@ -265,11 +265,25 @@ goes when that sign-in does: signing out, a server ending the sign-in, Clear, Re
 account signing in on that source leaves its posts here saying nothing of any of the three,
 until a signed-in read says so again.
 
-Every row on Account says what may be done on that source — read, read and write, or read only
-where the protocol has no writing in Fediqo at all, which is every forum. What it says is the
-server's own answer: a server that grants less than Fediqo asked for is taken at its word, and
-the row says what may be done rather than what was asked. A source that turns a write away says
-so on its row and keeps saying it until you sign in to it again.
+A source's row on Account is one line at every width: its mark, its hostname, the sign-in key
+and three dots. Every source draws the same marks; one a source does not have, or cannot do
+right now, is grey and says why. Choosing boards and lists is behind the dots, and so are Clear
+and Remove. What may be done on that source — read, read and write, or read only where the
+protocol has no writing in Fediqo at all, which is every forum — is no longer written on the
+row, and VoiceOver still says it. It is the server's own answer: a server that grants less than
+Fediqo asked for is taken at its word, and what is said is what may be done rather than what
+was asked. Where a sign-in has to be asked again before something it could do is offered, a
+lock with the words Update permission stands before the key, on the same line and drawn as the
+key is; on a row too narrow for the words and the whole hostname it is the lock alone. It is
+red on a source that turned a write away, and stays until you sign in to it again.
+
+Whatever takes something away, signing out aside, is behind three dots on the row or the
+section it acts on, and asks first: Clear and Remove on a source's row, Clear and Forget
+password in a source's detail on Usage, Stop keeping, letting go by dates, dropping picture
+copies, removing a timeline or a host you added, and taking back a
+post of your own. Signing out is the key itself, and asks first too. One is not asked: removing
+a rule from a timeline being edited is behind the dots as well, but it is only a draft, and
+nothing is kept until Done.
 
 The secret is kept in this device's Keychain. It is not in the
 store, it is not copied to iCloud, and it does not follow your Apple account to another
@@ -278,7 +292,9 @@ Take away carries it inside the locked file, and Move nearby sends it to another
 devices — with the store, or the sign-ins alone — when both sides agree. Both are below,
 under What this device holds.
 
-Sign out on the row, Clear, and Remove each delete the secret from this device. What Home and
+Signing out, Clear, and Remove each delete the secret from this device. Signing out is the key
+on the row, and it asks first: the question names the source and says what goes, and only
+pressing Sign out in the question signs you out. What Home and
 your lists brought in stays until you drop it. The sign-in page keeps no session of its own
 and shares none with Safari, so each sign-in asks for your password on the server's page, and
 signing out leaves nothing on this device that could sign in as you there. A server that ends
@@ -452,7 +468,10 @@ is what moves. A wide screen keeps every name in a row, and swipes all the same.
 One post is always marked as the one being read: the first wholly on screen, moving as you
 scroll, and never moving the list by itself. Nothing is done to the marked post. One press on a
 post opens it, a mark under a post acts on that post, and pressing and holding a post says who
-wrote it, exactly when and for whom, and offers what its marks do. A timeline you come back to
+wrote it, exactly when and for whom, and offers what its marks do. Every post draws the same
+seven marks in the same order — answer, boost, quote, favourite, bookmark, keep and three dots —
+and one its source does not offer is grey and says why. The dots open what pressing and holding
+opens; taking back a post of your own is there and nowhere else, and asks first. A timeline you come back to
 is where you left it.
 
 Pull a timeline down to read it again. While it reads, the reload mark is Stop. Press the top
@@ -462,7 +481,8 @@ sideways swipe goes back; on a page with tabs it goes to the tab beside.
 ### What this device holds
 
 The Usage page is tabbed by purpose: Sources, Time, Keep, and Copies. Tab rotates them.
-Sources holds the totals, each source's figures and its Clear: one figure of posts for each
+Sources holds the totals and a row for each source: its mark, its hostname and the way in to
+its detail, which holds its figures, and its Clear behind three dots. There is one figure of posts for each
 source, counting everything held from it, a forum topic's replies included. Time holds the week or month
 breakdown. Keep holds the two limits, Posts you keep, Let go by dates, and What the limits let go. Copies
 holds the pictures this device is keeping, and the drop that takes them. Clear takes a
@@ -517,12 +537,12 @@ the press itself lets nothing go.
 Usage's Keep tab counts what you keep under Posts you keep: every source together, then each
 by name — a source you removed among them — with what their words weigh, earlier wordings
 counted in. Pictures are not in that figure; picture copies are counted by source, on Copies.
-Stop keeping, beside each figure, un-keeps all of them or all from that source at once. It asks
+Stop keeping, behind the three dots beside each figure, un-keeps all of them or all from that source at once. It asks
 first and names the count, and it lets nothing go: they are ordinary posts from then, and the
 next limit or letting go may take them. A post two sources carry stays kept through the other
 source's copy; one source's Stop keeping counts only the posts it makes ordinary and says how
 many stay kept that way, and Every source reaches them all. A question that lets posts go —
-removing a source, letting go by dates, letting go of what was deleted at its source — says
+removing a source, letting go by dates — says
 how many kept posts stay. Reading back a store, and holding or moving one nearby, says how
 many of the posts it brings are kept before you agree, and a package whose store does not
 bear that number out is refused before anything here changes. One from a version that did not
@@ -624,8 +644,13 @@ before the creature arrived.
 
 The artwork is in [`assets/`](assets/) — `logo.svg` from 64 px up, `logo-small.svg` below
 that, where every metal edge is snapped to the pixel grid and the arms are thickened so they
-survive at 16 px, and `mascot.svg` for where the creature is the subject rather than the icon.
+survive at 16 px, `mascot.svg` for where the creature is the subject rather than the icon, and
+`octopus.svg` for the creature with nothing behind it.
 [`assets/README.md`](assets/README.md) says why each drawing is the way it is.
+
+The launch draws the octopus alone, in the page's own ink on the page's own ground: it rests a
+beat, gathers itself, pushes off, coasts back and fades. Where less motion was asked for, none
+of it is shown.
 
 ## DDD (Dream-Driven Development)
 

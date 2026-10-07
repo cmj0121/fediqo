@@ -14,8 +14,6 @@ import UIKit
 struct BuildStampSection: View {
     let stamp: BuildStamp
 
-    @Environment(\.colorScheme) private var colorScheme
-
     /// Bumped by each Copy, so the button says it worked and then goes back to saying what it
     /// does. A count rather than a flag, so a second press restarts the wait.
     @State private var copies = 0
@@ -26,12 +24,10 @@ struct BuildStampSection: View {
             ForEach(stamp.rows(), id: \.label) { row in
                 line(row)
             }
-            Button(action: copy) {
-                Label(
-                    L10n.t(copied ? "about.copied" : "about.copy"),
-                    systemImage: copied ? "checkmark" : "doc.on.doc"
-                )
-            }
+            ShellLinkButton(
+                L10n.t(copied ? "about.copied" : "about.copy"),
+                symbol: copied ? "checkmark" : "doc.on.doc", action: copy
+            )
             .accessibilityHint(L10n.t("about.copy.hint"))
             .modifier(CopiedFades(copies: copies, copied: $copied))
         } header: {
@@ -39,27 +35,25 @@ struct BuildStampSection: View {
         }
     }
 
-    /// The label and what this build says. A revision is drawn short (`BuildStamp.shortRevision`)
-    /// and set under its label, in the face a hash is read in; Copy still takes the whole of
-    /// it. Each row is one element to VoiceOver, read label then what is drawn.
-    @ViewBuilder
+    /// The label and what this build says: **one row shape for every row**, the label leading
+    /// and what the build says trailing, in the Form's own inks. A revision is drawn short
+    /// (`BuildStamp.shortRevision`) and in the face a hash is read in — a font on the value, not
+    /// a layout of its own, so Source is set out exactly as Version is. Copy still takes the
+    /// whole of it.
+    ///
+    /// **One rule for a value that does not fit**, whichever row it is on: it wraps under
+    /// itself rather than being cut, since "not recorded: …" is a sentence and a sentence cut
+    /// in the middle says nothing. Each row is one element to VoiceOver, read label then what
+    /// is drawn.
     private func line(_ row: BuildStamp.Row) -> some View {
-        if row.isReading {
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                Text(row.label)
-                Text(row.shown ?? row.value)
-                    .shellFont(.reading)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .accessibilityElement(children: .combine)
-        } else {
-            LabeledContent(row.label) {
-                Text(row.value)
-                    .textSelection(.enabled)
-            }
+        LabeledContent(row.label) {
+            Text(row.shown ?? row.value)
+                .fontDesign(row.isReading ? .monospaced : nil)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
         }
+        .accessibilityElement(children: .combine)
     }
 
     private func copy() {

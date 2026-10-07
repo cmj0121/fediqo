@@ -331,8 +331,8 @@ struct InventoryTests {
     /// figure and every Clear is on Usage, and Preferences draws none of them.
     @Test("The storage this device uses is on Usage, and Preferences no longer shows it")
     func theFiguresLiveOnUsage() throws {
-        let usage = try ["UsagePane", "UsageSources"].map(Self.source).joined()
-        let preferences = try Self.source("PreferencesPane")
+        let usage = try ["UsagePane", "UsageSources"].map(ShellSource.shell).joined()
+        let preferences = try ShellSource.shell("PreferencesPane")
         for key in [
             "prefs.cache", "prefs.cache.footer", "prefs.held.total", "prefs.held.disk",
             "prefs.held.breakdown", "prefs.cache.clear", "prefs.password.forget",
@@ -344,7 +344,7 @@ struct InventoryTests {
         for stem in ["prefs.cache", "prefs.held", "prefs.drop", "prefs.keep", "prefs.password"] {
             #expect(!preferences.contains("\"\(stem)"), "Preferences still draws \(stem)")
         }
-        #expect(usage.contains("session.clearing = source.host"), "a row's Clear no longer asks the same question")
+        #expect(usage.contains("asks: session.clearQuestion(host: host)"), "a source's Clear no longer asks the same question")
 
         for language in [DummyLanguage.english, .taiwanese] {
             let usageTitle = L10n.t("shell.usage.title", language: language)
@@ -364,26 +364,15 @@ struct InventoryTests {
     @Test("Usage and Preferences sit on the page's colour, and no page shows a scroll bar")
     func pagesShareOneBackgroundAndNoScrollBar() throws {
         for name in ["UsagePane", "PreferencesPane"] {
-            let file = try Self.source(name)
+            let file = try ShellSource.shell(name)
             #expect(file.contains(".scrollContentBackground(.hidden)"), "\(name) draws the Form's own background")
             #expect(file.contains(".scrollIndicators(.never)"), "\(name) can show a scroll bar")
         }
         for name in ["TimelinePane", "DummyThreadPane", "AccountPane"] {
-            let file = try Self.source(name)
+            let file = try ShellSource.shell(name)
             #expect(file.contains(".scrollIndicators(.never)"), "\(name) can show a scroll bar")
             #expect(!file.contains(".scrollIndicators(.hidden)"), "\(name) shows a bar when the system asks")
         }
-    }
-
-    private static func source(_ name: String) throws -> String {
-        try String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/FediqoUI/Shell/\(name).swift"),
-            encoding: .utf8
-        )
     }
 
     @Test("Switching between week and month rebuilds the counts; a redraw does not")

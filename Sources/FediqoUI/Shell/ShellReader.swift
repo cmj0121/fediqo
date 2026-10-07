@@ -334,17 +334,12 @@ struct LinkReaderSheet: View {
 
     private var footer: some View {
         HStack(spacing: ShellSpace.step) {
-            Button {
+            ShellLinkButton(L10n.t("link.reader.browser"), symbol: "arrow.up.forward.app") {
                 // **Where the reader is, not where they came in.** The header names `showing`'s
                 // host, so handing the browser the address the sheet was opened on would be the
                 // same lie one control further along.
                 openURL(reading.showing)
-            } label: {
-                Label(L10n.t("link.reader.browser"), systemImage: "arrow.up.forward.app")
-                    .shellFont(.meta, weight: .medium)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(ShellChrome.selectInk(colorScheme))
             .accessibilityHint(Text(L10n.t("thread.open.leaves")))
             Spacer(minLength: ShellSpace.snug)
             if !inPlace {

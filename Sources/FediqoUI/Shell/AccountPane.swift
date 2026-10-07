@@ -16,11 +16,24 @@ struct AccountPane: View {
     /// who pressed Return in the field is left with focus on a field while a screenful of new
     /// content has appeared below it.
     @AccessibilityFocusState private var previewFocused: Bool
-    /// What the source list measured itself to be. **Zero until the first measurement lands**, and
-    /// `SourceRow.regime(width:threshold:)` reads that zero as "not measured yet" rather than as a
-    /// narrow row.
-    @State private var rowWidth: CGFloat = 0
     @Environment(\.colorScheme) private var colorScheme
+    /// What Remove's question says of a source's posts — the reader's standing choice (#250).
+    /// Optional, so a page hosted without the preferences still draws.
+    @Environment(DummyPrefs.self) private var prefs: DummyPrefs?
+
+    /// Whether a removed source's posts stay, as things stand when it is asked: once for
+    /// Remove's question and again for its yes, so the line and the act agree.
+    private var postsStay: () -> Bool {
+        let prefs = prefs
+        return { Self.postsStay(prefs?.removedPostsStay) }
+    }
+
+    /// The reader's choice, or — where the page was hosted without the preferences — **that the
+    /// posts stay**. Not knowing falls on the side that takes less: a Remove that kept posts
+    /// nobody asked to keep can be put right from Usage, and one that deleted them cannot.
+    static func postsStay(_ chosen: Bool?) -> Bool {
+        chosen ?? true
+    }
     /// The system's sign-in sheet, which a Mastodon row's Sign in opens on the server's own page.
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
@@ -58,7 +71,7 @@ struct AccountPane: View {
         static let field: CGFloat = 520
         /// The promise is a sentence, not a row: it wraps where a sentence should.
         static let saying: CGFloat = 560
-        static let fieldRadius: CGFloat = 6
+        static let fieldRadius = ShellRadius.field
         static let icon: CGFloat = 18
         /// The one orchestrated moment on this page, and it answers the reader's own press: it
         /// shows them what changed. There is no other motion here that a press did not ask for.
@@ -122,6 +135,8 @@ struct AccountPane: View {
             .modifier(SignInChoiceQuestion(session: session) { host, writing in
                 Task { await chose(host: host, writing: writing) }
             })
+            // The key pressed while signed in: the question, and only its yes signs out.
+            .modifier(SignOutQuestion(session: session, signOut: signOutAnswered))
         }
     }
 
@@ -390,8 +405,8 @@ struct AccountPane: View {
     /// `.buttonStyle(.plain)` supplies no dimming of its own and an explicit `.foregroundStyle`
     /// overrides the one `.disabled` would supply — so this button was refused behind a sheet and
     /// looked exactly as pressable as before. **The fourth instance of that defect on this
-    /// branch**, and the one on the page whose other controls this unit had just fixed: the row's
-    /// four glyphs went through `RowActionState`, `ShellChrome.well` left this pane with the
+    /// branch**, and the one on the page whose other controls had just been fixed: the row's
+    /// glyphs took a look that carries their ink, `ShellChrome.well` left this pane with the
     /// boards plate, and this control went on saying press-me.
     ///
     /// **Internal rather than private so a test can read it**, on the same grounds as `busy` and
@@ -402,19 +417,10 @@ struct AccountPane: View {
     }
 
     private var searchField: some View {
-        HStack(alignment: .center, spacing: ShellSpace.snug) {
-            TextField(L10n.t("account.search.placeholder"), text: $session.hostname)
-                .shellFont(.body)
-                .textFieldStyle(.plain)
-                .focused($searchFocused)
-                .disabled(busy)
-                .onSubmit { Task { await typedHost() } }
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.URL)
-                #endif
-                .autocorrectionDisabled()
-                .accessibilityLabel(L10n.t("account.search.placeholder"))
+        ShellHostField(
+            L10n.t("account.search.placeholder"), text: $session.hostname, focus: $searchFocused,
+            onSubmit: { Task { await typedHost() } }
+        ) {
             Button {
                 Task { await typedHost() }
             } label: {
@@ -424,10 +430,10 @@ struct AccountPane: View {
                     .foregroundStyle(searchInk)
             }
             .buttonStyle(.plain)
-            .disabled(busy)
             .accessibilityLabel(L10n.t("account.search"))
             .help(L10n.t("account.search"))
         }
+        .disabled(busy)
         .padding(.horizontal, ShellSpace.step)
         .padding(.vertical, ShellSpace.snug)
         .frame(maxWidth: Metrics.field, alignment: .leading)
@@ -552,10 +558,9 @@ struct AccountPane: View {
     @ViewBuilder
     private var offer: some View {
         if let host = session.offerSignIn {
-            Button(String(format: L10n.t("account.refuse.signin"), host)) {
+            ShellLinkButton(String(format: L10n.t("account.refuse.signin"), host)) {
                 Task { await offeredSignIn(host) }
             }
-            .shellFont(.meta)
             .accessibilityLabel(Text(String(format: L10n.t("account.refuse.signin.label"), host)))
         }
     }
@@ -563,7 +568,7 @@ struct AccountPane: View {
     /// The sources this device reads, one row each.
     ///
     /// **This list and `UsagePane`'s answer different questions and are kept visibly apart.**
-    /// This one is *what am I reading* — a mark, a hostname, and what can be done about it. That
+    /// This one is *what am I reading* — a mark, a hostname, its sign-in, and `…`. That
     /// one is *what is this device holding* — an inventory, every line of it with a byte count or a
     /// date. So **no byte figure and no date appears on a row here, ever**, and the footnote below
     /// names the other list and its job rather than repeating it. Clear is in both, which is one
@@ -583,154 +588,46 @@ struct AccountPane: View {
     private var sources: some View {
         VStack(alignment: .leading, spacing: ShellSpace.snug) {
             // The list's heading (#244): one short line, and behind its (?) which question this
-            // list answers, what Remove costs, what the marks and the word on a row mean, and
-            // where what a source left is counted — the lines that stood under the list.
+            // list answers, what Remove costs, what the marks on a row mean, and where what a
+            // source left is counted — the lines that stood under the list.
             ShellSectionHead(
                 L10n.t("account.sources.title"), line: L10n.t("account.sources.line"), help: Self.sourcesHelp()
             )
-            askedAgain
             // **A plain stack, because the page is the thing that scrolls.** A `ScrollView` here
             // would be the inner one the page comment above is about.
             // Row-independent — `stage == nil && !checking` names no host — so it is asked once
             // for the list rather than once per row.
             let actsLive = ShellSession.rowActsLive(at: session.stage, checking: session.checking)
             // **Read once for the list, beside `actsLive` and for its reason.** `session.rows` is
-            // a computed property that allocates a fresh `[SourceRow]`, and `widest` folds the
-            // whole of it — so referenced from inside the `ForEach` they are O(n²) on the app's
-            // launch screen, and the sentence below would have read as though it were true while
-            // being false.
+            // a computed property that allocates a fresh `[SourceRow]`.
             let rows = session.rows
-            // **The method, not a second call to the same function.** They agreed by being the
-            // same expression, so changing the body alone would have left
-            // `thePaneHandsOneWidestToEveryRow` green while every row was drawn to a threshold
-            // nothing had pinned — the risk-12 shape with the test on the wrong side of it.
-            //
-            // **Handed the rows the list is drawn from.** It used to read `session.rows` itself,
-            // so the comment above — which says the list is built once — was false the line after
-            // it was written: the fold ran over a second, freshly allocated array.
-            let widest = widest(rows)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(rows) { row in
                     SourceRowView(
                         row: row,
-                        signedIn: session.isSignedIn(host: row.source.host),
-                        width: rowWidth,
-                        // **Handed down, never derived per row.** Decision 33 made the control
-                        // count per-protocol, so the widest row is a property of the list; a row
-                        // asking `controls(of:)` about itself would give a Mastodon one threshold
-                        // and the Discuz! beside it another, and a list where one row is trailing
-                        // and the row above it is beneath at the same width reads as broken.
-                        // Risk 14's generalised fix: the caller states the answer, the callee
-                        // never looks around for it.
-                        widest: widest,
                         actsLive: actsLive,
-                        // **The comparison moved to a named function and the fold went with
-                        // it.** It used to be written here, folding case on both sides against a
-                        // guarantee three files away that nothing at this site stated — the shape
-                        // `ShellSession.remove` names as how a bug class reaches fourteen places.
+                        // **The comparison is a named function and the fold went with it.**
                         // `ProgressOwner.row` carries the host already folded by whoever set it.
                         waiting: SourceRow.waitingLine(
                             session.progress, drawnAs: session.stage, host: row.source.host
                         ),
                         refusal: session.rowRefusal,
                         notice: session.forums.notice(host: row.source.host)?.sentence(),
-                        signIn: { Task { await press(row) } },
-                        clear: { askClear(row) },
-                        remove: { askRemove(row) },
-                        changeBoards: { Task { await changeBoards(row) } },
-                        chooseLists: { Task { await changeLists(row) } },
-                        open: { openSource(row) }
+                        clearAsks: { session.clearQuestion(host: row.source.host) },
+                        removeAsks: { session.removeQuestion(host: row.source.host, postsStay: postsStay()) },
+                        presses: presses(row, postsStay: postsStay)
                     )
                     // **Between rows and not after every one.** A rule under the last row is a
-                    // list that looks cut off rather than finished, with the footnote below it
-                    // hanging off the end of a table.
+                    // list that looks cut off rather than finished.
                     if row.id != rows.last?.id { ShellRule() }
                 }
             }
-            // **One reader for the whole list, not one per row.** Every row in it is the same
-            // width, and `SourceRow.regime` is a function of that width and of the list's own
-            // widest control set, so measuring it once and
-            // handing it down keeps each row a function of its inputs — which is what the row's
-            // own doc comment demands and what makes the decision drivable from a test.
-            //
-            // **This line is not reachable from a test, and it is now one of exactly two such
-            // seams left on this page** (risk 12). Nothing verifies that the number arriving in
-            // `rowWidth` is the row's width, and nothing can without a UI test target. The other
-            // is `FediqoRootView`'s `message:` closure, which feeds `SourceRow.clearDetailKey`.
-            // Every other decision on this page is a named value a test reads.
-            // On DESIGN-TAIL §6.3 and §6.4: whether it fires before first paint, and whether it
-            // fires when the macOS rail is expanded or collapsed — which moves the page by about
-            // 150pt and should flip the regime.
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
-        }
-    }
-
-    /// What this build now asks for, said to a reader who signed in before it asked (#69).
-    ///
-    /// **On the page and not in an alert.** Widening what somebody already agreed to is the one
-    /// thing this unit must not do quietly, and the honest opposite of quietly is *standing on the
-    /// page they manage their sources from*, for as long as it is true. An alert would be a
-    /// sentence they can dismiss and never see again, or one that comes back every launch; this
-    /// goes when they answer it and not before.
-    ///
-    /// **It names the sources and what has not changed, in that order.** Nothing about their
-    /// reading moved, and a line about permissions that does not say so reads as one that did.
-    ///
-    /// **`ShellNotice` is deliberately not used**: that is a whole page with nothing on it, and
-    /// this is a line in a page that is full.
-    ///
-    /// **It carries the question as well as the news, one control per source it names.** Being
-    /// told without being asked is half of what the sentence promises: the only way to the choice
-    /// was to sign out and in again, and a sign-out revokes the token at the server — so reaching
-    /// the question cost a working sign-in, and cancelling on the server's page left the reader
-    /// worse off than before the question existed. One press puts the question instead.
-    @ViewBuilder
-    private var askedAgain: some View {
-        standing(
-            Self.askedAgain(session.sources, in: session.mastodon),
-            line: "account.sources.writing.again.line", help: "account.sources.writing.again",
-            choose: "account.sources.writing.again.choose", press: askWriting
-        )
-        // The newer question, to a sign-in that already acts (#285): the same sentence shape, and
-        // a press that puts the bookmark question itself — one press, no choice to make, and no
-        // way to narrow the sign-in by it.
-        standing(
-            Self.askedForBookmarks(session.sources, in: session.mastodon),
-            line: "account.sources.bookmarks.again.line", help: "account.sources.bookmarks.again",
-            choose: "account.sources.bookmarks.again.choose", press: askBookmarks
-        )
-    }
-
-    /// One standing sentence about `hosts`, and the control that puts its question to each.
-    @ViewBuilder
-    private func standing(
-        _ hosts: [String], line lineKey: String, help helpKey: String, choose chooseKey: String,
-        press: @escaping (String) -> Void
-    ) -> some View {
-        if !hosts.isEmpty {
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                let named = hosts.joined(separator: ", ")
-                let line = String(format: L10n.t(lineKey), named)
-                Text(line)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .shellHelp(verbatim: String(format: L10n.t(helpKey), named), about: line)
-                // One per source and not one for the list: the question is about one server's
-                // sign-in, and a single control would have to ask which — which is the dialog
-                // asked twice.
-                ForEach(hosts, id: \.self) { host in
-                    Button(String(format: L10n.t(chooseKey), host)) { press(host) }
-                        .shellFont(.meta)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     /// What the sources list's (?) says: which question the list answers and what Remove costs,
-    /// what the marks on a row mean, what the word beside a host says, and where what each source
-    /// left is counted — four keys, one bubble.
+    /// what the key and `…` on a row are, what the lock and its word beside them mean, and where
+    /// what each source left is counted — four keys, one bubble.
     static func sourcesHelp(language: DummyLanguage? = nil) -> String {
         [
             "account.sources.detail", "account.sources.marks", "account.sources.writing", "account.sources.held",
@@ -739,42 +636,18 @@ struct AccountPane: View {
         .joined(separator: "\n\n")
     }
 
-    /// The sources on this page whose sign-in predates the question (#69).
-    ///
-    /// **Drawn from the page's own sources and not from the sessions' list of tokens**, so a token
-    /// left behind for a server the reader has since removed cannot put a stranger's name on this
-    /// page — and in join order, which is the order the sentence names them in.
-    ///
-    /// **`session.sources` and not `session.rows`**: this needs hostnames, and `rows` builds a
-    /// fresh `[SourceRow]` the list already builds twice. Internal so a test reads it, on
-    /// `widest`'s grounds.
-    static func askedAgain(_ sources: [Source], in mastodon: MastodonSessions) -> [String] {
-        sources.map(\.host).filter { mastodon.grants[$0] == .unasked }
-    }
-
-    /// The sources on this page whose sign-in reads and acts and was made before bookmarks were
-    /// asked for (#285) — `askedAgain`'s list for the newer question, drawn the same way and
-    /// answered by the same press. Never one of `askedAgain`'s: that sign-in is asked everything.
-    static func askedForBookmarks(_ sources: [Source], in mastodon: MastodonSessions) -> [String] {
-        sources.map(\.host).filter { mastodon.bookmarks(host: $0) == .unasked }
-    }
-
-    /// The control set of the widest row in this list — decision 33's one-threshold rule.
-    ///
-    /// **Internal rather than private so a test can read it**, on the same grounds as `busy` and
-    /// `searchInk`: this value decides the arrangement of *every* row on the page, and a value
-    /// computed inside a `View` body is reachable from nothing — which is precisely how the four
-    /// defects risk 12 counts all survived a green suite.
-    ///
-    /// **Handed the rows rather than reading them**, so the threshold is folded over the very
-    /// array the `ForEach` draws — not a second one built from the same source. As a property it
-    /// allocated a fresh `[SourceRow]` on every body evaluation, beside the one the list already
-    /// held, under a comment saying the list was read once.
-    ///
-    /// **Still `session.rows` at the call site and not `session.sources`**, so the list the
-    /// threshold is computed from is the list that is drawn.
-    func widest(_ rows: [SourceRow]) -> [SourceRow.Control] {
-        SourceRow.widest(rows)
+    /// Every press of one row, each a named method of this page and nothing else — so a row's
+    /// closures do nothing but call one. `postsStay` is read when Remove's yes is pressed.
+    func presses(_ row: SourceRow, postsStay: @escaping () -> Bool = { AccountPane.postsStay(nil) }) -> SourceRow.Presses {
+        SourceRow.Presses(
+            signIn: { Task { await press(row) } },
+            askAgain: { askAgain(row) },
+            changeBoards: { Task { await changeBoards(row) } },
+            chooseLists: { Task { await changeLists(row) } },
+            clear: { Task { await clear(row) } },
+            remove: { Task { await remove(row, keepingPosts: postsStay()) } },
+            open: { openSource(row) }
+        )
     }
 
     // MARK: - What every control on this page actually does
@@ -839,10 +712,14 @@ struct AccountPane: View {
     /// **A sign-in that could carry writing asks first** (#69). The question is the reader's to
     /// answer before the server's page opens, so nothing is asked of the server and nothing is
     /// opened until they have; a protocol this app cannot write on has no question to put and goes
-    /// straight through, which is decision 4's rule about absent controls applied to a dialog.
+    /// straight through.
+    ///
+    /// **Signing out asks first too, whatever the protocol.** A sign-out hands a Mastodon's token
+    /// back to its server and drops a forum's session with its saved password, so a press on a
+    /// signed-in key only puts the question (`ShellSession.signOutAsk`); `signOut(_:)` is its yes.
     func press(_ row: SourceRow) async {
         if session.isSignedIn(host: row.source.host) {
-            await session.signOut(host: row.source.host)
+            session.askSignOut(host: row.source.host)
         } else if row.asksWriting {
             session.signInChoice = row.source.host
         } else {
@@ -852,8 +729,19 @@ struct AccountPane: View {
         }
     }
 
-    /// The standing sentence's own control (#69): it puts the row's question to a reader who is
-    /// **already signed in**, and signs nobody out to do it.
+    /// The yes to the sign-out question: `signOut(_:)`, started from a press.
+    func signOutAnswered(_ host: String) {
+        Task { await signOut(host) }
+    }
+
+    /// The yes to the sign-out question: the one way a press on this page signs anybody out.
+    func signOut(_ host: String) async {
+        session.signOutAsk = nil
+        await session.signOut(host: host)
+    }
+
+    /// The writing question, put to a reader who is **already signed in** (#69), and nobody is
+    /// signed out to put it. Reached from the row's permission control (`askAgain`).
     ///
     /// The dialog and `MastodonSessions.signIn` both cope with a host that already holds a token —
     /// the new token replaces it here and the one it supersedes is revoked at the server — so a
@@ -861,12 +749,37 @@ struct AccountPane: View {
     ///
     /// **The row's own toggle is untouched**: it is two-state and stays two-state. This is the
     /// second surface for the question and not a third behaviour on the first.
+    ///
+    /// **Asked from the row and not in an alert, for as long as it is owed.** Widening what
+    /// somebody already agreed to is not done quietly: the control stands on the row of the
+    /// source it is about until the reader answers.
     func askWriting(_ host: String) {
         session.signInChoice = host
     }
 
-    /// The bookmark sentence's own control (#285): it puts the bookmark question about `host`,
-    /// the one a post's row puts, and signs nobody out to do it. Nothing where that sign-in is no
+    /// The permission control's press: the question this row's sign-in is owed, and **nobody is
+    /// signed out to put it** — `askWriting`'s argument, which is why this is not the key's own
+    /// press: on a signed-in row the key asks to sign out, and a sign-out revokes the token.
+    ///
+    /// A sign-in that only lacks bookmarks is asked for those, the one question a post's row
+    /// puts; a write turned away, or a sign-in made before writing was asked for, is asked what
+    /// it may do. Nothing where the row owes nothing.
+    func askAgain(_ row: SourceRow) {
+        let host = row.source.host
+        switch row.owed {
+        case .nothing: return
+        case .refused: askWriting(host)
+        case .asking:
+            if session.mastodon.bookmarks(host: host) == .unasked {
+                askBookmarks(host)
+            } else {
+                askWriting(host)
+            }
+        }
+    }
+
+    /// The bookmark question about `host` (#285), reached from the row's permission control:
+    /// the one a post's row puts, and nobody is signed out to put it. Nothing where that sign-in is no
     /// longer one to ask.
     func askBookmarks(_ host: String) {
         guard session.mastodon.bookmarks(host: host) == .unasked else { return }
@@ -890,13 +803,11 @@ struct AccountPane: View {
         )
     }
 
-    /// A row's Clear. **Empties nothing** — it raises the question, and only the question's yes
-    /// reaches `clear(host:)`. Decision 29, and `askRemove`'s shape for its reason.
-    ///
-    /// The same act, and the same key, as the one on Usage — which now asks the same
-    /// question through the same presenter, or one word would do two things two panes apart.
-    func askClear(_ row: SourceRow) {
-        session.clearing = row.source.host
+    /// The yes to a row's Clear (decision 29: the press itself only asks, and the row's `…` is
+    /// what asks). **`ShellSession.clear(host:)` and nothing beside it** — the one call the yes
+    /// to Usage's Clear makes too, so one act is one function whichever page it was asked on.
+    func clear(_ row: SourceRow) async {
+        await session.clear(host: row.source.host)
     }
 
     /// A row's boards control. **Changes nothing by itself** — it reads the forum's index and
@@ -912,10 +823,11 @@ struct AccountPane: View {
         await session.changeLists(host: row.source.host)
     }
 
-    /// A row's Remove. **Destroys nothing** — it raises the question, and only the question's
-    /// confirm reaches `remove(host:)`.
-    func askRemove(_ row: SourceRow) {
-        session.removing = row.source.host
+    /// The yes to a row's Remove, which the row's `…` asks first. **`ShellSession.remove(host:
+    /// keepingPosts:)` and nothing beside it**, with the reader's standing choice about its
+    /// posts (#250) as it stands at the yes.
+    func remove(_ row: SourceRow, keepingPosts: Bool) async {
+        await session.remove(host: row.source.host, keepingPosts: keepingPosts)
     }
 
     /// The row's own press — decision 31. **Asks nobody anything**: the profile is already in
@@ -948,6 +860,29 @@ struct AccountPane: View {
         SourceMarkRow.Mark(
             id: row.source.host, kind: row.source.kind, shape: row.shape, signedIn: signedIn
         )
+    }
+}
+
+/// Signing out, asked of a source whose key was pressed while signed in — a modifier, for
+/// `SignInChoiceQuestion`'s reason. **The question is the one read at the press and held with
+/// its host** (`SignOutAsk`), not read again while the card is up: a yes on a forum deletes its
+/// saved password, and a card re-read as it slid away would turn from the one that said so into
+/// the one that does not. Putting it down any other way than its yes signs nobody out.
+private struct SignOutQuestion: ViewModifier {
+    let session: ShellSession
+    let signOut: @MainActor (String) -> Void
+
+    func body(content: Content) -> some View {
+        content.shellConfirm(asked, question: \.question) { ask, _ in
+            signOut(ask.host)
+        }
+        // The question is drawn nowhere but on this page: leaving puts it down, so it cannot
+        // come back on a later visit asking about a sign-in as it stood then.
+        .onDisappear { session.dropSignOutAsk() }
+    }
+
+    private var asked: Binding<SignOutAsk?> {
+        Binding(get: { session.signOutAsk }, set: { if $0 == nil { session.signOutAsk = nil } })
     }
 }
 

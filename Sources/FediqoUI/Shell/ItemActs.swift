@@ -2,7 +2,7 @@ import FediqoCore
 import SwiftUI
 
 // How one of #54's acts is drawn and said on a row: the glyph, the name a pointer reads, the
-// sentence VoiceOver hears, and the line a row says where the act is not offered at all.
+// sentence VoiceOver hears, and — where the act is not offered — the reason its mark is dim.
 //
 // **Here rather than inside `DummyItemRow`'s body**, which is this package's standing arrangement
 // and the reason it is one: three controls in this milestone shipped wired to the wrong thing and
@@ -20,7 +20,7 @@ import SwiftUI
 /// it should have.
 ///
 /// The default is a row that does not act: a fixture, a preview, anything drawn with no session
-/// behind it. It offers nothing and says nothing, which is `PostActs.none`.
+/// behind it. It offers nothing, which is `PostActs.none`, and every mark on it is drawn dim.
 struct ItemActing {
     var acts: PostActs = .none
     /// Where each offered act has got to, **on the copy it goes through** — `through`'s.
@@ -36,25 +36,37 @@ struct ItemActing {
     /// the post to its source or taking the boost back (#106), the same for a favourite (#107),
     /// answering it (#108) — from a timeline by opening the conversation it belongs to, since
     /// that is where an answer is written, and from inside the conversation by opening the answer
-    /// — and asking to take it back (#109), which is only ever the question.
+    /// — and bookmarking it (#285). Taking back is asked first, and is `withdraw`'s.
     ///
-    /// Nothing where the list cannot act — a fixture, a preview — and then no mark is drawn.
+    /// Nothing where the list cannot act — a fixture, a preview — and then every act's mark is
+    /// drawn dim, as not right now.
     var perform: ((PostAct) -> Void)?
     /// The press on the keep mark (#284): keeps the row, or un-keeps it. **Beside `perform` and
     /// not one of its acts**, because it is none of #54's: nothing is sent to a source, so it is
     /// offered on a row whatever its source offers, signed in or not, and it has no standing to
-    /// be on its way or to fail. Nothing where the list cannot act, and then the press changes
-    /// nothing.
+    /// be on its way or to fail. Nothing where the list cannot act, and then its mark is dim.
     var keep: (() -> Void)?
     /// The press on a mark whose act the sign-in must be asked again for (#285) — bookmarking,
     /// on a sign-in made before it was asked for. It raises the question and sends nothing.
-    /// Nothing where the list cannot act, and then no such mark is drawn.
+    /// Nothing where the list cannot act, and then the dim mark's press goes nowhere.
     var ask: ((PostAct) -> Void)?
+    /// Taking the post back (#109), which is never a mark: the question it asks and what its yes
+    /// does, for the one destructive item of the row's `…`. Nothing where the list cannot act,
+    /// or the post does not offer it.
+    var withdraw: Withdraw?
+
+    /// The question taking a post back asks, and what a yes to it does. **The question is built
+    /// when the item is chosen** — it names the copy that goes as things stand at the press.
+    struct Withdraw {
+        let asks: () -> ShellConfirmation
+        let yes: () -> Void
+    }
 }
 
 /// What one act's mark draws on one row — `ItemActs.mark`'s answer.
 struct ItemMark: Equatable {
-    let symbol: String
+    /// The glyph, unfilled — what a `ShellMark` is made from, which fills it where the act is done.
+    let glyph: String
     /// What the source the act goes through last said.
     let done: Bool
     let count: Int?
@@ -64,39 +76,30 @@ struct ItemMark: Equatable {
 
 /// The vocabulary of the acts a reader performs on a post.
 enum ItemActs {
-    /// The glyph the mark draws.
+    /// The glyph of an act's mark, unfilled: the act's own, or where the act has got to.
     ///
     /// **The act's own glyph is replaced while the act is not settled, and that is the whole of
     /// "the mark shows the act is on its way".** A mark that kept its shape and changed only its
-    /// colour would say nothing to a reader who cannot tell the two colours apart, and a mark that
-    /// kept its shape entirely would say nothing to anybody. Three states, three shapes — four
-    /// for the favourite, whose star fills when it is done.
+    /// colour would say nothing to a reader who cannot tell the two colours apart. On its way is
+    /// `hourglass` and never `ellipsis`, which on this row is the menu and nothing else.
     ///
-    /// `done` is what the source last said, never what was pressed: a boost the reader made in
-    /// another app reads as done here the moment this device has fetched the post.
-    static func symbol(_ act: PostAct, done: Bool, standing: ShellActStanding?) -> String {
+    /// **Whether the act is offered is not asked**: a mark the source does not offer is the same
+    /// glyph in the dim ink (`look`), so there is no second glyph for "must be asked first".
+    static func glyph(_ act: PostAct, standing: ShellActStanding?) -> String {
         switch standing {
-        case .onItsWay: return "ellipsis"
+        case .onItsWay: return "hourglass"
         case .failed: return "exclamationmark.triangle"
         case nil: break
         }
-        // Settled, the glyph is the act's own and **whether it is done is carried by the mark's
-        // colour**, which is what `DummyMarkButton(on:)` already does for every other mark on the
-        // row. `arrow.2.squarepath` has no filled twin to swap to, and inventing a second glyph
-        // for the done state would make boosting the one act on the row that changes shape when
-        // it is done — a difference a reader would read as meaning something.
         switch act {
         case .boost: return "arrow.2.squarepath"
-        // The star is the one act that does have a filled twin, and it has always been drawn
-        // filled when done — kept, so the favourite reads as it did before it went to the source.
-        case .favourite: return done ? "star.fill" : "star"
+        case .favourite: return "star"
         // An answer is never "done" on the post: the reader may answer as often as they like, and
         // the words they wrote are rows of their own in the thread.
         case .answer: return "arrowshape.turn.up.left"
         // Never "done": a post taken back is not on the row to be drawn.
         case .withdraw: return "trash"
-        // The star's shape (#285): filled where the source says it is bookmarked.
-        case .bookmark: return done ? "bookmark.fill" : "bookmark"
+        case .bookmark: return "bookmark"
         }
     }
 
@@ -141,16 +144,11 @@ enum ItemActs {
         }
     }
 
-    /// What a mark says where its act has to be allowed first (#285): the act, and that asking
-    /// the source again is what a press does. One sentence for the pointer and for VoiceOver.
-    static func askLine(_ act: PostAct, language: DummyLanguage? = nil) -> String {
-        String(
-            format: L10n.t("item.act.ask", language: language), name(act, done: false, language: language)
-        )
-    }
-
     /// Everything one act's mark draws on one row: its glyph, whether it is done, the count
     /// beside it and the sentence a pointer and VoiceOver are given.
+    ///
+    /// `done` is what the source last said, never what was pressed: a boost the reader made in
+    /// another app reads as done here the moment this device has fetched the post.
     ///
     /// **All of it is read off the copy the act goes through** (#136) — `acting.through`, or the
     /// row where there is none — so the row never shows one source's state and presses another's.
@@ -165,6 +163,7 @@ enum ItemActs {
         case .boost: (copy.boosted == true, copy.counts.reblogs)
         case .favourite: (copy.favourited == true, copy.counts.favourites)
         case .answer: (false, copy.counts.replies)
+        // Never a mark (`line`); here because the switch names every act.
         case .withdraw: (false, nil)
         // What the source the act goes through last said (#285); a source counts no bookmarks.
         case .bookmark: (copy.bookmarked == true, nil)
@@ -177,7 +176,7 @@ enum ItemActs {
             said = String(format: L10n.t("item.act.onPost", language: language), said, copy.author)
         }
         return ItemMark(
-            symbol: symbol(act, done: done, standing: standing),
+            glyph: glyph(act, standing: standing),
             done: done,
             count: count,
             spoken: said
@@ -199,7 +198,8 @@ enum ItemActs {
         )
     }
 
-    /// What a row says where it offers no acts at all.
+    /// Why a post offers none of #54's acts, as a sentence: what the head of the row's `…` says,
+    /// and what each dim mark tells a pointer and VoiceOver after its reason.
     ///
     /// **Four reasons, four sentences, and nothing folded.** The reader is being told what to do
     /// about it, and "sign in again" and "this forum cannot be written to from here" are different
@@ -212,88 +212,213 @@ enum ItemActs {
         case .unnameable: return L10n.t("item.act.no.unnameable", language: language)
         }
     }
+
+    /// Why the marks of a post that offers no act are dim. **No `default:`.**
+    ///
+    /// A forum's post and one this device cannot name have no such act at all. **Not signed in,
+    /// and a source that turned a write away, are "not right now" and never "asked again"**:
+    /// `askAgain` is the one reason whose press puts a question, and a post's row has no question
+    /// that leads to signing in — that is asked on the source's own row. No mark says it must be
+    /// asked again and then does nothing; these say what is true, with the sentence that says
+    /// which after it, take the press and do nothing.
+    static func reason(_ refusal: PostActRefusal) -> DimReason {
+        switch refusal {
+        case .protocolCannot: .never
+        case .unnameable: .never
+        case .turnedAway: .notNow
+        case .notSignedIn: .notNow
+        }
+    }
+
+    /// Why quoting is dim on every row, as a sentence of its own: this app writes no quote yet.
+    /// It is what the quote says in place of "not right now", so it is said once.
+    static func quoteLine(language: DummyLanguage? = nil) -> String {
+        L10n.t("item.act.quote.no", language: language)
+    }
 }
 
-/// One mark under a post, as it is drawn and as the row's menu offers it (#306): what it is,
-/// its glyph, what it is called, whether it is done, and the count beside it.
+/// One mark under a post (#306): which it is, the shared mark it is drawn as — glyph, name,
+/// look, state and count — and the sentence a pointer and VoiceOver are given.
 struct RowMark: Identifiable, Equatable {
     enum Kind: Hashable {
-        /// One of #54's acts, done on the post.
+        /// One of #54's acts, done on the post — or dim, where the post does not offer it.
         case act(PostAct)
-        /// An act this sign-in must be asked again for first (#285): a press puts the question.
-        case ask(PostAct)
         /// Keeping the row on this device (#284).
         case keep
-        /// Marks that are drawn and do nothing yet but say so.
-        case quote, more
+        /// Quoting, which this app does not write yet: always dim.
+        case quote
+        /// `…`: the row's menu. Never an act and never dim.
+        case more
     }
 
     let kind: Kind
-    let symbol: String
+    let mark: ShellMark
+    /// The mark's name, and for a dim one its reason and the sentence that says which — what a
+    /// pointer and VoiceOver are given, and for quoting its line at the head of the menu.
     let label: String
-    let on: Bool
-    let count: Int?
 
     var id: Kind { kind }
 
-    /// Whether a press does something: the two that only say they are not built yet are drawn
-    /// on the row, where a gap would be noticed, and are not offered in a menu.
-    var acts: Bool { kind != .quote && kind != .more }
-
-    /// Whether a press takes something away for good: said as such where a menu can say it.
-    /// It asks first all the same.
-    var destroys: Bool { kind == .act(.withdraw) }
-
-    /// Whether this is the bookmark, asked for or not.
-    var isBookmark: Bool { kind == .act(.bookmark) || kind == .ask(.bookmark) }
+    var isBookmark: Bool { kind == .act(.bookmark) }
 }
 
 extension ItemActs {
+    /// The marks every post draws, in the order they are drawn. **Every post from every source
+    /// draws these seven**: taking back is not among them — it is an item of `…` alone.
+    static let line: [RowMark.Kind] = [
+        .act(.answer), .act(.boost), .quote, .act(.favourite), .act(.bookmark), .keep, .more,
+    ]
+
+    /// How one act's mark is drawn on a post, and the sentence that says why where it is dim.
+    ///
+    /// Live where the post offers the act and the list has somewhere for the press to go.
+    /// Otherwise dim, for the first of these that is true: the sign-in must be asked again for
+    /// this act (#285); the post offers no act and says why (`reason`); the source offers its
+    /// other acts and not this one; and — a post gone at its source, a source that has left, a
+    /// list that cannot act — not right now.
+    static func look(
+        _ act: PostAct, acting: ItemActing, language: DummyLanguage? = nil
+    ) -> (look: MarkLook, why: String?) {
+        look(act, acting: acting, refused: refused(acting, language: language))
+    }
+
+    /// Why the post offers no act, where it offers none: the reason its marks are dim for, and
+    /// the sentence that says which. Read once for the whole line of marks.
+    private static func refused(
+        _ acting: ItemActing, language: DummyLanguage?
+    ) -> (reason: DimReason, line: String)? {
+        acting.acts.refused.map { (reason($0), refusalLine($0, language: language)) }
+    }
+
+    private static func look(
+        _ act: PostAct, acting: ItemActing, refused: (reason: DimReason, line: String)?
+    ) -> (look: MarkLook, why: String?) {
+        if acting.acts.asks(act) { return (.dim(.askAgain), nil) }
+        if let refused { return (.dim(refused.reason), refused.line) }
+        guard acting.acts.offers(act) else {
+            return (.dim(acting.acts.offered.isEmpty ? .notNow : .never), nil)
+        }
+        return (acting.perform == nil ? .dim(.notNow) : .live, nil)
+    }
+
     /// The marks under a post, in the order they are drawn — **the one list the row's line of
     /// marks and its menu are both made from** (#306), so neither can offer what the other
     /// does not.
     ///
-    /// An act is here only where the post offers it and the list has somewhere for the press to
-    /// go, exactly as its mark has always been drawn; keeping is on every row.
+    /// **The same seven on every post, whatever its source** (`line`). A mark the post does not
+    /// offer is drawn dim in its own glyph (`look`), and says why to the pointer, to VoiceOver
+    /// and in the head of `…`; nothing is left out and no sentence stands in for the marks.
     static func marks(on item: DummyItem, acting: ItemActing, language: DummyLanguage? = nil) -> [RowMark] {
-        func act(_ act: PostAct) -> RowMark? {
-            guard acting.acts.offers(act), acting.perform != nil else { return nil }
-            let shown = mark(act, on: item, acting: acting, language: language)
-            return RowMark(
-                kind: .act(act), symbol: shown.symbol, label: shown.spoken, on: shown.done,
-                count: (shown.count ?? 0) > 0 ? shown.count : nil
-            )
+        // **Read once a call, and a row is a call each time it is drawn**: why the post offers
+        // nothing, the two shapes a sentence is joined in, and each reason's word as it is met.
+        let refused = refused(acting, language: language)
+        let said = L10n.t("mark.dim.said", language: language)
+        let whyShape = L10n.t("item.mark.why", language: language)
+        var words: [DimReason: String] = [:]
+        func made(_ kind: RowMark.Kind, _ mark: ShellMark, why: String? = nil) -> RowMark {
+            var spoken = mark.name
+            if case .dim(let reason) = mark.look {
+                let word = words[reason] ?? L10n.t(reason.key, language: language)
+                words[reason] = word
+                spoken = String(format: said, mark.name, word)
+            }
+            let label = why.map { String(format: whyShape, spoken, $0) }
+            return RowMark(kind: kind, mark: mark, label: label ?? spoken)
         }
-        func plain(_ kind: RowMark.Kind, _ symbol: String, _ key: String, on: Bool = false) -> RowMark {
-            RowMark(kind: kind, symbol: symbol, label: L10n.t(key, language: language), on: on, count: nil)
+        return line.map { kind in
+            switch kind {
+            case .act(let act):
+                let shown = mark(act, on: item, acting: acting, language: language)
+                let (look, why) = look(act, acting: acting, refused: refused)
+                let count = (shown.count ?? 0) > 0 ? shown.count : nil
+                return made(kind, ShellMark(shown.glyph, shown.spoken, look: look, on: shown.done, count: count), why: why)
+            case .quote:
+                let mark = ShellMark("quote.bubble", L10n.t("item.act.quote", language: language), look: .dim(.notNow))
+                let label = String(format: said, mark.name, quoteLine(language: language))
+                return RowMark(kind: kind, mark: mark, label: label)
+            case .keep:
+                let name = L10n.t(DummyItemRow.keepName(item), language: language)
+                let look: MarkLook = acting.keep == nil ? .dim(.notNow) : .live
+                return made(kind, ShellMark("archivebox", name, look: look, on: item.kept))
+            case .more:
+                return made(kind, ShellMark(ShellMore.symbol, L10n.t("mark.more", language: language), look: .live))
+            }
         }
-        let bookmark: RowMark? = acting.acts.asks(.bookmark) && acting.ask != nil
-            ? RowMark(kind: .ask(.bookmark), symbol: "bookmark.slash", label: askLine(.bookmark, language: language), on: false, count: nil)
-            : act(.bookmark)
-        let all: [RowMark?] = [
-            act(.answer), act(.boost), plain(.quote, "quote.bubble", "item.act.quote"), act(.favourite),
-            bookmark,
-            plain(.keep, item.kept ? "archivebox.fill" : "archivebox", DummyItemRow.keepName(item), on: item.kept),
-            act(.withdraw), plain(.more, "ellipsis", "item.act.more"),
-        ]
-        return all.compactMap { $0 }
     }
 
-    /// What the row's menu offers: every mark that does something. **Nothing in a menu is a
-    /// press that does nothing**, so keeping is offered only where the list has somewhere for
-    /// it to go — its mark is drawn on every row all the same, to keep the line one line.
-    static func menu(on item: DummyItem, acting: ItemActing, language: DummyLanguage? = nil) -> [RowMark] {
-        marks(on: item, acting: acting, language: language).filter { mark in
-            mark.acts && (mark.kind != .keep || acting.keep != nil)
+    /// A press on one of the row's marks, sent where its look says it goes (`ShellMark.pressed`):
+    /// a live mark acts, the one that must be asked again puts its question, and any other dim
+    /// mark takes the press and does nothing. `…` is a menu and has no press of its own.
+    ///
+    /// **Never filled on a press**: filled is what the source last said, and kept is what the
+    /// store holds, so nothing looks done that is not. Each act goes to the post the row shows,
+    /// and on a reblog's row keeping alone is the reblog's (#290).
+    static func press(_ mark: RowMark, acting: ItemActing) {
+        switch mark.kind {
+        case .act(let act):
+            ShellMark.pressed(mark.mark.look, act: { acting.perform?(act) }, ask: asks(mark, acting: acting))
+        case .keep:
+            ShellMark.pressed(mark.mark.look, act: { acting.keep?() }, ask: nil)
+        case .quote, .more:
+            break
         }
+    }
+
+    /// What the row's `…` holds, and what a long press on the row offers — **one value for the
+    /// two** (#306), so they cannot differ.
+    ///
+    /// The head is what the post is (`head`, ending with why it offers no act where it offers
+    /// none), then each dim mark named under its reason (`ShellMore.reasons`), the only place a
+    /// finger reads it — quoting under its own sentence. **Each reason is said once**: the six
+    /// marks follow by name alone, the dim ones disabled, since the head has said why. Then the
+    /// way out to the post's own page where there is one (`leave`); and, under the divider,
+    /// taking the post back — **offered here and nowhere else, only on the reader's own post**,
+    /// and only as `danger`, so the menu puts its question and nothing goes before a yes.
+    static func more(
+        on item: DummyItem, acting: ItemActing, here: Set<String>?, leave: (() -> Void)? = nil,
+        language: DummyLanguage? = nil
+    ) -> ShellMore {
+        let marks = marks(on: item, acting: acting, language: language).filter { $0.kind != .more }
+        var items = marks.map { mark in
+            ShellMoreItem.plain(mark.mark, ask: asks(mark, acting: acting), act: { press(mark, acting: acting) }).underHead
+        }
+        if let leave {
+            items.append(.plain("arrow.up.forward.app", item.outwardName, act: leave))
+        }
+        if acting.acts.offers(.withdraw), let withdraw = acting.withdraw {
+            let standing = acting.standings[.withdraw]
+            // **On its way it is dim and still the trash**: grey and not grey are one glyph, so
+            // the hourglass an act's mark wears while it is out is not worn here.
+            let onItsWay = standing == .onItsWay
+            items.append(.danger(
+                glyph(.withdraw, standing: onItsWay ? nil : standing),
+                spoken(.withdraw, done: false, standing: standing, language: language),
+                look: onItsWay ? .dim(.notNow) : .live,
+                asks: withdraw.asks(), act: withdraw.yes
+            ))
+        }
+        var shared: [ShellMark] = []
+        var quoted: [String] = []
+        for mark in marks {
+            if mark.kind == .quote { quoted.append(mark.label) } else { shared.append(mark.mark) }
+        }
+        let head = head(for: item, here: here, refused: acting.acts.refused, language: language)
+            + ShellMore.reasons(of: shared, language: language) + quoted
+        return ShellMore(head: head, items: items)
+    }
+
+    /// The question a dim mark puts, on the row and in the menu alike, where there is one to
+    /// put: only the act the sign-in must be asked again for (#285), and only in a list that can
+    /// ask.
+    private static func asks(_ mark: RowMark, acting: ItemActing) -> (() -> Void)? {
+        guard case .act(let act) = mark.kind, acting.acts.asks(act), let ask = acting.ask else { return nil }
+        return { ask(act) }
     }
 
     /// The gap a mark asks for before it: the marks that keep a post stand a little apart from
-    /// the ones that pass it on, and the first of them opens the group.
-    static func gap(before mark: RowMark, among marks: [RowMark]) -> CGFloat? {
-        if mark.isBookmark { return ShellSpace.room }
-        if mark.kind == .keep, !marks.contains(where: \.isBookmark) { return ShellSpace.room }
-        return nil
+    /// the ones that pass it on, and the bookmark — on every row now — opens the group.
+    static func gap(before mark: RowMark) -> CGFloat? {
+        mark.isBookmark ? ShellSpace.room : nil
     }
 
     /// How many heads have been built: a count a test reads, to hold that a row drawn and
@@ -309,8 +434,8 @@ extension ItemActs {
     ///
     /// **Who wrote it first, by name and whole handle** — a narrow row draws the handle only
     /// where it has room (#302), and this is where a finger finds it. **And last, why no act is
-    /// offered where none is** (`refused`), in the sentence the row says under itself, so a
-    /// menu with only keeping in it says why.
+    /// offered where none is** (`refused`): the sentence the row used to say under its marks,
+    /// which the dim marks now say instead.
     static func head(
         for item: DummyItem, here: Set<String>?, refused: PostActRefusal? = nil, language: DummyLanguage? = nil
     ) -> [String] {

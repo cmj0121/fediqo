@@ -67,7 +67,7 @@ struct BookmarkRowTests {
 
     // MARK: - Offered, or said why not
 
-    @Test("Signed in to read only, or not signed in, the bookmark is not offered and the row says why")
+    @Test("Signed in to read only, or not signed in, the bookmark is not offered or asked for, and a press sends nothing")
     func notOfferedWithoutActing() async throws {
         for scopes in [MastodonOAuth.reading, nil] {
             let (session, server) = try await shell(scopes: scopes, holding: note(bookmarked: nil))
@@ -75,7 +75,6 @@ struct BookmarkRowTests {
             let acts = session.acts(on: item)
             #expect(!acts.offers(.bookmark) && !acts.asks(.bookmark))
             #expect(acts.refused == .notSignedIn)
-            #expect(!ItemActs.refusalLine(.notSignedIn, language: .english).isEmpty)
             await session.toggle(.bookmark, on: item)
             #expect(!session.askToBookmark(item), "a sign-in that does not act has nothing to add bookmarks to")
             #expect(await server.paths.isEmpty)
@@ -154,7 +153,7 @@ struct BookmarkRowTests {
             #expect(session.acts.standing(of: item.id, .favourite) == nil, "one act's failure is not another's")
             #expect(try row(session).bookmarked == false, "the mark moved on a press that did not land")
             let mark = ItemActs.mark(.bookmark, on: try row(session), acting: session.acting(on: try row(session)), language: .english)
-            #expect(!mark.done && mark.symbol == "exclamationmark.triangle")
+            #expect(!mark.done && mark.glyph == "exclamationmark.triangle")
             #expect(mark.spoken == "Bookmark did not arrive. Press to try again.")
             await session.toggle(.bookmark, on: item)
             #expect(await server.paths == ["/api/v1/statuses/9/bookmark", "/api/v1/statuses/9/bookmark"])
@@ -453,7 +452,7 @@ struct BookmarkRowTests {
     private static func marks(_ item: DummyItem, _ acting: ItemActing) -> Set<String> {
         let probe = RowBandProbe()
         let row = DummyItemRow(item: item, catalogues: EmojiCatalogueStore(), posts: ForumPosts(),
-                               acting: acting, probe: probe, onToast: { _ in })
+                               acting: acting, probe: probe)
         let host = NSHostingView(rootView: row.frame(width: 720))
         host.frame = NSRect(origin: .zero, size: host.fittingSize)
         host.layoutSubtreeIfNeeded()
@@ -465,21 +464,27 @@ struct BookmarkRowTests {
         Set([DummyLanguage.english, .taiwanese].map(name))
     }
 
-    @Test("A row draws a bookmark mark only where its source can hold one: none where it only reads, an asking one for an earlier sign-in")
-    func theRowDrawsOnlyWhatTheSourceHolds() async throws {
+    @Test("Every row draws the bookmark mark, in its own glyph: dim where the source cannot hold one, live where it can, and dim as to be asked again for an earlier sign-in")
+    func theRowDrawsTheBookmarkLiveOrDim() async throws {
         let bookmark = Self.names { ItemActs.name(.bookmark, done: false, language: $0) }
         let taken = Self.names { ItemActs.name(.bookmark, done: true, language: $0) }
-        let asks = Self.names { ItemActs.askLine(.bookmark, language: $0) }
-        let every = bookmark.union(taken).union(asks)
+        func mark(_ item: DummyItem, _ acting: ItemActing) throws -> ShellMark {
+            let found = ItemActs.marks(on: item, acting: acting).first { $0.isBookmark }
+            return try #require(found).mark
+        }
 
-        // No session behind the row, a read-only sign-in, no sign-in: no bookmark mark at all.
-        #expect(Self.marks(DummyItem(note(bookmarked: true)), ItemActing()).isDisjoint(with: every))
+        // No session behind the row, a read-only sign-in, no sign-in: drawn, and dim.
+        let fixture = DummyItem(note(bookmarked: true))
+        #expect(!Self.marks(fixture, ItemActing()).isDisjoint(with: taken))
+        #expect(try mark(fixture, ItemActing()).look == .dim(.notNow))
         for scopes in [MastodonOAuth.reading, nil] {
             let (session, _) = try await shell(scopes: scopes, holding: note(bookmarked: true))
             var acting = session.acting(on: try row(session))
             acting.perform = { _ in }
             acting.ask = { _ in }
-            #expect(Self.marks(try row(session), acting).isDisjoint(with: every), "a mark nothing holds was drawn")
+            #expect(!Self.marks(try row(session), acting).isDisjoint(with: bookmark.union(taken)), "the mark was left out")
+            let drawn = try mark(try row(session), acting)
+            #expect(drawn.look == .dim(ItemActs.reason(.notSignedIn)) && drawn.symbol == "bookmark")
         }
 
         // Signed in to act: the mark says what the source last said, and nothing else.
@@ -489,26 +494,31 @@ struct BookmarkRowTests {
             acting.perform = { _ in }
             let drawn = Self.marks(try row(session), acting)
             #expect(!drawn.isDisjoint(with: said ? taken : bookmark))
-            #expect(drawn.isDisjoint(with: (said ? bookmark : taken).union(asks)))
+            #expect(drawn.isDisjoint(with: said ? bookmark : taken))
+            #expect(try mark(try row(session), acting).look == .live)
+            #expect(try mark(try row(session), acting).drawn == (said ? "bookmark.fill" : "bookmark"))
         }
 
-        // An earlier sign-in: one mark, which asks, and every other act still there.
+        // An earlier sign-in: the same glyph, dim, to be asked again; every other act live.
         let (session, _) = try await shell(scopes: Self.before, holding: note(bookmarked: nil))
         var acting = session.acting(on: try row(session))
         acting.perform = { _ in }
         acting.ask = { _ in }
         let drawn = Self.marks(try row(session), acting)
-        #expect(!drawn.isDisjoint(with: asks))
-        #expect(drawn.isDisjoint(with: bookmark.union(taken)))
+        #expect(!drawn.isDisjoint(with: bookmark) && drawn.isDisjoint(with: taken))
+        let asking = try mark(try row(session), acting)
+        #expect(asking.look == .dim(.askAgain) && asking.drawn == "bookmark", "no second glyph for the ask")
         #expect(!drawn.isDisjoint(with: Self.names { ItemActs.name(.favourite, done: false, language: $0) }))
+        let favourite = try #require(ItemActs.marks(on: try row(session), acting: acting).first { $0.kind == .act(.favourite) })
+        #expect(favourite.mark.look == .live)
     }
 
     @Test("The mark fills when the source says it is bookmarked, changes shape on its way, and is named for what a press does")
     func theMark() {
-        #expect(ItemActs.symbol(.bookmark, done: false, standing: nil) == "bookmark")
-        #expect(ItemActs.symbol(.bookmark, done: true, standing: nil) == "bookmark.fill")
-        #expect(ItemActs.symbol(.bookmark, done: true, standing: .onItsWay) != "bookmark.fill")
-        #expect(ItemActs.symbol(.bookmark, done: false, standing: .failed) != "bookmark")
+        #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: nil), on: false) == "bookmark")
+        #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: nil), on: true) == "bookmark.fill")
+        #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: .onItsWay), on: true) != "bookmark.fill")
+        #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: .failed), on: false) != "bookmark")
         #expect(ItemActs.spoken(.bookmark, done: false, standing: nil, language: .english) == "Bookmark")
         #expect(ItemActs.spoken(.bookmark, done: true, standing: nil, language: .english) == "Take the bookmark off")
         for language in [DummyLanguage.english, .taiwanese] {
@@ -516,9 +526,10 @@ struct BookmarkRowTests {
                 let said = ItemActs.spoken(.bookmark, done: done, standing: .onItsWay, language: language)
                 #expect(!said.contains("item.act."), "untranslated: \(said)")
             }
-            let asks = ItemActs.askLine(.bookmark, language: language)
-            #expect(asks.contains(ItemActs.name(.bookmark, done: false, language: language)))
-            #expect(!asks.contains("item.act.") && !asks.contains("%"))
+            let name = ItemActs.name(.bookmark, done: false, language: language)
+            let asks = ShellMark.spoken(name: name, look: .dim(.askAgain), language: language)
+            #expect(asks.hasPrefix(name) && asks != name, "the ask is the mark's name and its reason")
+            #expect(!asks.contains("mark.dim.") && !asks.contains("%"))
         }
         // The lines a mark only the screen held used to say are gone with it.
         for key in ["item.toast.bookmark.on", "item.toast.bookmark.off"] {

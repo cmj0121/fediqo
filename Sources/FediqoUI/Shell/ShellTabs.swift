@@ -279,6 +279,8 @@ struct TabsOverForm<Tabs: View>: ViewModifier {
     let slide: PageSlide
     @ViewBuilder var tabs: Tabs
 
+    @Environment(\.colorScheme) private var colorScheme
+
     func body(content: Content) -> some View {
         content
             .modifier(ProbedPane(part: .under))
@@ -290,9 +292,9 @@ struct TabsOverForm<Tabs: View>: ViewModifier {
                         .padding(.top, ShellSpace.step)
                         .padding(.bottom, ShellSpace.snug)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        // Whatever the page is drawn on, which on a narrow page is the
-                        // system's own and not the chassis's colour.
-                        .background(.background)
+                        // What the page is drawn on, so the list goes under the head and
+                        // is not read through it.
+                        .background(ShellChrome.page(colorScheme))
                         .modifier(ProbedPane(part: .head))
                 }
             }

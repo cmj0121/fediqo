@@ -3,8 +3,8 @@ import SwiftUI
 /// Preferences' tab of the hosts the person added (#226, #233), each for one of their sources.
 /// Everything said is `Allowance`'s and everything changed is `AllowanceBook`'s; this lays it out.
 ///
-/// **Three places, one at a time**: the list, a host's detail — what it lets through, and its
-/// Remove — and adding one, which is a place of its own entered from the list's last row rather
+/// **Three places, one at a time**: the list, a host's detail — what it lets through, with its
+/// Remove behind the head's `…` — and adding one, which is a place of its own entered from the list's last row rather
 /// than a form under the list.
 struct OwnHostsSection: View {
     let book: AllowanceBook
@@ -111,7 +111,9 @@ struct OwnHostsSection: View {
 }
 
 /// A host the person added, opened: what it lets through, when, why, the host, whether its
-/// source is gone — and Remove, which takes it off the list at once, as the list's own minus did.
+/// source is gone. **Remove is the one item of the head's `…`**: destructive, under the bin every
+/// removal wears, and asking first (`ShellQuestion.removeOwnHost`) — it used to be the detail's
+/// last row and take the host off the list at the press.
 struct OwnHostDetail: View {
     let entry: Allowance
     let gone: Bool
@@ -124,14 +126,24 @@ struct OwnHostDetail: View {
                 ShellDetailFact(label: L10n.t("allow.detail.state"), value: L10n.t("allow.own.gone"), alarm: true)
             }
             AllowanceFacts(entry: entry)
-            Button(role: .destructive, action: onRemove) {
-                Label(L10n.t("allow.own.removeIt"), systemImage: "minus.circle")
-            }
-            .keyboardShortcut(.delete)
-            .accessibilityLabel(String(format: L10n.t("allow.own.remove"), entry.title()))
         } header: {
-            ShellDetailHead(entry.title(), onBack: onBack) { Image(systemName: entry.symbol) }
+            ShellDetailHead(entry.title(), onBack: onBack) {
+                Image(systemName: entry.symbol)
+            } trailing: {
+                ShellMoreButton(Self.more(entry, remove: onRemove))
+            }
         }
+    }
+
+    /// The head's `…`: the one item that removes this host, named with it.
+    static func more(_ entry: Allowance, language: DummyLanguage? = nil, remove: @escaping () -> Void) -> ShellMore {
+        let host = entry.title(language: language)
+        return ShellMore(items: [
+            .danger(
+                "trash", String(format: L10n.t("allow.own.remove", language: language), host),
+                asks: ShellQuestion.removeOwnHost(host, language: language), act: remove
+            ),
+        ])
     }
 }
 
@@ -169,18 +181,8 @@ struct OwnHostAdding: View {
         Picker(L10n.t("allow.own.source"), selection: source) {
             ForEach(sources, id: \.self) { Text($0).tag($0) }
         }
-        HStack(spacing: ShellSpace.snug) {
-            TextField(L10n.t("allow.own.host"), text: $typed)
-                .textFieldStyle(.plain)
-                .focused($typing)
-                .onSubmit(add)
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.URL)
-                #endif
-                .autocorrectionDisabled()
-                .accessibilityLabel(L10n.t("allow.own.host"))
-            Button(L10n.t("allow.own.add"), action: add)
+        ShellHostField(L10n.t("allow.own.host"), text: $typed, focus: $typing, onSubmit: add) {
+            ShellIconButton("plus", name: "allow.own.add", action: add)
                 .disabled(typed.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .modifier(TypingTold(typing: typing, onTyping: onTyping))

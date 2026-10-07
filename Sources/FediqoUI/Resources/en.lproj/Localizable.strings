@@ -177,7 +177,6 @@
 "timeline.rule.written" = "%d rules of yours, in time order.";
 "timeline.rule.written.one" = "%d rule of yours, in time order.";
 "timeline.remove" = "Remove timeline";
-"timeline.remove.help" = "Asks first. Its rules go with it; the posts stay under All.";
 "timeline.remove.title" = "Remove \"%@\"?";
 "timeline.remove.detail" = "Its rules go with it. The posts stay under All.";
 "timeline.remove.confirm" = "Remove";
@@ -204,7 +203,6 @@
 "rule.missing.help" = "This is gone. The rule still applies to posts this device holds.";
 "rule.missing.spoken" = "Missing: it still applies to posts this device holds.";
 "rule.action.remove" = "Remove rule";
-"rule.remove.help" = "Takes this rule out. Nothing changes until Done.";
 "rule.add" = "Add a rule";
 "rule.add.help" = "Pick a kind, then what it names.";
 "rule.add.confirm" = "Add rule";
@@ -360,21 +358,19 @@
 "item.act.withdraw" = "Take back what you wrote";
 "item.act.answer" = "Answer";
 "item.act.quote" = "Quote";
+"item.act.quote.no" = "Quoting cannot be done here yet";
+"item.mark.why" = "%1$@: %2$@";
 "item.act.favourite" = "Favourite";
 "item.act.bookmark" = "Bookmark";
 "item.act.unbookmark" = "Take the bookmark off";
-"item.act.ask" = "%@: this sign-in must be asked again first";
 "item.bookmark.ask.title" = "Ask %@ to allow bookmarks?";
 "item.bookmark.ask.line" = "Its page asks again for what you allowed, and for bookmarks.";
 "item.bookmark.ask.detail" = "You signed in to %@ before Fediqo could bookmark. Its own page opens and asks for what this sign-in already has — reading, posting, replying, boosting and favouriting — and for bookmarks as well. Nothing is signed out first: close the page and everything stays as it is.";
 "item.bookmark.ask.confirm" = "Ask";
 "item.act.keep" = "Keep";
 "item.act.unkeep" = "Stop keeping";
-"item.act.more" = "More";
-"item.toast.quote" = "A quote opens the composer. Not this session.";
 "item.toast.kept.on" = "Kept on this device.";
 "item.toast.kept.off" = "No longer kept.";
-"item.toast.more" = "More stays dummy.";
 "item.note.public.body" = "The market is a hallway. Walk through it.";
 "item.note.you.work.body" = "Standup in ten. The rule is still: one stream.";
 "item.note.you.weekend.body" = "Octopus drawing, second pass.";
@@ -400,9 +396,6 @@
 "usage.drop.line" = "Kept until you choose otherwise; the oldest copies on disk go first.";
 "usage.gone.line" = "Only posts their source says are gone are marked.";
 "usage.source.back" = "Back to sources";
-"usage.source.clear.help" = "Asks first, then lets go of this source's pictures, emoji names, first posts and sign-in. Its posts stay, and it stays added.";
-"usage.drop.copies.help" = "Asks first, then drops every picture copy in memory and on disk.";
-"usage.gone.now.help" = "Asks first, then lets go now of every post and place deleted at its source, whatever the wait.";
 
 "store.unreachable.title" = "This device's store could not be opened";
 "store.unreachable.inUse.line" = "Another copy of Fediqo is using it. Nothing was changed.";
@@ -446,6 +439,7 @@
 "preferences.empty.title" = "Preferences";
 "preferences.empty.detail" = "Sources and appearance will live here.";
 
+"prefs.look.head" = "Language and look";
 "prefs.language" = "Language";
 "prefs.language.system" = "System";
 "prefs.language.english" = "English";
@@ -572,32 +566,8 @@
 "prefs.gone.days.one" = "%d day";
 "prefs.gone.keepwins" = "Keep posts holds only the latest %d months, which is shorter, so it lets them go first.";
 "prefs.gone.keepwins.one" = "Keep posts holds only the latest %d month, which is shorter, so it lets them go first.";
-"prefs.gone.now" = "Let them all go now";
-"prefs.gone.ask" = "Let go of %d posts deleted at their source?";
-"prefs.gone.ask.one" = "Let go of %d post deleted at its source?";
-"prefs.gone.ask.detail" = "They go from this device now, from every screen. Nothing else is touched, and every source stays joined. A post you keep stays, and is not in that count.";
 "prefs.gone.confirm" = "Let go";
-"prefs.gone.went" = "%d posts went.";
-"prefs.gone.went.one" = "%d post went.";
-"prefs.gone.went.none" = "None were held.";
 "prefs.gone.footer" = "A post is marked deleted only when this device reads that one post again and its source says it is not there. A post that simply did not arrive is never marked, and never let go here. What you took back yourself goes at once, unless you keep it: then it stays, marked. Where a timeline's source no longer has what lay between two posts, that place is marked the same way and goes the same way; the posts beside it stay.";
-"prefs.gone.posts" = "%d posts";
-"prefs.gone.posts.one" = "%d post";
-"prefs.gone.places" = "%d places";
-"prefs.gone.places.one" = "%d place";
-"prefs.gone.ask.places" = "Let go of %d places whose source no longer has what lay there?";
-"prefs.gone.ask.places.one" = "Let go of %d place whose source no longer has what lay there?";
-"prefs.gone.ask.both" = "Let go of %1$@ deleted at their source, and %2$@ whose source no longer has what lay there?";
-"prefs.gone.ask.detail.places" = "Posts go from this device now, from every screen. A place loses only its mark, and the post it sits by stays. Nothing else is touched, and every source stays joined. A post you keep stays, and is not in that count.";
-"prefs.gone.ask.detail.placesonly" = "Only their marks go, and the posts they sit by stay. Nothing else is touched, and every source stays joined.";
-"prefs.gone.ask.detail.counted" = "They go from this device now, from every screen. Nothing else is touched, and every source stays joined. The posts you keep are not in that count.";
-"prefs.gone.ask.detail.places.counted" = "Posts go from this device now, from every screen. A place loses only its mark, and the post it sits by stays. Nothing else is touched, and every source stays joined. The posts you keep are not in that count.";
-"prefs.gone.ask.line" = "They go from this device now.";
-"prefs.gone.ask.line.places" = "The posts go now; the places lose only their marks.";
-"prefs.gone.ask.line.placesonly" = "Only their marks go; the posts stay.";
-"prefs.gone.went.places" = "%d places went.";
-"prefs.gone.went.places.one" = "%d place went.";
-"prefs.gone.went.both" = "%1$@ and %2$@ went.";
 "prefs.drop.copies" = "Drop picture copies";
 "prefs.drop.copies.title" = "Drop every picture copy on this device?";
 "prefs.drop.copies.detail" = "The pictures held in memory and on disk go, from every source. Every post stays and still draws; its pictures are read again from their links as you scroll.";
@@ -652,6 +622,11 @@
 "forum.unforgotten" = "The username and password kept for this forum could not be deleted: %@.";
 "prefs.password.held" = "Password held on this device";
 "prefs.password.forget" = "Forget the password";
+"prefs.password.none" = "No password is saved for this forum.";
+"prefs.password.forget.title" = "Forget the password for %@?";
+"prefs.password.forget.line" = "It is deleted from this device; you type it again next time.";
+"prefs.password.forget.detail" = "The password saved for this forum is deleted from this device's Keychain and does not come back. You stay signed in until that sign-in ends, and everything else this device holds for it stays.";
+"prefs.password.forget.confirm" = "Forget";
 
 /* Unit F4 — choosing boards. */
 "board.choose.title" = "Boards on %@";
@@ -789,20 +764,15 @@
 "account.sources.detail"         = "Everything this device reads. Press a row for what that server says about itself — its name, its size, its boards. Removing one takes its boards and its posts with it.";
 "account.sources.held"           = "What each one has left on this device is on Usage.";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
-"account.sources.marks"          = "A row carries only the marks its own server has: sign in, change boards or lists, clear what it left here, and remove it.";
+"account.sources.marks"          = "Every row carries the same marks. The key is the sign-in: filled once you are signed in, grey where that source has none. Pressed while filled, it asks before it signs you out. ⋯ holds the rest: what the row has to say, changing boards or lists, clearing what the source left here, and removing it. What a source does not have is grey there too, and says why. A red ⋯ has something to say.";
 /* #69 — what may be done on a source, said on its row and explained once for the list. */
-"account.sources.writing"        = "A row also says what may be done on that source: read, read and write, or read only where the protocol has no writing in Fediqo at all. Write refused means a write was turned away; sign in to that source again.";
+"account.sources.writing"        = "A lock with the words Update permission, before the key, means that sign-in must be asked again before everything it could do is offered: a write was turned away, or it signed in before Fediqo asked to write or for bookmarks. Until you answer, what that sign-in already does is exactly as it was. Press it to be asked; nobody is signed out. On a row too narrow for the words, the lock stands alone.";
+"account.source.permission"      = "Update %@'s permission: its sign-in must be asked again before everything it could do is offered";
+"account.source.permission.word" = "Update permission";
 "account.source.writing.never"   = "read only";
 "account.source.writing.read"    = "read";
 "account.source.writing.write"   = "read and write";
 "account.source.writing.refused" = "write refused";
-/* Said in the open, for as long as it is true, to a reader who agreed to something narrower. */
-"account.sources.writing.again"  = "Fediqo now asks to write as well as read when you sign in. %@ signed in before it did: reading there is exactly as it was, and Fediqo writes nothing. Choose below, without signing out first.";
-"account.sources.writing.again.line" = "%@ signed in before Fediqo asked to write.";
-"account.sources.writing.again.choose" = "Choose what %@ may do";
-"account.sources.bookmarks.again" = "Fediqo now asks for bookmarks when you sign in to read and write. %@ signed in before it did: reading and writing there are exactly as they were, and only bookmarking waits. Choose below, without signing out first.";
-"account.sources.bookmarks.again.line" = "%@ signed in before Fediqo asked for bookmarks.";
-"account.sources.bookmarks.again.choose" = "Ask %@ to allow bookmarks";
 "account.bookmarks.failed" = "Bookmarks were not allowed. Everything else there works as it did.";
 "account.bookmarks.unavailable" = "That source has no bookmarks to allow. Everything else works as it did.";
 "account.bookmarks.refused" = "That source turned the bookmark away. Bookmarks are not offered there until you sign in to it again; everything else works as it did.";
@@ -812,11 +782,19 @@
 "account.signin.ask.read"        = "Sign in to read";
 "account.signin.ask.write"       = "Sign in to read and write";
 "account.signin.ask.line" = "Choose whether Fediqo only reads, or also writes and bookmarks as you.";
+"account.signout.ask.title" = "Sign out of %@?";
+"account.signout.ask.confirm" = "Sign out";
+"account.signout.ask.mastodon.line" = "The sign-in is handed back; Home, lists and writing stop here.";
+"account.signout.ask.mastodon.detail" = "This device forgets the sign-in and asks the server to end it. Your Home and your lists are no longer read, and you can no longer post, reply, boost, favourite or bookmark from Fediqo; the marks for what you favourited, boosted or bookmarked go from its posts. Everything already read stays, with the lists you chose, and you can sign in again at any time.";
+"account.signout.ask.forum.line" = "This device stops being signed in to this forum.";
+"account.signout.ask.forum.detail" = "The forum's session on this device goes. Boards that need a sign-in are not read until you sign in again. The pictures, emoji names and posts held from it stay, and so do the boards you picked.";
+"account.signout.ask.forum.password.line" = "You are signed out, and the password saved for it is deleted.";
+"account.signout.ask.forum.password.detail" = "The forum's session on this device goes, and the password saved for it is deleted from this device's Keychain. Only the password does not come back: you type it again next time. Boards that need a sign-in are not read until you sign in again. The pictures, emoji names and posts held from it stay, and so do the boards you picked.";
 
 "account.source.boards"          = "%1$d boards: %2$@";
 "account.source.unread"          = "Its description could not be read.";
 "account.source.remove.label"    = "Remove %@ and everything it left here";
-"account.source.signout.label"   = "Sign out of %@ and forget what it left here";
+"account.source.signout.label"   = "Sign out of %@. It asks first.";
 
 /* M1 tail — the row's controls, and changing a forum's boards. */
 "account.source.boards.change"    = "Change which boards you read on %@";
@@ -844,10 +822,6 @@
 
 /* Pressing a row. Decision 31: the row opens what that server says about itself. */
 "account.source.open"             = "What %@ says about itself";
-"account.source.more" = "More for this source";
-"account.source.more.said" = "More for this source. It has something to say";
-"account.source.state.trouble" = "needs a look";
-"account.source.state.waiting" = "waiting";
 "account.source.open.hint"        = "Opens what this server says about itself.";
 
 /* The detail: the same evidence, and the three sentences a preview says that are false here. */
@@ -964,6 +938,9 @@
 "allow.own.host" = "Host, such as img.example.com";
 "allow.own.add" = "Add";
 "allow.own.remove" = "Remove %@";
+"allow.own.remove.title" = "Remove %@ from your hosts?";
+"allow.own.remove.line" = "What it let through for its source is refused from now on.";
+"allow.own.remove.detail" = "The host leaves this list, and this device stops reaching it for that source. Nothing already held on this device goes, and you can add it again.";
 "allow.own.name" = "%@ (yours)";
 "allow.own.what" = "What %1$@'s pages pull in from this host, and what %1$@ points to on it";
 "allow.own.why" = "You added it.";
@@ -1002,11 +979,12 @@
 "prefs.tab.hosts" = "Your hosts";
 "prefs.tab.move" = "Move";
 "prefs.tab.gestures" = "Gestures";
+"gesture.title" = "Gestures";
 "gesture.head" = "What a finger does here. With a keyboard attached, the keys are listed instead.";
 "gesture.press" = "Press a post";
 "gesture.press.detail" = "Opens it, with what was said around it.";
 "gesture.hold" = "Press and hold a post";
-"gesture.hold.detail" = "Says who wrote it, exactly when, and who may read it, and offers what can be done to it.";
+"gesture.hold.detail" = "Says who wrote it, exactly when, and who may read it, and offers what can be done to it. The three dots under a post open the same list, and taking back a post of your own is in it.";
 "gesture.pull" = "Pull the list down";
 "gesture.pull.detail" = "Reads the timeline again, or the open post and its thread.";
 "gesture.stop" = "Press Stop";
@@ -1078,7 +1056,7 @@
 "usage.kept.figure" = "%1$@ · %2$@ of words";
 "usage.kept.posts" = "%d kept";
 "usage.kept.stop" = "Stop keeping";
-"usage.kept.stop.help" = "Stop keeping these posts. It asks first.";
+"usage.kept.stop.from" = "Stop keeping posts from %@";
 "usage.kept.went" = "%d posts are no longer kept.";
 "usage.kept.went.one" = "%d post is no longer kept.";
 "usage.kept.went.none" = "None was kept.";
@@ -1107,7 +1085,6 @@
 "prefs.limits.both" = "%1$@ and %2$@";
 "prefs.limits.brief.from" = "%1$@ · from %2$@";
 "prefs.limits.clear" = "Clear the account";
-"prefs.limits.clear.help" = "Asks first, then clears these lines. Nothing else goes.";
 "prefs.limits.clear.title" = "Clear the account?";
 "prefs.limits.clear.line" = "Only these lines go; every post and copy stays.";
 "prefs.limits.clear.detail" = "The lines say what the limits let go of, and nothing of that comes back by clearing them. Nothing held on this device changes, and no limit does.";
@@ -1199,7 +1176,6 @@
 "usage.span.between" = "%1$@ – %2$@";
 "usage.span.none" = "No posts on these days";
 "usage.span.now" = "Let these go";
-"usage.span.now.help" = "Asks first, then lets go of every post from these days and the source chosen.";
 "prefs.span.ask" = "Let go of %d posts?";
 "prefs.span.ask.one" = "Let go of %d post?";
 "prefs.span.ask.detail.counted" = "Every post from those days and that source goes from this device now, from every screen and every count. Nothing outside those days, and nothing from another source, is touched. Every source stays joined. The posts you keep are not in that count.";
@@ -1303,3 +1279,13 @@
 "nearby.mark.ask.help" = "The mark is made from the code you typed and that device's session: only the device showing this code shows this mark. If the other screen shows a different one, you have picked another device, or the code was mistyped — say so and nothing joins.";
 "nearby.mark.ask.same" = "The same";
 "nearby.mark.ask.different" = "Not the same";
+
+/* The one control rule: a mark is always drawn, live or dim, and a dim one says why. Read as "<name>. <reason>". */
+"mark.dim.never" = "This source has none";
+"mark.dim.notNow" = "Not right now";
+"mark.dim.askAgain" = "This sign-in must be asked again first";
+"mark.dim.said" = "%1$@. %2$@";
+"mark.dim.names" = ", ";
+"mark.more" = "More";
+"mark.more.one" = "More: %@";
+"mark.more.said" = "It has something to say";

@@ -176,7 +176,6 @@
 "timeline.rules.empty" = "還沒有規則：這條時間軸和「全部」一樣，什麼都顯示。";
 "timeline.rule.written" = "你的 %d 條規則，時間序。";
 "timeline.remove" = "移除時間軸";
-"timeline.remove.help" = "會先問過你。規則跟著移除，貼文仍留在「全部」。";
 "timeline.remove.title" = "移除「%@」？";
 "timeline.remove.detail" = "規則會一起移除，貼文還在「全部」裡。";
 "timeline.remove.confirm" = "移除";
@@ -203,7 +202,6 @@
 "rule.missing.help" = "這已經不在了，規則仍套用在這台裝置留著的貼文上。";
 "rule.missing.spoken" = "已不在：規則仍套用在這台裝置留著的貼文上。";
 "rule.action.remove" = "移除規則";
-"rule.remove.help" = "拿掉這條規則。按「完成」之前什麼都不會變。";
 "rule.add" = "加一條規則";
 "rule.add.help" = "先選種類，再選它指的是什麼。";
 "rule.add.confirm" = "加入規則";
@@ -359,21 +357,19 @@
 "item.act.withdraw" = "收回你寫的貼文";
 "item.act.answer" = "回應";
 "item.act.quote" = "引用";
+"item.act.quote.no" = "這裡還不能引用";
+"item.mark.why" = "%1$@：%2$@";
 "item.act.favourite" = "收藏";
 "item.act.bookmark" = "加書籤";
 "item.act.unbookmark" = "取消書籤";
-"item.act.ask" = "%@：要先再問一次這個登入";
 "item.bookmark.ask.title" = "請 %@ 允許書籤？";
 "item.bookmark.ask.line" = "它的頁面會再問一次你已允許的，並加上書籤。";
 "item.bookmark.ask.detail" = "你在 Fediqo 能加書籤之前就登入了 %@。它自己的頁面會打開，再問一次這個登入已經有的——讀取、發文、回覆、轉發、收藏——並加上書籤。不會先登出：關掉那一頁，一切都和原來一樣。";
 "item.bookmark.ask.confirm" = "詢問";
 "item.act.keep" = "留下";
 "item.act.unkeep" = "不再留下";
-"item.act.more" = "更多";
-"item.toast.quote" = "引用會開啟編輯器。這次工作階段還不行。";
 "item.toast.kept.on" = "已留在這台機器上。";
 "item.toast.kept.off" = "不再留下。";
-"item.toast.more" = "更多仍是 dummy。";
 "item.note.public.body" = "市場是一條走廊。走過去就好。";
 "item.note.you.work.body" = "十分鐘後 standup。規則還是：一條流。";
 "item.note.you.weekend.body" = "章魚第二稿。";
@@ -399,9 +395,6 @@
 "usage.drop.line" = "除非你另作選擇都會保留；磁碟上最舊的副本會先移除。";
 "usage.gone.line" = "只有來源表示已不在的貼文才會被標記。";
 "usage.source.back" = "回到來源";
-"usage.source.clear.help" = "會先詢問，再清除這台裝置存的這個來源的圖片、表情符號名稱、主文與登入資料。貼文會留下，來源也仍保持加入。";
-"usage.drop.copies.help" = "會先詢問，再捨棄記憶體與磁碟上所有的圖片副本。";
-"usage.gone.now.help" = "會先詢問，再立即放下所有來源已刪除的貼文與標記，不論等待多久。";
 
 "store.unreachable.title" = "這台裝置的 store 打不開";
 "store.unreachable.inUse.line" = "另一份 Fediqo 正在使用它。沒有任何改變。";
@@ -445,6 +438,7 @@
 "preferences.empty.title" = "偏好";
 "preferences.empty.detail" = "來源與外觀會放在這裡。";
 
+"prefs.look.head" = "語言與外觀";
 "prefs.language" = "語言";
 "prefs.language.system" = "系統";
 "prefs.language.english" = "English";
@@ -562,26 +556,8 @@
 "prefs.gone.never" = "永不";
 "prefs.gone.days" = "%d 天";
 "prefs.gone.keepwins" = "「保留貼文」只保留最近 %d 個月，比這更短，所以會先放下它們。";
-"prefs.gone.now" = "現在全部放下";
-"prefs.gone.ask" = "要放下 %d 則來源已刪除的貼文嗎？";
-"prefs.gone.ask.detail" = "它們會立即從這台裝置、從每個畫面上移除。其他內容都不受影響，每個來源仍保持加入。你留下的貼文會保留，也不算在這個數字裡。";
 "prefs.gone.confirm" = "放下";
-"prefs.gone.went" = "已放下 %d 則貼文。";
-"prefs.gone.went.none" = "沒有這樣的貼文。";
 "prefs.gone.footer" = "只有在這台裝置再次讀取那一則貼文、而來源表示它已不在時，才會標為已刪除。單純沒有送達的貼文不會被標記，也不會在這裡被放下。你自己收回的貼文會立即移除；若你已留下它，它會保留並帶著標記。時間軸上來源已不再有兩則貼文之間原本內容的地方，也會以同樣方式標記、同樣方式放下；旁邊的貼文仍會保留。";
-"prefs.gone.posts" = "%d 則";
-"prefs.gone.places" = "%d 處";
-"prefs.gone.ask.places" = "要放下 %d 處來源已不再有原本貼文的標記嗎？";
-"prefs.gone.ask.both" = "要放下 %1$@來源已刪除的貼文，以及 %2$@來源已不再有原本貼文的標記嗎？";
-"prefs.gone.ask.detail.places" = "貼文會立即從這台裝置、從每個畫面上移除。標記只會移除標記本身，旁邊的貼文仍會保留。其他內容都不受影響，每個來源仍保持加入。你留下的貼文會保留，也不算在這個數字裡。";
-"prefs.gone.ask.detail.placesonly" = "只會移除標記本身，旁邊的貼文仍會保留。其他內容都不受影響，每個來源仍保持加入。";
-"prefs.gone.ask.detail.counted" = "它們會立即從這台裝置、從每個畫面上移除。其他內容都不受影響，每個來源仍保持加入。你留下的貼文不算在這個數字裡。";
-"prefs.gone.ask.detail.places.counted" = "貼文會立即從這台裝置、從每個畫面上移除。標記只會移除標記本身，旁邊的貼文仍會保留。其他內容都不受影響，每個來源仍保持加入。你留下的貼文不算在這個數字裡。";
-"prefs.gone.ask.line" = "它們會立即從這台裝置移除。";
-"prefs.gone.ask.line.places" = "貼文會立即移除；標記處只移除標記本身。";
-"prefs.gone.ask.line.placesonly" = "只會移除標記本身，貼文仍會保留。";
-"prefs.gone.went.places" = "已放下 %d 處標記。";
-"prefs.gone.went.both" = "已放下 %1$@貼文和 %2$@標記。";
 "prefs.drop.copies" = "捨棄圖片副本";
 "prefs.drop.copies.title" = "捨棄這台裝置上所有的圖片副本？";
 "prefs.drop.copies.detail" = "所有來源存在記憶體與磁碟上的圖片都會移除。每則貼文都會留下並照常顯示；捲動時會從連結重新讀取圖片。";
@@ -636,6 +612,11 @@
 "forum.unforgotten" = "為這個論壇存起來的帳號與密碼刪不掉：%@。";
 "prefs.password.held" = "這台裝置存著密碼";
 "prefs.password.forget" = "忘掉密碼";
+"prefs.password.none" = "這個論壇沒有存密碼。";
+"prefs.password.forget.title" = "忘掉 %@ 的密碼？";
+"prefs.password.forget.line" = "它會從這台裝置刪掉；下次要再打一次。";
+"prefs.password.forget.detail" = "為這個論壇存的密碼會從這台裝置的鑰匙圈刪掉，而且不會回來。這次登入結束之前，你仍是登入狀態，這台裝置為它存的其他東西也都還在。";
+"prefs.password.forget.confirm" = "忘掉";
 
 /* Unit F4 — choosing boards. */
 "board.choose.title" = "%@ 的版塊";
@@ -765,20 +746,15 @@
 "account.sources.detail"         = "這個裝置讀的全部。按一列，看那個來源怎麼說它自己——它的名字、它的規模、它的版塊。移除其中一個，它的版塊和它的文章都會跟著走。";
 "account.sources.held"           = "每一個在這個裝置上還留著什麼，在「用量」裡。";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
-"account.sources.marks"          = "一列只帶它自己那個來源有的標記：登入、換版塊或列表、清除它留在這裡的東西、移除它。";
+"account.sources.marks"          = "每一列都帶同樣的標記。鑰匙是登入：登入之後是實心的，那個來源不提供登入的話是灰的。實心的時候按它，會先問過才登出。⋯ 裡面是其他的：這一列要說的話、換版塊或列表、清除它留在這裡的東西、移除它。來源沒有的那一項在裡面也是灰的，並且說為什麼。紅色的 ⋯ 是有話要說。";
 /* #69 — what may be done on a source, said on its row and explained once for the list. */
-"account.sources.writing"        = "每一列也會說那個來源上可以做什麼：讀、讀與寫，或者唯讀——那個協定在 Fediqo 裡根本沒有「寫」這件事。寫入被拒是說有一次寫入被擋了下來；再登入那個來源一次。";
+"account.sources.writing"        = "鑰匙前面的鎖和「更新權限」，是說那個登入要再問一次，才會提供它還能做的事：有一次寫入被擋了下來，或者它登入的時候 Fediqo 還沒問過寫入或書籤。在你回答之前，那個登入原本做得到的都和原來一樣。按它就會問；不會把誰登出。列太窄、放不下字的時候，只畫那把鎖。";
+"account.source.permission"      = "更新 %@ 的權限：要再問一次它的登入，才會提供它還能做的事";
+"account.source.permission.word" = "更新權限";
 "account.source.writing.never"   = "唯讀";
 "account.source.writing.read"    = "讀";
 "account.source.writing.write"   = "讀與寫";
 "account.source.writing.refused" = "寫入被拒";
-/* Said in the open, for as long as it is true, to a reader who agreed to something narrower. */
-"account.sources.writing.again"  = "Fediqo 現在登入時會連「寫」一起要求。%@ 是在那之前登入的：在那裡讀到的和以前完全一樣，Fediqo 什麼也不寫。不用先登出，在下面選就好。";
-"account.sources.writing.again.line" = "%@ 在 Fediqo 開始要求「寫」之前就登入了。";
-"account.sources.writing.again.choose" = "選擇 %@ 可以做什麼";
-"account.sources.bookmarks.again" = "現在你登入要讀寫時，Fediqo 也會要求書籤。%@ 在那之前就登入了：那裡的讀與寫都和原來一樣，只有書籤還等著。在下面選擇，不必先登出。";
-"account.sources.bookmarks.again.line" = "%@ 在 Fediqo 要求書籤之前就登入了。";
-"account.sources.bookmarks.again.choose" = "請 %@ 允許書籤";
 "account.bookmarks.failed" = "書籤沒有被允許。那裡其他的一切都和原來一樣。";
 "account.bookmarks.unavailable" = "那個來源沒有書籤可以允許。其他的一切都和原來一樣。";
 "account.bookmarks.refused" = "那個來源擋下了書籤。在你再登入它之前，那裡不提供書籤；其他的一切都和原來一樣。";
@@ -788,11 +764,19 @@
 "account.signin.ask.read"        = "登入來讀";
 "account.signin.ask.write"       = "登入來讀與寫";
 "account.signin.ask.line" = "選擇 Fediqo 只讀，或也以你的身分寫與加書籤。";
+"account.signout.ask.title" = "登出 %@？";
+"account.signout.ask.confirm" = "登出";
+"account.signout.ask.mastodon.line" = "登入會交還給這個來源；這台裝置不再讀首頁和列表，也不能再發文。";
+"account.signout.ask.mastodon.detail" = "這台裝置會忘掉這次登入，並請這個來源結束它。你的首頁和列表不會再讀，也不能再從 Fediqo 發文、回覆、轉發、收藏或加書籤；它的貼文上你收藏、轉發、加書籤的標記也會拿掉。已經讀進來的都還在，你選的列表也在，而且你隨時可以再登入。";
+"account.signout.ask.forum.line" = "這台裝置會登出這個論壇。";
+"account.signout.ask.forum.detail" = "這個論壇在這台裝置上的登入狀態會清掉。需要登入才能讀的版塊，要再登入才讀得到。這台裝置為它存的圖片、表情名稱和文章都還在，你選的版塊也在。";
+"account.signout.ask.forum.password.line" = "你會登出，為它存的密碼也會刪掉。";
+"account.signout.ask.forum.password.detail" = "這個論壇在這台裝置上的登入狀態會清掉，為它存的密碼也會從這台裝置的鑰匙圈刪掉。只有密碼不會回來：下次要再打一次。需要登入才能讀的版塊，要再登入才讀得到。這台裝置為它存的圖片、表情名稱和文章都還在，你選的版塊也在。";
 
 "account.source.boards"          = "%1$d 個版塊：%2$@";
 "account.source.unread"          = "讀不到它的自我介紹。";
 "account.source.remove.label"    = "移除 %@，連同它留在這裡的東西";
-"account.source.signout.label"   = "登出 %@，並忘掉它留在這裡的東西";
+"account.source.signout.label"   = "登出 %@。會先詢問。";
 
 /* M1 tail — the row's controls, and changing a forum's boards. */
 "account.source.boards.change"    = "換一批你在 %@ 上讀的版塊";
@@ -820,10 +804,6 @@
 
 /* Pressing a row. Decision 31: the row opens what that server says about itself. */
 "account.source.open"             = "%@ 怎麼介紹自己";
-"account.source.more" = "這個來源的其他動作";
-"account.source.more.said" = "這個來源的其他動作。它有話要說";
-"account.source.state.trouble" = "需要看一下";
-"account.source.state.waiting" = "等待中";
 "account.source.open.hint"        = "打開這個來源怎麼介紹自己。";
 
 /* The detail: the same evidence, and the three sentences a preview says that are false here. */
@@ -939,6 +919,9 @@
 "allow.own.host" = "主機，例如 img.example.com";
 "allow.own.add" = "加入";
 "allow.own.remove" = "移除 %@";
+"allow.own.remove.title" = "把 %@ 從你加入的主機移除？";
+"allow.own.remove.line" = "它為來源放行的東西，從現在起會被拒絕。";
+"allow.own.remove.detail" = "這台主機會從清單上拿掉，這台裝置不會再為那個來源連到它。已經存在這台裝置上的東西都不會動，之後也可以再加回來。";
 "allow.own.name" = "%@（你加的）";
 "allow.own.what" = "%1$@ 的頁面從這個主機載入的內容，以及 %1$@ 指向這裡的東西";
 "allow.own.why" = "你加入的。";
@@ -977,11 +960,12 @@
 "prefs.tab.hosts" = "自訂主機";
 "prefs.tab.move" = "搬移";
 "prefs.tab.gestures" = "手勢";
+"gesture.title" = "手勢";
 "gesture.head" = "手指在這裡能做的事。接上鍵盤時，改列出按鍵。";
 "gesture.press" = "按一則貼文";
 "gesture.press.detail" = "打開它，以及圍繞它說的話。";
 "gesture.hold" = "按住一則貼文";
-"gesture.hold.detail" = "說出是誰寫的、確切的時間、誰可以讀，並列出能對它做的事。";
+"gesture.hold.detail" = "說出是誰寫的、確切的時間、誰可以讀，並列出能對它做的事。貼文下方的三個點打開的是同一份清單，收回你自己的貼文就在裡面。";
 "gesture.pull" = "把列表往下拉";
 "gesture.pull.detail" = "重新讀這條時間軸，或打開的貼文和它的討論串。";
 "gesture.stop" = "按「停止」";
@@ -1053,7 +1037,7 @@
 "usage.kept.figure" = "%1$@ · 文字 %2$@";
 "usage.kept.posts" = "留下 %d 則";
 "usage.kept.stop" = "不再留下";
-"usage.kept.stop.help" = "不再留下這些貼文。會先問過。";
+"usage.kept.stop.from" = "不再留下 %@ 的貼文";
 "usage.kept.went" = "%d 則貼文不再留下。";
 "usage.kept.went.none" = "沒有留下的貼文。";
 "usage.kept.elsewhere" = "有 %d 則還透過另一個來源留著。";
@@ -1076,7 +1060,6 @@
 "prefs.limits.both" = "%1$@ 與 %2$@";
 "prefs.limits.brief.from" = "%1$@ · 來自 %2$@";
 "prefs.limits.clear" = "清除紀錄";
-"prefs.limits.clear.help" = "會先詢問，再清除這些紀錄。不會放下其他內容。";
 "prefs.limits.clear.title" = "清除紀錄？";
 "prefs.limits.clear.line" = "只清除這些紀錄；所有貼文與副本都保留。";
 "prefs.limits.clear.detail" = "這些紀錄說明各個上限放下了什麼，清除它們不會讓任何內容回來。這台裝置持有的內容與各個上限都不會改變。";
@@ -1166,7 +1149,6 @@
 "usage.span.between" = "%1$@ 到 %2$@";
 "usage.span.none" = "這幾天沒有貼文";
 "usage.span.now" = "放下這些貼文";
-"usage.span.now.help" = "會先詢問，再放下這幾天內、所選來源的每一則貼文。";
 "prefs.span.ask" = "要放下 %d 則貼文嗎？";
 "prefs.span.ask.detail.counted" = "這幾天發佈、來自所選來源的每一則貼文都會立即從這台裝置移除，不再出現在任何畫面或計數裡。這段日期以外的貼文、其他來源的貼文都不受影響，每個來源仍保持加入。你留下的貼文不算在這個數字裡。";
 "prefs.span.ask.line" = "發佈於 %1$@，來源：%2$@。放下後不會回來。";
@@ -1265,3 +1247,13 @@
 "nearby.mark.ask.help" = "這個標記由你輸入的代碼和那部裝置的工作階段算出：只有顯示這組代碼的裝置會顯示這個標記。如果另一部裝置畫面上的不一樣，就是選錯了裝置，或代碼打錯了——說不一樣，就什麼都不會連線。";
 "nearby.mark.ask.same" = "一樣";
 "nearby.mark.ask.different" = "不一樣";
+
+/* The one control rule: a mark is always drawn, live or dim, and a dim one says why. Read as "<name>. <reason>". */
+"mark.dim.never" = "這個來源沒有這一項";
+"mark.dim.notNow" = "現在不行";
+"mark.dim.askAgain" = "要先再問一次這個登入";
+"mark.dim.said" = "%1$@。%2$@";
+"mark.dim.names" = "、";
+"mark.more" = "更多";
+"mark.more.one" = "更多：%@";
+"mark.more.said" = "它有話要說";

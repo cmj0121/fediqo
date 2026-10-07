@@ -1,11 +1,20 @@
 import SwiftUI
 
-/// Cool chassis chrome. One phosphor, no candy sky, no system navy.
+/// Cool chassis chrome. One phosphor, no candy sky, no system colour for a ground.
 ///
-/// Two hues for the chassis and no more. `phosphor` says where the reader is and says
+/// Two hues for the marks and no more. `phosphor` says where the reader is and says
 /// nothing else; `filament` is the warm counter-hue a mark takes once it is on.
-/// Everything between them is the ink ramp and the machined greys — engraved, never
-/// printed.
+/// Everything between them is the ink ramp and the plates — engraved, never printed.
+///
+/// **The plates are one ground, and it is the octopus' ink**: a violet (OKLCH hue 285) so faint
+/// in light that it reads as paper and so deep in dark that it reads as night, with every plate
+/// the same hue a step lighter or darker than the page. It is neither of the two hues above —
+/// the lamp is teal and the on-mark amber, and amber sits across the wheel from violet, so a
+/// mark that is on is the strongest thing on the page. `ChassisGroundTests` holds each plate to
+/// the floors this file states: 4.5:1 for whatever is written on it, `placeFloor` for a glyph.
+/// The one wash it does not hold every ink on is `selectFill`: `ink`, `inkDim` and the lamp are
+/// written on a selected row and are held there, and `inkFaint` is not — it is 4.47:1 on that
+/// wash in light, so nothing is written in it there, and a row that is chosen writes a step up.
 ///
 /// The one family outside that rule is the audience ramp at the foot of this file, and
 /// `vis(_:_:)` says why it had to be one: how far a post travels is four facts, and four
@@ -14,11 +23,11 @@ enum ShellChrome {
     // MARK: The chassis
 
     static func page(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? rgb(0.063, 0.086, 0.102) : rgb(0.949, 0.961, 0.969)
+        scheme == .dark ? rgb(0.075, 0.075, 0.141) : rgb(0.937, 0.941, 1.000)
     }
 
     static func rail(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? rgb(0.047, 0.067, 0.078) : rgb(0.894, 0.922, 0.933)
+        scheme == .dark ? rgb(0.059, 0.055, 0.118) : rgb(0.902, 0.902, 0.961)
     }
 
     static func hairline(_ scheme: ColorScheme) -> Color {
@@ -26,29 +35,30 @@ enum ShellChrome {
             .opacity(scheme == .dark ? 0.28 : 0.22)
     }
 
-    /// A milled recess: pills, keycaps, the plate a glyph sits in. Neutral on purpose —
-    /// a container that borrows the lamp's hue makes every container look selected.
+    /// A milled recess: pills, keycaps, the plate a glyph sits in. The ground's own
+    /// hue and never the lamp's — a container that borrows the lamp's hue makes every container
+    /// look selected.
     static func well(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? rgb(0.133, 0.161, 0.180) : rgb(0.886, 0.906, 0.918)
+        scheme == .dark ? rgb(0.149, 0.149, 0.220) : rgb(0.894, 0.894, 0.953)
     }
 
     static func hoverFill(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? rgb(0.18, 0.28, 0.32).opacity(0.55)
-            : rgb(0.918, 0.949, 0.957)
+            ? rgb(0.255, 0.255, 0.333).opacity(0.55)
+            : rgb(0.922, 0.925, 0.980)
     }
 
     /// The lifted plate a focused row sits on.
     static func floatFill(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? rgb(0.11, 0.16, 0.19) : rgb(0.988, 0.992, 0.995)
+        scheme == .dark ? rgb(0.145, 0.145, 0.216) : rgb(0.973, 0.973, 1.000)
     }
 
     /// A plate standing a little proud of the pane: a quoted post inside the post that quotes it
-    /// (#214). Lighter than the page in dark and a shade darker and cooler in light, so it reads as
+    /// (#214). Lighter than the page in dark and a shade darker in light, so it reads as
     /// a surface of its own in both — and apart from `well`, the recess a cover's plate sits in,
     /// so a covered quote's hatch still reads on it.
     static func raised(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? rgb(0.098, 0.125, 0.145) : rgb(0.922, 0.937, 0.949)
+        scheme == .dark ? rgb(0.114, 0.114, 0.180) : rgb(0.914, 0.918, 0.973)
     }
 
     /// The soft shadow under `raised`. Low in light, where it is what lifts the plate; fainter
@@ -80,6 +90,20 @@ enum ShellChrome {
     /// some readers could not read at all. Hierarchy is worth less than legibility.
     static func inkFaint(_ scheme: ColorScheme) -> Color {
         ink(scheme).opacity(0.64)
+    }
+
+    /// A control that is drawn and cannot be pressed for what it stands for: the same glyph as
+    /// its live look, a step down the ramp. **A graphical object, so `placeFloor` is its line** —
+    /// the reader has to see which control is there to know what the row would offer — and not
+    /// the 4.5:1 of text; the count beside a dim mark is text and takes `inkFaint` instead.
+    ///
+    /// The opacity is set by the hardest ground a row's control is drawn on, which is the wash of
+    /// a selected row over the page in both schemes: 3.19:1 there in light and 3.17:1 in dark
+    /// (0.41 in dark measured 2.95 on it), and 3.2–3.4 light, 3.2–3.8 dark on the other plates.
+    /// Live quiet is `inkDim`, 6.7:1 at its lowest, so the two looks are a clear step apart.
+    /// `MarkContrastTests` measures every plate rather than trusting this.
+    static func markDim(_ scheme: ColorScheme) -> Color {
+        ink(scheme).opacity(scheme == .dark ? 0.44 : 0.52)
     }
 
     // MARK: The two hues
@@ -133,8 +157,8 @@ enum ShellChrome {
     /// What a waiting plate is drawn in — the ink ramp, not the milled recess.
     ///
     /// `well` is a container's colour and is meant to be quiet; a plate is standing in for a
-    /// thing, so it takes the ramp the thing's own ink is on. At full this is 4.8:1 on the page
-    /// in both schemes (in light, the same step as `inkFaint`), so that the bottom of
+    /// thing, so it takes the ramp the thing's own ink is on. At full this is 4.7:1 on the page
+    /// in light and 4.8:1 in dark (in light, the same step as `inkFaint`), so that the bottom of
     /// `ShellWaiting`'s pulse still clears `placeFloor` on the page, on a selected row, and under
     /// a pointer. Over the ground rather than opaque, so it is measured against whichever of
     /// those it is on instead of against one of them.

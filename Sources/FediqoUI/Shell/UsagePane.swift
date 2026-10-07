@@ -9,8 +9,12 @@ import SwiftUI
 /// decision 14's screen. Three caches hold a server's copy between them and none of them is
 /// visible from anywhere else in the app, so this is the only place a reader can see what has
 /// accumulated in their name, and the only place they can drop it. A source is one row — its
-/// posts as the figure, in the type scale's monospaced `reading` role so a column of servers lines
-/// up — and entering it opens everything held for it, where it is cleared (`UsageSourceDetail`).
+/// mark, its host and the way in — and entering it opens everything held for it, each figure a
+/// line, where it is cleared from the masthead's `…` (`UsageSourceDetail`).
+///
+/// **Nothing that takes something away is a button of its own on this page.** Clear, forgetting
+/// a password, stop keeping, letting go, clearing the limits' account and dropping the copies are
+/// each an item of a `…` on the row or section they act on, and each asks first.
 ///
 /// **The section says what it is, in its header, because the figures under it would otherwise
 /// lie.** What is held here outlives a relaunch: the posts are in the store on disk, pictures are
@@ -83,9 +87,6 @@ struct UsagePane: View {
     /// What each source's picture copies weigh on disk, by folded host. Optional for the reason
     /// `catalogues` is: until the first read lands, "nothing on disk" would be a guess.
     @State private var onDisk: [String: Int]?
-
-    /// The drop by cache has been pressed and not yet answered for.
-    @State private var droppingCopies = false
 
     /// A narrower window the reader picked and not yet confirmed: it would drop posts, so it asks
     /// first. A wider one, or forever, drops nothing and applies at once.
@@ -165,10 +166,6 @@ struct UsagePane: View {
         )) {
             await readCatalogues()
             await readDisk()
-        }
-        .shellConfirm($droppingCopies, question: ShellQuestion.dropCopies()) { _ in
-            session?.dropCopies()
-            Task { await readDisk() }
         }
         .shellConfirm($shortening, question: { ShellQuestion.shorten(months: $0) }) { months, _ in
             prefs.keepMonths = months
@@ -268,10 +265,10 @@ struct UsagePane: View {
             )
             // What changed posts said before (#286): held with them, so counted with them.
             if let earlier = Self.earlierFigure(holdings.earlier) {
-                stretch(reading(Text(L10n.t("prefs.held.earlier"))), figure: earlier)
+                stretch(ShellReadingLine(Text(L10n.t("prefs.held.earlier"))), figure: earlier)
             }
             ForEach(holdings.byPeriod.prefix(Self.stretchesShown), id: \.start) { bucket in
-                stretch(reading(Text(Self.stretchLabel(bucket.start, period: session.heldPeriod))),
+                stretch(ShellReadingLine(Text(Self.stretchLabel(bucket.start, period: session.heldPeriod))),
                         figure: Self.postsLine(bucket.posts))
             }
         } header: {
@@ -284,7 +281,7 @@ struct UsagePane: View {
         HStack {
             label
             Spacer()
-            reading(Text(figure))
+            ShellReadingLine(Text(figure))
         }
     }
 
@@ -313,10 +310,10 @@ struct UsagePane: View {
             if let line = Self.roomLine(
                 index: session.storeBytes, copies: onDisk.map { $0.values.reduce(0, +) }, room: prefs.roomBytes
             ) {
-                reading(Text(line))
+                ShellReadingLine(Text(line))
             }
             if let line = Self.roomKeptLine(heldByKept: session.roomHeldByKept) {
-                reading(Text(line))
+                ShellReadingLine(Text(line))
             }
         } header: {
             ShellSectionHead(title: "prefs.keep", line: "prefs.keep.line", help: "prefs.keep.help")
@@ -362,22 +359,35 @@ struct UsagePane: View {
         heldByKept ? L10n.t("prefs.room.kept", language: language) : nil
     }
 
-    /// Picture copies, all sources together, and the drop that takes them (#7, by cache).
+    /// Picture copies, all sources together, and — behind the line's `…` — the drop that takes
+    /// them (#7, by cache).
     private func copies(_ session: ShellSession) -> some View {
         let memory = Self.memory(session.sources.map(\.host), in: session)
         let disk = onDisk.map { $0.values.reduce(0, +) }
         return Section {
             HStack(spacing: ShellSpace.snug) {
-                reading(Text(Self.picturesLine(count: memory.count, bytes: memory.bytes, disk: disk)))
+                ShellReadingLine(Text(Self.picturesLine(count: memory.count, bytes: memory.bytes, disk: disk)))
                 Spacer(minLength: ShellSpace.snug)
-                ShellIconButton("trash", name: "prefs.drop.copies", help: "usage.drop.copies.help", tone: .alarm) {
-                    droppingCopies = true
-                }
+                ShellMoreButton(Self.copiesMore {
+                    session.dropCopies()
+                    Task { await readDisk() }
+                })
             }
             .padding(.vertical, ShellSpace.tight)
         } header: {
             ShellSectionHead(title: "prefs.held.total", line: "usage.drop.line", help: "prefs.drop.footer")
         }
+    }
+
+    /// The copies line's `…`: the one item that drops every picture copy — destructive, asking
+    /// `ShellQuestion.dropCopies` first.
+    static func copiesMore(language: DummyLanguage? = nil, drop: @escaping () -> Void) -> ShellMore {
+        ShellMore(items: [
+            .danger(
+                "trash", L10n.t("prefs.drop.copies", language: language),
+                asks: ShellQuestion.dropCopies(language: language), act: drop
+            ),
+        ])
     }
 
     /// The Keep picker's binding: a window that would drop posts waits on `shortening`'s question;
@@ -454,12 +464,6 @@ struct UsagePane: View {
 
     static func size(_ bytes: Int, language: DummyLanguage? = nil) -> String {
         Int64(bytes).formatted(.byteCount(style: .file).locale(L10n.locale(language)))
-    }
-
-    private func reading(_ text: Text) -> some View {
-        text
-            .shellFont(.reading)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 
     /// Reads each source's catalogue, **waiting first on a fetch already on its way for it**.

@@ -278,7 +278,7 @@ struct PageListSheet<Extra: View>: View {
             dismiss()
         } label: {
             ShellListRowFace(
-                title: entry.name, brief: entry.brief, figure: nil, selected: entry.current,
+                title: entry.name, brief: entry.brief, figure: nil, leads: false, selected: entry.current,
                 mark: Image(systemName: entry.symbol)
             )
             .background(

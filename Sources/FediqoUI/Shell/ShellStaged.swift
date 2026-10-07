@@ -167,18 +167,19 @@ struct StagedMenus: View {
                     let _ = acting.perform = { _ in }
                     let _ = acting.keep = {}
                     let _ = acting.ask = { _ in }
+                    let more = Self.more(item, acting, here: here)
                     VStack(alignment: .leading, spacing: ShellSpace.tight) {
                         Text(item.author).shellFont(.name, weight: .semibold)
-                        ForEach(ItemActs.head(for: item, here: here, refused: acting.acts.refused), id: \.self) { line in
+                        ForEach(more.head, id: \.self) { line in
                             Text(line).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
                         }
                         ShellRule()
-                        ForEach(ItemActs.menu(on: item, acting: acting)) { mark in
-                            Label(mark.label, systemImage: mark.symbol).shellFont(.body)
+                        ForEach(Array(more.ordinary.enumerated()), id: \.offset) { _, entry in
+                            Label(entry.title(), systemImage: entry.drawn).shellFont(.body)
                         }
-                        if item.outwardURL != nil {
-                            ShellRule()
-                            Label(item.outwardName, systemImage: "arrow.up.forward.app").shellFont(.body)
+                        if more.divides { ShellRule() }
+                        ForEach(Array(more.dangers.enumerated()), id: \.offset) { _, entry in
+                            Label(entry.title(), systemImage: entry.drawn).shellFont(.body)
                         }
                     }
                     .padding(ShellSpace.step)
@@ -189,5 +190,12 @@ struct StagedMenus: View {
             .padding(ShellSpace.pad)
         }
         .background(ShellChrome.page(colorScheme))
+    }
+
+    /// The row's menu as it would be raised, with a way out wherever the post has an address.
+    /// Nothing here is pressed, so the way out goes nowhere.
+    private static func more(_ item: DummyItem, _ acting: ItemActing, here: Set<String>?) -> ShellMore {
+        let leave: (() -> Void)? = item.outwardURL == nil ? nil : {}
+        return ItemActs.more(on: item, acting: acting, here: here, leave: leave)
     }
 }

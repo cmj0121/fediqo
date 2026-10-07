@@ -139,12 +139,9 @@ struct EarlierWordings: View {
                 // the words of one still covered, which are not in the tree at all.
                 .accessibilityElement(children: .combine)
                 if line.covered || line.pressedOpen {
-                    Button(L10n.t(line.covered ? "item.covered.show" : "item.covered.again")) {
+                    ShellLinkButton(L10n.t(line.covered ? "item.covered.show" : "item.covered.again")) {
                         shown.toggle(line.id)
                     }
-                    .shellFont(.meta)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(ShellChrome.selectInk(colorScheme))
                 }
             }
         }

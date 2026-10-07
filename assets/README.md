@@ -12,6 +12,7 @@ kept because the slots are where the timeline it came from is still legible.
 | `logo.svg` | 64 px and up | Creature at 1.48×, arms drawn thin enough to curl |
 | `logo-small.svg` | 32 px and below | Every metal edge on the 64-unit grid; creature at 1.30× with fat arms |
 | `mascot.svg` | Anywhere it is the subject | The same creature at 0.88 on a rounded plate, arms kept inside |
+| `octopus.svg` | The launch, as a template | The mascot's creature alone: no plate, no rim, one ink |
 | `kind-mastodon.svg` | 64 px and up, as a template | Squircle, trunk, and m — after the official mark, one ink |
 | `kind-mastodon-small.svg` | 32 px and below, as a template | The same silhouette on the 64-unit grid |
 | `kind-discuz.svg` | 64 px and up, as a template | The letters D and !, one ink |
@@ -43,6 +44,10 @@ rather than by reasoning:
 `mascot.svg` is the creature without the icon's job: an icon's arms are meant to bleed off
 the edge, and a mascot's are meant to be seen. It is artwork in its own right and is edited
 here rather than derived from `logo.svg`.
+
+`octopus.svg` is that creature with nothing behind it, for the launch. It is a template like
+the `kind-*` drawings, painted with the page's own ink, because a fixed body and a fixed rim
+each vanish on one of the two grounds.
 
 The `kind-*` drawings are the protocol glyphs a source row draws. Always — not only where a
 server published no picture of its own, and for two reasons. A server's own picture is a

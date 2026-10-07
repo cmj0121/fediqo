@@ -121,7 +121,7 @@ struct AnswerSheet: View {
         }
         .frame(maxHeight: 120)
         .padding(ShellSpace.snug)
-        .background(ShellChrome.floatFill(colorScheme), in: RoundedRectangle(cornerRadius: 6))
+        .background(ShellChrome.floatFill(colorScheme), in: RoundedRectangle(cornerRadius: ShellRadius.field))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(Self.answering(item)))
     }

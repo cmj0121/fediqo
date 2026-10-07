@@ -28,11 +28,11 @@ public struct FediqoRootView: View {
     @State private var composing = false
     @State private var showingShortcuts = false
     @State private var shortcutTab: DummyShortcutGroup = .move
-    /// The launch overlay. Starts true; `LandingView` clears it after the flips, and
+    /// The launch overlay. Starts true; `LandingView` clears it after the jet, and
     /// `playsLanding` is false from the first frame when reduce motion is on.
     @State private var showingLanding = true
     /// Bumped so a press of `r` remounts the overlay from rest rather than showing a
-    /// view that has already flipped.
+    /// view that has already jetted.
     @State private var landingTick = 0
     #if os(macOS)
     /// Owns the sign-in window so that it outlives the body that opened it — a window held only
@@ -197,7 +197,7 @@ public struct FediqoRootView: View {
     private var availability: ShellAvailability { session.availability }
 
     /// Reduce motion never mounts the overlay, so a reader who asked for stillness does not
-    /// get one frame of a flip and then a skip.
+    /// get one frame of the jet and then a skip.
     private var playsLanding: Bool { showingLanding && !reduceMotion }
 
     /// Whether the join sheet is up, derived from the stage rather than stored beside it.
@@ -389,10 +389,9 @@ public struct FediqoRootView: View {
             .sheet(item: $session.editing) { draft in
                 TimelineEditor(session: session, draft: draft)
             }
-            // Remove's question, Clear's, and the notice that a server ended a sign-in: each a
-            // modifier of its own rather than spelled here. See `HostQuestion` for why.
-            .modifier(HostQuestion.remove(session, prefs: prefs))
-            .modifier(HostQuestion.clear(session))
+            // The notice that a server ended a sign-in: a modifier of its own rather than spelled
+            // here. See `WithdrawQuestion` for why. Remove's question and Clear's are not on the
+            // root: each is asked by the `…` it is chosen from (`ShellMoreAsks`).
             .modifier(EndedSignInNotice(session: session))
             .modifier(ActivitySheet(session: session))
             .modifier(StoreNewerNotice(shown: $storeIsNewer, seen: storeNoticeSeen))
@@ -488,27 +487,6 @@ public struct FediqoRootView: View {
             .id(prefs.language)
     }
 
-    /// How many boards Remove would take from `host` — what its question's line names where there
-    /// are any, since they are the one part of Remove that does not come back.
-    ///
-    /// **Two whole sentences and two keys, not one sentence with a clause appended.** "the 3 boards
-    /// you picked" must never appear over a microblog, and a second half joined on with `+` is a
-    /// half no translator can put first. `ShellSession.clear` argues why the boards are the part
-    /// worth naming: pictures come back by themselves, a pick of eight boards out of forty does
-    /// not. See `ShellQuestion.remove`.
-    static func boards(of host: String, in sources: [Source]) -> Int {
-        sources.first { $0.host == host }?.boards.count ?? 0
-    }
-
-    /// The question before `host` is removed, with what this session holds for it read here: the
-    /// boards it takes, and how many of its posts the person keeps, which stay (#294).
-    static func removeQuestion(_ host: String, in session: ShellSession, postsStay: Bool) -> ShellConfirmation {
-        ShellQuestion.remove(
-            host: host, boards: boards(of: host, in: session.sources), postsStay: postsStay,
-            kept: session.holdings.kept(host: host).posts
-        )
-    }
-
     /// A forum's own page closed, on the window a Mac opens it in or the sheet elsewhere — **one
     /// body for both**, because this branch once lost the retry and the host when the page moved
     /// out of the sheet: the window was given the body the sheet had at the time, and the sheet
@@ -550,7 +528,7 @@ public struct FediqoRootView: View {
             return false
         }
         // The overlay is not a layer a press can leave, so dummy keys are swallowed until
-        // the flips finish rather than driving the shell underneath. Unmapped chords —
+        // the jet finishes rather than driving the shell underneath. Unmapped chords —
         // ⌘Q, ⌘C — have already returned false, so a quit still quits.
         if playsLanding { return true }
         // The editor is a sheet and owns its keys; nothing under it moves. Nor under the record
@@ -1713,12 +1691,8 @@ public struct FediqoRootView: View {
                     composing = true
                 }
             )
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(width: ShellSpace.hair)
+            ShellRule(.vertical)
             page
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(ShellChrome.page(colorScheme))
         }
         .background(ShellChrome.page(colorScheme))
     }
@@ -1781,6 +1755,8 @@ public struct FediqoRootView: View {
         .overlay(alignment: .bottomTrailing) {
             if availability.canCompose { composeButton }
         }
+        // Behind the folded places' own bar, which is no page's.
+        .background(ShellChrome.page(colorScheme))
     }
 
     /// Tabs instead of a rail, and only for the places it can enter. Drawn on a Mac as well
@@ -1878,9 +1854,15 @@ public struct FediqoRootView: View {
     /// **Per page rather than once at the root**, because on a compact `TabView` every tab stays
     /// alive and a value set above them all would be true in the tab nobody can see. See
     /// `EnvironmentValues.shellPlaceIsActive`.
+    ///
+    /// **Each page brings the ground with it**, in the narrow arrangement as in the wide one: a
+    /// tab is drawn on the system's own background unless its page covers it, and the chassis
+    /// has one ground whatever is drawn around the page.
     @ViewBuilder
     private func placedPage(_ item: ShellPlace) -> some View {
         pageFor(item)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(ShellChrome.page(colorScheme))
             .environment(\.shellPlaceIsActive, item == place)
     }
 }
@@ -1918,95 +1900,7 @@ private struct WithdrawQuestion: ViewModifier {
     }
 }
 
-/// Remove's question and Clear's (decision 29), each as a modifier of its own — one shape for
-/// the two, since they differ only in what they ask about, how heavy the confirm is, what it does
-/// and what the detail says.
-///
-/// **Out of `FediqoRootView`'s chain, and the presenters below with it.** Each built a `Binding`
-/// and a `presenting:` presenter with closures inside one very long modifier chain, and Xcode
-/// 26.6's Swift gave up type-checking that chain on the runner — while the compiler this is
-/// written with solved it in three seconds without a word. A local timing predicts nothing about
-/// another compiler's solver, so the chain is kept to one plain `.modifier(…)` per presenter
-/// instead, which is a cost no compiler has to solve against the rest of it. See
-/// `WithdrawQuestion`.
-///
-/// **On the root beside the other presenters**, and for the same documented reason: one
-/// presenter driven by one piece of session state survives a second call site.
-private struct HostQuestion: ViewModifier {
-    let session: ShellSession
-    /// The host being asked about, where one is; the question is presented from it.
-    let asking: ReferenceWritableKeyPath<ShellSession, String?>
-    let question: @MainActor (String) -> ShellConfirmation
-    let act: @MainActor (String) async -> Void
-
-    /// The host, and the question as it read when asked — so a sheet sliding away after the act
-    /// has begun still says what was asked, not what the act has since changed.
-    struct Asked {
-        let host: String
-        let question: ShellConfirmation
-    }
-
-    /// **The Remove question.** Remove is asked from a source row today and will be asked from
-    /// the source page's own header the day that grows one.
-    ///
-    /// It is asked at all because Remove takes the board picks the reader made, and
-    /// `ShellSession.clear`'s comment is the argument: pictures come back by themselves, a pick
-    /// of eight boards out of forty does not.
-    ///
-    /// **What happens to its posts is `prefs`' standing choice** (#250), read when the question
-    /// is asked and again when it is answered, so the line and the act agree: the reader is not
-    /// asked twice, and the one line says which of the two it will be.
-    static func remove(_ session: ShellSession, prefs: DummyPrefs) -> HostQuestion {
-        HostQuestion(
-            session: session, asking: \.removing,
-            question: { FediqoRootView.removeQuestion($0, in: session, postsStay: prefs.removedPostsStay) },
-            act: { await session.remove(host: $0, keepingPosts: prefs.removedPostsStay) }
-        )
-    }
-
-    /// **The Clear question, beside Remove's and driven the same way.** One presenter, one piece
-    /// of session state, two entrances: a source row and `UsagePane`'s row, which press the same
-    /// key for the same call and must therefore ask the same question.
-    ///
-    /// **It exists because Clear is not reversible, whatever the row looks like.** It drops the
-    /// pictures, the emoji names and the first posts, all of which come back — and it calls
-    /// `ForumSessions.forget(host:)`, which deletes the saved Keychain password and signs the
-    /// reader out of the forum. The Account row says neither of those before the press, so this
-    /// is the one place they are said: the line names what does not come back, the (?) the rest.
-    ///
-    /// **The detail is the one seam a test cannot reach** (risk 12). `clearDetailKey` and
-    /// `ShellQuestion.clear` are pure and driven across every combination; what nothing verifies
-    /// is that *this* closure asks with `hasPassword` and `reachedSignIn` for the host being
-    /// confirmed, because it runs only inside a presented sheet. Named here rather than left to
-    /// be discovered.
-    static func clear(_ session: ShellSession) -> HostQuestion {
-        HostQuestion(
-            session: session, asking: \.clearing,
-            question: { host in
-                ShellQuestion.clear(host: host, detailKey: SourceRow.clearDetailKey(
-                    hasPassword: session.forums.hasPassword(host: host),
-                    reachedSignIn: session.isSignedIn(host: host)
-                ))
-            },
-            act: { await session.clear(host: $0) }
-        )
-    }
-
-    func body(content: Content) -> some View {
-        content.shellConfirm(asked, question: \.question) { asked, _ in
-            Task { await act(asked.host) }
-        }
-    }
-
-    private var asked: Binding<Asked?> {
-        Binding(
-            get: { session[keyPath: asking].map { Asked(host: $0, question: question($0)) } },
-            set: { if $0 == nil { session[keyPath: asking] = nil } }
-        )
-    }
-}
-
-/// A server ended a sign-in on its own side, said — out of the chain for `HostQuestion`'s reason.
+/// A server ended a sign-in on its own side, said — out of the chain for `WithdrawQuestion`'s reason.
 /// The row already reads signed out, and this says why rather than leaving a timeline to go quiet.
 private struct EndedSignInNotice: ViewModifier {
     let session: ShellSession

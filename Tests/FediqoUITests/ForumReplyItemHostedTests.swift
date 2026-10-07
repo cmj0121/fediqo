@@ -120,7 +120,7 @@ struct ForumReplyItemHostedTests {
                 root: root, catalogues: session.emoji, posts: session.posts, conversations: session.conversations,
                 selectedID: $selected, decks: $decks, playback: playback,
                 onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { _ in },
-                onOpenPerson: { _ in }, jumpToTop: 0, onToast: { _ in }, onBack: {}, probe: probe
+                onOpenPerson: { _ in }, jumpToTop: 0, onBack: {}, probe: probe
             )
         }
     }

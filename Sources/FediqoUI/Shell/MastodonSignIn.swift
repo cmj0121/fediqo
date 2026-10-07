@@ -21,6 +21,9 @@ public final class MastodonSessions {
     /// Bumped per host by every sign-out, so a sign-in still on the server's page when the source
     /// is cleared or removed does not save the token it comes back with.
     @ObservationIgnored private var signOuts: [String: Int] = [:]
+    /// Told the folded host each time a server ends a sign-in on its own side, so whoever holds
+    /// a question about that sign-in can put it down.
+    @ObservationIgnored var onEnded: ((String) -> Void)?
 
     /// What each signed-in host's sign-in bought (#69) — **and, by its keys, who is signed in at
     /// all.**
@@ -401,6 +404,7 @@ public final class MastodonSessions {
         let host = raw.lowercased()
         refresh()
         if !ended.contains(host) { ended.append(host) }
+        onEnded?(host)
     }
 
     /// At launch: asks each server whether it still honours its token. Only a 401 signs out; a

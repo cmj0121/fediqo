@@ -45,12 +45,12 @@ enum PreviewOrigin: Equatable {
     /// when they added it, and this costs **no request**. `ShellSession.openSource(host:)` is the
     /// entrance.
     ///
-    /// **It carries the source, and that is not the copy `removing` refuses to hold.** The whole
+    /// **It carries the source, and that is not the copy a question refuses to hold.** The whole
     /// board list is the one thing this screen has that the row does not — the row clips at two
     /// lines — and it is not in `SourcePreview`, whose `boards` is the forum's *index*. A copy
     /// held here cannot go stale while it is held: this is a stage, and `rowActsLive` refuses
     /// every control on every row while a stage is up, so the reader cannot change their boards
-    /// underneath it. `removing` is a dialog, which leaves the rows live, and that is the
+    /// underneath it. A question is a dialog, which leaves the rows live, and that is the
     /// difference.
     case joined(Source)
 
@@ -923,8 +923,8 @@ struct JoinSheet: View {
                 // **Folded once for the list, not once per row.** `session.isAdded` lowercases and
                 // scans `sources` linearly, so asked inside the `ForEach` it is O(rows x sources)
                 // on every redraw — and this list is the directory whole now that the sheet has no
-                // filter, where it used to be a narrowed subset. `AccountPane`'s own comment about
-                // hoisting `rows` and `widest` out of its `ForEach` is the precedent.
+                // filter, where it used to be a narrowed subset. `AccountPane` reads
+                // `session.rows` once above its own `ForEach` for the same reason.
                 let added = Set(session.sources.map(\.host))
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -970,7 +970,7 @@ struct JoinSheet: View {
         // **Built once and handed to both readers.** `rowFoot` draws these three and the spoken
         // value says the same three, and each one costs a locale lookup, two bundle lookups and
         // two compact-number formats — so asking twice doubled that for every visible row on every
-        // redraw. `AccountPane`'s `let widest = widest` hoist is the same move for the same reason.
+        // redraw.
         let readings = readings(server)
         return Button {
             Task { await session.pick(server) }

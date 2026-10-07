@@ -107,7 +107,7 @@ struct ForumRefusalView: View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
             HStack(spacing: ShellSpace.snug) {
                 SecureField(L10n.t("refusal.password.field"), text: $password)
-                    .textFieldStyle(.roundedBorder)
+                    .shellField(.alone)
                     .autocorrectionDisabled()
                     .notOfferedToKeychain()
                     .frame(maxWidth: 280)
@@ -146,12 +146,7 @@ struct ForumRefusalView: View {
     }
 
     private func button(_ title: String, _ symbol: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol)
-                .shellFont(.meta, weight: .medium)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(ShellChrome.selectInk(colorScheme))
+        ShellLinkButton(title, symbol: symbol, action: action)
     }
 
     // MARK: - The rules, without a screen

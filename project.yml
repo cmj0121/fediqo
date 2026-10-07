@@ -161,9 +161,17 @@ targets:
         FediqoSourceDirty: $(FEDIQO_SOURCE_DIRTY)
         # Without this, iOS runs the app in the compatibility mode it keeps for apps written
         # before the modern screen sizes: letterboxed, scaled, with the tab bar floating
-        # somewhere above the bottom of the glass. An empty dictionary is the whole of what
-        # a SwiftUI app needs to say it was written for the screen it is on.
-        UILaunchScreen: {}
+        # somewhere above the bottom of the glass. The dictionary being there is the whole of
+        # what a SwiftUI app needs to say it was written for the screen it is on.
+        #
+        # The one key in it is the ground the system draws before the app has drawn anything:
+        # `Ground` in Apps/Shared/Assets.xcassets, the chassis page in light and in dark, so a
+        # launch does not open on the system's white and then turn. `ChassisGroundTests` holds
+        # the catalogue's two values to `ShellChrome.page`. The launch ground follows the
+        # system's appearance and not the theme chosen in the app, so a reader who set the app
+        # dark on a light system still opens light and then turns.
+        UILaunchScreen:
+          UIColorName: Ground
         # All four, because this app is on the iPad as well as the phone and the iPad will not
         # take a submission that cannot be a third of a screen. An app that reads a timeline
         # has no reason to refuse any of them anyway.

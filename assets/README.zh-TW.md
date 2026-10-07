@@ -11,6 +11,7 @@
 | `logo.svg`                  | 64 px 以上                  | 章魚 1.48×，觸手畫得夠細，捲得起來                               |
 | `logo-small.svg`            | 32 px 以下                  | 每一道金屬邊界都在 64 單位格線上；章魚 1.30×、粗觸手             |
 | `mascot.svg`                | 章魚本身就是主體時          | 同一隻章魚 0.88×，放在圓角底板上，觸手收在裡面                   |
+| `octopus.svg`               | 啟動畫面，當 template       | mascot 的那隻章魚本身：沒有底板、沒有邊光，單一 ink              |
 | `kind-mastodon.svg`         | 64 px 以上，當 template     | 圓角方塊、象鼻、m —— 對官方 mark 的剪影，單一 ink               |
 | `kind-mastodon-small.svg`   | 32 px 以下，當 template     | 同一剪影，64 單位格線                                            |
 | `kind-discuz.svg`           | 64 px 以上，當 template     | 字母 D 與 !，單一 ink                                            |
@@ -36,6 +37,9 @@
 
 `mascot.svg` 是卸下了 icon 職責的那隻章魚：icon 的觸手本來就該溢出邊緣，吉祥物的觸手則是
 要被看見的。它本身就是圖稿，直接在這裡編輯，不從 `logo.svg` 推導出來。
+
+`octopus.svg` 是同一隻章魚、背後什麼都沒有，給啟動畫面用。它跟 `kind-*` 一樣是 template，
+用頁面自己的 ink 上色，因為固定顏色的身體和固定顏色的邊光，各自會在兩種底色的其中一種上消失。
 
 `kind-*` 是 source row 畫的協定 glyph。一律畫它，不是只在伺服器沒交出自己的圖片時才畫，
 理由有兩個。伺服器自己的圖是橫幅：Mastodon 的是寬幅主視覺，Discourse 的通常是橫向字標，

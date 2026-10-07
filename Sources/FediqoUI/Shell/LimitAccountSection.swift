@@ -10,15 +10,15 @@ import SwiftUI
 /// pickers that set the limits and the figures they changed. The lines hold only what the row
 /// shows: never a post, never where it was read.
 ///
-/// Clear is a plain press, asked first (`ShellQuestion.clearAccount`): the lines go and nothing
-/// else does — there is nothing left of what they describe for a clear to reach.
+/// Clear is behind the list's `…`, a destructive item that asks first
+/// (`ShellQuestion.clearAccount`): the lines go and nothing else does — there is nothing left of
+/// what they describe for a clear to reach. Dim while there is no line to clear, and the menu's
+/// head then says that no limit has acted — the reason in its own words.
 struct LimitAccountSection: View {
     let session: ShellSession
 
-    @Environment(\.colorScheme) private var colorScheme
     @State private var lit: UUID?
     @State private var opened: LimitAct?
-    @State private var clearing = false
 
     var body: some View {
         Section {
@@ -29,9 +29,6 @@ struct LimitAccountSection: View {
             }
         } header: {
             ShellSectionHead(title: "prefs.limits", line: "prefs.limits.line", help: "prefs.limits.help")
-        }
-        .shellConfirm($clearing, question: ShellQuestion.clearAccount()) { _ in
-            Task { await session.clearLimitAccount() }
         }
     }
 
@@ -49,18 +46,26 @@ struct LimitAccountSection: View {
         }
         HStack(spacing: ShellSpace.snug) {
             if listed.isEmpty {
-                Text(L10n.t("prefs.limits.none"))
-                    .shellFont(.reading)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                ShellReadingLine(L10n.t("prefs.limits.none"))
             }
             Spacer(minLength: ShellSpace.snug)
-            if !listed.isEmpty {
-                ShellIconButton("eraser", name: "prefs.limits.clear", help: "prefs.limits.clear.help") {
-                    clearing = true
-                }
-            }
+            ShellMoreButton(Self.more(lines: listed.count) {
+                Task { await session.clearLimitAccount() }
+            })
         }
         .padding(.vertical, ShellSpace.tight)
+    }
+
+    /// The list's `…`: the one item that clears the account, under the eraser every clear wears.
+    /// Destructive, asking `ShellQuestion.clearAccount` first; dim where there is no line, under
+    /// a head that says there is nothing to clear rather than "not right now".
+    static func more(lines: Int, language: DummyLanguage? = nil, clear: @escaping () -> Void) -> ShellMore {
+        let item = ShellMoreItem.danger(
+            "eraser", L10n.t("prefs.limits.clear", language: language),
+            look: lines > 0 ? .live : .dim(.notNow),
+            asks: ShellQuestion.clearAccount(language: language), act: clear
+        )
+        return .ending(in: item, dimFor: lines == 0 ? L10n.t("prefs.limits.none", language: language) : nil)
     }
 
     /// The limit's glyph: the pickers' own, so a line is read back to the picker that set it.

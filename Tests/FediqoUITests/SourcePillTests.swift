@@ -96,8 +96,8 @@ struct SourcePillTests {
     /// construction — which is the honest reading of that acceptance line. What the scheme does
     /// decide is the plate the room is measured against, and there is one in both.
     ///
-    /// The plate is a milled recess and a quiet one on purpose — `ShellChrome.well` measures about
-    /// 1.2:1 against the page in either scheme, which is a wash the eye reads as a container and
+    /// The plate is a milled recess and a quiet one on purpose — `ShellChrome.well` measures
+    /// 1.11:1 against the page in light and 1.23:1 in dark, which is a wash the eye reads as a container and
     /// not a boundary it has to find. That is the token's own choice and not this issue's; what is
     /// pinned here is that the pill has a plate at all, in both schemes, for the room to be inside.
     @Test("There is a plate for the room to be inside, in light and in dark")

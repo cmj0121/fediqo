@@ -92,7 +92,8 @@ struct DummyItemRow: View {
     /// **Optional, and nothing is the honest answer twice over.** A row that names nobody has no
     /// person to open, and a list that is already this person's own page has nowhere to go: both
     /// pass nothing, and what the reader gets is a face that is a picture rather than a control
-    /// they can press and be refused. Decision 4's rule — absent, not disabled.
+    /// they can press and be refused. A face is not one of the row's marks, which are always
+    /// drawn and grey where they do nothing: it is a picture until there is somebody to open.
     var onOpenPerson: ((DummyPerson) -> Void)?
     /// Whether the reader has lifted the quoted post's cover — its own row's, so the quote and the
     /// post it opens are lifted together.
@@ -109,13 +110,11 @@ struct DummyItemRow: View {
     var onTurn: () -> Void = {}
     /// That the playing rectangle has left the screen, which the owner answers by stopping.
     var onEnded: () -> Void = {}
-    var onToast: (String) -> Void
 
     /// Where a press on the quote goes (#214). See `ShellQuotes`.
     @Environment(\.shellQuotes) private var quotes
     /// The hosts still on this device (#250); nothing — a preview, a test — means every host is.
     @Environment(\.shellSourcesHere) private var sourcesHere
-    @State private var hovering = false
     @State private var resolved = Written()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
@@ -250,10 +249,9 @@ struct DummyItemRow: View {
             .animation(.easeInOut(duration: 0.18), value: selected)
             .contentShape(Rectangle())
             .onTapGesture { onSelect?() }
-            .onHover { hovering = $0 }
-            // Pressed and held — or the pointer's other button — the row offers what its marks
-            // do, under what its parts tell a resting pointer (#306).
-            .modifier(RowMenu(item: item, acting: acting, here: sourcesHere, press: press))
+            // Pressed and held — or the pointer's other button — the row offers what its `…`
+            // does, under what its parts tell a resting pointer (#306).
+            .modifier(RowMenu(item: item, acting: acting, here: sourcesHere))
             .accessibilityElement(children: .contain)
             .task(id: Asked(item: item, settled: catalogueSettled)) { await resolve() }
     }
@@ -352,9 +350,6 @@ struct DummyItemRow: View {
         }
     }
 
-    /// The row being read. Its marks come up one notch; nothing appears or disappears.
-    private var reading: Bool { selected || hovering }
-
     private func content(_ written: Written) -> some View {
         // Asked once a pass (#214): where the quote leads is a look through what is held, and
         // three places on the row draw its answer.
@@ -377,12 +372,12 @@ struct DummyItemRow: View {
                     personAction
                     quoteAction(openQuote)
                 }
-                .modifier(Probed(band: .header, probe: probe))
+                .modifier(Probed(\.frames, .header, probe: probe))
             mainBox(written)
-                .modifier(Probed(band: .content, probe: probe))
+                .modifier(Probed(\.frames, .content, probe: probe))
             quoteBand(openQuote)
             actions
-                .modifier(Probed(band: .marks, probe: probe))
+                .modifier(Probed(\.frames, .marks, probe: probe))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .coordinateSpace(.named(RowBandProbe.space))
@@ -416,7 +411,7 @@ struct DummyItemRow: View {
                     // Just under the time's: what the post is — an answer, a quote — gives way
                     // before who reblogged does, and who reblogged before when.
                     .layoutPriority(0.5)
-                    .modifier(ProbedMeta(part: .reblogger, probe: probe))
+                    .modifier(Probed(\.meta, .reblogger, probe: probe))
             }
             if item.answering != .nothing { answered }
             if !item.isReblog, let line = Self.reblogLine(item) { boosted(line) }
@@ -431,13 +426,13 @@ struct DummyItemRow: View {
                 rebloggedAgo(moment)
                     .fixedSize(horizontal: true, vertical: false)
                     .layoutPriority(1)
-                    .modifier(ProbedMeta(part: .reblogAge, probe: probe))
+                    .modifier(Probed(\.meta, .reblogAge, probe: probe))
             }
         }
         .shellFont(.mark)
         .foregroundStyle(ShellChrome.inkFaint(colorScheme))
         .lineLimit(1)
-        .modifier(Probed(band: .decorator, probe: probe))
+        .modifier(Probed(\.frames, .decorator, probe: probe))
     }
 
     /// Whether this post says what happened to it before it got here.
@@ -583,7 +578,7 @@ struct DummyItemRow: View {
         return HStack(alignment: .center, spacing: gap) {
             pressingPerson(avatar)
             pressingPerson(names(written, fit: fit))
-                .modifier(ProbedMeta(part: .names, probe: probe))
+                .modifier(Probed(\.meta, .names, probe: probe))
             Spacer(minLength: gap)
             meta(fit, gap: gap)
         }
@@ -639,7 +634,7 @@ struct DummyItemRow: View {
         EmojiText(item.author, emojis: written.name, host: host, role: .name)
             .foregroundStyle(ShellChrome.ink(colorScheme))
             .lineLimit(1)
-            .modifier(ProbedMeta(part: .name, probe: probe))
+            .modifier(Probed(\.meta, .name, probe: probe))
             .layoutPriority(1)
     }
 
@@ -650,7 +645,7 @@ struct DummyItemRow: View {
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .modifier(ProbedMeta(part: .handle, probe: probe))
+                .modifier(Probed(\.meta, .handle, probe: probe))
                 .layoutPriority(0)
         }
     }
@@ -667,18 +662,18 @@ struct DummyItemRow: View {
             sourcePill(fit)
                 .fixedSize(horizontal: fit != nil, vertical: false)
                 .layoutPriority(0)
-                .modifier(ProbedMeta(part: .source, probe: probe))
+                .modifier(Probed(\.meta, .source, probe: probe))
             leftMark(terse: terse)
-                .modifier(ProbedMeta(part: .left, probe: probe))
+                .modifier(Probed(\.meta, .left, probe: probe))
             goneMark(terse: terse)
-                .modifier(ProbedMeta(part: .gone, probe: probe))
+                .modifier(Probed(\.meta, .gone, probe: probe))
             changedMark(terse: terse)
-                .modifier(ProbedMeta(part: .changed, probe: probe))
+                .modifier(Probed(\.meta, .changed, probe: probe))
             visibility
             postedAgo(short: fit?.shortAge == true)
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(1)
-                .modifier(ProbedMeta(part: .age, probe: probe))
+                .modifier(Probed(\.meta, .age, probe: probe))
         }
     }
 
@@ -805,7 +800,7 @@ struct DummyItemRow: View {
     /// Its source has said it no longer has this post (#179): the row stays, and says so.
     ///
     /// **A word and not only a glyph**, because this is the one fact on the meta line a reader
-    /// cannot guess from anything else on the row — and it is why the acts under it are absent.
+    /// cannot guess from anything else on the row — and it is why the marks under it are dim.
     /// It keeps its size for the age's reason: half of "deleted" is not a word. The glyph beside
     /// it is out of the accessibility tree; the word is what a listener hears, inside the row.
     @ViewBuilder
@@ -1120,7 +1115,7 @@ struct DummyItemRow: View {
         )
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: thumbSide, alignment: .top)
-        .modifier(Probed(band: .picture, probe: probe))
+        .modifier(Probed(\.frames, .picture, probe: probe))
     }
 
     /// The words band's column: the post. What happened to it is above the header (`decorator`).
@@ -1384,7 +1379,7 @@ struct DummyItemRow: View {
                 Text(notice)
                     .shellFont(.reading)
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .modifier(ProbedMeta(part: .reblogNotice, probe: probe))
+                    .modifier(Probed(\.meta, .reblogNotice, probe: probe))
             }
             if item.source.kind == .board, let board = item.board {
                 Text(board)
@@ -1505,7 +1500,7 @@ struct DummyItemRow: View {
                 onEnded: onEnded
             )
             .frame(width: slotSide, height: slotSide)
-            .modifier(Probed(band: .picture, probe: probe))
+            .modifier(Probed(\.frames, .picture, probe: probe))
         } else {
             Color.clear
                 .frame(width: slotSide, height: slotSide)
@@ -1515,11 +1510,16 @@ struct DummyItemRow: View {
 
     /// Every mark on one line, on every row, at every width and every type size (#245).
     ///
+    /// **The same seven on every row, whatever its source** (`ItemActs.line`): answer, boost,
+    /// quote, favourite, bookmark, keep and `…`. One the post does not offer is drawn in its own
+    /// glyph and the dim ink, with its reason for the pointer and for VoiceOver — so every row has
+    /// one shape, and no sentence stands where marks would have been.
+    ///
     /// **Never two lines.** The marks used to take a line each for the two groups on a narrow
     /// page or from `.xxLarge` up, which put a post's marks on two lines in a Mac window dragged
     /// narrow. Now the line gives way instead of breaking: the gaps close, then each mark gives
     /// up its touch room, its count and then the size of its glyph (`MarksLine`,
-    /// `DummyMarkButton`). Every mark is still there to press and still named.
+    /// `RowMarkFace`). Every mark is still there to press and still named.
     ///
     /// **One height on every row**, because the line is a press's floor tall whatever the marks
     /// on it — so a row whose marks run long is not taller than its neighbours.
@@ -1531,48 +1531,15 @@ struct DummyItemRow: View {
         let marks = ItemActs.marks(on: item, acting: acting)
         return MarksLine(spacing: ShellSpace.snug, least: Box.markGap) {
             ForEach(marks) { mark in
-                DummyMarkButton(symbol: mark.symbol, count: mark.count, label: mark.label, on: mark.on,
-                                quiet: !reading, glyph: glyph, countWidth: countBox, touch: touch) {
-                    press(mark.kind)
-                }
-                .modifier(ProbedMark(label: mark.label, probe: probe))
-                .layoutValue(key: MarkGap.self, value: ItemActs.gap(before: mark, among: marks))
+                RowMarkControl(
+                    mark: mark, item: item, acting: acting, here: sourcesHere,
+                    glyph: glyph, countWidth: countBox, touch: touch, probe: probe
+                )
+                .modifier(Probed(\.marks, mark.mark.name, probe: probe))
+                .layoutValue(key: MarkGap.self, value: ItemActs.gap(before: mark))
             }
-            refusal
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// What a press on a mark does — and on the same act in the row's menu, which calls this
-    /// and nothing else (#306).
-    ///
-    /// **Never filled on a press**: filled is what the source last said, and kept is what the
-    /// store holds, so nothing looks done that is not. The act a sign-in must be asked again for
-    /// (#285) only puts the question; keeping (#284) only asks the store. Each act goes to the
-    /// post this row shows, and on a reblog's row keeping alone is the reblog's (#290).
-    func press(_ kind: RowMark.Kind) {
-        switch kind {
-        case .act(let act): acting.perform?(act)
-        case .ask(let act): acting.ask?(act)
-        case .keep: acting.keep?()
-        case .quote: onToast(L10n.t("item.toast.quote"))
-        case .more: onToast(L10n.t("item.toast.more"))
-        }
-    }
-
-    /// What the row says where it offers none of #54's acts. Nothing where it offers them, and
-    /// nothing where there is no source for a sentence to be about — a fixture, a preview.
-    @ViewBuilder
-    private var refusal: some View {
-        if let refused = acting.acts.refused {
-            Text(ItemActs.refusalLine(refused))
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .lineLimit(1)
-                // The sentence gives way before a mark does; the whole of it is still heard.
-                .layoutPriority(-1)
-                .accessibilityLabel(ItemActs.refusalLine(refused))
-        }
     }
 
     // MARK: - The way out
@@ -1836,64 +1803,55 @@ extension View {
     }
 }
 
-/// The row's menu (#306): what the post is, then what can be done to it, then the way out to
-/// its own page.
+/// The row's menu under a long press (#306): what the post is, then what can be done to it, the
+/// way out to its own page, and taking it back where it is the reader's own.
 ///
-/// **One menu.** It was the way out alone; a reader with a finger had no other place to find
-/// what a pointer finds by resting on the row, and a second thing to press and hold would have
-/// been two answers to one gesture. On a Mac it is the pointer's other button, and says the same.
+/// **The one menu the row's `…` opens** (`RowMoreItems`, `ItemActs.more`), so a finger that
+/// holds the row and one that presses `…` are offered the same things in the same order. On a Mac
+/// it is the pointer's other button, and says the same.
 ///
-/// **The head is lines that cannot be pressed** — the exact time, who may read it, that it was
-/// changed — in a section of their own, so they read as what the post is and not as acts.
+/// **That the two are one is by construction, not by comparison**: this modifier and the `…`
+/// (`RowMarkControl`) each hold a `RowMoreItems` of the same row and nothing else, and that view
+/// is the one caller of `ItemActs.more` among the row's parts.
+///
+/// **Neither puts the question of the item that takes the post back.** The row holds no
+/// presenter: what was chosen is handed to the pane's one asker (`shellRowAsk`, `RowAsks`).
 struct RowMenu: ViewModifier {
     let item: DummyItem
     let acting: ItemActing
     let here: Set<String>?
-    let press: (RowMark.Kind) -> Void
 
     func body(content: Content) -> some View {
-        content.contextMenu {
-            RowMenuItems(item: item, acting: acting, here: here, press: press)
-        }
+        content.contextMenu { RowMoreItems(item: item, acting: acting, here: here) }
     }
 }
 
-/// What the menu holds, **worked out when the menu is drawn and not when the row is**: a view of
-/// its own, whose body nothing asks for until a menu is raised, so a row scrolled past builds
-/// neither the head nor a second list of its marks.
-private struct RowMenuItems: View {
+/// What the row's menu holds, **worked out when the menu is drawn and not when the row is**: a
+/// view of its own, whose body nothing asks for until a menu is raised, so a row scrolled past
+/// builds neither the head nor a second list of its marks.
+struct RowMoreItems: View {
     let item: DummyItem
     let acting: ItemActing
     let here: Set<String>?
-    let press: (RowMark.Kind) -> Void
 
     @Environment(\.openURL) private var openURL
+    @Environment(\.shellRowAsk) private var rowAsk
 
     var body: some View {
-        Section {
-            ForEach(ItemActs.head(for: item, here: here, refused: acting.acts.refused), id: \.self) { line in
-                Text(line)
-            }
-        }
-        Section {
-            ForEach(ItemActs.menu(on: item, acting: acting)) { mark in
-                Button(role: mark.destroys ? .destructive : nil) {
-                    press(mark.kind)
-                } label: {
-                    Label(mark.label, systemImage: mark.symbol)
-                }
-            }
-        }
-        // The one door out, checked as `WayOut` checks it.
-        if let url = WayOut.checked(item.outwardURL) {
-            Section {
-                Button {
-                    openURL(url)
-                } label: {
-                    Label(item.outwardName, systemImage: "arrow.up.forward.app")
-                }
-            }
-        }
+        ShellMoreItems(more: more, asked: asked)
+    }
+
+    /// A destructive item that is chosen goes to the pane's asker and is not kept here. Where
+    /// no pane is asking — a preview, a fixture — nothing is put, and nothing is taken away.
+    private var asked: Binding<ShellMoreAsk?> {
+        Binding(get: { nil }, set: { if let ask = $0 { rowAsk?.put(ask) } })
+    }
+
+    /// The one door out, checked as `WayOut` checks it; nothing where there is no address to
+    /// hand the system browser, and then the menu has no such item.
+    private var more: ShellMore {
+        let url = WayOut.checked(item.outwardURL)
+        return ItemActs.more(on: item, acting: acting, here: here, leave: url.map { url in { openURL(url) } })
     }
 }
 
@@ -1936,79 +1894,130 @@ private struct WayOut: ViewModifier {
     }
 }
 
-private struct DummyMarkButton: View {
-    let symbol: String
-    let count: Int?
-    /// The name of the control, already resolved.
-    ///
-    /// **A string and not a key**, since #106: an act's mark is named for what a press will do
-    /// *and* for where the last press got to — "Boost, on its way" — and that is a sentence built
-    /// from two facts rather than one word looked up. `ItemActs.spoken` builds it; the marks that
-    /// are still this device's own pass `L10n.t` of their key and read exactly as they did.
-    let label: String
-    let on: Bool
-    /// True on every row but the one being read. Emphasis only — the control is always
-    /// here, always the same size, and always reachable.
-    let quiet: Bool
+/// One of the row's seven marks, as a control: a button for the six that are acts, and for `…`
+/// the row's menu — both drawn by `RowMarkFace`, so `…` gives way on a narrow line as any mark
+/// does.
+///
+/// **Dim is not disabled**, `ShellMarkButton`'s rule: a dim mark keeps its place in the focus
+/// order and says its reason; its press is taken and goes nowhere, or to the question where the
+/// reason is that the sign-in must be asked again (`ItemActs.press`).
+private struct RowMarkControl: View {
+    let mark: RowMark
+    let item: DummyItem
+    let acting: ItemActing
+    let here: Set<String>?
     let glyph: CGFloat
     let countWidth: CGFloat
     /// The smallest a press is allowed to be. The glyph stays the size it is drawn;
     /// what grows is the area a finger can land on.
     let touch: CGFloat
-    let action: () -> Void
+    let probe: RowBandProbe?
+
+    var body: some View {
+        control
+            .buttonStyle(.plain)
+            // The name, and for a dim mark why — one sentence for the pointer and VoiceOver.
+            .help(mark.label)
+            .accessibilityLabel(mark.label)
+            // The count is heard whether or not the line had room to draw it.
+            .accessibilityValue(Text(mark.mark.count.map { String($0) } ?? ""))
+            .accessibilityAddTraits(mark.mark.on ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private var control: some View {
+        if mark.kind == .more {
+            Menu {
+                RowMoreItems(item: item, acting: acting, here: here)
+            } label: {
+                face
+            }
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+        } else {
+            Button {
+                ItemActs.press(mark, acting: acting)
+            } label: {
+                face
+            }
+        }
+    }
+
+    private var face: some View {
+        RowMarkFace(mark: mark.mark, glyph: glyph, countWidth: countWidth, touch: touch, probe: probe)
+    }
+}
+
+/// How a mark under a post is drawn: `ShellMark`'s glyph and inks, in the row's own sizes.
+///
+/// **The look is colour and nothing else.** The glyph is the mark's own whether it is live or
+/// dim (`ShellMark.drawn`), the ink is `ShellMark.ink`, and a count is text and takes text's
+/// floor (`ShellMark.countInk`).
+private struct RowMarkFace: View {
+    let mark: ShellMark
+    let glyph: CGFloat
+    let countWidth: CGFloat
+    let touch: CGFloat
+    let probe: RowBandProbe?
 
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        Button(action: action) {
-            // **What a mark gives up, in order, where its line is narrower than the marks**
-            // (`MarksLine`): the touch room around it, then the room held for its count, then the
-            // count, then the size of its glyph. Never its place on the line, and never its name.
-            ViewThatFits(in: .horizontal) {
-                face(count: count, side: glyph, floor: touch, countFloor: countWidth)
-                face(count: count, side: glyph, floor: 0, countFloor: countWidth)
-                face(count: count, side: glyph, floor: 0, countFloor: 0)
-                face(count: nil, side: glyph, floor: 0, countFloor: 0)
-                face(count: nil, side: glyph * 0.75, floor: 0, countFloor: 0)
-                face(count: nil, side: glyph * 0.5, floor: 0, countFloor: 0)
-            }
-            // **As wide as it is offered**, so a mark that gave something up still stands in its
-            // share of the line (#302): a press has the share to land on, and the marks keep
-            // apart instead of closing up at the line's leading end. A line with room offers a
-            // mark its own width, and this is then that.
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(minHeight: touch)
-            .contentShape(Rectangle())
+        // Asked once, and never per face: a hosted test's probe reports what each part drew.
+        if let probe {
+            faces(
+                glyph: Probing(\.glyphs, mark.name, probe: probe),
+                count: Probing(\.counts, mark.name, probe: probe)
+            )
+        } else {
+            faces(glyph: EmptyModifier(), count: EmptyModifier())
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(tint)
-        .animation(.easeInOut(duration: 0.15), value: quiet)
-        .help(label)
-        .accessibilityLabel(label)
-        // The count is heard whether or not the line had room to draw it.
-        .accessibilityValue(Text(count.map { String($0) } ?? ""))
-        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
-    private func face(count: Int?, side: CGFloat, floor: CGFloat, countFloor: CGFloat) -> some View {
+    private func faces<Glyph: ViewModifier, Count: ViewModifier>(glyph probed: Glyph, count counted: Count) -> some View {
+        let countInk = ShellMark.countInk(mark.look, on: mark.on, colorScheme)
+        // **What a mark gives up, in order, where its line is narrower than the marks**
+        // (`MarksLine`): the touch room around it, then the room held for its count, then the
+        // count, then the size of its glyph. Never its place on the line, and never its name.
+        return ViewThatFits(in: .horizontal) {
+            face(mark.count, glyph, floor: touch, countFloor: countWidth, countInk, probed, counted)
+            face(mark.count, glyph, floor: 0, countFloor: countWidth, countInk, probed, counted)
+            face(mark.count, glyph, floor: 0, countFloor: 0, countInk, probed, counted)
+            face(nil, glyph, floor: 0, countFloor: 0, countInk, probed, counted)
+            face(nil, glyph * 0.75, floor: 0, countFloor: 0, countInk, probed, counted)
+            face(nil, glyph * 0.5, floor: 0, countFloor: 0, countInk, probed, counted)
+        }
+        // The glyph's ink, said once for every face; a count beside it says its own.
+        .foregroundStyle(ShellMark.ink(mark.look, on: mark.on, colorScheme))
+        // **As wide as it is offered**, so a mark that gave something up still stands in its
+        // share of the line (#302): a press has the share to land on, and the marks keep
+        // apart instead of closing up at the line's leading end. A line with room offers a
+        // mark its own width, and this is then that.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: touch)
+        .contentShape(Rectangle())
+    }
+
+    private func face<Glyph: ViewModifier, Count: ViewModifier>(
+        _ count: Int?, _ side: CGFloat, floor: CGFloat, countFloor: CGFloat, _ countInk: Color,
+        _ probed: Glyph, _ counted: Count
+    ) -> some View {
         HStack(spacing: ShellSpace.hair * 2) {
-            Image(systemName: symbol)
+            Image(systemName: mark.drawn)
                 .font(.system(size: side, weight: .medium))
                 .frame(width: side, height: side)
+                .modifier(probed)
             if let count {
                 Text(String(count))
                     .shellFont(.reading)
                     .lineLimit(1)
                     .fixedSize()
                     .frame(minWidth: countFloor, alignment: .leading)
+                    .foregroundStyle(countInk)
+                    .modifier(counted)
             }
         }
         .frame(minWidth: floor, alignment: .leading)
-    }
-
-    private var tint: Color {
-        if on { return ShellChrome.filament(colorScheme) }
-        return quiet ? ShellChrome.inkFaint(colorScheme) : ShellChrome.inkDim(colorScheme)
     }
 }
 
@@ -2018,6 +2027,15 @@ extension EnvironmentValues {
     /// longer here. Nothing means nobody said: every host is taken as here. See
     /// `DummyItemRow.sourceLeft`.
     @Entry var shellSourcesHere: Set<String>?
+    /// Where a row's menu puts the question of its destructive item: the one asker of the pane
+    /// the row is listed in (`RowAsks`). Nothing — a preview, a fixture — means nobody asks.
+    @Entry var shellRowAsk: RowAsk?
+}
+
+/// The way a row hands the pane's asker the question its menu was asked for.
+@MainActor
+struct RowAsk {
+    let put: (ShellMoreAsk) -> Void
 }
 
 /// The row's four bands, top to bottom as they are drawn and heard.
@@ -2037,6 +2055,10 @@ final class RowBandProbe {
     var frames: [RowBand: CGRect] = [:]
     /// Where each mark was laid out, by its name.
     var marks: [String: CGRect] = [:]
+    /// The glyph each mark drew, by the mark's name: its size says whether it was shrunk.
+    var glyphs: [String: CGRect] = [:]
+    /// The count each mark drew beside its glyph, by the mark's name; none where it gave it up.
+    var counts: [String: CGRect] = [:]
     /// Where each part of the header's line was laid out.
     var meta: [RowMetaPart: CGRect] = [:]
 }
@@ -2052,64 +2074,50 @@ enum RowMetaPart: Hashable {
     case reblogNotice
 }
 
-/// Reports where a part of the header's line was laid out to a probe, where one is handed in;
-/// draws nothing and changes nothing.
-private struct ProbedMeta: ViewModifier {
-    let part: RowMetaPart
+/// Reports where one part of a row was laid out — a band, a part of the header's line, a mark,
+/// the glyph or the count a mark drew — to a probe, where one is handed in; draws nothing and
+/// changes nothing. `part` is which of the probe's tables, and `key` the part's name in it.
+private struct Probed<Key: Hashable>: ViewModifier {
+    let part: ReferenceWritableKeyPath<RowBandProbe, [Key: CGRect]>
+    let key: Key
     let probe: RowBandProbe?
+
+    init(_ part: ReferenceWritableKeyPath<RowBandProbe, [Key: CGRect]>, _ key: Key, probe: RowBandProbe?) {
+        self.part = part
+        self.key = key
+        self.probe = probe
+    }
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if let probe {
-            content.background(
-                GeometryReader { room in
-                    let _ = probe.meta[part] = room.frame(in: .named(RowBandProbe.space))
-                    Color.clear
-                }
-            )
+            content.modifier(Probing(part, key, probe: probe))
         } else {
             content
         }
     }
 }
 
-/// Reports a band's frame to a probe, where one is handed in; draws nothing and changes nothing.
-private struct Probed: ViewModifier {
-    let band: RowBand
-    let probe: RowBandProbe?
+/// The same, to a probe that is there. Of a mark's faces only the one `ViewThatFits` chose is
+/// laid out, so only that one reports.
+private struct Probing<Key: Hashable>: ViewModifier {
+    let part: ReferenceWritableKeyPath<RowBandProbe, [Key: CGRect]>
+    let key: Key
+    let probe: RowBandProbe
 
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let probe {
-            content.background(
-                GeometryReader { room in
-                    let _ = probe.frames[band] = room.frame(in: .named(RowBandProbe.space))
-                    Color.clear
-                }
-            )
-        } else {
-            content
-        }
+    init(_ part: ReferenceWritableKeyPath<RowBandProbe, [Key: CGRect]>, _ key: Key, probe: RowBandProbe) {
+        self.part = part
+        self.key = key
+        self.probe = probe
     }
-}
 
-/// Reports one mark's frame to a probe, by the mark's name; draws nothing and changes nothing.
-private struct ProbedMark: ViewModifier {
-    let label: String
-    let probe: RowBandProbe?
-
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if let probe {
-            content.background(
-                GeometryReader { room in
-                    let _ = probe.marks[label] = room.frame(in: .named(RowBandProbe.space))
-                    Color.clear
-                }
-            )
-        } else {
-            content
-        }
+        content.background(
+            GeometryReader { room in
+                let _ = probe[keyPath: part][key] = room.frame(in: .named(RowBandProbe.space))
+                Color.clear
+            }
+        )
     }
 }
 

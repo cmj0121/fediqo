@@ -116,35 +116,6 @@ final class ShellSession {
     /// message "tells the reader what happened and offers them nothing to do about it".
     var offerSignIn: String?
 
-    /// The server the reader has pressed Remove on and not yet answered for, or nothing.
-    ///
-    /// **Nothing is destroyed while this is set.** Remove takes the boards the reader picked, and
-    /// `clear`'s own comment is the argument for why that is worth a question first: pictures come
-    /// back by themselves and a pick of eight boards out of forty does not. So the press sets this,
-    /// the dialog says what goes, and only the confirm reaches `remove(host:)`.
-    ///
-    /// A host and not a `Source`, because the dialog needs the host to name it and the count of
-    /// boards to pick its sentence, and both are readable off `sources` — a second copy of a source
-    /// held here would be a copy that goes stale the moment the reader changes their boards.
-    var removing: String?
-
-    /// The server the reader has pressed Clear on and not yet answered for, or nothing.
-    ///
-    /// **Nothing is emptied while this is set** — `removing`'s shape, for a reason decision 29
-    /// only half states. The colour is the user's overstatement; the confirmation is closing a
-    /// real hole. `clear(host:)` reaches `ForumSessions.forget(host:)`, which drops the forum's
-    /// cookies **and deletes the saved password from the Keychain** — and `forget`'s own doc makes
-    /// the fairness of that conditional on one thing: *"the row says a password is held before the
-    /// button is pressed"*. `UsagePane` draws `passwordLine` and meets it. An Account row
-    /// draws no inventory line at all, by `DESIGN.md` §3.6's own rule, so until now this device
-    /// deleted a password with nothing on screen having said one was held — and signed the reader
-    /// out of a forum, changing the state of the icon beside the one they pressed.
-    ///
-    /// **One presenter, both entrances.** `prefs.cache.clear` is one word for one call, so a Clear
-    /// that confirms on Account and fires straight on Usage would be the same word doing two
-    /// different things two panes apart. `UsagePane` sets this too.
-    var clearing: String?
-
     /// What takes this device's store away and reads one back (#247), or nothing where the app
     /// handed none in — a preview, a test — and then Preferences offers neither.
     @ObservationIgnored var carrier: (any StoreCarrier)?
@@ -168,10 +139,36 @@ final class ShellSession {
     /// page will ask the reader to agree to — a choice made afterwards would be this app deciding
     /// and the server reporting. Cancelling it opens nothing and changes nothing.
     ///
-    /// `removing`'s shape, and a host for its reason: the dialog names it, and a copy of the
-    /// source held here would be one that goes stale. **Not `signingIn`**, which is the forum
+    /// A host and not a `Source`: the dialog names it, and a copy of the source held here would
+    /// be one that goes stale. **Not `signingIn`**, which is the forum
     /// sign-in already running in a web view — this is a question, and nothing is running.
     var signInChoice: String?
+    /// The source whose key was pressed while signed in, and whose sign-out has not been answered
+    /// for yet, or nothing.
+    ///
+    /// **Nobody is signed out while this is set.** A sign-out hands a Mastodon's token back to
+    /// its server and drops a forum's session and its saved password, so the press puts the
+    /// question and only its yes reaches `signOut(host:)`.
+    ///
+    /// **The host and the question as it read when asked, together** (`SignOutAsk`): what a
+    /// sign-out takes changes as it happens — a forum's saved password is gone a moment after
+    /// the yes — and a card still sliding away must go on saying what was asked.
+    ///
+    /// Put down where the source ends the sign-in itself (`MastodonSessions.onEnded`): there is
+    /// nothing left to sign out of, and the notice that says so must not wait behind this.
+    ///
+    /// **And put down by everything else that makes its words stale** (`dropSignOutAsk`): a
+    /// Clear or a Remove of that source, which take the sign-in themselves, and the Account page
+    /// leaving, which takes the only place the question is drawn. Held past any of those it
+    /// would come back later asking about a sign-in, or a password, that is no longer there.
+    var signOutAsk: SignOutAsk?
+
+    /// Puts down a sign-out question still waiting: the one about `host`, or whichever there is
+    /// where no host is given. Nobody is signed out by it.
+    func dropSignOutAsk(host: String? = nil) {
+        guard let asked = signOutAsk else { return }
+        if host == nil || asked.host.lowercased() == host?.lowercased() { signOutAsk = nil }
+    }
     /// The source whose sign-in is being asked to allow bookmarks, where one is (#285). Observed,
     /// and the question is presented from it; a press on a row's mark writes it.
     var bookmarkAsk: String?
@@ -243,14 +240,20 @@ final class ShellSession {
     /// beside `sources` is a copy that goes stale the moment a board is picked.
     var rows: [SourceRow] {
         sources.map { source in
-            SourceRow(
+            // From the session and never from the row, because two of the three facts that
+            // decide it — what the sign-in bought and what the source has refused since —
+            // are held here.
+            let writing = mastodon.writing(host: source.host, kind: source.kind)
+            return SourceRow(
                 source: source,
                 profile: profiles[source.host] ?? .unasked(host: source.host, kind: source.kind),
                 signedIn: isSignedIn(host: source.host),
-                // From the session and never from the row, because two of the three facts that
-                // decide it — what the sign-in bought and what the source has refused since —
-                // are held here.
-                writing: mastodon.writing(host: source.host, kind: source.kind)
+                writing: writing,
+                // Handed in for `writing`'s reason: what the sign-in was asked for is held here.
+                unasked: SourceRow.unasked(
+                    grant: mastodon.grants[source.host.lowercased()],
+                    bookmarks: mastodon.bookmarks(host: source.host)
+                )
             )
         }
     }
@@ -810,6 +813,10 @@ final class ShellSession {
             let from = (note.object as AnyObject?).map(ObjectIdentifier.init)
             MainActor.assumeIsolated { self?.allowancesChanged(by: from) }
         }
+        // A source that ends a sign-in itself answers a sign-out still being asked about it.
+        mastodon.onEnded = { [weak self] host in
+            self?.dropSignOutAsk(host: host)
+        }
         // Last, once every property is set: a take-away or a read back holds the room limit still (#249).
         carry.holding = { [weak self] held in self?.holdsStill = held }
         // And a move nearby likewise (#253): from the package's first byte to every way out.
@@ -1087,12 +1094,43 @@ final class ShellSession {
     /// Asks whether to take `item` back. **Asked, never pressed** — the only act in #54 that asks
     /// first, because a post taken back does not come back. Refused where the post does not offer
     /// it, which is the same one rule the mark reads.
+    ///
+    /// **And refused while a row's menu has its own question up** (`rowAsk`): one question about
+    /// taking back at a time, whichever way it was asked.
     @discardableResult
     func askToWithdraw(_ item: DummyItem) -> Bool {
-        guard let copy = actingCopy(of: item, for: .withdraw),
+        guard rowAsk == nil, let copy = actingCopy(of: item, for: .withdraw),
               !acts.isOnItsWay(copy.id, .withdraw)
         else { return false }
         withdrawing = item
+        return true
+    }
+
+    /// The destructive item of a row's `…` that was chosen and not yet answered — taking a post
+    /// back, the one such item a post's menu has. **Held here and not by the row**, so one asker
+    /// on the pane puts it for every row it lists (`RowAsks`), and a row scrolled away and drawn
+    /// again cannot drop a question that is still open.
+    private(set) var rowAsk: ShellMoreAsk?
+
+    /// Puts the question a row's menu asks, or takes it down. **Refused while the key's own
+    /// question is up** (`withdrawing`), as `askToWithdraw` is refused while this one is: the
+    /// two are one question asked two ways, and never both at once. Returns whether it was put.
+    @discardableResult
+    func putRowAsk(_ ask: ShellMoreAsk?) -> Bool {
+        guard ask == nil || withdrawing == nil else { return false }
+        rowAsk = ask
+        return ask != nil
+    }
+
+    /// The menu's question answered yes. **Refused where `askToWithdraw` would refuse to ask**:
+    /// the post no longer offers it, or its taking back is already on its way. Returns whether
+    /// anything was sent for.
+    @discardableResult
+    func withdrawAsked(_ item: DummyItem) -> Bool {
+        guard let copy = actingCopy(of: item, for: .withdraw),
+              !acts.isOnItsWay(copy.id, .withdraw)
+        else { return false }
+        Task { await withdraw(item) }
         return true
     }
 
@@ -1977,7 +2015,7 @@ final class ShellSession {
     ///
     /// **One function, because the alternative is the defect risk 12 counts.** A control that is
     /// drawn live and refused by a guard somewhere else is a button that does nothing, and this
-    /// branch has now shipped four of those. `SourceRowView` dims all four on this and
+    /// branch has now shipped four of those. `SourceRow.look` dims every mark on this and
     /// `changeBoards(host:)` refuses on this, so they cannot come to disagree.
     ///
     /// **`rowActsLive` and not `boardsLive`, which is a rename and not a widening of the rule.**
@@ -1996,8 +2034,8 @@ final class ShellSession {
     /// and both of these break in silence:
     ///
     /// - **`PreviewOrigin.joined` carries a `Source` and is safe from going stale because of this
-    ///   term.** `removing` refuses to hold a copy for exactly that reason; the detail may hold
-    ///   one because no row control can change a source's boards while a stage is up, and
+    ///   term.** A question holds a host and never a copy for exactly that reason; the detail
+    ///   may hold one because no row control can change a source's boards while a stage is up, and
     ///   `stage == nil` is the whole of why.
     /// - **A row is always visible while its own errand runs**, which is what lets
     ///   `reporting(_:drawnAs:)` hand `.row` straight back. `changeBoards` and `subscribe` both
@@ -2009,9 +2047,9 @@ final class ShellSession {
     /// Whether the **page's** three add controls may be acted on: the hostname field, the
     /// magnifier and Browse.
     ///
-    /// **`rowActsLive`'s twin, and it exists for the same reason.** The row's four controls were
-    /// drawn on one question and pressed on another until `RowActionState` made the pair
-    /// unspellable. The page's three had the same split and kept it: `AccountPane.busy` asked
+    /// **`rowActsLive`'s twin, and it exists for the same reason.** The row's controls were
+    /// drawn on one question and pressed on another until their look carried both
+    /// (`MarkLook`, whose ink and whose press are one value). The page's three had the same split and kept it: `AccountPane.busy` asked
     /// `stage?.surface == .sheet` while `look()` and `browse()` asked
     /// `stage?.admitsASecondLook`. Two exhaustive switches over the same five shapes, agreeing
     /// **by coincidence** — `surface == .pane` and `admitsASecondLook` happen to answer alike for
@@ -2617,12 +2655,9 @@ final class ShellSession {
 
     private func clearNow(host: String, keepingRows: Bool) async {
         let host = host.lowercased()
-        // The question has been answered, so nothing is pending any more — set before the awaits,
-        // so no dialog state outlives the decision it was asking about. `remove`'s own line, for
-        // its reason. Unconditional, because `remove` reaches this too and a Remove answered while
-        // a Clear was pending would otherwise leave that Clear's question standing over a row that
-        // has gone.
-        clearing = nil
+        // A Clear takes the sign-in itself, and a Remove clears: a sign-out still being asked
+        // about this source has nothing left to ask.
+        dropSignOutAsk(host: host)
         // Before the first await: Home posts read before the Clear must not land after it.
         stopReadingAsYou(host: host)
         // What waits in the source's line of loads goes too (#293) — here for a Clear, and for a
@@ -2831,7 +2866,11 @@ final class ShellSession {
     /// Through `forums.forget` and not through anything of its own, which is what makes `Clear` and
     /// `Remove` clear the sign-in too: there is one door and all three go through it (decision 13).
     /// A Mastodon's door is `mastodon.signOut`, which `clear` reaches the same way (decision 10).
+    ///
+    /// **What `signOutQuestion(host:)` says before this is reached is read off this function**:
+    /// change what goes here and the question's words change with it.
     func signOut(host: String) async {
+        dropSignOutAsk(host: host)
         if kind(of: host) == .mastodon {
             stopReadingAsYou(host: host)
             await loads.letGo(host: host)
@@ -2845,6 +2884,53 @@ final class ShellSession {
         }
         // Whatever kind it is, no session of any sort is left for it in the system's stores (#221).
         jar.forget(host: host, keeping: sources.map(\.host))
+    }
+
+    /// Puts the sign-out question about `host`, read as things stand now and held as read.
+    func askSignOut(host: String) {
+        signOutAsk = SignOutAsk(host: host, question: signOutQuestion(host: host))
+    }
+
+    /// The question before `host` is signed out, with what this session holds for it read here:
+    /// which door `signOut(host:)` takes for its kind, and whether a saved password goes with a
+    /// forum's session (`ForumSessions.forget` deletes it).
+    func signOutQuestion(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellQuestion.signOut(
+            host: host, mastodon: kind(of: host) == .mastodon,
+            hasPassword: forums.hasPassword(host: host), language: language
+        )
+    }
+
+    /// How many boards Remove would take from `host` — what its question's line names where there
+    /// are any, since they are the one part of Remove that does not come back.
+    ///
+    /// **Two whole sentences and two keys, not one sentence with a clause appended.** "the 3 boards
+    /// you picked" must never appear over a microblog, and a second half joined on with `+` is a
+    /// half no translator can put first. `clear` argues why the boards are the part worth naming:
+    /// pictures come back by themselves, a pick of eight boards out of forty does not. See
+    /// `ShellQuestion.remove`.
+    static func boards(of host: String, in sources: [Source]) -> Int {
+        sources.first { $0.host == host }?.boards.count ?? 0
+    }
+
+    /// The question before `host` is removed, with what this session holds for it read here: the
+    /// boards it takes, and how many of its posts the person keeps, which stay (#294).
+    func removeQuestion(host: String, postsStay: Bool) -> ShellConfirmation {
+        ShellQuestion.remove(
+            host: host, boards: Self.boards(of: host, in: sources), postsStay: postsStay,
+            kept: holdings.kept(host: host).posts
+        )
+    }
+
+    /// The question before what `host` left here is cleared, with what this session holds for it
+    /// read here: whether a saved password goes with it, and whether a sign-in does. One function
+    /// for the two places Clear is offered — a source row's `…` on Account and the `…` of a
+    /// source's detail on Usage — so the two ask one question.
+    func clearQuestion(host: String) -> ShellConfirmation {
+        ShellQuestion.clear(host: host, detailKey: SourceRow.clearDetailKey(
+            hasPassword: forums.hasPassword(host: host),
+            reachedSignIn: isSignedIn(host: host)
+        ))
     }
 
     /// Whether this device holds a sign-in for that source, whichever protocol it is.
@@ -3031,9 +3117,7 @@ final class ShellSession {
 
     private func removeNow(host raw: String, keepingPosts: Bool) async {
         let host = raw.lowercased()
-        // The question has been answered, so nothing is pending any more — set before the awaits,
-        // so no dialog state outlives the decision it was asking about.
-        removing = nil
+        dropSignOutAsk(host: host)
         if usageOpened?.lowercased() == host { usageOpened = nil }
         stopReadingAsYou(host: host)
         // Every read of it a reload has on its way ends here, signed in or not, and an open thread
@@ -3289,4 +3373,11 @@ private struct RemovedStops: HTTPClient {
         if await removed() { throw CancellationError() }
         return try await inner.data(from: url)
     }
+}
+
+/// A sign-out that has been asked about and not answered: the source, and the question exactly
+/// as it read at the press.
+struct SignOutAsk: Equatable {
+    let host: String
+    let question: ShellConfirmation
 }

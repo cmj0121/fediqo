@@ -22,17 +22,16 @@ struct RailView: View {
         static let well: CGFloat = 32
         /// **`well - snug`, and not a literal.** The row already states this rule for its own
         /// controls — `SourceRow.symbolPoints` is `touch - snug`, "leaving `ShellSpace.snug` of
-        /// the target around it" — and applied here it gives 24, which is `SourceRowView.glyph`'s
-        /// base and `SourceRow.markBase`. **One number, three surfaces: every mark in this app is
+        /// the target around it" — and applied here it gives 24, which is
+        /// `SourceRow.markBase`, the base `SourceRowView.mark` grows from. **One number, three surfaces: every mark in this app is
         /// 24pt at the default rung.** A mark at the full 32 would fill its plate edge to edge and
         /// put `closedMark`'s 1.2x strike 3.2pt outside the well on each side.
         ///
         /// **No metric moves with it.** The glyph lives inside a `well`-sized frame, so
         /// `collapsedWidth` stays 48, `expandedWidth` stays 201, the row stays 32 tall, and the
-        /// macOS minimum page stays 318 — which is what every threshold in the source row is
-        /// computed against.
+        /// macOS minimum page stays 318.
         static let iconSize: CGFloat = well - ShellSpace.snug
-        static let wellRadius: CGFloat = 3
+        static let wellRadius = ShellRadius.well
         static let rowInnerHeight: CGFloat = well
         static let collapsedWidth: CGFloat = side + well + side
         static let expandedWidth: CGFloat = side + well + pad + 148 + side
@@ -93,9 +92,7 @@ struct RailView: View {
 
             Spacer(minLength: Metrics.pad)
 
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(height: 1)
+            ShellRule()
                 .padding(.vertical, Metrics.pad)
                 .padding(.horizontal, Metrics.well / 4)
 
@@ -118,9 +115,7 @@ struct RailView: View {
         .clipped()
         .background(ShellChrome.rail(colorScheme))
         .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(ShellChrome.hairline(colorScheme))
-                .frame(width: 1)
+            ShellRule(.vertical)
         }
     }
 

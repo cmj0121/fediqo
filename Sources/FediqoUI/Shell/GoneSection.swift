@@ -1,8 +1,8 @@
 import FediqoCore
 import SwiftUI
 
-/// Posts their source deleted (#179), where this device says what it holds and for how long: the
-/// wait after which they go, and a press that lets them all go now.
+/// Posts their source deleted (#179), where this device says how long it holds them: the wait
+/// after which they go, or never.
 ///
 /// **Beside the keep-for window, on the same tab, because it is the same question** — how long
 /// a post stays here — asked of the posts a source has since let go. Where the two disagree the
@@ -10,24 +10,16 @@ import SwiftUI
 /// wait let a post go in a month.
 ///
 /// **And the places a read down settled** (#204), where a timeline's source no longer has what lay
-/// between two posts: the same wait and the same press let their marks go, and count them apart
-/// from the posts, so the press never says it let go of posts it did not.
+/// between two posts: the same wait lets their marks go.
+///
+/// **Nothing here lets them go at a press.** They go by the wait alone (`LettingGoneGo`), so the
+/// section is a choice and what follows from it, and holds nothing that takes away.
 ///
 /// A view of its own rather than more of `UsagePane`, so the page keeps one section per fact and
 /// this one can be read, and tested, alone.
 struct GoneSection: View {
     @Environment(DummyPrefs.self) private var prefs
-    @Environment(\.colorScheme) private var colorScheme
     let session: ShellSession
-
-    /// What the last press let go, and nothing before a press — "none went" would be an answer
-    /// to a question nobody asked yet.
-    @State private var went: WentGone?
-    /// The press has counted what it would let go and is asking first, as every other drop on
-    /// this page does; what it counted is what the question names.
-    @State private var asking: WentGone?
-    /// How many posts marked gone the person keeps, counted with `asking`: they stay (#294).
-    @State private var askingKept = 0
 
     /// The waits offered, in days. Never, the default, is offered beside them.
     static let dayChoices = [1, 7, 30, 90]
@@ -42,53 +34,11 @@ struct GoneSection: View {
                 }
             }
             if let line = Self.keepWinsLine(days: prefs.goneDays, keepingMonths: prefs.keepMonths) {
-                reading(line)
-            }
-            HStack(spacing: ShellSpace.snug) {
-                if let went { reading(Self.wentLine(went.posts, places: went.places)) }
-                Spacer(minLength: ShellSpace.snug)
-                ShellIconButton("trash", name: "prefs.gone.now", help: "usage.gone.now.help", tone: .alarm) {
-                    Task {
-                        // Nothing to let go is said at once; anything is asked about first.
-                        let counted = await session.goneHeld()
-                        if counted.isNone {
-                            went = counted
-                        } else {
-                            askingKept = await session.goneKept()
-                            asking = counted
-                        }
-                    }
-                }
+                ShellReadingLine(line)
             }
         } header: {
             ShellSectionHead(title: "prefs.gone", line: "usage.gone.line", help: "prefs.gone.footer")
         }
-        .shellConfirm($asking, question: { ShellQuestion.letGo(posts: $0.posts, places: $0.places, kept: askingKept) }) { _, _ in
-            Task { went = await session.letAllGoneGo() }
-        }
-    }
-
-    /// What the press asks before it lets `count` posts and `places` settled places go (#204):
-    /// each counted apart, and one left unsaid where there are none of it.
-    static func askLine(_ count: Int, places: Int = 0, language: DummyLanguage? = nil) -> String {
-        if places == 0 { return L10n.count("prefs.gone.ask", count, language: language) }
-        if count == 0 { return L10n.count("prefs.gone.ask.places", places, language: language) }
-        return String(
-            format: L10n.t("prefs.gone.ask.both", language: language),
-            L10n.count("prefs.gone.posts", count, language: language),
-            L10n.count("prefs.gone.places", places, language: language)
-        )
-    }
-
-    /// What the question says under it: where places go too, that only their marks do — and where
-    /// only places go, nothing of posts going.
-    ///
-    /// `counted` is where the question itself says how many kept posts stay (#294): the detail
-    /// then says only that they are not in the count, and not a second time that they stay.
-    static func askDetail(posts: Int, places: Int, counted: Bool = false, language: DummyLanguage? = nil) -> String {
-        let key = places == 0 ? "prefs.gone.ask.detail"
-            : posts == 0 ? "prefs.gone.ask.detail.placesonly" : "prefs.gone.ask.detail.places"
-        return L10n.t(counted && posts > 0 ? key + ".counted" : key, language: language)
     }
 
     /// What the page says where the keep-for window is the shorter of the two, and nothing where
@@ -99,27 +49,6 @@ struct GoneSection: View {
             return nil
         }
         return L10n.count("prefs.gone.keepwins", months, language: language)
-    }
-
-    /// What the press says back: how many posts and places went, or that there were none.
-    static func wentLine(_ count: Int, places: Int = 0, language: DummyLanguage? = nil) -> String {
-        switch (count, places) {
-        case (0, 0): L10n.t("prefs.gone.went.none", language: language)
-        case (_, 0): L10n.count("prefs.gone.went", count, language: language)
-        case (0, _): L10n.count("prefs.gone.went.places", places, language: language)
-        default:
-            String(
-                format: L10n.t("prefs.gone.went.both", language: language),
-                L10n.count("prefs.gone.posts", count, language: language),
-                L10n.count("prefs.gone.places", places, language: language)
-            )
-        }
-    }
-
-    private func reading(_ line: String) -> some View {
-        Text(line)
-            .shellFont(.reading)
-            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
     }
 }
 
