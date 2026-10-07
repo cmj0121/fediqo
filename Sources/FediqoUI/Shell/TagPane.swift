@@ -130,6 +130,8 @@ struct TagPane: View {
     var onToast: (String) -> Void
     var onBack: () -> Void
 
+    /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
+    @Environment(\.shellTouch) private var touch
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -292,7 +294,7 @@ struct TagPane: View {
             lifted: decks.isLifted(item.id),
             player: playback.rowPlayer(for: item, decks: decks),
             onSelect: {
-                switch DummyCommand.tapped(item.id, selected: selectedID) {
+                switch DummyCommand.tapped(item.id, selected: selectedID, touch: touch) {
                 case .select: selectedID = item.id
                 case .open: onOpenThread(item.id)
                 }

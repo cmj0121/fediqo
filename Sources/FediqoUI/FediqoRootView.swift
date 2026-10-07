@@ -89,6 +89,9 @@ public struct FediqoRootView: View {
     /// `stranded(among:scale:from:)` for what goes wrong when it is not.
     @State private var wakeCursor = 0
 
+    /// Where this launch is put with nothing pressed, where it is put anywhere. See `ShellStaged`.
+    private let staged: ShellStaged?
+
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -109,11 +112,14 @@ public struct FediqoRootView: View {
         storeTroubleAnswered: (@MainActor (StoreTroubleAnswer) -> Void)? = nil,
         carrier: (any StoreCarrier)? = nil,
         nearby: (any NearbyLink)? = nil,
-        deviceName: String = ""
+        deviceName: String = "",
+        staged: ShellStaged? = nil
     ) {
         let session = ShellSession(
             http: http, store: store, forums: forums, mastodon: mastodon,
-            timelines: WrittenTimelineStore(defaults: .standard)
+            // A launch made for a picture writes no timeline down: one it makes for itself
+            // (`ShellStaged.Step.empty`) is gone with the launch.
+            timelines: staged == nil ? WrittenTimelineStore(defaults: .standard) : nil
         )
         session.persist = persist
         session.carrier = carrier
@@ -128,6 +134,11 @@ public struct FediqoRootView: View {
         self.storeNoticeSeen = storeNoticeSeen
         _storeTrouble = State(initialValue: storeTrouble)
         self.storeTroubleAnswered = storeTroubleAnswered
+        self.staged = staged
+        // Before anything asks whether there is a keyboard (`ShellHands`).
+        if staged?.noKeyboard == true { ShellKeyboard.stagedAbsent = true }
+        // A launch put somewhere is photographed there, and the mascot would be in the picture.
+        _showingLanding = State(initialValue: staged == nil)
     }
 
     /// From here on, nothing leaves for a host that is not one of `hosts` — the sources the person
@@ -251,6 +262,9 @@ public struct FediqoRootView: View {
                 if let landing = launch.settle(availability, standingOn: place) {
                     place = landing
                 }
+                // Ended with this view's own task, so a window closed stops saying its notice.
+                let arriving = staged.map { staged in Task { await arrive(at: staged) } }
+                defer { arriving?.cancel() }
                 // Last, because it does not return: from here every landing renews what is in
                 // front, with no key pressed (#175).
                 await session.followStore()
@@ -459,6 +473,15 @@ public struct FediqoRootView: View {
             // The hosts still here, handed down once for the same reason: a row from a source
             // since removed says so wherever it is drawn (#250), and only the root knows which.
             .environment(\.shellSourcesHere, Set(session.sources.map(\.host)))
+            // Whether there is nothing here but a finger (#303), asked once and handed down.
+            .environment(\.shellTouch, ShellHands.shared.touch)
+            .environment(\.shellCovered, Self.covered(viewing: viewedItem != nil, shortcuts: showingShortcuts, landing: playsLanding))
+            .overlay(alignment: .top) {
+                if staged?.reports == true { StagedReport(session: session, counts: staged?.counts == true) }
+            }
+            .overlay {
+                if staged?.menus == true { StagedMenus(session: session) }
+            }
             .environment(\.locale, prefs.language.locale)
             .preferredColorScheme(prefs.theme.colorScheme)
             .dynamicTypeSize(prefs.fontSize.dynamicType)
@@ -1224,6 +1247,107 @@ public struct FediqoRootView: View {
     /// a press carries its own id.
     static func canWalk(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
         place == .timeline && DummyCommand.canWalk(whenOpen: open)
+    }
+
+    /// A launch put where `staged` says, by the same functions a press goes through, so nothing
+    /// is reached here that a reader could not reach: a place the rail has turned off is not
+    /// entered, a row not held opens nothing, and the composer stays shut for a reader who may
+    /// not write.
+    ///
+    /// **The place first, and the rest once the page has been drawn on it.** The first timeline
+    /// being chosen is a timeline switched, which ends a walk (`timelineSwitched`), and that
+    /// change is answered when the view is next drawn — after this would have opened the post.
+    /// A wait and not a signal, because nothing says a view has answered its changes; it costs
+    /// a picture a third of a second and a reader nothing, since no reader's launch comes here.
+    private func arrive(at staged: ShellStaged) async {
+        if let wanted = staged.place { place = availability.placing(place, as: wanted) }
+        if let page = staged.preferences.flatMap(PreferencesPane.Purpose.init(rawValue:)) { session.preferencesPurpose = page }
+        guard (try? await Task.sleep(for: .milliseconds(300))) != nil else { return }
+        // **The steps first, and what is opened after them.** A step may change the timeline in
+        // front, and that ends a walk: a post opened before the steps was shut again by them,
+        // and every picture of an opened post since timelines were staged was of the list.
+        for step in staged.steps {
+            guard (try? await Task.sleep(for: .milliseconds(500))) != nil else { return }
+            take(step, of: staged)
+        }
+        if !staged.steps.isEmpty {
+            guard (try? await Task.sleep(for: .milliseconds(400))) != nil else { return }
+        }
+        if let row = staged.opens { _ = openThread(row) }
+        if staged.composing, availability.canCompose { composing = true }
+        if let url = staged.reads { _ = linkReader.open(url) }
+        if let host = staged.signsIn { session.signingIn = ForumSignInRequest(host: host, stop: .noCredential) }
+        // Said again before it goes, for as long as the launch lasts.
+        if let says = staged.says {
+            for tick in 1... {
+                session.toast = ShellToast(tick: -tick, text: says)
+                guard (try? await Task.sleep(for: .seconds(1))) != nil else { return }
+            }
+        }
+    }
+
+    /// Whether something is drawn over the shell in this same view (#305): the opened picture,
+    /// the keys' guide, the landing. Every question, the composer, the editor, a sign-in, the
+    /// list of timelines and a link read out of a post on a phone are sheets — views of their
+    /// own, which a gesture on them never reaches the shell through.
+    static func covered(viewing: Bool, shortcuts: Bool, landing: Bool) -> Bool {
+        viewing || shortcuts || landing
+    }
+
+    /// One step of a staged launch, done as the person's own press or scroll would do it.
+    private func take(_ step: ShellStaged.Step, of staged: ShellStaged) {
+        switch step {
+        case .scroll(let down): staged.scroll?(down)
+        case .all: session.timelineID = .all
+        case .trends: session.timelineID = .trends
+        case .empty:
+            if !session.written.contains(where: { $0.name == "Nobody" }),
+               let nobody = Rule.author("@nobody@nowhere.example", in: .every, sources: []) {
+                var draft = TimelineDraft(new: session.written.count + 1)
+                draft.name = "Nobody"
+                draft.rules = [nobody]
+                draft.position = session.written.count
+                session.commit(draft)
+            }
+            if let made = session.written.first(where: { $0.name == "Nobody" }) { session.timelineID = .written(made.id) }
+        case .timelines:
+            let host = session.sources.first?.host ?? ""
+            let written: [(String, Rule?)] = [
+                ("A timeline with a rather long name, to see where a long name goes", Rule.author("@ada@\(host)", in: .every, sources: [])),
+                ("From a source that left", Rule.source("gone.example")),
+                ("Lin", Rule.author("@lin@\(host)", in: .every, sources: [])),
+            ]
+            for (name, rule) in written {
+                guard let rule else { continue }
+                var draft = TimelineDraft(new: session.written.count + 1)
+                draft.name = name
+                draft.rules = [rule]
+                draft.position = session.written.count
+                session.commit(draft)
+            }
+            // Writing one puts it in front; the one that was in front is put back before
+            // anything is drawn, so no timeline is switched to that nobody pressed for.
+            session.goToTimeline(at: 0)
+        case .go(let index): session.goToTimeline(at: index)
+        case .list: session.timelineListShown = true
+        case .unvisited: session.timelinePlaces = TimelinePlaces()
+        case .reload: _ = reload()
+        case .refused:
+            if session.sources.count > 1 { session.rowRefusal = (host: session.sources[1].host, key: "account.bookmarks.failed") }
+        case .slid(let page, let share):
+            let slide = session.slide(page)
+            slide.x = -CGFloat(share) * slide.width
+            slide.lean = CGFloat(share)
+        case .tabsList(let page): session.slide(page).listShown = true
+        case .editor: session.newTimeline()
+        case .usageNext:
+            let tabs = Array(UsagePane.Purpose.allCases)
+            if let to = TimelineSwipe.target(from: tabs.firstIndex(of: session.usagePurpose), count: tabs.count, step: 1) {
+                session.usagePurpose = tabs[to]
+            }
+        case .next: session.stepTimeline(by: 1)
+        case .previous: session.stepTimeline(by: -1)
+        }
     }
 
     /// `Return`: the conversation around the post the lamp is on.

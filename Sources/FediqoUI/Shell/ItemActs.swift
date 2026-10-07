@@ -213,3 +213,125 @@ enum ItemActs {
         }
     }
 }
+
+/// One mark under a post, as it is drawn and as the row's menu offers it (#306): what it is,
+/// its glyph, what it is called, whether it is done, and the count beside it.
+struct RowMark: Identifiable, Equatable {
+    enum Kind: Hashable {
+        /// One of #54's acts, done on the post.
+        case act(PostAct)
+        /// An act this sign-in must be asked again for first (#285): a press puts the question.
+        case ask(PostAct)
+        /// Keeping the row on this device (#284).
+        case keep
+        /// Marks that are drawn and do nothing yet but say so.
+        case quote, more
+    }
+
+    let kind: Kind
+    let symbol: String
+    let label: String
+    let on: Bool
+    let count: Int?
+
+    var id: Kind { kind }
+
+    /// Whether a press does something: the two that only say they are not built yet are drawn
+    /// on the row, where a gap would be noticed, and are not offered in a menu.
+    var acts: Bool { kind != .quote && kind != .more }
+
+    /// Whether a press takes something away for good: said as such where a menu can say it.
+    /// It asks first all the same.
+    var destroys: Bool { kind == .act(.withdraw) }
+
+    /// Whether this is the bookmark, asked for or not.
+    var isBookmark: Bool { kind == .act(.bookmark) || kind == .ask(.bookmark) }
+}
+
+extension ItemActs {
+    /// The marks under a post, in the order they are drawn — **the one list the row's line of
+    /// marks and its menu are both made from** (#306), so neither can offer what the other
+    /// does not.
+    ///
+    /// An act is here only where the post offers it and the list has somewhere for the press to
+    /// go, exactly as its mark has always been drawn; keeping is on every row.
+    static func marks(on item: DummyItem, acting: ItemActing, language: DummyLanguage? = nil) -> [RowMark] {
+        func act(_ act: PostAct) -> RowMark? {
+            guard acting.acts.offers(act), acting.perform != nil else { return nil }
+            let shown = mark(act, on: item, acting: acting, language: language)
+            return RowMark(
+                kind: .act(act), symbol: shown.symbol, label: shown.spoken, on: shown.done,
+                count: (shown.count ?? 0) > 0 ? shown.count : nil
+            )
+        }
+        func plain(_ kind: RowMark.Kind, _ symbol: String, _ key: String, on: Bool = false) -> RowMark {
+            RowMark(kind: kind, symbol: symbol, label: L10n.t(key, language: language), on: on, count: nil)
+        }
+        let bookmark: RowMark? = acting.acts.asks(.bookmark) && acting.ask != nil
+            ? RowMark(kind: .ask(.bookmark), symbol: "bookmark.slash", label: askLine(.bookmark, language: language), on: false, count: nil)
+            : act(.bookmark)
+        let all: [RowMark?] = [
+            act(.answer), act(.boost), plain(.quote, "quote.bubble", "item.act.quote"), act(.favourite),
+            bookmark,
+            plain(.keep, item.kept ? "archivebox.fill" : "archivebox", DummyItemRow.keepName(item), on: item.kept),
+            act(.withdraw), plain(.more, "ellipsis", "item.act.more"),
+        ]
+        return all.compactMap { $0 }
+    }
+
+    /// What the row's menu offers: every mark that does something. **Nothing in a menu is a
+    /// press that does nothing**, so keeping is offered only where the list has somewhere for
+    /// it to go — its mark is drawn on every row all the same, to keep the line one line.
+    static func menu(on item: DummyItem, acting: ItemActing, language: DummyLanguage? = nil) -> [RowMark] {
+        marks(on: item, acting: acting, language: language).filter { mark in
+            mark.acts && (mark.kind != .keep || acting.keep != nil)
+        }
+    }
+
+    /// The gap a mark asks for before it: the marks that keep a post stand a little apart from
+    /// the ones that pass it on, and the first of them opens the group.
+    static func gap(before mark: RowMark, among marks: [RowMark]) -> CGFloat? {
+        if mark.isBookmark { return ShellSpace.room }
+        if mark.kind == .keep, !marks.contains(where: \.isBookmark) { return ShellSpace.room }
+        return nil
+    }
+
+    /// How many heads have been built: a count a test reads, to hold that a row drawn and
+    /// never pressed builds none.
+    #if DEBUG
+    nonisolated(unsafe) static var headsBuilt = 0
+    #endif
+
+    /// What heads the row's menu (#306): what a pointer resting on the row's parts is told, for
+    /// a reader with no pointer to rest — **in the words those parts already say**. Who
+    /// reblogged it and when; exactly when it was published; who may read it; that it was
+    /// changed, is gone at its source, or that its source has left; and the source.
+    ///
+    /// **Who wrote it first, by name and whole handle** — a narrow row draws the handle only
+    /// where it has room (#302), and this is where a finger finds it. **And last, why no act is
+    /// offered where none is** (`refused`), in the sentence the row says under itself, so a
+    /// menu with only keeping in it says why.
+    static func head(
+        for item: DummyItem, here: Set<String>?, refused: PostActRefusal? = nil, language: DummyLanguage? = nil
+    ) -> [String] {
+        #if DEBUG
+        headsBuilt += 1
+        #endif
+        var lines: [String] = [DummyItemRow.spokenNames(item)]
+        if let reblog = DummyItemRow.spokenReblog(item, language: language) {
+            lines.append(reblog)
+        } else if let arrived = DummyItemRow.reblogLine(item, language: language) {
+            lines.append(arrived)
+        }
+        lines.append(DummyItemRow.exact(DummyItemRow.headerTime(item)))
+        if let audience = item.audience { lines.append(DummyItemRow.spokenAudience(audience)) }
+        if let editedAt = item.editedAt {
+            lines.append(DummyItemRow.changedDetail(editedAt, earlier: item.earlier.count, language: language))
+        }
+        if item.postGone { lines.append(L10n.t("item.gone.detail", language: language)) }
+        if DummyItemRow.sourceLeft(item, here: here) { lines.append(L10n.t("item.left.detail", language: language)) }
+        lines.append(DummyItemRow.spokenSource(item, language: language))
+        if let refused { lines.append(refusalLine(refused, language: language)) }
+        return lines
+    }
+}

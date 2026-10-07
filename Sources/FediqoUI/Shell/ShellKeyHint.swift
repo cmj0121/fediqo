@@ -36,7 +36,41 @@ enum ShellKeyboard {
         #if os(macOS)
         true
         #else
-        GCKeyboard.coalesced != nil
+        !stagedAbsent && GCKeyboard.coalesced != nil
+        #endif
+    }
+
+    /// A launch made for a picture stands as a device with no keyboard (`ShellStaged`): a
+    /// simulator reports the keyboard of the Mac it runs on, and a phone has none. Never set
+    /// by anything a reader launches.
+    @MainActor static var stagedAbsent = false
+}
+
+/// Whether there is a keyboard, as something a view can read and be drawn again by (#303): the
+/// same question `ShellKeyboard.present` answers, kept current as one comes and goes.
+///
+/// One for the app. `ShellWithKeyboard` asks for itself, per hint; what the lists do under a
+/// finger is asked here once and handed down as `\.shellTouch`.
+@MainActor
+@Observable
+final class ShellHands {
+    static let shared = ShellHands()
+
+    private(set) var keyboard = ShellKeyboard.present
+
+    /// Whether there is nothing here but a finger.
+    var touch: Bool { Self.touch(keyboard: keyboard) }
+
+    /// A Mac always has a keyboard, so it is never touch; an iPhone or iPad is while none is attached.
+    nonisolated static func touch(keyboard: Bool) -> Bool { !keyboard }
+
+    private init() {
+        #if os(iOS)
+        for name in [Notification.Name.GCKeyboardDidConnect, .GCKeyboardDidDisconnect] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.keyboard = ShellKeyboard.present }
+            }
+        }
         #endif
     }
 }

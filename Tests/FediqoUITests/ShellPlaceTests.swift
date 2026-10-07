@@ -431,6 +431,23 @@ struct DummyPrefsTests {
         #expect(DummyFontSize.standard.dynamicType < DummyFontSize.largest.dynamicType)
     }
 
+    @Test("In the hand every step of type is one rung smaller than on a desk, and the steps keep their order")
+    func typeInTheHandIsARungSmaller() {
+        let ladder: [DynamicTypeSize] = [
+            .xSmall, .small, .medium, .large, .xLarge, .xxLarge, .xxxLarge, .accessibility1,
+        ]
+        for step in DummyFontSize.allCases {
+            let desk = ladder.firstIndex(of: step.rung(held: false))
+            let hand = ladder.firstIndex(of: step.rung(held: true))
+            #expect(desk != nil && hand != nil && hand == desk.map { $0 - 1 }, "\(step) is one rung down")
+        }
+        #expect(DummyFontSize.standard.rung(held: true) == .xLarge, "Default in the hand is still above system large")
+        let held = DummyFontSize.allCases.map { $0.rung(held: true) }
+        #expect(held == held.sorted() && Set(held).count == held.count)
+        // A Mac reads from the desk's ladder, which is the one it always had.
+        #expect(DummyFontSize.allCases.allSatisfy { $0.dynamicType == $0.rung(held: false) })
+    }
+
     @Test("A chosen language loads that lproj")
     func chosenLanguageLoadsThatCatalog() {
         #expect(L10n.t("shell.timeline.title", language: .english) == "Timeline")

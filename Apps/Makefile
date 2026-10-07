@@ -59,7 +59,7 @@ BUILD_NUMBER   = $(shell $(ROOT)/scripts/version.sh --build)
 SOURCE         = $(shell $(ROOT)/scripts/version.sh --source)
 STAMP          = MARKETING_VERSION=$(VERSION) CURRENT_PROJECT_VERSION=$(BUILD_NUMBER) $(SOURCE)
 
-.PHONY: all run mac ios uitest uitest-ios publish shots shots-macos shots-ios shots-widths version xcodeproj sync-assets clean test build upgrade help
+.PHONY: all run mac ios uitest uitest-ios publish shots shots-macos shots-ios shots-widths shots-phone version xcodeproj sync-assets clean test build upgrade help
 
 all: help			# default action
 
@@ -149,6 +149,17 @@ shots-ios: xcodeproj	# photograph the phone and the iPad, both languages
 # is uploaded whole, so an extra picture there is an extra picture on a listing.
 shots-widths: xcodeproj	# photograph 440, 700 and 1024 points, smallest and largest text
 	@$(ROOT)/scripts/shots.sh --widths
+
+# A phone with posts on it, at 320, 375 and its own width, and an iPad beside them (#301). Kept
+# under a name, so what a change did is seen beside what was there:
+#
+#     make -C Apps shots-phone SHOTS=before
+#
+# The posts are the app's own stand-ins (`Apps/Shared/Staged.swift`): no server is asked and
+# nothing the person holds is read.
+SHOTS ?= now
+shots-phone: xcodeproj	# photograph a phone with posts on it into .build/shots-phone/$(SHOTS)
+	@$(ROOT)/scripts/shots.sh --phone $(SHOTS)
 
 version:			# show the version a build made here would report
 	@echo "$(VERSION) ($(BUILD_NUMBER))"

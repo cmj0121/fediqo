@@ -41,8 +41,27 @@ struct PreferencesPane: View {
         case reach
         case hosts
         case move
+        /// What a finger does (#308). Only where there is no keyboard: with one, the keys' own
+        /// guide is the place.
+        case gestures
 
         var id: Self { self }
+
+        /// **The six pages every reader has.** The gestures are a seventh only where there is
+        /// no keyboard, so they are not among "all": what is counted, walked by Tab and named
+        /// in the keys' guide is the six.
+        static let allCases: [Purpose] = [.choices, .build, .work, .reach, .hosts, .move]
+
+        /// The pages offered: the six, and under a finger the gestures after them.
+        static func shown(touch: Bool) -> [Purpose] {
+            touch ? allCases + [.gestures] : allCases
+        }
+
+        /// The page drawn for the one asked for: itself where it is offered, and the first page
+        /// where it is not — a keyboard attached while the gestures were in front.
+        static func drawn(_ asked: Purpose, touch: Bool) -> Purpose {
+            shown(touch: touch).contains(asked) ? asked : .choices
+        }
 
         var titleKey: String {
             switch self {
@@ -52,6 +71,7 @@ struct PreferencesPane: View {
             case .reach: "prefs.tab.reach"
             case .hosts: "prefs.tab.hosts"
             case .move: "prefs.tab.move"
+            case .gestures: "prefs.tab.gestures"
             }
         }
 
@@ -63,6 +83,7 @@ struct PreferencesPane: View {
             case .reach: "checkmark.shield"
             case .hosts: "globe"
             case .move: "arrow.left.arrow.right"
+            case .gestures: "hand.draw"
             }
         }
     }
@@ -87,7 +108,15 @@ struct PreferencesPane: View {
     /// Where the detail is kept with no shell round the pane — a preview, a test.
     @State private var unhosted: Detail?
 
-    private var purpose: Purpose { session?.preferencesPurpose ?? .choices }
+    @Environment(\.shellTouch) private var touch
+    @Environment(\.shellLayout) private var shellLayout
+    /// Whether the tabs are one head over the list (#305): on a narrow page.
+    private var headed: Bool { ShellTabs<Purpose>.headed(shellLayout, count: Purpose.shown(touch: touch).count) }
+    @State private var ownSlide = PageSlide()
+    /// How far what is under the tabs has been slid by a sideways swipe (#305).
+    private var slide: PageSlide { session?.slide("preferences") ?? ownSlide }
+
+    private var purpose: Purpose { Purpose.drawn(session?.preferencesPurpose ?? .choices, touch: touch) }
 
     /// The detail open, on the session where there is one, so Escape reaches it.
     private var opened: Binding<Detail?> {
@@ -101,9 +130,16 @@ struct PreferencesPane: View {
 
     var body: some View {
         Form {
-            Section { tabs }
-            page
+            // **On a narrow page the tabs are one head, over the list and not in it** (#305):
+            // the whole of what is under the head then follows a swipe as one. A wide page
+            // keeps its row of tabs where it was, in the list.
+            if !headed { Section { tabs } }
+            // On a wide page the tabs are a row in the list, and what is under them follows a
+            // swipe row by row.
+            Group { page }.modifier(Slid(slide: slide, applies: headed ? false : nil))
         }
+        // On a narrow one the tabs are one head over the list, and the whole list follows.
+        .modifier(TabsOverForm(headed: headed, slide: slide) { tabs })
         .formStyle(.grouped)
         // **The pane the type size is chosen on has to move with it** (#96). A `Form`'s rows
         // take the platform's own font unless they are told otherwise, and on a Mac that font
@@ -117,6 +153,18 @@ struct PreferencesPane: View {
         .scrollIndicators(.never)
         .clearsFloatingCorner()
         .padding(ShellSpace.snug)
+        // A keyboard attached with the gestures in front: the page drawn is the first, and the
+        // session is told so, so that Tab, Escape and a detail all go by the page on screen.
+        .onChange(of: touch) { _, now in
+            guard let session, session.preferencesPurpose != Purpose.drawn(session.preferencesPurpose, touch: now) else { return }
+            session.preferencesPurpose = Purpose.drawn(session.preferencesPurpose, touch: now)
+        }
+        // A sideways swipe goes to the tab beside, and back out of a row's detail (#305).
+        .modifier(SwipesTabs(
+            slide: slide, tabs: Purpose.shown(touch: touch), selected: purpose,
+            detail: opened.wrappedValue != nil, back: { opened.wrappedValue = nil },
+            select: { session?.preferencesPurpose = $0 }
+        ))
         .modifier(CarryFlow(session: session))
         .modifier(NearbyFlow(session: session))
     }
@@ -135,6 +183,7 @@ struct PreferencesPane: View {
                 returning: session?.preferencesReturning, onTyping: typing
             )
         case .move: move
+        case .gestures: GesturesSection()
         }
     }
 
@@ -225,7 +274,7 @@ struct PreferencesPane: View {
     /// The page's tabs (`ShellTabs`), in the Form so the grouped chrome is the page's own. Tab
     /// rotates them (`ShellSession.rotatePreferencesTab`).
     private var tabs: some View {
-        ShellTabs(Purpose.allCases, selected: purpose) { session?.preferencesPurpose = $0 }
+        ShellTabs(Purpose.shown(touch: touch), selected: purpose, slide: slide) { session?.preferencesPurpose = $0 }
     }
 
     /// Off is no latest date. Turning it on starts at today, the date that hides nothing yet.

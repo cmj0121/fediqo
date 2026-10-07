@@ -1,0 +1,193 @@
+import Foundation
+import SwiftUI
+
+/// Where a launch is put with nothing pressed: a place, a post opened on it, the composer over it.
+///
+/// **For a picture, and for nothing a reader does.** `scripts/shots.sh` photographs the app and
+/// may not press anything — a hosted runner will not grant what driving an app needs (#30), and
+/// this story takes no driven tests (#300) — so a screen that has to be arrived at is arrived at
+/// here, once, when the store has said what is held. The app hands one over only in a debug
+/// build launched for a picture; every other launch hands over nothing and this is never read.
+///
+/// **It names where to stand and never how to get there.** `FediqoRootView.arrive(at:)` goes by
+/// the functions a press goes through, so a picture cannot show a state the app would refuse a
+/// reader.
+public struct ShellStaged: Sendable {
+    /// The place to stand on, or the one the launch landed on.
+    public var place: ShellPlace?
+    /// The row whose conversation is opened, as `NoteKey.rowID` names it. Only on the timeline.
+    public var opens: String?
+    /// Whether the composer is up, where the reader may write.
+    public var composing: Bool
+    /// A sentence said at the foot of the timeline, and kept there: a notice is gone in two
+    /// seconds, which is before a picture is taken.
+    public var says: String?
+    /// The page read out of a post's words, as a press on its hyperlink would open it.
+    public var reads: URL?
+    /// The forum whose sign-in is asked for, as a read that needed one would ask.
+    public var signsIn: String?
+    /// What is then done to the list, one step after another with a moment between: what a
+    /// person would have scrolled and pressed to get a picture's state.
+    public var steps: [Step]
+    /// How the list is scrolled, which only the app can do: it is the one with the device's
+    /// own scroll view to reach. Nothing, and a step that scrolls does nothing.
+    public var scroll: (@MainActor @Sendable (_ down: CGFloat) -> Void)?
+    /// Whether the picture is of what the rows' menus say (#306): for the first few posts, the
+    /// head and the acts, written out plainly. A menu cannot be raised without a press, so its
+    /// words are photographed this way; how the menu itself looks is the system's.
+    public var menus: Bool
+    /// Whether the line over the picture counts the scroll views that want the press on the
+    /// top of the screen (#308), in place of what the list reports.
+    public var counts: Bool = false
+    /// The page of Preferences put in front, by its name, where the picture is of one.
+    public var preferences: String?
+    /// Whether the picture says, in a line over the page, which row the list reports at its
+    /// top, which it reports as the first wholly on screen, and which is marked as being read
+    /// (#303) — what a picture cannot otherwise show of a report nobody draws.
+    public var reports: Bool
+
+    /// One thing done to the list.
+    public enum Step: Hashable, Sendable {
+        /// The list scrolled this many points down from its start.
+        case scroll(CGFloat)
+        /// The timeline of every post.
+        case all
+        /// The timeline of what is rising, which holds posts where the launch was given some.
+        case trends
+        /// A timeline of the person's own that no post is under.
+        case empty
+        /// Timelines of the person's own, written as they would have written them: one with a
+        /// long name, one whose rule names a source that is not here, and one more.
+        case timelines
+        /// The timeline at this place among them all, from nought, put in front.
+        case go(Int)
+        /// The list of every timeline, up.
+        case list
+        /// Every timeline as one never visited: writing them above put each in front in turn,
+        /// which no person did.
+        case unvisited
+        /// The reload mark pressed, as `r` presses it (#307).
+        case reload
+        /// A source's row with something to say: a refusal against the second source (#302).
+        case refused
+        /// The list a page's name opens, up, by the page's name.
+        case tabsList(String)
+        /// The timeline editor, up, on a new timeline.
+        case editor
+        /// A page held part-way through a slide, by the page's name and the share of its width:
+        /// what a swipe looks like while the finger is still on it.
+        case slid(String, Double)
+        /// Usage's tab beside the one in front: what a swipe there ends in (#305).
+        case usageNext
+        /// One timeline on, or back: what a swipe does once it is let go (#305).
+        case next
+        case previous
+    }
+
+    /// Whether the launch stands as a device with no keyboard: a simulator reports the keyboard
+    /// of the Mac it runs on, and a phone has none (`ShellKeyboard.stagedAbsent`).
+    public var noKeyboard: Bool
+
+    public init(
+        place: ShellPlace? = nil, opens: String? = nil, composing: Bool = false, says: String? = nil,
+        reads: URL? = nil, signsIn: String? = nil, noKeyboard: Bool = false, steps: [Step] = [],
+        reports: Bool = false, menus: Bool = false
+    ) {
+        self.place = place
+        self.opens = opens
+        self.composing = composing
+        self.says = says
+        self.reads = reads
+        self.signsIn = signsIn
+        self.noKeyboard = noKeyboard
+        self.steps = steps
+        self.reports = reports
+        self.menus = menus
+    }
+}
+
+/// What the list reports and what is marked, written over a picture made to show it (#303).
+///
+/// None of the three is observed — that is the point of how they are kept — so the line is
+/// drawn again on a clock. Only a staged launch that asks for it draws this.
+struct StagedReport: View {
+    let session: ShellSession
+    /// The scroll views' count in place of the list's report.
+    var counts = false
+
+    /// A row's own number, which is the end of its id: enough to tell rows apart in a picture.
+    static func short(_ row: String?) -> String {
+        guard let row else { return "none" }
+        return row.split(separator: "/").last.map(String.init) ?? row
+    }
+
+    static func line(top: String?, whole: String?, marked: String?, kept: String?) -> String {
+        "top \(short(top)) · whole \(short(whole)) · marked \(short(marked)) · kept \(short(kept))"
+    }
+
+    /// How many scroll views on screen want the press on the top of the screen (#308).
+    @MainActor
+    static var toTop: String {
+        #if os(iOS)
+        let count = ScrollsToTopCount.now()
+        return "to top: \(count.wanting) of \(count.all) scroll views"
+        #else
+        return ""
+        #endif
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+            let mark = session.readingMark
+            Text(counts ? Self.toTop : Self.line(top: session.scrolledTop, whole: mark.whole.first, marked: mark.id, kept: mark.kept))
+                .font(.caption2.monospaced())
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(.yellow, in: Capsule())
+                .foregroundStyle(.black)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// What the menus of the first few rows say, written out (#306). Only a staged launch draws it.
+struct StagedMenus: View {
+    let session: ShellSession
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.shellSourcesHere) private var here
+
+    var body: some View {
+        let items = Array(session.timelineItems(latest: nil).prefix(3))
+        ScrollView {
+            VStack(alignment: .leading, spacing: ShellSpace.step) {
+                ForEach(items) { item in
+                    var acting = session.acting(on: item)
+                    let _ = acting.perform = { _ in }
+                    let _ = acting.keep = {}
+                    let _ = acting.ask = { _ in }
+                    VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                        Text(item.author).shellFont(.name, weight: .semibold)
+                        ForEach(ItemActs.head(for: item, here: here, refused: acting.acts.refused), id: \.self) { line in
+                            Text(line).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
+                        }
+                        ShellRule()
+                        ForEach(ItemActs.menu(on: item, acting: acting)) { mark in
+                            Label(mark.label, systemImage: mark.symbol).shellFont(.body)
+                        }
+                        if item.outwardURL != nil {
+                            ShellRule()
+                            Label(item.outwardName, systemImage: "arrow.up.forward.app").shellFont(.body)
+                        }
+                    }
+                    .padding(ShellSpace.step)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(ShellChrome.well(colorScheme), in: RoundedRectangle(cornerRadius: ShellSpace.step))
+                }
+            }
+            .padding(ShellSpace.pad)
+        }
+        .background(ShellChrome.page(colorScheme))
+    }
+}

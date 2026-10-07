@@ -5,6 +5,7 @@
 #   scripts/shots.sh --macos      # both languages, 1280x800
 #   scripts/shots.sh --ios        # both languages, both devices the store requires
 #   scripts/shots.sh --widths     # the four corners S9 is judged at -- not for the store
+#   scripts/shots.sh --phone      # a phone with posts on it, narrowest to widest -- not for the store
 #
 # What a person does is look at them and judge them. Nobody takes them, nobody crops them, and
 # nobody drags a window to the right size -- which is the whole of #30.
@@ -300,9 +301,137 @@ widths() {
     done < <(find "$out" -name '*.png' | sort)
 }
 
+# ── a phone, with posts on it ────────────────────────────────────────────────────────────────
+
+# What the app looks like on a phone, to be looked at before and after a change (#301).
+#
+# **Not store pictures and not committed**, for the reason the corners above are not: .build/ is
+# gitignored and `fastlane/screenshots/` is uploaded whole. Each run is kept under its own name --
+# `scripts/shots.sh --phone before` -- so a later run is laid beside an earlier one rather than
+# over it.
+#
+# **The posts come from nowhere.** The app is launched with `FEDIQO_STAGED=1`, which a debug
+# build answers with a store made in memory and a transport that answers every question itself:
+# no server is asked, and nothing the person holds -- store, sign-in, preferences written down --
+# is read. See `Apps/Shared/Staged.swift`, which is also where a screen is added: nothing here
+# presses anything, so a screen is a value of `FEDIQO_STAGED_SCREEN` or it is not photographed.
+#
+# The text size and the language are the app's own preferences handed over as launch arguments,
+# which the defaults read ahead of anything written down, so nothing is written down.
+#
+# ## The widths
+#
+# 320 and 375 are phones no simulator here is: the narrowest this Xcode ships is 390 points. So
+# the app makes its window that wide on the widest phone there is -- `FEDIQO_STAGED_WIDTH` --
+# and the picture is cut to the window. A sheet is laid out in its window, so the composer is
+# narrowed with the rest. **What that is not:** a small phone's height or its safe areas. The
+# window keeps the large phone's, so these are pictures of a width and of nothing else.
+#
+# The phone as it stands is the third, and an iPad the fourth: the one arrangement here that
+# writes every timeline's name in a row, which a phone at any width does not.
+# `SHOTS_SCREENS="compose notice"` takes those alone, for looking at one screen while it is worked on.
+# shellcheck disable=SC2206
+PHONE_SCREENS=(${SHOTS_SCREENS:-timeline post compose preferences notice link signin cut returned emptied named lost list swiped ended fresh menu loading gestures tops topspost topsprefs loadingpost onempty fromempty usage usagenext account midslide usagemid usagelist preflist accountlist editor editorlist loadingempty about opened back ownback lastback})
+PHONE_WIDTHS=(320 375 whole)
+PHONE_SCALES=(smallest default largest)
+
+# The newest of a kind this Xcode has, found rather than named -- the reason `UITEST_IOS_ID` in
+# Apps/Makefile is found: a device named here exists on one machine and not on the next.
+newest() {
+    local found
+    found="$(xcrun simctl list devices available | grep -E "^ *$1" | tail -1 | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')"
+    [ -n "$found" ] || { echo >&2 "shots: this Xcode has no simulator matching '$1'"; return 1; }
+    printf '%s' "$found"
+}
+
+# One device, every screen at every size of text, at each of the widths named.
+#   stage <udid> <pixels per point> <as a phone: 1 or nothing> <out> <width>...
+# As a phone: no keyboard (#303), and with timelines of the person's own (#304). The iPad is
+# photographed as it was before there was either, so its pictures say whether a wide page changed.
+stage() {
+    local udid="$1" density="$2" phone="$3" out="$4"; shift 4
+    local keyboard=1; [ -n "$phone" ] && keyboard=""
+    local was
+    was="$(xcrun simctl list devices | grep -F "$udid" | grep -c Booted || true)"
+    xcrun simctl bootstatus "$udid" -b >/dev/null 2>&1 || xcrun simctl boot "$udid" >/dev/null 2>&1 || true
+    xcrun simctl bootstatus "$udid" -b >/dev/null 2>&1 || true
+    # The same clock and the same light in every picture, so two runs differ only where the app does.
+    xcrun simctl status_bar "$udid" override --time "9:41" >/dev/null 2>&1 || true
+    xcrun simctl ui "$udid" appearance light >/dev/null 2>&1 || true
+    xcrun simctl install "$udid" "$IOS_APP" >/dev/null
+    # A simulator just booted has things of its own to say over the first picture.
+    [ "$was" = 0 ] && sleep 15
+
+    local wide screen scale file width
+    for wide in "$@"; do
+        for screen in "${PHONE_SCREENS[@]}"; do
+            for scale in "${PHONE_SCALES[@]}"; do
+                xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
+                env SIMCTL_CHILD_FEDIQO_STAGED=1 \
+                    SIMCTL_CHILD_FEDIQO_STAGED_SCREEN="$screen" \
+                    SIMCTL_CHILD_FEDIQO_STAGED_WIDTH="$wide" \
+                    SIMCTL_CHILD_FEDIQO_STAGED_KEYBOARD="$keyboard" \
+                    SIMCTL_CHILD_FEDIQO_STAGED_TIMELINES="$phone" \
+                    xcrun simctl launch "$udid" "$BUNDLE_ID" \
+                        -fediqo.dummy.language "${SHOTS_LANGUAGE:-en}" -fediqo.dummy.fontSize "$scale" >/dev/null
+                # Long enough for a launch and the steps a staged screen takes. A machine busy
+                # with something else needs longer, or the picture is of a launch half done:
+                # `SHOTS_WAIT=12`.
+                sleep "${SHOTS_WAIT:-4}"
+                file="$out/shot.png"
+                xcrun simctl io "$udid" screenshot "$file" >/dev/null 2>&1
+                [ -f "$file" ] || { echo >&2 "shots: no picture of $screen at $wide, $scale"; return 1; }
+                # `sips -c` cuts about the middle, which is where the app put its window.
+                if [ "$wide" != whole ]; then
+                    sips -c "$(sips -g pixelHeight "$file" | awk '/pixelHeight/ {print $2}')" \
+                        "$((wide * density))" "$file" >/dev/null
+                fi
+                # Named for the width it came out at, in points, so the name is what was measured.
+                width="$(( $(sips -g pixelWidth "$file" | awk '/pixelWidth/ {print $2}') / density ))"
+                say "  $out/$screen-$width-$scale.png"
+                mv "$file" "$out/$screen-$width-$scale.png"
+            done
+        done
+    done
+    xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
+    xcrun simctl status_bar "$udid" clear >/dev/null 2>&1 || true
+    # Only one this run booted is shut down: a simulator somebody has open is theirs.
+    [ "$was" = 0 ] && xcrun simctl shutdown "$udid" >/dev/null 2>&1
+    return 0
+}
+
+phone() {
+    local out=".build/shots-phone/${1:-now}"
+    local handset tablet
+    handset="$(newest 'iPhone .*Pro Max')" || return 1
+    tablet="$(newest 'iPad Pro 13')" || return 1
+
+    say "building the iOS app"
+    make -C Apps ios >/dev/null
+    [ -d "$IOS_APP" ] || { echo >&2 "shots: no iOS app at $IOS_APP"; return 1; }
+
+    # A run of every screen starts from nothing; a run of some replaces those and keeps the rest.
+    [ -n "${SHOTS_SCREENS:-}" ] || rm -rf "$out"
+    mkdir -p "$out"
+    # The phone as a phone is: nothing but a finger. The iPad with a keyboard attached, which is
+    # what it was photographed with before there was a difference (#303), so its pictures still
+    # say whether a wide page has changed.
+    stage "$handset" 3 1 "$out" "${PHONE_WIDTHS[@]}"
+    stage "$tablet" 2 "" "$out" whole
+
+    say ""
+    say "$out:"
+    local file
+    while IFS= read -r file; do
+        printf '  %-44s %s\n' "${file#$out/}" \
+            "$(sips -g pixelWidth -g pixelHeight "$file" | awk '/pixel/ {printf "%s ", $2}')"
+    done < <(find "$out" -name '*.png' | sort)
+}
+
 case "${1:-}" in
     --macos)  macos ;;
     --ios)    ios ;;
     --widths) widths ;;
-    *)        echo >&2 "usage: ${0##*/} [--macos | --ios | --widths]"; exit 2 ;;
+    --phone)  phone "${2:-}" ;;
+    *)        echo >&2 "usage: ${0##*/} [--macos | --ios | --widths | --phone [name]]"; exit 2 ;;
 esac

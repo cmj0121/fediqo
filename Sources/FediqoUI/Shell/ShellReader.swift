@@ -239,7 +239,12 @@ struct LinkReaderSheet: View {
                 // The floors stay what they were. They are the phone's case — a floor wide enough
                 // for a desktop would be wider than the screen — and an ideal is a preference a
                 // small screen is free to ignore, which is exactly the difference wanted here.
-                .frame(minWidth: 380, idealWidth: 800, minHeight: 480, idealHeight: 600)
+                //
+                // **And they are a Mac's** (#302): 380 is wider than the narrowest phone, where
+                // the sheet is the screen's width whatever is asked, so the floor there only put
+                // the header and the foot's buttons outside it.
+                .shellSheetFloor(width: 380, height: 480)
+                .frame(idealWidth: 800, idealHeight: 600)
         }
     }
 

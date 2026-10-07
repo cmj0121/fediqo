@@ -64,13 +64,27 @@ public enum DummyFontSize: String, CaseIterable, Identifiable, Sendable {
 
     /// The whole ladder sits one rung above the system's, so Default is a step
     /// larger than a stock app and every other step keeps its distance from it.
+    ///
+    /// **On a Mac.** On iOS the same ladder read a little large in the hand, so there it
+    /// stands one rung lower throughout (`rung(held:)`): Default is the system's own next
+    /// size up, and each step is still as far from it as it was.
     var dynamicType: DynamicTypeSize {
+        #if os(iOS)
+        rung(held: true)
+        #else
+        rung(held: false)
+        #endif
+    }
+
+    /// The rung this step stands on: `held` is a device read in the hand, where every step is
+    /// one rung smaller than on a desk. No `default:`, so a step added later has to say.
+    func rung(held: Bool) -> DynamicTypeSize {
         switch self {
-        case .smallest: .medium
-        case .smaller: .large
-        case .standard: .xxLarge
-        case .larger: .xxxLarge
-        case .largest: .accessibility1
+        case .smallest: held ? .small : .medium
+        case .smaller: held ? .medium : .large
+        case .standard: held ? .xLarge : .xxLarge
+        case .larger: held ? .xxLarge : .xxxLarge
+        case .largest: held ? .xxxLarge : .accessibility1
         }
     }
 }

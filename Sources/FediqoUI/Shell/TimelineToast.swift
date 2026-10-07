@@ -21,6 +21,12 @@ struct TimelineToast: Equatable, Sendable {
     var kind: Kind
     var text: String
 
+    /// The widest the capsule is drawn, in points: a sentence is read in a column, not across
+    /// a desktop's whole window.
+    static let measure: CGFloat = 480
+    /// The most lines a sentence too long for one is given before it is cut short.
+    static let lines = 3
+
     /// Notes flash; a wait and a miss stay, because the reader has to act on them.
     var stays: Bool { kind != .note }
 
@@ -118,21 +124,45 @@ struct TimelineToastBanner: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// **One line in a capsule where the sentence fits, and a few lines on a plate where it
+    /// does not** (#302). A sentence too long for the page used to run on for as many lines as
+    /// it took, inside a capsule whose round ends cut its corners, as wide as the page to its
+    /// very edges. Now it is no wider than `TimelineToast.measure` and stands clear of the
+    /// edges — and is still exactly as large as what it says, so a short notice is the capsule
+    /// it was and nothing wider; a sentence that does not fit one line of that breaks, and stops after
+    /// `TimelineToast.lines`. VoiceOver hears the whole of it either way.
     var body: some View {
+        Within(measure: TimelineToast.measure) {
+            ViewThatFits(in: .horizontal) {
+                face(lines: 1)
+                    .background(ShellChrome.well(colorScheme), in: Capsule())
+                face(lines: TimelineToast.lines)
+                    .background(
+                        ShellChrome.well(colorScheme),
+                        in: RoundedRectangle(cornerRadius: ShellSpace.step, style: .continuous)
+                    )
+            }
+        }
+        .foregroundStyle(ShellChrome.ink(colorScheme))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(text))
+        .accessibilityAddTraits(toast.kind == .loading ? .updatesFrequently : [])
+        // Clear of the page's edges, outside the element: what VoiceOver lands on is the notice.
+        .padding(.horizontal, ShellSpace.pad)
+    }
+
+    private func face(lines: Int) -> some View {
         HStack(spacing: ShellSpace.snug) {
             if toast.kind == .loading {
                 waitMark
             }
             Text(text)
                 .shellFont(.meta)
+                .lineLimit(lines)
+                .multilineTextAlignment(.leading)
         }
         .padding(.horizontal, ShellSpace.step)
         .padding(.vertical, ShellSpace.snug)
-        .background(ShellChrome.well(colorScheme), in: Capsule())
-        .foregroundStyle(ShellChrome.ink(colorScheme))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(text))
-        .accessibilityAddTraits(toast.kind == .loading ? .updatesFrequently : [])
     }
 
     /// The sentence: a wait's names what is running, where the reload's pieces are listed.
@@ -153,5 +183,37 @@ struct TimelineToastBanner: View {
                 .controlSize(.small)
                 .accessibilityHidden(true)
         }
+    }
+}
+
+/// Offers a view no more than `measure` across, and is then exactly the size the view came out
+/// at.
+///
+/// **Not a frame**, which is as wide as it is allowed to be: a short notice in a frame of the
+/// measure is an element the measure wide, with a capsule somewhere in the middle of it.
+///
+/// **And nothing is taken off what is offered but the measure.** A layout is asked again at the
+/// size it answered with, so one that took a margin off each time would be offered less than it
+/// had just said it needed, and break its sentence a second time. The room at the page's edges
+/// is padding outside this, which is taken off once.
+struct Within: Layout {
+    var measure: CGFloat
+
+    /// What the view is offered across, of `room` — or the measure where nobody said.
+    static func offered(_ room: CGFloat?, measure: CGFloat) -> CGFloat {
+        guard let room, room.isFinite else { return measure }
+        return max(0, min(measure, room))
+    }
+
+    private func offer(_ proposal: ProposedViewSize) -> ProposedViewSize {
+        ProposedViewSize(width: Self.offered(proposal.width, measure: measure), height: proposal.height)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        subviews.first?.sizeThatFits(offer(proposal)) ?? .zero
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: offer(ProposedViewSize(bounds.size)))
     }
 }

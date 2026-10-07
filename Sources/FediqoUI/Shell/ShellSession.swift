@@ -302,6 +302,13 @@ final class ShellSession {
     @ObservationIgnored let timelineStore: WrittenTimelineStore?
     /// The timeline editor, where it is open. Edits apply on Done (Decision 21).
     var editing: TimelineDraft?
+    /// Whether the list of every timeline is up, on a narrow page (#304).
+    var timelineListShown = false
+    /// What was pressed in that list and is done once the list has gone (`TimelineList.Act`).
+    @ObservationIgnored var timelineListPressed: TimelineList.Act?
+    /// Whether the narrow head — the one name, with the list behind it — is what is drawn at
+    /// the top of the timelines now. Past observation: it is read when something is pressed.
+    @ObservationIgnored var timelineHeadShown = false
     /// A sentence the timeline shows for a moment.
     var toast: ShellToast?
     /// Every held note's folded text, built the first time something reads text after `notes`
@@ -403,6 +410,19 @@ final class ShellSession {
     /// and a redraw of everything that reads this session on every one of those would be the
     /// scroll paying for a note nobody reads until the list is drawn again.
     @ObservationIgnored var scrolledTop: String?
+    /// The post being read under a finger (#303), beside the row it is worked out from and held
+    /// past observation for its reason. See `ShellReadingMark`.
+    @ObservationIgnored let readingMark = ShellReadingMark()
+    /// How far each page that is swiped sideways has been slid (#305), by the page's name.
+    /// Here so the page's head and its body read one, and past observation for the mark's reason.
+    @ObservationIgnored private var slides: [String: PageSlide] = [:]
+
+    func slide(_ page: String) -> PageSlide {
+        if let slide = slides[page] { return slide }
+        let slide = PageSlide()
+        slides[page] = slide
+        return slide
+    }
 
     /// The row one id stands for, anywhere in what this device holds — or nothing, where this
     /// device does not hold it any more.
@@ -639,8 +659,12 @@ final class ShellSession {
     /// Allowed, Your hosts, Move, and round again — closing a detail left open, as a pill does.
     @discardableResult
     func rotatePreferencesTab(by step: Int) -> Bool {
+        // The six: Tab is a key, so there is a keyboard, and the gestures' page is not offered.
+        // Left in front as a keyboard was attached, it is the first page that is drawn, and
+        // that is where Tab goes on from.
         preferencesPurpose = DummyCommand.advanced(
-            Array(PreferencesPane.Purpose.allCases), from: preferencesPurpose, by: step
+            Array(PreferencesPane.Purpose.allCases),
+            from: PreferencesPane.Purpose.drawn(preferencesPurpose, touch: false), by: step
         )
         return true
     }

@@ -133,8 +133,58 @@ extension ShellSession {
     @discardableResult
     func rotateTab(by step: Int) -> Bool {
         guard !queries.isEmpty else { return false }
-        timelineID = DummyCommand.advanced(queries, from: currentTimeline, by: step)
+        goToTimeline(DummyCommand.advanced(queries, from: currentTimeline, by: step))
         return true
+    }
+
+    /// The one way a timeline is put in front (#304): a press on its name, a row of the list,
+    /// Tab — and whatever moves between timelines next. Nothing for one that is not among the
+    /// person's timelines.
+    @discardableResult
+    func goToTimeline(_ query: TimelineQuery) -> Bool {
+        guard queries.contains(query) else { return false }
+        if timelineID != query { timelineID = query }
+        return true
+    }
+
+    /// One timeline on (`1`) or back (`-1`) from the one in front, and nothing past either end
+    /// (#305): what a swipe does, and what VoiceOver's scroll does for a reader who makes none.
+    @discardableResult
+    func stepTimeline(by step: Int) -> Bool {
+        let place = timelinePosition
+        guard let target = TimelineSwipe.target(from: place.index, count: place.count, step: step) else { return false }
+        return goToTimeline(at: target)
+    }
+
+    /// The same by its place among them, from nought; nothing past either end.
+    @discardableResult
+    func goToTimeline(at index: Int) -> Bool {
+        guard queries.indices.contains(index) else { return false }
+        return goToTimeline(queries[index])
+    }
+
+    /// Where the timeline in front stands among them all, from nought, and how many there are.
+    var timelinePosition: (index: Int?, count: Int) {
+        (queries.firstIndex(of: currentTimeline), queries.count)
+    }
+
+    /// What was pressed in the list of timelines, done now that the list has gone — on the
+    /// timeline that was pressed for, and only where it and the head are still there.
+    func timelineListDismissed() {
+        let pressed = timelineListPressed
+        timelineListPressed = nil
+        switch TimelineList.afterDismissal(pressed, among: queries, headShown: timelineHeadShown) {
+        case .new?: newTimeline()
+        case .edit(let query)?: editTimeline(query)
+        case nil: break
+        }
+    }
+
+    /// What the list of timelines offers now. See `TimelineList`.
+    var timelineList: TimelineList {
+        TimelineList.offered(
+            queries, current: currentTimeline, name: name(of:), rule: rule(of:), missing: hasMissingRule
+        )
     }
 
     /// What the stream draws: the query in front, through the one text index this session holds,
@@ -259,7 +309,7 @@ extension ShellSession {
         guard case .written(let id) = currentTimeline,
               let index = written.firstIndex(where: { $0.id == id })
         else {
-            showToast(L10n.t("timeline.edit.fixed"))
+            showToast(L10n.t(TimelineList.fixedNoticeKey(narrow: timelineHeadShown)))
             return true
         }
         edit(TimelineDraft(editing: written[index], at: index, of: written.count))
@@ -268,7 +318,7 @@ extension ShellSession {
 
     /// A pointer on a tab — double-click or long-press — puts it in front, then the same as `e`.
     func editTimeline(_ query: TimelineQuery) {
-        timelineID = query
+        guard goToTimeline(query) else { return }
         _ = editCurrentTimeline()
     }
 

@@ -99,6 +99,7 @@
 "shortcut.tag" = "Open a hashtag of the post: what this device holds under it";
 "shortcut.quote" = "Open the post this one quotes";
 "shortcut.reload" = "Reload this timeline, or the open thread";
+"timeline.reload.stop" = "Stop reloading";
 "shortcut.dismiss" = "Close what is in front, or unfocus";
 "shortcut.search" = "Search the posts this device holds";
 
@@ -150,6 +151,14 @@
 "shortcut.edit" = "Write or change this timeline";
 "timeline.edit.title" = "Edit timeline";
 "timeline.new.title" = "New timeline";
+"timeline.list.title" = "Timelines";
+"tabs.list.title" = "Pages";
+"tabs.list.hint" = "Lists this page's tabs";
+"tabs.position" = "%d of %d";
+"timeline.list.hint" = "Lists every timeline";
+"timeline.list.hint.missing" = "A rule here is missing. Lists every timeline";
+"timeline.edit.fixed.narrow" = "All and Trends can't be edited. To add your own timeline, press this timeline's name and choose New timeline.";
+"timeline.position" = "%d of %d";
 "editor.tab.rules" = "Rules";
 "editor.tab.timeline" = "Timeline";
 "timeline.edit.fixed" = "All and Trends can't be edited. To add your own timeline, press + — or Tab to it and press e.";
@@ -835,6 +844,10 @@
 
 /* Pressing a row. Decision 31: the row opens what that server says about itself. */
 "account.source.open"             = "What %@ says about itself";
+"account.source.more" = "More for this source";
+"account.source.more.said" = "More for this source. It has something to say";
+"account.source.state.trouble" = "needs a look";
+"account.source.state.waiting" = "waiting";
 "account.source.open.hint"        = "Opens what this server says about itself.";
 
 /* The detail: the same evidence, and the three sentences a preview says that are false here. */
@@ -988,6 +1001,28 @@
 /* Preferences says the least first (#233). */
 "prefs.tab.hosts" = "Your hosts";
 "prefs.tab.move" = "Move";
+"prefs.tab.gestures" = "Gestures";
+"gesture.head" = "What a finger does here. With a keyboard attached, the keys are listed instead.";
+"gesture.press" = "Press a post";
+"gesture.press.detail" = "Opens it, with what was said around it.";
+"gesture.hold" = "Press and hold a post";
+"gesture.hold.detail" = "Says who wrote it, exactly when, and who may read it, and offers what can be done to it.";
+"gesture.pull" = "Pull the list down";
+"gesture.pull.detail" = "Reads the timeline again, or the open post and its thread.";
+"gesture.stop" = "Press Stop";
+"gesture.stop.detail" = "While a reload runs, the reload mark is Stop, and stops it.";
+"gesture.top" = "Press the top of the screen";
+"gesture.top.detail" = "Goes to the top of the list.";
+"gesture.name" = "Press the name at the top";
+"gesture.name.detail" = "On a timeline, lists every timeline; a new one is made there, and this one changed. On a page with tabs, lists its tabs.";
+"gesture.swipe" = "Swipe sideways";
+"gesture.swipe.detail" = "Goes to the timeline beside this one, and on a page with tabs to the tab beside.";
+"gesture.back" = "Swipe back";
+"gesture.back.detail" = "A swipe sideways on an opened post, person or tag, or on a row's detail, goes back.";
+"gesture.pill" = "Press a timeline's name";
+"gesture.pill.detail" = "Goes to that timeline. The + before the names makes a new one.";
+"gesture.pillHold" = "Press and hold a timeline's name";
+"gesture.pillHold.detail" = "Writes or changes that timeline.";
 "prefs.askEvery.brief" = "How long this device waits before asking again.";
 "prefs.latest.brief" = "Timelines stop at the end of this day.";
 "about.brief" = "What this build was stamped with.";

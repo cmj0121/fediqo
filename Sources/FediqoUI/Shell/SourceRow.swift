@@ -694,6 +694,8 @@ struct SourceRowView: View {
     /// will actually be rendered at. **The rendered pixel count and never the platform** — a 1×
     /// external display hung off a Mac wants the same drawing an old phone does.
     @Environment(\.displayScale) private var displayScale
+    /// On a narrow page a source is one line (#302). See `SourceFit`.
+    @Environment(\.shellLayout) private var shellLayout
     /// The leading mark's drawn size, before the ceiling. Scaled so the mark grows with the
     /// hostname beside it; capped by `symbolPoints(_:)`, which the control glyphs already read.
     @ShellMetric(relativeTo: .callout) private var markScaled: CGFloat = SourceRow.markBase
@@ -746,7 +748,112 @@ struct SourceRowView: View {
         // every access. This is the app's launch screen with one of these per source.
         let controls = controls
         let regime = regime
-        return HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
+        return Group {
+            if shellLayout == .narrow { oneLine(controls) } else { lines(controls, regime) }
+        }
+        .padding(.vertical, shellLayout == .narrow ? ShellSpace.tight : ShellSpace.step)
+        // **The wash is under the whole row including its controls, and that is correct**: the
+        // wash says *this row*, and the marks are in this row. Drawn behind the padding so the lit
+        // area is the row and not only its words.
+        .background { if let wash = pressed.wash { wash } }
+        .onHover { hovering = $0 }
+    }
+
+    // MARK: - One line, on a narrow page
+
+    /// **One source, one line** (#302): its mark, its host, its one word, and what can be done
+    /// to it as glyphs a finger's size. A phone drew this as three — the host, a line held
+    /// open for something to say, and the controls under it. What has no room gives way as
+    /// `SourceFit` lists it, and the first that fits is drawn; the host is on every one and
+    /// loses its middle before anything loses the host.
+    private func oneLine(_ controls: [SourceRow.Control]) -> some View {
+        let said = SourceRow.statusLines(waiting: waiting, refusal: refusal, notice: notice, host: row.source.host)
+        return ViewThatFits(in: .horizontal) {
+            ForEach(SourceFit.ladder, id: \.self) { fit in
+                line(fit, controls, said)
+            }
+        }
+    }
+
+    private func line(_ fit: SourceFit, _ controls: [SourceRow.Control], _ said: [String]) -> some View {
+        let shown = fit.shown(controls), folded = fit.folded(controls)
+        return HStack(alignment: .center, spacing: ShellSpace.snug) {
+            markDrawing.frame(width: mark, height: mark).foregroundStyle(markInk)
+                .accessibilityHidden(true)
+            Button(action: open) {
+                LeastIdeal(cap: fit.hostRoom * hostFloorScaled / SourceRow.hostFloor) {
+                    Text(row.source.host)
+                        .shellFont(.name)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                        .lineLimit(1)
+                        // The host is the identity: its start and its end are both kept.
+                        .truncationMode(.middle)
+                }
+                .frame(maxWidth: .infinity, minHeight: SourceRow.touch, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(pressed == .inert)
+            .help(String(format: L10n.t("account.source.open"), row.source.host))
+            // Every word of the row, and everything it has to say, whichever of them is drawn.
+            .accessibilityLabel(SourceFit.spoken(row: SourceRow.spoken(row), said: said))
+            .accessibilityHint(Text(L10n.t("account.source.open.hint")))
+            if fit.drawsWord {
+                // Where the row has something to say, the word names that, and not what may be
+                // done here: it is what the reader has to act on.
+                if let trouble = SourceFit.troubleKey(waiting: waiting != nil, said: said) {
+                    Text(L10n.t(trouble))
+                        .shellFont(.mark)
+                        .foregroundStyle(SourceFit.warns(waiting: waiting != nil, said: said) ? ShellChrome.alarm(colorScheme) : ShellChrome.inkDim(colorScheme))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .accessibilityHidden(true)
+                } else {
+                    writingWord.fixedSize()
+                }
+            }
+            HStack(spacing: 0) {
+                ForEach(shown) { icon($0) }
+                if SourceFit.hasMore(folded: folded, said: said) { more(folded, said) }
+            }
+        }
+    }
+
+    /// What the line had no room for, and what the row has to say: behind one mark, pressed.
+    /// The sentences first — a wait, a refusal, a notice, which the three-line row drew under
+    /// the host — and then each control folded away, by the name it is pressed under.
+    private func more(_ folded: [SourceRow.Control], _ said: [String]) -> some View {
+        Menu {
+            if !said.isEmpty {
+                Section {
+                    ForEach(said, id: \.self) { Text($0) }
+                }
+            }
+            ForEach(folded) { control in
+                Button(role: SourceFit.destroys(control) ? .destructive : nil, action: press(control)) {
+                    Label(
+                        SourceRow.controlLabel(control, source: row.source, signedIn: signedIn),
+                        systemImage: Self.symbol(control)
+                    )
+                }
+                .disabled(!actsLive)
+            }
+        } label: {
+            Image(systemName: SourceFit.moreSymbol(waiting: waiting != nil, said: said))
+                .font(.system(size: SourceRow.symbolPoints(glyph)))
+                // The warning's own colour where the row says something went wrong: on a
+                // glyph it is a control, and this one is where the sentence is read.
+                .foregroundStyle(SourceFit.warns(waiting: waiting != nil, said: said) ? ShellChrome.alarm(colorScheme) : ShellChrome.inkDim(colorScheme))
+                .frame(minWidth: SourceRow.touch, minHeight: SourceRow.touch)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(L10n.t(SourceFit.moreKey(said: said)))
+    }
+
+    // MARK: - On a page with room
+
+    private func lines(_ controls: [SourceRow.Control], _ regime: SourceRow.Regime) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
             leadingMark
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 // **The hostname is the press, and the marks are siblings of it.** That is the
@@ -780,12 +887,6 @@ struct SourceRowView: View {
             // threshold would be computed from a row this one is not.
             if regime == .trailing { actionsTrailing(controls) }
         }
-        .padding(.vertical, ShellSpace.step)
-        // **The wash is under the whole row including its controls, and that is correct**: the
-        // wash says *this row*, and the marks are in this row. Drawn behind the padding so the lit
-        // area is the row and not only its words.
-        .background { if let wash = pressed.wash { wash } }
-        .onHover { hovering = $0 }
     }
 
     /// The protocol's own mark, or the shape glyph where this repo draws none — decision 37.
@@ -1272,5 +1373,80 @@ struct SourceStanding: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// What a source's one line draws on a narrow page, most first (#302). The first that fits is
+/// drawn, and the last where none does.
+///
+/// The mark and the host are on every one, and the host is never given up: it loses its middle.
+/// What goes, in order: the one word after the host ("read", "read and write"); then every
+/// control but the first, which fold behind one mark that lists them by name; then the first
+/// as well. A fold loses nothing — each control is pressed there as it was — and the word is
+/// still heard.
+enum SourceFit: Hashable, CaseIterable, Sendable {
+    case whole
+    case wordless
+    case folded
+    case bare
+
+    static let ladder: [SourceFit] = [.whole, .wordless, .folded, .bare]
+
+    var drawsWord: Bool { self == .whole }
+
+    /// The controls drawn as marks of their own on the line.
+    func shown(_ controls: [SourceRow.Control]) -> [SourceRow.Control] {
+        switch self {
+        case .whole, .wordless: controls
+        case .folded: Array(controls.prefix(1))
+        case .bare: []
+        }
+    }
+
+    /// The controls behind the one mark.
+    func folded(_ controls: [SourceRow.Control]) -> [SourceRow.Control] {
+        Array(controls.dropFirst(shown(controls).count))
+    }
+
+    /// The room the host is sure of when the line is tried for size, at the default text: the
+    /// whole floor while there is still something to give up for it, and half on the last.
+    var hostRoom: CGFloat { self == .bare ? SourceRow.hostFloor / 2 : SourceRow.hostFloor }
+
+    /// Whether the one mark is drawn: there is a control behind it, or something to say.
+    static func hasMore(folded: [SourceRow.Control], said: [String]) -> Bool {
+        !folded.isEmpty || !said.isEmpty
+    }
+
+    /// Whether a control takes something away, and is offered as such in the list.
+    static func destroys(_ control: SourceRow.Control) -> Bool {
+        control == .clear || control == .remove
+    }
+
+    /// Whether the row says something went wrong, as against only that it is waiting.
+    static func warns(waiting: Bool, said: [String]) -> Bool {
+        !said.isEmpty && !(waiting && said.count == 1)
+    }
+
+    /// The word that stands where the state word does while the row has something to say:
+    /// that it is waiting, or that it needs a look. Nothing where it has nothing to say.
+    static func troubleKey(waiting: Bool, said: [String]) -> String? {
+        guard !said.isEmpty else { return nil }
+        return warns(waiting: waiting, said: said) ? "account.source.state.trouble" : "account.source.state.waiting"
+    }
+
+    /// The one mark's glyph: the plain one, an hourglass while it only waits, a warning otherwise.
+    static func moreSymbol(waiting: Bool, said: [String]) -> String {
+        guard !said.isEmpty else { return "ellipsis" }
+        return warns(waiting: waiting, said: said) ? "exclamationmark.circle" : "hourglass"
+    }
+
+    /// What the one mark is called: and that there is something to read behind it, where there is.
+    static func moreKey(said: [String]) -> String {
+        said.isEmpty ? "account.source.more" : "account.source.more.said"
+    }
+
+    /// What a listener is told of the row: what it is, and then whatever it has to say.
+    static func spoken(row: String, said: [String]) -> String {
+        ([row] + said).joined(separator: " ")
     }
 }

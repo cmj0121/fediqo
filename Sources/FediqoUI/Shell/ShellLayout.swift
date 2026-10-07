@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 /// Which of the app's two arrangements a width gets: the rail beside the page, or the page with
 /// the places as tabs (#57).
@@ -125,6 +128,21 @@ extension EnvironmentValues {
     /// search bar's end sat beneath it — acts the wide arrangement never hid. The button stays
     /// where it is; what is under it is told how much room to leave, and leaves it.
     @Entry var shellFloatingCorner: CGSize = .zero
+
+    /// Whether a sideways swipe moves anything here: on an iPhone or iPad. A test hosting a
+    /// page on a Mac says yes, to see what of the page a slide moves and what it leaves.
+    @Entry var shellSlides: Bool = ShellSheetFloor.sizedByContent == false
+
+    /// The slide of the page a row of tabs heads, where the page hands one down rather than
+    /// passing it: what the tabs' head leans with, and where its list is kept open.
+    @Entry var shellTabsSlide: PageSlide? = nil
+
+    /// Where a hosted pane laid its head and what is under it, for a test that asks.
+    @Entry var shellPaneProbe: PaneProbe? = nil
+
+    /// Whether something is drawn over the whole shell — a picture opened, the keys' guide, the
+    /// landing — so what is under it must not answer a gesture made across it (#305).
+    @Entry var shellCovered: Bool = false
 }
 
 /// Leaves the floating corner clear at the end of a list, so its last row can be scrolled out
@@ -144,4 +162,123 @@ struct ClearsFloatingCorner: ViewModifier {
 extension View {
     /// See `ClearsFloatingCorner`.
     func clearsFloatingCorner() -> some View { modifier(ClearsFloatingCorner()) }
+}
+
+/// The least a sheet's content asks to be, where asking decides anything (#302).
+///
+/// **On a Mac a sheet is as large as what is in it**, so a floor is what stops one opening as a
+/// sliver. **On an iPhone and an iPad the system sizes the sheet** and the content is laid out
+/// in what it is given: a floor there changes nothing where it is met and, where the screen is
+/// narrower than it, lays the content out wider than the sheet with both edges cut off.
+enum ShellSheetFloor {
+    /// Whether a sheet here is sized by what is in it.
+    static var sizedByContent: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// The floor to hold, or nothing where the sheet is not the content's to size.
+    static func held(_ floor: CGSize, sizedByContent: Bool = ShellSheetFloor.sizedByContent) -> CGSize? {
+        sizedByContent ? floor : nil
+    }
+}
+
+extension View {
+    /// Holds a sheet's content to no less than this, on a Mac. See `ShellSheetFloor`.
+    func shellSheetFloor(width: CGFloat, height: CGFloat) -> some View {
+        let held = ShellSheetFloor.held(CGSize(width: width, height: height))
+        return frame(minWidth: held?.width, minHeight: held?.height)
+    }
+}
+
+extension View {
+    /// Keeps what stands at the foot of a page to the leading side of the corner the compose
+    /// button floats in, where it floats (#302). `already` is the room the view keeps at its
+    /// own sides anyway.
+    func standsBesideFloatingCorner(by already: CGFloat = 0) -> some View {
+        modifier(StandsBesideFloatingCorner(already: already))
+    }
+}
+
+/// What stands at the foot of a page stands **beside** the compose button, and not over it.
+///
+/// It was lifted over the button, which on a phone put a notice some way up the page, across
+/// the post being read. Now it stays at the foot, just over the places, and is kept clear of
+/// the button sideways: it has the room to the leading side of the button's corner, and is in
+/// the middle of that. Nothing where no button floats — a wide page, a reader who may not
+/// write — and there it is in the middle of the page's foot, as it always was.
+struct StandsBesideFloatingCorner: ViewModifier {
+    let already: CGFloat
+    @Environment(\.shellFloatingCorner) private var corner
+
+    /// How much of the page's trailing side is left to the button: its corner's width — the
+    /// button, the room it keeps from the edge and a gap beside it — less the room the view
+    /// keeps at its own side anyway, so that room is not kept twice on a page with none to spare.
+    static func kept(corner: CGSize, already: CGFloat) -> CGFloat {
+        max(0, corner.width - already)
+    }
+
+    func body(content: Content) -> some View {
+        content.padding(.trailing, Self.kept(corner: corner, already: already))
+    }
+}
+
+/// Where a pane's head and what is under it were laid out, on screen. See `Probed`.
+@MainActor
+final class PaneProbe {
+    var head = CGRect.zero
+    var under = CGRect.zero
+}
+
+/// Reports where a part of a pane was laid out to a probe, where one is handed down; draws
+/// nothing and changes nothing.
+struct ProbedPane: ViewModifier {
+    enum Part { case head, under }
+    let part: Part
+
+    @Environment(\.shellPaneProbe) private var probe
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let probe {
+            content.background(GeometryReader { place in
+                let _ = part == .head ? (probe.head = place.frame(in: .global)) : (probe.under = place.frame(in: .global))
+                Color.clear
+            })
+        } else {
+            content
+        }
+    }
+}
+
+/// Tells what is in a sheet which arrangement it is drawn in (#305).
+///
+/// **A sheet is raised from the root, outside the arrangement**, so it is handed none and would
+/// take the wide one everywhere. On a phone it is as narrow as the page under it, and says so
+/// by the same rule the page goes by (`ShellLayout.answering(width:phoneIsCompact:)`). On an
+/// iPad and a Mac a sheet has a width of its own that no page's arrangement speaks for, and it
+/// is left as it was.
+struct ShellSheetArranged: ViewModifier {
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.shellLayout) private var handed
+
+    /// The arrangement a sheet takes: a phone's own, and anywhere else the one it was handed.
+    static func layout(phoneIsCompact: Bool?, handed: ShellLayout) -> ShellLayout {
+        phoneIsCompact.map { ShellLayout.answering(width: nil, phoneIsCompact: $0) } ?? handed
+    }
+
+    private var phoneIsCompact: Bool? {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone ? sizeClass == .compact : nil
+        #else
+        nil
+        #endif
+    }
+
+    func body(content: Content) -> some View {
+        content.environment(\.shellLayout, Self.layout(phoneIsCompact: phoneIsCompact, handed: handed))
+    }
 }

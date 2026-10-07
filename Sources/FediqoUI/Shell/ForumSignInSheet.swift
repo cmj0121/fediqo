@@ -53,7 +53,11 @@ struct ForumSignInSheet: View {
         // Lower than the 520×560 that stood here, and that is the point: the ideal above is what
         // decides the opening size now, and a floor that high stopped a reader making the window
         // small when they wanted to see what was behind it.
-        .frame(minWidth: 380, minHeight: 480)
+        //
+        // **A Mac's floor only** (#302): there a sheet or a window is as small as what is in it
+        // allows. On a phone the sheet is the screen's width, and a floor wider than the
+        // narrowest one put the page's edges and the foot's buttons outside it.
+        .shellSheetFloor(width: 380, height: 480)
         .task { await open() }
         // The check a sign-in shows, and a page followed from it, only while the sheet is up (#220).
         .onDisappear { [engine] in Task { await engine.signingIn(false) } }

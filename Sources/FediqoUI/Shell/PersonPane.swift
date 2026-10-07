@@ -57,6 +57,8 @@ struct PersonPane: View {
     var onBack: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
+    /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
+    @Environment(\.shellTouch) private var touch
 
     /// The face at the head of the page. Larger than a row's, because here it is the subject
     /// rather than a fitting beside the words — and scaled with the letters, for the reason every
@@ -216,7 +218,7 @@ struct PersonPane: View {
             // conversation, which is `DummyCommand.tapped` and is exactly what a press does on
             // the stream (#122). This page used to answer only the first half.
             onSelect: {
-                switch DummyCommand.tapped(item.id, selected: selectedID) {
+                switch DummyCommand.tapped(item.id, selected: selectedID, touch: touch) {
                 case .select: selectedID = item.id
                 case .open: onOpenThread(item.id)
                 }

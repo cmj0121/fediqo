@@ -81,6 +81,23 @@ struct BuildStamp: Equatable, Sendable {
         let value: String
         /// Drawn in the monospaced reading face: a hash is read character by character.
         var isReading = false
+        /// What the page draws, where that is less than the value: the value is what is copied.
+        var shown: String? = nil
+    }
+
+    /// How many characters of a revision the page draws: enough to tell one commit from another.
+    static let shortLength = 8
+
+    /// A revision as the page draws it: **the first eight characters of the hash**, and
+    /// whatever follows the hash — a mark that the checkout had changes, say — kept whole.
+    /// Anything that does not begin with more than eight characters of a hash is as it was: a
+    /// hash already short, a word in a hash's place, nothing at all.
+    ///
+    /// Only what is drawn. The stamp, and what Copy puts on the clipboard, are the whole hash.
+    static func shortRevision(_ revision: String) -> String {
+        let hash = revision.prefix { $0.isASCII && $0.isHexDigit }
+        guard hash.count > shortLength else { return revision }
+        return String(hash.prefix(shortLength)) + revision.dropFirst(hash.count)
     }
 
     /// What the page shows, in order. Where there is no revision there is no Changes row, since
@@ -98,7 +115,10 @@ struct BuildStamp: Equatable, Sendable {
             ))
             return rows
         }
-        rows.append(Row(label: L10n.t("about.source", language: language), value: revision, isReading: true))
+        rows.append(Row(
+            label: L10n.t("about.source", language: language), value: revision, isReading: true,
+            shown: Self.shortRevision(revision)
+        ))
         rows.append(Row(
             label: L10n.t("about.changes", language: language),
             value: L10n.t(Self.changesKey(changes), language: language)

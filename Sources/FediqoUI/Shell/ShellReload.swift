@@ -64,6 +64,28 @@ final class ShellReload {
 
     /// The kinds of reload on the wire now. A second `r` of a kind already here starts nothing.
     private(set) var asking: Set<Ask> = []
+
+    /// What of `asking` a reader pressed for, and so may stop: `Escape`, and the Stop the
+    /// reload mark becomes while one runs (#307). What the app asks by itself — on the wait,
+    /// for more as the list is read down, for a tag or a search — is not theirs to stop here.
+    static func stoppable(_ asking: Set<Ask>) -> Set<Ask> {
+        asking.subtracting([.held, .search, .tag, .more, .renew])
+    }
+
+    /// Whether there is something running that Stop would stop.
+    var stoppable: Bool { !Self.stoppable(asking).isEmpty }
+
+    /// Returns when the read asked about is running no more — landed, failed or stopped —
+    /// which is when a pull's own spinner goes (#307). **And when whoever is waiting
+    /// is cancelled**: a list that has gone takes its spinner with it.
+    ///
+    /// `ask` is the read whoever pulled is waiting for — a timeline's list waits for the
+    /// timeline's, a conversation for its own — and not any read that happens to be running.
+    func settled(_ ask: Ask) async {
+        while asking.contains(ask), !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(80))
+        }
+    }
     /// Whether any reload the toast speaks for is on the wire. Not a tag's ask, which its own
     /// page speaks for (#124), nor an open thread's renewal, which its foot does (#198).
     var running: Bool { !asking.subtracting([.tag, .renew]).isEmpty }
@@ -746,7 +768,7 @@ final class ShellReload {
     /// wait's and ends as the thread is left (#198).
     @discardableResult
     func stop() -> Bool {
-        let pressed = asking.subtracting([.held, .search, .tag, .more, .renew])
+        let pressed = Self.stoppable(asking)
         guard !pressed.isEmpty else { return false }
         halted.formUnion(pressed)
         for (ask, run) in runs where pressed.contains(ask) {

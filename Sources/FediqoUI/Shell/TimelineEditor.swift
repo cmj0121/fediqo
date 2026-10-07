@@ -38,19 +38,31 @@ struct TimelineEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
-            header
-            ShellTabs(EditorTab.allCases, selected: flow.tab) { select($0) }
+            header.headOfPage()
+            ShellTabs(EditorTab.allCases, selected: flow.tab, slide: session.slide("editor")) { select($0) }
+                // A sheet is not told the arrangement of the page it was raised over.
+                .modifier(ShellSheetArranged())
+                .modifier(ProbedPane(part: .head))
             Rectangle().fill(ShellChrome.hairline(colorScheme)).frame(height: ShellSpace.hair)
-            switch flow.tab {
-            case .timeline: timelineTab
-            case .rules: rulesTab
+            // What is under the tabs follows a sideways swipe; the head and the tabs stay (#305).
+            Group {
+                switch flow.tab {
+                case .timeline: timelineTab
+                case .rules: rulesTab
+                }
             }
+            .modifier(ProbedPane(part: .under))
+            .modifier(Slid(slide: session.slide("editor")))
             EditorKeyStrip(
                 stage: flow.stage, changing: flow.changing != nil, tab: flow.tab,
                 fields: RuleBuilder.fields(in: sources).count, typed: flow.adding.takesHandle
             )
         }
         .padding(ShellSpace.pad)
+        // A sideways swipe goes to the editor's other tab (#305).
+        .modifier(SwipesTabs(
+            slide: session.slide("editor"), tabs: Array(EditorTab.allCases), selected: flow.tab, select: { select($0) }
+        ))
         #if os(macOS)
         .frame(minWidth: 460, minHeight: 520, alignment: .topLeading)
         #else
