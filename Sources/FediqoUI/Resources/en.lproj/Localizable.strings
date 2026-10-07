@@ -789,7 +789,7 @@
 "account.sources.detail"         = "Everything this device reads. Press a row for what that server says about itself — its name, its size, its boards. Removing one takes its boards and its posts with it.";
 "account.sources.held"           = "What each one has left on this device is on Usage.";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
-"account.sources.marks"          = "Every row carries the same marks. The key is the sign-in: filled once you are signed in, grey where that source has none. ⋯ holds the rest: what the row has to say, changing boards or lists, clearing what the source left here, and removing it. What a source does not have is grey there too, and says why. A red ⋯ has something to say.";
+"account.sources.marks"          = "Every row carries the same marks. The key is the sign-in: filled once you are signed in, grey where that source has none. Pressed while filled, it asks before it signs you out. ⋯ holds the rest: what the row has to say, changing boards or lists, clearing what the source left here, and removing it. What a source does not have is grey there too, and says why. A red ⋯ has something to say.";
 /* #69 — what may be done on a source, said on its row and explained once for the list. */
 "account.sources.writing"        = "A lock with an exclamation mark means that sign-in must be asked again before everything it could do is offered: a write was turned away, or it signed in before Fediqo asked to write or for bookmarks. Press it to be asked; nobody is signed out.";
 "account.source.permission"      = "%@'s sign-in must be asked again before everything it could do is offered";
@@ -813,11 +813,19 @@
 "account.signin.ask.read"        = "Sign in to read";
 "account.signin.ask.write"       = "Sign in to read and write";
 "account.signin.ask.line" = "Choose whether Fediqo only reads, or also writes and bookmarks as you.";
+"account.signout.ask.title" = "Sign out of %@?";
+"account.signout.ask.confirm" = "Sign out";
+"account.signout.ask.mastodon.line" = "The sign-in is handed back; Home, lists and writing stop here.";
+"account.signout.ask.mastodon.detail" = "This device forgets the sign-in and asks the server to end it. Your Home and your lists are no longer read, and you can no longer post, reply, boost, favourite or bookmark from Fediqo; the marks for what you favourited, boosted or bookmarked go from its posts. Everything already read stays, with the lists you chose, and you can sign in again at any time.";
+"account.signout.ask.forum.line" = "This device stops being signed in to this forum.";
+"account.signout.ask.forum.detail" = "The forum's session on this device goes. Boards that need a sign-in are not read until you sign in again. The pictures, emoji names and posts held from it stay, and so do the boards you picked.";
+"account.signout.ask.forum.password.line" = "You are signed out, and the password saved for it is deleted.";
+"account.signout.ask.forum.password.detail" = "The forum's session on this device goes, and the password saved for it is deleted from this device's Keychain. Only the password does not come back: you type it again next time. Boards that need a sign-in are not read until you sign in again. The pictures, emoji names and posts held from it stay, and so do the boards you picked.";
 
 "account.source.boards"          = "%1$d boards: %2$@";
 "account.source.unread"          = "Its description could not be read.";
 "account.source.remove.label"    = "Remove %@ and everything it left here";
-"account.source.signout.label"   = "Sign out of %@ and forget what it left here";
+"account.source.signout.label"   = "Sign out of %@. It asks first.";
 
 /* M1 tail — the row's controls, and changing a forum's boards. */
 "account.source.boards.change"    = "Change which boards you read on %@";

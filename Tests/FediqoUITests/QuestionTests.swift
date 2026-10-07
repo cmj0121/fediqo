@@ -20,6 +20,9 @@ struct QuestionTests {
             ShellQuestion.remove(host: "a.example", boards: 0, postsStay: true, language: language),
             ShellQuestion.remove(host: "a.example", boards: 3, postsStay: true, language: language),
             ShellQuestion.signIn(host: "a.example", language: language),
+            ShellQuestion.signOut(host: "a.example", mastodon: true, language: language),
+            ShellQuestion.signOut(host: "a.example", mastodon: false, language: language),
+            ShellQuestion.signOut(host: "a.example", mastodon: false, hasPassword: true, language: language),
             ShellQuestion.bookmarks(host: "a.example", language: language),
             ShellQuestion.dropCopies(language: language),
             ShellQuestion.forgetPassword(host: "a.example", language: language),
@@ -151,6 +154,34 @@ struct QuestionTests {
         #expect(!ShellQuestion.remove(host: "a", boards: 0, language: .english).line.contains("boards"))
     }
 
+    @Test("Signing out says what goes for each kind, and is a loss only where a saved password goes",
+          arguments: [DummyLanguage.english, .taiwanese])
+    func signOutSaysWhatGoes(_ language: DummyLanguage) {
+        let mastodon = ShellQuestion.signOut(host: "m.example", mastodon: true, hasPassword: true, language: language)
+        let forum = ShellQuestion.signOut(host: "f.example", mastodon: false, language: language)
+        let held = ShellQuestion.signOut(host: "f.example", mastodon: false, hasPassword: true, language: language)
+        for (question, host) in [(mastodon, "m.example"), (forum, "f.example"), (held, "f.example")] {
+            #expect(question.title == String(format: L10n.t("account.signout.ask.title", language: language), host))
+            #expect(question.symbol == "key" && question.cancel != nil)
+            #expect(question.choices.map(\.id) == [ShellQuestion.yes])
+            #expect(question.choices.first?.label == L10n.t("account.signout.ask.confirm", language: language))
+        }
+        // A Mastodon holds no password of ours, whatever a forum of the same name once saved.
+        #expect(mastodon.line == L10n.t("account.signout.ask.mastodon.line", language: language))
+        #expect(mastodon.help == L10n.t("account.signout.ask.mastodon.detail", language: language))
+        #expect(forum.line == L10n.t("account.signout.ask.forum.line", language: language))
+        #expect(held.line == L10n.t("account.signout.ask.forum.password.line", language: language))
+        #expect(Set([mastodon.line, forum.line, held.line]).count == 3)
+        #expect(mastodon.choices.map(\.role) == [.keyed] && forum.choices.map(\.role) == [.keyed])
+        #expect(held.choices.map(\.role) == [.destructive] && held.warns)
+
+        guard language == .english else { return }
+        #expect(mastodon.line.contains("handed back") && mastodon.help?.contains("asks the server to end it") == true)
+        for word in ["post", "bookmark", "lists"] { #expect(mastodon.help?.contains(word) == true, "\(word)") }
+        #expect(!forum.line.contains("password") && forum.help?.contains("password") == false)
+        #expect(held.line.contains("password") && held.help?.contains("does not come back") == true)
+    }
+
     @Test("Signing in offers reading first, neither lit, and a key answers only with reading")
     func signInChoices() {
         let question = ShellQuestion.signIn(host: "a", language: .english)
@@ -172,6 +203,9 @@ struct QuestionTests {
             "account.remove.line.stay", "account.remove.line.stay.boards", "confirm.destructive.hint",
             "prefs.password.forget.title", "prefs.password.forget.line", "prefs.password.forget.detail",
             "prefs.password.forget.confirm",
+            "account.signout.ask.title", "account.signout.ask.confirm", "account.signout.ask.mastodon.line",
+            "account.signout.ask.mastodon.detail", "account.signout.ask.forum.line", "account.signout.ask.forum.detail",
+            "account.signout.ask.forum.password.line", "account.signout.ask.forum.password.detail",
             "allow.own.remove.title", "allow.own.remove.line", "allow.own.remove.detail", "usage.kept.stop.from",
         ] + Self.clearKeys.map(ShellQuestion.clearLineKey)
         for lproj in ["en", "zh-TW", "zh-Hant"] {

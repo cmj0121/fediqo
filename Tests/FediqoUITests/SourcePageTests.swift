@@ -187,14 +187,15 @@ struct SourcePageTests {
         )
         #expect(
             SourceRow.controlLabel(.signIn, source: forum, signedIn: true)
-                == "Sign out of \(Self.forum) and forget what it left here"
+                == "Sign out of \(Self.forum). It asks first."
         )
     }
 
     /// **The wiring, not only the rule.** A predicate that is right and a press that never consults
     /// it is this milestone's recurring failure, so the press itself is driven here: it must sign
-    /// in when this device has seen nothing, and sign out when it has.
-    @Test("Pressing the toggle signs in or out according to that same predicate")
+    /// in when this device has seen nothing, and — once it has — ask before it signs out, with
+    /// only the question's yes ending the sign-in.
+    @Test("Pressing the toggle signs in, or asks to sign out, according to that same predicate")
     func pressingTheToggleGoesTheRightWay() async {
         let forums = ForumSessions(credentials: MemoryCredentials())
         let session = ShellSession(http: FixtureHTTP(), store: ItemStore(), forums: forums)
@@ -206,14 +207,71 @@ struct SourcePageTests {
         await pane.press(row)
         #expect(session.signingIn?.host == Self.forum, "the press did not offer a sign-in")
 
-        // Seen: the press ends it, and the predicate goes back to no.
+        // Seen: the press asks, and signs nobody out by asking.
         session.signingIn = nil
         await forums.plantSession(host: Self.forum)
         #expect(forums.reachedSignIn(host: Self.forum), "the premise did not hold")
+        #expect(session.signOutAsk == nil)
         await pane.press(row)
-        #expect(!forums.reachedSignIn(host: Self.forum), "the press did not sign the reader out")
+        #expect(session.signOutAsk?.host == Self.forum, "the press did not put the question")
+        #expect(forums.reachedSignIn(host: Self.forum), "the press signed the reader out before they answered")
+
+        // Putting the question down changes nothing.
+        session.signOutAsk = nil
+        #expect(forums.reachedSignIn(host: Self.forum))
+
+        // Its yes ends the sign-in, and the predicate goes back to no.
+        await pane.press(row)
+        await pane.signOut(Self.forum)
+        #expect(session.signOutAsk == nil, "the question outlived its answer")
+        #expect(!forums.reachedSignIn(host: Self.forum), "the yes did not sign the reader out")
         #expect(session.signingIn == nil, "signing out opened a sign-in sheet")
         #expect(session.sources.map(\.host) == [Self.forum], "signing out removed the source")
+    }
+
+    /// A sign-out question waits in the session, and the page that draws it can go while it
+    /// waits. Whatever makes its words stale puts it down, so it cannot come back later.
+    @Test("A sign-out still being asked is put down by a Clear or a Remove of that source, and by the page leaving; one about another source is left alone")
+    func aWaitingSignOutIsPutDown() async {
+        let other = "other.example"
+        let session = ShellSession(http: FixtureHTTP(), store: ItemStore(), forums: ForumSessions(credentials: MemoryCredentials()))
+        await seed(session, [Source(host: Self.forum, kind: .discuz), Source(host: other, kind: .discuz)])
+
+        // Only the one about that source, whatever its case.
+        session.askSignOut(host: Self.forum)
+        session.dropSignOutAsk(host: other)
+        #expect(session.signOutAsk?.host == Self.forum, "a question about another source was put down")
+        session.dropSignOutAsk(host: Self.forum.uppercased())
+        #expect(session.signOutAsk == nil)
+
+        // The page leaving puts down whichever there is.
+        session.askSignOut(host: Self.forum)
+        session.dropSignOutAsk()
+        #expect(session.signOutAsk == nil)
+        session.dropSignOutAsk()
+        #expect(session.signOutAsk == nil, "putting down nothing is nothing")
+
+        // A Clear of another source leaves it; a Clear of its own takes it.
+        session.askSignOut(host: Self.forum)
+        await session.clear(host: other)
+        #expect(session.signOutAsk?.host == Self.forum)
+        await session.clear(host: Self.forum)
+        #expect(session.signOutAsk == nil, "the question outlived a Clear of its source")
+
+        // And so does a Remove.
+        session.askSignOut(host: Self.forum)
+        await session.remove(host: other)
+        #expect(session.signOutAsk?.host == Self.forum)
+        await session.remove(host: Self.forum, keepingPosts: true)
+        #expect(session.signOutAsk == nil, "the question outlived a Remove of its source")
+
+        // The page puts it down as it leaves, in the question's own modifier.
+        let pane = try! String(
+            contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Sources/FediqoUI/Shell/AccountPane.swift"),
+            encoding: .utf8
+        )
+        #expect(pane.contains(".onDisappear { session.dropSignOutAsk() }"))
     }
 
     /// Remove's question and its yes read one value, and where the page has no preferences to
@@ -709,8 +767,8 @@ struct SourcePageTests {
         #expect(
             L10n.t("account.sources.marks", language: .english) == """
                 Every row carries the same marks. The key is the sign-in: filled once you are \
-                signed in, grey where that source has none. ⋯ holds the rest: what the row has \
-                to say, changing boards or lists, clearing what the source left here, and \
+                signed in, grey where that source has none. Pressed while filled, it asks before \
+                it signs you out. ⋯ holds the rest: what the row has to say, changing boards or lists, clearing what the source left here, and \
                 removing it. What a source does not have is grey there too, and says why. A red ⋯ \
                 has something to say.
                 """
@@ -723,7 +781,7 @@ struct SourcePageTests {
         )
         #expect(
             L10n.t("account.source.signout.label", language: .english)
-                == "Sign out of %@ and forget what it left here"
+                == "Sign out of %@. It asks first."
         )
         // **The copy change unit 4 left behind, because it belongs with the list it describes.**
         // "This timeline's source" was singular and now stands over a list of servers.
@@ -1209,7 +1267,7 @@ struct SourcePageTests {
         )
         #expect(
             SourceRow.controlLabel(.signIn, source: forum, signedIn: true)
-                == "Sign out of \(Self.forum) and forget what it left here"
+                == "Sign out of \(Self.forum). It asks first."
         )
         #expect(
             SourceRow.controlLabel(.clear, source: forum, signedIn: false)

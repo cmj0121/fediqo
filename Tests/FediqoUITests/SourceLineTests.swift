@@ -108,6 +108,9 @@ struct SourceLineTests {
         // And it is named by its act, either way round.
         #expect(out.name == String(format: L10n.t("account.refuse.signin.label"), "a.example"))
         #expect(signedIn.name == String(format: L10n.t("account.source.signout.label"), "a.example"))
+        // The name says the press asks: it no longer promises to forget what the source left.
+        #expect(L10n.t("account.source.signout.label", language: .english) == "Sign out of %@. It asks first.")
+        #expect(L10n.t("account.source.signout.label", language: .taiwanese) == "登出 %@。會先詢問。")
     }
 
     @Test("Boards are dim for good where the protocol has no picker or the source has no boards; lists are dim for now signed out where the protocol has lists, and for good elsewhere; clear and remove are on every source",

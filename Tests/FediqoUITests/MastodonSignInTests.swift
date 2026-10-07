@@ -517,6 +517,111 @@ struct MastodonSignInTests {
         #expect(!session.isSignedIn(host: host))
     }
 
+    /// **Signing out asks first** (2026-10-07): a sign-out hands the token back to the server,
+    /// so the key pressed while signed in only puts the question, and its yes is the one way
+    /// the page signs anybody out.
+    @Test("A signed-in Mastodon's key puts the sign-out question and revokes nothing; only its yes signs out")
+    func signingOutAsksFirst() async throws {
+        let (session, server, tokens) = await shell()
+        await session.signIn(host: host, through: Page())
+        #expect(session.isSignedIn(host: host), "the premise did not hold")
+        let before = await server.paths
+        let pane = AccountPane(session: session)
+
+        await pane.press(row(session, host))
+        #expect(session.signOutAsk == SignOutAsk(host: host, question: session.signOutQuestion(host: host)))
+        #expect(session.signInChoice == nil, "a signed-in key asked about signing in")
+        #expect(session.isSignedIn(host: host), "the press signed the reader out before they answered")
+        #expect(try tokens.signedInHosts() == [host])
+        #expect(await server.paths == before, "the server was asked for something before the answer")
+        #expect(session.signOutQuestion(host: host, language: .english)
+            == ShellQuestion.signOut(host: host, mastodon: true, language: .english))
+
+        // Cancel changes nothing.
+        session.signOutAsk = nil
+        #expect(session.isSignedIn(host: host))
+        #expect(await server.paths == before)
+
+        // The yes: the token leaves this device and the server is asked to end it.
+        await pane.press(row(session, host))
+        await pane.signOut(host)
+        #expect(session.signOutAsk == nil)
+        #expect(!session.isSignedIn(host: host))
+        #expect(try tokens.signedInHosts().isEmpty)
+        #expect(await server.paths.last == "/oauth/revoke")
+    }
+
+    /// A yes on a forum deletes its saved password while the card is still sliding away. The
+    /// card draws what was asked — held with the host at the press — and not what is true now.
+    @Test("The question asked is held as it read at the press, and does not change when the password goes")
+    func theAskedQuestionIsHeld() async throws {
+        let credentials = MemoryCredentials()
+        try credentials.save(ForumCredential(host: forum, username: "u", password: "p"))
+        let forums = ForumSessions(credentials: credentials)
+        let session = ShellSession(http: FixtureHTTP(), store: ItemStore(), forums: forums)
+        session.sources = [Source(host: forum, kind: .discuz)]
+        await forums.plantSession(host: forum)
+        let pane = AccountPane(session: session)
+        await pane.press(row(session, forum))
+        let asked = try #require(session.signOutAsk)
+        #expect(asked.host == forum)
+        #expect(asked.question == ShellQuestion.signOut(host: forum, mastodon: false, hasPassword: true))
+        #expect(asked.question.warns)
+
+        // The password goes — as the yes makes it — and what was asked still reads as asked,
+        // though the question read afresh is now the other one.
+        forums.forgetPassword(host: forum)
+        #expect(session.signOutAsk == asked)
+        #expect(session.signOutQuestion(host: forum) != asked.question)
+
+        let account = try String(
+            contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("Sources/FediqoUI/Shell/AccountPane.swift"),
+            encoding: .utf8
+        )
+        // The wiring: the page carries the presenter, and the presenter draws the held question.
+        #expect(account.contains(".modifier(SignOutQuestion(session: session, signOut: signOutAnswered))"), "the page asks nothing")
+        #expect(account.contains("content.shellConfirm(asked, question: \\.question) { ask, _ in"))
+    }
+
+    @Test("A source ending the sign-in itself puts the sign-out question down, so its notice is not kept waiting")
+    func endedByTheServerAnswersTheQuestion() async throws {
+        let (session, _, _) = await shell()
+        await session.signIn(host: host, through: Page())
+        let pane = AccountPane(session: session)
+        await pane.press(row(session, host))
+        #expect(session.signOutAsk?.host == host)
+
+        // Another source ending its sign-in is not an answer about this one.
+        session.mastodon.endedByServer(host: "other.example")
+        #expect(session.signOutAsk?.host == host)
+
+        session.mastodon.endedByServer(host: host.uppercased())
+        #expect(session.signOutAsk == nil)
+        #expect(session.mastodon.ended.contains(host))
+    }
+
+    @Test("A forum's sign-out question says whether a saved password goes with it")
+    func aForumsSignOutNamesThePassword() async throws {
+        let none = ShellSession(http: FixtureHTTP(), store: ItemStore(), forums: ForumSessions(credentials: MemoryCredentials()))
+        none.sources = [Source(host: forum, kind: .discuz)]
+        #expect(none.signOutQuestion(host: forum, language: .english)
+            == ShellQuestion.signOut(host: forum, mastodon: false, language: .english))
+
+        let credentials = MemoryCredentials()
+        try credentials.save(ForumCredential(host: forum, username: "u", password: "p"))
+        let forums = ForumSessions(credentials: credentials)
+        let session = ShellSession(http: FixtureHTTP(), store: ItemStore(), forums: forums)
+        session.sources = [Source(host: forum, kind: .discuz)]
+        #expect(forums.hasPassword(host: forum), "the premise did not hold")
+        let held = session.signOutQuestion(host: forum, language: .english)
+        #expect(held == ShellQuestion.signOut(host: forum, mastodon: false, hasPassword: true, language: .english))
+
+        // What the question says is what the yes does: the password is gone afterwards.
+        await AccountPane(session: session).signOut(forum)
+        #expect(!forums.hasPassword(host: forum))
+    }
+
     /// A protocol this app cannot write to has no question to put — decision 4's rule about
     /// absent controls, applied to a dialog.
     @Test("A forum's sign-in puts no writing question")

@@ -143,6 +143,32 @@ final class ShellSession {
     /// be one that goes stale. **Not `signingIn`**, which is the forum
     /// sign-in already running in a web view — this is a question, and nothing is running.
     var signInChoice: String?
+    /// The source whose key was pressed while signed in, and whose sign-out has not been answered
+    /// for yet, or nothing.
+    ///
+    /// **Nobody is signed out while this is set.** A sign-out hands a Mastodon's token back to
+    /// its server and drops a forum's session and its saved password, so the press puts the
+    /// question and only its yes reaches `signOut(host:)`.
+    ///
+    /// **The host and the question as it read when asked, together** (`SignOutAsk`): what a
+    /// sign-out takes changes as it happens — a forum's saved password is gone a moment after
+    /// the yes — and a card still sliding away must go on saying what was asked.
+    ///
+    /// Put down where the source ends the sign-in itself (`MastodonSessions.onEnded`): there is
+    /// nothing left to sign out of, and the notice that says so must not wait behind this.
+    ///
+    /// **And put down by everything else that makes its words stale** (`dropSignOutAsk`): a
+    /// Clear or a Remove of that source, which take the sign-in themselves, and the Account page
+    /// leaving, which takes the only place the question is drawn. Held past any of those it
+    /// would come back later asking about a sign-in, or a password, that is no longer there.
+    var signOutAsk: SignOutAsk?
+
+    /// Puts down a sign-out question still waiting: the one about `host`, or whichever there is
+    /// where no host is given. Nobody is signed out by it.
+    func dropSignOutAsk(host: String? = nil) {
+        guard let asked = signOutAsk else { return }
+        if host == nil || asked.host.lowercased() == host?.lowercased() { signOutAsk = nil }
+    }
     /// The source whose sign-in is being asked to allow bookmarks, where one is (#285). Observed,
     /// and the question is presented from it; a press on a row's mark writes it.
     var bookmarkAsk: String?
@@ -786,6 +812,10 @@ final class ShellSession {
         ) { [weak self] note in
             let from = (note.object as AnyObject?).map(ObjectIdentifier.init)
             MainActor.assumeIsolated { self?.allowancesChanged(by: from) }
+        }
+        // A source that ends a sign-in itself answers a sign-out still being asked about it.
+        mastodon.onEnded = { [weak self] host in
+            self?.dropSignOutAsk(host: host)
         }
         // Last, once every property is set: a take-away or a read back holds the room limit still (#249).
         carry.holding = { [weak self] held in self?.holdsStill = held }
@@ -2594,6 +2624,9 @@ final class ShellSession {
 
     private func clearNow(host: String, keepingRows: Bool) async {
         let host = host.lowercased()
+        // A Clear takes the sign-in itself, and a Remove clears: a sign-out still being asked
+        // about this source has nothing left to ask.
+        dropSignOutAsk(host: host)
         // Before the first await: Home posts read before the Clear must not land after it.
         stopReadingAsYou(host: host)
         // What waits in the source's line of loads goes too (#293) — here for a Clear, and for a
@@ -2802,7 +2835,11 @@ final class ShellSession {
     /// Through `forums.forget` and not through anything of its own, which is what makes `Clear` and
     /// `Remove` clear the sign-in too: there is one door and all three go through it (decision 13).
     /// A Mastodon's door is `mastodon.signOut`, which `clear` reaches the same way (decision 10).
+    ///
+    /// **What `signOutQuestion(host:)` says before this is reached is read off this function**:
+    /// change what goes here and the question's words change with it.
     func signOut(host: String) async {
+        dropSignOutAsk(host: host)
         if kind(of: host) == .mastodon {
             stopReadingAsYou(host: host)
             await loads.letGo(host: host)
@@ -2816,6 +2853,21 @@ final class ShellSession {
         }
         // Whatever kind it is, no session of any sort is left for it in the system's stores (#221).
         jar.forget(host: host, keeping: sources.map(\.host))
+    }
+
+    /// Puts the sign-out question about `host`, read as things stand now and held as read.
+    func askSignOut(host: String) {
+        signOutAsk = SignOutAsk(host: host, question: signOutQuestion(host: host))
+    }
+
+    /// The question before `host` is signed out, with what this session holds for it read here:
+    /// which door `signOut(host:)` takes for its kind, and whether a saved password goes with a
+    /// forum's session (`ForumSessions.forget` deletes it).
+    func signOutQuestion(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellQuestion.signOut(
+            host: host, mastodon: kind(of: host) == .mastodon,
+            hasPassword: forums.hasPassword(host: host), language: language
+        )
     }
 
     /// How many boards Remove would take from `host` — what its question's line names where there
@@ -3034,6 +3086,7 @@ final class ShellSession {
 
     private func removeNow(host raw: String, keepingPosts: Bool) async {
         let host = raw.lowercased()
+        dropSignOutAsk(host: host)
         if usageOpened?.lowercased() == host { usageOpened = nil }
         stopReadingAsYou(host: host)
         // Every read of it a reload has on its way ends here, signed in or not, and an open thread
@@ -3289,4 +3342,11 @@ private struct RemovedStops: HTTPClient {
         if await removed() { throw CancellationError() }
         return try await inner.data(from: url)
     }
+}
+
+/// A sign-out that has been asked about and not answered: the source, and the question exactly
+/// as it read at the press.
+struct SignOutAsk: Equatable {
+    let host: String
+    let question: ShellConfirmation
 }

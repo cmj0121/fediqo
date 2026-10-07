@@ -199,6 +199,34 @@ enum ShellQuestion {
         )
     }
 
+    /// Signing out of a source, asked when its key is pressed while signed in. The title names
+    /// the host; the line and the (?) say what goes, which is not the same for the two kinds a
+    /// sign-in exists for.
+    ///
+    /// A Mastodon (`mastodon`): the token leaves this device and the server is asked to end it,
+    /// so reading as the person and everything the sign-in allowed stop. A forum: its session on
+    /// this device goes — and with it the saved password, where one is held (`hasPassword`).
+    ///
+    /// **Keyed and not destructive, as Clear is and for its reason**: signing in again brings
+    /// the sign-in back. **Except where a saved password goes**: that does not come back, so
+    /// that sign-out is a loss, drawn and chorded as one.
+    static func signOut(
+        host: String, mastodon: Bool, hasPassword: Bool = false, language: DummyLanguage? = nil
+    ) -> ShellConfirmation {
+        let key = mastodon ? "account.signout.ask.mastodon"
+            : hasPassword ? "account.signout.ask.forum.password" : "account.signout.ask.forum"
+        return ShellConfirmation(
+            symbol: "key", title: String(format: L10n.t("account.signout.ask.title", language: language), host),
+            line: L10n.t(key + ".line", language: language),
+            help: L10n.t(key + ".detail", language: language),
+            choices: [.init(
+                yes, L10n.t("account.signout.ask.confirm", language: language),
+                role: !mastodon && hasPassword ? .destructive : .keyed
+            )],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     /// Bookmarks, asked of a sign-in that already reads and acts (#285). Not a loss: what the
     /// sign-in does today it goes on doing, and the source's own page asks again before anything
     /// is granted. The line says what the page will ask for, bookmarks among it.

@@ -135,6 +135,8 @@ struct AccountPane: View {
             .modifier(SignInChoiceQuestion(session: session) { host, writing in
                 Task { await chose(host: host, writing: writing) }
             })
+            // The key pressed while signed in: the question, and only its yes signs out.
+            .modifier(SignOutQuestion(session: session, signOut: signOutAnswered))
         }
     }
 
@@ -805,9 +807,13 @@ struct AccountPane: View {
     /// answer before the server's page opens, so nothing is asked of the server and nothing is
     /// opened until they have; a protocol this app cannot write on has no question to put and goes
     /// straight through.
+    ///
+    /// **Signing out asks first too, whatever the protocol.** A sign-out hands a Mastodon's token
+    /// back to its server and drops a forum's session with its saved password, so a press on a
+    /// signed-in key only puts the question (`ShellSession.signOutAsk`); `signOut(_:)` is its yes.
     func press(_ row: SourceRow) async {
         if session.isSignedIn(host: row.source.host) {
-            await session.signOut(host: row.source.host)
+            session.askSignOut(host: row.source.host)
         } else if row.asksWriting {
             session.signInChoice = row.source.host
         } else {
@@ -815,6 +821,17 @@ struct AccountPane: View {
                 host: row.source.host, through: WebAuthBrowser(session: webAuthenticationSession)
             )
         }
+    }
+
+    /// The yes to the sign-out question: `signOut(_:)`, started from a press.
+    func signOutAnswered(_ host: String) {
+        Task { await signOut(host) }
+    }
+
+    /// The yes to the sign-out question: the one way a press on this page signs anybody out.
+    func signOut(_ host: String) async {
+        session.signOutAsk = nil
+        await session.signOut(host: host)
     }
 
     /// The standing sentence's own control (#69): it puts the row's question to a reader who is
@@ -832,7 +849,7 @@ struct AccountPane: View {
 
     /// The permission glyph's press: the question this row's sign-in is owed, and **nobody is
     /// signed out to put it** — `askWriting`'s argument, which is why this is not the key's own
-    /// press: on a signed-in row the key signs out, and a sign-out revokes the token.
+    /// press: on a signed-in row the key asks to sign out, and a sign-out revokes the token.
     ///
     /// A sign-in that only lacks bookmarks is asked for those, the one question a post's row
     /// puts; a write turned away, or a sign-in made before writing was asked for, is asked what
@@ -933,6 +950,29 @@ struct AccountPane: View {
         SourceMarkRow.Mark(
             id: row.source.host, kind: row.source.kind, shape: row.shape, signedIn: signedIn
         )
+    }
+}
+
+/// Signing out, asked of a source whose key was pressed while signed in — a modifier, for
+/// `SignInChoiceQuestion`'s reason. **The question is the one read at the press and held with
+/// its host** (`SignOutAsk`), not read again while the card is up: a yes on a forum deletes its
+/// saved password, and a card re-read as it slid away would turn from the one that said so into
+/// the one that does not. Putting it down any other way than its yes signs nobody out.
+private struct SignOutQuestion: ViewModifier {
+    let session: ShellSession
+    let signOut: @MainActor (String) -> Void
+
+    func body(content: Content) -> some View {
+        content.shellConfirm(asked, question: \.question) { ask, _ in
+            signOut(ask.host)
+        }
+        // The question is drawn nowhere but on this page: leaving puts it down, so it cannot
+        // come back on a later visit asking about a sign-in as it stood then.
+        .onDisappear { session.dropSignOutAsk() }
+    }
+
+    private var asked: Binding<SignOutAsk?> {
+        Binding(get: { session.signOutAsk }, set: { if $0 == nil { session.signOutAsk = nil } })
     }
 }
 

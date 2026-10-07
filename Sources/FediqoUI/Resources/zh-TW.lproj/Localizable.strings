@@ -765,7 +765,7 @@
 "account.sources.detail"         = "這個裝置讀的全部。按一列，看那個來源怎麼說它自己——它的名字、它的規模、它的版塊。移除其中一個，它的版塊和它的文章都會跟著走。";
 "account.sources.held"           = "每一個在這個裝置上還留著什麼，在「用量」裡。";
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
-"account.sources.marks"          = "每一列都帶同樣的標記。鑰匙是登入：登入之後是實心的，那個來源不提供登入的話是灰的。⋯ 裡面是其他的：這一列要說的話、換版塊或列表、清除它留在這裡的東西、移除它。來源沒有的那一項在裡面也是灰的，並且說為什麼。紅色的 ⋯ 是有話要說。";
+"account.sources.marks"          = "每一列都帶同樣的標記。鑰匙是登入：登入之後是實心的，那個來源不提供登入的話是灰的。實心的時候按它，會先問過才登出。⋯ 裡面是其他的：這一列要說的話、換版塊或列表、清除它留在這裡的東西、移除它。來源沒有的那一項在裡面也是灰的，並且說為什麼。紅色的 ⋯ 是有話要說。";
 /* #69 — what may be done on a source, said on its row and explained once for the list. */
 "account.sources.writing"        = "帶驚嘆號的鎖是說那個登入要再問一次，才會提供它還能做的事：有一次寫入被擋了下來，或者它登入的時候 Fediqo 還沒問過寫入或書籤。按它就會問；不會把誰登出。";
 "account.source.permission"      = "要再問一次 %@ 的登入，才會提供它還能做的事";
@@ -789,11 +789,19 @@
 "account.signin.ask.read"        = "登入來讀";
 "account.signin.ask.write"       = "登入來讀與寫";
 "account.signin.ask.line" = "選擇 Fediqo 只讀，或也以你的身分寫與加書籤。";
+"account.signout.ask.title" = "登出 %@？";
+"account.signout.ask.confirm" = "登出";
+"account.signout.ask.mastodon.line" = "登入會交還給這個來源；這台裝置不再讀首頁和列表，也不能再發文。";
+"account.signout.ask.mastodon.detail" = "這台裝置會忘掉這次登入，並請這個來源結束它。你的首頁和列表不會再讀，也不能再從 Fediqo 發文、回覆、轉發、收藏或加書籤；它的貼文上你收藏、轉發、加書籤的標記也會拿掉。已經讀進來的都還在，你選的列表也在，而且你隨時可以再登入。";
+"account.signout.ask.forum.line" = "這台裝置會登出這個論壇。";
+"account.signout.ask.forum.detail" = "這個論壇在這台裝置上的登入狀態會清掉。需要登入才能讀的版塊，要再登入才讀得到。這台裝置為它存的圖片、表情名稱和文章都還在，你選的版塊也在。";
+"account.signout.ask.forum.password.line" = "你會登出，為它存的密碼也會刪掉。";
+"account.signout.ask.forum.password.detail" = "這個論壇在這台裝置上的登入狀態會清掉，為它存的密碼也會從這台裝置的鑰匙圈刪掉。只有密碼不會回來：下次要再打一次。需要登入才能讀的版塊，要再登入才讀得到。這台裝置為它存的圖片、表情名稱和文章都還在，你選的版塊也在。";
 
 "account.source.boards"          = "%1$d 個版塊：%2$@";
 "account.source.unread"          = "讀不到它的自我介紹。";
 "account.source.remove.label"    = "移除 %@，連同它留在這裡的東西";
-"account.source.signout.label"   = "登出 %@，並忘掉它留在這裡的東西";
+"account.source.signout.label"   = "登出 %@。會先詢問。";
 
 /* M1 tail — the row's controls, and changing a forum's boards. */
 "account.source.boards.change"    = "換一批你在 %@ 上讀的版塊";
