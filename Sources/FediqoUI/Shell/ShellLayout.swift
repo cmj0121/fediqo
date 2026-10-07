@@ -29,7 +29,7 @@ public enum ShellLayout: Hashable, Sendable, CaseIterable {
 
     /// Where the rail begins. **Not a new number:** it is the floor the rail beside the page has
     /// always kept on a Mac, `RailView.Metrics.expandedWidth` plus the hairline plus the 318
-    /// points every threshold in a source row is measured against. Below it the rail open leaves
+    /// points of the narrowest page a Mac draws beside it. Below it the rail open leaves
     /// the page narrower than anything in it was built for, so below it the rail is not drawn.
     public static let breakpoint: CGFloat = 520
 

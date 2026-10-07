@@ -47,8 +47,8 @@ struct BoardPickerList: View {
     /// as a control. 20 at the default rung, one point over the name's cap height, so the box is
     /// the loudest thing on the row at every rung rather than only at the smallest.
     @ShellMetric(relativeTo: .callout) private var tickSize: CGFloat = 20
-    /// Half a callout's cap height, scaling with it — `SourceRowView.capHalf`'s value and its
-    /// reason, one file over. See `row(_:)`.
+    /// Half a callout's cap height, scaling with it: what the tick's centre is set against, so
+    /// it sits on the name's first line at every rung. See `row(_:)`.
     @ShellMetric(relativeTo: .callout) private var capHalf: CGFloat = 6
 
     var body: some View {
@@ -112,7 +112,6 @@ struct BoardPickerList: View {
         let on = picked.contains(board.fid)
         // Read out before the `alignmentGuide` closure: that closure is `@Sendable` and a
         // `@ScaledMetric` is main-actor isolated, so the number crosses rather than the property.
-        // `SourceRowView.actionsTrailing` states the same rule one file over.
         let anchor = capHalf
         return Button {
             if on { picked.remove(board.fid) } else { picked.insert(board.fid) }
@@ -134,8 +133,7 @@ struct BoardPickerList: View {
                 HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
                     tick(on)
                         // The tick has no baseline of its own, so its own centre is mapped onto
-                        // the name's — the guide `SourceRowView` uses for the row's trailing
-                        // group, and for the same reason.
+                        // the name's.
                         .alignmentGuide(.firstTextBaseline) {
                             $0[VerticalAlignment.center] + anchor
                         }
@@ -365,7 +363,7 @@ struct ListPickerList: View {
 
 /// How the board picker's tick is drawn, in whichever of its two states it is in.
 ///
-/// **`RowActionState`'s shape, applied to the other control this branch shipped invisible.** The
+/// **The state carries its inks**, so the three are chosen together and never one by one. The
 /// mark's ink exists only in `.on`, so **a mark on an unticked box cannot be spelled**.
 ///
 /// **What the type does not prevent, said plainly rather than claimed away**: `.on(plate: p,

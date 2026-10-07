@@ -46,7 +46,8 @@ enum ShellPopUp: CaseIterable {
 /// a pop-up drawn without the second one looked exactly like a pop-up with it — dimmed page,
 /// dead tap. Here the veil cannot be built without saying what pressing it does: a pop-up that
 /// does not close when the reader presses beside it is now unspellable rather than merely
-/// discouraged, which is the same move `RowActionState` made for a row's controls.
+/// discouraged, which is the same move `ShellMoreItem.danger` makes for a press that takes something away: it
+/// cannot be built without the question it asks.
 ///
 /// **`contentShape` before the gesture**, because a `Color` fills its frame but only a shape
 /// takes a hit — without it the press lands on whatever is behind the veil, which is the page the

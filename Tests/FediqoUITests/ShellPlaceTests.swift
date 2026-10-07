@@ -81,7 +81,7 @@ struct ShellPlaceTests {
 
     /// **The rail's mark is `well - snug`, which is the row's own rule applied to the rail.**
     /// `SourceRow.symbolPoints` is `touch - snug`, "leaving `ShellSpace.snug` of the target around
-    /// it"; here it gives 24, which is also `SourceRow.markBase` and `SourceRowView.glyph`'s base.
+    /// it"; here it gives 24, which is also `SourceRow.markBase`, the base `SourceRowView.mark` grows from.
     /// One number, three surfaces — and the compositional half of what the user asked for when they
     /// said the rail's marks looked small beside the buttons.
     ///

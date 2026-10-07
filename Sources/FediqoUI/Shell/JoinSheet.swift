@@ -923,8 +923,8 @@ struct JoinSheet: View {
                 // **Folded once for the list, not once per row.** `session.isAdded` lowercases and
                 // scans `sources` linearly, so asked inside the `ForEach` it is O(rows x sources)
                 // on every redraw — and this list is the directory whole now that the sheet has no
-                // filter, where it used to be a narrowed subset. `AccountPane`'s own comment about
-                // hoisting `rows` and `widest` out of its `ForEach` is the precedent.
+                // filter, where it used to be a narrowed subset. `AccountPane` reads
+                // `session.rows` once above its own `ForEach` for the same reason.
                 let added = Set(session.sources.map(\.host))
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -970,7 +970,7 @@ struct JoinSheet: View {
         // **Built once and handed to both readers.** `rowFoot` draws these three and the spoken
         // value says the same three, and each one costs a locale lookup, two bundle lookups and
         // two compact-number formats — so asking twice doubled that for every visible row on every
-        // redraw. `AccountPane`'s `let widest = widest` hoist is the same move for the same reason.
+        // redraw.
         let readings = readings(server)
         return Button {
             Task { await session.pick(server) }
