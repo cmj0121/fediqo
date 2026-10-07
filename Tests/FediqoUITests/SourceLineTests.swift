@@ -368,6 +368,60 @@ struct SourceLineTests {
         #expect(busy.more.head.last == "\(held.name), \(busy.key.name). \(L10n.t("mark.dim.notNow"))")
     }
 
+    @Test("The permission control is the lock and one word together, the same word whatever is owed and in every language; without room it is the same mark with the word left off")
+    func theControlIsALockAndAWord() {
+        #expect(SourceRow.permissionWord == "account.source.permission.word")
+        #expect(L10n.t(SourceRow.permissionWord, language: .english) == "Update permission")
+        #expect(L10n.t(SourceRow.permissionWord, language: .taiwanese) == "更新權限")
+
+        // The three cases that owe it: a write turned away, a sign-in made before writing was
+        // asked for, and one made before bookmarks were.
+        let source = Self.micro
+        func row(_ writing: SourceWriting, _ grant: MastodonGrant, _ bookmarks: BookmarkStanding) -> SourceRow {
+            SourceRow(
+                source: source, profile: .unasked(host: source.host, kind: source.kind), signedIn: true,
+                writing: writing, unasked: SourceRow.unasked(grant: grant, bookmarks: bookmarks)
+            )
+        }
+        let owing = [
+            row(.refused, .writing, .allowed), row(.reads, .unasked, .unavailable), row(.writes, .writing, .unasked),
+        ]
+        #expect(owing.map(\.owed) == [.refused, .asking, .asking])
+        for language in DummyLanguage.allCases {
+            let marks = owing.map { SourceRow.permission($0, actsLive: true, language: language)! }
+            let word = L10n.t(SourceRow.permissionWord, language: language)
+            #expect(word != SourceRow.permissionWord && !word.isEmpty)
+            #expect(marks.allSatisfy { $0.symbol == "exclamationmark.lock" && $0.word == word }, "\(language)")
+            // What is said is the sentence, and it starts by what the word says.
+            #expect(marks.allSatisfy { $0.spoken == $0.name && $0.name.contains(source.host) && $0.name != word })
+        }
+        // Held, the word stays: only the look and what is said after the name change.
+        let held = SourceRow.permission(owing[0], actsLive: false)!
+        #expect(held.word == "Update permission" && held.look == .dim(.notNow))
+        #expect(held.spoken.hasSuffix(L10n.t("mark.dim.notNow")))
+
+        // Bare, it is the same mark in everything but the word.
+        let worded = SourceRow.permission(owing[0], actsLive: true)!
+        var same = worded.bare
+        #expect(same.word == nil && same != worded)
+        same.word = worded.word
+        #expect(same == worded)
+        #expect(Self.view(Self.row(source)).key.word == nil, "the key grew a word")
+
+        // The word's ink is the glyph's while live, and a dim mark's text otherwise.
+        for scheme in [ColorScheme.light, .dark] {
+            for owed in [SourceRow.Owed.asking, .refused] {
+                let live = SourceRow.permissionInk(owed, look: .live, scheme)
+                #expect(live == (owed == .refused ? ShellChrome.alarm(scheme) : ShellChrome.inkDim(scheme)))
+                #expect(ShellMark.wordInk(.live, glyph: live, scheme) == live)
+                let dim = SourceRow.permissionInk(owed, look: .dim(.notNow), scheme)
+                #expect(dim == ShellChrome.markDim(scheme))
+                #expect(ShellMark.wordInk(.dim(.notNow), glyph: dim, scheme) == ShellChrome.inkFaint(scheme))
+                #expect(ShellMark.wordInk(.dim(.notNow), glyph: dim, scheme) == ShellMark.countInk(.dim(.notNow), on: false, scheme))
+            }
+        }
+    }
+
     @Test("The page hands the glyph its own asking: a press puts the sign-in question and signs nobody out, and a row that owes nothing puts none")
     func theGlyphIsWiredToThePagesAsking() async {
         let session = ShellSession(http: FixtureHTTP(), store: ItemStore())
@@ -381,6 +435,12 @@ struct SourceLineTests {
         pane.presses(Self.row(Self.micro, signedIn: true, owed: .refused)).askAgain()
         #expect(session.signInChoice == "micro.example", "the glyph's press reached nothing")
         #expect(session.sources.count == 1 && session.cleared == 0)
+
+        // A sign-in made before writing was asked for holds no bookmarks to ask about, so it is
+        // asked what it may do as well.
+        session.signInChoice = nil
+        pane.presses(Self.row(Self.micro, signedIn: true, owed: .asking)).askAgain()
+        #expect(session.signInChoice == "micro.example" && session.bookmarkAsk == nil)
     }
 
     // MARK: - No two presses overlap
@@ -446,7 +506,7 @@ struct SourceLineTests {
         #expect(elsewhere.said.isEmpty && elsewhere.saying == .nothing)
     }
 
-    @Test("The list's help names the key, the menu and the lock in all three tables, and the two Chinese tables are one")
+    @Test("The list's help names the key, the menu, and the lock with its word in all three tables, and the two Chinese tables are one")
     func theHelpSaysTheNewMarks() throws {
         let resources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -468,12 +528,18 @@ struct SourceLineTests {
             #expect(!marks.contains("沒有登入"), "the legend reads as signed out, not as no sign-in offered")
             #expect(strings.contains("\"mark.more.said\" = "))
             #expect(strings.contains("\"account.sources.writing\"") && strings.contains("\"account.source.permission\""))
+            #expect(strings.contains("\"account.source.permission.word\""))
+            #expect(!strings.contains(".again.line\"") && !strings.contains("writing.again") && !strings.contains("bookmarks.again"),
+                    "a sentence no page draws is still shipped")
         }
         #expect(tables[1] == tables[2], "the two Chinese tables differ")
         for language in [DummyLanguage.english, .taiwanese] {
             let help = AccountPane.sourcesHelp(language: language)
             #expect(help.contains(L10n.t("account.sources.marks", language: language)))
             #expect(help.contains(language == .english ? "lock" : "鎖"), "the help does not say what the lock means")
+            #expect(help.contains(L10n.t(SourceRow.permissionWord, language: language)), "the help does not name the word the row draws")
+            // No sentence stands on the page about it any more, so the help says what it said.
+            #expect(help.contains(language == .english ? "exactly as it was" : "和原來一樣"))
             #expect(!help.contains(L10n.t("account.source.writing.write", language: language)), "the help still describes a word no row draws")
         }
     }
@@ -533,20 +599,133 @@ struct SourceLineTests {
         // And with something to say, it is still one line: the sentence is behind the mark.
         let waiting = row(Self.sources[2].1, signedIn: false, layout: .narrow, width: width, type: type, waiting: "Signing in to forum.example…")
         #expect(abs(waiting.height - heights[0]) <= 0.5 && waiting.width <= width + 0.5)
-        // And with the permission glyph beside the key, the same line again.
+        // And with the permission control beside the key, word or no word, the same line again.
         let owing = row(Self.sources[0].1, signedIn: true, layout: .narrow, width: width, type: type, owed: .refused)
         #expect(abs(owing.height - heights[0]) <= 0.5 && owing.width <= width + 0.5, "\(type): the glyph made the row \(owing)")
     }
 
     /// What the row leaves the hostname, measured off the hosted row: the row's width less
     /// everything in it that is not the hostname's text — which is the row at its ideal width
-    /// around a one-letter host, less that letter.
-    private func hostRoom(in width: CGFloat, type: DynamicTypeSize, owed: SourceRow.Owed?) -> CGFloat {
+    /// around a one-letter host, less that letter. At its ideal width a row that owes the
+    /// permission control draws it with its word; `worded: false` is the row with the lock
+    /// alone, which is that less what the word adds to the control.
+    private func hostRoom(
+        in width: CGFloat, type: DynamicTypeSize, owed: SourceRow.Owed?, worded: Bool = false
+    ) -> CGFloat {
         let short = Source(host: "a", kind: .mastodon)
-        let ideal = NSHostingView(rootView: Self.view(Self.row(short, signedIn: true, owed: owed))
+        var ideal = NSHostingView(rootView: Self.view(Self.row(short, signedIn: true, owed: owed))
             .dynamicTypeSize(type).fixedSize()).fittingSize.width
+        if owed != nil, !worded { ideal -= wordAdds(type) }
         let letter = NSHostingView(rootView: Text("a").shellFont(.name).dynamicTypeSize(type).fixedSize()).fittingSize.width
         return width - (ideal - letter)
+    }
+
+    /// The permission control's drawn width, with its word or bare.
+    private func control(_ type: DynamicTypeSize, worded: Bool) -> CGFloat {
+        let mark = SourceRow.permission(Self.row(Self.micro, signedIn: true, owed: .refused), actsLive: true)!
+        return NSHostingView(rootView: ShellMarkButton(worded ? mark : mark.bare, act: {})
+            .dynamicTypeSize(type).fixedSize()).fittingSize.width
+    }
+
+    /// What the word adds to the control's width.
+    private func wordAdds(_ type: DynamicTypeSize) -> CGFloat {
+        control(type, worded: true) - control(type, worded: false)
+    }
+
+    /// Whether the row, hosted `width` wide, drew the permission control with its word, and
+    /// where its far edge landed.
+    private func drawn(
+        _ source: Source, width: CGFloat, type: DynamicTypeSize, owed: SourceRow.Owed? = .refused
+    ) -> (worded: Bool, maxX: CGFloat) {
+        let told = Told()
+        let placed = Self.view(Self.row(source, signedIn: true, owed: owed))
+            .dynamicTypeSize(type)
+            .background(GeometryReader { place in
+                let _ = told.maxX = place.frame(in: .named("row")).maxX
+                Color.clear
+            })
+            .backgroundPreferenceValue(SourceRowView.Worded.self) { worded in
+                let _ = told.worded = worded
+                Color.clear
+            }
+            .frame(minWidth: 0, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: width, alignment: .leading)
+            .coordinateSpace(.named("row"))
+        let hosted = NSHostingView(rootView: placed)
+        hosted.frame = NSRect(x: 0, y: 0, width: width, height: 600)
+        hosted.layoutSubtreeIfNeeded()
+        return (told.worded, told.maxX)
+    }
+
+    private final class Told {
+        var worded = false
+        var maxX: CGFloat = 0
+    }
+
+    @Test("The word gives way before the hostname does: the control carries its word wherever the whole hostname fits beside it, and is the lock alone on any narrower row — never a cut word, never no control")
+    func theWordGivesWay() {
+        let named = Self.sources[0].1
+        let long = Self.sources[4].1
+        // A wide page: the word is drawn, whatever the host.
+        #expect(drawn(named, width: 900, type: .large).worded)
+        #expect(drawn(long, width: 900, type: .large).worded)
+        #expect(!drawn(named, width: 900, type: .large, owed: nil).worded, "a word where nothing is owed")
+
+        // The word is drawn down to the last point the whole line fits in, and not one under.
+        for type in [DynamicTypeSize.large, .accessibility1] {
+            let whole = NSHostingView(rootView: Self.view(Self.row(named, signedIn: true, owed: .refused))
+                .dynamicTypeSize(type).fixedSize()).fittingSize.width
+            #expect(drawn(named, width: whole.rounded(.up), type: type).worded, "\(type)")
+            let under = drawn(named, width: whole.rounded(.up) - 2, type: type)
+            #expect(!under.worded && under.maxX <= whole.rounded(.up) - 2 + 0.5, "\(type): \(under)")
+            // And the word is the whole of the difference: glyph box, gaps and press are one.
+            #expect(abs(control(type, worded: false) - ShellGlyphBox.box * ShellType.multiple(at: type)) <= 1)
+        }
+
+        // A 320-point phone's row at the default size: a hostname the row has room for whole
+        // keeps the word; one it has not is drawn with the lock alone and keeps what it had.
+        let room = hostRoom(in: 288, type: .large, owed: .refused, worded: true)
+        // 54 points in English: 288 less the mark, the gaps, the worded control (106), the key
+        // and the menu. Under it the word goes and the hostname has the 128 it had.
+        #expect(abs(room - 54) <= 1, "the word leaves a hostname \(room) points at the default size")
+        #expect(abs(control(.large, worded: true) - 106) <= 1 && abs(wordAdds(.large) - 74) <= 1)
+        #expect(abs(hostRoom(in: 900, type: .large, owed: .refused, worded: true) - 666) <= 1)
+        #expect(!drawn(named, width: 288, type: .large).worded)
+        #expect(!drawn(long, width: 288, type: .large).worded)
+        #expect(drawn(Source(host: "a", kind: .mastodon), width: 288, type: .large).worded == (room > 0))
+        // The largest size: the lock alone, for any host.
+        #expect(!drawn(named, width: 288, type: .accessibility1).worded)
+        #expect(!drawn(Source(host: "a", kind: .mastodon), width: 288, type: .accessibility1).worded)
+        // There the worded control alone is 164 points, and the line would be 34 over the row.
+        #expect(abs(hostRoom(in: 288, type: .accessibility1, owed: .refused, worded: true) + 34) <= 1)
+        #expect(abs(hostRoom(in: 288, type: .accessibility1, owed: .refused) - 77) <= 1)
+    }
+
+    @Test("The worded control stands off the key by the same gap a glyph does, at its real width: the row is wider by exactly what the word adds, so no press reaches its neighbour's",
+          arguments: [DynamicTypeSize.medium, .large, .xxxLarge, .accessibility1])
+    func theWordedControlKeepsItsGap(_ type: DynamicTypeSize) {
+        let short = Source(host: "a", kind: .mastodon)
+        func ideal(_ owed: SourceRow.Owed?) -> CGFloat {
+            NSHostingView(rootView: Self.view(Self.row(short, signedIn: true, owed: owed))
+                .dynamicTypeSize(type).fixedSize()).fittingSize.width
+        }
+        let box = ShellGlyphBox.box * ShellType.multiple(at: type)
+        let gap = ShellTouchFloor.gap(drawn: box)
+        let worded = control(type, worded: true)
+        #expect(worded > box, "\(type): the word takes no room")
+        // The row with the control is the row without it, plus the control whole and one gap:
+        // nothing of the word's width was taken out of the gap either side of it.
+        #expect(abs(ideal(.refused) - (ideal(nil) + worded + gap)) <= 0.5, "\(type): \(ideal(.refused)) \(ideal(nil)) \(worded) \(gap)")
+        // And it spills what a glyph spills, which that gap is twice.
+        #expect(gap == ShellTouchFloor.spill(drawn: box) * 2)
+        // The same height as the key beside it.
+        let key = NSHostingView(rootView: ShellMarkButton(Self.view(Self.row(short)).key, act: {})
+            .dynamicTypeSize(type).fixedSize()).fittingSize.height
+        let tall = NSHostingView(rootView: ShellMarkButton(
+            SourceRow.permission(Self.row(short, signedIn: true, owed: .refused), actsLive: true)!, act: {}
+        ).dynamicTypeSize(type).fixedSize()).fittingSize.height
+        #expect(abs(tall - key) <= 0.5, "\(type): the control is \(tall) tall beside a key \(key) tall")
     }
 
     @Test("The hostname's width on the narrowest row is a number that is watched: at 288 points with the lock, the key and the menu all drawn, 128 points at the default size and 77 at the largest")
@@ -564,6 +743,8 @@ struct SourceLineTests {
         #expect(largest >= 77, "the hostname has \(largest) points at the largest size")
         // Without the lock it has a mark's box and its gap more.
         #expect(hostRoom(in: 288, type: .accessibility1, owed: nil) > largest)
+        // The word costs the hostname nothing on this row: it is not drawn where it would.
+        #expect(!drawn(Self.sources[0].1, width: 288, type: .large).worded)
     }
 
     @Test("A wide page draws the same one line a narrow page does: the same height, and no line held open under the host")

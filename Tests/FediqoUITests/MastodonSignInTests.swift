@@ -650,8 +650,7 @@ struct MastodonSignInTests {
             #expect(!body.contains("write"), "a read-only sign-in asked to write")
         }
         #expect(row(session, host).writing == .reads)
-        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon).isEmpty,
-                "a reader who answered is asked again")
+        #expect(row(session, host).owed == .nothing, "a reader who answered is asked again")
     }
 
     @Test("Signing in to write asks for both parts, and the row says both")
@@ -712,7 +711,7 @@ struct MastodonSignInTests {
     /// **A reader signed in before this app could write is told, and nothing of theirs moves.**
     /// The token kept by that build recorded no scopes at all, which is what tells it apart from a
     /// reader who was offered the writing part and said no.
-    @Test("A sign-in made before the question reads as before, and is asked again in the open")
+    @Test("A sign-in made before the question reads as before, and its row asks again in the open")
     func askedAgain() async throws {
         let (session, _, tokens) = await shell()
         try tokens.save(token(host))
@@ -720,30 +719,29 @@ struct MastodonSignInTests {
 
         #expect(session.isSignedIn(host: host), "reading stopped working")
         #expect(session.mastodon.grants[host] == .unasked)
-        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon) == [host])
+        #expect(row(session, host).owed == .asking)
         #expect(row(session, host).writing == .reads, "it writes nothing until they agree")
 
-        // Answering it — either way — takes the line off the page.
+        // Answering it — either way — takes the control off the row.
         await session.signIn(host: host, through: Page(), writing: true)
         #expect(session.mastodon.grants[host] == .writing)
-        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon).isEmpty)
+        #expect(row(session, host).owed == .nothing)
         #expect(row(session, host).writing == .writes)
     }
 
     /// **Being told is not being asked.** The only route to the question was sign out → sign in,
     /// and a sign-out revokes the token at the server — so reaching the choice cost a working
     /// read-only sign-in, and cancelling on the server's page left the reader with less than they
-    /// had before the question existed. The sentence carries the question now.
-    @Test("The standing sentence asks in place: nobody is signed out and nothing is asked of the server")
-    func theSentenceAsksInPlace() async throws {
+    /// had before the question existed. The row's permission control carries the question now.
+    @Test("The row's permission control asks in place: nobody is signed out and nothing is asked of the server")
+    func theRowAsksInPlace() async throws {
         let (session, server, tokens) = await shell()
         try tokens.save(MastodonToken(
             host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret"
         ))
         session.mastodon.refresh()
-        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon) == [host])
 
-        // The row says so too, with its one permission glyph — whose press is this same asking.
+        // The row says so, with its one permission control — whose press is this asking.
         #expect(row(session, host).owed == .asking)
         AccountPane(session: session).askAgain(row(session, host))
         #expect(session.signInChoice == host && session.bookmarkAsk == nil)
@@ -758,7 +756,7 @@ struct MastodonSignInTests {
         session.signInChoice = nil
         #expect(try tokens.token(host: host)?.accessToken == "tok-old")
         #expect(await server.paths.isEmpty)
-        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon) == [host])
+        #expect(row(session, host).owed == .asking)
 
         // Answering it: the new token replaces the old one here, and revokes it there.
         await session.signIn(host: host, through: Page(), writing: true)
@@ -766,7 +764,7 @@ struct MastodonSignInTests {
         #expect(session.mastodon.grants[host] == .writing)
         #expect(row(session, host).writing == .writes)
         #expect(await server.revoked == ["tok-old"], "the sign-in it replaced is still live")
-        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon).isEmpty)
+        #expect(row(session, host).owed == .nothing)
     }
 
     /// **A sign-in made in place must not leave the token it replaces alive**, and narrowing is
@@ -800,19 +798,19 @@ struct MastodonSignInTests {
         #expect(try tokens.token(host: host)?.scopes == MastodonOAuth.reading)
         #expect(session.mastodon.grants[host] == .reading)
         #expect(row(session, host).writing == .reads)
-        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon).isEmpty,
-                "a reader who answered is asked again")
+        #expect(row(session, host).owed == .nothing, "a reader who answered is asked again")
     }
 
     /// A token left behind for a server the reader has since removed must not put a stranger's
-    /// name on the page: the line is drawn from the rows.
-    @Test("The line names only sources this page draws")
-    func askedAgainNamesOnlyItsOwnRows() async throws {
+    /// name on the page: the control is a row's, and a row is a source.
+    @Test("Only a source this page draws is asked again")
+    func onlyItsOwnRowsAreAskedAgain() async throws {
         let (session, _, tokens) = await shell()
         try tokens.save(token("gone.example"))
         session.mastodon.refresh()
         #expect(session.mastodon.grants["gone.example"] == .unasked)
-        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon).isEmpty)
+        #expect(!session.rows.contains { $0.source.host == "gone.example" })
+        #expect(session.rows.allSatisfy { $0.owed == .nothing })
     }
 
     /// **A source that turns a write away says so and keeps saying it.** Nothing this device holds
@@ -826,14 +824,14 @@ struct MastodonSignInTests {
 
         session.mastodon.refusedWrite(host: host)
         #expect(row(session, host).writing == .refused)
-        // The row draws no word for it now: it owes the permission glyph, in the alarm.
+        // The row draws no word for what it may do: it owes the permission control, in the alarm.
         #expect(row(session, host).owed == .refused)
         #expect(SourceRow.permissionInk(.refused, look: .live, .light) == ShellChrome.alarm(.light))
         #expect(session.isSignedIn(host: host), "a refused write signed the reader out")
         #expect(SourceRow.spoken(row(session, host))
             .contains(L10n.t("account.source.writing.refused")))
 
-        // The glyph's press asks what the sign-in may do, and signs nobody out to ask.
+        // The control's press asks what the sign-in may do, and signs nobody out to ask.
         AccountPane(session: session).askAgain(row(session, host))
         #expect(session.signInChoice == host && session.isSignedIn(host: host))
         session.signInChoice = nil
@@ -865,8 +863,7 @@ struct MastodonSignInTests {
         var keys = Set(SourceWriting.allCases.map(SourceRow.writingKey))
         #expect(keys.count == SourceWriting.allCases.count, "two states share a word")
         keys.formUnion([
-            "account.sources.writing", "account.sources.writing.again",
-            "account.sources.writing.again.choose",
+            "account.sources.writing", "account.source.permission", "account.source.permission.word",
             "account.signin.ask.title", "account.signin.ask.detail",
             "account.signin.ask.read", "account.signin.ask.write",
         ])
@@ -953,8 +950,8 @@ struct MastodonSignInTests {
         #expect(acts.offered == [.boost, .favourite, .answer])
         #expect(acts.asks(.bookmark))
         #expect(session.mastodon.bookmarks(host: host) == .unasked)
-        #expect(AccountPane.askedForBookmarks(session.sources, in: session.mastodon) == [host])
-        #expect(AccountPane.askedAgain(session.sources, in: session.mastodon).isEmpty, "it is not asked the older question")
+        // The row owes its control for bookmarks alone: its grant was asked everything else.
+        #expect(self.row(session, host).owed == .asking)
 
         // The mark's press sends nothing and signs nobody out: it only puts the question.
         await session.toggle(.bookmark, on: row)
@@ -985,7 +982,7 @@ struct MastodonSignInTests {
         acts = session.acts(on: row)
         #expect(acts.offered == [.boost, .favourite, .answer, .bookmark] && acts.asking.isEmpty, "asked more than once")
         #expect(!session.askToBookmark(row))
-        #expect(AccountPane.askedForBookmarks(session.sources, in: session.mastodon).isEmpty)
+        #expect(self.row(session, host).owed == .nothing)
     }
 
     /// Every registration an earlier build made for acting leaves bookmarks out. Started on, the
@@ -1023,7 +1020,7 @@ struct MastodonSignInTests {
         #expect(session.mastodon.bookmarks(host: host) == .unavailable)
         let acts = session.acts(on: await post(in: session))
         #expect(acts.offered == [.boost, .favourite, .answer] && acts.asking.isEmpty)
-        #expect(AccountPane.askedForBookmarks(session.sources, in: session.mastodon).isEmpty)
+        #expect(row(session, host).owed == .nothing)
 
         // Signing out forgets that it was asked, with everything else of the sign-in.
         await session.signOut(host: host)
@@ -1065,7 +1062,7 @@ struct MastodonSignInTests {
         relaunched.sources = await relaunched.store.sources()
         #expect(relaunched.mastodon.grants[host] == .writing)
         #expect(relaunched.mastodon.bookmarks(host: host) == .unavailable, "asked again after a relaunch")
-        #expect(AccountPane.askedForBookmarks(relaunched.sources, in: relaunched.mastodon).isEmpty)
+        #expect(relaunched.rows.allSatisfy { $0.owed == .nothing })
         let row = await post(in: relaunched)
         #expect(!relaunched.acts(on: row).asks(.bookmark) && !relaunched.askToBookmark(row))
         let before = await server.paths.count
@@ -1167,7 +1164,7 @@ struct MastodonSignInTests {
         #expect(try tokens.token(host: host)?.accessToken == "tok-old")
         #expect(row(session, host).writing == .writes)
         for language in [DummyLanguage.english, .taiwanese] {
-            for key in ["account.bookmarks.failed", "account.bookmarks.unavailable", "account.sources.bookmarks.again.choose"] {
+            for key in ["account.bookmarks.failed", "account.bookmarks.unavailable", "account.source.permission.word"] {
                 #expect(L10n.t(key, language: language) != key, "\(key) is not written in \(language)")
             }
         }
@@ -1195,7 +1192,7 @@ struct MastodonSignInTests {
         }
     }
 
-    @Test("Account's bookmark sentence puts the bookmark question itself: one press, and never the read-or-write choice")
+    @Test("A row that owes bookmarks alone puts the bookmark question itself: one press, and never the read-or-write choice")
     func accountAsksTheBookmarkQuestion() async throws {
         let (session, server, tokens) = await shell()
         try tokens.save(MastodonToken(
@@ -1203,7 +1200,7 @@ struct MastodonSignInTests {
         ))
         session.mastodon.refresh()
 
-        // The row owes its permission glyph for it, and the glyph's press is this one question.
+        // The row owes its permission control for it, and the control's press is this one question.
         #expect(row(session, host).owed == .asking)
         AccountPane(session: session).askAgain(row(session, host))
         #expect(session.bookmarkAsk == host && session.signInChoice == nil)
@@ -1237,7 +1234,7 @@ struct MastodonSignInTests {
         #expect(again.title.contains(host) && again.line.contains(word))
         #expect(again.help?.contains(host) == true)
         #expect(!again.warns, "nothing is lost by asking")
-        for key in ["account.sources.bookmarks.again", "account.sources.bookmarks.again.line", "item.act.unbookmark"] {
+        for key in ["account.sources.writing", "item.act.unbookmark"] {
             #expect(L10n.t(key, language: language) != key, "\(key) is not written in \(language)")
         }
     }

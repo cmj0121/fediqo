@@ -38,7 +38,7 @@ struct SourceRow: Identifiable, Hashable {
     /// `writing`, and **handed in as `writing` is and for its reason**: both are the session's.
     let unasked: Bool
 
-    /// What the sign-in must be asked again for — what the row's one permission glyph is drawn
+    /// What the sign-in must be asked again for — what the row's one permission control is drawn
     /// from. Derived, so it cannot disagree with `writing`.
     var owed: Owed { Self.owed(writing: writing, unasked: unasked) }
 
@@ -141,7 +141,7 @@ struct SourceRow: Identifiable, Hashable {
     ///
     /// **Said, and not drawn.** `spoken(_:)` says it on every row — four words and no silence, so
     /// a listener never has to read a source by what is missing — and what a sighted reader is
-    /// shown is the one case that asks something of them: the permission glyph (`owed`).
+    /// shown is the one case that asks something of them: the permission control (`owed`).
     ///
     /// **No `default:`**, this file's rule everywhere it switches over a closed set.
     static func writingKey(_ writing: SourceWriting) -> String {
@@ -422,9 +422,9 @@ extension SourceRow {
         case refused
     }
 
-    /// The one permission glyph's rule (Q5): a sign-in that must be asked again.
+    /// The one permission control's rule (Q5): a sign-in that must be asked again.
     ///
-    /// **Three cases with one cure, so one glyph is honest**: a write the source refused, a
+    /// **Three cases with one cure, so one glyph and one word are honest**: a write the source refused, a
     /// sign-in made before writing was asked for, and one made before bookmarks were. Left out
     /// are the two with no cure or none needed — `.never`, where there is nothing to ask, and
     /// `.reads` by the reader's own choice — and a source that is signed out, whose live key
@@ -446,26 +446,35 @@ extension SourceRow {
     /// `exclamationmark.triangle` by an act that failed.
     static let permissionSymbol = "exclamationmark.lock"
 
-    /// What the permission glyph says — to the pointer, to VoiceOver, and at the head of the
-    /// row's `…`, which is where a finger reads it. Nothing where nothing is owed.
+    /// What the permission control says beyond its word — to the pointer, to VoiceOver, and at
+    /// the head of the row's `…`, which is where a finger reads it. Nothing where nothing is
+    /// owed. **The only place a row says why**: no sentence stands on the page about it.
     static func permissionLine(_ row: SourceRow, language: DummyLanguage? = nil) -> String? {
         guard row.owed != .nothing else { return nil }
         return String(format: L10n.t("account.source.permission", language: language), row.source.host)
     }
 
-    /// The permission glyph as a value, or nothing where nothing is owed: its glyph, its
-    /// sentence, and a mark's two looks — live, or dim for now while the row's acts are not
-    /// live. **The look decides the press** (`ShellMark.press`), so a glyph that cannot be
+    /// The word drawn after the permission glyph: one word whatever is owed, since the cure is
+    /// one. Why it is owed is `permissionLine`'s to say.
+    static let permissionWord = "account.source.permission.word"
+
+    /// The permission control as a value, or nothing where nothing is owed: its glyph, its word,
+    /// its sentence, and a mark's two looks — live, or dim for now while the row's acts are not
+    /// live. **The look decides the press** (`ShellMark.press`), so a control that cannot be
     /// pressed is never drawn as one that can, and says "not right now" after its sentence.
     static func permission(
         _ row: SourceRow, actsLive: Bool, language: DummyLanguage? = nil
     ) -> ShellMark? {
         guard let line = permissionLine(row, language: language) else { return nil }
-        return ShellMark(permissionSymbol, line, look: actsLive ? .live : .dim(.notNow))
+        return ShellMark(
+            permissionSymbol, line, look: actsLive ? .live : .dim(.notNow),
+            word: L10n.t(permissionWord, language: language)
+        )
     }
 
-    /// The permission glyph's ink: a dim mark's while it cannot be pressed; otherwise quiet, and
-    /// the alarm only where a write was turned away.
+    /// The permission control's ink, glyph and word alike while it is live: a dim mark's while it
+    /// cannot be pressed (and its word a dim mark's text, `ShellMark.wordInk`); otherwise quiet,
+    /// and the alarm only where a write was turned away.
     ///
     /// **The one ink handed to a `ShellMarkButton` over its look's own** (`MarkLook`): a mark is
     /// a press that is offered, and this one also says something happened to a press.
@@ -504,7 +513,7 @@ extension SourceRow {
     /// What each press of a row does, handed in by the page: the row acts on nothing itself.
     struct Presses {
         var signIn: () -> Void = {}
-        /// Puts the question a sign-in is owed; the permission glyph's press.
+        /// Puts the question a sign-in is owed; the permission control's press.
         var askAgain: () -> Void = {}
         var changeBoards: () -> Void = {}
         var chooseLists: () -> Void = {}
@@ -629,8 +638,9 @@ extension SourceRow {
 /// differs: what a source lacks is dim, and says why.
 ///
 /// **What is drawn.** The mark and the hostname, which is the row's press and opens what the
-/// server says about itself (decision 31). One glyph when the sign-in must be asked again
-/// (`SourceRow.owed`), and only then. The key: quiet when signed out, filled and warm when signed
+/// server says about itself (decision 31). A lock and a word, beside the key and drawn as it
+/// is, when the sign-in must be asked again (`SourceRow.owed`), and only then — the lock alone
+/// where the row has no room for the word and the whole hostname (`body`). The key: quiet when signed out, filled and warm when signed
 /// in, dim where the protocol has no sign-in or the page is busy. And `…`, always that glyph and
 /// red where the row warns, which holds what the row has to say, Boards, Lists, and — under its
 /// divider, each asking first — Clear and Remove.
@@ -728,17 +738,49 @@ struct SourceRowView: View {
         SourceRow.saying(waiting: waiting != nil, said: said)
     }
 
-    /// The permission glyph, where one is owed. Internal for `key`'s reason.
+    /// The permission control, where one is owed. Internal for `key`'s reason.
     var permission: ShellMark? {
         SourceRow.permission(row, actsLive: actsLive)
     }
 
+    /// Whether the line drawn carries the permission control's word. What a hosted row is asked
+    /// (`SourceLineTests`), since which of two lines fits is decided by the layout.
+    struct Worded: PreferenceKey {
+        static let defaultValue = false
+        static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+    }
+
+    /// **The word gives way before the hostname does.** A row that owes the permission control
+    /// draws it with its word only where the whole line fits with the hostname whole; on any
+    /// narrower row it is the lock alone, and from there it is the hostname that gives, by its
+    /// middle. The word is never cut and the control is never left out.
     var body: some View {
+        let permission = permission
+        Group {
+            if let permission, permission.word != nil {
+                ViewThatFits(in: .horizontal) {
+                    line(permission)
+                    line(permission.bare)
+                }
+            } else {
+                line(permission)
+            }
+        }
+        .padding(.vertical, ShellSpace.tight)
+        // **The wash is under the whole row including its marks, and that is correct**: the wash
+        // says *this row*, and the marks are in this row. Drawn behind the padding so the lit
+        // area is the row and not only its words.
+        .background { if let wash = pressed.wash { wash } }
+        .onHover { hovering = $0 }
+    }
+
+    /// The row's one line, with the permission control as it is handed in.
+    private func line(_ permission: ShellMark?) -> some View {
         // Read once a pass: each is a walk of the row's sentences or a formatted label.
         let said = said
         let saying = SourceRow.saying(waiting: waiting != nil, said: said)
         let key = key
-        HStack(alignment: .center, spacing: ShellSpace.snug) {
+        return HStack(alignment: .center, spacing: ShellSpace.snug) {
             // A scanning aid across a list, not information. `spoken(_:)` names the protocol in
             // words, so a reader who cannot see this loses nothing.
             markDrawing.frame(width: mark, height: mark).foregroundStyle(markInk)
@@ -765,7 +807,8 @@ struct SourceRowView: View {
             .accessibilityLabel(SourceRow.heard(row: SourceRow.spoken(row), said: said))
             .accessibilityHint(Text(L10n.t("account.source.open.hint")))
             // Spaced so no two presses overlap (`ShellTouchFloor.gap`), and never squeezed: under
-            // a narrow page it is the hostname that gives way, by its middle.
+            // a narrow page it is the hostname that gives way, by its middle. The worded control
+            // spills what a glyph does past its own edges, so one gap serves both.
             HStack(spacing: ShellTouchFloor.gap(drawn: box)) {
                 if let permission {
                     ShellMarkButton(
@@ -783,12 +826,7 @@ struct SourceRowView: View {
             .padding(.leading, ShellTouchFloor.lead(drawn: box))
             .layoutPriority(1)
         }
-        .padding(.vertical, ShellSpace.tight)
-        // **The wash is under the whole row including its marks, and that is correct**: the wash
-        // says *this row*, and the marks are in this row. Drawn behind the padding so the lit
-        // area is the row and not only its words.
-        .background { if let wash = pressed.wash { wash } }
-        .onHover { hovering = $0 }
+        .preference(key: Worded.self, value: permission?.word != nil)
     }
 
     /// The protocol's own mark, or the shape glyph where this repo draws none — decision 37.

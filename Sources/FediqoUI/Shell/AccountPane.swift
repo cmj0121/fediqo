@@ -593,7 +593,6 @@ struct AccountPane: View {
             ShellSectionHead(
                 L10n.t("account.sources.title"), line: L10n.t("account.sources.line"), help: Self.sourcesHelp()
             )
-            askedAgain
             // **A plain stack, because the page is the thing that scrolls.** A `ScrollView` here
             // would be the inner one the page comment above is about.
             // Row-independent — `stage == nil && !checking` names no host — so it is asked once
@@ -626,97 +625,15 @@ struct AccountPane: View {
         }
     }
 
-    /// What this build now asks for, said to a reader who signed in before it asked (#69).
-    ///
-    /// **On the page and not in an alert.** Widening what somebody already agreed to is the one
-    /// thing this unit must not do quietly, and the honest opposite of quietly is *standing on the
-    /// page they manage their sources from*, for as long as it is true. An alert would be a
-    /// sentence they can dismiss and never see again, or one that comes back every launch; this
-    /// goes when they answer it and not before.
-    ///
-    /// **It names the sources and what has not changed, in that order.** Nothing about their
-    /// reading moved, and a line about permissions that does not say so reads as one that did.
-    ///
-    /// **`ShellNotice` is deliberately not used**: that is a whole page with nothing on it, and
-    /// this is a line in a page that is full.
-    ///
-    /// **It carries the question as well as the news, one control per source it names.** Being
-    /// told without being asked is half of what the sentence promises: the only way to the choice
-    /// was to sign out and in again, and a sign-out revokes the token at the server — so reaching
-    /// the question cost a working sign-in, and cancelling on the server's page left the reader
-    /// worse off than before the question existed. One press puts the question instead.
-    @ViewBuilder
-    private var askedAgain: some View {
-        standing(
-            Self.askedAgain(session.sources, in: session.mastodon),
-            line: "account.sources.writing.again.line", help: "account.sources.writing.again",
-            choose: "account.sources.writing.again.choose", press: askWriting
-        )
-        // The newer question, to a sign-in that already acts (#285): the same sentence shape, and
-        // a press that puts the bookmark question itself — one press, no choice to make, and no
-        // way to narrow the sign-in by it.
-        standing(
-            Self.askedForBookmarks(session.sources, in: session.mastodon),
-            line: "account.sources.bookmarks.again.line", help: "account.sources.bookmarks.again",
-            choose: "account.sources.bookmarks.again.choose", press: askBookmarks
-        )
-    }
-
-    /// One standing sentence about `hosts`, and the control that puts its question to each.
-    @ViewBuilder
-    private func standing(
-        _ hosts: [String], line lineKey: String, help helpKey: String, choose chooseKey: String,
-        press: @escaping (String) -> Void
-    ) -> some View {
-        if !hosts.isEmpty {
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                let named = hosts.joined(separator: ", ")
-                let line = String(format: L10n.t(lineKey), named)
-                Text(line)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .shellHelp(verbatim: String(format: L10n.t(helpKey), named), about: line)
-                // One per source and not one for the list: the question is about one server's
-                // sign-in, and a single control would have to ask which — which is the dialog
-                // asked twice.
-                ForEach(hosts, id: \.self) { host in
-                    ShellLinkButton(String(format: L10n.t(chooseKey), host)) { press(host) }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
     /// What the sources list's (?) says: which question the list answers and what Remove costs,
-    /// what the key and `…` on a row are, what the lock beside them means, and where what each
-    /// source left is counted — four keys, one bubble.
+    /// what the key and `…` on a row are, what the lock and its word beside them mean, and where
+    /// what each source left is counted — four keys, one bubble.
     static func sourcesHelp(language: DummyLanguage? = nil) -> String {
         [
             "account.sources.detail", "account.sources.marks", "account.sources.writing", "account.sources.held",
         ]
         .map { L10n.t($0, language: language) }
         .joined(separator: "\n\n")
-    }
-
-    /// The sources on this page whose sign-in predates the question (#69).
-    ///
-    /// **Drawn from the page's own sources and not from the sessions' list of tokens**, so a token
-    /// left behind for a server the reader has since removed cannot put a stranger's name on this
-    /// page — and in join order, which is the order the sentence names them in.
-    ///
-    /// **`session.sources` and not `session.rows`**: this needs hostnames, and `rows` builds a
-    /// fresh `[SourceRow]` the list already builds twice. Internal so a test reads it, on
-    /// `busy`'s grounds.
-    static func askedAgain(_ sources: [Source], in mastodon: MastodonSessions) -> [String] {
-        sources.map(\.host).filter { mastodon.grants[$0] == .unasked }
-    }
-
-    /// The sources on this page whose sign-in reads and acts and was made before bookmarks were
-    /// asked for (#285) — `askedAgain`'s list for the newer question, drawn the same way and
-    /// answered by the same press. Never one of `askedAgain`'s: that sign-in is asked everything.
-    static func askedForBookmarks(_ sources: [Source], in mastodon: MastodonSessions) -> [String] {
-        sources.map(\.host).filter { mastodon.bookmarks(host: $0) == .unasked }
     }
 
     /// Every press of one row, each a named method of this page and nothing else — so a row's
@@ -823,8 +740,8 @@ struct AccountPane: View {
         await session.signOut(host: host)
     }
 
-    /// The standing sentence's own control (#69): it puts the row's question to a reader who is
-    /// **already signed in**, and signs nobody out to do it.
+    /// The writing question, put to a reader who is **already signed in** (#69), and nobody is
+    /// signed out to put it. Reached from the row's permission control (`askAgain`).
     ///
     /// The dialog and `MastodonSessions.signIn` both cope with a host that already holds a token —
     /// the new token replaces it here and the one it supersedes is revoked at the server — so a
@@ -832,11 +749,15 @@ struct AccountPane: View {
     ///
     /// **The row's own toggle is untouched**: it is two-state and stays two-state. This is the
     /// second surface for the question and not a third behaviour on the first.
+    ///
+    /// **Asked from the row and not in an alert, for as long as it is owed.** Widening what
+    /// somebody already agreed to is not done quietly: the control stands on the row of the
+    /// source it is about until the reader answers.
     func askWriting(_ host: String) {
         session.signInChoice = host
     }
 
-    /// The permission glyph's press: the question this row's sign-in is owed, and **nobody is
+    /// The permission control's press: the question this row's sign-in is owed, and **nobody is
     /// signed out to put it** — `askWriting`'s argument, which is why this is not the key's own
     /// press: on a signed-in row the key asks to sign out, and a sign-out revokes the token.
     ///
@@ -857,8 +778,8 @@ struct AccountPane: View {
         }
     }
 
-    /// The bookmark sentence's own control (#285): it puts the bookmark question about `host`,
-    /// the one a post's row puts, and signs nobody out to do it. Nothing where that sign-in is no
+    /// The bookmark question about `host` (#285), reached from the row's permission control:
+    /// the one a post's row puts, and nobody is signed out to put it. Nothing where that sign-in is no
     /// longer one to ask.
     func askBookmarks(_ host: String) {
         guard session.mastodon.bookmarks(host: host) == .unasked else { return }

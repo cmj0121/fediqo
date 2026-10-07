@@ -14,7 +14,7 @@ import SwiftUI
 ///
 /// **Neither look is the alarm**: a press that takes something away is an item of the `…` menu
 /// (`ShellMoreItem.danger`) and never a mark. The one stated exception is an ink handed to
-/// `ShellMarkButton` over the look's own — the source row's permission glyph
+/// `ShellMarkButton` over the look's own — the source row's permission control
 /// (`SourceRow.permissionInk`), which is in the alarm where a write was turned away: it says
 /// something happened to a press, and offers none that takes anything.
 enum MarkLook: Equatable {
@@ -47,8 +47,8 @@ enum DimReason: Equatable, CaseIterable {
 }
 
 /// One control of a row, as a value: its glyph, what it is called, whether it is switched on, how
-/// it is drawn, and the count beside it where it has one. `ShellMarkButton` draws it; the rules it
-/// is drawn by are the statics here, so a test reads them without a screen.
+/// it is drawn, and the word or the count beside it where it has one. `ShellMarkButton` draws it;
+/// the rules it is drawn by are the statics here, so a test reads them without a screen.
 struct ShellMark: Equatable {
     /// The act's own symbol, unfilled: `drawn(_:on:)` fills it where the mark is on.
     let symbol: String
@@ -59,13 +59,28 @@ struct ShellMark: Equatable {
     /// the warm hue while it is live. The one place "on" is said.
     var on: Bool
     var count: Int?
+    /// A short word drawn after the glyph, for the one mark a glyph alone does not say enough
+    /// for. The same box, press, help and spoken name as a mark without one: the word is drawn,
+    /// and `name` is still what is said.
+    var word: String?
 
-    init(_ symbol: String, _ name: String, look: MarkLook, on: Bool = false, count: Int? = nil) {
+    init(
+        _ symbol: String, _ name: String, look: MarkLook, on: Bool = false, count: Int? = nil,
+        word: String? = nil
+    ) {
         self.symbol = symbol
         self.name = name
         self.look = look
         self.on = on
         self.count = count
+        self.word = word
+    }
+
+    /// The same mark without its word: what a row draws where the word has no room.
+    var bare: ShellMark {
+        var mark = self
+        mark.word = nil
+        return mark
     }
 
     /// What a press on a mark is.
@@ -97,6 +112,13 @@ struct ShellMark: Equatable {
     static func countInk(_ look: MarkLook, on: Bool, _ scheme: ColorScheme) -> Color {
         if case .dim = look { return ShellChrome.inkFaint(scheme) }
         return ink(look, on: on, scheme)
+    }
+
+    /// The ink of the word beside a glyph: the glyph's own while the mark is live, and a dim
+    /// mark's count's otherwise, for `countInk`'s reason — a word is text.
+    static func wordInk(_ look: MarkLook, glyph: Color, _ scheme: ColorScheme) -> Color {
+        if case .dim = look { return ShellChrome.inkFaint(scheme) }
+        return glyph
     }
 
     /// The symbol as drawn: the filled twin where the mark is on and the glyph has one, the act's
@@ -145,7 +167,7 @@ struct ShellMark: Equatable {
 }
 
 /// One mark, drawn — in `ShellGlyphBox`, the box every glyph-only control has, and in the look
-/// the mark carries.
+/// the mark carries. A mark with a word (`ShellMark.word`) is the same box grown wider by it.
 ///
 /// **Dim is not disabled.** A disabled control is skipped by the keyboard and said only as
 /// "dimmed"; this one keeps its place in the focus order and its sentence, so a listener hears
@@ -171,12 +193,21 @@ struct ShellMarkButton: View {
     }
 
     var body: some View {
+        let glyph = ink ?? ShellMark.ink(mark.look, on: mark.on, colorScheme)
         Button {
             ShellMark.pressed(mark.look, act: act, ask: ask)
         } label: {
             HStack(spacing: ShellSpace.tight) {
                 Image(systemName: mark.drawn)
-                    .foregroundStyle(ink ?? ShellMark.ink(mark.look, on: mark.on, colorScheme))
+                    .foregroundStyle(glyph)
+                if let word = mark.word {
+                    // Whole or not at all: whoever draws the mark gives it room or draws it
+                    // `bare`, and the word is never cut to an ellipsis.
+                    Text(word)
+                        .foregroundStyle(ShellMark.wordInk(mark.look, glyph: glyph, colorScheme))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
                 if let count = mark.count {
                     Text(L10n.compact(count))
                         .foregroundStyle(ShellMark.countInk(mark.look, on: mark.on, colorScheme))

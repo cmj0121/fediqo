@@ -238,10 +238,10 @@ write at all, so refusing the writing part changes nothing about reading. Signin
 how you change your answer.
 
 If you signed in before Fediqo could write, that sign-in still only reads, and Fediqo writes
-nothing with it. Account says so, names the source, and puts the choice there beside it: one
-press asks the same question, without signing you out first. Cancel on the server's page and
-the sign-in you already had is still the one in use. What you already agreed to is never
-widened behind your back.
+nothing with it. That source's row on Account says so, with a lock and the words Update
+permission before its key: one press asks the same question, without signing you out first.
+Cancel on the server's page and the sign-in you already had is still the one in use. What you
+already agreed to is never widened behind your back.
 
 If you signed in to read and write before Fediqo could bookmark, that sign-in posts, replies,
 boosts and favourites exactly as it did; only bookmarking waits. The bookmark under a post
@@ -273,8 +273,9 @@ protocol has no writing in Fediqo at all, which is every forum — is no longer 
 row, and VoiceOver still says it. It is the server's own answer: a server that grants less than
 Fediqo asked for is taken at its word, and what is said is what may be done rather than what
 was asked. Where a sign-in has to be asked again before something it could do is offered, a
-lock stands before the key; it is red on a source that turned a write away, and stays until you
-sign in to it again.
+lock with the words Update permission stands before the key, on the same line and drawn as the
+key is; on a row too narrow for the words and the whole hostname it is the lock alone. It is
+red on a source that turned a write away, and stays until you sign in to it again.
 
 Whatever takes something away, signing out aside, is behind three dots on the row or the
 section it acts on, and asks first: Clear and Remove on a source's row, Clear and Forget
