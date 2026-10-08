@@ -144,6 +144,7 @@ struct UsageSourceDetail: View {
             ShellReadingLine(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
             ShellReadingLine(Text(UsagePane.picturesLine(source, in: session, onDisk: onDisk)))
             postLine
+            noticesLine
             passwordLine
         } header: {
             ShellSectionHead(title: "prefs.cache")
@@ -224,6 +225,25 @@ struct UsageSourceDetail: View {
                 )
             }
         }
+    }
+
+    /// How many notices this device holds of this source (#323) — a line only where it holds
+    /// any: what a sign-out, a Clear or a Remove lets go of with the rest. Lines, as the page
+    /// counts them; a gathered line is one. Read off the store's own count.
+    ///
+    /// **The design left a notices figure out of Usage**; it is here by `Holdings`' rule, that
+    /// what this device holds is said, by source — words on disk the page did not name would
+    /// be the one thing held that Usage kept quiet about.
+    @ViewBuilder
+    private var noticesLine: some View {
+        let held = Self.notices(source, in: session)
+        if held > 0 {
+            ShellReadingLine(Text(L10n.count("prefs.cache.notices", held)))
+        }
+    }
+
+    static func notices(_ source: Source, in session: ShellSession) -> Int {
+        session.noticesHeld[source.host.lowercased()] ?? 0
     }
 
     /// That a password is held for this server: a line, and no press beside it — forgetting it

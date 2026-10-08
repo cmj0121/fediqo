@@ -25,6 +25,11 @@ import Synchronization
 /// the items by every save that finds them moved, and by themselves by `saveUnsent()`, which
 /// writes that handful of rows and no post — what a send waits for before its request leaves.
 ///
+/// **So are the notices** (`NoticeReach`): written by every save that finds them moved, after the
+/// texts and before the items, and followed like the items, rewriting no post: a page of notices
+/// read is on disk `quiet` after it lands where the follower is listening, and no later than
+/// `gap` after the followed save before it where the follower is sleeping that out.
+///
 /// **The write is off the main actor**, on GRDB's own queue, so a quit or a backgrounding waits
 /// for it without the interface stopping while it runs.
 ///
@@ -39,6 +44,9 @@ public actor StoreSaver {
 
     /// Writes the texts the person pressed to send, in the place of the ones written before.
     public typealias WriteUnsent = @Sendable (_ unsent: [Unsent]) async throws -> Void
+
+    /// Writes what each source said happened to the person, in the place of what was written.
+    public typealias WriteNotices = @Sendable (_ notices: [NoticeReach]) async throws -> Void
 
     /// How a `flush(deadline:)` ended.
     public enum Outcome: Equatable, Sendable {
@@ -63,6 +71,7 @@ public actor StoreSaver {
     private let store: ItemStore
     private let write: Write?
     private let writeUnsent: WriteUnsent?
+    private let writeNotices: WriteNotices?
     /// The save queued last, running or waiting. The next save starts after it.
     private var tail: Task<Void, any Error>?
     /// The save waiting to start, if one is; a new `save()` joins it.
@@ -73,13 +82,18 @@ public actor StoreSaver {
     /// The revision of the texts the last write of them landed (`ItemStore.unsentRevision`).
     /// A store starts at 0 with what it read back, which is what the file holds.
     private var writtenUnsent = 0
+    /// The same, of the notices (`ItemStore.noticesRevision`).
+    private var writtenNotices = 0
 
     /// `write` is `nil` when this run must not write at all — the fail-closed case of
     /// `StoreFile.open(at:now:)`. Every save is then a logged no-op.
-    public init(store: ItemStore, write: Write?, writeUnsent: WriteUnsent? = nil) {
+    public init(
+        store: ItemStore, write: Write?, writeUnsent: WriteUnsent? = nil, writeNotices: WriteNotices? = nil
+    ) {
         self.store = store
         self.write = write
         self.writeUnsent = writeUnsent
+        self.writeNotices = writeNotices
         if write == nil {
             Self.log.error("No index this run: nothing read will be saved")
         }
@@ -89,13 +103,15 @@ public actor StoreSaver {
     public init(store: ItemStore, file: StoreFile?) {
         var write: Write?
         var writeUnsent: WriteUnsent?
+        var writeNotices: WriteNotices?
         if let file {
             write = { sources, notes, said in
                 try await file.save(sources: sources, notes: notes, said: said)
             }
             writeUnsent = { try await file.save(unsent: $0) }
+            writeNotices = { try await file.save(notices: $0) }
         }
-        self.init(store: store, write: write, writeUnsent: writeUnsent)
+        self.init(store: store, write: write, writeUnsent: writeUnsent, writeNotices: writeNotices)
     }
 
     /// Runs `body` where a save would run: after every save asked for before it, and before any
@@ -157,6 +173,21 @@ public actor StoreSaver {
             return true
         } catch {
             Self.log.error("Saving what waits to be sent failed: \(String(describing: error), privacy: .public)")
+            throw error
+        }
+    }
+
+    /// Writes the notices where they have moved. **Only a count is logged, and of a failure only
+    /// what the store said of it**: a notice is other people's names and words.
+    private func writeNoticesNow() async throws {
+        guard let writeNotices else { return }
+        let snapshot = await store.noticesSnapshot()
+        guard snapshot.revision != writtenNotices else { return }
+        do {
+            try await writeNotices(snapshot.notices)
+            writtenNotices = snapshot.revision
+        } catch {
+            Self.log.error("Saving the notices failed: \(String(describing: error), privacy: .public)")
             throw error
         }
     }
@@ -239,7 +270,7 @@ public actor StoreSaver {
         // since the store was made where nothing has been written yet: a store starts at
         // revision 0, one a launch read back included (`ItemStore.revision`).
         let changes = await store.changes()
-        var heard = written ?? 0
+        var heard = Followed(items: written ?? 0, notices: writtenNotices)
         do {
             heard = try await follow(from: heard, quiet: quiet, gap: gap, sleep: sleep)
             for await _ in changes {
@@ -252,28 +283,50 @@ public actor StoreSaver {
 
     /// One change heard: the save it arms, and the gap that save is owed. Returns the revision
     /// the store was at when this last looked; throws only what `sleep` throws.
+    ///
+    /// **A page of notices arms a save as a landing does** and owes no gap: the gap is the price
+    /// of writing every note again, and a save that found only the notices moved wrote none.
     private func follow(
-        from heard: Int, quiet: Duration, gap: Duration,
+        from heard: Followed, quiet: Duration, gap: Duration,
         sleep: @Sendable (Duration) async throws -> Void
-    ) async throws -> Int {
-        let revision = await store.revision
-        guard revision != heard, revision != written else { return revision }
+    ) async throws -> Followed {
+        let revision = await followed()
+        let itemsMoved = revision.items != heard.items && revision.items != written
+        guard itemsMoved || revision.notices != writtenNotices else { return revision }
         try await sleep(quiet)
-        let armed = await store.revision
-        guard armed != written else { return armed }
+        let armed = await followed()
+        guard armed.items != written, itemsMoved || armed.items != revision.items else {
+            // Only the notices moved, or a save asked for meanwhile took the items with it.
+            if armed.notices != writtenNotices { try? await exclusively { try await self.writeNoticesNow() } }
+            return armed
+        }
         // A failure is already in the log, and there is nobody here to tell.
         let wrote = (try? await saveAndTell()) ?? false
         if wrote { try await sleep(gap - quiet) }
         return armed
     }
 
+    /// The two revisions a followed save writes by, read in one hop.
+    private struct Followed: Equatable {
+        var items: Int
+        var notices: Int
+    }
+
+    /// Where this run writes no notices they are never found moved.
+    private func followed() async -> Followed {
+        let revisions = await store.revisions
+        return Followed(items: revisions.items, notices: writeNotices == nil ? writtenNotices : revisions.notices)
+    }
+
     private func started(_ id: Int) {
         if waiting?.id == id { waiting = nil }
     }
 
-    /// Whether anything of the items was written. The texts go first, where they moved.
+    /// Whether anything of the items was written. The texts go first, where they moved, and
+    /// then the notices.
     private func writeNow() async throws -> Bool {
         try await writeUnsentNow()
+        try await writeNoticesNow()
         guard let write else { return false }
         let snapshot = await store.snapshot()
         guard snapshot.revision != written else { return false }

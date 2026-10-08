@@ -650,6 +650,8 @@
 "prefs.cache.posts" = "%d first posts";
 "prefs.cache.posts.one" = "%d first post";
 "prefs.cache.posts.none" = "No first posts held";
+"prefs.cache.notices" = "%d notices";
+"prefs.cache.notices.one" = "%d notice";
 
 /* Unit F6 — the boards under boards, drawn. */
 "board.choose.under" = "%1$@, under %2$@";
@@ -1346,6 +1348,8 @@
 "notices.foot.more" = "Older notices can be read. Press here, or scroll to here, to read them.";
 "notices.foot.reading" = "Reading older notices…";
 "notices.foot.held" = "Older notices wait until the source named above can be read.";
+"notices.foot.asking" = "Reading the newest notices…";
+"notices.foot.limit" = "Older notices are not read: they are older than the latest months Keep posts holds.";
 "notices.foot.end" = "No older notices: every source has sent all it has.";
 "notices.server.admin.sign_up.by" = "signed up on this server";
 "notices.server.admin.report.by" = "filed a report on this server";
@@ -1353,7 +1357,7 @@
 "notices.unasked.line" = "No sign-in on this device may read notices yet.";
 "notices.refused.line" = "No sign-in on this device may read notices.";
 "notices.source.locked" = "This device could not read the sign-in for %@, so it was not asked.";
-"notices.source.full" = "Fediqo holds no more notices from %@ until it is opened again: its older notices are not shown, and may belong among the lines below.";
+"notices.source.full" = "Fediqo holds as many notices from %@ as it keeps of one source: its older notices are not shown, and may belong among the lines below. They are read again once there is room — when notices are dismissed, or the months limit lets old ones go.";
 "notices.none.narrowed.one" = "%d notice read so far is of a kind you left out. Show that kind again above.";
 "notices.retry.waits" = "A read is on its way. Try again once it has ended.";
 "notices.source.unread" = "%@ was not read: the read was stopped before it answered. Press the reload mark, or r, to read again.";
@@ -1431,7 +1435,7 @@
 "notices.act.letThrough.many" = "%2$d people's notices held on %1$@ were not let through. Read again to see where each stands.";
 "notices.act.letGo.many" = "%2$d people's notices held on %1$@ were not let go. Read again to see where each stands.";
 "notices.person.named" = "%1$@ (%2$@)";
-"notices.foot.full" = "Older notices are not read: Fediqo holds no more of one source until it is opened again.";
+"notices.foot.full" = "Older notices are not read: Fediqo holds as many of one source as it keeps. They are read again once there is room — when notices are dismissed, or the months limit lets old ones go.";
 "notices.ask.signin.detail" = "%@'s own page opens and asks again for what this sign-in has, your notices among it. Sign in to read asks to read, your notices among it. Sign in to read and write asks to post, reply, boost, favourite and bookmark as well, and to dismiss notices. Nothing is signed out first: close the page and the sign-in you have goes on as it is.";
 "said.act.boost.failed" = "%@ could not be reached, so the boost did not change. It is as it was.";
 "said.act.boost.refused" = "%@ would not let this sign-in change the boost. It is as it was.";

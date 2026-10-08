@@ -639,6 +639,7 @@
 /* Unit F6 — the first posts this device is holding, in the inventory beside Clear. */
 "prefs.cache.posts" = "%d 篇主文";
 "prefs.cache.posts.none" = "未存任何主文";
+"prefs.cache.notices" = "%d 則通知";
 
 /* Unit F6 — the boards under boards, drawn. */
 "board.choose.under" = "%1$@，在 %2$@ 底下";
@@ -1312,6 +1313,8 @@
 "notices.foot.more" = "還有更早的通知，按下或捲到這裡就會讀取。";
 "notices.foot.reading" = "正在讀取更早的通知…";
 "notices.foot.held" = "更早的通知要等上面提到的來源讀得到才會顯示。";
+"notices.foot.asking" = "正在讀取最新的通知…";
+"notices.foot.limit" = "不再讀取更早的通知：它們比「保留貼文」留下的月數還舊。";
 "notices.foot.end" = "沒有更早的通知了：每個來源都把有的送來了。";
 "notices.server.admin.sign_up.by" = "在這個來源註冊了";
 "notices.server.admin.report.by" = "在這個來源提出了一則檢舉";
@@ -1319,7 +1322,7 @@
 "notices.unasked.line" = "這台裝置上還沒有哪個登入可以讀取通知。";
 "notices.refused.line" = "這台裝置上沒有哪個登入可以讀取通知。";
 "notices.source.locked" = "這台裝置讀不到 %@ 的登入，所以沒有去問。";
-"notices.source.full" = "Fediqo 在重新開啟之前，為 %@ 保留的通知已達上限：它更早的通知不會顯示，而且可能本該排在下面這些之間。";
+"notices.source.full" = "Fediqo 為 %@ 保留的通知已達上限：它更早的通知不會顯示，而且可能本該排在下面這些之間。等有空位就會再讀——移除通知，或保留期限讓舊的離開之後。";
 "notices.retry.waits" = "正在讀取中，等它結束再試一次。";
 "notices.source.unread" = "還沒讀到 %@：它回答之前讀取就停止了。按重新讀取的標記或 r 再讀一次。";
 "notices.source.unread.touch" = "還沒讀到 %@：它回答之前讀取就停止了。按重新讀取的標記再讀一次。";
@@ -1393,7 +1396,7 @@
 "notices.act.letThrough.many" = "%1$@ 擋下的通知中，有 %2$d 個人的沒有放行。再讀取一次看看各自的狀況。";
 "notices.act.letGo.many" = "%1$@ 擋下的通知中，有 %2$d 個人的沒有放下。再讀取一次看看各自的狀況。";
 "notices.person.named" = "%1$@（%2$@）";
-"notices.foot.full" = "不再讀取更早的通知：Fediqo 在重新開啟之前，為單一來源保留的通知已達上限。";
+"notices.foot.full" = "不再讀取更早的通知：Fediqo 為單一來源保留的通知已達上限。等有空位就會再讀——移除通知，或保留期限讓舊的離開之後。";
 "notices.ask.signin.detail" = "%@ 自己的頁面會打開，再問一次這個登入已經有的，包含你的通知。「登入來讀」問讀取，包含你的通知。「登入來讀與寫」另外問發文、回覆、轉發、收藏與加書籤，以及移除通知。不會先登出：關掉那一頁，你原有的登入照舊。";
 "said.act.boost.failed" = "連不上 %@，所以轉發沒有變動。它和原來一樣。";
 "said.act.boost.refused" = "%@ 不讓這個登入變動轉發。它和原來一樣。";

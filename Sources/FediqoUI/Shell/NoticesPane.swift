@@ -109,11 +109,20 @@ struct NoticesPane: View {
     /// What stands under the last line now.
     static func foot(in session: ShellSession) -> NoticesFoot {
         let list = session.noticeList
-        return NoticesFoot.foot(
+        let foot = NoticesFoot.foot(
             hasMore: list.hasMore(in: session),
             isReading: list.readingHosts.contains { list.reaches[$0]?.readingOn == true },
             floor: list.floor, full: list.isFull
         )
+        // "Wait for the source named above" is said only where one is named: with what this
+        // device holds drawn and every source being asked for its newest, nobody is, and the
+        // foot says that they are being read.
+        if foot == .held, list.isReading, list.failures.isEmpty, list.locked.isEmpty { return .asking }
+        // And where what stops the list is the months limit, that is what is said.
+        if foot == .held || foot == .end, !list.isReading, list.failures.isEmpty, list.locked.isEmpty, list.isAtLimit {
+            return .limit
+        }
+        return foot
     }
 
     /// What is said where no line is drawn now.

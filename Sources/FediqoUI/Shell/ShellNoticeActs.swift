@@ -393,6 +393,9 @@ final class ShellNoticeActs {
             out[name] = nil
             list.redraw()
             settle(host: host, in: session)
+            // A dismissal is the person asking for a line to be gone: its words are off this
+            // device's disk before the act is over (#292). Last, so nothing above waits for it.
+            if act == .dismiss || act == .dismissAll { await list.gone(in: session) }
         case .no(let why) where session.mastodon.token(host: host)?.accessToken == sent:
             out[name] = nil
             list.redraw()

@@ -12,7 +12,8 @@ useDefault = true
 description = "a Mastodon notice's group key: kind, post id, hour stretch"
 condition = "AND"
 paths = [
-    '''^Tests/FediqoCoreTests/MastodonNotice[A-Za-z]*\.swift$''',
+    '''^Tests/FediqoCoreTests/(Mastodon)?Notice[A-Za-z]*\.swift$''',
+    '''^Tests/FediqoPersistenceTests/Notice[A-Za-z]*\.swift$''',
     '''^Tests/FediqoUITests/Notice[A-Za-z]*\.swift$''',
 ]
 regexes = ['''^[a-z_.]+-\d+-\d+$''']

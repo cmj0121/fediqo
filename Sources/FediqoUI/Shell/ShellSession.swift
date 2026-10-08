@@ -502,6 +502,10 @@ final class ShellSession {
     /// figure is the store's and not a timeline's. Rebuilt where either is assigned or the
     /// breakdown switches between week and month, never on a redraw.
     private(set) var holdings = Holdings(notes: [], per: .month)
+    /// How many notices the store holds of each source, by host (#323): what Usage says.
+    /// Counted off the store and not off what the notices page draws, which is empty while
+    /// who is signed in cannot be read and the disk still holds them.
+    private(set) var noticesHeld: [String: Int] = [:]
 
     /// Whether the breakdown is by week or by month.
     var heldPeriod: HeldPeriod = .month {
@@ -849,10 +853,17 @@ final class ShellSession {
             let from = (note.object as AnyObject?).map(ObjectIdentifier.init)
             MainActor.assumeIsolated { self?.allowancesChanged(by: from) }
         }
+        // What the notices page draws is what the store holds (#323).
+        noticeList.store = store
         // A source that ends a sign-in itself answers a sign-out still being asked about it.
         mastodon.onEnded = { [weak self] host in
             self?.dropSignOutAsk(host: host)
             self?.noticeList.forget(host: host)
+            // And from the store and the disk, by the path a sign-out takes and waited for
+            // there (`forgetReaderMarksDue`, #292) — **here, the one place every ended sign-in
+            // comes through**, whichever read or write found it: a reload, a thread, an act,
+            // a text being sent, the notices read. After every save asked for before it.
+            self?.sweepEndedReader()
             // A press still out to it cannot be answered for, and one that did not arrive
             // cannot be tried again: neither is left standing about a sign-in that ended.
             self?.acts.forget(host: host)
@@ -2597,6 +2608,20 @@ final class ShellSession {
         // Before anything is read: what an ended sign-in's reader had done to its posts (#285).
         await forgetReaderMarksDue()
         await adoptSources()
+        // What each source said happened to the person, where what is held of it moved (#323):
+        // drawn from this device before anybody is asked, and again whenever a letting go
+        // reaches a notice. Only once who is signed in could be read (`ShellNoticeList.follow`).
+        let noticesMark = await store.noticesMark
+        if countedNotices != noticesMark {
+            // How many are held, said by Usage whoever may read them just now.
+            let count = await store.noticesCount()
+            if count != noticesHeld { noticesHeld = count }
+            countedNotices = noticesMark
+        }
+        if adoptedNotices != noticesMark, mastodon.grantsKnown {
+            adoptedNotices = noticesMark
+            await noticeList.follow(in: self)
+        }
         let repliesRevision = await store.repliesRevision
         let drawn = await store.drawn
         let all = again || adopted?.store != drawn || adopted?.notes != notesRevision ? await store.all() : nil
@@ -2643,6 +2668,32 @@ final class ShellSession {
     /// waited for. Nothing outside a test, which holds an adopt here to press, or to fail a
     /// write, while it is in flight.
     @ObservationIgnored var adopting: (@MainActor () async -> Void)?
+
+    /// The sources and the notices held of them, adopted for a notices page that reads before
+    /// anything else has adopted the store (`ShellNoticeList.read`).
+    func adoptHeldNotices() async {
+        await adoptSources()
+        await noticeList.follow(in: self)
+    }
+
+    /// The sweep of readers who changed that is in flight (`forgetReaderMarksDue`), if one is.
+    @ObservationIgnored var readerSweep: Task<Void, Never>?
+
+    /// The store's `noticesMark` as the last adopt handed the notices to their list, and as it
+    /// last counted them.
+    @ObservationIgnored private var adoptedNotices: [Int]?
+    @ObservationIgnored private var countedNotices: [Int]?
+
+    /// The sweep of an ended sign-in's reader, asked for by `mastodon.onEnded` and not waited
+    /// for there — the ending is found inside a read — but itself waiting for the write, and
+    /// in the line of saves, so `saved()` is past it.
+    private func sweepEndedReader() {
+        let before = saving
+        saving = Task {
+            await before?.value
+            await forgetReaderMarksDue()
+        }
+    }
 
     /// The store's `repliesRevision` as the last adopt read the topics' kept replies.
     @ObservationIgnored private var adoptedReplies: Int?
@@ -2897,8 +2948,16 @@ final class ShellSession {
     /// how many posts and from which sources — the one thing that can still be said of them.
     @discardableResult
     func keep(months: Int?, from now: Date = Date()) async -> Int {
+        let told = await store.noticesRevision
         let went = await store.letGoBeyond(months: months, from: now)
-        guard went.posts > 0 else { return 0 }
+        // The notices page draws nothing past the limit from this moment (`ShellNoticeList.cut`).
+        await noticeList.follow(in: self)
+        guard went.posts > 0 else {
+            // Only notices older than the limit went, or the copy of a post that old one
+            // carried: waited for all the same, and counted nowhere — a notice is not a post.
+            if await store.noticesRevision != told { await saveNow() }
+            return 0
+        }
         // The window cuts a topic's kept replies too, and the count says so at once (#194).
         let all = await store.all()
         let replies = await store.replies()
@@ -3322,7 +3381,13 @@ final class ShellSession {
             unreadAll = 0
             progressHost = ""
         }
-        await store.remove(host: host, keepingPosts: keepingPosts)
+        // What it said happened to the person went with it, posts kept or not — and is off the
+        // disk before the rest is said to have gone (#292). **Said by the removal itself**,
+        // in the store's own step: an adopt on its way reads the store between any two looks
+        // made from here, and no revision compared across them would say what went. Only
+        // where notices did go, so a source with none waits for no write.
+        let told = await store.remove(host: host, keepingPosts: keepingPosts)
+        if told { await saveNow() }
         // What waited to be sent to it goes with it, as its question said — off the disk
         // before the rest is said to have gone (#292). A sign-out and a Clear leave them.
         await outbox.forget(host: host, in: self)

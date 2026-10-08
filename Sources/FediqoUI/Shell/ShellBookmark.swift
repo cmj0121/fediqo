@@ -78,9 +78,31 @@ extension ShellSession {
     /// **Asked for wherever a sign-in ends or changes, and not left to the next read of the
     /// store**: right after a sign-out, a Clear or a Remove, after a sign-in and before its first
     /// read, and before a take-away or a move nearby saves the store (`saveForCarry`).
+    ///
+    /// **One at a time, and a caller is past every one begun before it.** Who changed is
+    /// taken once, by whichever call comes first, and that call waits for the write; a second
+    /// call arriving meanwhile — a sign-out's own, while a server-ended sign-in's sweep is in
+    /// flight and has taken its host too — would otherwise find nothing left to do and say it
+    /// was done while the first was still writing. Nothing to do is still no wait at all.
     func forgetReaderMarksDue() async {
+        while let running = readerSweep {
+            await running.value
+            // Whoever is first past it lets go of it: a finished sweep answers at once, and
+            // left standing would be waited on for ever by a caller that never gives way.
+            if readerSweep == running { readerSweep = nil }
+        }
+        let changed = mastodon.takeReadersChanged().sorted()
+        let first = !readerMarksSwept && mastodon.grantsKnown
+        guard !changed.isEmpty || first else { return }
+        let sweep = Task { await forgetReaderMarks(of: changed) }
+        readerSweep = sweep
+        await sweep.value
+        if readerSweep == sweep { readerSweep = nil }
+    }
+
+    private func forgetReaderMarks(of changed: [String]) async {
         var moved = false
-        for host in mastodon.takeReadersChanged().sorted() {
+        for host in changed {
             if await store.forgetReaderMarks(host: host) { moved = true }
             // What the source said happened to that reader is theirs alone too (#323).
             noticeList.forget(host: host)
@@ -103,6 +125,9 @@ extension ShellSession {
             readerMarksSwept = true
             if await store.forgetReaderMarks(keeping: mastodon.signedInHosts) { moved = true }
         }
+        // Before any read for whoever signs in next can land: its first stretch is written
+        // under the epoch the letting go left (`ShellNoticeList.learnEpochs`).
+        await noticeList.learnEpochs()
         // Waited for: what a source said of a reader who has left is not on disk a moment
         // longer than it is in the store (#285, #292).
         if moved { await persist?() }

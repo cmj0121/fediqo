@@ -9,9 +9,22 @@ import Observation
 // as failed (`retry`). Nothing here starts by itself, and nothing is asked while the page is
 // closed.
 //
-// **Held in memory and nowhere else.** A notice is not an item: nothing here reaches the store,
-// so a read that fails or is refused has nothing on this device to undo, and after a relaunch
-// the list is empty until its first read.
+// **Held by the store, and this is what is drawn of it.** A notice is not an item, and is held
+// beside the items all the same (`ItemStore.hold(_:)`, `NoticeReach`): each source's lines and
+// how far down it was read, written to this device and read back at a launch. So the page draws
+// what is held at once — after a relaunch too — and then asks, and the list changes as answers
+// land. What is here is **a copy of what the store holds, refreshed from it** (`follow`), with
+// what is this run's alone laid beside it: where each read stands, why one failed, what an act
+// has on its way, the marks a dismissal leaves against reads still out. None of that is written.
+//
+// The copy is written through and taken back. A stretch that lands, a line its source
+// dismissed and a source emptied are folded in here first — in the one main-actor step the
+// answer arrives in, so the floor, the marks and what is drawn move together — and then handed
+// to the store, in order (`keep`). Whatever changes in the store by another road comes back by
+// itself, as a timeline's posts do: a carried post struck because that post was let go, old
+// lines let go by the months limit, a source removed, a store read back, a reader signed out.
+// **Only a stretch that landed is ever written**: a read that fails or is refused changes
+// nothing on this device.
 //
 // **Several sources, each read to its own depth, drawn as one list without hiding a gap.**
 // `LatestDate`'s rule the other way up — there, posts newer than the chosen day stay held and
@@ -23,11 +36,14 @@ import Observation
 //
 // **And nothing drawn is taken back by a source answering late.** While a source's first
 // stretch is on the wire nobody knows where it will stop the list, so what is drawn stays as
-// it was — nothing at all, on the first read of a run — until every source asked has answered
-// or failed. After that the list only grows downward, but for a source read again from the top
+// it was — nothing at all, where nothing is held — until every source asked has answered
+// or failed. **A source's first stretch is its first answer with nothing held of it.** One whose
+// lines were read back from the store has answered: they are drawn, and reading it again is a
+// reload like coming back to the page — joined where the new stretch meets what is held,
+// replaced across a real gap. After that the list only grows downward, but for a source read again from the top
 // that answers with a stretch joined to nothing held: a real gap, said by cutting there.
 
-/// Every signed-in source's notices, for as long as this run wants them.
+/// Every signed-in source's notices, as this device holds them and as this run is reading them.
 ///
 /// On the session for `ShellConversations`' reason: what the page draws and what a sign-out or a
 /// Clear lets go of have to be the same object. (`ShellNotice` is the empty-page view; this name
@@ -64,11 +80,12 @@ final class ShellNoticeList {
         /// The id the next, older stretch is asked before. Nothing where the source has no more,
         /// or has not answered yet.
         var before: String?
-        /// Which read this source answers with, remembered for the run so it is asked one way.
+        /// Which read this source answers with, remembered so it is asked one way.
         var gathered: Bool?
         var standing: Standing = .unread
-        /// Whether this source has answered at all this run: which read it answers with is
-        /// known. One that has not, and is on the wire, is on its first stretch.
+        /// Whether this source has answered at all — in this run, or in the one that wrote what
+        /// is held of it: which read it answers with is known. One that has not, and is on the
+        /// wire, is on its first stretch.
         var answered: Bool { gathered != nil }
         /// Whether the ask on the wire, or the one that failed, was for an older stretch and
         /// not the newest — what asking that source again asks for.
@@ -98,7 +115,7 @@ final class ShellNoticeList {
         /// every entry was past this build — has reached no moment it can name, and holds
         /// nothing: it cannot say where the list should stop. It is the first asked by
         /// reading on, which goes past the stretch it could not read.
-        var holds: Date? { askable && before != nil ? reached : nil }
+        var holds: Date? { askable && before != nil && !full ? reached : nil }
 
         /// Whether this source's sign-in may still be asked for notices, as `settle(in:)` last
         /// found it. **What decides whether it holds the list, and not the word its failure
@@ -114,19 +131,29 @@ final class ShellNoticeList {
         /// Whether nobody knows yet where this source will stop the list.
         var isOnFirstStretch: Bool { standing == .reading && !answered }
 
-        /// Whether this source has handed over as many lines as are held of one for a run
-        /// (`capacity`): it is not read on, and the foot says why. A read from the top that is
-        /// joined to nothing held starts it again.
+        /// Whether this source holds as many lines as are held of one (`capacity`) and has
+        /// more below: it is not read on while it does, and the foot says why. **Derived from
+        /// the count** (`bound`): once lines go — dismissed, or let go by the months limit —
+        /// it is full no longer, and is read on from where it stopped.
         var full = false
 
-        /// This reach kept to `capacity` lines: the newest of them, and **reading on ended
-        /// for it** where there are more — lines past the bound, or a source that has more to
-        /// give. A source read to its own end at exactly the bound is not full; it has no more.
+        /// This reach kept to `capacity` lines: the newest of them, **and where it stopped
+        /// kept with them** — the next older stretch is asked before the oldest line kept, so
+        /// nothing lies unread between what is held and what reading on brings once there is
+        /// room. A source read to its own end at exactly the bound is not full; it has no more.
+        /// Asked after every change to the lines held, so `full` is never left standing.
         mutating func bound(to capacity: Int) {
-            guard notices.count > capacity || (notices.count == capacity && before != nil) else { return }
-            notices = Array(notices.prefix(capacity))
-            before = nil
-            full = true
+            if notices.count > capacity {
+                notices = Array(notices.prefix(capacity))
+                // **By the last line kept's newest id, never its oldest**: a gathered line's
+                // oldest is its group's lowest id, which can lie below the newest of the lines
+                // just left out, and asking before that would skip them. Its own older
+                // members come back under its name and fold into it (`readingOn`).
+                before = notices.last?.newestID
+                // Read down to the bound and no further, as far as what is held can say.
+                reached = notices.map(\.at).min()
+            }
+            full = notices.count >= capacity && before != nil
         }
 
         /// This reach once its source has dismissed everything it had: nothing held, and
@@ -139,11 +166,11 @@ final class ShellNoticeList {
         }
     }
 
-    /// How many lines are held of one source for a run. Nothing here is kept between runs and
-    /// nothing lets a line go by age, so without a bound a source read on and on — or one that
-    /// answers every ask with more — is held whole. Thousands of lines is months of a busy
-    /// account; past it the foot says the limit was reached, and a reload still reads the newest.
-    static let capacity = 2_000
+    /// How many lines are held of one source, in this run and across them
+    /// (`NoticeReach.capacity`). Without a months limit nothing lets a line go by age, so
+    /// without a bound a source read on and on — or one that answers every ask with more — is
+    /// held whole. Past it the foot says the limit was reached, and a reload still reads the newest.
+    static let capacity = NoticeReach.capacity
 
     /// `capacity`, where a test wants a bound it can reach.
     @ObservationIgnored var capacity = ShellNoticeList.capacity
@@ -203,6 +230,27 @@ final class ShellNoticeList {
     /// line be struck, and nothing held would say any more why it went.
     @ObservationIgnored private var pressed: Set<String> = []
 
+    /// The store that holds the notices, set by the session that owns both. Nothing where a
+    /// list stands by itself: it then holds for the run, and writes nowhere.
+    @ObservationIgnored var store: ItemStore?
+    /// What the store last said it holds of each source, as taken here: a host whose reach
+    /// there differs from this has changed in the store, and is taken again (`take`).
+    @ObservationIgnored private var mirrored: [String: NoticeReach] = [:]
+    /// The write to the store asked for last, running or waiting; the next runs after it.
+    @ObservationIgnored private var writing: Task<Void, Never>?
+    /// How many writes are still out, and the store's revision of the notices the last one to
+    /// land left: what the store holds is taken only once it is at least what was written here.
+    @ObservationIgnored private var writesOut = 0
+    @ObservationIgnored private var wrote = 0
+    /// The epoch each source's notices were at in the store when it was last taken: what a
+    /// write names, so one made of a copy from before a letting go is not taken there.
+    @ObservationIgnored private var epochs: [String: Int] = [:]
+    /// The moment the months limit lets go of everything before, as the store last said it:
+    /// no line older is drawn, though one read on to this run is held until the limit acts.
+    @ObservationIgnored private var limit: Date?
+    /// Whether what the store holds has been taken at all this run.
+    @ObservationIgnored private var followed = false
+
     /// The acts on what is listed, and what each source holds back. Beside the list because
     /// what an act has on its way is left out of what is drawn here, a line leaves what is
     /// held only on its source's answer, and a sign-out lets go of both at once.
@@ -245,6 +293,26 @@ final class ShellNoticeList {
         !isReading && !due(in: session).isEmpty
     }
 
+    /// Whether a source has been read down to the months limit and has more below it: nothing
+    /// older is asked for, drawn or written, and the foot says the limit is why.
+    var isAtLimit: Bool {
+        reaches.values.contains { $0.before != nil && !$0.full && pastLimit($0) }
+    }
+
+    /// Whether a source's reading has reached past the months limit, where there is one.
+    private func pastLimit(_ reach: Reach) -> Bool {
+        guard let limit, let reached = reach.reached else { return false }
+        return reached < limit
+    }
+
+    /// The epochs the store has each source's notices at, taken again: asked for right after
+    /// a reader's notices were let go, so the first stretch read for whoever is signed in
+    /// next is written as theirs and not refused as the last reader's.
+    func learnEpochs() async {
+        guard let store else { return }
+        epochs = await store.noticesEpochs()
+    }
+
     /// Whether a source is held to `capacity` and read on no further: what the foot says where
     /// it would otherwise say every source has handed over all it has.
     var isFull: Bool { reaches.values.contains(where: \.full) }
@@ -283,7 +351,12 @@ final class ShellNoticeList {
     ///
     /// A second call while one is on the wire waits on that one, and reads again only where a
     /// source may be asked now that it did not ask. A reading on still out is ended first.
+    ///
+    /// **What this device holds is drawn before anybody is asked**: where the store has not
+    /// been taken from yet this run, it is taken here first — its sources with it, since a
+    /// page may read before the session's first adopt and nobody is asked of a source unknown.
     func read(in session: ShellSession) async {
+        if !followed { await session.adoptHeldNotices() }
         if let work, let set = work.fromTop {
             await work.task.value
             let now = Set(Self.asked(in: session).map { $0.host.lowercased() })
@@ -315,7 +388,17 @@ final class ShellNoticeList {
     /// as each answer lands. A source that left, or whose sign-in did, by a way that told
     /// nobody here is let go of. One still signed in whose sign-in may no longer read notices
     /// is named as refused: it keeps what it had read and stops holding the list (`Reach.holds`).
+    ///
+    /// **Nothing is let go while who is signed in could not be read** — a locked Keychain is
+    /// not everybody leaving. **And only of what is drawn**: the store lets go of what it holds
+    /// by the calls that take a source or a sign-in away (`forget(host:)`), never by this
+    /// list's reading of who is here, which a session that has not adopted its sources yet
+    /// would get wrong for everybody.
     private func settle(in session: ShellSession) {
+        guard session.mastodon.grantsKnown else {
+            rebuild()
+            return
+        }
         let here = Set(session.sources.map { $0.host.lowercased() }).intersection(session.mastodon.signedInHosts)
         let askable = Set(Self.asked(in: session).map { $0.host.lowercased() })
         for (host, reach) in reaches {
@@ -365,6 +448,11 @@ final class ShellNoticeList {
     /// Lets go of what one source said: a sign-out, a Clear, a Remove, a server ending the
     /// sign-in, or the reader there becoming somebody else. An answer still on its way from it
     /// lands nowhere.
+    ///
+    /// **Of what is drawn and of this run's own; the store lets go of what it holds itself**, in
+    /// the call each of those makes of it anyway (`ItemStore.forgetReaderMarks`, `remove`) — the
+    /// one whose caller waits for the write, so nothing a signed-out reader was told is on
+    /// disk once they are told they are signed out (#292).
     func forget(host raw: String) {
         let host = raw.lowercased()
         asking.remove(host)
@@ -390,8 +478,11 @@ final class ShellNoticeList {
         let host = notice.source.host.lowercased()
         guard let held = reaches[host] else { return }
         reaches[host]?.notices = held.notices.without(notice)
+        // One line fewer may be room again: a source at the bound is read on once it is.
+        reaches[host]?.bound(to: capacity)
         if asking.contains(host), let was = work?.was[host] {
             work?.was[host]?.notices = was.notices.without(notice)
+            work?.was[host]?.bound(to: capacity)
         }
         if let moment = ReadMoment.now().place { struck[host, default: [:]][notice.id] = moment }
         // Straight out of the list, with no cut made for it: one line gone moves neither
@@ -400,6 +491,10 @@ final class ShellNoticeList {
         // it — `redraw` — for the entry it then lets go of, which changes nothing here.)
         whole = whole.without(notice)
         if lines.contains(where: { $0.id == notice.id }) { lines = lines.without(notice) }
+        // But where that one line was what kept the source at the bound, it holds the list
+        // again from where it stopped, and the list is cut for it.
+        if held.full, reaches[host]?.full == false { rebuild() }
+        keep(host: host)
     }
 
     /// Every notice one source had, dismissed there at once: nothing of it is held, and it has
@@ -415,6 +510,114 @@ final class ShellNoticeList {
         struck[host] = nil
         whole.removeAll { $0.source.host.lowercased() == host }
         rebuild()
+        keep(host: host)
+    }
+
+    /// What a source dismissed is off this device's disk: every write of this list's has
+    /// reached the store, and the store has been saved — **waited for** (#292). The line left
+    /// the screen at the person's yes; this is what the act's flight ends on, and nothing is
+    /// said for it.
+    func gone(in session: ShellSession) async {
+        await kept()
+        await session.saveNow()
+    }
+
+    // MARK: - What the store holds
+
+    /// What is held of one source handed to the store, in the place of what it held: after a
+    /// stretch has landed, or a line or every line was dismissed. **In the order asked**, each write after the one before it, and off
+    /// the main actor only for the store's own hop.
+    ///
+    /// `fresh` names the lines of a stretch that has just landed; every other line is a copy
+    /// of what was held, and puts back no post the store has struck meanwhile.
+    private func keep(host: String, fresh: Set<String> = []) {
+        guard let store else { return }
+        guard let reach = reaches[host], let gathered = reach.gathered else { return }
+        let held = NoticeReach(
+            host: host, notices: reach.notices, before: reach.before, reached: reach.reached,
+            gathered: gathered, full: reach.full
+        )
+        // The epoch this copy is of, taken now and not when the write runs: a sign-out, a
+        // Clear or another account between the two ends it, and the store then takes nothing
+        // of this (`ItemStore.hold(_:fresh:since:)`).
+        let epoch = epochs[host]
+        writesOut += 1
+        let before = writing
+        writing = Task { [weak self] in
+            await before?.value
+            let revision = await store.hold(held, fresh: fresh, since: epoch).revision
+            guard let self else { return }
+            self.wrote = max(self.wrote, revision)
+            self.writesOut -= 1
+            // The last write out has landed: what the store made of it — and of anything that
+            // reached it by another road meanwhile — is taken now.
+            if self.writesOut == 0 { await self.follow() }
+        }
+    }
+
+    /// Every write to the store asked for before this call has landed there. What a test
+    /// awaits before it looks at the store.
+    func kept() async {
+        await writing?.value
+    }
+
+    /// What the store holds, taken as what is held here: called when the store says its
+    /// notices changed (`ShellSession.adopt`), before the first read of a run, and after the
+    /// last of this list's own writes has landed. With a session, who may still be asked is
+    /// settled against it too.
+    ///
+    /// **Not while a write of this list's is out, and never a snapshot older than its last
+    /// write**: what is here is then newer than what was read, and the write's own landing
+    /// takes the store again. **And not while who is signed in could not be read**: every
+    /// source would look signed out.
+    func follow(in session: ShellSession? = nil) async {
+        guard let store, session?.mastodon.grantsKnown ?? true else { return }
+        let held = await store.noticesHeld()
+        guard writesOut == 0, held.revision >= wrote else { return }
+        followed = true
+        epochs = held.epochs
+        limit = held.cutoff
+        take(held.notices)
+        if let session { settle(in: session) } else { rebuild() }
+    }
+
+    /// Each source whose reach in the store is not what was last taken of it, taken: its
+    /// lines and how far down it was read replace what is held here, and where the read stands
+    /// stays this run's. A read on the wire is put back to the same, should it not answer.
+    private func take(_ held: [NoticeReach]) {
+        let now = Dictionary(held.map { ($0.host, $0) }, uniquingKeysWith: { first, _ in first })
+        for host in Set(now.keys).union(mirrored.keys) where now[host] != mirrored[host] {
+            mirrored[host] = now[host]
+            var taken = Self.taking(now[host], into: reaches[host])
+            taken?.bound(to: capacity)
+            if taken != reaches[host] { reaches[host] = taken }
+            if asking.contains(host), let work {
+                var was = Self.taking(now[host], into: work.was[host])
+                was?.bound(to: capacity)
+                self.work?.was[host] = was
+            }
+        }
+    }
+
+    /// `reach` holding what the store holds of its source. Where the store holds nothing of
+    /// it, it has not answered — and is not here at all unless a read of it is out or failed.
+    private static func taking(_ held: NoticeReach?, into reach: Reach?) -> Reach? {
+        var reach = reach
+        guard let held else {
+            switch reach?.standing {
+            case nil, .unread?, .read?: return nil
+            case .reading?, .failed?: break
+            }
+            reach?.empty()
+            reach?.gathered = nil
+            return reach
+        }
+        if reach == nil { reach = Reach() }
+        reach?.notices = held.notices
+        reach?.before = held.before
+        reach?.reached = held.reached
+        reach?.gathered = held.gathered
+        return reach
     }
 
     /// What is drawn made again from what is held, after what the acts have on their way
@@ -476,7 +679,10 @@ final class ShellNoticeList {
     private func due(in session: ShellSession) -> [Ask] {
         Self.asked(in: session).compactMap { source -> Ask? in
             let host = source.host.lowercased()
-            guard let reach = reaches[host], reach.standing == .read, let before = reach.before,
+            // Read this run, or read by the run before and held: either has answered, and its
+            // older stretch can be asked for from where it stopped.
+            guard let reach = reaches[host], reach.standing == .read || (reach.standing == .unread && reach.answered),
+                  let before = reach.before, !reach.full, !pastLimit(reach),
                   !locked.contains(host), reach.reached.map({ $0 == floor }) ?? true
             else { return nil }
             return Ask(source: source, before: before, gathered: reach.gathered)
@@ -521,7 +727,10 @@ final class ShellNoticeList {
                     guard self.generation == mine, self.asking.remove(ask.host) != nil,
                           let token = sent[ask.host]
                     else { continue }
-                    self.land(result, of: ask, sentWith: token, was: was[ask.host], in: session)
+                    // What it held before as that stands now: the store may have let some of
+                    // it go while this was on the wire (`take`).
+                    let before = self.work.map { $0.was[ask.host] } ?? was[ask.host]
+                    self.land(result, of: ask, sentWith: token, was: before, in: session)
                 }
             }
             // Here and not after the wait below: whoever else waits on this read must find it
@@ -602,14 +811,27 @@ final class ShellNoticeList {
                     reach.notices = top
                     reach.before = page.before
                     reach.reached = moment
-                    reach.full = false
                 }
+            }
+            // Nothing past the months limit is held: a stretch that crosses it keeps what is
+            // within, and how far down it reached says the source is at the limit (`due`).
+            // **Where it stopped is the limit itself**: the next older stretch is asked before
+            // the oldest line kept, and it has reached just past the limit — so a longer limit
+            // set later finds it due again from there, with nothing between unread.
+            if let limit, let moment, moment < limit {
+                reach.notices.removeAll { $0.at < limit }
+                // By its newest id, for `bound`'s reason. With nothing kept at all, from where
+                // this stretch was asked — or, a read from the top, from where the source says
+                // its next begins: it has more, and the foot says the limit is why none is read.
+                reach.before = reach.notices.last?.newestID ?? ask.before ?? page.before
+                reach.reached = limit.addingTimeInterval(-0.001)
             }
             reach.bound(to: capacity)
             if outrun { reach.empty() }
             reach.gathered = page.gathered
             reach.standing = .read
             reaches[host] = reach
+            keep(host: host, fresh: Set(brought.map(\.id)))
             if ask.before == nil { acts.read(host: host) }
         case .failure(let error) where Cancellation.happened(error):
             reaches[host] = was
@@ -642,7 +864,7 @@ final class ShellNoticeList {
             let kept = whole.filter { reaches[$0.source.host.lowercased()] != nil }
             if kept.count != whole.count { whole = kept }
         } else {
-            let cut = Self.cut(reaches)
+            let cut = Self.cut(reaches, within: limit)
             if cut.floor != floor { floor = cut.floor }
             whole = cut.lines
         }
@@ -657,10 +879,13 @@ final class ShellNoticeList {
     /// is kept**: the floor is the latest moment among those the sources that have more have
     /// reached, and the lines are every notice at or after it, newest first; two of one moment
     /// stand by host, then the newer id first.
-    static func cut(_ reaches: [String: Reach]) -> (lines: [Notice], floor: Date?) {
+    ///
+    /// `limit` is the months limit's moment, where the person set one: no line older is drawn.
+    static func cut(_ reaches: [String: Reach], within limit: Date? = nil) -> (lines: [Notice], floor: Date?) {
         let floor = reaches.values.compactMap(\.holds).max()
+        let stop = [floor, limit].compactMap { $0 }.max()
         let lines = reaches.values.flatMap(\.notices)
-            .filter { notice in floor.map { notice.at >= $0 } ?? true }
+            .filter { notice in stop.map { notice.at >= $0 } ?? true }
             .sorted { a, b in
                 if a.at != b.at { return a.at > b.at }
                 if a.source.host != b.source.host { return a.source.host < b.source.host }

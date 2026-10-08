@@ -112,7 +112,7 @@ struct UnsentStoreTests {
                 try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier = 'v13-unsent'")
             }
         }
-        #expect(try migrations(index).last == "v12-references-only", "the premise: a store from before")
+        #expect(try !migrations(index).contains("v13-unsent"), "the premise: a store from before")
 
         let opened = StoreFile.open(at: dir)
 

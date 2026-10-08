@@ -98,6 +98,10 @@ public final class MastodonSessions {
     /// the sign-in held instead of taking that for a no.
     @ObservationIgnored private var noticesKnown = false
 
+    /// The hosts whose reader changed and whose sweep has not run yet, without taking them:
+    /// what a quit lets go of from the store before it saves, the rest being the next launch's.
+    public var readersChangedWaiting: Set<String> { readersChanged }
+
     /// The hosts whose reader changed since this was last asked, handed over once.
     func takeReadersChanged() -> Set<String> {
         defer { readersChanged = [] }

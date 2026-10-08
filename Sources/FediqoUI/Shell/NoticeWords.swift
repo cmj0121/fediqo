@@ -291,7 +291,7 @@ enum NoticesLine: Equatable, Identifiable {
     case locked(host: String)
     /// May be asked, and has not answered or failed: the read was stopped before it did.
     case unread(host: String)
-    /// Held to as many lines as are kept of one source for a run: its older notices are not
+    /// Held to as many lines as are kept of one source (`NoticeReach.capacity`): its older notices are not
     /// shown, and lines of another source may stand below where they would have been.
     case full(host: String)
 
@@ -403,8 +403,15 @@ enum NoticesFoot: Equatable {
     case reading
     /// The list stops where a source could not be read further, and that source is named above.
     case held
-    /// A source is held to as many lines as are kept of one for a run, and is read on no
-    /// further: there may be older notices, and this run does not show them.
+    /// What this device holds is drawn, and every source is being asked for its newest: older
+    /// notices can be read once they have answered.
+    case asking
+    /// A source has been read down to the months limit: older notices are beyond what this
+    /// device keeps, and are not asked for.
+    case limit
+    /// A source is held to as many lines as are kept of one (`NoticeReach.capacity`), and is
+    /// read on no further: there may be older notices, and they are not shown. Held so across
+    /// runs, until a read from the top joined to nothing held starts the source again.
     case full
     /// Every source has handed over all it has.
     case end
@@ -432,6 +439,8 @@ enum NoticesFoot: Equatable {
         case .more: L10n.t("notices.foot.more", language: language)
         case .reading: L10n.t("notices.foot.reading", language: language)
         case .held: L10n.t("notices.foot.held", language: language)
+        case .asking: L10n.t("notices.foot.asking", language: language)
+        case .limit: L10n.t("notices.foot.limit", language: language)
         case .full: L10n.t("notices.foot.full", language: language)
         case .end: L10n.t("notices.foot.end", language: language)
         }
@@ -442,6 +451,8 @@ enum NoticesFoot: Equatable {
         case .more: "arrow.down.circle"
         case .reading: "ellipsis"
         case .held: "exclamationmark.triangle"
+        case .asking: "ellipsis"
+        case .limit: "calendar"
         case .full: "tray.full"
         case .end: "checkmark.circle"
         }

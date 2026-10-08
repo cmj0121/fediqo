@@ -3,9 +3,10 @@ import Foundation
 // What a source says happened to the person (#323): somebody answered, mentioned, boosted,
 // favoured, followed or quoted them, a poll of theirs ended, a post they boosted changed.
 //
-// **Not an item.** A notice stands in no timeline and is held in no store: it is read each run
-// and kept in memory. The post one is about is only *carried* here, as the `Note` any other read
-// would have made of it, and becomes an item when somebody opens it and not before.
+// **Not an item.** A notice stands in no timeline: it is held beside the items (`NoticeReach`),
+// a source's lines and how far down that source was read, so the page draws what this device
+// holds before anybody is asked. The post one is about is only *carried* here, as the `Note` any
+// other read would have made of it, and becomes an item when somebody opens it and not before.
 
 /// One thing a source says happened to the person: one line of the page.
 ///
@@ -116,6 +117,15 @@ public struct Notice: Hashable, Sendable, Identifiable {
         }
     }
 
+    /// This line carrying `post` in the place of the one it carried, or nothing: what is left
+    /// of a line whose post this device has let go.
+    public func carrying(_ post: Note?) -> Notice {
+        Notice(
+            source: source, handle: handle, kind: kind, people: people, count: count, post: post, at: at,
+            newestID: newestID, oldestID: oldestID
+        )
+    }
+
     /// Whether the person was answered and not only mentioned. **Not a kind**: a source sends an
     /// answer as a `mention`, and what tells the two apart is the post, which answers something.
     public var answers: Bool { kind == .mention && post?.reply != nil }
@@ -154,6 +164,96 @@ extension [Notice] {
             }
         }
         return lines
+    }
+}
+
+/// What this device holds of one source's notices, between runs as within one: its lines, and
+/// how far down the source was read — so no line is ever drawn below a stretch another source
+/// has not been asked for, from the first frame after a relaunch as before it.
+///
+/// **Not an item, and nothing keeps one** (#282): held beside the items, written as a part of
+/// its own, let go with the sign-in it was read by, and never carried to another device.
+public struct NoticeReach: Hashable, Sendable {
+    /// How many lines are held of one source. Thousands of lines is months of a busy account;
+    /// past it the newest are kept, and the source is read on no further while it is at the
+    /// bound: once lines go — dismissed, or let go by the months limit — it is read on again
+    /// from where it stopped.
+    public static let capacity = 2_000
+
+    /// The folded host of the source that said them.
+    public let host: String
+    /// Newest first, as the source handed them over.
+    public var notices: [Notice]
+    /// The id the next, older stretch is asked before. Nothing where the source has no more.
+    public var before: String?
+    /// The moment the source has been read down to: the oldest any stretch read of it named.
+    public var reached: Date?
+    /// Which read the source answers with: the gathered one, or the single one.
+    public var gathered: Bool
+    /// Whether the source is held to `capacity` and has more below: read on no further while
+    /// it is. **Derived from the count** (`bounded`), and written down only as that.
+    public var full: Bool
+
+    public init(
+        host: String, notices: [Notice] = [], before: String? = nil, reached: Date? = nil,
+        gathered: Bool, full: Bool = false
+    ) {
+        self.host = host.lowercased()
+        self.notices = notices
+        self.before = before
+        self.reached = reached
+        self.gathered = gathered
+        self.full = full
+    }
+
+    /// This reach kept to `capacity` lines: the newest of them, **and where it stopped kept
+    /// with them** — the next older stretch is asked before the oldest line kept, so nothing
+    /// lies unread between what is held and what reading on brings once there is room. It is
+    /// full while it holds `capacity` lines and has more below; a source read to its own end at
+    /// exactly the bound is not full, and one whose lines have since gone is full no longer.
+    public func bounded(to capacity: Int = NoticeReach.capacity) -> NoticeReach {
+        var bound = self
+        if notices.count > capacity {
+            bound.notices = Array(notices.prefix(capacity))
+            // Its newest id and not its oldest: a gathered line's oldest is its group's lowest
+            // id, which can lie below lines just left out.
+            bound.before = bound.notices.last?.newestID
+            bound.reached = bound.notices.map(\.at).min()
+        }
+        bound.full = bound.notices.count >= capacity && bound.before != nil
+        return bound
+    }
+
+    /// This reach with every carried post `gone` names struck: each line stays, without what
+    /// it was about, and a read brings that back where the source still serves it.
+    public func striking(_ gone: (Note) -> Bool) -> NoticeReach {
+        guard notices.contains(where: { $0.post.map(gone) ?? false }) else { return self }
+        var struck = self
+        struck.notices = notices.map { line in
+            line.post.map(gone) == true ? line.carrying(nil) : line
+        }
+        return struck
+    }
+
+    /// What of this reach is written down under a months limit that lets go of everything
+    /// before `cutoff`: no line older than it, and no carried post older than it. How far down
+    /// the source was read stands — what lay there was let go, and was not left unread.
+    ///
+    /// **A longer limit set later does not bring back what a shorter one let go**, as it does
+    /// not for posts: a source read past the old limit is read on from where it had reached,
+    /// and the lines between are read again only by a read of that stretch.
+    public func within(_ cutoff: Date?) -> NoticeReach {
+        guard let cutoff else { return self }
+        return striking { $0.postedAt < cutoff }.withinLines(cutoff)
+    }
+
+    /// This reach without the lines older than `cutoff`: **the one rule of what is held under
+    /// a months limit**, for what is drawn, what Usage counts and what is written alike.
+    public func withinLines(_ cutoff: Date?) -> NoticeReach {
+        guard let cutoff, notices.contains(where: { $0.at < cutoff }) else { return self }
+        var kept = self
+        kept.notices.removeAll { $0.at < cutoff }
+        return kept
     }
 }
 
@@ -271,7 +371,7 @@ public struct NoticesHeld: Hashable, Sendable {
     public var isEmpty: Bool { requests <= 0 && notices <= 0 }
 }
 
-/// What is known, this run, of whether one source holds notices back.
+/// What is known, this run, of whether one source holds notices back. Never written down.
 ///
 /// **A source that has no such thing is asked once and not again.** Whoever asks keeps the
 /// answer and hands it back with the next ask, as a page's `gathered` is handed back: `absent`

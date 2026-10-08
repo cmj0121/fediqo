@@ -834,6 +834,8 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 // And it brings no text waiting to be sent: a take-away writes none, and one
                 // that came all the same would be sent from this device as well as its own.
                 try index.dropUnsent()
+                // Nor what a source said happened to whoever was signed in where it was made.
+                try index.dropNotices()
                 contents = try index.load()
                 kept = try index.keptCount()
                 // Read, and so one this build may write: where this run has no file of its own
@@ -927,8 +929,19 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     ) async throws -> (undo: () async throws -> Void, settle: () -> Void) {
         if let file {
             let previous = try file.load()
-            try await file.save(sources: contents.sources, notes: contents.notes, said: contents.said)
-            return ({ try await file.save(sources: previous.sources, notes: previous.notes, said: previous.said) }, {})
+            // What each source said happened to whoever was signed in here goes from the file
+            // with the store it was read beside (`ItemStore.replace` lets it go from memory):
+            // the sign-ins a read back leaves may be somebody else's (#292). In the one
+            // transaction that writes the new items: both, or neither.
+            let told = try file.loadNotices(of: previous.sources)
+            try await file.save(
+                sources: contents.sources, notes: contents.notes, said: contents.said, replacingNotices: []
+            )
+            return ({
+                try await file.save(
+                    sources: previous.sources, notes: previous.notes, said: previous.said, replacingNotices: told
+                )
+            }, {})
         }
         guard let index = staged.index else { return ({}, {}) }
         let manager = FileManager.default

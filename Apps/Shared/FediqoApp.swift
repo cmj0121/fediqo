@@ -49,7 +49,10 @@ final class Launch {
         let media = try? MediaCache.caches()
         StorePackager.sweepLeftovers(directory: StoreFile.applicationSupportDirectory, media: media?.location)
         let opened = StoreFile.openApplicationSupport()
-        store = ItemStore(sources: opened.sources, notes: opened.notes, said: opened.said, unsent: opened.unsent)
+        store = ItemStore(
+            sources: opened.sources, notes: opened.notes, said: opened.said, notices: opened.notices,
+            unsent: opened.unsent
+        )
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
@@ -117,16 +120,32 @@ final class Launch {
     /// forum browser's store keeps its sources' sign-ins and nothing else. Bounded like the save,
     /// so a WebKit that stops answering cannot hold a quit up.
     func end() async {
+        await forgetChangedReaders()
         _ = await saver.flush()
         let hosts = await store.sources().map(\.host)
         // Nothing where this run never read the store: `ForumSessions.sourcesRead`.
         await forums.leaveNothing(keeping: hosts, within: StoreSaver.deadline)
     }
 
+    /// What a source said of, and to, a reader whose sign-in has ended, let go from the store
+    /// before the save that follows — the sweep a session queues for it (`forgetReaderMarksDue`)
+    /// may not have run when the app is left or quit, and its notices would then stay on disk
+    /// until the next launch (#292). The store's part only, and not taken from the session,
+    /// whose own sweep still does the rest. **Bounded**: a step in memory a host, with no
+    /// request and no write; the write is the flush after it, which answers by
+    /// `StoreSaver.deadline`. **Not covered by a test**: nothing tests the app target; what it
+    /// calls (`ItemStore.forgetReaderMarks`, the flush) is tested where it lives.
+    private func forgetChangedReaders() async {
+        for host in mastodon.readersChangedWaiting.sorted() {
+            await store.forgetReaderMarks(host: host)
+        }
+    }
+
     /// As the app goes to the background, which may be a moment away to a password manager in the
     /// middle of a sign-in: the save, and only the forum browser's copies of what it fetched. The
     /// rest waits for the quit, or for the next launch's sweep.
     func pause() async {
+        await forgetChangedReaders()
         _ = await saver.flush()
         await forums.dropCache(within: StoreSaver.deadline)
     }

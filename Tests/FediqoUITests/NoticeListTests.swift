@@ -853,6 +853,80 @@ struct NoticeListTests {
         #expect(list.isFull, "a source with more at the bound is read on past it")
     }
 
+    /// Groups of the gathered read: each a key, its newest id, the lowest id of the group on
+    /// this page, and its minute.
+    private static func groups(_ lines: [(key: String, newest: Int, low: Int, at: Int)]) -> NoticeSources.Outcome {
+        .body(#"{"accounts":[],"statuses":[],"notification_groups":["# + lines.map {
+            """
+            {"group_key":"\($0.key)","notifications_count":2,"type":"favourite","most_recent_notification_id":\($0.newest),
+             "page_min_id":"\($0.low)","page_max_id":"\($0.newest)",
+             "latest_page_notification_at":"\(String(format: "2024-06-01T00:%02d:00.000Z", $0.at))","sample_account_ids":[]}
+            """
+        }.joined(separator: ",") + "]}")
+    }
+
+    /// A gathered source whose second line reaches down to id 3 — below the third line's 6.
+    private static let reaching: [String: NoticeSources.Outcome] = [
+        "\(a)\(v2)": groups([("g1", 10, 9, 50), ("g2", 8, 3, 40), ("g3", 6, 5, 30)]),
+        // Asked before the second line's newest: its older members, and the line below it.
+        "\(a)\(v2)?8": groups([("g2", 7, 3, 40), ("g3", 6, 5, 30)]),
+    ]
+
+    @Test("A gathered source at the bound resumes from its last kept line's newest notice: the line left out below it is asked for again, none skipped and none twice")
+    func theBoundResumesAGatheredSource() async throws {
+        let (session, server, _) = try await shell(Self.reaching, signedIn: [Self.a: Self.reads])
+        let list = session.noticeList
+        list.capacity = 2
+        await list.read(in: session)
+        #expect(list.lines.map(\.id).map { $0.suffix(2) } == ["g1", "g2"] && list.isFull)
+        #expect(list.reaches[Self.a]?.notices.last?.oldestID == "3", "the premise: the kept line reaches below the one left out")
+
+        list.took(try #require(list.lines.first))
+        await list.readOn(in: session)
+
+        #expect(await server.asked.suffix(1) == ["\(Self.a)\(Self.v2)?8"], "asked below the line left out")
+        #expect(list.failures.isEmpty)
+        #expect(list.lines.map(\.id).map { $0.suffix(2) } == ["g2", "g3"])
+    }
+
+    @Test("A gathered source stopped at the months limit resumes, under a longer limit, from its last kept line's newest notice: the line the limit left out is asked for again, none skipped and none twice")
+    func theLimitResumesAGatheredSource() async throws {
+        let (session, server, _) = try await shell(Self.reaching, signedIn: [Self.a: Self.reads])
+        let list = session.noticeList
+        let now = ISO8601DateFormatter().date(from: "2024-07-01T00:35:00Z")!
+        await session.keep(months: 1, from: now)
+        await list.read(in: session)
+        #expect(list.lines.map(\.id).map { $0.suffix(2) } == ["g1", "g2"])
+        #expect(list.isAtLimit && !list.hasMore(in: session) && NoticesPane.foot(in: session) == .limit)
+
+        await session.keep(months: 3, from: now)
+        #expect(list.hasMore(in: session))
+        await list.readOn(in: session)
+
+        #expect(await server.asked.suffix(1) == ["\(Self.a)\(Self.v2)?8"], "asked below the line left out")
+        #expect(list.failures.isEmpty)
+        #expect(list.lines.map(\.id).map { $0.suffix(2) } == ["g1", "g2", "g3"])
+    }
+
+    @Test("A source at the bound is not read on even where another source stops the list at the very moment it was read down to")
+    func aFullSourceAtTheFloorIsNotReadOn() async throws {
+        var routes = Self.two
+        // A reaches the bound at :30 after its second stretch; B's first stretch stops at :30 too.
+        routes["\(Self.b)\(Self.v1)"] = Self.page(Self.one(8, at: 45), Self.one(7, at: 30))
+        let (session, server, _) = try await shell(routes)
+        let list = session.noticeList
+        list.capacity = 3
+        await list.read(in: session)
+        await list.readOn(in: session)
+        #expect(list.fullHosts == [Self.a])
+        #expect(list.reaches[Self.a]?.reached == Self.minute(30) && list.floor == Self.minute(30), "the premise: the two meet")
+
+        await list.readOn(in: session)
+
+        #expect(await server.reads.suffix(1) == ["\(Self.b)\(Self.v1)?7"])
+        #expect(await server.reads.filter { $0.hasPrefix(Self.a) }.count == 2, "a source at the bound was read on")
+    }
+
     @Test("A source read to its own end at the bound has no more, and is not said to be held short; another source is read on beside one that is")
     func theBoundIsOneSourcesOwn() async throws {
         var end = ShellNoticeList.Reach()
@@ -864,7 +938,7 @@ struct NoticeListTests {
         #expect(!end.full && end.notices.count == 3)
         end.before = "0"
         end.bound(to: 3)
-        #expect(end.full && end.before == nil && end.holds == nil)
+        #expect(end.full && end.before == "0" && end.holds == nil, "full keeps where it stopped, and does not hold the list")
         end.empty()
         #expect(!end.full)
 
@@ -903,7 +977,7 @@ struct NoticeListTests {
         #expect(NoticesPane.standsOut(.full(host: Self.a)) && !NoticesPane.isFailure(.full(host: Self.a)))
         #expect(
             NoticesLine.full(host: Self.a).words(language: .english)
-                == "Fediqo holds no more notices from a.example until it is opened again: its older notices are not shown, and may belong among the lines below."
+                == "Fediqo holds as many notices from a.example as it keeps of one source: its older notices are not shown, and may belong among the lines below. They are read again once there is room — when notices are dismissed, or the months limit lets old ones go."
         )
         #expect(NoticesLine.full(host: Self.a).words(language: .taiwanese).contains(Self.a))
         #expect(

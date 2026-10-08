@@ -542,7 +542,7 @@ struct NoticeWordsTests {
         #expect(NoticesFoot.foot(hasMore: false, isReading: true, floor: nil, full: true) == .reading)
         #expect(NoticesFoot.foot(hasMore: false, isReading: false, floor: Self.at, full: true) == .held)
         #expect(NoticesFoot.full.words(language: .english)
-            == "Older notices are not read: Fediqo holds no more of one source until it is opened again.")
+            == "Older notices are not read: Fediqo holds as many of one source as it keeps. They are read again once there is room — when notices are dismissed, or the months limit lets old ones go.")
         #expect(NoticesFoot.full.words(language: .english) != NoticesFoot.end.words(language: .english))
         let ours = NoticesFoot.full.words(language: .taiwanese)
         #expect(!ours.hasPrefix("notices.") && ours != NoticesFoot.end.words(language: .taiwanese))

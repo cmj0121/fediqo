@@ -467,6 +467,45 @@ struct NoticesHostedTests {
         #expect(rows(probe).count == 1)
     }
 
+    @Test("After a relaunch the page draws what this device holds while its sources are still being asked, and the foot says they are being read — not to wait for a source named above")
+    func heldNoticesAreDrawnWhileTheDoorIsHeld() async throws {
+        let routes = [
+            Self.a: Self.page(Self.one(4, "favourite", minutes: 2, post: 30), Self.one(3, "follow", by: "Bo", minutes: 9)),
+        ]
+        let (first, _) = try await shell(routes, signedIn: [Self.a: Self.reads])
+        await first.noticeList.read(in: first)
+        await first.noticeList.kept()
+        let held = await first.store.noticesHeld().notices
+        #expect(held.first?.notices.count == 2 && held.first?.before != nil, "the premise: held, with more below")
+
+        // The next run: the store as a launch reads it, and a source that does not answer yet.
+        let tokens = MemoryMastodonTokens()
+        try tokens.save(Self.token(Self.a, scopes: Self.reads))
+        let gate = Gate()
+        let server = NoticeHosts([Self.a: .held(gate, "[" + Self.one(4, "favourite", minutes: 2, post: 30) + "]")])
+        let store = ItemStore(sources: [Source(host: Self.a, kind: .mastodon)], notes: [], notices: held)
+        let session = ShellSession(
+            http: FixtureHTTP(), store: store, mastodon: MastodonSessions(tokens: tokens, sender: server)
+        )
+        session.mastodon.refresh()
+        await session.reloadFromStore()
+
+        let (still, before) = hosted(session)
+        Self.settle(still)
+        #expect(rows(before).count == 2, "drawn with nobody asked")
+        #expect(await server.asked.isEmpty)
+        #expect(before.says[.foot] == "Older notices can be read. Press here, or scroll to here, to read them.")
+
+        let (view, probe) = hosted(session, opening: true)
+        #expect(await spun { Self.settle(view); return await server.asked == [Self.a] })
+        Self.settle(view)
+        #expect(rows(probe).count == 2, "what is held stays drawn while the source is asked")
+        #expect(probe.says[.foot] == "Reading the newest notices…")
+        #expect(probe.says[.foot] != NoticesFoot.held.words())
+        await gate.open()
+        #expect(await spun { Self.settle(view); return !session.noticeList.isReading })
+    }
+
     @Test("A short list reads on only when its foot is pressed, and says when there is no more")
     func theFootReadsOnWhenPressed() async throws {
         let (session, server) = try await shell([
