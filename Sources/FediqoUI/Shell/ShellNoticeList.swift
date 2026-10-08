@@ -555,7 +555,7 @@ final class ShellNoticeList {
             var reach = was ?? Reach()
             // Refused only where the source said this sign-in may not. Any other answer — too
             // many requests, a failure of its own — is a failure, which asking again may get past.
-            reach.standing = .failed(ShellNoticeActs.refuses(error) ? .refused : .unreachable)
+            reach.standing = .failed(WriteWhy.refuses(error) ? .refused : .unreachable)
             reach.readingOn = ask.before != nil
             reaches[host] = reach
         }

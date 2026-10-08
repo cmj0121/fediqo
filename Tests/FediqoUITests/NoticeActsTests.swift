@@ -979,18 +979,18 @@ struct NoticeActsTests {
     func whatAFailureIsSaidAs() {
         typealias Acts = ShellNoticeActs
         let timedOut = URLError(.timedOut)
-        #expect(Acts.why(MastodonAuthError.http(403), wrote: true) == .refused)
-        #expect(Acts.why(MastodonAuthError.http(401), wrote: false) == .refused)
-        #expect(Acts.why(MastodonAuthError.http(500), wrote: true) == .declined)
-        #expect(Acts.why(MastodonAuthError.http(404), wrote: true) == .declined)
-        #expect(Acts.why(MastodonAuthError.http(429), wrote: false) == .declined)
-        #expect(Acts.why(MastodonNoticeError.unreadable, wrote: false) == .declined)
-        #expect(Acts.why(timedOut, wrote: true) == .unconfirmed, "a write that ran out of time was said not to have happened")
-        #expect(Acts.why(timedOut, wrote: false) == .unreachable, "a read has nothing to confirm")
-        #expect(Acts.why(URLError(.notConnectedToInternet), wrote: true) == .unreachable)
-        #expect(Acts.why(FixtureHTTPError.unreachable, wrote: true) == .unreachable)
+        #expect(WriteWhy(MastodonAuthError.http(403), wrote: true) == .refused)
+        #expect(WriteWhy(MastodonAuthError.http(401), wrote: false) == .refused)
+        #expect(WriteWhy(MastodonAuthError.http(500), wrote: true) == .declined)
+        #expect(WriteWhy(MastodonAuthError.http(404), wrote: true) == .declined)
+        #expect(WriteWhy(MastodonAuthError.http(429), wrote: false) == .declined)
+        #expect(WriteWhy(MastodonNoticeError.unreadable, wrote: false) == .declined)
+        #expect(WriteWhy(timedOut, wrote: true) == .unconfirmed, "a write that ran out of time was said not to have happened")
+        #expect(WriteWhy(timedOut, wrote: false) == .unreachable, "a read has nothing to confirm")
+        #expect(WriteWhy(URLError(.notConnectedToInternet), wrote: true) == .unreachable)
+        #expect(WriteWhy(FixtureHTTPError.unreachable, wrote: true) == .unreachable)
 
-        func words(_ act: Acts.Act, _ why: Acts.Why, _ language: DummyLanguage = .english) -> String {
+        func words(_ act: Acts.Act, _ why: WriteWhy, _ language: DummyLanguage = .english) -> String {
             NoticeActs.words(.init(act: act, why: why), host: Self.a, language: language)
         }
         #expect(words(.dismiss, .unconfirmed) == "a.example did not confirm the notice was dismissed. Read again to see.")
@@ -1004,7 +1004,7 @@ struct NoticeActsTests {
         let writes: [Acts.Act] = [.dismiss, .dismissAll, .letThrough, .letGo]
         for language in [DummyLanguage.english, .taiwanese] {
             for act in writes + [.requests] {
-                for why in [Acts.Why.refused, .unreachable, .declined] + (act == .requests ? [] : [.unconfirmed]) {
+                for why in [WriteWhy.refused, .unreachable, .declined] + (act == .requests ? [] : [.unconfirmed]) {
                     let said = words(act, why, language)
                     #expect(said.contains(Self.a) && !said.contains("notices.act."), "\(act) \(why) has no words in \(language)")
                 }

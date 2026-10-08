@@ -2047,6 +2047,9 @@ public struct FediqoRootView: View {
     /// alive and a value set above them all would be true in the tab nobody can see. See
     /// `EnvironmentValues.shellPlaceIsActive`.
     ///
+    /// **And each page says what did not happen** (`SaidStrip`), so it is said whichever place
+    /// is in front, and stands inside the page rather than over what is drawn around it.
+    ///
     /// **Each page brings the ground with it**, in the narrow arrangement as in the wide one: a
     /// tab is drawn on the system's own background unless its page covers it, and the chassis
     /// has one ground whatever is drawn around the page.
@@ -2054,6 +2057,9 @@ public struct FediqoRootView: View {
     private func placedPage(_ item: ShellPlace) -> some View {
         pageFor(item)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // What did not happen is said at the foot of every page, inside it: over no rail,
+            // no tab and no sheet. A modifier of its own — see `SaidStrip`.
+            .modifier(SaidStrip(said: session.said))
             .background(ShellChrome.page(colorScheme))
             .environment(\.shellPlaceIsActive, item == place)
     }

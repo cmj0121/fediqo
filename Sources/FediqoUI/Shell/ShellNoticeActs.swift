@@ -31,25 +31,10 @@ final class ShellNoticeActs {
         case letThrough, letGo
     }
 
-    /// Why an act changed nothing.
-    enum Why: Equatable, Sendable {
-        /// The source answered and said this sign-in may not.
-        case refused
-        /// Nothing answered: the source was not reached.
-        case unreachable
-        /// The source answered, and not with a yes or a refusal of the sign-in: it did not do
-        /// it, and nothing is known of why.
-        case declined
-        /// An act went out and no answer came in time: it may have been done all the same.
-        case unconfirmed
-        /// The sign-in could not be read off this device, so nothing was sent.
-        case locked
-    }
-
     /// What is said of the last act at one source that changed nothing.
     struct Said: Equatable, Sendable {
         let act: Act
-        let why: Why
+        let why: WriteWhy
     }
 
     /// The last act at each source that changed nothing, by folded host. Taken down by the
@@ -264,7 +249,7 @@ final class ShellNoticeActs {
 
     private enum Answer<Value: Sendable> {
         case yes(Value)
-        case no(Why)
+        case no(WriteWhy)
         /// Nothing is to change or be said: the sign-in it was asked with is no longer the one
         /// held, or the asker walked away.
         case nothing
@@ -283,28 +268,7 @@ final class ShellNoticeActs {
         switch result {
         case .success(let value): return .yes(value)
         case .failure(let error) where Cancellation.happened(error): return .nothing
-        case .failure(let error): return .no(Self.why(error, wrote: purpose == .write))
-        }
-    }
-
-    /// What a failure says happened. **Only what is known**: a 401 or a 403 is the source
-    /// refusing this sign-in; any other answer is the source not doing it, for a reason nobody
-    /// here was told; a write that ran out of time may have landed; and anything else never
-    /// reached the source at all.
-    static func why(_ error: any Error, wrote: Bool) -> Why {
-        if refuses(error) { return .refused }
-        if case .http? = error as? MastodonAuthError { return .declined }
-        if error is MastodonNoticeError { return .declined }
-        if wrote, (error as? URLError)?.code == .timedOut { return .unconfirmed }
-        return .unreachable
-    }
-
-    /// Whether a failure is the source saying this sign-in may not: a 401 it stood by, a 403.
-    /// The one reading of it, for an act and for the list's own read.
-    static func refuses(_ error: any Error) -> Bool {
-        switch error as? MastodonAuthError {
-        case .http(401)?, .http(403)?: true
-        default: false
+        case .failure(let error): return .no(WriteWhy(error, wrote: purpose == .write))
         }
     }
 

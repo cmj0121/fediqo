@@ -78,6 +78,10 @@ final class ShellSession {
     /// session for `conversations`' reason, and held nowhere else: it is read each run.
     let noticeList = ShellNoticeList()
 
+    /// What the person asked of a source that changed nothing, said on every page
+    /// (`SaidStrip`). On the session for `conversations`' reason; for the run only.
+    let said = ShellSaid()
+
     /// What each server says it is, asked of that server rather than read off what was written
     /// down when it was joined — #86. On the session for `conversations`' reason.
     let flavours = ShellFlavours()
@@ -834,6 +838,7 @@ final class ShellSession {
         mastodon.onEnded = { [weak self] host in
             self?.dropSignOutAsk(host: host)
             self?.noticeList.forget(host: host)
+            self?.said.forget(host: host)
         }
         // Last, once every property is set: a take-away or a read back holds the room limit still (#249).
         carry.holding = { [weak self] held in self?.holdsStill = held }
@@ -2719,6 +2724,9 @@ final class ShellSession {
         // that cannot now arrive, and a failure left standing about a source the reader has just
         // emptied is a sentence about nothing (#106).
         acts.forget(host: host)
+        // And what was said of a write to it: a line about a source that is not here asks
+        // the person to act on nothing.
+        said.forget(host: host)
         await forums.forget(host: host)
         // Decision 10: a Mastodon's sign-in goes with a Clear as a forum's does. Signing out
         // drops nothing that Home or a list brought in.
@@ -2901,6 +2909,7 @@ final class ShellSession {
             await loads.letGo(host: host)
             refs.letGo(host: host)
             noticeList.forget(host: host)
+            said.forget(host: host)
             await mastodon.signOut(host: host)
             // What the source said this reader did to its posts goes with the sign-in, now and
             // on disk (#285) — before anything can take the store away with it still said.
