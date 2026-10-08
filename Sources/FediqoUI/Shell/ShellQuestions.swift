@@ -106,6 +106,49 @@ enum ShellQuestion {
         )
     }
 
+    /// Discarding a text that waits to be sent (`ShellOutbox`). **A loss, and drawn as one**:
+    /// the words are deleted from this device and do not come back.
+    ///
+    /// **One that may have been posted is not said to be unsent.** Its question is about this
+    /// device's copy alone: forgetting it here takes nothing back from its source, where — if
+    /// it was posted — it stays, to be taken back from its own row.
+    static func discard(_ sending: ShellOutbox.Sending, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let kind = sending.unsent.answers == nil ? "post" : "answer"
+        let maybe = sending.standing == .unconfirmed
+        let opening = OutboxWords.opening(sending.unsent.text)
+        return ShellConfirmation(
+            symbol: "trash",
+            title: L10n.t("outbox.discard.title\(maybe ? ".unconfirmed" : "").\(kind)", language: language),
+            line: maybe
+                ? String(format: L10n.t("outbox.discard.line.unconfirmed", language: language), sending.unsent.host)
+                : String(format: L10n.t("outbox.discard.line", language: language), opening),
+            help: maybe ? String(format: L10n.t("outbox.discard.detail.unconfirmed", language: language), opening) : nil,
+            choices: [.init(
+                yes, L10n.t(maybe ? "outbox.discard.confirm.unconfirmed" : "outbox.discard", language: language),
+                role: .destructive
+            )],
+            cancel: L10n.t("compose.cancel", language: language)
+        )
+    }
+
+    /// Before a text that may have been posted is sent all the same: said plainly that it may
+    /// then be posted twice, and where to look first. `changed` is the person having typed
+    /// over it: what goes is then a new post, and the first — if it was posted — stays.
+    static func resend(
+        _ sending: ShellOutbox.Sending, changed: Bool, language: DummyLanguage? = nil
+    ) -> ShellConfirmation {
+        let kind = sending.unsent.answers == nil ? "post" : "answer"
+        let host = sending.unsent.host
+        return ShellConfirmation(
+            symbol: "questionmark.circle",
+            title: L10n.t("outbox.resend.title.\(kind)", language: language),
+            line: String(format: L10n.t(changed ? "outbox.resend.line.changed" : "outbox.resend.line", language: language), host),
+            help: String(format: L10n.t("outbox.resend.detail", language: language), host),
+            choices: [.init(yes, L10n.t("outbox.resend.confirm", language: language), role: .destructive)],
+            cancel: L10n.t("compose.cancel", language: language)
+        )
+    }
+
     /// Removing a source. The line says what will happen to its posts — they go, or they stay
     /// as the reader chose on Preferences (#250, `postsStay`) — and the boards it takes do not
     /// come back, so where there are any the line names them too; the (?) says the rest.
@@ -114,8 +157,12 @@ enum ShellQuestion {
     /// itself says how many stay for that — a line of its own, so the count is read before the
     /// yes — and the (?) says the rest as before. Where they all stay it says nothing of them:
     /// none goes.
+    ///
+    /// `unsent` is how many texts wait to be sent to it (`ShellOutbox`): they are deleted with
+    /// it, and the question says how many — on the line where the line can take it.
     static func remove(
-        host: String, boards: Int, postsStay: Bool = false, kept: Int = 0, language: DummyLanguage? = nil
+        host: String, boards: Int, postsStay: Bool = false, kept: Int = 0, unsent: Int = 0,
+        language: DummyLanguage? = nil
     ) -> ShellConfirmation {
         let stay = postsStay ? ".stay" : ""
         // Only the boards keys carry a count to format; the rest are said as written.
@@ -135,6 +182,10 @@ enum ShellQuestion {
                 ? String(format: L10n.t("account.remove.detail.boards.counted", language: language), boards)
                 : L10n.t("account.remove.detail.counted", language: language)
         }
+        (line, help) = saying(
+            unsent > 0 ? L10n.count("question.unsent.go", unsent, language: language) : nil,
+            line: line, help: help, language: language
+        )
         return ShellConfirmation(
             symbol: "trash", title: String(format: L10n.t("account.remove.title", language: language), host),
             line: line, help: help,

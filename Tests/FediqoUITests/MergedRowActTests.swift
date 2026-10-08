@@ -160,7 +160,8 @@ struct MergedRowActTests {
         #expect(target.item.source.host == second, "the sheet names the source it goes to")
         #expect(target.item.statusID == "222")
         session.answerDrafts[target.id] = "@ada@origin.example yes"
-        try await session.answer(target)
+        #expect(session.send(answer: target))
+        await session.outbox.settled()
 
         let request = try #require(await server.requests.first)
         #expect(request.url?.host == second)

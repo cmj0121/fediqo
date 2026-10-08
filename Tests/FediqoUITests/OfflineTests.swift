@@ -209,7 +209,7 @@ struct OfflineTests {
                 "and what was held is still drawn")
     }
 
-    @Test("Posting with the network off keeps the draft and names the source that did not answer")
+    @Test("Posting with the network off keeps the text and names the source it was not sent to")
     func postSaysSo() async throws {
         let (session, _) = try await launch()
         session.sources = await session.store.sources()
@@ -217,19 +217,18 @@ struct OfflineTests {
         #expect(session.composeHost == Self.host)
         session.composeDraft = "written on a plane"
 
-        await #expect(throws: URLError.self) { try await session.post() }
+        #expect(session.send())
+        await session.outbox.settled()
 
-        #expect(session.composeDraft == "written on a plane", "nothing written is lost")
+        let entry = try #require(session.outbox.sendings.first, "nothing written is lost")
+        #expect(entry.unsent.text == "written on a plane")
+        #expect(entry.standing == .failed(.unreachable))
         #expect(session.isSignedIn(host: Self.host), "a dark network is not a sign-out")
-        let failed = try #require(ComposerSheet.failedAt(session), "the failure names a source")
-        #expect(failed == Self.host)
-        #expect(
-            ComposerSheet.surface(offered: session.writableSources, draft: session.composeDraft, failed: failed)
-                == .composing,
-            "the editor and its failure plate stay, not the empty notice"
-        )
-        #expect(session.canPost, "and the same draft can be sent again once the network is back")
-        #expect(ShellFailure.spoken([failed]).contains(Self.host))
+        let hold = session.outbox.hold(entry, in: session)
+        #expect(hold == nil)
+        #expect(OutboxWords.line(entry, hold: hold, whom: nil).contains(Self.host), "the strip names the source")
+        #expect(OutboxWords.presses(entry, hold: hold).contains(.again),
+                "and the same text can be sent again once the network is back")
     }
 
     @Test("Signing in with the network off says the source could not be reached, and opens no page")

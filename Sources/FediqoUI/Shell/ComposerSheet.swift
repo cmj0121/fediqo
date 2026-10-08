@@ -7,14 +7,15 @@ struct ComposerSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     /// What the sheet draws: empty is only when there is nothing to write to **and** nothing
-    /// unsent and no failure in hand. A 403 or 401 that spends the last writable source must
-    /// not swallow the draft into that notice.
+    /// unsent and no refusal in hand. A source that stops being writable while the sheet is up
+    /// must not swallow the draft into that notice.
     enum Surface: Equatable {
         case empty
         case composing
     }
 
-    /// The source a failed send is said against: the one the composer was writing to.
+    /// The source a press that could not send is said against: the one the composer was
+    /// writing to.
     @MainActor
     static func failedAt(_ session: ShellSession) -> String? { session.composeHost }
 
@@ -23,15 +24,6 @@ struct ComposerSheet: View {
         if failed != nil { return .composing }
         if !trimmed(draft).isEmpty { return .composing }
         return .empty
-    }
-
-    /// Cancel is refused while a send is on the wire, so a late success cannot land on a
-    /// sheet the reader already left.
-    static func canDismiss(sending: Bool) -> Bool { !sending }
-
-    /// A landing clears the draft only where it is still the snapshot that was sent.
-    static func draftAfterLanding(current: String, sent: String) -> String {
-        trimmed(current) == sent ? "" : current
     }
 
     static func trimmed(_ text: String) -> String {
@@ -78,12 +70,9 @@ struct ComposerSheet: View {
             writes: { failed in
                 Self.surface(offered: offered, draft: session.composeDraft, failed: failed) == .composing
             },
-            send: {
-                try await session.post()
-                return session.composeDraft.isEmpty
-            },
+            send: { session.send() },
             failedAt: { Self.failedAt(session) }
-        ) { sending, failed in
+        ) { failed in
             if Self.surface(offered: offered, draft: session.composeDraft, failed: failed) == .empty {
                 ShellNotice(
                     symbol: "square.and.pencil",
@@ -98,7 +87,6 @@ struct ComposerSheet: View {
             } else if !offered.isEmpty {
                 ComposeChoices(session: session, offered: offered)
                 .pickerStyle(.menu)
-                .disabled(sending)
             }
         }
         .onAppear { session.prepareCompose() }
@@ -159,10 +147,13 @@ private struct ComposeChoices: View {
     }
 }
 
-/// What the composer and an answer share (#108): the limit line, the editor, the wait while a
-/// send is on the wire, the failure that keeps every character and tries again, and the toolbar
-/// whose Cancel is refused while a send is out — **one state machine for the two**, where the
-/// answer used to re-implement the composer's and had begun to drift from it.
+/// What the composer and an answer share (#108): the limit line, the editor, and the one refusal
+/// known at the press — **one sheet for the two**, where the answer used to re-implement the
+/// composer's and had begun to drift from it.
+///
+/// **Nothing here waits.** The press hands the text to the outbox and the sheet closes
+/// (`ShellSession.send`); no send is on the wire while a sheet is up, so Cancel and a swipe
+/// always close it, and what comes of the send is said on the page (`SaidStrip`).
 ///
 /// **The two drifts are parameters rather than fixed**, so each sheet keeps exactly what it drew:
 /// the composer's editor draws no scroll indicators and its limit line is spoken as its own
@@ -180,22 +171,22 @@ struct WritingSheet<Above: View>: View {
     let height: CGFloat
     let hidesScrollIndicators: Bool
     let speaksLimitLine: Bool
-    /// Whether the editor is drawn, given the source a failed send is holding, if any.
+    /// Whether the editor is drawn, given the source a refused press is said against, if any.
     let writes: (String?) -> Bool
-    /// The send: throws where it failed, and says whether the sheet may close — only where the
-    /// draft it sent is gone (`ComposerSheet.draftAfterLanding`).
-    let send: @MainActor () async throws -> Bool
-    /// The source a failed send is said against, asked when it fails.
+    /// The press: true where the outbox took the text, and the sheet closes; false where it
+    /// could not be sent at all — no source to send through — and the draft is untouched.
+    let send: @MainActor () -> Bool
+    /// The source a refused press is said against, asked when it is refused.
     let failedAt: @MainActor () -> String?
-    let above: (_ sending: Bool, _ failed: String?) -> Above
+    let above: (_ failed: String?) -> Above
 
     init(
         titleKey: String, sendKey: String, bodyKey: String, draft: Binding<String>, limit: Int,
         canSend: Bool, height: CGFloat, hidesScrollIndicators: Bool, speaksLimitLine: Bool,
         writes: @escaping (String?) -> Bool = { _ in true },
-        send: @escaping @MainActor () async throws -> Bool,
+        send: @escaping @MainActor () -> Bool,
         failedAt: @escaping @MainActor () -> String?,
-        @ViewBuilder above: @escaping (_ sending: Bool, _ failed: String?) -> Above
+        @ViewBuilder above: @escaping (_ failed: String?) -> Above
     ) {
         self.titleKey = titleKey
         self.sendKey = sendKey
@@ -218,13 +209,12 @@ struct WritingSheet<Above: View>: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     private var compact: Bool { sizeClass == .compact }
     #endif
-    @State private var sending = false
     @State private var failed: String?
 
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: ShellSpace.step) {
-                above(sending, failed)
+                above(failed)
                 if writes(failed) {
                     let remaining = ComposerSheet.remaining(draft.wrappedValue, limit: limit)
                     let line = ComposerSheet.limitLine(remaining: remaining, limit: limit)
@@ -237,16 +227,10 @@ struct WritingSheet<Above: View>: View {
                         .scrollContentBackground(.hidden)
                         .modifier(HiddenIndicators(hidden: hidesScrollIndicators))
                         .foregroundStyle(ShellChrome.ink(colorScheme))
-                        .disabled(sending)
                         .accessibilityLabel(L10n.t(bodyKey))
-                    if sending {
-                        ShellWaiting()
-                            .frame(height: ShellSpace.pad)
-                            .frame(maxWidth: .infinity)
-                    }
                     if let failed {
                         ShellFailure(source: failed) {
-                            Task { await run() }
+                            run()
                         }
                         .frame(minHeight: 72)
                     }
@@ -262,16 +246,14 @@ struct WritingSheet<Above: View>: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(L10n.t("compose.cancel")) {
-                        guard ComposerSheet.canDismiss(sending: sending) else { return }
                         dismiss()
                     }
-                    .disabled(!ComposerSheet.canDismiss(sending: sending))
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L10n.t(sendKey)) {
-                        Task { await run() }
+                        run()
                     }
-                    .disabled(!canSend || sending)
+                    .disabled(!canSend)
                     .accessibilityLabel(L10n.t(sendKey))
                 }
             }
@@ -284,18 +266,13 @@ struct WritingSheet<Above: View>: View {
         #else
         .frame(minWidth: WritingRoom.floor(600, compact: compact), minHeight: WritingRoom.floor(height, compact: compact))
         #endif
-        .interactiveDismissDisabled(!ComposerSheet.canDismiss(sending: sending))
     }
 
-    private func run() async {
-        guard !sending else { return }
-        sending = true
-        failed = nil
-        defer { sending = false }
-        do {
-            guard try await send() else { return }
+    /// The press: the outbox takes the text and the sheet closes, with nothing waited for.
+    private func run() {
+        if send() {
             dismiss()
-        } catch {
+        } else {
             failed = failedAt()
         }
     }

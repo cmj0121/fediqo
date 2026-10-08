@@ -619,7 +619,7 @@ struct RefsLoadTests {
         #expect(await quiet() == nil, "an answer that came back from another host is not the source's")
         _ = try await WatchedHTTP(Answering(status: 429, headers: slow), for: .timeline, in: session.work).data(from: url)
         #expect(await quiet() == 120)
-        #expect(SourceWork.Purpose.allCases.filter(\.isOfTheSource) == [.timeline, .conversation, .lists, .signInCheck, .write, .search, .notices, .reference])
+        #expect(SourceWork.Purpose.allCases.filter(\.isOfTheSource) == [.timeline, .conversation, .lists, .signInCheck, .write, .search, .notices, .reference, .ownPosts])
     }
 
     @Test("What any read of a source hears about how often it may be asked reaches that source's line of loads; another host's answer does not")

@@ -21,6 +21,10 @@ import Synchronization
 /// disk within the minute. What is this device's alone, and whoever is about to read the file,
 /// still asks: `save()` and `flush(deadline:)` write at once and take the followed save with them.
 ///
+/// **The texts the person pressed to send are a part of their own** (`Unsent`): written before
+/// the items by every save that finds them moved, and by themselves by `saveUnsent()`, which
+/// writes that handful of rows and no post — what a send waits for before its request leaves.
+///
 /// **The write is off the main actor**, on GRDB's own queue, so a quit or a backgrounding waits
 /// for it without the interface stopping while it runs.
 ///
@@ -32,6 +36,9 @@ public actor StoreSaver {
     public typealias Write = @Sendable (
         _ sources: [Source], _ notes: [Note], _ said: [SourceProfile]
     ) async throws -> Void
+
+    /// Writes the texts the person pressed to send, in the place of the ones written before.
+    public typealias WriteUnsent = @Sendable (_ unsent: [Unsent]) async throws -> Void
 
     /// How a `flush(deadline:)` ended.
     public enum Outcome: Equatable, Sendable {
@@ -55,6 +62,7 @@ public actor StoreSaver {
 
     private let store: ItemStore
     private let write: Write?
+    private let writeUnsent: WriteUnsent?
     /// The save queued last, running or waiting. The next save starts after it.
     private var tail: Task<Void, any Error>?
     /// The save waiting to start, if one is; a new `save()` joins it.
@@ -62,12 +70,16 @@ public actor StoreSaver {
     private var nextID = 0
     /// The store revision the last write landed, or nil before the first.
     private var written: Int?
+    /// The revision of the texts the last write of them landed (`ItemStore.unsentRevision`).
+    /// A store starts at 0 with what it read back, which is what the file holds.
+    private var writtenUnsent = 0
 
     /// `write` is `nil` when this run must not write at all — the fail-closed case of
     /// `StoreFile.open(at:now:)`. Every save is then a logged no-op.
-    public init(store: ItemStore, write: Write?) {
+    public init(store: ItemStore, write: Write?, writeUnsent: WriteUnsent? = nil) {
         self.store = store
         self.write = write
+        self.writeUnsent = writeUnsent
         if write == nil {
             Self.log.error("No index this run: nothing read will be saved")
         }
@@ -76,12 +88,14 @@ public actor StoreSaver {
     /// Saves into `file`, or nowhere when it is `nil`.
     public init(store: ItemStore, file: StoreFile?) {
         var write: Write?
+        var writeUnsent: WriteUnsent?
         if let file {
             write = { sources, notes, said in
                 try await file.save(sources: sources, notes: notes, said: said)
             }
+            writeUnsent = { try await file.save(unsent: $0) }
         }
-        self.init(store: store, write: write)
+        self.init(store: store, write: write, writeUnsent: writeUnsent)
     }
 
     /// Runs `body` where a save would run: after every save asked for before it, and before any
@@ -112,6 +126,39 @@ public actor StoreSaver {
     /// Writes what the store holds now, after every save asked for before this one.
     public func save() async throws {
         _ = try await saveAndTell()
+    }
+
+    /// Writes the texts the person pressed to send, where they have moved, and nothing else:
+    /// where a save would run — after every save asked for before it, and never inside a read
+    /// back's commit — but no post is written again for it. **What a send waits for** before
+    /// its request leaves, so that a text the source may have taken is on disk first; a full
+    /// save would have the request wait for every note to be written.
+    ///
+    /// **Says whether the texts are on disk as the store holds them**: false where this run
+    /// writes nowhere, and a write that failed throws. A send asks, and does not leave on a no.
+    ///
+    /// **A read back needs nothing cleared here.** It replaces the posts through the open file
+    /// (`StoreFile.save(sources:notes:said:)`), which touches no text, and `ItemStore.replace`
+    /// leaves the texts held: the table and the store agree before it and after, so the
+    /// revision last written stays true. Where this run has no file it writes no text at all.
+    @discardableResult
+    public func saveUnsent() async throws -> Bool {
+        try await exclusively { try await self.writeUnsentNow() }
+    }
+
+    @discardableResult
+    private func writeUnsentNow() async throws -> Bool {
+        guard let writeUnsent else { return false }
+        let snapshot = await store.unsentSnapshot()
+        guard snapshot.revision != writtenUnsent else { return true }
+        do {
+            try await writeUnsent(snapshot.unsent)
+            writtenUnsent = snapshot.revision
+            return true
+        } catch {
+            Self.log.error("Saving what waits to be sent failed: \(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
 
     /// `save()`, and whether the save this call made or joined wrote anything: false where it
@@ -224,8 +271,9 @@ public actor StoreSaver {
         if waiting?.id == id { waiting = nil }
     }
 
-    /// Whether anything was written.
+    /// Whether anything of the items was written. The texts go first, where they moved.
     private func writeNow() async throws -> Bool {
+        try await writeUnsentNow()
         guard let write else { return false }
         let snapshot = await store.snapshot()
         guard snapshot.revision != written else { return false }

@@ -500,7 +500,12 @@ public struct MastodonAuthorized: Sendable {
 
     /// A form POST through the same door: the token, the 401 rule, and never off this host.
     public func post(path: String, form: [(String, String)]) async throws -> Data {
-        try await finish(try await send(path: path, method: "POST", form: form), path: path)
+        try await post(path: path, form: form, headers: [:])
+    }
+
+    /// `post(path:form:)`, with headers of the request's own beside the door's.
+    public func post(path: String, form: [(String, String)], headers: [String: String]) async throws -> Data {
+        try await finish(try await send(path: path, method: "POST", form: form, headers: headers), path: path)
     }
 
     /// Who the reader is on this source, as `@user@host` — the spelling `Note.handle` takes, so a
@@ -510,12 +515,18 @@ public struct MastodonAuthorized: Sendable {
     /// a sign-in to a different account on the same host is a different answer: remembering it
     /// would be this device deciding whose posts are whose.
     public func handle() async throws -> String {
-        struct Me: Decodable { let acct: String }
+        try await who().handle
+    }
+
+    /// `handle()`, and beside it the id this source gives the account, where it says one: what
+    /// names the account whatever it is renamed to, and what its own posts are read by.
+    public func who() async throws -> (id: String?, handle: String) {
+        struct Me: Decodable { let id: String?; let acct: String }
         let data = try await get(path: Self.accountCheck)
         guard let me = try? MastodonJSON.decoder.decode(Me.self, from: data) else {
             throw MastodonWriteError.unreadable
         }
-        return StatusDTO.handle(me.acct, host: token.host)
+        return (me.id, StatusDTO.handle(me.acct, host: token.host))
     }
 
     /// A DELETE through the same door (#109): taking back what the reader wrote.
@@ -544,13 +555,16 @@ public struct MastodonAuthorized: Sendable {
         path: String,
         method: String = "GET",
         query: [URLQueryItem] = [],
-        form: [(String, String)]? = nil
+        form: [(String, String)]? = nil,
+        headers: [String: String] = [:]
     ) async throws -> (Data, status: Int) {
         guard let url = Host.httpsURL(host: token.host, path: path, query: query) else {
             throw URLError(.badURL)
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
+        // Before the door's own, which nothing handed in replaces.
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let form { request.setForm(form) }

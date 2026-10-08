@@ -111,6 +111,7 @@ public struct FediqoRootView: View {
         forums: ForumSessions = ForumSessions(),
         mastodon: MastodonSessions = MastodonSessions(),
         persist: (@MainActor () async -> Void)? = nil,
+        persistUnsent: (@MainActor () async -> Bool)? = nil,
         measureStore: (@Sendable () async -> Int)? = nil,
         compactStore: (@Sendable () async throws -> Void)? = nil,
         weighStore: (@Sendable () async -> Int)? = nil,
@@ -131,6 +132,7 @@ public struct FediqoRootView: View {
             timelines: staged == nil ? WrittenTimelineStore(defaults: .standard) : nil
         )
         session.persist = persist
+        session.persistUnsent = persistUnsent
         session.carrier = carrier
         session.nearbyLink = nearby
         session.deviceName = deviceName
@@ -261,6 +263,7 @@ public struct FediqoRootView: View {
                 await session.loadLimitAccount()
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
+                await session.adoptUnsent()
                 // Then the room (#249), judged once what is held is known and the months limit
                 // has had its turn — the one order in which each limit acts once at a launch.
                 session.roomBytes = prefs.roomBytes
@@ -330,6 +333,7 @@ public struct FediqoRootView: View {
             .modifier(WithdrawQuestion(session: session))
             .modifier(BookmarkQuestion(session: session))
             .modifier(NoticeQuestion(session: session))
+            .modifier(UnsentPresenters(session: session))
             // An answer, over the conversation it belongs to (#108). Driven by the session's one
             // value, so the key and the mark open the same surface by writing the same thing.
             .sheet(item: $session.answering) { target in
@@ -2059,7 +2063,7 @@ public struct FediqoRootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // What did not happen is said at the foot of every page, inside it: over no rail,
             // no tab and no sheet. A modifier of its own — see `SaidStrip`.
-            .modifier(SaidStrip(said: session.said, held: item != place || composing || stagePresented.wrappedValue || session.raisesOverPages))
+            .modifier(SaidStrip(said: session.said, session: session, held: item != place || composing || stagePresented.wrappedValue || session.raisesOverPages))
             .background(ShellChrome.page(colorScheme))
             .environment(\.shellPlaceIsActive, item == place)
     }
@@ -2094,6 +2098,49 @@ private struct WithdrawQuestion: ViewModifier {
         Binding(
             get: { session.withdrawing.map { Asked(item: $0, copy: session.withdrawingCopy ?? $0) } },
             set: { if $0 == nil { session.cancelWithdraw() } }
+        )
+    }
+}
+
+/// A text that waits to be sent, opened again, and the question before one is discarded
+/// (`ShellOutbox`) — out of the chain for `WithdrawQuestion`'s reason. The sheet closing by any
+/// way changes nothing of the text, and keeps what was typed for the next time it is opened;
+/// a question answered any way but its yes changes nothing. And the question before a text
+/// that may have been posted is sent all the same.
+private struct UnsentPresenters: ViewModifier {
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: editing) { asked in
+                UnsentSheet(id: asked.id)
+                    #if os(iOS)
+                    .presentationDetents([.medium, .large])
+                    #endif
+            }
+            .shellConfirm(discarding, question: { ShellQuestion.discard($0) }) { sending, _ in
+                session.outbox.discardSoon(sending.id, in: session)
+            }
+            .shellConfirm(resending, question: { ShellQuestion.resend($0, changed: session.outbox.changed($0.id) != nil) }) { sending, _ in
+                session.outbox.sendAnyway(sending.id, in: session)
+            }
+    }
+
+    private var editing: Binding<UnsentAsk?> {
+        Binding(get: { session.editingUnsent }, set: { session.editingUnsent = $0 })
+    }
+
+    private var resending: Binding<ShellOutbox.Sending?> {
+        Binding(
+            get: { session.resendingUnsent.flatMap { session.outbox.sending($0.id) } },
+            set: { if $0 == nil { session.resendingUnsent = nil } }
+        )
+    }
+
+    private var discarding: Binding<ShellOutbox.Sending?> {
+        Binding(
+            get: { session.discardingUnsent.flatMap { session.outbox.sending($0.id) } },
+            set: { if $0 == nil { session.discardingUnsent = nil } }
         )
     }
 }

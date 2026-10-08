@@ -1,7 +1,12 @@
+import FediqoCore
 import SwiftUI
 
 /// What did not happen, said at the foot of whatever page is in front (`ShellSaid`): the one
 /// place a write's outcome is said when no sheet and no row is there to say it.
+///
+/// **And what is being sent** (`ShellOutbox`), before the rest: a post or an answer on its way
+/// is a line here and no row anywhere (#282), and one that did not arrive stands here with
+/// every character behind it and the presses that send it again, open it or discard it.
 ///
 /// **An inset, not an overlay.** The page ends above it, so it covers no row, and the
 /// timeline's own capsule stands over it rather than under it. It is the page's — put on each
@@ -22,6 +27,8 @@ import SwiftUI
 /// opened, and one that is open closes.
 struct SaidStrip: ViewModifier {
     let said: ShellSaid
+    /// Whose outbox is drawn before the lines; nothing where a page has none to draw.
+    var session: ShellSession?
     /// The root has something raised, or this page is not in front: no list is opened here.
     var held = false
 
@@ -39,22 +46,38 @@ struct SaidStrip: ViewModifier {
     /// The glyph before each line: a row's own for an act that did not arrive.
     static let symbol = "exclamationmark.triangle"
 
+    /// The glyph before one line: the strip's own, but for the one line that is good news.
+    static func symbol(of line: Said) -> String {
+        if case .found = line.what { return "checkmark.circle" }
+        return symbol
+    }
+
     @State private var showingAll = false
+    /// A press made in the list that the root answers with a sheet or a question of its own:
+    /// done once the list has gone, since one sheet is not raised under another.
+    @State private var afterList: OutboxPressed?
+
+    private var sendings: [ShellOutbox.Sending] { session?.outbox.sendings ?? [] }
+    private var nothing: Bool { said.lines.isEmpty && sendings.isEmpty }
 
     func body(content: Content) -> some View {
         content
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !said.lines.isEmpty {
-                    SaidLines(said: said, showAll: { showingAll = Self.opensAll(held: held) })
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                if !nothing {
+                    SaidLines(
+                        said: said, session: session, showAll: { showingAll = Self.opensAll(held: held) },
+                        press: { Self.pressed($0, in: session) }
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: said.lines)
-            .sheet(isPresented: $showingAll) {
-                SaidAll(said: said) { showingAll = false }
+            .animation(.easeInOut(duration: 0.2), value: sendings)
+            .sheet(isPresented: $showingAll, onDismiss: listGone) {
+                SaidAll(said: said, session: session, press: pressedInList) { showingAll = false }
             }
             // The last line taken down leaves nothing to list.
-            .onChange(of: said.lines.isEmpty) { _, empty in
+            .onChange(of: nothing) { _, empty in
                 if empty { showingAll = false }
             }
             .onChange(of: held) { _, held in
@@ -66,9 +89,44 @@ struct SaidStrip: ViewModifier {
     static func opensAll(held: Bool) -> Bool { !held }
 
     /// What a page draws of `lines`, and how many more there are behind the count.
-    static func drawn(_ lines: [Said], in layout: ShellLayout) -> (shown: [Said], more: Int) {
+    static func drawn<Line>(_ lines: [Line], in layout: ShellLayout) -> (shown: [Line], more: Int) {
         let shown = shown(in: layout)
         return (Array(lines.prefix(shown)), max(0, lines.count - shown))
+    }
+
+    /// Every line a page has to draw, in order: what waits to be sent, newest first, and then
+    /// what did not happen.
+    static func lines(_ said: [Said], sendings: [ShellOutbox.Sending]) -> [StripLine] {
+        sendings.reversed().map(StripLine.sending) + said.map(StripLine.said)
+    }
+
+    /// Whether the root answers a press with a sheet or a question of its own.
+    static func raises(_ press: OutboxWords.Press) -> Bool {
+        press == .edit || press == .discard
+    }
+
+    /// A press on one of the outbox's lines, done.
+    static func pressed(_ pressed: OutboxPressed, in session: ShellSession?) {
+        guard let session, let sending = session.outbox.sending(pressed.id) else { return }
+        switch pressed.press {
+        case .again: session.outbox.again(pressed.id, in: session)
+        case .anyway: session.outbox.sendUnkept(pressed.id, in: session)
+        case .edit: session.outbox.edit(pressed.id, in: session)
+        case .copy: session.outbox.copy(sending.unsent.text)
+        case .discard: session.discardingUnsent = UnsentAsk(id: pressed.id)
+        }
+    }
+
+    private func pressedInList(_ pressed: OutboxPressed) {
+        guard Self.raises(pressed.press) else { return Self.pressed(pressed, in: session) }
+        afterList = pressed
+        showingAll = false
+    }
+
+    private func listGone() {
+        guard let pressed = afterList else { return }
+        afterList = nil
+        Self.pressed(pressed, in: session)
     }
 
     static func more(_ count: Int, language: DummyLanguage? = nil) -> (word: String, spoken: String) {
@@ -79,20 +137,46 @@ struct SaidStrip: ViewModifier {
     }
 }
 
+/// One line of the strip: a text of the outbox's, or something that did not happen.
+enum StripLine: Identifiable {
+    case sending(ShellOutbox.Sending)
+    case said(Said)
+
+    var id: String {
+        switch self {
+        case .sending(let sending): Self.id(sending.id)
+        case .said(let said): said.id
+        }
+    }
+
+    /// The name a text of the outbox's is drawn and probed under.
+    static func id(_ unsent: UUID) -> String { "outbox\u{1e}\(unsent.uuidString)" }
+}
+
+/// A press on one of the outbox's lines: which, on which text.
+struct OutboxPressed: Equatable {
+    let press: OutboxWords.Press
+    let id: UUID
+}
+
 /// The strip itself: the newest lines, newest first, and the count of the rest.
 struct SaidLines: View {
     let said: ShellSaid
+    var session: ShellSession?
     let showAll: () -> Void
+    var press: (OutboxPressed) -> Void = { _ in }
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.shellLayout) private var layout
     @Environment(\.shellSaidProbe) private var probe
 
     var body: some View {
-        let drawn = SaidStrip.drawn(said.folded, in: layout)
+        let drawn = SaidStrip.drawn(
+            SaidStrip.lines(said.folded, sendings: session?.outbox.sendings ?? []), in: layout
+        )
         VStack(spacing: ShellSpace.tight) {
             ForEach(drawn.shown) { line in
-                SaidLine(line: line) { said.takeDown(line.id) }
+                StripLineView(line: line, said: said, session: session, press: press)
             }
             if drawn.more > 0 { more(drawn.more) }
         }
@@ -119,6 +203,83 @@ struct SaidLines: View {
     }
 }
 
+/// One line of either kind, drawn as its kind is.
+struct StripLineView: View {
+    let line: StripLine
+    let said: ShellSaid
+    let session: ShellSession?
+    let press: (OutboxPressed) -> Void
+
+    var body: some View {
+        switch line {
+        case .said(let line):
+            SaidLine(line: line) { said.takeDown(line.id) }
+        case .sending(let sending):
+            if let session { OutboxLine(sending: sending, session: session, press: press) }
+        }
+    }
+}
+
+/// One text of the outbox's: its glyph, its sentence whole and, where it waits for the person,
+/// the presses that send it again, open it, copy it or discard it — side by side where they
+/// are whole, one under the other where they are not.
+///
+/// **No press takes the line down.** It stands for words the person wrote: it goes when they
+/// land, or when the person discards them, and by nothing else.
+struct OutboxLine: View {
+    let sending: ShellOutbox.Sending
+    let session: ShellSession
+    let press: (OutboxPressed) -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.shellSaidProbe) private var probe
+
+    var body: some View {
+        let hold = session.outbox.hold(sending, in: session)
+        let words = OutboxWords.line(sending, hold: hold, whom: session.outbox.whom(sending, in: session))
+        let presses = OutboxWords.presses(sending, hold: hold)
+        let name = StripLine.id(sending.id)
+        VStack(alignment: .leading, spacing: ShellSpace.tight) {
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+                Image(systemName: OutboxWords.symbol(sending))
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .accessibilityHidden(true)
+                Text(words)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .modifier(SaidProbed(.words(name), probe: probe))
+            }
+            if !presses.isEmpty {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: ShellSpace.step) { buttons(presses) }
+                    VStack(alignment: .leading, spacing: ShellSpace.tight) { buttons(presses) }
+                }
+            }
+        }
+        .padding(.horizontal, ShellSpace.step)
+        .padding(.vertical, ShellSpace.snug)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            ShellChrome.well(colorScheme),
+            in: RoundedRectangle(cornerRadius: ShellSpace.step, style: .continuous)
+        )
+        .modifier(SaidProbed(.line(name), probe: probe))
+    }
+
+    private func buttons(_ presses: [OutboxWords.Press]) -> some View {
+        ForEach(presses, id: \.self) { one in
+            ShellLinkButton(OutboxWords.word(one)) { press(OutboxPressed(press: one, id: sending.id)) }
+                .accessibilityLabel(OutboxWords.spoken(one, host: sending.unsent.host))
+                .fixedSize()
+                .modifier(SaidProbed(.press(StripLine.id(sending.id), one), probe: probe))
+        }
+    }
+}
+
 /// One line: its glyph, its sentence whole, and the press that takes it down.
 struct SaidLine: View {
     let line: Said
@@ -130,7 +291,7 @@ struct SaidLine: View {
     var body: some View {
         let words = line.words()
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-            Image(systemName: SaidStrip.symbol)
+            Image(systemName: SaidStrip.symbol(of: line))
                 .shellFont(.meta)
                 .foregroundStyle(ShellChrome.inkDim(colorScheme))
                 .accessibilityHidden(true)
@@ -162,6 +323,8 @@ struct SaidLine: View {
 /// ways — its mark, Escape, a swipe — and each line is taken down there as on the page.
 struct SaidAll: View {
     let said: ShellSaid
+    var session: ShellSession?
+    var press: (OutboxPressed) -> Void = { _ in }
     let onClose: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
@@ -182,8 +345,8 @@ struct SaidAll: View {
             ShellRule()
             ScrollView {
                 VStack(spacing: ShellSpace.tight) {
-                    ForEach(said.lines) { line in
-                        SaidLine(line: line) { said.takeDown(line.id) }
+                    ForEach(SaidStrip.lines(said.lines, sendings: session?.outbox.sendings ?? [])) { line in
+                        StripLineView(line: line, said: said, session: session, press: press)
                     }
                 }
                 .padding(ShellSpace.pad)
@@ -203,6 +366,8 @@ final class SaidProbe {
     enum Part: Hashable {
         /// One line, its words and its press to take it down, by `Said.id`.
         case line(String), words(String), close(String)
+        /// One press on a text of the outbox's, by the line's name.
+        case press(String, OutboxWords.Press)
         case more
     }
 

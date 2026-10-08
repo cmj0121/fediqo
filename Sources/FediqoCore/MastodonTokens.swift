@@ -27,11 +27,19 @@ public struct MastodonToken: Sendable, Equatable, CustomStringConvertible,
     /// what tells a sign-in that asked for bookmarks and was not given them from one made before
     /// bookmarks were asked for at all: the first is not asked again, and the second is owed it.
     public let asked: String?
+    /// Whose sign-in this is, as its source said through it: the id the source gives the
+    /// account, and its handle as `@user@host`. Nothing until the source has been asked — a
+    /// token kept before this was written down, or one a package brought. **Kept with the
+    /// sign-in**, so what the person writes can be named as theirs with no network at all.
+    public let accountID: String?
+    public let handle: String?
 
     public init(
         host: String, accessToken: String, clientID: String, clientSecret: String,
-        scopes: String? = nil, asked: String? = nil
+        scopes: String? = nil, asked: String? = nil, accountID: String? = nil, handle: String? = nil
     ) {
+        self.accountID = accountID
+        self.handle = handle
         self.host = host.lowercased()
         self.accessToken = accessToken
         self.clientID = clientID
@@ -45,7 +53,15 @@ public struct MastodonToken: Sendable, Equatable, CustomStringConvertible,
     public func recorded(asked: String?) -> MastodonToken {
         MastodonToken(
             host: host, accessToken: accessToken, clientID: clientID, clientSecret: clientSecret,
-            scopes: scopes, asked: asked
+            scopes: scopes, asked: asked, accountID: accountID, handle: handle
+        )
+    }
+
+    /// This token, written down as the sign-in of the account its source named through it.
+    public func named(accountID: String, handle: String) -> MastodonToken {
+        MastodonToken(
+            host: host, accessToken: accessToken, clientID: clientID, clientSecret: clientSecret,
+            scopes: scopes, asked: asked, accountID: accountID, handle: handle
         )
     }
 
@@ -324,6 +340,10 @@ public enum MastodonKeychain {
             var scopes: String?
             /// Absent in an item kept before what a sign-in asked for was written down (#285).
             var asked: String?
+            /// Absent in an item kept before whose sign-in it is was written down, and until
+            /// its source has said. Optional and ignored by a build that does not know them.
+            var accountID: String?
+            var handle: String?
         }
 
         private struct App: Codable {
@@ -336,7 +356,8 @@ public enum MastodonKeychain {
         static func encode(_ token: MastodonToken) -> Data {
             let value = Token(
                 accessToken: token.accessToken, clientID: token.clientID,
-                clientSecret: token.clientSecret, scopes: token.scopes, asked: token.asked
+                clientSecret: token.clientSecret, scopes: token.scopes, asked: token.asked,
+                accountID: token.accountID, handle: token.handle
             )
             return (try? JSONEncoder().encode(value)) ?? Data()
         }
@@ -352,7 +373,8 @@ public enum MastodonKeychain {
             else { return nil }
             return MastodonToken(
                 host: host, accessToken: value.accessToken, clientID: value.clientID,
-                clientSecret: value.clientSecret, scopes: value.scopes, asked: value.asked
+                clientSecret: value.clientSecret, scopes: value.scopes, asked: value.asked,
+                accountID: value.accountID, handle: value.handle
             )
         }
 

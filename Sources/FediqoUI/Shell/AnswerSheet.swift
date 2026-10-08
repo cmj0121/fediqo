@@ -21,8 +21,7 @@ struct AnswerTarget: Identifiable, Equatable {
 /// An answer, written over the conversation it belongs to (#108).
 ///
 /// **The composer's shape pointed at something** — the same `WritingSheet` — and its rules are
-/// the composer's own statics rather than a second copy of them: the ceiling, the send test, the
-/// draft a landing clears.
+/// the composer's own statics rather than a second copy of them: the ceiling and the send test.
 /// What is different is what this surface has that the composer does not — the post being
 /// answered stays in view while the words are written, the source is named rather than chosen
 /// because the post decides it, and the reach starts no wider than the post.
@@ -71,14 +70,9 @@ struct AnswerSheet: View {
             height: 460,
             hidesScrollIndicators: false,
             speaksLimitLine: false,
-            send: {
-                try await session.answer(target)
-                guard session.answerDraft(target).isEmpty else { return false }
-                session.answering = nil
-                return true
-            },
+            send: { session.send(answer: target) },
             failedAt: { host }
-        ) { sending, _ in
+        ) { _ in
             answered(item)
             HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
                 Text(Self.goesTo(host: host))
@@ -91,7 +85,6 @@ struct AnswerSheet: View {
                 }
                 .pickerStyle(.menu)
                 .shellFont(.meta)
-                .disabled(sending)
                 .accessibilityLabel(L10n.t("answer.reach"))
             }
             if Self.widens(reach.wrappedValue, from: target.start) {
@@ -124,5 +117,61 @@ struct AnswerSheet: View {
         .background(ShellChrome.floatFill(colorScheme), in: RoundedRectangle(cornerRadius: ShellRadius.field))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(Self.answering(item)))
+    }
+}
+
+/// A text that waits to be sent, opened again (`ShellOutbox.edit`): the composer's shape on the
+/// entry itself, so no draft is overwritten and nothing is merged.
+///
+/// **Leaving it changes nothing.** What is typed is kept beside the text for the next time the
+/// sheet is opened (`ShellOutbox.edits`), and the text that waits is as it was. Send sends it —
+/// as it was, under the name it had, or changed, as the different post it is.
+/// Where it goes and who it reaches were chosen when it was written, and are said, not asked.
+struct UnsentSheet: View {
+    let id: UUID
+
+    @Environment(ShellSession.self) private var session
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Where it goes and who may read it, in one line.
+    static func goesTo(_ unsent: Unsent, language: DummyLanguage? = nil) -> String {
+        String(
+            format: L10n.t("outbox.edit.goesTo", language: language),
+            unsent.host, L10n.t(ComposerSheet.visibilityKey(unsent.audience), language: language)
+        )
+    }
+
+    var body: some View {
+        let held = session.outbox.sending(id)
+        let host = held?.unsent.host ?? ""
+        let limit = session.postLimit(of: host)
+        let draft = Binding(
+            get: { session.outbox.draft(id) },
+            set: { session.outbox.write(id, text: $0) }
+        )
+        WritingSheet(
+            // A text that may be a post already is not called unsent.
+            titleKey: session.outbox.mayHaveBeenPosted(id) ? "outbox.edit.title.unconfirmed" : "outbox.edit.title",
+            sendKey: "answer.send",
+            bodyKey: held?.unsent.answers == nil ? "compose.body" : "answer.body",
+            draft: draft,
+            limit: limit,
+            canSend: held.map { ComposerSheet.canSend(
+                text: session.outbox.draft(id), limit: limit, hasSource: session.outbox.hold($0, in: session) == nil
+            ) } ?? false,
+            height: 400,
+            hidesScrollIndicators: true,
+            speaksLimitLine: true,
+            send: { session.send(unsent: id) },
+            failedAt: { host }
+        ) { _ in
+            if let held {
+                Text(Self.goesTo(held.unsent))
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .task(id: host) { await session.refreshPostLimit(of: host) }
     }
 }

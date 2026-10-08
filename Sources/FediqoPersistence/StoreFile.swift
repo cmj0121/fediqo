@@ -119,7 +119,8 @@ public struct StoreFile: Sendable {
         return (try? probe.read(migrator.hasBeenSuperseded)) ?? false
     }
 
-    /// Whether the index standing at `path` holds nothing — no source and no post — or `nil`
+    /// Whether the index standing at `path` holds nothing — no source, no post and no text the
+    /// person pressed to send — or `nil`
     /// where that cannot be asked. Asked on a read-only connection, so asking changes nothing.
     static func holdsNothing(indexAt path: String) -> Bool? {
         var readOnly = Configuration()
@@ -127,7 +128,7 @@ public struct StoreFile: Sendable {
         guard let probe = try? DatabaseQueue(path: path, configuration: readOnly) else { return nil }
         return try? probe.read { db in
             let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'")
-            for table in ["source", "note"] where tables.contains(table) {
+            for table in ["source", "note", "unsent"] where tables.contains(table) {
                 if try Int.fetchOne(db, sql: "SELECT count(*) FROM \(table)") ?? 0 > 0 { return false }
             }
             return true
@@ -143,6 +144,8 @@ public struct StoreFile: Sendable {
         public let notes: [Note]
         /// What each source last said about itself, as of when (#188).
         public let said: [SourceProfile]
+        /// What the person pressed to send and no source had said landed (`Unsent`).
+        public let unsent: [Unsent]
         /// Where an unreadable index was moved by this launch, when one was. Nothing in the app
         /// reads it again; it is deleted once the person has been told and what took its place
         /// has been saved (`trouble`, `StoreFile.told(in:)`).
@@ -155,8 +158,10 @@ public struct StoreFile: Sendable {
 
         init(
             file: StoreFile?, sources: [Source] = [], notes: [Note] = [], said: [SourceProfile] = [],
+            unsent: [Unsent] = [],
             setAside: URL? = nil, storeIsNewer: Bool = false, trouble: StoreTrouble? = nil
         ) {
+            self.unsent = unsent
             self.trouble = trouble
             self.file = file
             self.sources = sources
@@ -206,6 +211,7 @@ public struct StoreFile: Sendable {
         do {
             let file = try opening(directory)
             let snapshot = try file.load()
+            let unsent = try file.loadUnsent()
             // Read, and so not about to be set aside: only now is it rewritten (#292).
             file.scrub()
             // One put aside by a launch that was quit before it could say so is said now — and
@@ -216,6 +222,7 @@ public struct StoreFile: Sendable {
             }
             return Opened(
                 file: file, sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said,
+                unsent: unsent,
                 trouble: untold.isEmpty ? nil : .damaged(replacedBy: restored ? .otherStore : .empty)
             )
         } catch is Newer {
@@ -758,6 +765,30 @@ private var migrator: DatabaseMigrator {
                 try setRefs.execute(arguments: [String(decoding: written, as: UTF8.self), rowid])
             }
             try strip.execute(arguments: [rowid])
+        }
+    }
+    // What the person pressed to send and no source has said landed (`Unsent`), in a table of
+    // its own: written as a part of its own (`StoreFile.save(unsent:)`), read in the order
+    // pressed. `answers` and `root` name a post as a row is named, or are NULL for a post.
+    // `writer_id` and `writer` are who wrote it at its source — the one account it is ever sent
+    // as — and `asked_at` is when that source was first asked.
+    //
+    // **A migration id for `v3-holding`'s reason.** A build from before would open the store
+    // and never show, send or let go of a text the person believes is waiting. The id makes it
+    // refuse the store instead.
+    migrator.registerMigration("v13-unsent") { db in
+        try db.create(table: "unsent") { t in
+            t.primaryKey("id", .text)
+            t.column("host", .text).notNull()
+            t.column("body", .text).notNull()
+            t.column("audience", .text).notNull()
+            t.column("answers", .text)
+            t.column("root", .text)
+            t.column("pressed_at", .datetime).notNull()
+            t.column("standing", .text).notNull()
+            t.column("writer_id", .text)
+            t.column("writer", .text)
+            t.column("asked_at", .datetime)
         }
     }
     return migrator

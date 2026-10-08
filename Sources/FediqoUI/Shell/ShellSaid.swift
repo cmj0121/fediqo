@@ -9,6 +9,9 @@ struct Said: Identifiable, Equatable, Sendable {
         /// An act on one post, by the row it was pressed on.
         case act(PostAct, row: String)
         case notice(ShellNoticeActs.Act)
+        /// A text nobody had confirmed, found posted at its source and let go (`ShellOutbox`):
+        /// nothing to do about it, said once so that its line does not simply vanish.
+        case found(UUID, answer: Bool)
     }
 
     /// Whose post an act was on, as a line names it: a line read on another page, or beside
@@ -70,6 +73,7 @@ struct Said: Identifiable, Equatable, Sendable {
         switch what {
         case .act(let act, let row): return "\(host)\u{1e}act\u{1e}\(act)\u{1e}\(row)"
         case .notice(let act): return "\(host)\u{1e}notice\u{1e}\(act)"
+        case .found(let text, _): return "\(host)\u{1e}found\u{1e}\(text.uuidString)"
         }
     }
 
@@ -78,6 +82,8 @@ struct Said: Identifiable, Equatable, Sendable {
     @MainActor
     func words(language: DummyLanguage? = nil) -> String {
         switch what {
+        case .found(_, let answer):
+            return String(format: L10n.t(answer ? "outbox.found.answer" : "outbox.found.post", language: language), host)
         case .notice(let act):
             return NoticeActs.words(ShellNoticeActs.Said(act: act, why: why), host: host, language: language)
         case .act(let act, _):
@@ -184,13 +190,14 @@ final class ShellSaid {
 }
 
 extension ShellSession {
-    /// Whether one of the root's presenters this session drives is up — the answer, the
-    /// sign-in, the timeline editor, or a question about taking back, bookmarks, notices,
-    /// signing out or a sign-in a source ended. What a page reads before it raises anything
+    /// Whether one of the root's presenters this session drives is up — the answer, a text
+    /// that waits to be sent, the sign-in, the timeline editor, or a question about taking
+    /// back, discarding, bookmarks, notices, signing out or a sign-in a source ended. What a page reads before it raises anything
     /// of its own (`SaidStrip.held`); the composer and the join are the root's own state, and
     /// it adds them.
     var raisesOverPages: Bool {
         answering != nil || signingIn != nil || editing != nil || withdrawing != nil || rowAsk != nil
+            || editingUnsent != nil || discardingUnsent != nil || resendingUnsent != nil
             || bookmarkAsk != nil || noticeAsk != nil || signOutAsk != nil || !mastodon.ended.isEmpty
     }
 }

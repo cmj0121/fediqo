@@ -7,7 +7,7 @@ import Testing
 ///
 /// What a test can reach: which posts offer an answer and what the row says where one does not;
 /// where the reach starts; that the answer goes to the post's own source and names the post; that
-/// a failure keeps every character and the same press sends again; that what landed is laid into
+/// a failure keeps every character and Send again sends it again; that what landed is laid into
 /// the open conversation under what it answers, with nothing read again; the key, and every word
 /// of the surface in every language. What it cannot: the sheet itself on a Mac and a phone, in
 /// light and dark, and VoiceOver walking it — that lives in a view body.
@@ -134,7 +134,7 @@ struct AnswerTests {
 
     // MARK: - Sending
 
-    @Test("A send that fails keeps every character, and the same send goes again")
+    @Test("A send that fails keeps every character, and Send again makes the second request")
     func aFailureKeepsTheText() async throws {
         let (session, server) = try await shell(
             scopes: writing, holding: root(), routes: ["/api/v1/statuses": .fail]
@@ -144,9 +144,14 @@ struct AnswerTests {
         let target = try #require(session.answering)
         let written = "@ada@social.example  yes — and 100% so, «quoted» + more\n"
         session.answerDrafts[target.id] = written
-        await #expect(throws: URLError.self) { try await session.answer(target) }
-        #expect(session.answerDraft(target) == written, "every character kept")
-        await #expect(throws: URLError.self) { try await session.answer(target) }
+        #expect(session.send(answer: target))
+        await session.outbox.settled()
+        let entry = try #require(session.outbox.sendings.first)
+        #expect(entry.unsent.text == ComposerSheet.trimmed(written), "every character kept")
+        #expect(entry.standing == .failed(.unreachable))
+        #expect(session.outbox.again(entry.id, in: session))
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.map(\.unsent.text) == [ComposerSheet.trimmed(written)])
         #expect(await server.paths == ["/api/v1/statuses", "/api/v1/statuses"])
     }
 
@@ -164,11 +169,12 @@ struct AnswerTests {
         session.openAnswer(to: post, in: post)
         let target = try #require(session.answering)
         session.answerDrafts[target.id] = "@ada yes"
-        try await session.answer(target)
+        #expect(session.send(answer: target))
+        await session.outbox.settled()
         let form = await server.form("/api/v1/statuses")
         #expect(form["in_reply_to_id"] == "9")
         #expect(form["visibility"] == "private")
-        #expect(session.answerDrafts[target.id] == nil, "a landing clears the draft")
+        #expect(session.answerDrafts[target.id] == nil, "the press took the draft")
     }
 
     @Test("What landed is in the conversation under what it answers, with nothing read again")
@@ -191,7 +197,8 @@ struct AnswerTests {
         #expect(session.openAnswer(to: bo, in: post))
         let target = try #require(session.answering)
         session.answerDrafts[target.id] = "mine"
-        try await session.answer(target)
+        #expect(session.send(answer: target))
+        await session.outbox.settled()
 
         let thread = session.conversations.conversation(around: post)
         #expect(thread.descendants.map(\.item.body) == ["hello", "hello", "mine", "hello"],
@@ -216,7 +223,8 @@ struct AnswerTests {
         session.openAnswer(to: post, in: post)
         let target = try #require(session.answering)
         session.answerDrafts[target.id] = "first"
-        try await session.answer(target)
+        #expect(session.send(answer: target))
+        await session.outbox.settled()
         let thread = session.conversations.conversation(around: post)
         #expect(thread.descendants.map(\.item.body) == ["first"])
         #expect(thread.descendants.first?.depth == 1)
@@ -272,7 +280,8 @@ struct AnswerTests {
         #expect(session.openAnswer(to: row, in: row))
         let target = try #require(session.answering)
         session.answerDrafts[target.id] = "yes"
-        try? await session.answer(target)
+        #expect(session.send(answer: target))
+        await session.outbox.settled()
         let request = try #require(await server.requests.first)
         #expect(await server.requests.count == 1)
         #expect(request.url?.host == own, "the answer goes to the row's own source")

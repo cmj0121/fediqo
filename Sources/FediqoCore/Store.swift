@@ -82,6 +82,14 @@ public actor ItemStore {
     public private(set) var repliesRevision = 0
     /// Everyone listening for a change. See `changes()`.
     private var listeners: [UUID: AsyncStream<Int>.Continuation] = [:]
+    /// What the person pressed to send and no source has said landed, in the order pressed.
+    ///
+    /// **Beside the items and none of them** (`Unsent`): untouched by `replace`, by
+    /// `remove(host:)`, and by every limit and purge — only a landing or the person lets one go.
+    private var unsent: [Unsent] = []
+    /// Counts the changes to `unsent`, apart from `revision`: a saver writes the texts as a
+    /// part of their own, so holding one rewrites no post, and a landing rewrites no text.
+    public private(set) var unsentRevision = 0
 
     public init() {}
 
@@ -141,7 +149,10 @@ public actor ItemStore {
     /// **A row that still owes a load comes in still owing it** (`Note.refsDue`, #293): the last
     /// run did not get to it, and this one asks for it — within the pace every load keeps
     /// (`LoadPacer`). Only a store laid in whole from elsewhere owes nothing (`replace`).
-    public init(sources: [Source], notes incoming: [Note], said: [SourceProfile] = []) {
+    public init(sources: [Source], notes incoming: [Note], said: [SourceProfile] = [], unsent: [Unsent] = []) {
+        for text in unsent where !self.unsent.contains(where: { $0.id == text.id }) {
+            self.unsent.append(text)
+        }
         for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
             sourceList.append(source)
         }
@@ -1034,6 +1045,32 @@ public actor ItemStore {
         // By host, so one state of the store is always written one way.
         let said = saidByHost.values.sorted { $0.host < $1.host }
         return (sourceList, ordered, said, revision)
+    }
+
+    /// Holds a text pressed to send, or what is now known of one already held — in its place.
+    public func hold(_ text: Unsent) {
+        if let at = unsent.firstIndex(where: { $0.id == text.id }) {
+            guard unsent[at] != text else { return }
+            unsent[at] = text
+        } else {
+            unsent.append(text)
+        }
+        unsentRevision += 1
+    }
+
+    /// Lets a text go: it landed, or the person discarded it.
+    public func letGo(unsent id: UUID) {
+        guard let at = unsent.firstIndex(where: { $0.id == id }) else { return }
+        unsent.remove(at: at)
+        unsentRevision += 1
+    }
+
+    /// Every text held, in the order pressed.
+    public func unsentHeld() -> [Unsent] { unsent }
+
+    /// The texts and the revision they are at, read in one hop — what a save writes of them.
+    public func unsentSnapshot() -> (unsent: [Unsent], revision: Int) {
+        (unsent, unsentRevision)
     }
 
     /// Every item this device holds, newest first (#296): whatever brought it — a timeline, a

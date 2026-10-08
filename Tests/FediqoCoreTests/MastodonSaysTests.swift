@@ -522,6 +522,48 @@ struct MastodonSaysTests {
         let afterNote = try decoded(after).asNote(source: Self.source, categories: [], sent: .now())
         #expect(afterNote.refs == [.quotes(.deleted)] && afterNote.brought.isEmpty)
     }
+
+    // MARK: - One key, one post
+
+    /// What "Send again" rests on (`Unsent.id`): a post sent a second time under the key it was
+    /// first sent with is not a second post.
+    ///
+    /// **And what it cannot rest on, with this server.** Mastodon 4.6.6 does not answer the
+    /// repeat with the post it made: its own replay path fails (`PostStatusService` goes on to
+    /// process a status it did not set) and the answer is a 500. So the key keeps a text from
+    /// being posted twice, and says nothing of whether it was posted once — which is why a text
+    /// that may have landed goes on saying so when a later try fails (`ShellOutbox`). Pinned as
+    /// it is, so that a server that answers the repeat with the post is noticed here.
+    @Test("A post sent again under the key it was first sent with makes no second post — the writer's own posts hold it once — but this server answers each repeat with a 500 and not with the post; the same words under another key are another post")
+    func oneKeyIsOnePost() async throws {
+        try await LocalServers.requireHealthy()
+        let store = ItemStore(sources: [Self.source], notes: [])
+        let write = MastodonWrite(door: try door(.writer), store: store)
+        let words = "sent once \(UUID().uuidString.prefix(8))"
+        let key = UUID()
+
+        let first = try await write.post(words, visibility: .everyone, key: key)
+        let firstID = try #require(first.statusID)
+        for _ in 1...2 {
+            await #expect(throws: MastodonAuthError.http(500), "the repeat was answered some other way") {
+                try await write.post(words, visibility: .everyone, key: key)
+            }
+        }
+
+        let me = try await ask(.writer, "GET", "/api/v1/accounts/verify_credentials")
+        let mine = try await ask(.writer, "GET", "/api/v1/accounts/\(try #require(me.object["id"] as? String))/statuses?limit=40")
+        #expect(mine.status == 200)
+        let held = mine.list.filter { ($0["content"] as? String)?.contains(words) == true }
+        #expect(held.compactMap { $0["id"] as? String } == [firstID], "the same key made a second post, or none")
+
+        let other = try await write.post(words, visibility: .everyone, key: UUID())
+        #expect(other.statusID != nil && other.statusID != firstID, "another key is another post")
+
+        // Nothing of this check is left in the writer's posts for the next one to read.
+        for id in [firstID, other.statusID].compactMap({ $0 }) {
+            #expect(try await ask(.writer, "DELETE", "/api/v1/statuses/\(id)").status == 200)
+        }
+    }
 }
 
 /// A sender that passes every request on and keeps the last one with its answer: for seeing

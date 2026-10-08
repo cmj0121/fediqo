@@ -81,6 +81,8 @@ final class ShellSession {
     /// What the person asked of a source that changed nothing, said on every page
     /// (`SaidStrip`). On the session for `conversations`' reason; for the run only.
     let said = ShellSaid()
+    /// What the person pressed to send and no source has said landed (`ShellOutbox`).
+    let outbox = ShellOutbox()
 
     /// What each server says it is, asked of that server rather than read off what was written
     /// down when it was joined — #86. On the session for `conversations`' reason.
@@ -783,6 +785,12 @@ final class ShellSession {
     /// what reads the file next — `saveForCarry()` and the room's check — and by an act that
     /// takes something off this device (`saveNow`).
     @ObservationIgnored var persist: (@MainActor () async -> Void)?
+    /// Writes only what the person pressed to send (`Unsent`) — a handful of rows, whatever the
+    /// store holds — and says whether they are on disk. Set by the app beside `persist`.
+    /// Awaited by a send before its request leaves, which does not leave on a no, and by a
+    /// discard before it says the text is gone; never by a sheet. Nothing in a session nobody
+    /// gave a disk — a test, a preview — where a text is held in memory as everything is.
+    @ObservationIgnored var persistUnsent: (@MainActor () async -> Bool)?
     /// The save asked for last through `saveSoon()`, running or waiting; the next runs after it.
     @ObservationIgnored var saving: Task<Void, Never>?
 
@@ -860,6 +868,7 @@ final class ShellSession {
     @ObservationIgnored private nonisolated(unsafe) var allowanceWatch: (any NSObjectProtocol)?
 
     /// The unsent text, kept when the composer closes without sending (#56). In-session only.
+    /// A send takes it at the press (`send()`), and what is typed afterwards is a new draft.
     var composeDraft = ""
     /// The source the composer will write to, among those that may be written on.
     var composeHost: String?
@@ -946,30 +955,6 @@ final class ShellSession {
         )
     }
 
-    /// Writes the draft to the chosen source and takes the returned post into the store.
-    /// Empty or over-long text is not sent. A failure keeps the draft.
-    func post() async throws {
-        let text = ComposerSheet.trimmed(composeDraft)
-        guard !text.isEmpty, let host = composeHost else { return }
-        guard writableSources.contains(where: { $0.host == host }) else {
-            throw MastodonWriteError.noSource
-        }
-        guard text.count <= postLimit(of: host) else { return }
-        guard let door = mastodon.authorized(host: host, for: .write) else {
-            throw MastodonWriteError.noSource
-        }
-        do {
-            _ = try await reach.write(door, landingIn: store)
-                .post(text, visibility: composeAudience)
-            composeDraft = ComposerSheet.draftAfterLanding(current: composeDraft, sent: text)
-            await adopt()
-            saveSoon()
-        } catch {
-            writeFailed(error, host: host)
-            throw error
-        }
-    }
-
     /// What a write's failure says about the sign-in it went through, written against `host`:
     /// a 401 the account check confirmed signs the source out, and a 403 marks the source as
     /// having turned a write away. **One reading for every write** — a post, an answer and each
@@ -981,7 +966,7 @@ final class ShellSession {
     /// for the rest of this run the mark is not offered on that source's rows, every other act
     /// it offers stays, and the reader is told, here and on the source's row. `sent` is the token
     /// the request went with, so a refusal about a sign-in since replaced is not laid on the new.
-    private func writeFailed(
+    func writeFailed(
         _ error: any Error, host: String, bookmarkSentWith sent: MastodonToken? = nil
     ) {
         switch error as? MastodonAuthError {
@@ -1262,7 +1247,7 @@ final class ShellSession {
     /// between them can answer differently.
     ///
     /// A 401 the account check confirms signs the source out, and a 403 marks the source as
-    /// having turned a write away — `writeFailed`, exactly as `post()` reads them.
+    /// having turned a write away — `writeFailed`, exactly as a post's send reads them.
     ///
     /// **Shown first, and the last press wins.** The states of one act on one row
     /// (`ShellActs.standings`), and every way between them:
@@ -1423,7 +1408,8 @@ final class ShellSession {
     /// the one surface by writing the one value.
     var answering: AnswerTarget?
     /// What has been written to each post and not yet sent, by row. Kept when the sheet closes
-    /// unsent and when a send fails, so every character survives both; cleared only by a landing.
+    /// unsent. A send takes the text at the press and holds it, on disk, until it lands or the
+    /// person discards it (`ShellOutbox`).
     var answerDrafts: [String: String] = [:]
     /// Who each unsent answer reaches, by row — chosen before it is sent, from where it started.
     var answerReach: [String: Audience] = [:]
@@ -1464,42 +1450,15 @@ final class ShellSession {
         )
     }
 
-    /// Sends the answer to the source the post was read through — **the post decides it; it is
-    /// not a choice** — and lays what landed into the conversation under what it answers.
-    ///
-    /// A failure throws and keeps every character: the draft is only cleared by a landing, and
-    /// only where it is still the text that was sent, `ComposerSheet.draftAfterLanding`'s rule.
-    /// 401 and 403 are read as `post()` reads them.
-    func answer(_ target: AnswerTarget) async throws {
-        let item = target.item
-        let host = item.source.host
-        let text = ComposerSheet.trimmed(answerDraft(target))
-        guard !text.isEmpty, text.count <= postLimit(of: host) else { return }
-        // Asked of the row as it is now, not as the sheet opened on it: a post its source said
-        // was gone while the answer was being written offers nothing to answer (#179).
-        guard acts(on: held(item.id) ?? item).offers(.answer),
-              let answered = note(ofRow: item.id),
-              let door = mastodon.authorized(host: host, for: .write)
-        else { throw MastodonWriteError.noSource }
-        let reach = answerReach[item.id] ?? target.start
-        do {
-            let note = try await self.reach.write(door, landingIn: store)
-                .post(text, visibility: reach, answering: answered)
-            answerDrafts[item.id] = ComposerSheet.draftAfterLanding(
-                current: answerDraft(target), sent: text
-            )
-            if answerDrafts[item.id]?.isEmpty == true {
-                answerDrafts[item.id] = nil
-                answerReach[item.id] = nil
-            }
-            conversations.landed(note, under: target.root.id, rootID: target.root.statusID)
-            await adopt()
-            saveSoon()
-        } catch {
-            writeFailed(error, host: host)
-            throw error
-        }
-    }
+    /// The text of the outbox's that the sheet is open on, where one is (`ShellOutbox.edit`).
+    /// Observed, and the sheet is presented from it.
+    var editingUnsent: UnsentAsk?
+    /// The text of the outbox's whose discarding is being asked about. Nothing goes while it
+    /// is only asked.
+    var discardingUnsent: UnsentAsk?
+    /// The text that may have been posted and is asked about before it is sent all the same —
+    /// again, or changed (`ShellOutbox.sendAnyway`). Nothing is sent while it is only asked.
+    var resendingUnsent: UnsentAsk?
 
     func isAdded(_ domain: String) -> Bool {
         let host = domain.lowercased()
@@ -2560,6 +2519,14 @@ final class ShellSession {
         await adopt()
     }
 
+    /// What the last run pressed to send and no source said landed, drawn as it stands and not
+    /// sent (`ShellOutbox.adopt`). Asked once, as a launch reads the store.
+    func adoptUnsent() async {
+        outbox.adopt(await store.unsentHeld())
+        // One whose post the last run's reads already brought is let go here and now.
+        outbox.reconcile(in: self)
+    }
+
     /// What a read back replaced, adopted without a relaunch (#247): the store, the person's
     /// timelines and choices read again off the preferences, who is signed in read again off
     /// the Keychain, and the picture copies measured again.
@@ -2640,6 +2607,8 @@ final class ShellSession {
         let replies = adoptedReplies != repliesRevision ? await store.replies() : nil
         adoptHeld(notes: all, replies: replies)
         if all != nil { adopted = (store: drawn, notes: notesRevision) }
+        // A text that may have been posted is let go where its post is now among what is held.
+        if all != nil { outbox.reconcile(in: self) }
         // The misses as they stand with what was just assigned: only these are settled, by
         // what the store says of them after the waits below (`settleMisses`).
         let misses = acts.misses
@@ -3110,10 +3079,13 @@ final class ShellSession {
 
     /// The question before `host` is removed, with what this session holds for it read here: the
     /// boards it takes, and how many of its posts the person keeps, which stay (#294).
+    ///
+    /// **And how many texts wait to be sent to it**: a sign-out leaves them waiting, and a
+    /// Remove lets them go, which is said before the yes.
     func removeQuestion(host: String, postsStay: Bool) -> ShellConfirmation {
         ShellQuestion.remove(
             host: host, boards: Self.boards(of: host, in: sources), postsStay: postsStay,
-            kept: holdings.kept(host: host).posts
+            kept: holdings.kept(host: host).posts, unsent: outbox.count(host: host)
         )
     }
 
@@ -3351,6 +3323,9 @@ final class ShellSession {
             progressHost = ""
         }
         await store.remove(host: host, keepingPosts: keepingPosts)
+        // What waited to be sent to it goes with it, as its question said — off the disk
+        // before the rest is said to have gone (#292). A sign-out and a Clear leave them.
+        await outbox.forget(host: host, in: self)
         await adopt()
         // A post the person keeps stays though the rest went (#284), and a row that stays is
         // `keepingPosts`' case for the pictures: let go without the bump, so it asks nothing of

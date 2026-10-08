@@ -264,7 +264,10 @@ struct GoneMarkTests {
         #expect(session.canSendAnswer(target))
         await session.markGone(Self.note().key, at: Self.posted)
         #expect(!session.canSendAnswer(target))
-        await #expect(throws: MastodonWriteError.noSource) { try await session.answer(target) }
+        #expect(!session.send(answer: target))
+        await session.outbox.settled()
+        #expect(session.answerDraft(target) == "@ada hello", "the draft is untouched")
+        #expect(session.outbox.sendings.isEmpty)
         #expect(await server.paths.isEmpty)
     }
 

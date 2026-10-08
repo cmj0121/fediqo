@@ -113,6 +113,36 @@ public final class MastodonSessions {
     /// then nothing there is offered for taking back — the safe side of not knowing.
     private(set) var handles: [String: String] = [:]
 
+    /// An account as its source named it, and the sign-in the answer came through.
+    struct Reader: Equatable {
+        let id: String
+        let handle: String
+        fileprivate let accessToken: String
+    }
+
+    /// Who each sign-in is, by the id its source gives the account, as the account check said
+    /// through that very sign-in.
+    @ObservationIgnored private var readers: [String: Reader] = [:]
+    /// Moved when `readers` is, so a page drawn from `reader(host:)` is drawn again.
+    private var readersLearnt = 0
+
+    /// Who is signed in at `host`, where its source has said — **through the sign-in held
+    /// now**. Read off the sign-in itself, where it was written down with it (`learnWho`), so it
+    /// is known with no network; and otherwise what this run was told through that very token.
+    /// A sign-in replaced under this object's feet, by a read back or another device's
+    /// package, is somebody nobody has asked about yet, and this answers nothing for it: what
+    /// was learnt of the sign-in before is never laid on the one that took its place.
+    func reader(host raw: String) -> Reader? {
+        _ = readersLearnt
+        let host = raw.lowercased()
+        guard let held = token(host: host) else { return nil }
+        if let id = held.accountID, let handle = held.handle {
+            return Reader(id: id, handle: handle, accessToken: held.accessToken)
+        }
+        guard let reader = readers[host], held.accessToken == reader.accessToken else { return nil }
+        return reader
+    }
+
     /// Hosts whose account check found the network dark (#222) — a launch with no network, most
     /// often — and so are asked again as soon as a read gets through to them, rather than going
     /// unknown until a relaunch. `learnWhoAgain(among:)` is that second ask.
@@ -384,8 +414,18 @@ public final class MastodonSessions {
         unlearned.remove(host)
         guard let door = authorized(host: host, within: limit, for: .signInCheck) else { return }
         do {
-            let handle = try await door.handle()
-            if isSignedIn(host: host) { handles[host] = handle }
+            let who = try await door.who()
+            if isSignedIn(host: host) {
+                handles[host] = who.handle
+                readers[host] = who.id.map { Reader(id: $0, handle: who.handle, accessToken: door.token.accessToken) }
+                // Written down with the sign-in it was said through, where that is still the
+                // one held: the next run knows whose it is before any source answers.
+                if let id = who.id, let held = token(host: host), held.accessToken == door.token.accessToken,
+                   held.accountID != id || held.handle != who.handle {
+                    try? tokens.save(held.named(accountID: id, handle: who.handle))
+                }
+                readersLearnt += 1
+            }
         } catch MastodonAuthError.signedOut {
             endedByServer(host: host)
         } catch where DarkNetwork.caused(error) {

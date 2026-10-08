@@ -831,6 +831,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 // in the staged file, which may be moved into place as it stands, and so off
                 // what is read out of it for the store in memory and the index this run holds.
                 try index.settleReferences()
+                // And it brings no text waiting to be sent: a take-away writes none, and one
+                // that came all the same would be sent from this device as well as its own.
+                try index.dropUnsent()
                 contents = try index.load()
                 kept = try index.keptCount()
                 // Read, and so one this build may write: where this run has no file of its own

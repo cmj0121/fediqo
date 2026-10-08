@@ -49,7 +49,7 @@ final class Launch {
         let media = try? MediaCache.caches()
         StorePackager.sweepLeftovers(directory: StoreFile.applicationSupportDirectory, media: media?.location)
         let opened = StoreFile.openApplicationSupport()
-        store = ItemStore(sources: opened.sources, notes: opened.notes, said: opened.said)
+        store = ItemStore(sources: opened.sources, notes: opened.notes, said: opened.said, unsent: opened.unsent)
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
@@ -264,7 +264,7 @@ struct FediqoApp: App {
     private var live: some View {
         FediqoRootView(
             store: Launch.shared.store, forums: Launch.shared.forums,
-            mastodon: Launch.shared.mastodon, persist: save,
+            mastodon: Launch.shared.mastodon, persist: save, persistUnsent: saveUnsent,
             measureStore: measureStore, compactStore: compactStore, weighStore: weighStore,
             limits: Launch.shared.limits,
             storeIsNewer: Launch.shared.storeIsNewer,
@@ -292,6 +292,13 @@ struct FediqoApp: App {
     /// A failure is already logged by the saver; there is nothing more to do about it here.
     private func save() async {
         try? await Launch.shared.saver.save()
+    }
+
+    /// Only what the person pressed to send (`StoreSaver.saveUnsent`): awaited by a send before
+    /// its request leaves, and answered with whether the texts are on disk — no where the write
+    /// failed, which the saver has logged, and where this run has no store to write.
+    private func saveUnsent() async -> Bool {
+        (try? await Launch.shared.saver.saveUnsent()) ?? false
     }
 
     /// On iOS a backgrounded app is suspended within moments, which would stop a write halfway;

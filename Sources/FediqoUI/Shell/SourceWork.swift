@@ -84,6 +84,9 @@ final class SourceWork {
         /// What this device holds, moved to or from a device nearby (#253, #6): listed under the
         /// name that device gave itself, which is the one place it went or came from.
         case nearbyMove
+        /// The person's own newest posts at a source, read once before a text that may have
+        /// been posted is sent again (`ShellOutbox`): asked by their press, and nothing landed.
+        case ownPosts
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -96,7 +99,7 @@ final class SourceWork {
         /// Everything else reaches wherever a post, a page or a directory points.
         var isOfTheSource: Bool {
             switch self {
-            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck: true
+            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
                  .nearbyMove:
