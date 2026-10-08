@@ -229,11 +229,16 @@ public struct NoticePage: Hashable, Sendable {
     public let gathered: Bool
     /// The id the next, older stretch is asked before. Nothing where the source had no more.
     public let before: String?
+    /// When the read that brought this stretch was sent, in the run's order (`ReadMoment`):
+    /// what tells a stretch asked for before a line was dismissed from one asked for after.
+    /// Unsaid for a page made by hand, which is never taken for one sent just now.
+    public let sent: ReadMoment
 
-    public init(notices: [Notice], gathered: Bool, before: String?) {
+    public init(notices: [Notice], gathered: Bool, before: String?, sent: ReadMoment = .unsaid) {
         self.notices = notices
         self.gathered = gathered
         self.before = before
+        self.sent = sent
     }
 }
 

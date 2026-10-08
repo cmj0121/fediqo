@@ -1387,6 +1387,11 @@
 "notices.act.letThrough.unconfirmed" = "%@ 沒有確認通知已放行。再讀取一次看看。";
 "notices.act.letGo.declined" = "%@ 沒有放下通知。它擋下的仍然列著。";
 "notices.act.letGo.unconfirmed" = "%@ 沒有確認通知已放下。再讀取一次看看。";
+"notices.act.which.notice" = "%1$@通知：%2$@。";
+"notices.act.which.person" = "%1$@來自：%2$@。";
+"notices.act.dismiss.many" = "%1$@ 上有 %2$d 則通知沒有移除。再讀取一次看看各自的狀況。";
+"notices.act.letThrough.many" = "%1$@ 擋下的通知中，有 %2$d 個人的沒有放行。再讀取一次看看各自的狀況。";
+"notices.act.letGo.many" = "%1$@ 擋下的通知中，有 %2$d 個人的沒有放下。再讀取一次看看各自的狀況。";
 "notices.person.named" = "%1$@（%2$@）";
 "notices.foot.full" = "不再讀取更早的通知：Fediqo 在重新開啟之前，為單一來源保留的通知已達上限。";
 "notices.ask.signin.detail" = "%@ 自己的頁面會打開，再問一次這個登入已經有的，包含你的通知。「登入來讀」問讀取，包含你的通知。「登入來讀與寫」另外問發文、回覆、轉發、收藏與加書籤，以及移除通知。不會先登出：關掉那一頁，你原有的登入照舊。";

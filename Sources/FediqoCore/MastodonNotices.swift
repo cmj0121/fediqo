@@ -51,7 +51,7 @@ public struct MastodonNotices: Sendable {
                 guard let read = try? MastodonJSON.decoder.decode(GatheredDTO.self, from: data) else {
                     throw MastodonNoticeError.unreadable
                 }
-                return try Self.page(read.notificationGroups, gathered: true, read.reader(source: source, sent: sent))
+                return try Self.page(read.notificationGroups, gathered: true, sent: sent, read.reader(source: source, sent: sent))
             } catch MastodonAuthError.http(404) where gathered == nil {
                 // No gathered read on this source: it is asked one notice at a time.
             }
@@ -60,7 +60,7 @@ public struct MastodonNotices: Sendable {
         guard let read = try? MastodonJSON.decoder.decode([Entry<SingleDTO>].self, from: data) else {
             throw MastodonNoticeError.unreadable
         }
-        return try Self.page(read, gathered: false) { $0.asNotice(source: source, sent: sent) }
+        return try Self.page(read, gathered: false, sent: sent) { $0.asNotice(source: source, sent: sent) }
     }
 
     /// **The next stretch is asked before the lowest id this one named**, for both reads; the
@@ -71,12 +71,12 @@ public struct MastodonNotices: Sendable {
     /// still says where it stopped, so reading on goes past it rather than stopping there for
     /// good. One that has entries and names no id anywhere is no page of notices at all.
     private static func page<Body>(
-        _ entries: [Entry<Body>], gathered: Bool, _ notice: (Body) -> Notice?
+        _ entries: [Entry<Body>], gathered: Bool, sent: ReadMoment, _ notice: (Body) -> Notice?
     ) throws -> NoticePage {
         let lowest = entries.compactMap(\.lowest).min { StatusID.later($1, than: $0) }
         guard lowest != nil || entries.isEmpty else { throw MastodonNoticeError.unreadable }
         return NoticePage(
-            notices: entries.compactMap { $0.value.flatMap(notice) }, gathered: gathered, before: lowest
+            notices: entries.compactMap { $0.value.flatMap(notice) }, gathered: gathered, before: lowest, sent: sent
         )
     }
 
@@ -95,8 +95,12 @@ public struct MastodonNotices: Sendable {
     /// exactly as one it dismissed, so returning proves the line is gone, not that it was
     /// there — and a 404 there is no line gone but the request itself not known.
     ///
+    /// **But for one asked again after an ask that was not confirmed in time**
+    /// (`afterUnconfirmed`): the source was sent this dismissal once already and nobody heard
+    /// its answer, so a 404 now is that dismissal having landed, and it returns as one does.
+    ///
     /// **Only at the notice's own source**: one that is another's is `elsewhere`, unasked.
-    public func dismiss(_ notice: Notice) async throws {
+    public func dismiss(_ notice: Notice, afterUnconfirmed: Bool = false) async throws {
         guard notice.source.host == door.token.host else { throw MastodonNoticeError.elsewhere }
         switch notice.handle {
         case .one(let id):
@@ -106,7 +110,9 @@ public struct MastodonNotices: Sendable {
             } catch MastodonAuthError.http(404) {}
         case .gathered(let key):
             guard Self.isGroupKey(key) else { throw MastodonRequestError.invalidURL }
-            _ = try await door.post(path: "\(Self.gatheredPath)/\(key)/dismiss", form: [])
+            do {
+                _ = try await door.post(path: "\(Self.gatheredPath)/\(key)/dismiss", form: [])
+            } catch MastodonAuthError.http(404) where afterUnconfirmed {}
         }
     }
 

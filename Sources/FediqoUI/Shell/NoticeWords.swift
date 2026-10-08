@@ -155,16 +155,26 @@ enum NoticeWords {
         )
     }
 
+    /// Who and what, as one run: "Ada favourited your post". What a line elsewhere names a
+    /// notice by, and the head of what a listener hears of its row.
+    static func act(_ notice: Notice, language: DummyLanguage? = nil) -> String {
+        act(notice, who: who(notice, language: language), what: what(notice, language: language), language: language)
+    }
+
+    private static func act(_ notice: Notice, who: String?, what: String, language: DummyLanguage?) -> String {
+        let reads = readsOnFromWho(notice, language: language)
+        return who.map {
+            String(format: L10n.t(reads ? "notices.spoken.act" : "notices.spoken.named", language: language), $0, what)
+        } ?? what
+    }
+
     /// `spoken(_:language:)` of parts already worked out: a row draws each, and says them here
     /// without working any out again.
     @MainActor
     static func spoken(
         _ notice: Notice, who: String?, what: String, excerpt: String?, language: DummyLanguage? = nil
     ) -> String {
-        let reads = readsOnFromWho(notice, language: language)
-        let act = who.map {
-            String(format: L10n.t(reads ? "notices.spoken.act" : "notices.spoken.named", language: language), $0, what)
-        } ?? what
+        let act = act(notice, who: who, what: what, language: language)
         let said = excerpt.map {
             String(format: L10n.t("notices.spoken.post", language: language), act, $0)
         } ?? act

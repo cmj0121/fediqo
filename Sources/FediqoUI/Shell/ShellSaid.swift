@@ -23,6 +23,14 @@ struct Said: Identifiable, Equatable, Sendable {
         case by(String)
     }
 
+    /// What an act on notices that changed nothing was about, where its line stands for one
+    /// thing: the notice, or the person whose held-back notices they are. Kept as it is and
+    /// worded at the draw, in the language of the draw.
+    enum About: Equatable, Sendable {
+        case notice(Notice)
+        case person(NoticePerson)
+    }
+
     /// The source and what was asked of it: the same thing failing again replaces its line.
     let id: String
     /// The folded host.
@@ -31,16 +39,23 @@ struct Said: Identifiable, Equatable, Sendable {
     let why: WriteWhy
     /// Whose post it was, for an act on one; nothing for a notice, or where nobody said.
     let whose: Whose?
-    /// How many lines this one stands for: one, or — for a line `ShellSaid.folded` made —
-    /// every line about one act at one source.
+    /// How many things this line stands for: one, or — for a line `ShellSaid.folded` made —
+    /// every line about one act at one source, or — for an act on notices — every notice or
+    /// request of that source the act did not take (`ShellNoticeActs.missed`).
     let many: Int
+    /// Which notice, or whose, an act on notices was about; nothing where the line stands
+    /// for several, or for all a source has.
+    let about: About?
 
-    init(_ what: What, _ why: WriteWhy, host: String, of whose: Whose? = nil) {
+    init(
+        _ what: What, _ why: WriteWhy, host: String, of whose: Whose? = nil, about: About? = nil, many: Int = 1
+    ) {
         self.host = host.lowercased()
         self.what = what
         self.why = why
         self.whose = whose
-        many = 1
+        self.about = about
+        self.many = many
         id = Self.id(what, host: host)
     }
 
@@ -51,6 +66,7 @@ struct Said: Identifiable, Equatable, Sendable {
         what = newest.what
         why = newest.why
         whose = nil
+        about = nil
         self.many = many
         id = Self.foldID(act, host: host)
     }
@@ -85,7 +101,9 @@ struct Said: Identifiable, Equatable, Sendable {
         case .found(_, let answer):
             return String(format: L10n.t(answer ? "outbox.found.answer" : "outbox.found.post", language: language), host)
         case .notice(let act):
-            return NoticeActs.words(ShellNoticeActs.Said(act: act, why: why), host: host, language: language)
+            return NoticeActs.words(
+                ShellNoticeActs.Said(act: act, why: why), host: host, about: about, many: many, language: language
+            )
         case .act(let act, _):
             if many > 1 {
                 return String(format: L10n.t("said.act.\(act).many", language: language), host, many)
@@ -170,6 +188,14 @@ final class ShellSaid {
         lines.insert(said, at: 0)
         if lines.count > Self.kept { lines.removeLast(lines.count - Self.kept) }
         announce(said.words())
+    }
+
+    /// Puts a line in the place of the one standing under its name, where one stands: the
+    /// same act at the same source, now about fewer things. **Not said aloud and not moved
+    /// to the front** — nothing new happened; what the line counts did.
+    func amend(_ said: Said) {
+        guard let at = lines.firstIndex(where: { $0.id == said.id }) else { return }
+        lines[at] = said
     }
 
     /// Takes one line down: its `×`, or the same act having since succeeded (`Said.id`). A

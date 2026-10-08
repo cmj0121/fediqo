@@ -37,7 +37,8 @@ enum NoticeActs {
 
     // MARK: - The menus
 
-    /// A line's `…`: Dismiss, asked first. Dim while its dismissal is on the wire.
+    /// A line's `…`: Dismiss, asked first. Not to be chosen while its dismissal is on the
+    /// wire — when the line is not drawn at all, so this is for a menu built before the yes.
     static func more(_ notice: Notice, in session: ShellSession, language: DummyLanguage? = nil) -> ShellMore {
         let acts = session.noticeList.acts
         let why = why(host: notice.source.host, in: session, language: language)
@@ -118,7 +119,29 @@ enum NoticeActs {
     // MARK: - The sentences
 
     /// What an act at `host` that changed nothing came to, in one sentence.
-    static func words(_ said: ShellNoticeActs.Said, host: String, language: DummyLanguage? = nil) -> String {
+    ///
+    /// **Which, where it is one thing, and how many where it is several** (`about`, `many`):
+    /// the line this is drawn on stands at the foot of any page, beside a list where several
+    /// notices may have come back, and "the notice" alone cannot say which.
+    static func words(
+        _ said: ShellNoticeActs.Said, host: String, about: FediqoUI.Said.About? = nil, many: Int = 1,
+        language: DummyLanguage? = nil
+    ) -> String {
+        if many > 1, said.why != .locked, [.dismiss, .letThrough, .letGo].contains(said.act) {
+            return String(format: L10n.t("notices.act.\(said.act).many", language: language), host, many)
+        }
+        let sentence = sentence(said, host: host, language: language)
+        switch about {
+        case .notice(let notice)?:
+            return String(format: L10n.t("notices.act.which.notice", language: language), sentence, NoticeWords.act(notice, language: language))
+        case .person(let person)?:
+            return String(format: L10n.t("notices.act.which.person", language: language), sentence, NoticeWords.named(person, language: language))
+        case nil:
+            return sentence
+        }
+    }
+
+    private static func sentence(_ said: ShellNoticeActs.Said, host: String, language: DummyLanguage?) -> String {
         let key: String
         switch (said.act, said.why) {
         case (_, .locked): key = "notices.source.locked"

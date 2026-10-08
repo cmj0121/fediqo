@@ -1425,6 +1425,11 @@
 "notices.act.letThrough.unconfirmed" = "%@ did not confirm the notices were let through. Read again to see.";
 "notices.act.letGo.declined" = "%@ did not let the notices go. What it holds is still listed.";
 "notices.act.letGo.unconfirmed" = "%@ did not confirm the notices were let go. Read again to see.";
+"notices.act.which.notice" = "%1$@ The notice: %2$@.";
+"notices.act.which.person" = "%1$@ From: %2$@.";
+"notices.act.dismiss.many" = "%2$d notices on %1$@ were not dismissed. Read again to see where each stands.";
+"notices.act.letThrough.many" = "%2$d people's notices held on %1$@ were not let through. Read again to see where each stands.";
+"notices.act.letGo.many" = "%2$d people's notices held on %1$@ were not let go. Read again to see where each stands.";
 "notices.person.named" = "%1$@ (%2$@)";
 "notices.foot.full" = "Older notices are not read: Fediqo holds no more of one source until it is opened again.";
 "notices.ask.signin.detail" = "%@'s own page opens and asks again for what this sign-in has, your notices among it. Sign in to read asks to read, your notices among it. Sign in to read and write asks to post, reply, boost, favourite and bookmark as well, and to dismiss notices. Nothing is signed out first: close the page and the sign-in you have goes on as it is.";

@@ -150,7 +150,9 @@ final class ShellNoticeList {
 
     /// Each source's notices, by its folded host.
     private(set) var reaches: [String: Reach] = [:]
-    /// What the page draws: every source's notices at or after `floor`, newest first. Left as
+    /// What the page draws: every source's notices at or after `floor`, newest first, less
+    /// the lines an act the person said yes to is taking away (`ShellNoticeActs.hidden`) —
+    /// each still held in `reaches`, and drawn again where it was if its source says no. Left as
     /// it was while a source's first stretch is on the wire — **so one source that does not
     /// answer keeps a first read blank until its request ends at `deadline`**, and twice that
     /// where its gathered read answered 404 slowly and the single read then hangs. The page
@@ -175,19 +177,36 @@ final class ShellNoticeList {
     @ObservationIgnored private var asking: Set<String> = []
     /// Counts the reads started and stopped, so an answer to one that was stopped is dropped.
     @ObservationIgnored private var generation = 0
-    /// What a source dismissed while a read of it was on the wire: struck from that read's
-    /// answer as it lands, which was asked for before the dismissal and may still name it.
-    @ObservationIgnored private var gone: [String: Gone] = [:]
+    /// The lines each source has dismissed, by host and line, each with the moment its
+    /// source's yes landed here in the run's order of reads (`ReadMoment`) — #291's guard, for
+    /// notices: a stretch sent before that moment was asked for before the dismissal and may
+    /// still name the line, so the line is left out of it; one sent after is the source's
+    /// later word. A mark goes once a later-sent stretch of its source has landed.
+    ///
+    /// **The moment is when the yes landed here, which is later than when the source acted.**
+    /// A read sent in between was answered after the dismissal and is still weighed as before
+    /// it: where it names a new notice under the same group key, that line is left out until
+    /// the next read — and after dismissing all, so are the lines that arrived in between.
+    /// Accepted: the other way round a line the source dismissed would be drawn, and nothing
+    /// here knows when the source acted.
+    @ObservationIgnored private var struck: [String: [String: UInt64]] = [:]
+    /// The same, for a source that dismissed everything it had: a stretch sent before that
+    /// moment is not taken.
+    @ObservationIgnored private var emptied: [String: UInt64] = [:]
+    /// What `cut` last said is the list, with nothing an act is taking away left out. Kept so
+    /// that a line whose act failed is drawn again where it was, even while what is drawn is
+    /// held still for a source's first stretch.
+    @ObservationIgnored private var whole: [Notice] = []
+    /// The lines that left what is drawn at a yes of the person's, each until it is drawn
+    /// again: what the lamp is moved by (`leftAtYes`). **Taken at the yes and not asked for
+    /// afterwards** — by the time the page has drawn, the source may have answered and the
+    /// line be struck, and nothing held would say any more why it went.
+    @ObservationIgnored private var pressed: Set<String> = []
 
-    /// The acts on what is listed, and what each source holds back. Beside the list because a
-    /// line leaves it only on a source's answer, and a sign-out lets go of both at once.
+    /// The acts on what is listed, and what each source holds back. Beside the list because
+    /// what an act has on its way is left out of what is drawn here, a line leaves what is
+    /// held only on its source's answer, and a sign-out lets go of both at once.
     @ObservationIgnored let acts = ShellNoticeActs()
-
-    /// What a source took away while it was being read.
-    private enum Gone {
-        case lines(Set<String>)
-        case all
-    }
 
     /// One source asked for one stretch.
     private struct Ask: Sendable {
@@ -333,10 +352,9 @@ final class ShellNoticeList {
     func stop() -> Bool {
         guard let work else { return false }
         work.task.cancel()
-        for host in asking {
-            reaches[host] = work.was[host]
-            gone[host] = nil
-        }
+        // What a source dismissed meanwhile is struck from `was` already (`took`), and its
+        // mark stands: a stopped read's answer lands nowhere, and the next one is weighed.
+        for host in asking { reaches[host] = work.was[host] }
         asking = []
         generation += 1
         self.work = nil
@@ -351,7 +369,8 @@ final class ShellNoticeList {
         let host = raw.lowercased()
         asking.remove(host)
         locked.remove(host)
-        gone[host] = nil
+        struck[host] = nil
+        emptied[host] = nil
         acts.forget(host: host)
         guard reaches[host] != nil else { return }
         reaches[host] = nil
@@ -360,54 +379,95 @@ final class ShellNoticeList {
 
     // MARK: - What a source dismissed
 
-    /// One line its source has dismissed: gone from what is held, and from what is drawn.
+    /// One line its source has dismissed: gone from what is held. It left what is drawn at
+    /// the person's yes (`ShellNoticeActs.hidden`).
     ///
-    /// **Called only once the source has answered** (`ShellNoticeActs.dismiss`). Where a read
-    /// of that source is on the wire the line is struck from what the read set out with too,
-    /// and from its answer when that lands — it was asked for before the dismissal.
+    /// **Called only once the source has answered** (`ShellNoticeActs.dismiss`). The line is
+    /// struck by the moment that answer landed, against every read sent before it: one on the
+    /// wire now — from what it set out with, which a stopped read is put back to, and from its
+    /// answer when that lands — whether it was sent before the person's yes or after it.
     func took(_ notice: Notice) {
         let host = notice.source.host.lowercased()
         guard let held = reaches[host] else { return }
         reaches[host]?.notices = held.notices.without(notice)
-        if asking.contains(host) {
-            if let was = work?.was[host] { work?.was[host]?.notices = was.notices.without(notice) }
-            switch gone[host] {
-            case .all?: break
-            case .lines(let held)?: gone[host] = .lines(held.union([notice.id]))
-            case nil: gone[host] = .lines([notice.id])
-            }
+        if asking.contains(host), let was = work?.was[host] {
+            work?.was[host]?.notices = was.notices.without(notice)
         }
-        // Straight out of what is drawn, and nothing made again: one line gone moves neither
+        if let moment = ReadMoment.now().place { struck[host, default: [:]][notice.id] = moment }
+        // Straight out of the list, with no cut made for it: one line gone moves neither
         // where a source has been read down to nor whether it has more, so the floor and
-        // every other line stand where they did.
-        lines = lines.without(notice)
+        // every other line stand where they did. (The act that called this draws again after
+        // it — `redraw` — for the entry it then lets go of, which changes nothing here.)
+        whole = whole.without(notice)
+        if lines.contains(where: { $0.id == notice.id }) { lines = lines.without(notice) }
     }
 
     /// Every notice one source had, dismissed there at once: nothing of it is held, and it has
-    /// no more to read on to. Another source's lines stand. A read of it on the wire was asked
-    /// for before the source emptied, so its answer is not taken; the next read says what has
-    /// happened since.
+    /// no more to read on to. Another source's lines stand. A read of it sent before this was
+    /// asked for before the source emptied, so its answer is not taken; the next read says
+    /// what has happened since.
     func tookAll(host raw: String) {
         let host = raw.lowercased()
         guard reaches[host] != nil else { return }
         reaches[host]?.empty()
-        if asking.contains(host) {
-            work?.was[host]?.empty()
-            gone[host] = .all
-        }
-        if let source = lines.first(where: { $0.source.host.lowercased() == host })?.source {
-            lines = lines.without(all: source)
-        }
+        if asking.contains(host) { work?.was[host]?.empty() }
+        emptied[host] = ReadMoment.now().place
+        struck[host] = nil
+        whole.removeAll { $0.source.host.lowercased() == host }
         rebuild()
     }
 
-    /// What `host` dismissed while its read was out, struck from what that read left held.
-    private func strike(host: String) {
-        guard let gone = gone.removeValue(forKey: host) else { return }
-        switch gone {
-        case .all: reaches[host]?.empty()
-        case .lines(let ids): reaches[host]?.notices.removeAll { ids.contains($0.id) }
+    /// What is drawn made again from what is held, after what the acts have on their way
+    /// changed (`ShellNoticeActs.hidden`): a line leaving at the person's yes, and one drawn
+    /// again where it was because its source said no. Nothing held moves.
+    ///
+    /// `atYes` is the person's yes itself: the lines it takes out of what is drawn are
+    /// remembered as theirs (`leftAtYes`).
+    func redraw(atYes: Bool = false) {
+        let before = atYes ? Set(lines.map(\.id)) : []
+        rebuild()
+        if atYes { pressed.formUnion(before.subtracting(lines.map(\.id))) }
+    }
+
+    /// Whether a line left what is drawn at a yes of the person's — its own dismissal, or
+    /// its source's dismissing of all — and has not been drawn since: whether or not the
+    /// source has answered yet.
+    func leftAtYes(_ id: String) -> Bool {
+        pressed.contains(id)
+    }
+
+    /// What one source held before a read, less what it has dismissed since: what a read
+    /// that fails, is refused or is walked away from puts back, and what an answer is joined to.
+    ///
+    /// **Every mark still held is struck, whenever the read was sent.** A mark goes when a
+    /// later-sent stretch lands, so one still here is newer than every stretch `was` is made of.
+    private func left(of was: Reach?, host: String) -> Reach? {
+        guard var was else { return nil }
+        if emptied[host] != nil { was.empty() }
+        if let marks = struck[host] { was.notices.removeAll { marks[$0.id] != nil } }
+        return was
+    }
+
+    /// The lines of a stretch its source had not dismissed when the stretch was sent, and the
+    /// marks a later-sent stretch has now landed past let go of. A stretch that cannot say
+    /// when it was sent is taken for one sent before every mark.
+    private func undismissed(_ page: NoticePage, host: String) -> [Notice] {
+        guard let marks = struck[host] else { return page.notices }
+        let sent = page.sent.place
+        let later = marks.filter { mark in sent.map { mark.value > $0 } ?? true }
+        struck[host] = later.isEmpty ? nil : later
+        return page.notices.filter { later[$0.id] == nil }
+    }
+
+    /// Whether a stretch was sent before its source dismissed everything it had: it is not
+    /// taken. One sent after lets go of the mark.
+    private func outrun(_ page: NoticePage, host: String) -> Bool {
+        guard let mark = emptied[host] else { return false }
+        if let sent = page.sent.place, sent > mark {
+            emptied[host] = nil
+            return false
         }
+        return true
     }
 
     /// What reading on asks: each source that answered, has more, and has been read down to
@@ -493,9 +553,10 @@ final class ShellNoticeList {
         in session: ShellSession
     ) {
         let host = ask.host
+        let was = left(of: was, host: host)
         defer {
-            strike(host: host)
             settle(in: session)
+            acts.settle(host: host, in: session)
         }
         switch ShellNoticeActs.counts(result, of: host, sentWith: sent, in: session) {
         case .ended: return
@@ -509,14 +570,17 @@ final class ShellNoticeList {
             var reach = was ?? Reach()
             // Off the stretch as it came, before any line of it is folded into one held.
             let moment = page.notices.map(\.at).min()
+            // And what it brings, less what its source dismissed after it was sent.
+            let outrun = outrun(page, host: host)
+            let brought = undismissed(page, host: host)
             if let asked = ask.before {
-                reach.notices = reach.notices.readingOn(page.notices)
+                reach.notices = reach.notices.readingOn(brought)
                 // A stretch that names nothing older than it was asked before is the end: a
                 // source that ignored the ask would otherwise be asked the same thing for ever.
                 reach.before = page.before.flatMap { StatusID.later(asked, than: $0) ? $0 : nil }
                 reach.reach(to: moment)
             } else {
-                let top = [Notice]().readingOn(page.notices)
+                let top = [Notice]().readingOn(brought)
                 // **Whether the new top meets what is held is read off notice ids, as numbers,
                 // and never off a line's name.** A gathered line is named by its group, and the
                 // source cuts one group across stretches: one held from far down that gains a
@@ -542,6 +606,7 @@ final class ShellNoticeList {
                 }
             }
             reach.bound(to: capacity)
+            if outrun { reach.empty() }
             reach.gathered = page.gathered
             reach.standing = .read
             reaches[host] = reach
@@ -566,17 +631,26 @@ final class ShellNoticeList {
     /// `lines` and `floor` made again from what is held. Nothing is assigned where nothing moved.
     ///
     /// **Not while a source's first stretch is on the wire**: where it will stop the list is
-    /// not known, and a line drawn now might have to be taken back when it answers. What is
-    /// drawn stays, less the lines of a source let go of meanwhile.
+    /// not known, and a line drawn now might have to be taken back when it answers. The list
+    /// stays, less the lines of a source let go of meanwhile.
+    ///
+    /// **What an act has on its way is left out last, of whichever list that is** — so the
+    /// floor, how far each source was read, the bound and every count of what is held are
+    /// what they were, and only what is drawn is short of the lines that are leaving.
     private func rebuild() {
-        guard !reaches.values.contains(where: \.isOnFirstStretch) else {
-            let kept = lines.filter { reaches[$0.source.host.lowercased()] != nil }
-            if kept.count != lines.count { lines = kept }
-            return
+        if reaches.values.contains(where: \.isOnFirstStretch) {
+            let kept = whole.filter { reaches[$0.source.host.lowercased()] != nil }
+            if kept.count != whole.count { whole = kept }
+        } else {
+            let cut = Self.cut(reaches)
+            if cut.floor != floor { floor = cut.floor }
+            whole = cut.lines
         }
-        let cut = Self.cut(reaches)
-        if cut.floor != floor { floor = cut.floor }
-        if cut.lines != lines { lines = cut.lines }
+        let hidden = acts.hidden
+        let drawn = hidden.isEmpty ? whole : whole.filter { !hidden.hides($0) }
+        if drawn != lines { lines = drawn }
+        // A line drawn again is no longer one the person sent away.
+        if !pressed.isEmpty { pressed.subtract(lines.map(\.id)) }
     }
 
     /// The one list of several sources' notices, and where it stops — **the one place the rule

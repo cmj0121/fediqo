@@ -11,7 +11,10 @@ import SwiftUI
 ///
 /// **What can be done is behind three dots, and asked first** (`NoticeActs`): a line's own —
 /// dismissing it — the head's, which dismisses all a source has, and a held-back request's.
-/// One asker on the page puts every such question (`ShellNoticeActs.asked`).
+/// One asker on the page puts every such question (`ShellNoticeActs.asked`). **At its yes
+/// the line, or the request, leaves the page**; where its source then says no it is drawn
+/// again where it was, and the strip at the foot of every page says so (`SaidStrip`) — this
+/// page's own sentences above the list are for its ask and its reading of requests.
 ///
 /// **What it says before any line**, in this order: that nobody is signed in to a source that
 /// has notices, and what would make the page fill; that somebody is, and no sign-in may read
@@ -320,9 +323,9 @@ struct NoticesPane: View {
             wordLine(NoticeActs.onItsWay(request), part: .onWay(request.id), ink: ShellChrome.inkDim(colorScheme))
             ShellRule()
         }
-        let holders = acts.holders
+        let holders = acts.shownHolders
         ForEach(holders, id: \.self) { host in
-            if let held = acts.held(host: host) {
+            if let held = acts.shownHeld(host: host) {
                 NoticeHeldLine(host: host, held: held, open: acts.opened.contains(host)) { toggleHeld(host) }
                 ShellRule()
             }
@@ -343,7 +346,8 @@ struct NoticesPane: View {
         }
     }
 
-    /// What each act that changed nothing came to, by source, in host order.
+    /// What the page has to say of itself, by source, in host order: an ask for notices, or
+    /// a reading of what is held back, that came to nothing (`ShellNoticeActs.said`).
     static func said(in session: ShellSession, language: DummyLanguage? = nil) -> [(host: String, words: String)] {
         session.noticeList.acts.said.sorted { $0.key < $1.key }.map {
             ($0.key, NoticeActs.words($0.value, host: $0.key, language: language))
@@ -376,7 +380,7 @@ struct NoticesPane: View {
     @ViewBuilder
     private func heldBack(_ hosts: [String]) -> some View {
         ForEach(hosts, id: \.self) { host in
-            let listed = acts.requests[host] ?? []
+            let listed = acts.listed(host: host)
             if listed.isEmpty, acts.readingRequests.contains(host) {
                 wordLine(
                     String(format: L10n.t("notices.held.reading"), host), part: .heldReading(host),
@@ -390,7 +394,7 @@ struct NoticesPane: View {
             }
             // The source counts more people than it listed — or listed nobody at all: said,
             // so an opened line never stands over nothing.
-            if let held = acts.held(host: host), acts.requests[host] != nil, held.requests > listed.count,
+            if let held = acts.shownHeld(host: host), acts.requests[host] != nil, held.requests > listed.count,
                !acts.readingRequests.contains(host) {
                 wordLine(
                     String(format: L10n.t(listed.isEmpty ? "notices.held.none" : "notices.held.partial"), host),
@@ -529,8 +533,8 @@ struct NoticesPane: View {
             .clearsFloatingCorner()
             .modifier(KeepsNoticeMark(mark: mark, hand: hand, shown: shown.count, onArrive: arrivedAtFoot))
             .modifier(NoticeListPlace(
-                proxy: proxy, ids: shown.map(\.id), selectedID: $selectedID, mark: mark, touch: touch,
-                jumpToTop: jumpToTop
+                proxy: proxy, ids: shown.map(\.id), leaving: list.leftAtYes, selectedID: $selectedID, mark: mark,
+                touch: touch, jumpToTop: jumpToTop
             ))
         }
     }
@@ -573,6 +577,21 @@ struct NoticesPane: View {
         let tap = DummyCommand.tapped(notice.id, selected: selected, touch: touch)
         guard tap == .open, NoticeWords.opens(notice) == .nothing else { return tap }
         return nil
+    }
+
+    /// Where the lamp stands once the lines drawn have changed from `was` to `now`.
+    ///
+    /// **A lit line the person dismissed hands the lamp to the line that takes its place** —
+    /// the next one down still drawn, or the one above where it was the last — so `d` and its
+    /// yes, again and again, walk down the list and never drop the keys back to the top. A lit
+    /// line that left any other way — the choice of kinds took it, or its source did — is not
+    /// the lamp's, and nothing is lit. **A line drawn again does not take the lamp back**: its
+    /// source said no after the person had moved on, and the strip says so.
+    static func lamp(_ selected: String?, was: [String], now: [String], leaving: (String) -> Bool) -> String? {
+        guard let selected, !now.contains(selected) else { return selected }
+        guard leaving(selected), let at = was.firstIndex(of: selected) else { return nil }
+        let drawn = Set(now)
+        return was[(at + 1)...].first(where: drawn.contains) ?? was[..<at].last(where: drawn.contains)
     }
 }
 
@@ -754,6 +773,9 @@ private struct KeepsNoticeMark: ViewModifier {
 private struct NoticeListPlace: ViewModifier {
     let proxy: ScrollViewProxy
     let ids: [String]
+    /// Whether a line left at the person's own yes (`ShellNoticeList.leftAtYes`): lit, it
+    /// hands the lamp on.
+    let leaving: (String) -> Bool
     @Binding var selectedID: String?
     let mark: ShellReadingMark
     let touch: Bool
@@ -761,10 +783,10 @@ private struct NoticeListPlace: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: ids, initial: true) { _, ids in
+            .onChange(of: ids, initial: true) { was, ids in
                 mark.list(Set(ids))
-                // A line the choice of kinds took away, or its source did, is not the lamp's.
-                if let selectedID, !ids.contains(selectedID) { self.selectedID = nil }
+                let lamp = NoticesPane.lamp(selectedID, was: was, now: ids, leaving: leaving)
+                if lamp != selectedID { selectedID = lamp }
             }
             .onAppear {
                 let returning = mark.returning
@@ -818,7 +840,8 @@ final class NoticesProbe {
         case nobody, notAllowed, head, none, foot
         /// The head's parts: the place's name, the words about the kinds, and the three marks.
         case title, kindsWords, kindsMark, reloadMark, moreMark
-        /// What an act at one source came to, and a request said to be on its way, by its id.
+        /// What the page says of itself at one source — its ask, its reading of requests —
+        /// and a request said to be on its way, by its id.
         case said(String), onWay(String)
         /// One source's held-back line, its words and its press, by host; and under it, while
         /// its requests are read and where it holds more than it listed.

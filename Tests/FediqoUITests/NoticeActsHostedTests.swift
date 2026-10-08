@@ -262,7 +262,7 @@ struct NoticeActsHostedTests {
         #expect(bare.frames[.more] == nil)
     }
 
-    @Test("Choosing Dismiss only puts the question; its yes dismisses, and the row leaves the page only after the source answers. The key asks the same question")
+    @Test("Choosing Dismiss only puts the question; at its yes the row leaves the page, and the source is asked. The key asks the same question")
     func dismissIsAskedFirst() async throws {
         let gate = Gate()
         let path = F.post(Self.a, "/api/v1/notifications/4/dismiss")
@@ -286,13 +286,14 @@ struct NoticeActsHostedTests {
         acts.asked = nil
         #expect(await spun { await server.count(path) == 1 })
         let (_, waiting) = hosted(session)
-        #expect(rows(waiting).contains(notice.id), "the row left before the source answered")
+        #expect(rows(waiting).count == 2 && !rows(waiting).contains(notice.id), "the row is drawn after the yes")
         // On the wire, the item says it is not to be chosen again just now.
         let busy = try #require(NoticeActs.more(notice, in: session, language: .english).items.first)
         #expect(!busy.answers && busy.title(language: .english) == "Dismiss. Not right now")
 
         await gate.open()
         #expect(await spun { !session.noticeList.lines.contains { $0.id == notice.id } })
+        #expect(await spun { acts.acting.isEmpty }, "the source's answer never landed")
         let (_, after) = hosted(session)
         #expect(rows(after).count == 2 && !rows(after).contains(notice.id))
 
@@ -364,9 +365,12 @@ struct NoticeActsHostedTests {
         asked.answered(ShellQuestion.yes)
         acts.asked = nil
         #expect(await spun { await server.count(clear) == 1 })
-        #expect(session.noticeList.lines.count == 3, "lines left before the source answered")
+        #expect(session.noticeList.lines.count == 1, "the source's lines are drawn after the yes")
+        let (_, waiting) = hosted(session)
+        #expect(rows(waiting) == [try line("8", of: Self.b, in: session).id])
         await gate.open()
         #expect(await spun { session.noticeList.lines.count == 1 })
+        #expect(await spun { acts.acting.isEmpty }, "the source's answer never landed")
         let (_, after) = hosted(session)
         #expect(rows(after) == [try line("8", of: Self.b, in: session).id], "the source left alone lost its lines")
 
@@ -614,10 +618,27 @@ struct NoticeActsHostedTests {
             #expect(frame.minX >= -0.5 && frame.maxX <= 320 + Self.pixel, "\(type): \(part) runs past a page 320 points across")
         }
 
-        // Each sentence the acts say stands at the height it asks for at the width it has.
-        let said = try #require(NoticesPane.said(in: session).first?.words)
+        // What the dismissal came to is said in the strip, whole, and not above the list.
+        let said = try #require(session.said.lines.first)
+        #expect(said.what == .notice(.dismiss) && said.why == .declined && said.host == Self.long && NoticesPane.said(in: session).isEmpty)
+        #expect(probe.frames[.said(Self.long)] == nil)
+        let strip = SaidProbe()
+        let foot = NSHostingView(
+            rootView: Color.clear.modifier(SaidStrip(said: session.said, session: session))
+                .environment(\.shellSaidProbe, strip)
+                .environment(\.shellLayout, .narrow)
+                .dynamicTypeSize(type)
+        )
+        foot.frame = NSRect(x: 0, y: 0, width: 320, height: 700)
+        for _ in 0..<3 { Self.settle(foot) }
+        let line = try #require(strip.frames[.line(said.id)], "\(type): the strip does not draw it")
+        #expect(line.minX >= -0.5 && line.maxX <= 320 + Self.pixel, "\(type): the strip's line runs past 320 points")
+        let spoken = try #require(strip.frames[.words(said.id)])
+        let whole = Self.wrapped(Text(said.words()).shellFont(.meta), width: spoken.width, type)
+        #expect(spoken.height >= whole - 0.5, "\(type): the strip's sentence is cut: \(spoken.height) of \(whole)")
+
+        // Each sentence the acts say on the page stands at the height it asks for at the width it has.
         let sentences: [(NoticesProbe.Part, String)] = [
-            (.said(Self.long), said),
             (.onWay(listed[1].id), NoticeActs.onItsWay(listed[1])),
             (.heldPartial(Self.long), String(format: L10n.t("notices.held.partial"), Self.long)),
         ]
@@ -658,8 +679,8 @@ struct NoticeActsHostedTests {
         let excerpt = Self.wrapped(
             Text(try #require(NoticeActs.excerpt(request))).shellFont(.body).lineLimit(NoticeRow.excerptLines), width: who.width, type
         )
-        let whole = name + count + excerpt + 2 * ShellSpace.tight
-        #expect(who.height >= whole - 0.5, "\(type): a request's name or count is cut: \(who.height) of \(whole)")
+        let tall = name + count + excerpt + 2 * ShellSpace.tight
+        #expect(who.height >= tall - 0.5, "\(type): a request's name or count is cut: \(who.height) of \(tall)")
     }
 
     @Test("At 320 points a row with its three dots cuts nothing: the dots whole under the first line, the words there whole beside them, and the first line as it is without them",

@@ -13,6 +13,9 @@ actor NoticeActServer: HTTPSender {
         case status(Int)
         /// Answers only once the gate opens.
         case held(Gate, String, Int = 200)
+        /// No answer at all, once the gate opens: the request fails as the door's own does —
+        /// `.timedOut` is a request that ran out of time, with nobody waiting for a clock.
+        case fails(Gate?, URLError.Code)
     }
 
     private var routes: [String: Outcome]
@@ -49,6 +52,9 @@ actor NoticeActServer: HTTPSender {
         case .held(let gate, let body, let status)?:
             await gate.wait()
             return answer(body, status)
+        case .fails(let gate, let code)?:
+            await gate?.wait()
+            throw URLError(code)
         case nil: break
         }
         switch url.path {
@@ -211,6 +217,11 @@ struct NoticeActsTests {
         await shell.0.noticeList.readOn(in: shell.0)
         #expect(ids(shell.0.noticeList.lines) == ["a4", "b8", "a3"])
         return shell
+    }
+
+    /// What the strip at the foot of every page says, newest first.
+    private func strip(_ session: ShellSession) -> [String] {
+        session.said.lines.map { $0.words(language: .english) }
     }
 
     private func line(_ id: String, in session: ShellSession) throws -> Notice {
@@ -490,7 +501,7 @@ struct NoticeActsTests {
 
     // MARK: - Dismissing one
 
-    @Test("A dismissed line leaves the list only once its source has answered")
+    @Test("A dismissed line leaves what is drawn at the yes, and what is held only once its source has answered")
     func dismissedOnlyAfterTheAnswer() async throws {
         let gate = Gate()
         let dismiss = F.post(Self.a, "/api/v1/notifications/4/dismiss")
@@ -500,13 +511,15 @@ struct NoticeActsTests {
 
         let task = Task { await acts.dismiss(notice, in: session) }
         #expect(await spun { await server.count(dismiss) == 1 })
-        #expect(ids(session.noticeList.lines) == ["a4", "b8", "a3"], "the line left before the source answered")
+        #expect(ids(session.noticeList.lines) == ["b8", "a3"], "the line was drawn after the yes")
+        #expect(session.noticeList.reaches[Self.a]?.notices.contains { $0.id == notice.id } == true, "it left what is held before the source answered")
         #expect(acts.acting == [notice.id])
 
         await gate.open()
         await task.value
         #expect(ids(session.noticeList.lines) == ["b8", "a3"])
-        #expect(acts.acting.isEmpty && acts.said.isEmpty)
+        #expect(session.noticeList.reaches[Self.a]?.notices.contains { $0.id == notice.id } == false)
+        #expect(acts.acting.isEmpty && acts.said.isEmpty && session.said.lines.isEmpty)
         #expect(await server.posts == [dismiss])
     }
 
@@ -527,7 +540,7 @@ struct NoticeActsTests {
         #expect(await server.posts == [dismiss])
     }
 
-    @Test("A dismissal the source refuses, or that fails, leaves the line and says so by source; the next that lands takes the words down")
+    @Test("A dismissal the source refuses, or that fails, draws the line again and says so on the strip; the next that lands takes the words down")
     func aRefusalLeavesTheLine() async throws {
         let dismiss = F.post(Self.a, "/api/v1/notifications/4/dismiss")
         let (session, server, tokens) = try await two([dismiss: .status(403)])
@@ -536,30 +549,28 @@ struct NoticeActsTests {
 
         await acts.dismiss(notice, in: session)
         #expect(ids(session.noticeList.lines) == ["a4", "b8", "a3"])
-        #expect(acts.said == [Self.a: .init(act: .dismiss, why: .refused)])
-        #expect(NoticesPane.said(in: session, language: .english).map(\.words)
-            == ["a.example would not let this sign-in dismiss the notice. It is still here."])
+        #expect(session.said.lines.map(\.what) == [.notice(.dismiss)] && session.said.lines.map(\.why) == [.refused])
+        #expect(strip(session) == ["a.example would not let this sign-in dismiss the notice. It is still here. The notice: Ada favourited your post."])
+        #expect(acts.said.isEmpty && NoticesPane.said(in: session).isEmpty, "said twice: on the strip and above the list")
         #expect(session.mastodon.dismisses(host: Self.a), "one refusal rewrote what the sign-in may do")
         #expect(try tokens.token(host: Self.a)?.scopes == F.acts)
 
         await server.set(dismiss, .status(503))
         await acts.dismiss(notice, in: session)
         #expect(ids(session.noticeList.lines) == ["a4", "b8", "a3"])
-        #expect(acts.said == [Self.a: .init(act: .dismiss, why: .declined)])
-        #expect(NoticesPane.said(in: session, language: .english).map(\.words)
-            == ["a.example did not dismiss the notice. It is still here."])
+        #expect(session.said.lines.map(\.what) == [.notice(.dismiss)] && session.said.lines.map(\.why) == [.declined])
+        #expect(strip(session) == ["a.example did not dismiss the notice. It is still here. The notice: Ada favourited your post."])
 
         // No answer at all is the one thing said as not reached.
         await server.set(dismiss, nil)
         await acts.dismiss(notice, in: session)
         #expect(ids(session.noticeList.lines) == ["a4", "b8", "a3"])
-        #expect(NoticesPane.said(in: session, language: .english).map(\.words)
-            == ["a.example could not be reached, so the notice was not dismissed. It is still here."])
+        #expect(strip(session) == ["a.example could not be reached, so the notice was not dismissed. It is still here. The notice: Ada favourited your post."])
 
         await server.set(dismiss, .body("{}"))
         await acts.dismiss(notice, in: session)
         #expect(ids(session.noticeList.lines) == ["b8", "a3"])
-        #expect(acts.said.isEmpty)
+        #expect(acts.said.isEmpty && session.said.lines.isEmpty)
     }
 
     @Test("Nothing is sent for a line whose sign-in only reads, for one of a source not held, or for one the list does not hold")
@@ -588,7 +599,7 @@ struct NoticeActsTests {
 
         #expect(await server.posts.isEmpty)
         #expect(ids(session.noticeList.lines) == ["a4", "b8", "a3"])
-        #expect(acts.said.isEmpty)
+        #expect(acts.said.isEmpty && session.said.lines.isEmpty)
     }
 
     @Test("An answer for a sign-in since replaced, or signed out of, changes nothing and says nothing")
@@ -611,7 +622,7 @@ struct NoticeActsTests {
             await task.value
 
             #expect(session.noticeList.reaches[Self.a]?.notices.contains { $0.id == notice.id } == true, "\(status)")
-            #expect(acts.said.isEmpty, "\(status): a refusal of a sign-in no longer held was said of the one held now")
+            #expect(acts.said.isEmpty && session.said.lines.isEmpty, "\(status): a refusal of a sign-in no longer held was said of the one held now")
             #expect(acts.acting.isEmpty)
         }
     }
@@ -627,7 +638,7 @@ struct NoticeActsTests {
         #expect(!session.mastodon.isSignedIn(host: Self.a))
         #expect(session.mastodon.ended == [Self.a])
         #expect(ids(session.noticeList.lines) == ["b8"])
-        #expect(session.noticeList.acts.said.isEmpty)
+        #expect(session.noticeList.acts.said.isEmpty && session.said.lines.isEmpty)
     }
 
     @Test("A line dismissed while its source is being read stays gone when that read answers still naming it")
@@ -664,7 +675,7 @@ struct NoticeActsTests {
 
     // MARK: - Dismissing all
 
-    @Test("Dismissing all asks one source once, and its lines leave only after it answers; the other source's stand")
+    @Test("Dismissing all asks one source once; its lines leave what is drawn at the yes and what is held once it answers; the other source's stand")
     func dismissAllTakesOneSourcesLines() async throws {
         let gate = Gate()
         let clear = F.post(Self.a, "/api/v1/notifications/clear")
@@ -673,7 +684,8 @@ struct NoticeActsTests {
 
         let task = Task { await acts.dismissAll(host: Self.a, in: session) }
         #expect(await spun { await server.count(clear) == 1 })
-        #expect(ids(session.noticeList.lines) == ["a4", "b8", "a3"], "lines left before the source answered")
+        #expect(ids(session.noticeList.lines) == ["b8"], "the source's lines were drawn after the yes")
+        #expect(session.noticeList.reaches[Self.a]?.notices.count == 2, "they left what is held before the source answered")
         #expect(acts.acting == [ShellNoticeActs.all(Self.a)])
 
         await gate.open()
@@ -684,7 +696,7 @@ struct NoticeActsTests {
         #expect(!session.noticeList.hasMore(in: session))
     }
 
-    @Test("Dismissing all that is refused or fails leaves every line and says so; a source whose sign-in only reads is asked nothing")
+    @Test("Dismissing all that is refused or fails draws every line again and says so on the strip; a source whose sign-in only reads is asked nothing")
     func dismissAllRefused() async throws {
         let clear = F.post(Self.a, "/api/v1/notifications/clear")
         let (session, server, _) = try await two([clear: .status(403)])
@@ -692,18 +704,17 @@ struct NoticeActsTests {
 
         await acts.dismissAll(host: Self.a, in: session)
         #expect(ids(session.noticeList.lines) == ["a4", "b8", "a3"])
-        #expect(NoticesPane.said(in: session, language: .english).map(\.words)
-            == ["a.example would not let this sign-in dismiss its notices. They are still here."])
+        #expect(strip(session) == ["a.example would not let this sign-in dismiss its notices. They are still here."])
 
         await server.set(clear, .status(500))
         await acts.dismissAll(host: Self.a, in: session)
         #expect(ids(session.noticeList.lines) == ["a4", "b8", "a3"])
-        #expect(NoticesPane.said(in: session, language: .english).map(\.words)
-            == ["a.example did not dismiss its notices. They are still here."])
+        #expect(strip(session) == ["a.example did not dismiss its notices. They are still here."])
+        #expect(NoticesPane.said(in: session).isEmpty)
 
         await acts.dismissAll(host: Self.b, in: session)
         #expect(await server.posts == [clear, clear], "a sign-in that only reads was sent to dismiss")
-        #expect(acts.said[Self.b] == nil)
+        #expect(acts.said[Self.b] == nil && !session.said.lines.contains { $0.host == Self.b })
     }
 
     @Test("Dismissing all for a sign-in since replaced changes nothing")
@@ -717,7 +728,7 @@ struct NoticeActsTests {
         await gate.open()
         await task.value
         #expect(ids(session.noticeList.lines) == ["a4", "b8", "a3"])
-        #expect(session.noticeList.acts.said.isEmpty)
+        #expect(session.noticeList.acts.said.isEmpty && session.said.lines.isEmpty)
     }
 
     // MARK: - What a source holds back
@@ -866,7 +877,7 @@ struct NoticeActsTests {
         #expect(!dismiss.title.contains("evE") && !dismiss.line.contains("evE") && dismiss.help == nil)
     }
 
-    @Test("A request let through leaves the list of them once the source answers, and is said to be on its way until a later read shows its notices")
+    @Test("A request let through leaves what is listed at the yes and what is held once the source answers, and is then said to be on its way until a later read shows its notices")
     func letThroughIsOnItsWay() async throws {
         let gate = Gate()
         let accept = F.post(Self.a, Self.requests + "/71/accept")
@@ -876,7 +887,7 @@ struct NoticeActsTests {
 
         let task = Task { await acts.letThrough(eve, in: session) }
         #expect(await spun { await server.count(accept) == 1 })
-        #expect(acts.requests[Self.a]?.count == 2 && acts.onItsWay.isEmpty, "it moved before the source answered")
+        #expect(acts.requests[Self.a]?.count == 2 && acts.onItsWay.isEmpty, "it moved in what is held before the source answered")
 
         await gate.open()
         await task.value
@@ -906,7 +917,7 @@ struct NoticeActsTests {
         #expect(session.noticeList.standing(host: Self.a) == .read)
     }
 
-    @Test("A request let go leaves once the source answers; the last one gone, the held-back line goes with it")
+    @Test("A request let go leaves what is held once the source answers; the last one gone, the held-back line goes with it")
     func letGoLeavesAfterTheAnswer() async throws {
         let (session, server, _) = try await holding([
             F.post(Self.a, Self.requests + "/71/dismiss"): .body("{}"),
@@ -923,7 +934,7 @@ struct NoticeActsTests {
         #expect(await server.posts == [F.post(Self.a, Self.requests + "/71/dismiss"), F.post(Self.a, Self.requests + "/72/dismiss")])
     }
 
-    @Test("A request the source refuses to act on, or that fails, stays listed and says so")
+    @Test("A request the source refuses to act on, or that fails, is listed again and the strip says so")
     func aRefusedRequestStays() async throws {
         let accept = F.post(Self.a, Self.requests + "/71/accept")
         let go = F.post(Self.a, Self.requests + "/71/dismiss")
@@ -933,13 +944,14 @@ struct NoticeActsTests {
 
         await acts.letThrough(eve, in: session)
         #expect(acts.requests[Self.a]?.count == 2 && acts.onItsWay.isEmpty)
-        #expect(NoticesPane.said(in: session, language: .english).map(\.words)
-            == ["a.example would not let this sign-in let notices through. What it holds is still held."])
+        #expect(strip(session) == ["a.example would not let this sign-in let notices through. What it holds is still held. From: @eve@a.example (Eve)."])
+        #expect(acts.listed(host: Self.a).count == 2, "a request the source kept is not listed")
 
         await acts.letGo(eve, in: session)
         #expect(acts.requests[Self.a]?.count == 2)
-        #expect(NoticesPane.said(in: session, language: .english).map(\.words)
-            == ["a.example did not let the notices go. What it holds is still listed."])
+        #expect(strip(session).first == "a.example did not let the notices go. What it holds is still listed. From: @eve@a.example (Eve).")
+        #expect(strip(session).count == 2, "two acts, each said: neither stands for the other")
+        #expect(NoticesPane.said(in: session).isEmpty)
         #expect(acts.held(host: Self.a) == NoticesHeld(requests: 2, notices: 4))
     }
 
@@ -972,7 +984,7 @@ struct NoticeActsTests {
         try tokens.save(F.token(Self.a, scopes: F.acts, access: "tok-other"))
         await gate.open()
         await task.value
-        #expect(acts.requests[Self.a]?.count == 2 && acts.onItsWay.isEmpty && acts.said.isEmpty)
+        #expect(acts.requests[Self.a]?.count == 2 && acts.onItsWay.isEmpty && acts.said.isEmpty && session.said.lines.isEmpty)
     }
 
     @Test("What a failure is said as is only what is known: refused, not done, not confirmed, or not reached")
@@ -1012,7 +1024,7 @@ struct NoticeActsTests {
         }
     }
 
-    @Test("A dismissal that runs out of time is said as not confirmed, and the line stands until a read says")
+    @Test("A dismissal that runs out of time is said as not confirmed, and the line is drawn again until a read says")
     func aDismissalOutOfTime() async throws {
         let gate = Gate()
         let dismiss = F.post(Self.a, "/api/v1/notifications/4/dismiss")
@@ -1029,7 +1041,7 @@ struct NoticeActsTests {
 
         #expect(await server.count(dismiss) == 1)
         #expect(ids(session.noticeList.lines) == ["a4", "b8", "a3"])
-        #expect(session.noticeList.acts.said == [Self.a: .init(act: .dismiss, why: .unconfirmed)])
+        #expect(session.said.lines.map(\.what) == [.notice(.dismiss)] && session.said.lines.map(\.why) == [.unconfirmed])
     }
 
     @Test("A sign-out lets go of everything said and held of that source's acts with its lines")
@@ -1037,10 +1049,11 @@ struct NoticeActsTests {
         let (session, _, _) = try await holding([F.post(Self.a, "/api/v1/notifications/4/dismiss"): .status(503)])
         let acts = session.noticeList.acts
         await acts.dismiss(try line("a4", in: session), in: session)
-        #expect(acts.said[Self.a] != nil)
+        #expect(session.said.lines.map(\.host) == [Self.a])
 
-        session.noticeList.forget(host: Self.a)
+        await session.signOut(host: Self.a)
 
+        #expect(session.said.lines.isEmpty, "a sign-out left a line about a source no longer signed in to")
         #expect(acts.said.isEmpty && acts.holdings[Self.a] == nil && acts.requests.isEmpty && acts.opened.isEmpty)
         #expect(ids(session.noticeList.lines) == ["b8"])
     }

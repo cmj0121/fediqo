@@ -228,6 +228,18 @@ struct MastodonNoticeActsTests {
         #expect(await server.asked == [Self.dismissLine, Self.dismissLine, Self.dismissOne])
     }
 
+    @Test("A gathered line asked again after a dismissal nobody heard the answer to: its 404 is that dismissal having landed, and anything else is still an error")
+    func goneAfterUnconfirmed() async throws {
+        let (notices, server, _) = try acting([Self.dismissLine: Self.missing])
+        try await notices.dismiss(line(Self.favourites), afterUnconfirmed: true)
+        #expect(await server.asked == [Self.dismissLine])
+
+        let (refusing, _, _) = try acting([Self.dismissLine: .json(Captures.gone, status: 403)])
+        await #expect(throws: MastodonAuthError.http(403)) {
+            try await refusing.dismiss(line(Self.favourites), afterUnconfirmed: true)
+        }
+    }
+
     @Test("A notice or a held-back request of another source is never asked of this one, where the same number names something else: dismissing, letting through and letting go each send nothing")
     func anotherSources() async throws {
         let (notices, server, _) = try acting([:])
