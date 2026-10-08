@@ -1575,11 +1575,11 @@ struct DummyItemRow: View {
     /// The press a finger makes is the row's own and is decided by `DummyCommand.tapped`: one
     /// press lights, the next opens. A reader landing on this element activates it once, so the
     /// second half is offered here by name — the same shape `outwardAction` above uses, and for
-    /// the same reason. It says what the written-down key says.
+    /// the same reason. It says what the written-down key says of a post.
     @ViewBuilder
     private var openAction: some View {
         if let onOpen {
-            Button(L10n.t("shortcut.expand"), action: onOpen)
+            Button(L10n.t("item.open.thread"), action: onOpen)
         }
     }
 

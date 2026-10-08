@@ -67,9 +67,9 @@ final class ShellNoticeList {
         /// Which read this source answers with, remembered for the run so it is asked one way.
         var gathered: Bool?
         var standing: Standing = .unread
-        /// Whether this source has answered at all this run. One that has not, and is on the
-        /// wire, is on its first stretch.
-        var answered = false
+        /// Whether this source has answered at all this run: which read it answers with is
+        /// known. One that has not, and is on the wire, is on its first stretch.
+        var answered: Bool { gathered != nil }
         /// Whether the ask on the wire, or the one that failed, was for an older stretch and
         /// not the newest — what asking that source again asks for.
         var readingOn = false
@@ -113,7 +113,40 @@ final class ShellNoticeList {
 
         /// Whether nobody knows yet where this source will stop the list.
         var isOnFirstStretch: Bool { standing == .reading && !answered }
+
+        /// Whether this source has handed over as many lines as are held of one for a run
+        /// (`capacity`): it is not read on, and the foot says why. A read from the top that is
+        /// joined to nothing held starts it again.
+        var full = false
+
+        /// This reach kept to `capacity` lines: the newest of them, and **reading on ended
+        /// for it** where there are more — lines past the bound, or a source that has more to
+        /// give. A source read to its own end at exactly the bound is not full; it has no more.
+        mutating func bound(to capacity: Int) {
+            guard notices.count > capacity || (notices.count == capacity && before != nil) else { return }
+            notices = Array(notices.prefix(capacity))
+            before = nil
+            full = true
+        }
+
+        /// This reach once its source has dismissed everything it had: nothing held, and
+        /// nothing older to read on to.
+        mutating func empty() {
+            notices = []
+            before = nil
+            reached = nil
+            full = false
+        }
     }
+
+    /// How many lines are held of one source for a run. Nothing here is kept between runs and
+    /// nothing lets a line go by age, so without a bound a source read on and on — or one that
+    /// answers every ask with more — is held whole. Thousands of lines is months of a busy
+    /// account; past it the foot says the limit was reached, and a reload still reads the newest.
+    static let capacity = 2_000
+
+    /// `capacity`, where a test wants a bound it can reach.
+    @ObservationIgnored var capacity = ShellNoticeList.capacity
 
     /// Each source's notices, by its folded host.
     private(set) var reaches: [String: Reach] = [:]
@@ -142,6 +175,19 @@ final class ShellNoticeList {
     @ObservationIgnored private var asking: Set<String> = []
     /// Counts the reads started and stopped, so an answer to one that was stopped is dropped.
     @ObservationIgnored private var generation = 0
+    /// What a source dismissed while a read of it was on the wire: struck from that read's
+    /// answer as it lands, which was asked for before the dismissal and may still name it.
+    @ObservationIgnored private var gone: [String: Gone] = [:]
+
+    /// The acts on what is listed, and what each source holds back. Beside the list because a
+    /// line leaves it only on a source's answer, and a sign-out lets go of both at once.
+    @ObservationIgnored let acts = ShellNoticeActs()
+
+    /// What a source took away while it was being read.
+    private enum Gone {
+        case lines(Set<String>)
+        case all
+    }
 
     /// One source asked for one stretch.
     private struct Ask: Sendable {
@@ -178,6 +224,18 @@ final class ShellNoticeList {
     /// one answer `readOn` goes by, so a foot is never drawn that asks nobody.
     func hasMore(in session: ShellSession) -> Bool {
         !isReading && !due(in: session).isEmpty
+    }
+
+    /// Whether a source is held to `capacity` and read on no further: what the foot says where
+    /// it would otherwise say every source has handed over all it has.
+    var isFull: Bool { reaches.values.contains(where: \.full) }
+
+    /// The sources held to `capacity`, in host order: named above the list from the moment
+    /// they are. **A full source does not hold the list** (`Reach.holds`) — it would stop every
+    /// other source being read on for the rest of the run — so another's older lines may stand
+    /// below a stretch of its own that is not shown, and its name is what says so.
+    var fullHosts: [String] {
+        reaches.filter(\.value.full).keys.sorted()
     }
 
     /// `lines` without the kinds the reader narrowed away (`DummyPrefs.noticesHidden`). Done
@@ -242,14 +300,14 @@ final class ShellNoticeList {
         let here = Set(session.sources.map { $0.host.lowercased() }).intersection(session.mastodon.signedInHosts)
         let askable = Set(Self.asked(in: session).map { $0.host.lowercased() })
         for (host, reach) in reaches {
-            if !here.contains(host) {
+            guard here.contains(host) else {
                 forget(host: host)
-            } else {
-                let may = askable.contains(host)
-                if reach.askable != may { reaches[host]?.askable = may }
-                if !may, reach.standing != .reading, reach.standing != .failed(.refused) {
-                    reaches[host]?.standing = .failed(.refused)
-                }
+                continue
+            }
+            let may = askable.contains(host)
+            if reach.askable != may { reaches[host]?.askable = may }
+            if !may, reach.standing != .reading, reach.standing != .failed(.refused) {
+                reaches[host]?.standing = .failed(.refused)
             }
         }
         rebuild()
@@ -275,7 +333,10 @@ final class ShellNoticeList {
     func stop() -> Bool {
         guard let work else { return false }
         work.task.cancel()
-        for host in asking { reaches[host] = work.was[host] }
+        for host in asking {
+            reaches[host] = work.was[host]
+            gone[host] = nil
+        }
         asking = []
         generation += 1
         self.work = nil
@@ -290,9 +351,63 @@ final class ShellNoticeList {
         let host = raw.lowercased()
         asking.remove(host)
         locked.remove(host)
+        gone[host] = nil
+        acts.forget(host: host)
         guard reaches[host] != nil else { return }
         reaches[host] = nil
         rebuild()
+    }
+
+    // MARK: - What a source dismissed
+
+    /// One line its source has dismissed: gone from what is held, and from what is drawn.
+    ///
+    /// **Called only once the source has answered** (`ShellNoticeActs.dismiss`). Where a read
+    /// of that source is on the wire the line is struck from what the read set out with too,
+    /// and from its answer when that lands — it was asked for before the dismissal.
+    func took(_ notice: Notice) {
+        let host = notice.source.host.lowercased()
+        guard let held = reaches[host] else { return }
+        reaches[host]?.notices = held.notices.without(notice)
+        if asking.contains(host) {
+            if let was = work?.was[host] { work?.was[host]?.notices = was.notices.without(notice) }
+            switch gone[host] {
+            case .all?: break
+            case .lines(let held)?: gone[host] = .lines(held.union([notice.id]))
+            case nil: gone[host] = .lines([notice.id])
+            }
+        }
+        // Straight out of what is drawn, and nothing made again: one line gone moves neither
+        // where a source has been read down to nor whether it has more, so the floor and
+        // every other line stand where they did.
+        lines = lines.without(notice)
+    }
+
+    /// Every notice one source had, dismissed there at once: nothing of it is held, and it has
+    /// no more to read on to. Another source's lines stand. A read of it on the wire was asked
+    /// for before the source emptied, so its answer is not taken; the next read says what has
+    /// happened since.
+    func tookAll(host raw: String) {
+        let host = raw.lowercased()
+        guard reaches[host] != nil else { return }
+        reaches[host]?.empty()
+        if asking.contains(host) {
+            work?.was[host]?.empty()
+            gone[host] = .all
+        }
+        if let source = lines.first(where: { $0.source.host.lowercased() == host })?.source {
+            lines = lines.without(all: source)
+        }
+        rebuild()
+    }
+
+    /// What `host` dismissed while its read was out, struck from what that read left held.
+    private func strike(host: String) {
+        guard let gone = gone.removeValue(forKey: host) else { return }
+        switch gone {
+        case .all: reaches[host]?.empty()
+        case .lines(let ids): reaches[host]?.notices.removeAll { ids.contains($0.id) }
+        }
     }
 
     /// What reading on asks: each source that answered, has more, and has been read down to
@@ -334,7 +449,12 @@ final class ShellNoticeList {
         let task = Task { @MainActor [sent, was, doors] in
             await withTaskGroup(of: (Ask, Result<NoticePage, any Error>).self) { group in
                 for door in doors {
-                    group.addTask { (door.ask, await Self.page(door.notices, door.ask)) }
+                    group.addTask {
+                        let ask = door.ask
+                        return (ask, await ShellNoticeActs.run(door.notices) {
+                            try await $0.page(source: ask.source, before: ask.before, gathered: ask.gathered)
+                        })
+                    }
                 }
                 for await (ask, result) in group {
                     // Stopped, or the source let go of, while this was on the wire.
@@ -356,17 +476,6 @@ final class ShellNoticeList {
         }
     }
 
-    /// The request, the wait and the decoding: off the main actor.
-    private nonisolated static func page(
-        _ notices: MastodonNotices, _ ask: Ask
-    ) async -> Result<NoticePage, any Error> {
-        do {
-            return .success(try await notices.page(source: ask.source, before: ask.before, gathered: ask.gathered))
-        } catch {
-            return .failure(error)
-        }
-    }
-
     /// One source's answer, folded into what is held.
     ///
     /// **Only where the token it was asked with is still the one held** (`refusedBookmark`'s
@@ -384,16 +493,16 @@ final class ShellNoticeList {
         in session: ShellSession
     ) {
         let host = ask.host
-        defer { settle(in: session) }
-        let held = session.mastodon.token(host: host)?.accessToken
-        if case .failure(MastodonAuthError.signedOut) = result, held == nil {
-            session.mastodon.endedByServer(host: host)
-            forget(host: host)
-            return
+        defer {
+            strike(host: host)
+            settle(in: session)
         }
-        guard held == sent.accessToken else {
+        switch ShellNoticeActs.counts(result, of: host, sentWith: sent, in: session) {
+        case .ended: return
+        case .replaced:
             reaches[host] = was
             return
+        case .held: break
         }
         switch result {
         case .success(let page):
@@ -429,12 +538,14 @@ final class ShellNoticeList {
                     reach.notices = top
                     reach.before = page.before
                     reach.reached = moment
+                    reach.full = false
                 }
             }
+            reach.bound(to: capacity)
             reach.gathered = page.gathered
             reach.standing = .read
-            reach.answered = true
             reaches[host] = reach
+            if ask.before == nil { acts.read(host: host) }
         case .failure(let error) where Cancellation.happened(error):
             reaches[host] = was
         case .failure(let error):
@@ -442,18 +553,11 @@ final class ShellNoticeList {
                 session.mastodon.refusedNotices(host: host, sentWith: sent)
             }
             var reach = was ?? Reach()
-            reach.standing = .failed(Self.absence(for: error))
+            // Refused only where the source said this sign-in may not. Any other answer — too
+            // many requests, a failure of its own — is a failure, which asking again may get past.
+            reach.standing = .failed(ShellNoticeActs.refuses(error) ? .refused : .unreachable)
             reach.readingOn = ask.before != nil
             reaches[host] = reach
-        }
-    }
-
-    /// Refused only where the source said this sign-in may not. Any other answer — too many
-    /// requests, a failure of its own — is a failure, which asking again may get past.
-    private static func absence(for error: any Error) -> Absence {
-        switch error as? MastodonAuthError {
-        case .http(401)?, .http(403)?: .refused
-        default: .unreachable
         }
     }
 

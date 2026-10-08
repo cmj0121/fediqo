@@ -808,4 +808,123 @@ struct NoticeListTests {
         relaunched.noticesHidden = []
         #expect(DummyPrefs(defaults: defaults).noticesHidden.isEmpty)
     }
+
+    // MARK: - The bound
+
+    @Test("Reading on stops where a source is held to the most kept of one for a run, the foot says so and not that there are no more, and a reload still reads the newest")
+    func aSourceIsHeldToABound() async throws {
+        #expect(ShellNoticeList.capacity == 2_000)
+        let (session, server, _) = try await shell(Self.two, signedIn: [Self.a: Self.reads])
+        let list = session.noticeList
+        #expect(list.capacity == ShellNoticeList.capacity)
+        list.capacity = 3
+
+        await list.read(in: session)
+        #expect(drawn(list.lines) == ["a4", "a3"])
+        #expect(!list.isFull && NoticesPane.foot(in: session) == .more)
+
+        // The next stretch brings the fourth line: the newest three stay, and reading on ends.
+        await list.readOn(in: session)
+        #expect(drawn(list.lines) == ["a4", "a3", "a2"])
+        #expect(list.reaches[Self.a]?.notices.count == 3, "more is held of one source than the bound")
+        #expect(list.isFull && !list.hasMore(in: session) && list.floor == nil)
+        #expect(NoticesPane.foot(in: session) == .full, "the foot says there are no more, and there are")
+        let asked = await server.asked.count
+        await list.readOn(in: session)
+        #expect(await server.asked.count == asked, "a source held to the bound was read on")
+
+        // A reload reads the newest, joined to what is held, and the bound still holds.
+        await server.set("\(Self.a)\(Self.v1)", Self.page(Self.one(5, at: 55), Self.one(4, at: 50), Self.one(3, at: 40)))
+        await list.read(in: session)
+        #expect(drawn(list.lines) == ["a5", "a4", "a3"])
+        #expect(list.standing(host: Self.a) == .read && list.failures.isEmpty)
+        #expect(list.isFull && NoticesPane.foot(in: session) == .full)
+        await list.readOn(in: session)
+        #expect(await server.asked.count == asked + 1, "only the reload asked")
+
+        // One joined to nothing held starts the source again: it is read on as any is.
+        await server.set("\(Self.a)\(Self.v1)", Self.page(Self.one(20, at: 58), Self.one(19, at: 57)))
+        await server.set("\(Self.a)\(Self.v1)?19", Self.page(Self.one(18, at: 56)))
+        await list.read(in: session)
+        #expect(drawn(list.lines) == ["a20", "a19"])
+        #expect(!list.isFull && NoticesPane.foot(in: session) == .more)
+        await list.readOn(in: session)
+        #expect(drawn(list.lines) == ["a20", "a19", "a18"])
+        #expect(list.isFull, "a source with more at the bound is read on past it")
+    }
+
+    @Test("A source read to its own end at the bound has no more, and is not said to be held short; another source is read on beside one that is")
+    func theBoundIsOneSourcesOwn() async throws {
+        var end = ShellNoticeList.Reach()
+        end.notices = (0..<3).map {
+            Notice(source: Source(host: Self.a, kind: .mastodon), handle: .one(id: "\($0)"), kind: .favourite, people: [],
+                   at: Self.minute($0), newestID: "\($0)", oldestID: "\($0)")
+        }
+        end.bound(to: 3)
+        #expect(!end.full && end.notices.count == 3)
+        end.before = "0"
+        end.bound(to: 3)
+        #expect(end.full && end.before == nil && end.holds == nil)
+        end.empty()
+        #expect(!end.full)
+
+        // A reaches the bound with more to give; B, under the same bound, is read on to its end.
+        let (session, server, _) = try await shell(Self.two)
+        let list = session.noticeList
+        list.capacity = 4
+        await list.read(in: session)
+        await list.readOn(in: session)
+        #expect(list.reaches[Self.a]?.full == true && list.reaches[Self.b]?.full == false)
+        #expect(list.floor == Self.minute(10), "a source held to the bound still holds the list up")
+        #expect(drawn(list.lines) == ["a4", "b8", "a3", "a2", "a1", "b7"])
+        #expect(NoticesPane.foot(in: session) == .more)
+        await list.readOn(in: session)
+        await list.readOn(in: session)
+        #expect(await server.reads.suffix(2) == ["\(Self.b)\(Self.v1)?7", "\(Self.b)\(Self.v1)?6"])
+        #expect(drawn(list.lines) == ["a4", "b8", "a3", "a2", "a1", "b7", "b6"])
+        #expect(list.reaches[Self.b]?.full == false && !list.hasMore(in: session))
+        #expect(NoticesPane.foot(in: session) == .full)
+    }
+
+    @Test("A source held to the bound is named above the list from the moment it is, while the others are read on; reading it afresh takes the name down")
+    func aFullSourceIsNamed() async throws {
+        let (session, server, _) = try await shell(Self.two)
+        let list = session.noticeList
+        list.capacity = 4
+        await list.read(in: session)
+        #expect(list.fullHosts.isEmpty && NoticesPane.lines(in: session).isEmpty)
+
+        // A reaches the bound while B still has more: named at once, and the foot still reads on.
+        await list.readOn(in: session)
+        #expect(list.reaches[Self.a]?.holds == nil, "a full source held the list, and stopped the others")
+        #expect(list.fullHosts == [Self.a])
+        #expect(NoticesPane.lines(in: session) == [.full(host: Self.a)])
+        #expect(NoticesPane.foot(in: session) == .more)
+        #expect(NoticesPane.standsOut(.full(host: Self.a)) && !NoticesPane.isFailure(.full(host: Self.a)))
+        #expect(
+            NoticesLine.full(host: Self.a).words(language: .english)
+                == "Fediqo holds no more notices from a.example until it is opened again: its older notices are not shown, and may belong among the lines below."
+        )
+        #expect(NoticesLine.full(host: Self.a).words(language: .taiwanese).contains(Self.a))
+        #expect(
+            NoticesLine.full(host: Self.a).words(language: .taiwanese) != NoticesLine.full(host: Self.a).words(language: .english)
+        )
+
+        // Every source done: the name stands, and the foot says the limit too.
+        await list.readOn(in: session)
+        await list.readOn(in: session)
+        #expect(NoticesPane.lines(in: session) == [.full(host: Self.a)] && NoticesPane.foot(in: session) == .full)
+
+        // Named after what failed, before what was never asked.
+        let lines = NoticesLine.lines(
+            reading: [], failures: [(Self.b, .unreachable)], askable: [Self.b],
+            hosts: [("c.example", .unasked)], full: [Self.a]
+        )
+        #expect(lines == [.failed(host: Self.b, why: .unreachable, again: true), .full(host: Self.a), .unasked(host: "c.example")])
+
+        // Read afresh from a top joined to nothing held, the source starts again, unnamed.
+        await server.set("\(Self.a)\(Self.v1)", Self.page(Self.one(20, at: 58)))
+        await list.read(in: session)
+        #expect(list.fullHosts.isEmpty && NoticesPane.lines(in: session).isEmpty)
+    }
 }

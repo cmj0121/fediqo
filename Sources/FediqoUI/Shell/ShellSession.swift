@@ -176,6 +176,13 @@ final class ShellSession {
     /// The source whose sign-in is being asked to allow bookmarks, where one is (#285). Observed,
     /// and the question is presented from it; a press on a row's mark writes it.
     var bookmarkAsk: String?
+    /// What the sign-in question open about a host said of notices, kept from when it was first
+    /// drawn until it is answered or put down (`ShellNoticeAsk`). Not observed: it is read by
+    /// the question being drawn, and must not draw it again.
+    @ObservationIgnored var noticesSaid: [String: Bool] = [:]
+    /// The source whose sign-in is being asked to allow notices, where one is (#323). Observed,
+    /// and the question is presented from it; the press on the notices page writes it.
+    var noticeAsk: String?
     /// Whether the rows of every source nobody is signed in to have been checked once this run
     /// for what an earlier reader left on them (`forgetReaderMarksDue`).
     @ObservationIgnored var readerMarksSwept = false
@@ -2957,14 +2964,19 @@ final class ShellSession {
     /// (#69) — `askSignIn(_:)` raises it and only a button in it reaches here. It is never assumed
     /// and never remembered from a previous sign-in: a reader who did not say yes this time signs
     /// in to read, on exactly the scopes this app asked for before it could write at all.
-    func signIn(host raw: String, through browser: any OAuthBrowser, writing: Bool = false) async {
+    ///
+    /// `noticesSaid` is what that question said of notices (`SignInAsked.notices`); nothing
+    /// where none was put.
+    func signIn(
+        host raw: String, through browser: any OAuthBrowser, writing: Bool = false, noticesSaid: Bool? = nil
+    ) async {
         guard let host = try? Host.parse(raw) else { return }
         guard kind(of: host) == .mastodon else {
             await signIn(host: host)
             return
         }
         if rowRefusal?.host == host { rowRefusal = nil }
-        let failure = await mastodon.signIn(host: host, through: browser, writing: writing)
+        let failure = await mastodon.signIn(host: host, through: browser, writing: writing, noticesSaid: noticesSaid)
         // **Before the first read as whoever signed in** (#285): what the source said an earlier
         // reader did is let go of first, so what it now says of this one is not taken with it.
         await forgetReaderMarksDue()

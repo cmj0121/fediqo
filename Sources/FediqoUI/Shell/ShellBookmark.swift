@@ -26,6 +26,7 @@ extension ShellSession {
 
     /// The question answered no: everything stays as it was.
     func cancelBookmarkAsk() {
+        if let bookmarkAsk { noticesSaid[bookmarkAsk.lowercased()] = nil }
         bookmarkAsk = nil
     }
 
@@ -41,12 +42,15 @@ extension ShellSession {
     /// still does everything it did, whatever happened on the page — so a failure is "bookmarks
     /// were not allowed", never "the sign-in failed", and a source with none to give is said to
     /// have none. A page closed says nothing, as any sign-in's does.
-    func allowBookmarks(host raw: String, through browser: any OAuthBrowser) async {
-        bookmarkAsk = nil
+    ///
+    /// `noticesSaid` is what the question said of notices (`SignInAsked`): said to carry none,
+    /// the page asks for none.
+    func allowBookmarks(host raw: String, through browser: any OAuthBrowser, noticesSaid said: Bool? = nil) async {
+        cancelBookmarkAsk()
         let host = raw.lowercased()
         guard mastodon.bookmarks(host: host) == .unasked else { return }
         if rowRefusal?.host == host { rowRefusal = nil }
-        let failure = await mastodon.signIn(host: host, through: browser, writing: true)
+        let failure = await mastodon.signIn(host: host, through: browser, writing: true, noticesSaid: said)
         await forgetReaderMarksDue()
         if let failure {
             NetLog.auth.notice("\(NetLog.line("bookmarks", host: host, error: failure), privacy: .public)")
@@ -118,16 +122,20 @@ struct BookmarkQuestion: ViewModifier {
     let session: ShellSession
 
     func body(content: Content) -> some View {
-        content.shellConfirm(asked, question: { ShellQuestion.bookmarks(host: $0) }) { host, _ in
+        content.shellConfirm(asked, question: question) { ask, _ in
             Task {
                 await session.allowBookmarks(
-                    host: host, through: WebAuthBrowser(session: webAuthenticationSession)
+                    host: ask.host, through: WebAuthBrowser(session: webAuthenticationSession), noticesSaid: ask.notices
                 )
             }
         }
     }
 
-    private var asked: Binding<String?> {
-        Binding(get: { session.bookmarkAsk }, set: { if $0 == nil { session.cancelBookmarkAsk() } })
+    private func question(_ ask: SignInAsked) -> ShellConfirmation {
+        session.bookmarkQuestion(host: ask.host)
+    }
+
+    private var asked: Binding<SignInAsked?> {
+        Binding(get: { session.bookmarkAsk.map(session.signInAsked) }, set: { if $0 == nil { session.cancelBookmarkAsk() } })
     }
 }

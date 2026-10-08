@@ -150,15 +150,15 @@ struct ShellPlaceTests {
 
 @Suite("The empty session")
 struct EmptySessionTests {
-    @Test("Timeline and notices rails are not selectable")
-    func timelineAndNoticesAreOff() {
+    @Test("The timeline rail is not selectable; notices is, and says there what would make it fill")
+    func timelineIsOffAndNoticesIsEntered() {
         let empty = ShellAvailability.empty
         #expect(!empty.allows(.timeline))
-        #expect(!empty.allows(.notices))
+        #expect(empty.allows(.notices))
         #expect(empty.allows(.account))
         #expect(empty.allows(.usage))
         #expect(empty.allows(.preferences))
-        #expect(empty.enabledPlaces == [.account, .usage, .preferences])
+        #expect(empty.enabledPlaces == [.notices, .account, .usage, .preferences])
     }
 
     @Test("Compose command no-ops without a signed-in source")
@@ -173,11 +173,12 @@ struct EmptySessionTests {
         let empty = ShellAvailability.empty
         #expect(empty.rotate(from: .account, by: 1) == .usage)
         #expect(empty.rotate(from: .usage, by: 1) == .preferences)
-        #expect(empty.rotate(from: .preferences, by: 1) == .account)
-        #expect(empty.rotate(from: .account, by: -1) == .preferences)
-        #expect(empty.rotate(from: .timeline, by: 1) == .account)
+        #expect(empty.rotate(from: .preferences, by: 1) == .notices)
+        #expect(empty.rotate(from: .notices, by: 1) == .account)
+        #expect(empty.rotate(from: .account, by: -1) == .notices)
+        #expect(empty.rotate(from: .timeline, by: 1) == .notices)
         #expect(empty.placing(.account, as: .timeline) == .account)
-        #expect(empty.placing(.account, as: .notices) == .account)
+        #expect(empty.placing(.account, as: .notices) == .notices)
         #expect(empty.placing(.account, as: .usage) == .usage)
     }
 
@@ -185,7 +186,7 @@ struct EmptySessionTests {
     func disabledReasonsAndEmptyAccount() {
         let empty = ShellAvailability.empty
         #expect(empty.reasonKey(for: .timeline) == "shell.timeline.disabled")
-        #expect(empty.reasonKey(for: .notices) == "shell.notices.disabled")
+        #expect(empty.reasonKey(for: .notices) == nil)
         #expect(empty.reasonKey(for: .account) == nil)
         #expect(L10n.t("account.rail.empty", language: .english) == "Add a source")
         #expect(L10n.t("account.add.title", language: .english) == "Add a source")
@@ -197,12 +198,13 @@ struct EmptySessionTests {
                 """
         )
         #expect(L10n.t("shell.timeline.disabled", language: .english) == "Add a source on Account first")
-        #expect(L10n.t("shell.notices.disabled", language: .english) == "Notices need a signed-in source")
         #expect(L10n.t("compose.disabled.summary", language: .english) == "Compose needs a signed-in source")
         #expect(
             L10n.t("notices.empty.detail", language: .english)
-                == "Notices are what an account receives. This session reads public "
-                + "timelines and signs in to nothing, so nothing arrives here."
+                == "Notices are what a source tells an account: who answered, mentioned, boosted, favourited "
+                + "or followed you. Nothing on this device is signed in to a source that has them, so there is "
+                + "nobody to ask. Sign in to a Mastodon source on the Account page; this page then says what "
+                + "more it would ask of that sign-in before it asks."
         )
     }
 
@@ -223,7 +225,7 @@ struct EmptySessionTests {
         #expect(!ShellAvailability(queryIDs: ["board:forum.example:33"]).allows(.timeline))
         let ready = ShellAvailability(queryIDs: ["all", "trends"])
         #expect(ready.allows(.timeline))
-        #expect(!ready.allows(.notices))
+        #expect(ready.allows(.notices))
         #expect(!ready.canCompose)
         let signed = ShellAvailability(queryIDs: ["all", "trends"], signedIn: true)
         #expect(signed.allows(.notices))
