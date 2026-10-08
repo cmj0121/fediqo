@@ -143,6 +143,13 @@ final class DummyPrefs {
         didSet { write("askMinutes", String(askMinutes)) }
     }
 
+    /// The kinds of notice the notices page leaves out (#323), each under the word
+    /// `Notice.Kind.narrowedAs` gives it; empty, the default, shows every kind. Only what is
+    /// drawn is narrowed: no source is asked anything for it, and the notices stay held.
+    var noticesHidden: Set<String> {
+        didSet { write("noticesHidden", noticesHidden.sorted().joined(separator: ",")) }
+    }
+
     /// The waits a person picks from, in minutes.
     static let waits = [1, 5, 15, 30, 60]
 
@@ -150,7 +157,7 @@ final class DummyPrefs {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, language, theme, fontSize) = Self.read(defaults)
+        (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, noticesHidden, language, theme, fontSize) = Self.read(defaults)
         L10n.language = language
     }
 
@@ -163,6 +170,7 @@ final class DummyPrefs {
         if removedPostsStay != read.removedPostsStay { removedPostsStay = read.removedPostsStay }
         if latestDate != read.latestDate { latestDate = read.latestDate }
         if askMinutes != read.askMinutes { askMinutes = read.askMinutes }
+        if noticesHidden != read.noticesHidden { noticesHidden = read.noticesHidden }
         if language != read.language { language = read.language }
         if theme != read.theme { theme = read.theme }
         if fontSize != read.fontSize { fontSize = read.fontSize }
@@ -170,7 +178,7 @@ final class DummyPrefs {
 
     private static func read(_ defaults: UserDefaults) -> (
         keepMonths: Int?, goneDays: Int?, roomBytes: Int?, removedPostsStay: Bool, latestDate: LatestDate?, askMinutes: Int,
-        language: DummyLanguage, theme: DummyTheme, fontSize: DummyFontSize
+        noticesHidden: Set<String>, language: DummyLanguage, theme: DummyTheme, fontSize: DummyFontSize
     ) {
         func read(_ name: String) -> String? { defaults.string(forKey: Self.prefix + name) }
         let keepMonths = Int(read("keepMonths") ?? "").flatMap { $0 > 0 ? $0 : nil }
@@ -179,10 +187,11 @@ final class DummyPrefs {
         let removedPostsStay = read("removedPostsStay") == "1"
         let latestDate = LatestDate(read("latestDate") ?? "")
         let askMinutes = Int(read("askMinutes") ?? "").flatMap { Self.waits.contains($0) ? $0 : nil } ?? 1
+        let noticesHidden = Set((read("noticesHidden") ?? "").split(separator: ",").map(String.init))
         let language = DummyLanguage(rawValue: read("language") ?? "") ?? .system
         let theme = DummyTheme(rawValue: read("theme") ?? "") ?? .system
         let fontSize = DummyFontSize(rawValue: read("fontSize") ?? "") ?? .standard
-        return (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, language, theme, fontSize)
+        return (keepMonths, goneDays, roomBytes, removedPostsStay, latestDate, askMinutes, noticesHidden, language, theme, fontSize)
     }
 
     private static let prefix = "fediqo.dummy."

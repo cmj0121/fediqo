@@ -74,6 +74,10 @@ final class ShellSession {
     /// Nothing it holds is in the store's list of rows; see its own doc.
     let conversations = ShellConversations()
 
+    /// What each signed-in source says happened to the reader (#323), as one list. On the
+    /// session for `conversations`' reason, and held nowhere else: it is read each run.
+    let noticeList = ShellNoticeList()
+
     /// What each server says it is, asked of that server rather than read off what was written
     /// down when it was joined — #86. On the session for `conversations`' reason.
     let flavours = ShellFlavours()
@@ -816,6 +820,7 @@ final class ShellSession {
         // A source that ends a sign-in itself answers a sign-out still being asked about it.
         mastodon.onEnded = { [weak self] host in
             self?.dropSignOutAsk(host: host)
+            self?.noticeList.forget(host: host)
         }
         // Last, once every property is set: a take-away or a read back holds the room limit still (#249).
         carry.holding = { [weak self] held in self?.holdsStill = held }
@@ -2683,6 +2688,8 @@ final class ShellSession {
         // Seven became eight, for the same reason: an open thread's answers are this device's
         // copy of that server's words too.
         conversations.forget(host: host)
+        // What the source said happened to its reader goes with the sign-in a Clear takes (#323).
+        noticeList.forget(host: host)
         // And nine: what the server last said it was is that server's word, not this device's
         // note. Dropped with the rest, so the next read asks it again — and what it said about
         // itself with it (#188), from this run and from the store, for the same reason.
@@ -2875,6 +2882,7 @@ final class ShellSession {
             stopReadingAsYou(host: host)
             await loads.letGo(host: host)
             refs.letGo(host: host)
+            noticeList.forget(host: host)
             await mastodon.signOut(host: host)
             // What the source said this reader did to its posts goes with the sign-in, now and
             // on disk (#285) — before anything can take the store away with it still said.
