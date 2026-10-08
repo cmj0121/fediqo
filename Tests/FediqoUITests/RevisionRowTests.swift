@@ -322,10 +322,11 @@ struct RevisionRowTests {
         session.persist = {
             let snapshot = await session.store.snapshot()
             try? await file.save(sources: snapshot.sources, notes: snapshot.notes)
+            return true
         }
         await Self.lands(session, "about pears", edited: 30)
         await Self.lands(session, "about plums", edited: 90)
-        await session.persist?()
+        _ = await session.persist?()
         let before = try Self.row(session)
 
         let opened = StoreFile.open(at: dir)

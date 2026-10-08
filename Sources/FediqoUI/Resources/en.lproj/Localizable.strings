@@ -1103,7 +1103,7 @@
 "work.thisDevice" = "This device";
 "carry.title" = "Take away";
 "carry.line" = "Everything here, as one locked file in your own hands.";
-"carry.help" = "Take away writes the whole of what this device holds — posts, timelines, rules, what was read, sources, and what signs in to them — to one file locked by a password you set, and puts it where you choose: never anywhere of ours, never through the Apple account. Read back opens such a file on a clean install or a new device and gives it the same store. Nothing leaves this device either way; both are listed under This device in the run's requests.";
+"carry.help" = "Take away writes what this device holds — posts, timelines, rules, what was read, sources, and what signs in to them — to one file locked by a password you set, and puts it where you choose: never anywhere of ours, never through the Apple account. Notices, and texts still waiting to be sent, are not in it. Read back opens such a file on a clean install or a new device and gives it the same store. Nothing leaves this device either way; both are listed under This device in the run's requests.";
 "carry.idle" = "Nothing under way";
 "carry.take" = "Take away";
 "carry.take.help" = "Weighs what is here, asks whether the picture copies ride, asks for a password, then lets you choose where the file goes.";
@@ -1114,7 +1114,7 @@
 "carry.progress" = "%@ of %@";
 "carry.take.ask.title" = "Take away what this device holds?";
 "carry.take.ask.line" = "With pictures %@ · without %@";
-"carry.take.ask.help" = "With the picture copies, the file shows everything this device shows with no network. Without them it is far smaller, and pictures come back as each post is read again. Either way every post, timeline, rule, source and sign-in is in it.";
+"carry.take.ask.help" = "With the picture copies, the file shows every post as this device shows it with no network. Without them it is far smaller, and pictures come back as each post is read again. Either way every post, timeline, rule, source and sign-in is in it.";
 "carry.take.with" = "With pictures";
 "carry.take.without" = "Without pictures";
 "carry.read.ask.title" = "Read back %d posts?";
@@ -1190,7 +1190,7 @@
 "work.purpose.nearbyMove" = "Moving what this device holds to or from a device nearby";
 "nearby.title" = "Move nearby";
 "nearby.line" = "Everything here, straight to another of your devices, over the air.";
-"nearby.help" = "Hold from nearby shows a six-digit code on this device and waits. Move to nearby lists your devices that are waiting, asks for the code the other one shows, and sends the whole of what this device holds — or only what signs in — straight to it, over Wi-Fi or the direct link between the two, and through nothing else: not our servers, not the Apple account. Both devices ask before anything moves, either can refuse, and the other device proves the whole of it before anything there changes. Each side lists the move under the other device's name in the run's requests.";
+"nearby.help" = "Hold from nearby shows a six-digit code on this device and waits. Move to nearby lists your devices that are waiting, asks for the code the other one shows, and sends what this device holds — or only what signs in — straight to it, over Wi-Fi or the direct link between the two, and through nothing else: not our servers, not the Apple account. Both devices ask before anything moves, either can refuse, and the other device proves the whole of it before anything there changes. Each side lists the move under the other device's name in the run's requests. Notices, and texts still waiting to be sent, do not move.";
 "nearby.idle" = "Nothing under way";
 "nearby.hold" = "Hold from nearby";
 "nearby.hold.help" = "Shows a code and this device's name, and waits for another of your devices to send what it holds.";
@@ -1232,7 +1232,7 @@
 "nearby.hold.sheet.help" = "The mark beside the name is made from the code and this session: the other device works it out from the digits typed and asks whether it is the same, so a device only pretending to be this one cannot pass. The code is new each time, and a wrong one gets one try: it becomes the key the two devices join under, so a device that does not show the same six digits never connects. Nothing moves until this device has shown what would arrive and you have said yes.";
 "nearby.pick.sheet.title" = "Move to nearby";
 "nearby.pick.sheet.line" = "Choose the device that is holding, and type the code it shows.";
-"nearby.pick.sheet.help" = "Only your devices with Fediqo open on Hold from nearby are listed, by the name each gives itself. Once the code is typed, a four-character mark is shown and you are asked whether that device's screen shows the same before anything joins. The code on that device's screen is the proof both sides agree on; a wrong one connects nothing. With pictures, the whole of what this device shows moves; without them, far less, and pictures come back as posts are read again. Sign-ins only moves nothing but what signs in to your sources.";
+"nearby.pick.sheet.help" = "Only your devices with Fediqo open on Hold from nearby are listed, by the name each gives itself. Once the code is typed, a four-character mark is shown and you are asked whether that device's screen shows the same before anything joins. The code on that device's screen is the proof both sides agree on; a wrong one connects nothing. With pictures, every post moves as this device shows it; without them, far less, and pictures come back as posts are read again. Sign-ins only moves nothing but what signs in to your sources.";
 "nearby.pick.looking" = "Looking nearby";
 "nearby.pick.row.brief" = "Holding from nearby";
 "nearby.pick.code" = "Six-digit code";
@@ -1453,10 +1453,6 @@
 "said.act.withdraw.refused" = "%@ would not let this sign-in take the post back. It is still here.";
 "said.act.withdraw.declined" = "%@ did not take the post back. It is still here.";
 "said.act.withdraw.unconfirmed" = "%@ did not confirm the post was taken back. Reload to see.";
-"said.act.answer.failed" = "%@ could not be reached, so your answer was not sent.";
-"said.act.answer.refused" = "%@ would not let this sign-in answer. Your answer was not sent.";
-"said.act.answer.declined" = "%@ did not take your answer. It was not sent.";
-"said.act.answer.unconfirmed" = "%@ did not confirm your answer was sent. Reload to see.";
 "said.post.yours" = "your post";
 "said.post.by" = "%@'s post";
 "said.act.boost.failed.of" = "%1$@ could not be reached, so the boost of %2$@ did not change. It is as it was.";
@@ -1479,10 +1475,15 @@
 "said.act.favourite.many" = "%2$d favourites at %1$@ did not go through. Reload to see where each stands.";
 "said.act.bookmark.many" = "%2$d bookmarks at %1$@ did not go through. Reload to see where each stands.";
 "said.act.withdraw.many" = "%2$d posts at %1$@ were not taken back. Reload to see where each stands.";
-"said.act.answer.many" = "%2$d answers to %1$@ were not sent.";
 "said.title" = "Not done";
 "said.close" = "Close";
 "said.all.close" = "Close";
+"said.unwritten.notice" = "A notice you dismissed could not be taken off this device yet. It will be tried again.";
+"said.unwritten.post" = "A post you took back could not be taken off this device yet. It will be tried again.";
+"said.unwritten.posts" = "Posts you let go could not be taken off this device yet. It will be tried again.";
+"said.unwritten.source" = "What a source you removed left here could not be taken off this device yet. It will be tried again.";
+"said.unwritten.cleared" = "What you cleared could not be taken off this device yet. It will be tried again.";
+"said.unwritten.reader" = "What a sign-in that ended left here could not be taken off this device yet. It will be tried again.";
 "said.clear" = "Close all";
 "said.more" = "%d more";
 "said.more.spoken" = "%d more things not done. Show them all.";
@@ -1523,6 +1524,8 @@
 "outbox.looking.answer" = "Looking for your answer on %@ before sending it again…";
 "outbox.unkept.post" = "Your post could not be kept on this device, so it was not sent to %@. Sent now, it would be lost if this did not finish.";
 "outbox.unkept.answer" = "Your answer could not be kept on this device, so it was not sent to %@. Sent now, it would be lost if this did not finish.";
+"outbox.unremoved.post" = "Your post for %@ could not be removed from this device. Its words are still kept here: discard it again to try once more.";
+"outbox.unremoved.answer" = "Your answer for %@ could not be removed from this device. Its words are still kept here: discard it again to try once more.";
 "outbox.hold.other.post" = "Your post was written as %2$@, and %1$@ is signed in as %3$@. Sign in as %2$@ to send it.";
 "outbox.hold.other.answer" = "Your answer was written as %2$@, and %1$@ is signed in as %3$@. Sign in as %2$@ to send it.";
 "outbox.hold.other.unknown.post" = "Your post was written as %2$@. %1$@ has not yet said who is signed in now, so it waits. It can be sent once %1$@ answers.";

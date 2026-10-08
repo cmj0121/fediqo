@@ -36,6 +36,14 @@ import Synchronization
 /// **A failure is logged and thrown.** A save that did not land is the reader's posts at risk,
 /// and a `try?` at the call site would make that invisible; a caller with nothing to do about it
 /// may still drop the error, because it is already in the log.
+///
+/// **Each part is written whatever became of the others.** The texts, the notices and the items
+/// each have their own write, their own outcome and their own revision last written: a notices
+/// write that fails does not keep a post from being saved, at a quit least of all. The save
+/// throws afterwards, the first failure it met.
+///
+/// **And a write that failed is owed another** (`follow`): tried again by the follower, with
+/// nobody asking, a `gap` later — `retries` times at most, until one lands.
 public actor StoreSaver {
     /// Writes one snapshot to the index.
     public typealias Write = @Sendable (
@@ -65,6 +73,9 @@ public actor StoreSaver {
     /// The least time between two followed saves. A save is every note written again, so reading
     /// on for an hour is at most sixty of them; the one knob, set against the durations logged.
     public static let gap: Duration = .seconds(60)
+    /// How many times running a write that failed is tried again by the follower, a `gap`
+    /// apart, before it is left to the next change or the next ask.
+    public static let retries = 5
 
     private static let log = Logger(subsystem: "Fediqo", category: "index")
 
@@ -84,6 +95,40 @@ public actor StoreSaver {
     private var writtenUnsent = 0
     /// The same, of the notices (`ItemStore.noticesRevision`).
     private var writtenNotices = 0
+    /// Whether a write of any part has failed since the last save that wrote every part: what
+    /// the follower owes another try for.
+    private var unlanded = false
+    /// How many tries running the follower has made of a write that failed.
+    private var retried = 0
+    /// Wakes the follower, where one runs: the store changed, or a write failed.
+    private var wake: AsyncStream<Void>.Continuation?
+    /// Everyone told when a save has written every part after a write had failed. See `landings()`.
+    private var landingListeners: [UUID: AsyncStream<Void>.Continuation] = [:]
+
+    /// Each time a save writes every part **after a write of some part had failed**: whoever
+    /// told the person that something could not be taken off this device yet learns here that
+    /// it now has been — whichever window asked, and where it was the follower's own retry
+    /// that landed, with nobody asking. Each call is its own stream, and only the newest is
+    /// kept; one nobody reads any more drops itself.
+    public func landings() -> AsyncStream<Void> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        landingListeners[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.stopTelling(id) }
+        }
+        return stream
+    }
+
+    private func stopTelling(_ id: UUID) {
+        landingListeners[id] = nil
+    }
+
+    /// A write of one part failed: the follower is told, and owes another.
+    private func owe() {
+        unlanded = true
+        wake?.yield()
+    }
 
     /// `write` is `nil` when this run must not write at all — the fail-closed case of
     /// `StoreFile.open(at:now:)`. Every save is then a logged no-op.
@@ -173,6 +218,7 @@ public actor StoreSaver {
             return true
         } catch {
             Self.log.error("Saving what waits to be sent failed: \(String(describing: error), privacy: .public)")
+            owe()
             throw error
         }
     }
@@ -188,6 +234,7 @@ public actor StoreSaver {
             writtenNotices = snapshot.revision
         } catch {
             Self.log.error("Saving the notices failed: \(String(describing: error), privacy: .public)")
+            owe()
             throw error
         }
     }
@@ -256,8 +303,13 @@ public actor StoreSaver {
     /// **A save asked for meanwhile takes the armed one with it**: the follower wakes to a store
     /// already written — or finds it so once the asked save under way has landed — writes nothing
     /// and owes no gap. Only a followed save that wrote is owed one. A change that moved no
-    /// written revision (#208) arms nothing. A followed save that fails is in the log and is not
-    /// tried again by itself; the next change, or the next ask, is.
+    /// written revision (#208) arms nothing.
+    ///
+    /// **A write that failed is tried again, by itself** (`retry`): any part's, a followed save's
+    /// or one somebody asked for — a `gap` after the failure, and a `gap` after each try that
+    /// fails too, `retries` times running. Past that nothing is slept for or written until the
+    /// store next changes or somebody asks; a change, and a save that writes every part, each
+    /// start the count again.
     ///
     /// `sleep` is `Task.sleep` but for a test, which drives it by hand. Every hop here is on this
     /// actor but the store's own, so nothing of it touches the main actor.
@@ -270,15 +322,42 @@ public actor StoreSaver {
         // since the store was made where nothing has been written yet: a store starts at
         // revision 0, one a launch read back included (`ItemStore.revision`).
         let changes = await store.changes()
+        // One thing to wait on for the two that wake this: the store changing, and a write
+        // failing (`owe`). Only the newest is kept, as the store keeps only its newest change.
+        let (wakes, wake) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        self.wake = wake
+        let heardChanges = Task {
+            for await _ in changes { wake.yield() }
+        }
+        defer {
+            heardChanges.cancel()
+            self.wake = nil
+        }
         var heard = Followed(items: written ?? 0, notices: writtenNotices)
+        wake.yield()
         do {
-            heard = try await follow(from: heard, quiet: quiet, gap: gap, sleep: sleep)
-            for await _ in changes {
+            for await _ in wakes {
                 heard = try await follow(from: heard, quiet: quiet, gap: gap, sleep: sleep)
+                try await retry(gap: gap, sleep: sleep)
             }
         } catch {
             // Cancelled in a wait: whoever stopped this flushes, as a quit does.
         }
+    }
+
+    /// The try a failed write is owed: a `gap` on, every part that has moved since it was last
+    /// written. Nothing where no write has failed since the last whole save, where one landed
+    /// while this waited, or where `retries` have been made running — **so a disk that will not
+    /// be written is asked a handful of times, a minute apart, and then let be**. A try that
+    /// fails wakes the follower again (`owe`), which is what makes the next one.
+    private func retry(gap: Duration, sleep: @Sendable (Duration) async throws -> Void) async throws {
+        guard unlanded, retried < Self.retries else { return }
+        retried += 1
+        try await sleep(gap)
+        // Read after the wait: a save somebody asked for meanwhile may have written it all.
+        guard unlanded else { return }
+        // A failure is already in the log, and is tried again from the top of the loop.
+        if (try? await saveAndTell()) == true { try await sleep(gap) }
     }
 
     /// One change heard: the save it arms, and the gap that save is owed. Returns the revision
@@ -286,13 +365,24 @@ public actor StoreSaver {
     ///
     /// **A page of notices arms a save as a landing does** and owes no gap: the gap is the price
     /// of writing every note again, and a save that found only the notices moved wrote none.
+    ///
+    /// **Only a change arms one.** A wake that is a write having failed finds no revision moved
+    /// since this last looked and arms nothing here, whichever part failed: every part's
+    /// failure is `retry`'s, under its one bound. The texts are never armed here at all — each
+    /// is written by whoever pressed (`saveUnsent`) — so a write of them that fails is `retry`'s too.
     private func follow(
         from heard: Followed, quiet: Duration, gap: Duration,
         sleep: @Sendable (Duration) async throws -> Void
     ) async throws -> Followed {
         let revision = await followed()
         let itemsMoved = revision.items != heard.items && revision.items != written
-        guard itemsMoved || revision.notices != writtenNotices else { return revision }
+        // Moved since this last looked, as the items are asked: a write of them that failed
+        // has woken this too (`owe`), and that is `retry`'s to try again, within its bound —
+        // not a change, which would be tried here a `quiet` apart for as long as it failed.
+        let noticesMoved = revision.notices != heard.notices && revision.notices != writtenNotices
+        guard itemsMoved || noticesMoved else { return revision }
+        // The store changed: what is owed a write that failed is counted afresh.
+        retried = 0
         try await sleep(quiet)
         let armed = await followed()
         guard armed.items != written, itemsMoved || armed.items != revision.items else {
@@ -322,11 +412,26 @@ public actor StoreSaver {
         if waiting?.id == id { waiting = nil }
     }
 
-    /// Whether anything of the items was written. The texts go first, where they moved, and
-    /// then the notices.
+    /// Whether anything of the items was written. The texts go first, where they moved, then
+    /// the notices, then the items — **each whatever became of the one before it**, so a part
+    /// that cannot be written keeps no other from the file. Throws the first failure, after
+    /// every part has had its turn.
     private func writeNow() async throws -> Bool {
-        try await writeUnsentNow()
-        try await writeNoticesNow()
+        var failure: (any Error)?
+        do { try await writeUnsentNow() } catch { failure = error }
+        do { try await writeNoticesNow() } catch { failure = failure ?? error }
+        var wrote = false
+        do { wrote = try await writeItemsNow() } catch { failure = failure ?? error }
+        if let failure { throw failure }
+        if unlanded {
+            unlanded = false
+            for listener in landingListeners.values { listener.yield() }
+        }
+        retried = 0
+        return wrote
+    }
+
+    private func writeItemsNow() async throws -> Bool {
         guard let write else { return false }
         let snapshot = await store.snapshot()
         guard snapshot.revision != written else { return false }
@@ -340,6 +445,7 @@ public actor StoreSaver {
             return true
         } catch {
             Self.log.error("Saving the index failed: \(String(describing: error), privacy: .public)")
+            owe()
             throw error
         }
     }

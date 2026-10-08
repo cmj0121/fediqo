@@ -61,7 +61,7 @@ struct SpanSection: View {
                     }
                 ))
             }
-            if let went { ShellReadingLine(Self.wentLine(went)) }
+            if let went { ShellReadingLine(Self.wentLine(went, offDevice: !Self.unwritten(in: session))) }
         } header: {
             ShellSectionHead(title: "prefs.span", line: "usage.span.line", help: "prefs.span.footer")
         }
@@ -163,9 +163,18 @@ struct SpanSection: View {
         count == 0 ? L10n.t("usage.span.none", language: language) : L10n.count("prefs.held.posts", count, language: language)
     }
 
-    /// What the press says back: how many went.
-    static func wentLine(_ count: Int, language: DummyLanguage? = nil) -> String {
-        L10n.count("prefs.span.went", count, language: language)
+    /// Whether the posts a press let go are still in this device's file: the write behind it
+    /// did not land, and the strip says so (`ShellSession.saveNow`) until one does.
+    static func unwritten(in session: ShellSession) -> Bool {
+        session.said.lines.contains { $0.what == .unwritten(.posts) }
+    }
+
+    /// What the press says back: how many went — or, where the write that takes them off
+    /// the disk did not land, the strip's own sentence that they are not off this device yet,
+    /// and no count: nothing is said to be done that is not.
+    static func wentLine(_ count: Int, offDevice: Bool = true, language: DummyLanguage? = nil) -> String {
+        guard offDevice else { return Said(.unwritten(.posts), .unreachable, host: "").words(language: language) }
+        return L10n.count("prefs.span.went", count, language: language)
     }
 }
 
@@ -206,14 +215,23 @@ extension ShellSession {
     /// press (#248). Where something went, the rows are read again, the store is written so the
     /// drop holds after a relaunch, and the index is measured again; where nothing did, nothing
     /// moves. Returns how many went.
+    ///
+    /// **A notice's copy of a post of those days goes too**, an item or not, and is counted
+    /// nowhere — a notice is not a post — but is off the disk before this returns all the same.
     @discardableResult
     func letGo(span: Range<Date>, host: String?) async -> Int {
         await holdingStill {
+            let told = await store.noticesRevision
             let went = await store.letGo(span: span, host: host)
-            guard went > 0 else { return 0 }
+            guard went > 0 else {
+                // Only the copy a notice carried went: waited for like the rest (#292), as
+                // `keep(months:)` waits for the notices its limit alone let go.
+                if await store.noticesRevision != told { await saveNow(.posts) }
+                return 0
+            }
             await reloadFromStore()
             // Waited for: the count is not said while the file still holds what went (#292).
-            await saveNow { [weak self] in await self?.readStoreBytes() }
+            await saveNow(.posts) { [weak self] in await self?.readStoreBytes() }
             return went
         }
     }

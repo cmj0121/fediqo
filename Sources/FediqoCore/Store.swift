@@ -90,6 +90,27 @@ public actor ItemStore {
     /// Counts the changes to `unsent`, apart from `revision`: a saver writes the texts as a
     /// part of their own, so holding one rewrites no post, and a landing rewrites no text.
     public private(set) var unsentRevision = 0
+    /// The texts let go of — landed, discarded, their source removed — by name: **what a write
+    /// of a text is asked against, so one made of a copy from before the letting go is not
+    /// taken** (`hold(_:)`), as the notices' epochs do for a host. Kept here, where the letting
+    /// go happens, so no order of arrival can put a text back. A name is given once and never
+    /// to a second text. For the run.
+    private var unsentGone: Set<UUID> = []
+    /// Who is sending each text that is being sent, by the name its sender goes by — a session's
+    /// outbox (`claim(unsent:for:)`). **One sender a text**: decided here, in the store's own
+    /// isolation, so two windows over one store cannot both send it. For the run, never written.
+    private var unsentSenders: [UUID: UUID] = [:]
+    /// Counts every change to the texts and to who is sending them: what a page that draws
+    /// them has taken, or has yet to (`unsentView`). Apart from `unsentRevision`, which a
+    /// saver writes by and a claim does not move.
+    public private(set) var unsentMark = 0
+
+    /// The texts, or who is sending one, changed: everyone listening is told, as for a notice.
+    /// The revision a save writes the posts by stays where it is.
+    private func unsentChanged() {
+        unsentMark += 1
+        for listener in listeners.values { listener.yield(revision) }
+    }
     /// What each signed-in source says happened to the person, and how far down it was read, by
     /// host (`NoticeReach`, #323).
     ///
@@ -1140,21 +1161,61 @@ public actor ItemStore {
     }
 
     /// Holds a text pressed to send, or what is now known of one already held — in its place.
-    public func hold(_ text: Unsent) {
+    ///
+    /// **Not one let go of this run** (`unsentGone`): whoever writes it now took its copy before
+    /// the person, or its landing, said it goes (#292). Returns whether it is held — **and
+    /// whoever is about to send it does not, on a no.**
+    @discardableResult
+    public func hold(_ text: Unsent) -> Bool {
+        guard !unsentGone.contains(text.id) else { return false }
         if let at = unsent.firstIndex(where: { $0.id == text.id }) {
-            guard unsent[at] != text else { return }
+            guard unsent[at] != text else { return true }
             unsent[at] = text
         } else {
             unsent.append(text)
         }
         unsentRevision += 1
+        unsentChanged()
+        return true
     }
 
-    /// Lets a text go: it landed, or the person discarded it.
+    /// Lets a text go: it landed, or the person discarded it. Held or not, its name is not
+    /// held again (`hold(_:)`), and nobody is sending it any more.
     public func letGo(unsent id: UUID) {
-        guard let at = unsent.firstIndex(where: { $0.id == id }) else { return }
-        unsent.remove(at: at)
-        unsentRevision += 1
+        var moved = unsentGone.insert(id).inserted
+        if unsentSenders.removeValue(forKey: id) != nil { moved = true }
+        if let at = unsent.firstIndex(where: { $0.id == id }) {
+            unsent.remove(at: at)
+            unsentRevision += 1
+            moved = true
+        }
+        if moved { unsentChanged() }
+    }
+
+    /// Takes the sending of one text for `sender`, where nobody else has it: **the one place
+    /// it is decided who sends a text**, so it is never sent by two at once. True where
+    /// `sender` has it — now, or already. Whether the text is still held is not asked here:
+    /// that is `hold(_:)`'s to say, and a sender asks both.
+    public func claim(unsent id: UUID, for sender: UUID) -> Bool {
+        if let has = unsentSenders[id] { return has == sender }
+        unsentSenders[id] = sender
+        unsentChanged()
+        return true
+    }
+
+    /// Gives the sending of one text back, where `sender` has it: its request has ended,
+    /// whatever became of it.
+    public func release(unsent id: UUID, from sender: UUID) {
+        guard unsentSenders[id] == sender else { return }
+        unsentSenders[id] = nil
+        unsentChanged()
+    }
+
+    /// The texts as they stand, read in one hop: each held, who is sending which, and the
+    /// names let go of this run — what every page that draws them draws from, so a text
+    /// discarded, landed, changed or taken to send through one of them is so in all.
+    public func unsentView() -> UnsentView {
+        UnsentView(texts: unsent, senders: unsentSenders, gone: unsentGone, mark: unsentMark)
     }
 
     /// Every text held, in the order pressed.

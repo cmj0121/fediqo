@@ -191,7 +191,8 @@ public struct NoticeReach: Hashable, Sendable {
     /// Which read the source answers with: the gathered one, or the single one.
     public var gathered: Bool
     /// Whether the source is held to `capacity` and has more below: read on no further while
-    /// it is. **Derived from the count** (`bounded`), and written down only as that.
+    /// it is. **Derived from the count** (`bounded`), and written down nowhere: whoever holds
+    /// a reach read back from disk says it again (`ItemStore.init`).
     public var full: Bool
 
     public init(

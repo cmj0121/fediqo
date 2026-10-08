@@ -125,7 +125,7 @@ struct BookmarkRowTests {
             ]
         )
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
 
         await session.toggle(.bookmark, on: try row(session))
         #expect(await server.paths == ["/api/v1/statuses/9/bookmark"])
@@ -258,7 +258,7 @@ struct BookmarkRowTests {
         let (session, _, _) = try await marked()
         #expect(Self.said(try row(session)) == [true, true, true])
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
 
         await session.signOut(host: host)
         await session.reloadFromStore()
@@ -326,8 +326,8 @@ struct BookmarkRowTests {
         let (session, tokens, _) = try await marked()
         let file = try StoreFile(at: root)
         let saver = StoreSaver(store: session.store, file: file)
-        session.persist = { try? await saver.save() }
-        await session.persist?()
+        session.persist = { (try? await saver.save()) != nil }
+        _ = await session.persist?()
         #expect(try file.load().notes.first?.bookmarked == true)
         func packager(_ directory: URL, _ file: StoreFile?, _ store: ItemStore, _ suite: String) throws -> StorePackager {
             StorePackager(
@@ -361,7 +361,7 @@ struct BookmarkRowTests {
     func endedThenSavedForCarry() async throws {
         let (session, tokens, _) = try await marked()
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
         try tokens.forget(host: host)
         session.mastodon.endedByServer(host: host)
 
@@ -437,6 +437,7 @@ struct BookmarkRowTests {
         session.persist = {
             let snapshot = await session.store.snapshot()
             try? await file.save(sources: snapshot.sources, notes: snapshot.notes)
+            return true
         }
         await session.toggle(.bookmark, on: try row(session))
         await session.saved()

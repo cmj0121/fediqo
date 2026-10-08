@@ -211,7 +211,7 @@ struct ShownFirstTests {
     func shownAtThePress(act: PostAct, on: Bool) async throws {
         let (session, server, _) = try await shell(!on)
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
         let item = try row(session)
         let out = await pressed(session, server) { await session.toggle(act, on: item) }
         defer { out.watchdog.cancel() }
@@ -641,7 +641,8 @@ struct ShownFirstTests {
         #expect(folded[0].words(language: .english) == "4 boosts at social.example did not go through. Reload to see where each stands.")
         #expect(folded[0].words(language: .taiwanese) == "social.example 上有 4 個轉發沒有完成。重新載入看看各自的狀況。")
         for language in [DummyLanguage.english, .taiwanese] {
-            for act in PostAct.allCases {
+            // An answer that did not arrive is the outbox's line, and is never said here.
+            for act in PostAct.allCases where act != .answer {
                 #expect(L10n.t("said.act.\(act).many", language: language) != "said.act.\(act).many")
             }
         }
@@ -666,7 +667,7 @@ struct ShownFirstTests {
         let (session, server, home) = try await shell()
         let mine = try row(session, "1")
         var writtenWhileOut: [Bool] = []
-        session.persist = { writtenWhileOut.append(session.acts.leaving.contains(mine.id)) }
+        session.persist = { writtenWhileOut.append(session.acts.leaving.contains(mine.id)); return true }
         #expect(session.askToWithdraw(mine))
         let out = await pressed(session, server) { await session.withdraw(mine) }
         defer { out.watchdog.cancel() }
@@ -706,7 +707,7 @@ struct ShownFirstTests {
             let drawn = session.timelineItems(latest: nil).map(\.id)
             let mine = try row(session, "1")
             var saved = 0
-            session.persist = { saved += 1 }
+            session.persist = { saved += 1; return true }
             let out = await pressed(session, server) { await session.withdraw(mine) }
             #expect(!session.notes.contains { $0.key.rowID == mine.id })
 

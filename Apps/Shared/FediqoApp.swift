@@ -284,6 +284,7 @@ struct FediqoApp: App {
         FediqoRootView(
             store: Launch.shared.store, forums: Launch.shared.forums,
             mastodon: Launch.shared.mastodon, persist: save, persistUnsent: saveUnsent,
+            savesLanded: { [saver = Launch.shared.saver] in await saver.landings() },
             measureStore: measureStore, compactStore: compactStore, weighStore: weighStore,
             limits: Launch.shared.limits,
             storeIsNewer: Launch.shared.storeIsNewer,
@@ -308,9 +309,12 @@ struct FediqoApp: App {
         }
     }
 
-    /// A failure is already logged by the saver; there is nothing more to do about it here.
-    private func save() async {
-        try? await Launch.shared.saver.save()
+    /// Whether the write happened: no where it failed — the saver has logged it, and owes
+    /// another try by itself (`StoreSaver.follow`) — which an act that takes something off
+    /// this device tells the person (`ShellSession.saveNow`). A run with no store to write
+    /// has no file for anything to be left in, and its save is the logged no-op it always was.
+    private func save() async -> Bool {
+        (try? await Launch.shared.saver.save()) != nil
     }
 
     /// Only what the person pressed to send (`StoreSaver.saveUnsent`): awaited by a send before

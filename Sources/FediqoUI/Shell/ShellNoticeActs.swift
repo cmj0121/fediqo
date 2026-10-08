@@ -157,11 +157,6 @@ final class ShellNoticeActs {
         )).held
     }
 
-    /// The sources holding something back, in host order.
-    var holders: [String] {
-        holdings.filter { $0.value.held != nil }.keys.sorted()
-    }
-
     /// The sources the page says are holding something back (`shownHeld`), in host order.
     var shownHolders: [String] {
         holdings.keys.filter { shownHeld(host: $0) != nil }.sorted()

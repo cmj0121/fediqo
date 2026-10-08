@@ -113,7 +113,7 @@ struct NoticesHeldTests {
             http: FixtureHTTP(), store: store, mastodon: MastodonSessions(tokens: tokens, sender: server)
         )
         let saver = StoreSaver(store: store, file: file)
-        session.persist = { try? await saver.save() }
+        session.persist = { (try? await saver.save()) != nil }
         session.mastodon.refresh()
         if let capacity { session.noticeList.capacity = capacity }
         if adopting { await session.reloadFromStore() }
@@ -604,6 +604,7 @@ struct NoticesHeldTests {
             writing = true
             await gate.wait()
             try? await saver.save()
+            return true
         }
         // A's sign-in goes, and the first sweep takes it and is held at its write.
         try tokens.forget(host: Self.a)
@@ -708,6 +709,7 @@ struct NoticesHeldTests {
         here.session.persist = {
             saves += 1
             try? await saver.save()
+            return true
         }
         let list = here.list
         await list.read(in: here.session)
@@ -769,5 +771,29 @@ struct NoticesHeldTests {
         #expect(try disk(dir, holds: "Ada-Four"))
         await again.session.reloadFromStore()
         #expect(ids(again.list.lines) == ["a4"])
+    }
+
+    @Test("Letting a span of days go that holds no item but the post a notice carries leaves none of that post's words in the file by the time it returns; the line stays")
+    func aSpanThatHoldsOnlyACarriedPost() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let tokens = try signedIn()
+        let routes = [
+            F.get(Self.a): F.page(Self.mention(4, by: "Ada-Four", words: "quillwort-carried", minutes: 5)),
+            F.get(Self.b): F.page(),
+        ]
+        try await firstRun(in: dir, routes, tokens: tokens)
+        let again = try await run(in: dir, routes, tokens: tokens)
+        #expect(again.list.lines.first?.post?.body == "quillwort-carried")
+        #expect(again.session.notes.isEmpty, "the premise: the post is no item")
+        #expect(try disk(dir, holds: "quillwort-carried"), "the premise")
+
+        let span = Date().addingTimeInterval(-3600)..<Date().addingTimeInterval(3600)
+        #expect(await again.session.letGo(span: span, host: nil) == 0, "no item went: a notice's copy is counted nowhere")
+
+        #expect(try !disk(dir, holds: "quillwort-carried"))
+        #expect(try disk(dir, holds: "Ada-Four"), "the line stays")
+        await again.session.reloadFromStore()
+        #expect(ids(again.list.lines) == ["a4"] && again.list.lines.first?.post == nil)
     }
 }

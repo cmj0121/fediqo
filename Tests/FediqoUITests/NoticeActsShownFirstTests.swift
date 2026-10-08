@@ -751,7 +751,7 @@ struct NoticeActsShownFirstTests {
         let task = try start(.letThrough, in: session)
         #expect(await spun { await server.count(through) == 1 })
         #expect(acts.shownHolders.isEmpty && acts.shownHeld(host: Self.a) == nil, "a source was said to hold what is on its way out")
-        #expect(acts.holders == [Self.a] && acts.opened == [Self.a])
+        #expect(acts.held(host: Self.a) != nil && acts.opened == [Self.a])
 
         await gate.open()
         await task.value

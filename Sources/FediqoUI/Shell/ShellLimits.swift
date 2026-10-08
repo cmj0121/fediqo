@@ -127,7 +127,7 @@ extension ShellSession {
             await reloadFromStore()
             // Waited for, where nothing else waits for a save: the next line weighs the file
             // this writes. Nobody pressed for it — the check runs in its own task.
-            await persist?()
+            await write()
             let after = await weighStore()
             // A round that gave nothing back — a save that did not land — is not tried again.
             guard after < held else { break }

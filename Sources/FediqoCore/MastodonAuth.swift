@@ -511,9 +511,11 @@ public struct MastodonAuthorized: Sendable {
     /// Who the reader is on this source, as `@user@host` — the spelling `Note.handle` takes, so a
     /// post can be told to be theirs by comparing the two (#109).
     ///
-    /// **Asked of the source and never written down.** It is the account check's own answer, and
-    /// a sign-in to a different account on the same host is a different answer: remembering it
-    /// would be this device deciding whose posts are whose.
+    /// **Asked of the source, and written down nowhere by this call.** It is the account check's
+    /// own answer, and a sign-in to a different account on the same host is a different answer.
+    /// Where it is remembered it is with the sign-in it was said through, and goes with it
+    /// (`MastodonToken.accountID` and `handle`, in the sign-in's Keychain item) — never apart
+    /// from one, which would be this device deciding whose posts are whose.
     public func handle() async throws -> String {
         try await who().handle
     }

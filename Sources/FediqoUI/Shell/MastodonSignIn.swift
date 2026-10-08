@@ -118,10 +118,18 @@ public final class MastodonSessions {
     private(set) var handles: [String: String] = [:]
 
     /// An account as its source named it, and the sign-in the answer came through.
+    ///
+    /// **Who it is, is the id** — what a text's writer is told by (`ShellOutbox.writes`). The
+    /// handle is the source's own spelling of a name: compared as sent with the handle a post
+    /// of that source carries, and never drawn as sent (`shown`).
     struct Reader: Equatable {
         let id: String
         let handle: String
         fileprivate let accessToken: String
+
+        /// `handle`, made fit to stand in a sentence of ours: no control or format character,
+        /// no line break, and no longer than a name may run (`LineText.oneLine`).
+        var shown: String { LineText.oneLine(handle) }
     }
 
     /// Who each sign-in is, by the id its source gives the account, as the account check said

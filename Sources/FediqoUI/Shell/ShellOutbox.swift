@@ -38,6 +38,26 @@ import UIKit
 /// first, and told it may post twice. A read that brings such a post lets the text go by itself
 /// (`reconcile`). A text the person changed is a different post, and takes a new name.
 ///
+/// **Not said to be gone while the file holds it** (#292). Every write that takes a text's
+/// words off the disk is asked whether it landed. Where the person said it goes — a discard,
+/// its source removed — and the write did not land, its line stands saying so (`unremoved`),
+/// and Discard tries again. Where its post exists — it landed, or was seen to have — the line
+/// goes all the same, and the row left behind is taken out by the next save (`wroteGone`).
+///
+/// **A view over what the store holds** (`follow`). Every window has an outbox of its own and
+/// all of them draw one store's texts: a text discarded, landed, changed or added through one
+/// is so in each of them as the store says it changed, and where a text stands is the store's
+/// word wherever the store knows it — its source was asked and it may have been posted, it was
+/// refused, it was not sent, another window is sending it. What is this outbox's alone, and in
+/// memory, is the request it has out itself (`out`), what was typed over a text in its sheet,
+/// and that a write to this device's file did not land (`unkept`, `unremoved`).
+///
+/// **One sender a text, and the store says who** (`ItemStore.claim`). A send takes the text in
+/// the store's own isolation before anything is asked of its source and gives it back when the
+/// request has ended; an outbox that does not get it sends nothing and draws the text as on its
+/// way. And **wherever the store will not hold a text, nothing is sent and its line goes**
+/// (`ItemStore.hold`): it was let go of — through another window, or by its landing.
+///
 /// **One on the wire a source**, the rest waiting in the order pressed, so two posts reach
 /// their source in the order written; one that fails does not hold the next back.
 ///
@@ -59,6 +79,9 @@ final class ShellOutbox {
         case unconfirmed
         /// It could not be written to this device, so its request did not leave.
         case unkept
+        /// The person said it goes, and its words could not be taken out of this device's
+        /// file: they are still there, and nothing is done with it but to try that again.
+        case unremoved
     }
 
     struct Sending: Identifiable, Equatable, Sendable {
@@ -77,7 +100,8 @@ final class ShellOutbox {
         /// Nobody is signed in to its source with writing.
         case signedOut
         /// Whoever is signed in to its source is not shown to be who wrote it: somebody else,
-        /// by their handle, or nobody the source has named yet.
+        /// by their handle as it is drawn (`MastodonSessions.Reader.shown`), or nobody the
+        /// source has named yet.
         case otherAccount(here: String?)
         /// The post it answers is not held, or its source has said it is gone.
         case answeredGone
@@ -107,9 +131,10 @@ final class ShellOutbox {
     /// sheet held them, for the run: an answer read in an open conversation is in no store.
     @ObservationIgnored private var targets: [UUID: AnswerTarget] = [:]
     /// The texts whose source was asked and never said yes or no in a way that settles it —
-    /// this run, or the one before (`adopt`). **Once a text may have landed, nothing but a yes
-    /// says otherwise**: a later try that fails proves nothing about the first, so it goes on
-    /// saying it may have been posted until it lands, is found, or is discarded.
+    /// this run, the one before, or through another window, as the store says (`follow`).
+    /// **Once a text may have landed, nothing but a yes says otherwise**: a later try that
+    /// fails proves nothing about the first, so it goes on saying it may have been posted
+    /// until it lands, is found, or is discarded.
     @ObservationIgnored private var mayHaveLanded: Set<UUID> = []
     /// When each text's source was last asked, this run: a post made by a later try is still
     /// that text's (`isPost`).
@@ -119,6 +144,17 @@ final class ShellOutbox {
     @ObservationIgnored private var discarding: Set<UUID> = []
     /// The texts the person said to send though they could not be written to this device.
     @ObservationIgnored private var sentUnkept: Set<UUID> = []
+    /// This outbox's name among the store's senders (`ItemStore.claim`).
+    @ObservationIgnored let sender = UUID()
+    /// The texts this outbox has out itself — pressed here and waiting, looked for, or on the
+    /// wire — until that has ended and the store was told. **What the store's word does not
+    /// draw over** (`follow`): its own copy of each is the newer one meanwhile.
+    @ObservationIgnored private var out: Set<UUID> = []
+    /// The names this outbox let go of itself. Its line is gone here at once and the store is
+    /// told behind that, so a view of the store read in between does not draw it again.
+    @ObservationIgnored private var dropped: Set<UUID> = []
+    /// The store's `unsentMark` as the last view followed had it: an older one is not taken.
+    @ObservationIgnored private var followed = -1
     /// The one send running for each source.
     @ObservationIgnored private var pumps: [String: Task<Void, Never>] = [:]
     /// The write of each text asked for and not yet returned: its send waits for it.
@@ -127,6 +163,9 @@ final class ShellOutbox {
     @ObservationIgnored private var works: [UUID: Task<Void, Never>] = [:]
     /// The moment a request is said to leave. A seam, so a test sets the clock.
     @ObservationIgnored var now: () -> Date = { Date() }
+    /// Waited for by a text's own write before it holds the text. A seam, so a test keeps
+    /// one there while its source is removed.
+    @ObservationIgnored var holding: (@MainActor () async -> Void)?
 
     /// Puts a text where the person can take it elsewhere. A seam, so a test reads what went.
     @ObservationIgnored var copy: (String) -> Void = { text in
@@ -151,23 +190,77 @@ final class ShellOutbox {
     /// Whether `id` may have been posted already.
     func mayHaveBeenPosted(_ id: UUID) -> Bool { mayHaveLanded.contains(id) }
 
-    // MARK: - A launch
+    // MARK: - What the store holds
 
-    /// What the last run left: each drawn as it stands and none sent. One whose source was
-    /// asked may have been posted; one that was not, was not sent.
-    func adopt(_ held: [Unsent]) {
-        for unsent in held where sending(unsent.id) == nil {
-            let standing: Standing
-            switch unsent.standing {
-            case .asked:
-                standing = .unconfirmed
-                mayHaveLanded.insert(unsent.id)
-            case .refused: standing = .failed(.refused)
-            case .declined: standing = .failed(.declined)
-            case .fresh, .unreachable: standing = .failed(.unreachable)
+    /// What the store holds of the texts, drawn: at a launch — what the last run left, each as
+    /// it stands and none sent — and each time the store says they changed, through this
+    /// window or another (`ShellSession.adopt`).
+    ///
+    /// - A text let go of in the store is gone here, and any sheet or question about it with
+    ///   it — but for one whose words this outbox is still taking off the disk, or could not.
+    /// - A text held that is not out from here is drawn as the store has it: on its way where
+    ///   another outbox is sending it, may have been posted where its source was asked, and
+    ///   otherwise not sent, by what its source answered.
+    /// - A text out from here is left as it is (`out`), and one this outbox let go of is not
+    ///   drawn again (`dropped`).
+    ///
+    /// Nothing is said aloud for it: whoever pressed heard it where they pressed. On the main
+    /// actor, with no wait inside; the view was read in one hop of the store's.
+    func follow(_ view: UnsentView, in session: ShellSession) {
+        guard view.mark >= followed else { return }
+        followed = view.mark
+        let went = sendings.filter {
+            view.gone.contains($0.id) && $0.standing != .unremoved && !discarding.contains($0.id)
+        }.map(\.id)
+        for id in went { drop(id) }
+        unask(went, in: session)
+        for text in view.texts where !out.contains(text.id) && !dropped.contains(text.id) && !discarding.contains(text.id) {
+            let other = view.senders[text.id].flatMap { $0 == sender ? nil : $0 }
+            if text.standing == .asked { mayHaveLanded.insert(text.id) } else { mayHaveLanded.remove(text.id) }
+            guard let at = sendings.firstIndex(where: { $0.id == text.id }) else {
+                sendings.append(Sending(unsent: text, standing: Self.standing(of: text, sentElsewhere: other != nil)))
+                continue
             }
-            sendings.append(Sending(unsent: unsent, standing: standing))
+            // That it could not be written to this device is this run's to know, while the
+            // text is as it was then and nobody else is sending it.
+            if sendings[at].standing == .unkept, sendings[at].unsent == text, other == nil { continue }
+            let drawn = Sending(unsent: text, standing: Self.standing(of: text, sentElsewhere: other != nil))
+            if sendings[at] != drawn { sendings[at] = drawn }
         }
+        // A sheet open on a text another window is now sending has nothing it may send: it
+        // closes. What was typed there stays beside the text (`edits`), and is in the sheet
+        // again where the text comes back as not sent.
+        if let asked = session.editingUnsent, !out.contains(asked.id), sending(asked.id)?.isOut == true {
+            session.editingUnsent = nil
+        }
+    }
+
+    /// Where a text stands by what the store holds of it. One whose source was asked may have
+    /// been posted; one that was not, was not sent.
+    private static func standing(of text: Unsent, sentElsewhere: Bool) -> Standing {
+        if sentElsewhere { return .onItsWay }
+        switch text.standing {
+        case .asked: return .unconfirmed
+        case .refused: return .failed(.refused)
+        case .declined: return .failed(.declined)
+        case .fresh, .unreachable: return .failed(.unreachable)
+        }
+    }
+
+    /// A sheet or a question about a text that went has nothing left to be about.
+    private func unask(_ going: [UUID], in session: ShellSession) {
+        if let asked = session.editingUnsent, going.contains(asked.id) { session.editingUnsent = nil }
+        if let asked = session.discardingUnsent, going.contains(asked.id) { session.discardingUnsent = nil }
+        if let asked = session.resendingUnsent, going.contains(asked.id) { session.resendingUnsent = nil }
+    }
+
+    /// The end of what this outbox had out of one text: the store is told nobody here is
+    /// sending it, and it is drawn from the store again — as it was left, or as another
+    /// window has it since. On the main actor but for the store's two hops.
+    private func settle(_ id: UUID, in session: ShellSession) async {
+        await session.store.release(unsent: id, from: sender)
+        out.remove(id)
+        follow(await session.store.unsentView(), in: session)
     }
 
     // MARK: - The press
@@ -179,6 +272,7 @@ final class ShellOutbox {
         targets[unsent.id] = target
         let taken = Sending(unsent: unsent, standing: .waiting)
         sendings.append(taken)
+        out.insert(unsent.id)
         keep(unsent, in: session)
         session.said.announce(OutboxWords.line(taken, hold: nil, whom: whom(taken, in: session)))
         pump(unsent.host, in: session)
@@ -191,9 +285,10 @@ final class ShellOutbox {
     /// sent again on the strength of this press alone.
     @discardableResult
     func again(_ id: UUID, in session: ShellSession) -> Bool {
-        guard let at = sendings.firstIndex(where: { $0.id == id }), !sendings[at].isOut, !discarding.contains(id),
+        guard let at = sendings.firstIndex(where: { $0.id == id }), !sendings[at].isOut, !leaving(id),
               sendings[at].standing != .unkept, hold(sendings[at], in: session) == nil
         else { return false }
+        out.insert(id)
         guard mayHaveLanded.contains(id) else {
             sendings[at].standing = .waiting
             pump(sendings[at].unsent.host, in: session)
@@ -209,9 +304,10 @@ final class ShellOutbox {
     @discardableResult
     func sendUnkept(_ id: UUID, in session: ShellSession) -> Bool {
         guard let at = sendings.firstIndex(where: { $0.id == id }), sendings[at].standing == .unkept,
-              !discarding.contains(id), hold(sendings[at], in: session) == nil
+              !leaving(id), hold(sendings[at], in: session) == nil
         else { return false }
         sentUnkept.insert(id)
+        out.insert(id)
         sendings[at].standing = .waiting
         pump(sendings[at].unsent.host, in: session)
         return true
@@ -222,10 +318,11 @@ final class ShellOutbox {
     /// changed it in its sheet, as the different post it now is.
     @discardableResult
     func sendAnyway(_ id: UUID, in session: ShellSession) -> Bool {
-        guard let at = sendings.firstIndex(where: { $0.id == id }), !sendings[at].isOut, !discarding.contains(id),
+        guard let at = sendings.firstIndex(where: { $0.id == id }), !sendings[at].isOut, !leaving(id),
               hold(sendings[at], in: session) == nil
         else { return false }
         if changed(id) != nil { return sendChanged(id, in: session) != nil }
+        out.insert(id)
         sendings[at].standing = .waiting
         pump(sendings[at].unsent.host, in: session)
         return true
@@ -236,7 +333,7 @@ final class ShellOutbox {
     /// Opens the sheet on a text that waits. False where it is out, or is not here.
     @discardableResult
     func edit(_ id: UUID, in session: ShellSession) -> Bool {
-        guard let held = sending(id), !held.isOut, !discarding.contains(id) else { return false }
+        guard let held = sending(id), !held.isOut, !leaving(id) else { return false }
         session.editingUnsent = UnsentAsk(id: id)
         return true
     }
@@ -268,7 +365,7 @@ final class ShellOutbox {
     @discardableResult
     func sendChanged(_ id: UUID, in session: ShellSession) -> UUID? {
         guard let typed = changed(id), let at = sendings.firstIndex(where: { $0.id == id }), !sendings[at].isOut,
-              !discarding.contains(id), hold(sendings[at], in: session) == nil
+              !leaving(id), hold(sendings[at], in: session) == nil
         else { return nil }
         let old = sendings[at].unsent
         let fresh = Unsent(
@@ -276,6 +373,10 @@ final class ShellOutbox {
             pressedAt: old.pressedAt, writerID: old.writerID, writer: old.writer
         )
         sendings[at] = Sending(unsent: fresh, standing: .waiting)
+        out.insert(fresh.id)
+        // The old one is this outbox's to let go of, behind this (`keep`).
+        out.remove(id)
+        dropped.insert(id)
         wroteWith[fresh.id] = wroteWith.removeValue(forKey: id)
         targets[fresh.id] = targets.removeValue(forKey: id)
         edits[id] = nil
@@ -292,12 +393,33 @@ final class ShellOutbox {
     /// (#292): the line stands until the write that takes its words out of the file has
     /// returned — and nothing sends it meanwhile (`discarding`), so what is read here before
     /// the waits is still so after them.
+    ///
+    /// **Where that write did not land the line does not go**: it stands as one that could
+    /// not be removed from this device (`unremoved`), said aloud, and Discard on it tries the
+    /// write again with no second question — the yes was given.
+    ///
+    /// **That it could not be removed is said in the window that discarded it, and in no
+    /// other.** The store lets the text go before the write, so every other window's line
+    /// goes then (`follow`), and a write that then fails is this window's to say: the store
+    /// knows what it holds, not what the file does, and teaching it would be a second
+    /// standing kept in step with the saver's for one person at one device. The saver tries
+    /// the write again by itself, and a save that lands takes this line down (`written`).
+    ///
+    /// **Not one somebody is sending**: the sending of it is taken first, in the store
+    /// (`ItemStore.claim`), so a window that has it on the wire is not discarded under — the
+    /// line is drawn as on its way, as the store has it, and nothing goes.
     func discard(_ id: UUID, in session: ShellSession) async {
         guard let held = sending(id), !held.isOut, discarding.insert(id).inserted else { return }
         await keeps[id]?.value
+        guard await session.store.claim(unsent: id, for: sender) else {
+            discarding.remove(id)
+            return follow(await session.store.unsentView(), in: session)
+        }
         await session.store.letGo(unsent: id)
-        _ = await session.persistUnsent?()
+        // A session nobody gave a disk has no file for its words to be left in.
+        let written = await session.persistUnsent?() ?? true
         discarding.remove(id)
+        guard written else { return stand(id, .unremoved, in: session) }
         drop(id)
     }
 
@@ -310,20 +432,39 @@ final class ShellOutbox {
     /// question said so — and off the disk before this returns, which is before the Remove
     /// that waits for it says it is done. One on the wire comes back to no entry, and lets go
     /// of whatever it wrote meanwhile (`gone`).
+    ///
+    /// **Where the write did not land they are not gone, and are not left unsaid**: each
+    /// stands on the page again as one that could not be removed from this device
+    /// (`unremoved`), behind what else waits, with Discard to try the write again.
     func forget(host raw: String, in session: ShellSession) async {
         let host = raw.lowercased()
-        let going = sendings.filter { $0.unsent.host == host }.map(\.id)
+        let lines = sendings.filter { $0.unsent.host == host }
+        let going = lines.map(\.id)
         guard !going.isEmpty else { return }
         // Each text's own write, taken before the entry and its task are let go of.
         let writes = going.compactMap { keeps[$0] }
         for id in going { drop(id) }
-        // A sheet or a question about one of them has nothing left to be about.
-        if let asked = session.editingUnsent, going.contains(asked.id) { session.editingUnsent = nil }
-        if let asked = session.discardingUnsent, going.contains(asked.id) { session.discardingUnsent = nil }
-        if let asked = session.resendingUnsent, going.contains(asked.id) { session.resendingUnsent = nil }
+        unask(going, in: session)
         for write in writes { await write.value }
         for id in going { await session.store.letGo(unsent: id) }
-        _ = await session.persistUnsent?()
+        guard let persist = session.persistUnsent, await !persist() else { return }
+        for was in lines where sending(was.id) == nil {
+            sendings.append(Sending(unsent: was.unsent, standing: .unremoved))
+            stand(was.id, .unremoved, in: session)
+        }
+    }
+
+    /// A save of the whole store landed, the texts with it (`ShellSession.write`): the words
+    /// of each text that could not be taken off the disk are off it now, and its line goes —
+    /// but for one whose own discard is trying that write this moment, which says so itself.
+    func written() {
+        for line in sendings where line.standing == .unremoved && !discarding.contains(line.id) { drop(line.id) }
+    }
+
+    /// Whether the person said `id` goes: its words are on their way out of the file, or
+    /// could not be taken out of it. Nothing sends, changes or opens one.
+    private func leaving(_ id: UUID) -> Bool {
+        discarding.contains(id) || sending(id)?.standing == .unremoved
     }
 
     private func drop(_ id: UUID) {
@@ -336,16 +477,35 @@ final class ShellOutbox {
         sentUnkept.remove(id)
         discarding.remove(id)
         lastAsked[id] = nil
+        out.remove(id)
+        dropped.insert(id)
     }
 
     /// Whether a text's entry went while something waited — its source removed, or its post
     /// seen to have arrived — and, where it did, whatever was held of it since is let go: a
     /// write that landed after the letting go must not leave the text in the store.
+    ///
+    /// One the person said goes and that could not be taken off the disk (`unremoved`) is
+    /// gone to whoever asks here too, and this is one more try at that write.
     private func gone(_ id: UUID, in session: ShellSession) async -> Bool {
-        guard sending(id) == nil else { return false }
+        guard sending(id).map({ $0.standing == .unremoved }) ?? true else { return false }
         await session.store.letGo(unsent: id)
-        _ = await session.persistUnsent?()
+        if await wroteGone(in: session), sending(id)?.standing == .unremoved { drop(id) }
         return true
+    }
+
+    /// Writes the texts down after one was let go that nothing is left to say of on the page,
+    /// and says whether the write landed. **Where it did not, the row left in the file is
+    /// stale and is not left to the next launch**: the store holds the text no longer, so a
+    /// save is asked for here — every save writes the texts again where they have moved since
+    /// the last write of them that landed (`StoreSaver`), this one and each after it. A run
+    /// that reads the row back before any did draws it as it was written, and lets it go at
+    /// once where its post is among what is held (`ShellSession.adoptUnsent`, `isPost`).
+    @discardableResult
+    private func wroteGone(in session: ShellSession) async -> Bool {
+        guard let persist = session.persistUnsent, await !persist() else { return true }
+        session.saveSoon()
+        return false
     }
 
     // MARK: - What a line says
@@ -358,7 +518,7 @@ final class ShellOutbox {
               session.mastodon.authorized(host: host, for: .write) != nil
         else { return .signedOut }
         guard writes(sending.unsent, in: session) else {
-            return .otherAccount(here: session.mastodon.reader(host: host)?.handle)
+            return .otherAccount(here: session.mastodon.reader(host: host)?.shown)
         }
         if sending.unsent.answers != nil, answered(sending.unsent, in: session) == nil { return .answeredGone }
         return nil
@@ -445,13 +605,11 @@ final class ShellOutbox {
         let kept = keeps[id]
         drop(id)
         session.said.say(Said(.found(id, answer: was.answers != nil), .unconfirmed, host: was.host))
-        if session.resendingUnsent?.id == id { session.resendingUnsent = nil }
-        if session.discardingUnsent?.id == id { session.discardingUnsent = nil }
-        if session.editingUnsent?.id == id { session.editingUnsent = nil }
+        unask([id], in: session)
         work {
             await kept?.value
             await session.store.letGo(unsent: id)
-            _ = await session.persistUnsent?()
+            await self.wroteGone(in: session)
         }
     }
 
@@ -468,6 +626,12 @@ final class ShellOutbox {
         }
         // Read after the wait: let go of meanwhile, it is not looked for any more.
         guard let held = sending(id)?.unsent else { return true }
+        // And the sign-in is still the one the read went with, and may still write there:
+        // what another sign-in's read brought is taken in for nobody, and the text stays.
+        guard session.mastodon.token(host: held.host)?.accessToken == door.token.accessToken,
+              session.mastodon.authorized(host: held.host, for: .write) != nil,
+              session.writableSources.contains(where: { $0.host == held.host }), writes(held, in: session)
+        else { return nil }
         let answering = answeredID(held, in: session)
         let last = lastAsked[id]
         guard let post = read.first(where: { Self.isPost($0, of: held, answering: answering, lastAsked: last) }) else {
@@ -491,8 +655,11 @@ final class ShellOutbox {
     /// not found past the key's life, or the look could not be had — the person is asked.
     private func lookThenSend(_ id: UUID, in session: ShellSession) async {
         let found = await look(id, in: session)
-        // Read after the wait: it arrived, was let go with its source, or is no longer looked for.
-        guard let at = sendings.firstIndex(where: { $0.id == id }), sendings[at].standing == .looking else { return }
+        // Read after the wait: it arrived, was let go with its source, or is no longer looked for
+        // — and then it is not out from here any more either, and is drawn from the store again.
+        guard let at = sendings.firstIndex(where: { $0.id == id }), sendings[at].standing == .looking else {
+            return await settle(id, in: session)
+        }
         let asked = sendings[at].unsent.askedAt
         if found == false, let asked, now().timeIntervalSince(asked) < Self.keyLife,
            hold(sendings[at], in: session) == nil {
@@ -501,6 +668,7 @@ final class ShellOutbox {
         } else {
             sendings[at].standing = .unconfirmed
             session.resendingUnsent = UnsentAsk(id: id)
+            await settle(id, in: session)
         }
     }
 
@@ -514,6 +682,11 @@ final class ShellOutbox {
         keeps[id] = Task {
             await before?.value
             if let old { await session.store.letGo(unsent: old) }
+            await self.holding?()
+            // Its sender before it is held, so no other window draws it as one to send again.
+            _ = await session.store.claim(unsent: id, for: self.sender)
+            // Not taken where the text was let go of meanwhile (`ItemStore.hold`): its send
+            // asks again, and does not leave on a no.
             await session.store.hold(unsent)
             _ = await session.persistUnsent?()
         }
@@ -617,6 +790,12 @@ final class ShellOutbox {
     /// | failed, unconfirmed, unkept | what was typed over it is sent (`sendChanged`) | waiting, a new text under a new name |
     /// | failed, unconfirmed, unkept | the person's yes to discarding it | — |
     /// | any | its source is removed (`forget`) | —; a request still out comes back to no entry |
+    /// | waiting | its turn, and another window is sending it (`ItemStore.claim`) | on its way, as the store has it; nothing sent from here |
+    /// | waiting | its turn, and another window asked its source since this one looked | unconfirmed, nothing sent |
+    /// | waiting | its turn, and the store will not hold it: it was let go of | —, nothing sent |
+    /// | any, not out from here | the store says it changed (`follow`) | as the store has it |
+    /// | failed, unconfirmed, unkept — discarded, or its source removed | the write that takes it off the disk did not land | unremoved |
+    /// | unremoved | Discard: the write is tried again, and lands | — |
     ///
     /// **Everything is read again after each wait.** The entry is found by its name each time,
     /// never held across an `await`; the door, who is signed in and the post answered are
@@ -627,18 +806,41 @@ final class ShellOutbox {
     ///
     /// **The entry goes only after the post is adopted**, so nothing says it is being sent
     /// beside the post it became, and no moment shows neither.
+    ///
+    /// **One sender a text.** The sending is taken in the store before anything is asked
+    /// (`ItemStore.claim`) and given back when this ends, however it ends (`settle`); where
+    /// another outbox has it, nothing is done here but to draw it as the store has it.
     private func send(_ id: UUID, in session: ShellSession) async {
         guard let at = sendings.firstIndex(where: { $0.id == id }) else { return }
         sendings[at].standing = .onItsWay
-        let host = sendings[at].unsent.host
         await keeps.removeValue(forKey: id)?.value
+        if await session.store.claim(unsent: id, for: sender) { await sendAsSender(id, in: session) }
+        await settle(id, in: session)
+    }
+
+    /// `send`, once the store has said this outbox is the one sending `id`.
+    private func sendAsSender(_ id: UUID, in session: ShellSession) async {
+        // The text as the store holds it now: another window may have sent it, and had no
+        // yes or no that settles it, since this one last looked. It may have been posted then,
+        // and is not sent on the strength of a press made before that was known.
+        let held = await session.store.unsentView().texts.first { $0.id == id }
+        guard let at = sendings.firstIndex(where: { $0.id == id }) else { return }
+        if let held, held != sendings[at].unsent {
+            sendings[at].unsent = held
+            if held.standing == .asked, !mayHaveLanded.contains(id) { return stand(id, .unconfirmed, in: session) }
+        }
+        let host = sendings[at].unsent.host
         // Who is signed in there, where its source has not said this run and the text names
         // its writer: asked before anything is decided on it.
         if sending(id)?.unsent.writerID != nil, session.mastodon.reader(host: host) == nil {
             await session.mastodon.learnWho(host: host, within: Self.lookDeadline)
         }
-        // Read after the waits, and nothing awaited from here to the write below.
-        guard var unsent = sending(id)?.unsent else { return }
+        // Read after the waits, and nothing awaited from here to the write below. Let go of
+        // meanwhile, whatever its own write held of it since goes with it.
+        guard var unsent = sending(id)?.unsent, sending(id)?.standing != .unremoved else {
+            _ = await gone(id, in: session)
+            return
+        }
         guard ready(unsent, in: session) != nil else { return await missed(id, .unreachable, in: session) }
         // Named now, where it could not be at the press: the sign-in is the one it was pressed
         // under (`writes`), and its source has since said who that is.
@@ -652,7 +854,9 @@ final class ShellOutbox {
         let asking = now()
         unsent.askedAt = unsent.askedAt ?? asking
         if let at = sendings.firstIndex(where: { $0.id == id }) { sendings[at].unsent = unsent }
-        await session.store.hold(unsent)
+        // **Not held, not sent**: the store holds no text let go of (`ItemStore.hold`) —
+        // discarded or landed through another window, its source removed — and its line goes.
+        guard await session.store.hold(unsent) else { return letGoHere(id, in: session) }
         // A session nobody gave a disk holds a text in memory, as it holds everything.
         var written = true
         if let persist = session.persistUnsent { written = await persist() }
@@ -661,7 +865,7 @@ final class ShellOutbox {
             // Not on disk, so it does not leave — and is not held as asked, which it never was.
             if let at = sendings.firstIndex(where: { $0.id == id }) { sendings[at].unsent = before }
             stand(id, .unkept, in: session)
-            await session.store.hold(before)
+            guard await session.store.hold(before) else { return letGoHere(id, in: session) }
             _ = await gone(id, in: session)
             return
         }
@@ -683,9 +887,9 @@ final class ShellOutbox {
             await session.reloadFromStore()
             drop(id)
             await session.store.letGo(unsent: id)
-            _ = await session.persistUnsent?()
-            // The post is the source's, and is written behind its landing.
-            session.saveSoon()
+            // The post is the source's, and is written behind its landing — by a save that
+            // writes the texts again too, where the write of them here did not land.
+            if await wroteGone(in: session) { session.saveSoon() }
         } catch {
             session.writeFailed(error, host: host)
             if let why = Self.notSent(error) {
@@ -723,14 +927,26 @@ final class ShellOutbox {
         case .unreachable, .locked, .unconfirmed: unsent.standing = .unreachable
         }
         if let at = sendings.firstIndex(where: { $0.id == id }) { sendings[at].unsent.standing = unsent.standing }
-        await session.store.hold(unsent)
+        guard await session.store.hold(unsent) else { return letGoHere(id, in: session) }
         if await gone(id, in: session) { return }
         _ = await session.persistUnsent?()
     }
 
+    /// A text the store will not hold: it was let go of, and whoever did so writes that down.
+    /// Its line goes from here too, with any sheet or question about it.
+    private func letGoHere(_ id: UUID, in session: ShellSession) {
+        drop(id)
+        unask([id], in: session)
+    }
+
     /// Where a send ended, drawn and said aloud once.
+    ///
+    /// One the person said goes stays as that (`unremoved`), whatever a request of its own
+    /// still out comes back with.
     private func stand(_ id: UUID, _ standing: Standing, in session: ShellSession) {
-        guard let at = sendings.firstIndex(where: { $0.id == id }) else { return }
+        guard let at = sendings.firstIndex(where: { $0.id == id }),
+              sendings[at].standing != .unremoved || standing == .unremoved
+        else { return }
         if standing == .unconfirmed { mayHaveLanded.insert(id) }
         sendings[at].standing = standing
         let ended = sendings[at]
@@ -766,6 +982,8 @@ enum OutboxWords {
     /// it or discard it.
     static func presses(_ sending: ShellOutbox.Sending, hold: ShellOutbox.Hold?) -> [Press] {
         if sending.isOut { return [] }
+        // Asked to go already: the one thing left is to try taking it off the disk again.
+        if sending.standing == .unremoved { return [.discard] }
         if hold != nil { return [.copy, .discard] }
         return sending.standing == .unkept ? [.anyway, .copy, .discard] : [.again, .edit, .discard]
     }
@@ -787,7 +1005,7 @@ enum OutboxWords {
         case .waiting, .onItsWay: "paperplane"
         case .looking: "magnifyingglass"
         case .unconfirmed: "questionmark.circle"
-        case .failed, .unkept: SaidStrip.symbol
+        case .failed, .unkept, .unremoved: SaidStrip.symbol
         }
     }
 
@@ -806,6 +1024,9 @@ enum OutboxWords {
             return String(format: L10n.t("outbox.sending.answer.to", language: language), host, LineText.oneLine(whom))
         case .looking:
             return said("looking")
+        // Said before anything of its source: it is here whatever became of that.
+        case .unremoved:
+            return said("unremoved")
         case .failed, .unconfirmed, .unkept:
             break
         }
@@ -813,7 +1034,8 @@ enum OutboxWords {
         case .noSource?: return said("hold.noSource")
         case .answeredGone?: return said("hold.answered")
         case .otherAccount(let here)?:
-            guard let writer = sending.unsent.writer else { return said("hold.unnamed") }
+            // A handle is its source's word: set in a sentence of ours only made fit for one.
+            guard let writer = sending.unsent.writer.map({ LineText.oneLine($0) }) else { return said("hold.unnamed") }
             guard let here else {
                 return String(format: L10n.t("outbox.hold.other.unknown.\(kind)", language: language), host, writer)
             }
@@ -827,6 +1049,7 @@ enum OutboxWords {
         case .looking: return said("looking")
         case .unconfirmed, .failed(.unconfirmed): return said("unconfirmed")
         case .unkept: return said("unkept")
+        case .unremoved: return said("unremoved")
         case .failed(.refused): return said("refused")
         case .failed(.declined): return said("declined")
         case .failed(.locked), .failed(.unreachable): return said("failed")

@@ -113,6 +113,9 @@ struct SaidStrip: ViewModifier {
         case .anyway: session.outbox.sendUnkept(pressed.id, in: session)
         case .edit: session.outbox.edit(pressed.id, in: session)
         case .copy: session.outbox.copy(sending.unsent.text)
+        // One that could not be taken off this device was asked about already, and the
+        // answer was yes: the press tries the write again.
+        case .discard where sending.standing == .unremoved: session.outbox.discardSoon(pressed.id, in: session)
         case .discard: session.discardingUnsent = UnsentAsk(id: pressed.id)
         }
     }

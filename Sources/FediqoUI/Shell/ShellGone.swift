@@ -54,7 +54,7 @@ extension ShellSession {
         guard !went.isNone else { return went }
         await reloadFromStore()
         // Waited for: what was let go is not said to be gone while the file still holds it (#292).
-        await saveNow { [weak self] in await self?.readStoreBytes() }
+        await saveNow(.posts) { [weak self] in await self?.readStoreBytes() }
         return went
     }
 }

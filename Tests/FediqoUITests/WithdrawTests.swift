@@ -150,7 +150,7 @@ struct WithdrawTests {
     func confirmedItGoes() async throws {
         let (session, server) = try await shell(routes: ["/api/v1/statuses/1": .json("{}")])
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
         let mine = try item(session, by: "me")
         session.askToWithdraw(mine)
         await session.withdraw(mine)

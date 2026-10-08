@@ -787,14 +787,18 @@ final class ShellSession {
     ///
     /// **Asked through `saveSoon()`**, which does not wait for it (`ShellSaving`). Awaited only by
     /// what reads the file next — `saveForCarry()` and the room's check — and by an act that
-    /// takes something off this device (`saveNow`).
-    @ObservationIgnored var persist: (@MainActor () async -> Void)?
+    /// takes something off this device (`saveNow`). **Says whether the write happened**: no
+    /// where it failed, which whoever asked for something to be gone tells the person.
+    @ObservationIgnored var persist: (@MainActor () async -> Bool)?
     /// Writes only what the person pressed to send (`Unsent`) — a handful of rows, whatever the
     /// store holds — and says whether they are on disk. Set by the app beside `persist`.
     /// Awaited by a send before its request leaves, which does not leave on a no, and by a
     /// discard before it says the text is gone; never by a sheet. Nothing in a session nobody
     /// gave a disk — a test, a preview — where a text is held in memory as everything is.
     @ObservationIgnored var persistUnsent: (@MainActor () async -> Bool)?
+    /// Each save that wrote every part after a write had failed, whoever made it
+    /// (`StoreSaver.landings`). Set by the app beside `persist`; followed by `followSaves()`.
+    @ObservationIgnored var savesLanded: (@Sendable () async -> AsyncStream<Void>)?
     /// The save asked for last through `saveSoon()`, running or waiting; the next runs after it.
     @ObservationIgnored var saving: Task<Void, Never>?
 
@@ -1317,8 +1321,8 @@ final class ShellSession {
                 // A post taken back is waited for: it left the screen at the yes, and nothing
                 // says it is gone — a kept copy drawn again, marked — while the file still
                 // holds its words (#292). Whatever became of the sign-in meanwhile: the source
-                // said yes, so the post is gone there.
-                if act == .withdraw { await persist?() }
+                // said yes, so the post is gone there. A write that did not land is said.
+                if act == .withdraw { await saveNow(.post) }
                 guard stands(flight, copy.id, act, door) else { break }
                 if act == .withdraw {
                     acts.landed(copy.id, act)
@@ -2531,9 +2535,12 @@ final class ShellSession {
     }
 
     /// What the last run pressed to send and no source said landed, drawn as it stands and not
-    /// sent (`ShellOutbox.adopt`). Asked once, as a launch reads the store.
+    /// sent (`ShellOutbox.follow`). Asked as a launch reads the store; every adopt after it
+    /// follows the texts where they moved.
     func adoptUnsent() async {
-        outbox.adopt(await store.unsentHeld())
+        let view = await store.unsentView()
+        adoptedUnsent = view.mark
+        outbox.follow(view, in: self)
         // One whose post the last run's reads already brought is let go here and now.
         outbox.reconcile(in: self)
     }
@@ -2558,6 +2565,10 @@ final class ShellSession {
         emojis.clear()
         pictures.disk?.trim()
         cleared += 1
+        // What this run pressed and said was about rows the store no longer holds: a mark left
+        // on a press that did not arrive, and a line about one, would be about nothing.
+        acts.clear()
+        said.clear()
         // The package's account rides with its store (#251): this device's lines give way to
         // it, then the months limit has its turn on what was read back and writes its line as
         // at a launch.
@@ -2622,6 +2633,14 @@ final class ShellSession {
             adoptedNotices = noticesMark
             await noticeList.follow(in: self)
         }
+        // What waits to be sent, where the store's texts or who is sending one moved — through
+        // this window or another: the outbox draws what the store holds (`ShellOutbox.follow`).
+        // The view is read in one hop of the store's and laid in with no wait between.
+        if await store.unsentMark != adoptedUnsent {
+            let view = await store.unsentView()
+            adoptedUnsent = view.mark
+            outbox.follow(view, in: self)
+        }
         let repliesRevision = await store.repliesRevision
         let drawn = await store.drawn
         let all = again || adopted?.store != drawn || adopted?.notes != notesRevision ? await store.all() : nil
@@ -2682,6 +2701,8 @@ final class ShellSession {
     /// The store's `noticesMark` as the last adopt handed the notices to their list, and as it
     /// last counted them.
     @ObservationIgnored private var adoptedNotices: [Int]?
+    /// The store's `unsentMark` as the last adopt handed the texts to the outbox.
+    @ObservationIgnored private var adoptedUnsent: Int?
     @ObservationIgnored private var countedNotices: [Int]?
 
     /// The sweep of an ended sign-in's reader, asked for by `mastodon.onEnded` and not waited
@@ -2853,11 +2874,16 @@ final class ShellSession {
     /// `keepingRows` is `remove(host:keepingPosts:)`'s case (#250): the rows of this host are
     /// staying on screen, so the pictures go without the generation bump that would make every
     /// one of them ask a host nothing may ask.
-    func clear(host: String, keepingRows: Bool = false) async {
-        await holdingStill { await clearNow(host: host, keepingRows: keepingRows) }
+    ///
+    /// **Waited for on disk** (#292): a Clear is the person asking for what this source said of
+    /// itself and of its reader to be gone from this device, and it is not done while the
+    /// file still holds that. `gone` is what a write that did not land is said to be of — a
+    /// Remove's, where it is a Remove that clears.
+    func clear(host: String, keepingRows: Bool = false, as gone: Said.Unwritten = .cleared) async {
+        await holdingStill { await clearNow(host: host, keepingRows: keepingRows, as: gone) }
     }
 
-    private func clearNow(host: String, keepingRows: Bool) async {
+    private func clearNow(host: String, keepingRows: Bool, as gone: Said.Unwritten) async {
         let host = host.lowercased()
         // A Clear takes the sign-in itself, and a Remove clears: a sign-out still being asked
         // about this source has nothing left to ask.
@@ -2920,6 +2946,8 @@ final class ShellSession {
         // joined source's timeline a second time, so dropping its notes here would leave a source
         // still joined and permanently empty; the drop by time is what lets posts go.
         cleared += 1
+        // Last, so everything above is in the write, and nothing above waits for it.
+        await saveNow(gone)
     }
 
     /// The drop by cache (#7), and exactly one set: the pictures held in memory and on disk
@@ -2955,7 +2983,7 @@ final class ShellSession {
         guard went.posts > 0 else {
             // Only notices older than the limit went, or the copy of a post that old one
             // carried: waited for all the same, and counted nowhere — a notice is not a post.
-            if await store.noticesRevision != told { await saveNow() }
+            if await store.noticesRevision != told { await saveNow(.posts) }
             return 0
         }
         // The window cuts a topic's kept replies too, and the count says so at once (#194).
@@ -2965,7 +2993,7 @@ final class ShellSession {
         adoptedReplies = await store.repliesRevision
         // Waited for: what the window dropped is not said to be gone while the file still holds
         // it (#292). Giving the file back its room, and measuring it, follow and are not.
-        await saveNow { [weak self] in
+        await saveNow(.posts) { [weak self] in
             try? await self?.compactStore?()
             await self?.readStoreBytes()
         }
@@ -3381,13 +3409,11 @@ final class ShellSession {
             unreadAll = 0
             progressHost = ""
         }
-        // What it said happened to the person went with it, posts kept or not — and is off the
-        // disk before the rest is said to have gone (#292). **Said by the removal itself**,
-        // in the store's own step: an adopt on its way reads the store between any two looks
-        // made from here, and no revision compared across them would say what went. Only
-        // where notices did go, so a source with none waits for no write.
-        let told = await store.remove(host: host, keepingPosts: keepingPosts)
-        if told { await saveNow() }
+        // Its posts, where they go with it, and what it said happened to the person, posts
+        // kept or not, are off the disk before the rest is said to have gone (#292): removing
+        // a source is the person asking for them to be gone, whatever it held.
+        await store.remove(host: host, keepingPosts: keepingPosts)
+        await saveNow(.source)
         // What waited to be sent to it goes with it, as its question said — off the disk
         // before the rest is said to have gone (#292). A sign-out and a Clear leave them.
         await outbox.forget(host: host, in: self)
@@ -3396,7 +3422,7 @@ final class ShellSession {
         // `keepingPosts`' case for the pictures: let go without the bump, so it asks nothing of
         // a host nothing may ask.
         let rowsStay = keepingPosts ? true : !(await store.held(host: host)).isEmpty
-        await clear(host: host, keepingRows: rowsStay)
+        await clear(host: host, keepingRows: rowsStay, as: .source)
 
         // Folded on both sides rather than on one. `Host.parse` lowercases everything it returns,
         // so all three of these are already folded today — and that is a guarantee three files

@@ -122,6 +122,17 @@ struct StoreSaverFollowTests {
 
     private struct Refused: Error {}
 
+    private actor Flag {
+        private(set) var isOn: Bool
+        init(_ isOn: Bool) { self.isOn = isOn }
+        func set(_ value: Bool) { isOn = value }
+    }
+
+    private actor Counter {
+        private(set) var count = 0
+        func bump() { count += 1 }
+    }
+
     @Test("A change is saved once the quiet is out, and nobody asked")
     func aChangeIsSaved() async throws {
         let (store, _, waits, landed, following) = try await followed()
@@ -254,7 +265,7 @@ struct StoreSaverFollowTests {
         await end(following, waits)
     }
 
-    @Test("A followed save that fails is not tried again by itself and owes no gap; the next change is written")
+    @Test("A followed save that fails is tried again by itself a gap later, and takes with it what changed meanwhile")
     func aFailedFollowedSave() async throws {
         let store = ItemStore(sources: [alpha], notes: [])
         let landed = Landed()
@@ -277,13 +288,167 @@ struct StoreSaverFollowTests {
         await store.ingest([note("2")])
         await waits.asked(2)
         #expect(await landed.writes == [[]])
+        #expect(await waits.asked == [Self.quiet, Self.gap], "the failure was tried again at once, or not at all")
         await waits.wake()
         await waits.asked(3)
-        #expect(await landed.writes == [[], ["1", "2"]])
-        #expect(
-            await waits.asked == [Self.quiet, Self.quiet, Self.gap - Self.quiet],
-            "the failure was tried again by itself, or was owed a gap"
+        #expect(await landed.writes == [[], ["1", "2"]], "nobody asked, and nothing changed after the failure was owed")
+        #expect(await waits.asked == [Self.quiet, Self.gap, Self.gap], "a try that wrote is owed its gap")
+        await end(following, waits)
+    }
+
+    @Test("A write that keeps failing is tried a gap apart, a handful of times, and then let be until something lands")
+    func aFailureIsRetriedWithinBounds() async throws {
+        let store = ItemStore(sources: [alpha], notes: [])
+        let landed = Landed()
+        let waits = Waits()
+        let failing = Flag(true)
+        let tries = Counter()
+        let saver = StoreSaver(store: store) { _, notes, _ in
+            await tries.bump()
+            if await failing.isOn { throw Refused() }
+            await landed.record(notes)
+        }
+        let following = Task {
+            await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
+        }
+        await store.ingest([note("1")])
+        await waits.asked(1)
+        for wait in 1...StoreSaver.retries {
+            await waits.wake()
+            await waits.asked(wait + 1)
+        }
+        #expect(await waits.asked == [Self.quiet] + Array(repeating: Self.gap, count: StoreSaver.retries))
+        await waits.wake()
+        // The last try has failed: a turn of every queue, and nothing more is asked for.
+        while await tries.count < StoreSaver.retries + 1 { await Task.yield() }
+        for _ in 0..<200 { await Task.yield() }
+        #expect(await tries.count == StoreSaver.retries + 1, "the follower went on trying past its bound")
+        #expect(await waits.asked.count == StoreSaver.retries + 1, "the follower went on waiting past its bound")
+        #expect(await landed.writes.isEmpty)
+
+        // A save somebody asks for lands, and the count starts again: the next failure is owed its tries.
+        await failing.set(false)
+        try await saver.save()
+        #expect(await landed.writes == [["1"]])
+        await failing.set(true)
+        await store.ingest([note("2")])
+        await waits.asked(StoreSaver.retries + 2)
+        await waits.wake()
+        await waits.asked(StoreSaver.retries + 3)
+        #expect(await waits.asked.suffix(2) == [Self.quiet, Self.gap])
+        await end(following, waits)
+    }
+
+    @Test("A notices write that always fails is under the same bound as every part's: tried once behind the change and then a gap apart, a handful of times, and nothing more is slept for or written until the store changes — which starts the count again")
+    func aNoticesFailureIsRetriedWithinBounds() async throws {
+        let store = ItemStore(sources: [alpha], notes: [])
+        let waits = Waits()
+        let tries = Counter()
+        let posts = Counter()
+        let saver = StoreSaver(
+            store: store, write: { _, _, _ in await posts.bump() },
+            writeNotices: { _ in
+                await tries.bump()
+                throw Refused()
+            }
         )
+        try await saver.save()
+        let following = Task {
+            await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
+        }
+        await store.hold(NoticeReach(host: alpha.host, before: "9", gathered: true))
+        await waits.asked(1)
+        for wait in 1...StoreSaver.retries {
+            await waits.wake()
+            await waits.asked(wait + 1)
+        }
+        await waits.wake()
+        while await tries.count < StoreSaver.retries + 1 { await Task.yield() }
+        // The last try has failed: every turn there is to take, and nothing more is asked for.
+        for _ in 0..<500 { await Task.yield() }
+        #expect(await tries.count == StoreSaver.retries + 1, "the notices went on being tried past the bound")
+        #expect(await waits.asked == [Self.quiet] + Array(repeating: Self.gap, count: StoreSaver.retries))
+        #expect(await posts.count == 1, "no post was written again for a notice")
+
+        // A change: one try behind it, and its handful again.
+        await store.hold(NoticeReach(host: alpha.host, before: "8", gathered: true))
+        await waits.asked(StoreSaver.retries + 2)
+        await waits.wake()
+        while await tries.count < StoreSaver.retries + 2 { await Task.yield() }
+        for _ in 0..<500 { await Task.yield() }
+        #expect(await waits.asked.suffix(2) == [Self.quiet, Self.gap], "a change did not start the count again")
+        await end(following, waits)
+    }
+
+    @Test("A save that writes every part after one had failed is told to whoever listens, once, whoever made it; a save with nothing behind it to make good is not")
+    func aLandingAfterAFailureIsTold() async throws {
+        let store = ItemStore(sources: [alpha], notes: [])
+        let failing = Flag(true)
+        let saver = StoreSaver(store: store) { _, _, _ in
+            if await failing.isOn { throw Refused() }
+        }
+        let told = Counter()
+        let landings = await saver.landings()
+        let listening = Task {
+            for await _ in landings { await told.bump() }
+        }
+        await #expect(throws: Refused.self) { try await saver.save() }
+        for _ in 0..<200 { await Task.yield() }
+        #expect(await told.count == 0)
+
+        await failing.set(false)
+        try await saver.save()
+        while await told.count < 1 { await Task.yield() }
+        await store.ingest([note("1")])
+        try await saver.save()
+        for _ in 0..<200 { await Task.yield() }
+        #expect(await told.count == 1, "a save with nothing to make good was told as one that did")
+        listening.cancel()
+    }
+
+    @Test("A save somebody asked for that fails is tried again by the follower, with no change and nobody asking")
+    func anAskedSaveThatFailsIsRetried() async throws {
+        let store = ItemStore(sources: [alpha], notes: [])
+        let landed = Landed()
+        let waits = Waits()
+        let door = Door()
+        let saver = StoreSaver(store: store) { _, notes, _ in
+            if await door.pass() == 1 { throw Refused() }
+            await landed.record(notes)
+        }
+        let following = Task {
+            await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
+        }
+        await #expect(throws: Refused.self) { try await saver.save() }
+        await waits.asked(1)
+        #expect(await waits.asked == [Self.gap])
+        #expect(await landed.writes.isEmpty)
+        await waits.wake()
+        await waits.asked(2)
+        #expect(await landed.writes == [[]])
+        await end(following, waits)
+    }
+
+    @Test("A save that landed while the retry waited leaves it nothing to write")
+    func aRetryFindsItLanded() async throws {
+        let store = ItemStore(sources: [alpha], notes: [])
+        let landed = Landed()
+        let waits = Waits()
+        let door = Door()
+        let saver = StoreSaver(store: store) { _, notes, _ in
+            if await door.pass() == 1 { throw Refused() }
+            await landed.record(notes)
+        }
+        let following = Task {
+            await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
+        }
+        await #expect(throws: Refused.self) { try await saver.resave() }
+        await waits.asked(1)
+        try await saver.resave()
+        await waits.wake()
+        for _ in 0..<200 { await Task.yield() }
+        #expect(await landed.writes == [[]], "the retry wrote the store a second time")
+        #expect(await waits.asked == [Self.gap])
         await end(following, waits)
     }
 

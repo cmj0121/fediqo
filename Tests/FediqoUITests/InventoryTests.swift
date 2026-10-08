@@ -54,6 +54,7 @@ struct InventoryTests {
         session.persist = {
             saves.count += 1
             try? await saver.save()
+            return true
         }
     }
 

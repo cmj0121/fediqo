@@ -50,6 +50,32 @@ struct UnsentStoreTests {
         }
     }
 
+    // MARK: - Let go, and not put back
+
+    @Test("A text let go is not held again by a write made of a copy from before the letting go — held at the time or not — while another text is, and a later run holds what its file reads back")
+    func notHeldAgainOnceLetGo() async throws {
+        let store = ItemStore()
+        let text = Self.text("let go, and written late")
+        let other = Self.text("another", minutes: 1)
+        #expect(await store.hold(text))
+        await store.letGo(unsent: text.id)
+        let revision = await store.unsentRevision
+
+        var late = text
+        late.standing = .asked
+        #expect(await !store.hold(late), "a copy from before the letting go")
+        #expect(await store.unsentHeld().isEmpty)
+        #expect(await store.unsentRevision == revision, "and nothing for a save to write")
+
+        // Let go before its own first write arrived.
+        await store.letGo(unsent: other.id)
+        #expect(await !store.hold(other))
+        let third = Self.text("a third", minutes: 2)
+        #expect(await store.hold(third))
+        #expect(await store.unsentHeld() == [third])
+        #expect(await ItemStore(sources: [], notes: [], unsent: [text]).unsentHeld() == [text], "for the run, and no longer")
+    }
+
     // MARK: - Written and read back
 
     @Test("Texts are read back by a relaunch in the order pressed, with every character, who each reaches, what it answers and where it stood — and writing them touches no post")
@@ -97,30 +123,56 @@ struct UnsentStoreTests {
 
     // MARK: - The store's format
 
-    @Test("A store as the build before this one left it opens with everything it held, and no text; it is then this build's")
+    /// The twelve steps the last build before texts and notices knew.
+    private static let before = [
+        "v1-index", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions",
+        "v9-language", "v10-references", "v11-one-holding", "v12-references-only",
+    ]
+
+    @Test("A store as the last build before texts and notices left it — every step up to v12-references-only and neither after — opens through both new steps with every source, post and kept mark it held, no text and no notice; it is then this build's")
     func aStoreFromBefore() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let index = dir.appendingPathComponent("index.sqlite")
-        let notes = [PackagerFixture.note("1"), PackagerFixture.note("2")]
+        var kept = PackagerFixture.note("2")
+        kept.kept = true
+        let notes = [PackagerFixture.note("1"), kept, PackagerFixture.note("3", source: PackagerFixture.forum)]
+        let sources = [Self.mastodon, PackagerFixture.forum]
         do {
             let file = try StoreFile(at: dir)
-            try await file.save(sources: [Self.mastodon], notes: notes)
-            // As the build before left it: no table for texts, and no word of the step that makes it.
+            try await file.save(sources: sources, notes: notes)
+            // As that build left it: the two steps since made three tables and changed no other,
+            // so without the tables and the word of either step this is its file.
             try await file.db.write { db in
-                try db.execute(sql: "DROP TABLE unsent")
-                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier = 'v13-unsent'")
+                for table in ["unsent", "notice", "notice_reach"] { try db.execute(sql: "DROP TABLE \(table)") }
+                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier IN ('v13-unsent', 'v14-notices')")
             }
         }
-        #expect(try !migrations(index).contains("v13-unsent"), "the premise: a store from before")
+        #expect(try migrations(index) == Self.before, "the premise: a store no step after v12-references-only has touched")
+        #expect(try tables(index).isDisjoint(with: ["unsent", "notice", "notice_reach"]))
 
         let opened = StoreFile.open(at: dir)
 
         #expect(opened.file != nil && opened.setAside == nil && !opened.storeIsNewer && opened.trouble == nil)
-        #expect(opened.sources == [Self.mastodon])
+        #expect(opened.sources == sources)
         #expect(opened.notes == notes)
+        #expect(opened.notes.map(\.kept) == [false, true, false])
         #expect(opened.unsent.isEmpty)
-        #expect(try migrations(index).last == "v13-unsent")
+        #expect(opened.notices.isEmpty)
+        #expect(try migrations(index) == Self.before + ["v13-unsent", "v14-notices"])
+        #expect(try tables(index).isSuperset(of: ["unsent", "notice", "notice_reach"]))
+
+        // And it is this build's from here: a text and a notice are held in it, beside what it held.
+        let waiting = Self.text("written since")
+        try await #require(opened.file).save(unsent: [waiting])
+        let again = StoreFile.open(at: dir)
+        #expect(again.unsent == [waiting] && again.notes == notes && again.sources == sources)
+    }
+
+    private func tables(_ index: URL) throws -> Set<String> {
+        try DatabaseQueue(path: index.path).read { db in
+            Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'"))
+        }
     }
 
     @Test("A build that knows no v13-unsent sees this build's store as newer, and the store is unchanged for being asked")

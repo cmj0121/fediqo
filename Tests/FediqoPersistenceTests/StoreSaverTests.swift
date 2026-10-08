@@ -257,6 +257,43 @@ struct StoreSaverTests {
         let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _, _ in throw Refused() }
         #expect(await saver.flush(deadline: .seconds(60)) == .failed)
     }
+
+    /// Which parts a save wrote, in the order they landed.
+    private actor Parts {
+        private(set) var wrote: [String] = []
+        func add(_ part: String) { wrote.append(part) }
+    }
+
+    @Test("A part that cannot be written keeps no other from the file: with the notices failing, or the texts, the posts are still saved, the flush answers that it failed, and the part is tried again by the next save",
+          arguments: ["notices", "texts"])
+    func eachPartIsWrittenWhateverBecameOfTheOthers(_ failing: String) async throws {
+        let store = ItemStore(sources: [alpha], notes: [note("1", from: alpha)])
+        await store.hold(Unsent(host: alpha.host, text: "words", audience: .everyone))
+        await store.hold(NoticeReach(host: alpha.host, before: "9", gathered: true))
+        let parts = Parts()
+        let broken = Mutex(true)
+        let saver = StoreSaver(
+            store: store,
+            write: { _, notes, _ in await parts.add("items:\(notes.count)") },
+            writeUnsent: { texts in
+                if failing == "texts", broken.withLock({ $0 }) { throw Refused() }
+                await parts.add("texts:\(texts.count)")
+            },
+            writeNotices: { reaches in
+                if failing == "notices", broken.withLock({ $0 }) { throw Refused() }
+                await parts.add("notices:\(reaches.count)")
+            }
+        )
+
+        #expect(await saver.flush(deadline: .seconds(60)) == .failed, "a save that left a part unwritten said it saved")
+        let other = failing == "notices" ? "texts:1" : "notices:1"
+        #expect(await parts.wrote == [other, "items:1"], "the part that failed kept another from the file")
+
+        // Nothing moved since: the parts that landed are not written again, and the one that did not is.
+        broken.withLock { $0 = false }
+        #expect(await saver.flush(deadline: .seconds(60)) == .saved)
+        #expect(await parts.wrote == [other, "items:1", failing == "notices" ? "notices:1" : "texts:1"])
+    }
 }
 
 /// Numbers calls from inside a `@Sendable` write, without a hop.

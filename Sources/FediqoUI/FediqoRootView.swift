@@ -110,8 +110,9 @@ public struct FediqoRootView: View {
         store: ItemStore = ItemStore(),
         forums: ForumSessions = ForumSessions(),
         mastodon: MastodonSessions = MastodonSessions(),
-        persist: (@MainActor () async -> Void)? = nil,
+        persist: (@MainActor () async -> Bool)? = nil,
         persistUnsent: (@MainActor () async -> Bool)? = nil,
+        savesLanded: (@Sendable () async -> AsyncStream<Void>)? = nil,
         measureStore: (@Sendable () async -> Int)? = nil,
         compactStore: (@Sendable () async throws -> Void)? = nil,
         weighStore: (@Sendable () async -> Int)? = nil,
@@ -133,6 +134,7 @@ public struct FediqoRootView: View {
         )
         session.persist = persist
         session.persistUnsent = persistUnsent
+        session.savesLanded = savesLanded
         session.carrier = carrier
         session.nearbyLink = nearby
         session.deviceName = deviceName
@@ -286,6 +288,8 @@ public struct FediqoRootView: View {
             }
             // Posts their source deleted go on this device's wait (#179).
             .modifier(LettingGoneGo(session: session))
+            // A save that lands after one failed takes down what was said of the failure.
+            .modifier(FollowingSaves(session: session))
             // And the store is held within the room the person gave it (#249).
             .modifier(KeepingWithinRoom(session: session))
             .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))

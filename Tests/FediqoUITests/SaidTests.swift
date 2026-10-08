@@ -133,7 +133,8 @@ struct SaidTests {
         #expect(words(.act(.boost, row: row), .locked) == "This device could not read the sign-in for a.example, so it was not asked.")
 
         let notices: [Said.What] = [ShellNoticeActs.Act.dismiss, .dismissAll, .letThrough, .letGo].map { .notice($0) }
-        let acts: [Said.What] = PostAct.allCases.map { .act($0, row: row) }
+        // An answer that did not arrive is the outbox's own line, and is never said here.
+        let acts: [Said.What] = PostAct.allCases.filter { $0 != .answer }.map { .act($0, row: row) }
         for language in [DummyLanguage.english, .taiwanese] {
             for what in notices + acts {
                 for why in [WriteWhy.refused, .unreachable, .declined, .unconfirmed, .locked] {

@@ -15,14 +15,12 @@ private struct ReachRecord: Codable, FetchableRecord, PersistableRecord {
     var gathered: Bool
     var before: String?
     var reached: Date?
-    var full: Bool
 
     init(_ reach: NoticeReach) {
         host = reach.host
         gathered = reach.gathered
         before = reach.before
         reached = reach.reached
-        full = reach.full
     }
 }
 
@@ -127,7 +125,7 @@ extension StoreFile {
                 guard let source = byHost[reach.host] else { return nil }
                 return NoticeReach(
                     host: reach.host, notices: (lines[reach.host] ?? []).compactMap { $0.notice(from: source) },
-                    before: reach.before, reached: reach.reached, gathered: reach.gathered, full: reach.full
+                    before: reach.before, reached: reach.reached, gathered: reach.gathered
                 )
             }
         }

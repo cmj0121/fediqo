@@ -538,7 +538,7 @@ struct NoticeActsHostedTests {
         #expect(await server.posts == [accept])
         asked.answered(ShellQuestion.yes)
         acts.asked = nil
-        #expect(await spun { acts.holders.isEmpty })
+        #expect(await spun { acts.held(host: Self.a) == nil })
         #expect(await server.posts == [accept, go])
         let (_, after) = hosted(session)
         #expect(after.frames[.held(Self.a)] == nil && after.frames[.request(listed[1].id)] == nil)

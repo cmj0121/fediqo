@@ -47,7 +47,7 @@ struct KeptRowTests {
     func pressKeepsAndUnkeeps() async throws {
         let session = await Self.shell([Self.note("1"), Self.note("2")])
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
 
         #expect(await session.toggleKept(try Self.row(session, "1")) == true)
         #expect(try Self.row(session, "1").kept)
@@ -68,7 +68,7 @@ struct KeptRowTests {
     func nothingHeldNothingKept() async {
         let session = await Self.shell([Self.note("1")])
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
         #expect(await session.toggleKept(DummyItem(Self.note("stranger"))) == nil)
         await session.saved()
         #expect(saved == 0)

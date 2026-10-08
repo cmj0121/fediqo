@@ -516,10 +516,10 @@ final class ShellNoticeList {
     /// What a source dismissed is off this device's disk: every write of this list's has
     /// reached the store, and the store has been saved — **waited for** (#292). The line left
     /// the screen at the person's yes; this is what the act's flight ends on, and nothing is
-    /// said for it.
+    /// said for it — but where that write did not land, which is said (`ShellSession.saveNow`).
     func gone(in session: ShellSession) async {
         await kept()
-        await session.saveNow()
+        await session.saveNow(.notice)
     }
 
     // MARK: - What the store holds

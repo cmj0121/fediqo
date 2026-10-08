@@ -6,12 +6,33 @@ import SwiftUI
 /// and why. What `SaidStrip` draws a line for.
 struct Said: Identifiable, Equatable, Sendable {
     enum What: Equatable, Sendable {
-        /// An act on one post, by the row it was pressed on.
+        /// An act on one post, by the row it was pressed on. Never an answer: a text that did
+        /// not arrive is the outbox's own line (`ShellOutbox`), and has no words here.
         case act(PostAct, row: String)
         case notice(ShellNoticeActs.Act)
         /// A text nobody had confirmed, found posted at its source and let go (`ShellOutbox`):
         /// nothing to do about it, said once so that its line does not simply vanish.
         case found(UUID, answer: Bool)
+        /// Something the person asked to be gone that could not be taken off this device's
+        /// disk yet (`ShellSession.saveNow`): no source's, and nothing to press — it is tried
+        /// again by itself.
+        case unwritten(Unwritten)
+    }
+
+    /// What the person asked to be gone from this device, as its line names it.
+    enum Unwritten: String, CaseIterable, Sendable {
+        /// A notice, or every notice of a source, dismissed.
+        case notice
+        /// A post taken back.
+        case post
+        /// Posts let go: by dates, by what is marked gone, by the months kept.
+        case posts
+        /// A source removed, and what went with it.
+        case source
+        /// A source cleared.
+        case cleared
+        /// What a source said of somebody who has signed out of it.
+        case reader
     }
 
     /// Whose post an act was on, as a line names it: a line read on another page, or beside
@@ -82,6 +103,12 @@ struct Said: Identifiable, Equatable, Sendable {
         return Self.foldID(act, host: host)
     }
 
+    /// Whether this is a line about this device's own file, and no source's.
+    var isUnwritten: Bool {
+        if case .unwritten = what { return true }
+        return false
+    }
+
     /// The name a line about `what` at `host` stands under, for the act that later succeeds
     /// to take it down by (`ShellSaid.takeDown`).
     static func id(_ what: What, host: String) -> String {
@@ -90,6 +117,7 @@ struct Said: Identifiable, Equatable, Sendable {
         case .act(let act, let row): return "\(host)\u{1e}act\u{1e}\(act)\u{1e}\(row)"
         case .notice(let act): return "\(host)\u{1e}notice\u{1e}\(act)"
         case .found(let text, _): return "\(host)\u{1e}found\u{1e}\(text.uuidString)"
+        case .unwritten(let gone): return "\u{1e}unwritten\u{1e}\(gone.rawValue)"
         }
     }
 
@@ -100,6 +128,8 @@ struct Said: Identifiable, Equatable, Sendable {
         switch what {
         case .found(_, let answer):
             return String(format: L10n.t(answer ? "outbox.found.answer" : "outbox.found.post", language: language), host)
+        case .unwritten(let gone):
+            return L10n.t("said.unwritten.\(gone.rawValue)", language: language)
         case .notice(let act):
             return NoticeActs.words(
                 ShellNoticeActs.Said(act: act, why: why), host: host, about: about, many: many, language: language
@@ -116,8 +146,8 @@ struct Said: Identifiable, Equatable, Sendable {
             case .declined: key = "said.act.\(act).declined"
             case .unconfirmed: key = "said.act.\(act).unconfirmed"
             }
-            // Whose post, where it is known and the act is one on a post that is drawn.
-            guard let whose, act != .answer else { return String(format: L10n.t(key, language: language), host) }
+            // Whose post, where it is known.
+            guard let whose else { return String(format: L10n.t(key, language: language), host) }
             return String(format: L10n.t(key + ".of", language: language), host, Self.named(whose, language: language))
         }
     }
@@ -208,6 +238,12 @@ final class ShellSaid {
     func forget(host raw: String) {
         let host = raw.lowercased()
         lines.removeAll { $0.host == host }
+    }
+
+    /// A write to this device landed: whatever was said not to be off it yet now is.
+    func written() {
+        guard lines.contains(where: { $0.isUnwritten }) else { return }
+        lines.removeAll { $0.isUnwritten }
     }
 
     func clear() {

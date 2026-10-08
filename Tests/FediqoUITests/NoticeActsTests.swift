@@ -745,7 +745,7 @@ struct NoticeActsTests {
         await acts.readPage(in: session)
         #expect(acts.held(host: Self.a) == NoticesHeld(requests: 2, notices: 3))
         #expect(acts.holdings[Self.b] == .absent && acts.held(host: Self.b) == nil)
-        #expect(acts.holders == [Self.a])
+        #expect(acts.shownHolders == [Self.a])
         #expect(NoticeActs.words(NoticesHeld(requests: 2, notices: 3), host: Self.a, language: .english)
             == "a.example is holding back 3 notices.")
         #expect(NoticeActs.words(NoticesHeld(requests: 1, notices: 1), host: Self.a, language: .english)
@@ -760,7 +760,7 @@ struct NoticeActsTests {
         // A source that holds nothing just now has nothing to offer; a failure leaves what was known.
         await server.set(F.get(Self.a, Self.policy), F.policy(requests: 0, notices: 0))
         await acts.look(in: session)
-        #expect(acts.held(host: Self.a) == nil && acts.holders.isEmpty)
+        #expect(acts.held(host: Self.a) == nil && acts.shownHolders.isEmpty)
         await server.set(F.get(Self.a, Self.policy), F.policy(requests: 1, notices: 4))
         await acts.look(in: session)
         await server.set(F.get(Self.a, Self.policy), .status(503))
@@ -930,7 +930,7 @@ struct NoticeActsTests {
         #expect(acts.requests[Self.a]?.map(\.requestID) == ["72"])
         #expect(acts.onItsWay.isEmpty)
         await acts.letGo(listed[1], in: session)
-        #expect(acts.held(host: Self.a) == nil && acts.holders.isEmpty && acts.opened.isEmpty)
+        #expect(acts.held(host: Self.a) == nil && acts.shownHolders.isEmpty && acts.opened.isEmpty)
         #expect(await server.posts == [F.post(Self.a, Self.requests + "/71/dismiss"), F.post(Self.a, Self.requests + "/72/dismiss")])
     }
 

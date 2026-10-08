@@ -808,7 +808,7 @@ private var migrator: DatabaseMigrator {
     // What each signed-in source says happened to the person (`NoticeReach`, #323), in two
     // tables of their own, written as a part of their own (`StoreFile.save(notices:)`): a
     // source's reach — which read it answers with, the id its next older stretch is asked
-    // before, the moment it was read down to, whether it is held to the bound — and its lines,
+    // before, the moment it was read down to — and its lines,
     // each at its place in the source's order. `people` is a JSON array; `post` is the post the
     // line is about as a row of `note` would write it, as JSON, or NULL — carried, and in no
     // timeline until somebody opens it.
@@ -822,7 +822,6 @@ private var migrator: DatabaseMigrator {
             t.column("gathered", .boolean).notNull()
             t.column("before", .text)
             t.column("reached", .datetime)
-            t.column("full", .boolean).notNull().defaults(to: false)
         }
         try db.create(table: "notice") { t in
             t.column("host", .text).notNull()

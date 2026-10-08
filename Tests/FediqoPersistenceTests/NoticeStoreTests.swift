@@ -41,10 +41,9 @@ struct NoticeStoreTests {
         )
     }
 
-    private static func reach(_ lines: [Notice], before: String? = nil, full: Bool = false) -> NoticeReach {
+    private static func reach(_ lines: [Notice], before: String? = nil) -> NoticeReach {
         NoticeReach(
-            host: mastodon.host, notices: lines, before: before, reached: lines.map(\.at).min(), gathered: false,
-            full: full
+            host: mastodon.host, notices: lines, before: before, reached: lines.map(\.at).min(), gathered: false
         )
     }
 
@@ -95,7 +94,7 @@ struct NoticeStoreTests {
         ]
         let reach = NoticeReach(
             host: Self.mastodon.host, notices: lines, before: "28", reached: Self.origin.addingTimeInterval(120),
-            gathered: true, full: true
+            gathered: true
         )
 
         try await file.save(notices: [reach])

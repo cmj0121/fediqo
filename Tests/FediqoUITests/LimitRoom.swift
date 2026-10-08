@@ -62,7 +62,7 @@ struct LimitRoom {
         let saver = StoreSaver(store: store, file: file)
         let file = self.file
         let compaction = self.compaction
-        session.persist = { try? await saver.save() }
+        session.persist = { (try? await saver.save()) != nil }
         session.measureStore = { file.bytesOnDisk() }
         session.weighStore = { file.bytesHeld() }
         session.compactStore = {
@@ -76,7 +76,7 @@ struct LimitRoom {
         }
         session.limitStore = try LimitAccountFile(directory: dir)
         await session.reloadFromStore()
-        await session.persist?()
+        _ = await session.persist?()
     }
 
     /// `count` copies of `bytes` each under `host`, numbered from `n` and written oldest first.

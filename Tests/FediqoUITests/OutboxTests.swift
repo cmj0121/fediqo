@@ -27,6 +27,8 @@ private actor PostServer: HTTPSender {
     /// nothing for a 500. Past the end, an empty list.
     private var own: [String?]
     private(set) var looks = 0
+    /// Held for every read of somebody's own posts; nothing where none is.
+    private let looking: Gate?
     /// Who each sign-in is, by its token: an id and a name.
     private static let people = ["tok-1": ("1", "me"), "tok-2": ("2", "other"), "tok-3": ("1", "me")]
 
@@ -37,9 +39,10 @@ private actor PostServer: HTTPSender {
 
     init(
         _ script: [Answer] = [], holding gates: [Int: Gate] = [:], account: Int = 200,
-        host: String = "social.example", elsewhere: Gate? = nil, own: [String?] = []
+        host: String = "social.example", elsewhere: Gate? = nil, own: [String?] = [], looking: Gate? = nil
     ) {
         self.own = own
+        self.looking = looking
         self.script = script
         self.gates = gates
         self.host = host
@@ -68,6 +71,7 @@ private actor PostServer: HTTPSender {
         }
         if url.path.hasSuffix("/statuses"), request.httpMethod != "POST" {
             looks += 1
+            await looking?.wait()
             guard let list = own.isEmpty ? "[]" : own.removeFirst() else { return answered("{}", 500) }
             return answered(list, 200)
         }
@@ -193,9 +197,9 @@ struct OutboxTests {
         )
         session.said.announce = { _ in }
         if let saver {
-            session.persist = { saves?.whole += 1; try? await saver.save() }
+            session.persist = { saves?.whole += 1; return (try? await saver.save()) != nil }
             session.persistUnsent = { saves?.texts += 1; return (try? await saver.saveUnsent()) ?? false }
-            await session.saveNow()
+            await session.write()
         }
         session.mastodon.refresh()
         // Each source says who is signed in, as a launch and a sign-in ask it.
@@ -1217,12 +1221,582 @@ struct OutboxTests {
         #expect(await elsewhere.posts.count == 1)
     }
 
+    // MARK: - Not said to be gone while the file holds it
+
+    private static let unremoved = "Your post for social.example could not be removed from this device. Its words are still kept here: discard it again to try once more."
+
+    /// A run holding one text known not to have gone, whose writes of the texts fail while
+    /// the flag it hands back is up — and every write of the store with them, where `whole`.
+    @MainActor
+    private final class Failing {
+        var on = true
+    }
+
+    private func unwritable(
+        _ words: String, hosts: [String] = [host], disk: Disk, whole: Bool = false
+    ) async throws -> (ShellSession, PostServer, UUID, Failing) {
+        let server = PostServer([.error(.notConnectedToInternet)])
+        let (session, _) = try await run(server, hosts: hosts, disk: disk)
+        #expect(post(words, in: session))
+        await session.outbox.settled()
+        let failing = Failing()
+        let texts = session.persistUnsent
+        session.persistUnsent = { failing.on ? false : await texts?() ?? false }
+        if whole, let store = session.persist { session.persist = { failing.on ? false : await store() } }
+        return (session, server, try #require(session.outbox.sendings.first?.id), failing)
+    }
+
+    @Test("A discard whose write did not land is not said to be gone: the line stands, saying aloud that it could not be removed from this device, with Discard alone; nothing sends or opens it; and Discard again — no second question — takes it off the disk")
+    func discardNotWritten() async throws {
+        let disk = Disk()
+        defer { disk.remove() }
+        let (session, server, id, failing) = try await unwritable("larkspur-ridge, to be discarded", disk: disk)
+        var heard: [String] = []
+        session.said.announce = { heard.append($0) }
+
+        await session.outbox.discard(id, in: session)
+
+        let entry = try #require(session.outbox.sendings.first, "it did not silently vanish")
+        #expect(entry.standing == .unremoved)
+        #expect(try disk.holds("larkspur-ridge"), "the file still holds its words")
+        #expect(line(entry, in: session) == Self.unremoved)
+        #expect(heard == [Self.unremoved], "and a listener is told")
+        #expect(OutboxWords.line(entry, hold: nil, whom: nil, language: .taiwanese)
+            == "你要送往 social.example 的貼文沒辦法從這個裝置移除。它的文字還留在這裡：再丟棄一次試試。")
+        #expect(presses(entry, in: session) == [.discard])
+        #expect(OutboxWords.symbol(entry) == SaidStrip.symbol)
+        #expect(!session.outbox.again(id, in: session) && !session.outbox.edit(id, in: session))
+        #expect(!session.outbox.sendAnyway(id, in: session) && !session.outbox.sendUnkept(id, in: session))
+        session.outbox.write(id, text: "typed over it")
+        #expect(session.outbox.sendChanged(id, in: session) == nil)
+
+        // Tried again while the disk still refuses: it stands as it stood.
+        SaidStrip.pressed(OutboxPressed(press: .discard, id: id), in: session)
+        #expect(session.discardingUnsent == nil, "the yes was given: it is not asked again")
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.first?.standing == .unremoved)
+
+        failing.on = false
+        SaidStrip.pressed(OutboxPressed(press: .discard, id: id), in: session)
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.isEmpty)
+        #expect(try disk.texts().isEmpty)
+        #expect(try !disk.holds("larkspur-ridge"))
+        #expect(await server.posts.count == 1)
+    }
+
+    @Test("Removing a source whose texts could not be taken off the disk does not leave them unsaid: each stands again as not removed from this device — not as a text whose source is gone — and Discard takes it off")
+    func removedNotWritten() async throws {
+        let disk = Disk()
+        defer { disk.remove() }
+        // Nothing can be written: a Remove waits for a save of the whole store too, which
+        // would take the texts out with it where it landed.
+        let (session, _, id, failing) = try await unwritable(
+            "marram-dune, as its source goes", hosts: [Self.host, Self.other], disk: disk, whole: true
+        )
+        var heard: [String] = []
+        session.said.announce = { heard.append($0) }
+
+        await session.remove(host: Self.host)
+
+        #expect(!session.isAdded(Self.host))
+        let entry = try #require(session.outbox.sendings.first, "its words are in the file: it is not said to be gone")
+        #expect(entry.id == id && entry.standing == .unremoved)
+        #expect(try disk.holds("marram-dune"))
+        #expect(line(entry, in: session) == Self.unremoved)
+        #expect(heard.contains(Self.unremoved))
+        #expect(presses(entry, in: session) == [.discard])
+        #expect(await session.store.unsentHeld().isEmpty, "the store let it go: only the file is behind")
+
+        failing.on = false
+        SaidStrip.pressed(OutboxPressed(press: .discard, id: id), in: session)
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.isEmpty)
+        #expect(try disk.texts().isEmpty)
+        #expect(try !disk.holds("marram-dune"))
+    }
+
+    @Test("A text that could not be taken off the disk is off it once a save of the whole store lands: its line goes with nobody pressing, and so does what was said of anything else not yet off this device")
+    func aSaveThatLandsTakesItOff() async throws {
+        let disk = Disk()
+        defer { disk.remove() }
+        let (session, _, id, failing) = try await unwritable("sorrel-quay words", disk: disk, whole: true)
+        await session.outbox.discard(id, in: session)
+        #expect(await !session.saveNow(.posts))
+        #expect(session.outbox.sendings.first?.standing == .unremoved && session.said.lines.count == 1)
+        #expect(try disk.holds("sorrel-quay"))
+
+        failing.on = false
+        session.saveSoon()
+        await session.saved()
+
+        #expect(session.outbox.sendings.isEmpty, "the line still says the file holds what it no longer does")
+        #expect(session.said.lines.isEmpty)
+        #expect(try disk.texts().isEmpty && !disk.holds("sorrel-quay"))
+    }
+
+    @Test("A post that landed while the write taking its text out of the file failed: the line goes — the post is there — and the save behind the landing takes the row out")
+    func landedNotWritten() async throws {
+        let disk = Disk()
+        defer { disk.remove() }
+        let (session, _) = try await run(PostServer(), disk: disk)
+        let texts = session.persistUnsent
+        var writes = 0
+        // The text as taken, the text as asked, and then the write that takes it out: failed.
+        session.persistUnsent = {
+            writes += 1
+            return writes < 3 ? await texts?() ?? false : false
+        }
+        #expect(post("sorrel-bank, landed", in: session))
+        await session.outbox.settled()
+
+        #expect(writes == 3)
+        #expect(session.outbox.sendings.isEmpty && session.notes.map(\.body) == ["sorrel-bank, landed"])
+        await session.saved()
+        #expect(try disk.texts().isEmpty, "the next save wrote the texts again")
+    }
+
+    @Test("A text seen to have arrived while the write taking it out of the file failed: the line goes, and a save is asked for that takes the row out")
+    func arrivedNotWritten() async throws {
+        let disk = Disk()
+        defer { disk.remove() }
+        let (session, _, entry) = try await maybePosted("thrift-cove, did it go", disk: disk)
+        session.persistUnsent = { false }
+
+        try await landed(Self.status("thrift-cove, did it go"), in: session)
+        #expect(session.outbox.sendings.isEmpty)
+        #expect(session.said.lines.map(\.what) == [.found(entry.id, answer: false)])
+        await session.outbox.settled()
+        await session.saved()
+        #expect(try disk.texts().isEmpty, "not left for the next launch to draw as maybe posted")
+    }
+
+    @Test("A run that reads back the row of a text whose post the last run landed lets it go at once — by its writer, at its source, published when it was asked, with its words — and does not draw it as maybe posted")
+    func aStaleRowAtLaunch() async throws {
+        let disk = Disk()
+        defer { disk.remove() }
+        let (first, _) = try await run(PostServer(), disk: disk)
+        // The fixture's source publishes at this moment.
+        first.outbox.now = { Date(timeIntervalSince1970: 1_717_200_000) }
+        var asked: Unsent?
+        let texts = first.persistUnsent
+        first.persistUnsent = {
+            if let row = await first.store.unsentHeld().first, row.standing == .asked { asked = row }
+            return await texts?() ?? false
+        }
+        #expect(post("campion-lane, landed", in: first))
+        await first.outbox.settled()
+        await first.saved()
+        #expect(try disk.texts().isEmpty)
+        // The write that took it out never landed: the file holds the row as it was asked.
+        let row = try #require(asked)
+        try await StoreFile(at: disk.dir).save(unsent: [row])
+
+        let (second, _) = try await run(PostServer(), disk: disk)
+
+        #expect(second.notes.map(\.body) == ["campion-lane, landed"])
+        #expect(second.outbox.sendings.isEmpty, "its post is held: it is not drawn as maybe posted")
+        #expect(second.said.lines.map(\.what) == [.found(row.id, answer: false)])
+        await second.outbox.settled()
+        #expect(try disk.texts().isEmpty)
+    }
+
+    @Test("A source removed while a text's own write has not reached the store: that write is not taken afterwards, nothing of the text is written once Remove has said done, and its send comes back to nothing")
+    func removedBeforeItsOwnWrite() async throws {
+        let disk = Disk()
+        defer { disk.remove() }
+        let server = PostServer()
+        let (session, _) = try await run(server, hosts: [Self.host, Self.other], disk: disk)
+        let hold = Gate()
+        let watchdog = hangGuard(hold)
+        defer { watchdog.cancel() }
+        session.outbox.holding = { await hold.wait() }
+        // What the store held of the texts at each write made after Remove said it was done.
+        var late: [String] = []
+        var done = false
+        let texts = session.persistUnsent
+        session.persistUnsent = {
+            if done { late += await session.store.unsentHeld().map(\.text) }
+            return await texts?() ?? false
+        }
+        #expect(post("yarrow-field, held before its write", in: session))
+        // Its send has taken the write to wait on: Remove finds none to wait for.
+        #expect(await spun { session.outbox.sendings.first?.standing == .onItsWay })
+
+        await session.remove(host: Self.host)
+        done = true
+        #expect(session.outbox.sendings.isEmpty)
+        #expect(try !disk.holds("yarrow-field"))
+
+        await hold.open()
+        await session.outbox.settled()
+        #expect(late.isEmpty, "a write from before the letting go put the text back")
+        #expect(await session.store.unsentHeld().isEmpty)
+        #expect(try disk.texts().isEmpty)
+        #expect(try !disk.holds("yarrow-field"))
+        #expect(await server.posts.isEmpty)
+    }
+
+    // MARK: - A handle is its source's word
+
+    @Test("A handle a source sent is drawn in a line of ours with no direction mark, control character or line break of its own, for who wrote a text and for who is signed in — and who wrote it is told by the id, whatever the handle says")
+    func handlesMadeFit() async throws {
+        let server = PostServer([.error(.notConnectedToInternet)])
+        let (session, tokens) = try await run(server)
+        #expect(post("written as me", in: session))
+        await session.outbox.settled()
+        let entry = try #require(session.outbox.sendings.first)
+        func token(_ access: String, _ id: String, _ handle: String) -> MastodonToken {
+            MastodonToken(
+                host: Self.host, accessToken: access, clientID: "cid", clientSecret: "csecret", scopes: Self.writing,
+                accountID: id, handle: handle
+            )
+        }
+        func fit(_ line: String) -> Bool {
+            line.unicodeScalars.allSatisfy {
+                ![.control, .format, .lineSeparator, .paragraphSeparator].contains($0.properties.generalCategory)
+            }
+        }
+
+        // Somebody else, whose source spells them with an override, a bell and a line break.
+        let raw = "@oth\u{202E}er\u{0007}\n\u{2066}@social.example"
+        try tokens.save(token("tok-2", "2", raw))
+        session.mastodon.refresh()
+        #expect(session.mastodon.reader(host: Self.host)?.handle == raw, "kept as sent, for what it is compared with")
+        #expect(session.outbox.hold(entry, in: session) == .otherAccount(here: "@other @social.example"))
+        let said = line(entry, in: session)
+        #expect(said == "Your post was written as @me@social.example, and social.example is signed in as @other @social.example. Sign in as @me@social.example to send it.")
+        #expect(fit(said))
+
+        // The writer's own handle, as a row written by an earlier build may hold it.
+        var dirty = entry.unsent
+        dirty.writer = "@m\u{202E}e\u{200B}\r\n@social.example"
+        for hold in [ShellOutbox.Hold.otherAccount(here: nil), .otherAccount(here: "@other@social.example")] {
+            let line = OutboxWords.line(ShellOutbox.Sending(unsent: dirty, standing: .failed(.unreachable)), hold: hold, whom: nil)
+            #expect(fit(line) && line.contains("@me @social.example"), "\(hold)")
+        }
+
+        // The writer again under another sign-in, spelt otherwise: the id says who it is.
+        try tokens.save(token("tok-3", "1", "@renamed\u{202E}@social.example"))
+        session.mastodon.refresh()
+        #expect(session.outbox.hold(entry, in: session) == nil)
+        // And a post is theirs by the handle as its source sent it, never by one made fit.
+        dirty.standing = .asked
+        dirty.askedAt = Date()
+        let theirs = Note(
+            id: "https://\(Self.host)/users/me/statuses/5", source: Source(host: Self.host, kind: .mastodon),
+            author: "Me", handle: dirty.writer ?? "", body: "written as me", postedAt: Date(), categories: [.home],
+            audience: .everyone, statusID: "5"
+        )
+        #expect(ShellOutbox.isPost(theirs, of: dirty, answering: nil))
+    }
+
+    // MARK: - The sign-in the look went with
+
+    @Test("A sign-in replaced while a text is looked for among its writer's posts — the same account under another sign-in — takes in nothing the look read: the text stays as it was, and the person is asked before anything is sent")
+    func replacedDuringTheLook() async throws {
+        let look = Gate()
+        let watchdog = hangGuard(look)
+        defer { watchdog.cancel() }
+        let server = PostServer([.error(.timedOut)], own: ["[\(Self.status("did this go"))]"], looking: look)
+        let (session, tokens) = try await run(server)
+        #expect(post("did this go", in: session))
+        await session.outbox.settled()
+        let entry = try #require(session.outbox.sendings.first)
+        let revision = await session.store.revision
+
+        #expect(session.outbox.again(entry.id, in: session))
+        #expect(await spun { await server.looks == 1 })
+        try tokens.save(Self.token(Self.host, "tok-3", knownAs: "1"))
+        session.mastodon.refresh()
+        #expect(session.outbox.hold(entry, in: session) == nil, "the premise: the writer still, by the id")
+        await look.open()
+        await session.outbox.settled()
+
+        #expect(session.notes.isEmpty, "what the old sign-in's read brought is taken in for nobody")
+        #expect(await session.store.revision == revision)
+        #expect(session.said.lines.isEmpty)
+        #expect(session.outbox.sendings.map(\.standing) == [.unconfirmed], "the text stays as it was")
+        #expect(session.resendingUnsent == UnsentAsk(id: entry.id))
+        #expect(await server.posts.count == 1)
+    }
+
+    // MARK: - Two windows over one store
+
+    /// A second window beside `first`: a session and an outbox of its own over the same store,
+    /// the same sign-ins and the same file, as a Mac's second window is. It has adopted what
+    /// the store holds, and follows nothing by itself.
+    private func window(beside first: ShellSession) async -> ShellSession {
+        let second = ShellSession(http: FixtureHTTP(), store: first.store, mastodon: first.mastodon)
+        second.said.announce = { _ in }
+        second.persist = first.persist
+        second.persistUnsent = first.persistUnsent
+        await second.reloadFromStore()
+        await second.adoptUnsent()
+        return second
+    }
+
+    @Test("A text discarded in one window is gone from the other as the store says so, and from the file; and where it stood in the second was the store's word of it")
+    func discardedInOneWindowIsGoneInTheOther() async throws {
+        let disk = Disk()
+        defer { disk.remove() }
+        let server = PostServer([.http(422)])
+        let (first, _) = try await run(server, disk: disk)
+        #expect(post("juniper-anvil words", in: first))
+        await first.outbox.settled()
+        let second = await window(beside: first)
+        let following = Task { await second.followStore() }
+        defer { following.cancel() }
+
+        let drawn = try #require(second.outbox.sendings.first)
+        #expect(drawn == first.outbox.sendings.first, "the second window draws what the first does")
+        #expect(drawn.standing == .failed(.declined))
+        #expect(presses(drawn, in: second) == [.again, .edit, .discard])
+
+        await first.outbox.discard(drawn.id, in: first)
+
+        #expect(first.outbox.sendings.isEmpty)
+        #expect(await spun { second.outbox.sendings.isEmpty }, "the second window still offers a text the first discarded")
+        #expect(try disk.texts().isEmpty)
+        #expect(await server.posts.count == 1)
+    }
+
+    @Test("A text that lands through one window is drawn as on its way in the other while it is out, with nothing to press, and is gone from both when it lands")
+    func landedInOneWindowIsGoneInTheOther() async throws {
+        let gate = Gate()
+        let watchdog = hangGuard(gate)
+        defer { watchdog.cancel() }
+        let server = PostServer([.error(.notConnectedToInternet), .yes], holding: [1: gate])
+        let (first, _) = try await run(server)
+        #expect(post("hello twice", in: first))
+        await first.outbox.settled()
+        let second = await window(beside: first)
+        let following = Task { await second.followStore() }
+        defer { following.cancel() }
+        let id = try #require(second.outbox.sendings.first?.id)
+        #expect(second.outbox.sendings.first?.standing == .failed(.unreachable))
+
+        #expect(first.outbox.again(id, in: first))
+        #expect(await spun { await server.posts.count == 2 })
+        // The request is held at the source: the other window says so, and offers nothing.
+        #expect(await spun { second.outbox.sendings.first?.standing == .onItsWay })
+        #expect(presses(try #require(second.outbox.sendings.first), in: second).isEmpty)
+        #expect(!second.outbox.again(id, in: second) && !second.outbox.edit(id, in: second))
+
+        await gate.open()
+        await first.outbox.settled()
+        #expect(first.outbox.sendings.isEmpty)
+        #expect(await spun { second.outbox.sendings.isEmpty }, "the second window still holds a text that landed")
+        #expect(await spun { second.notes.map(\.body) == ["hello twice"] })
+        #expect(await server.posts.count == 2)
+    }
+
+    @Test("Send again pressed in two windows, the second while the first's request is on the wire and before it has heard: one request leaves, and the second draws the text as on its way")
+    func sendAgainInTwoWindowsSendsOnce() async throws {
+        let gate = Gate()
+        let watchdog = hangGuard(gate)
+        defer { watchdog.cancel() }
+        let server = PostServer([.error(.notConnectedToInternet), .yes], holding: [1: gate])
+        let (first, _) = try await run(server)
+        #expect(post("only once", in: first))
+        await first.outbox.settled()
+        let second = await window(beside: first)
+        let id = try #require(second.outbox.sendings.first?.id)
+
+        #expect(first.outbox.again(id, in: first))
+        #expect(await spun { await server.posts.count == 2 })
+        // Held at the source, and the second window has not looked at the store since: its
+        // line still says it was not sent, with Send again live.
+        #expect(second.outbox.sendings.first?.standing == .failed(.unreachable))
+        #expect(second.outbox.again(id, in: second), "the press is taken: only the store can say who sends")
+        await second.outbox.settled()
+
+        #expect(await server.posts.count == 2, "the second window sent the text the first has on the wire")
+        #expect(second.outbox.sendings.first?.standing == .onItsWay)
+        #expect(presses(try #require(second.outbox.sendings.first), in: second).isEmpty)
+
+        await gate.open()
+        await first.outbox.settled()
+        await second.reloadFromStore()
+        #expect(first.outbox.sendings.isEmpty && second.outbox.sendings.isEmpty)
+        #expect(await server.posts.count == 2)
+        #expect(await first.store.unsentHeld().isEmpty)
+        #expect(first.notes.map(\.body) == ["only once"])
+    }
+
+    @Test("A text that may have been posted, sent again from two windows at once — each looked, neither found it, and the first's request is on the wire: the store gives the sending to one, and the other sends nothing")
+    func theStoreGivesTheSendingToOne() async throws {
+        let gate = Gate()
+        let watchdog = hangGuard(gate)
+        defer { watchdog.cancel() }
+        let server = PostServer([.http(500), .yes, .yes], holding: [1: gate], own: ["[]", "[]"])
+        let (first, _) = try await run(server)
+        #expect(post("one of two", in: first))
+        await first.outbox.settled()
+        let second = await window(beside: first)
+        let id = try #require(second.outbox.sendings.first?.id)
+        #expect(second.outbox.sendings.first?.standing == .unconfirmed && second.outbox.mayHaveBeenPosted(id))
+
+        #expect(first.outbox.again(id, in: first))
+        #expect(await spun { await server.posts.count == 2 })
+        // Held at the source. What the store holds of the text is what the second window
+        // already has — asked, as it was — so nothing but who is sending it says it is out.
+        #expect(await first.store.unsentHeld() == [try #require(second.outbox.sendings.first?.unsent)])
+        #expect(second.outbox.again(id, in: second))
+        await second.outbox.settled()
+
+        #expect(await server.looks == 2, "the second window looked for it too")
+        #expect(await server.posts.count == 2, "two windows sent one text at once")
+        #expect(second.outbox.sendings.first?.standing == .onItsWay)
+
+        await gate.open()
+        await first.outbox.settled()
+        await second.reloadFromStore()
+        #expect(first.outbox.sendings.isEmpty && second.outbox.sendings.isEmpty)
+        #expect(await server.posts.count == 2)
+    }
+
+    @Test("Send again in a window that has not heard the text was discarded in another: the store will not hold it, so nothing is sent and its line goes")
+    func sendAgainOnATextDiscardedElsewhereSendsNothing() async throws {
+        let disk = Disk()
+        defer { disk.remove() }
+        let server = PostServer([.http(422)])
+        let (first, _) = try await run(server, disk: disk)
+        #expect(post("thistle-harbour words", in: first))
+        await first.outbox.settled()
+        let second = await window(beside: first)
+        let id = try #require(second.outbox.sendings.first?.id)
+        second.editingUnsent = UnsentAsk(id: id)
+
+        await first.outbox.discard(id, in: first)
+        // Not looked at the store since: Send again is live on a text that is gone.
+        #expect(presses(try #require(second.outbox.sendings.first), in: second) == [.again, .edit, .discard])
+        #expect(second.outbox.again(id, in: second))
+        await second.outbox.settled()
+
+        #expect(await server.posts.count == 1, "a discarded text was posted")
+        #expect(second.outbox.sendings.isEmpty, "the line of a text that is gone stands")
+        #expect(second.editingUnsent == nil, "a sheet on a text that is gone stays up")
+        #expect(await first.store.unsentHeld().isEmpty)
+        #expect(try disk.texts().isEmpty && !disk.holds("thistle-harbour"))
+    }
+
+    @Test("A text one window sent and got no answer for may have been posted in every window: the other looks first, and one that has not heard yet and presses Send again sends nothing")
+    func askedThroughAnotherWindowIsNotSentBlind() async throws {
+        let server = PostServer([.http(422), .http(500)], own: [nil])
+        let (first, _) = try await run(server)
+        #expect(post("maybe there", in: first))
+        await first.outbox.settled()
+        let second = await window(beside: first)
+        let id = try #require(second.outbox.sendings.first?.id)
+        #expect(!second.outbox.mayHaveBeenPosted(id))
+
+        #expect(first.outbox.again(id, in: first))
+        await first.outbox.settled()
+        #expect(first.outbox.sendings.first?.standing == .unconfirmed)
+        // The second window has not heard: to it the text was not sent, and Send again sends.
+        #expect(second.outbox.sendings.first?.standing == .failed(.declined))
+        #expect(second.outbox.again(id, in: second))
+        await second.outbox.settled()
+
+        #expect(await server.posts.count == 2, "sent again on a press made before it was known it may have landed")
+        #expect(second.outbox.sendings.first?.standing == .unconfirmed)
+        #expect(second.outbox.mayHaveBeenPosted(id))
+        // And from there it is looked for before it is sent, as in the window that sent it.
+        #expect(second.outbox.again(id, in: second))
+        await second.outbox.settled()
+        #expect(await server.looks == 1)
+        #expect(await server.posts.count == 2)
+        #expect(second.resendingUnsent?.id == id, "a look that could not be had asks first")
+    }
+
+    @Test("Discard in a window that has not heard another is sending the text: nothing is discarded under the request, and the line is drawn as on its way")
+    func aTextBeingSentElsewhereIsNotDiscarded() async throws {
+        let gate = Gate()
+        let watchdog = hangGuard(gate)
+        defer { watchdog.cancel() }
+        let server = PostServer([.error(.notConnectedToInternet), .yes], holding: [1: gate])
+        let (first, _) = try await run(server)
+        #expect(post("not under it", in: first))
+        await first.outbox.settled()
+        let second = await window(beside: first)
+        let id = try #require(second.outbox.sendings.first?.id)
+
+        #expect(first.outbox.again(id, in: first))
+        #expect(await spun { await server.posts.count == 2 })
+        await second.outbox.discard(id, in: second)
+
+        #expect(await first.store.unsentHeld().map(\.id) == [id], "discarded while its request was on the wire")
+        #expect(second.outbox.sendings.first?.standing == .onItsWay)
+
+        await gate.open()
+        await first.outbox.settled()
+        await second.reloadFromStore()
+        #expect(second.outbox.sendings.isEmpty && first.notes.map(\.body) == ["not under it"])
+    }
+
+    @Test("A sheet open on a text in one window closes when another window starts sending it, and what was typed there is in the sheet again where the text comes back as not sent")
+    func aSheetOnATextSentElsewhereCloses() async throws {
+        let gate = Gate()
+        let watchdog = hangGuard(gate)
+        defer { watchdog.cancel() }
+        let server = PostServer([.error(.notConnectedToInternet), .http(422)], holding: [1: gate])
+        let (first, _) = try await run(server)
+        #expect(post("as written", in: first))
+        await first.outbox.settled()
+        let second = await window(beside: first)
+        let id = try #require(second.outbox.sendings.first?.id)
+        #expect(second.outbox.edit(id, in: second))
+        second.outbox.write(id, text: "typed over it")
+        #expect(second.editingUnsent?.id == id)
+
+        #expect(first.outbox.again(id, in: first))
+        #expect(await spun { await server.posts.count == 2 })
+        await second.reloadFromStore()
+
+        #expect(second.editingUnsent == nil, "a sheet whose Send can send nothing stays up")
+        #expect(second.outbox.sendings.first?.standing == .onItsWay)
+
+        await gate.open()
+        await first.outbox.settled()
+        await second.reloadFromStore()
+        #expect(second.outbox.sendings.first?.standing == .failed(.declined))
+        #expect(second.outbox.edit(id, in: second))
+        #expect(second.outbox.draft(id) == "typed over it" && second.outbox.changed(id) == "typed over it")
+        #expect(await server.texts == ["as written", "as written"])
+    }
+
+    @Test("One sender a text, decided in the store: the first to take it has it until it gives it back or the text is let go, and a text let go of is not held again")
+    func oneSenderATextInTheStore() async {
+        let store = ItemStore()
+        let text = Unsent(host: Self.host, text: "words", audience: .everyone)
+        let (one, two) = (UUID(), UUID())
+        await store.hold(text)
+        let before = await store.unsentRevision
+
+        #expect(await store.claim(unsent: text.id, for: one))
+        #expect(await store.claim(unsent: text.id, for: one), "its own sender is refused it")
+        #expect(await !store.claim(unsent: text.id, for: two))
+        #expect(await store.unsentView().senders == [text.id: one])
+        await store.release(unsent: text.id, from: two)
+        #expect(await !store.claim(unsent: text.id, for: two), "given back by somebody who did not have it")
+        await store.release(unsent: text.id, from: one)
+        #expect(await store.claim(unsent: text.id, for: two))
+        #expect(await store.unsentRevision == before, "who is sending a text is nothing a save writes")
+
+        let mark = await store.unsentMark
+        await store.letGo(unsent: text.id)
+        let view = await store.unsentView()
+        #expect(view.texts.isEmpty && view.senders.isEmpty && view.gone == [text.id] && view.mark > mark)
+        #expect(await !store.hold(text))
+    }
+
     // MARK: - The words
 
     @Test("Every sentence and every press of the outbox has words in each language, and the two Chinese files agree")
     func everyWord() throws {
         let kinds = ["post", "answer"]
-        var keys = ["sending", "looking", "failed", "refused", "declined", "unconfirmed", "unkept", "hold.signedOut",
+        var keys = ["sending", "looking", "failed", "refused", "declined", "unconfirmed", "unkept", "unremoved", "hold.signedOut",
                     "hold.noSource", "hold.other", "hold.other.unknown", "hold.unnamed", "discard.title",
                     "discard.title.unconfirmed", "resend.title"]
             .flatMap { key in kinds.map { "outbox.\(key).\($0)" } }
@@ -1243,7 +1817,7 @@ struct OutboxTests {
         let unsent = Unsent(host: Self.host, text: "x", audience: .followers)
         #expect(UnsentSheet.goesTo(unsent) == "Goes to social.example, private")
         // Every way a line can stand says something of its own.
-        let all: [ShellOutbox.Standing] = [.onItsWay, .looking, .unconfirmed, .unkept, .failed(.refused), .failed(.declined), .failed(.unreachable)]
+        let all: [ShellOutbox.Standing] = [.onItsWay, .looking, .unconfirmed, .unkept, .unremoved, .failed(.refused), .failed(.declined), .failed(.unreachable)]
         let said = all.map { OutboxWords.line(ShellOutbox.Sending(unsent: unsent, standing: $0), hold: nil, whom: nil) }
         #expect(Set(said).count == all.count)
         #expect(OutboxWords.line(ShellOutbox.Sending(unsent: unsent, standing: .failed(.unreachable)), hold: .noSource, whom: nil)

@@ -44,7 +44,7 @@ struct ForumWordsKeptTests {
             posts: ForumPosts(http: http)
         )
         let saves = Saves()
-        session.persist = { saves.count += 1 }
+        session.persist = { saves.count += 1; return true }
         await session.reloadFromStore()
         return (session, store, saves)
     }

@@ -49,7 +49,7 @@ struct SpanTests {
         let store = Self.held()
         let session = ShellSession(http: FixtureHTTP(), store: store)
         let saves = Counter()
-        session.persist = { await saves.bump() }
+        session.persist = { await saves.bump(); return true }
         let measures = Counter()
         session.measureStore = { await measures.bump() }
         await session.reloadFromStore()
@@ -90,7 +90,7 @@ struct SpanTests {
     func nothingToLetGo() async {
         let session = ShellSession(http: FixtureHTTP(), store: Self.held())
         let saves = Counter()
-        session.persist = { await saves.bump() }
+        session.persist = { await saves.bump(); return true }
         await session.reloadFromStore()
         let span = SpanSection.span(from: Self.day(1), to: Self.day(0))
         #expect(await session.spanHeld(span, host: nil) == 0)
@@ -109,6 +109,7 @@ struct SpanTests {
         session.persist = {
             let snapshot = await store.snapshot()
             try? await StoreFile(at: dir).save(sources: snapshot.sources, notes: snapshot.notes)
+            return true
         }
         await session.reloadFromStore()
         await session.letGo(span: SpanSection.span(from: Self.day(9), to: Self.day(5)), host: nil)

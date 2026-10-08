@@ -130,7 +130,7 @@ extension ShellSession {
         await noticeList.learnEpochs()
         // Waited for: what a source said of a reader who has left is not on disk a moment
         // longer than it is in the store (#285, #292).
-        if moved { await persist?() }
+        if moved { await saveNow(.reader) }
     }
 }
 
@@ -141,7 +141,7 @@ extension ShellSession {
     func saveForCarry() async {
         await forgetReaderMarksDue()
         // Waited for: what is packed next is read from the file this writes.
-        await persist?()
+        await write()
     }
 }
 

@@ -70,3 +70,15 @@ public struct Unsent: Hashable, Sendable, Identifiable {
         self.standing = standing
     }
 }
+
+/// The texts a store holds, as one moment of it (`ItemStore.unsentView`).
+public struct UnsentView: Sendable {
+    /// In the order pressed.
+    public let texts: [Unsent]
+    /// Who is sending each text that is being sent (`ItemStore.claim`).
+    public let senders: [UUID: UUID]
+    /// The names let go of this run: landed, discarded, their source removed.
+    public let gone: Set<UUID>
+    /// The store's `unsentMark` at this moment: a later view has a greater one.
+    public let mark: Int
+}
