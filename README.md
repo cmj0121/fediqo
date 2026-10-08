@@ -121,12 +121,18 @@ make servers-down
 brought the servers up, and that is the part a pull request checks. The servers, the
 cases they unlock, and a release build run when work lands on `main`.
 
+The Mastodon server runs no worker, so its seed gives the first account its notices and runs
+the waiting jobs itself. The checks that dismiss a notice use notices up: four runs fit
+between seeds, a run past that says to seed again, and `make servers` once more makes up what
+was used.
+
 ## Using it
 
 An empty launch opens Account. Add a Mastodon host or a Discuz forum from the catalog or by
 typing its hostname. It names the protocol; only those two join this session. What a source
-sends lands in this device's store, and every timeline is a query of that store. Notices and
-compose stay off until they have something.
+sends lands in this device's store, and every timeline is a query of that store. Compose
+stays off until it has something; Notices can always be entered, and says what would make it
+fill.
 
 ### Writing a post
 
@@ -249,6 +255,34 @@ there says it has to be asked for, and Account names the source: one press on ei
 a page that names bookmarks, without signing you out first. A server that has no bookmarks to
 grant leaves you signed in to read and write, and the bookmark is drawn grey there.
 
+Reading your notices is asked for apart from all of that, and only when you press for it on the
+Notices page — for a sign-in made today and one made long ago alike. No sign-in asks for it
+unasked, and no row on Account gains a lock for it. The press asks first and says everything
+the server's page will be asked for: reading notices; dismissing them too where that sign-in
+reads and writes, since dismissing is an act; and bookmarks as well, where a sign-in to read
+and write was made before Fediqo could bookmark. A sign-in made before Fediqo could write is
+asked whether it reads or reads and writes, with notices in either answer. Nobody is signed
+out. Close the server's page, or say no on it, and the sign-in you had goes on as it was. A
+source that has no notices to give is said to have none, and is not asked again until Fediqo
+is opened again or you sign in to it again. Once allowed,
+notices are carried by the next sign-in to that source, and forgotten when you sign out. That
+sign-in's own question says notices come with it — reading them, and dismissing them where
+reading and writing is chosen — whether it is signing in again, adding the writing part, or
+asking for bookmarks. What the question said is what is asked: notices allowed while it stood
+open are not added to it.
+
+What a sign-in asks its server for, in the server's own words:
+
+| Part       | Asked for                                            | When                                            |
+| ---------- | ---------------------------------------------------- | ----------------------------------------------- |
+| reading    | `read:statuses read:lists read:accounts read:search` | every sign-in                                   |
+| writing    | `write:statuses write:favourites`                    | where you chose reading and writing             |
+| bookmarks  | `write:bookmarks`                                    | with writing                                    |
+| notices    | `read:notifications`                                 | only after you press for notices on Notices     |
+| dismissing | `write:notifications`                                | with notices, and only where the sign-in writes |
+
+A server that refuses `read:search` or `write:bookmarks` is asked again without it.
+
 A bookmark is kept at the source. The mark under a post is what its source last said — filled
 where it holds your bookmark, and never filled by a press that did not land — so it reads the
 same in any other app, and after a relaunch. A press the source turns away says so and leaves
@@ -280,8 +314,9 @@ red on a source that turned a write away, and stays until you sign in to it agai
 Whatever takes something away, signing out aside, is behind three dots on the row or the
 section it acts on, and asks first: Clear and Remove on a source's row, Clear and Forget
 password in a source's detail on Usage, Stop keeping, letting go by dates, dropping picture
-copies, removing a timeline or a host you added, and taking back a
-post of your own. Signing out is the key itself, and asks first too. One is not asked: removing
+copies, removing a timeline or a host you added, taking back a
+post of your own, dismissing a notice or every notice of a source, and letting go of what a
+source holds back. Signing out is the key itself, and asks first too. One is not asked: removing
 a rule from a timeline being edited is behind the dots as well, but it is only a draft, and
 nothing is kept until Done.
 
@@ -452,6 +487,74 @@ sentence in their place. `s` lifts the cover; the mark then says it was covered,
 covers it again. Covered pictures carry the same mark. After Esc from a thread, the post it
 opened from is centred and still selected.
 
+### Notices
+
+Notices is what your signed-in Mastodon sources say happened to you there: somebody answered,
+mentioned, boosted, favourited, followed, asked to follow or quoted you; a poll ended; a post
+you boosted was edited; the server itself has a word. The page can always be entered. With
+nobody signed in to a Mastodon it says what would make it fill, and a source signed in to and
+not yet asked for notices is named with one press that asks, under the same lock a source's
+row on Account draws where its sign-in must be asked again — see Signing in to Mastodon,
+above.
+
+Every such source's notices are one list, newest first. Each line says what happened, who did
+it, the post it is about where there is one, when, and its source. Where the source gathers
+many of one kind about one post, that is one line naming one person and how many others;
+Fediqo gathers nothing of its own. A kind this version does not know is kept and said to be
+unknown.
+
+A post its author covered is covered on a notice's line too, and on what a source holds back:
+the line shows the author's warning, or that the post is covered, and never the words
+beneath. Opening it leads to the conversation, where it is covered as it is anywhere.
+
+| Key      | What it does on Notices                          |
+| -------- | ------------------------------------------------ |
+| `r`      | read every source's notices again                |
+| `j`      | move down; on the last line, read the older ones |
+| `Return` | open what the notice you are on is about         |
+| `p`      | open whoever the notice you are on names first   |
+| `d`      | dismiss the notice you are on, asked first       |
+
+Notices are read when the page is opened, at its reload mark, at `r` and at a pull, and never
+by a clock: nothing is asked while the page is closed. A read can be stopped. Reading on is
+yours too — a press on the foot of the list, `j` on the last line, or a scroll by hand that
+ends at the foot. A line never stands below a stretch another source has not been asked for:
+what is older is held and shown as reading on reaches it. A source that fails is named above
+the list with a way to ask again, and the others still land.
+
+At most 2,000 notices are held of one source in a run. At that limit the newest are kept and
+reading on ends for that source. From then on it is named above the list: its older notices
+are not shown, and may belong among the lines below, since the other sources go on being read.
+The foot of the list says the limit was reached rather than that there are no older notices.
+Reading again still reads the newest.
+
+The kinds shown are narrowed from the head of the page, which says how many kinds are left
+out. Narrowing asks nothing of a source and only changes what is drawn, and the choice is kept
+on this device.
+
+A notice opens what it is about. One about a post opens that post in its conversation, in the
+timeline, and leaving it comes back to the line it was opened from. One about a person — a
+follow, a request to follow — opens what Fediqo shows of that person. A post older than this
+device keeps says so on its line.
+
+Dismissing is done at the source. A notice is dismissed from the three dots on its line, or
+with `d`; every notice of one source at once from the three dots at the head of the page, a
+source at a time. Each asks first, and dismissing all takes every notice that source has for
+you, shown here or not. The line leaves only when the source has said so, and it is gone in
+your other apps too. Where a sign-in only reads, dismissing is dim and says why.
+
+Where a source says it is holding notices back from people it does not trust, a line above the
+list says how many. Opened, it lists whose they are, and each can be let through or let go
+from its three dots, both asked first; the question names the person by their address
+(`@name@host`) first, and the name they chose after it. Letting one through also lets that person's later
+notices through, at the source, and Fediqo cannot take that back; what was let through is said
+to be on its way until that source is next read. Letting go dismisses them there, unshown.
+Where a source holds none, or has no such thing, nothing is drawn.
+
+Notices are held for this run only. Nothing of them is written to what this device keeps, so
+after a relaunch the page is empty until its first read. The post a notice is about is held
+only once you open it.
+
 ### On a phone
 
 With no keyboard attached, Preferences has a Gestures page that lists what a finger does; with
@@ -477,6 +580,10 @@ is where you left it.
 Pull a timeline down to read it again. While it reads, the reload mark is Stop. Press the top
 of the screen to go to the top of the list. On an opened post, person or tag, or a row's detail, a
 sideways swipe goes back; on a page with tabs it goes to the tab beside.
+
+On Notices, one press on a notice opens what it is about, and pulling the list down reads the
+notices again. Holding a notice, or pressing the three dots on its line, offers to dismiss it.
+Older notices are read by pressing the foot of the list, or by scrolling to it.
 
 ### What this device holds
 
