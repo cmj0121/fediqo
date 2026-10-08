@@ -768,7 +768,13 @@ final class ShellSession {
     var searchFocused = false
 
     /// Writes the store to disk. Set by the app so a drop by time survives a relaunch.
+    ///
+    /// **Asked through `saveSoon()`**, which does not wait for it (`ShellSaving`). Awaited only by
+    /// what reads the file next — `saveForCarry()` and the room's check — and by an act that
+    /// takes something off this device (`saveNow`).
     @ObservationIgnored var persist: (@MainActor () async -> Void)?
+    /// The save asked for last through `saveSoon()`, running or waiting; the next runs after it.
+    @ObservationIgnored var saving: Task<Void, Never>?
 
     init(
         http: any HTTPClient,
@@ -942,7 +948,7 @@ final class ShellSession {
                 .post(text, visibility: composeAudience)
             composeDraft = ComposerSheet.draftAfterLanding(current: composeDraft, sent: text)
             await adopt()
-            await persist?()
+            saveSoon()
         } catch {
             writeFailed(error, host: host)
             throw error
@@ -1251,7 +1257,9 @@ final class ShellSession {
             conversations.replace(answered)
             acts.landed(copy.id, act)
             await adopt()
-            await persist?()
+            // A post taken back is waited for: it is not said to be gone while the file still
+            // holds its words (#292). A mark is the source's, and is written behind the press.
+            if act == .withdraw { await persist?() } else { saveSoon() }
         } catch {
             writeFailed(error, host: host, bookmarkSentWith: act == .bookmark ? door.token : nil)
             acts.failed(copy.id, act)
@@ -1335,7 +1343,7 @@ final class ShellSession {
             }
             conversations.landed(note, under: target.root.id, rootID: target.root.statusID)
             await adopt()
-            await persist?()
+            saveSoon()
         } catch {
             writeFailed(error, host: host)
             throw error
@@ -2760,9 +2768,12 @@ final class ShellSession {
         let replies = await store.replies()
         adoptHeld(notes: all, replies: replies)
         adoptedReplies = await store.repliesRevision
-        await persist?()
-        try? await compactStore?()
-        await readStoreBytes()
+        // Waited for: what the window dropped is not said to be gone while the file still holds
+        // it (#292). Giving the file back its room, and measuring it, follow and are not.
+        await saveNow { [weak self] in
+            try? await self?.compactStore?()
+            await self?.readStoreBytes()
+        }
         await record(LimitAct(limit: .months, at: now, posts: went.posts, sources: went.sources))
         return went.posts
     }
@@ -2776,7 +2787,7 @@ final class ShellSession {
     func keep(_ opening: ForumOpening, for key: NoteKey) {
         Task {
             guard await store.keep([key: opening]) else { return }
-            await persist?()
+            saveSoon()
         }
     }
 
@@ -2794,7 +2805,7 @@ final class ShellSession {
         let opening = blog.opening
         notes = notes.map { $0.key == key && $0.opening != opening ? $0.with(opening: opening) : $0 }
         guard await store.keep([key: opening], shown: true) else { return }
-        await persist?()
+        saveSoon()
     }
 
     /// One page of a topic's replies, landed in the store as that topic's kept replies and saved,
@@ -2824,7 +2835,7 @@ final class ShellSession {
         }
         await store.ingest(notes, ifSourceHere: host)
         await store.refresh(notes.filter { $0.opening != nil }, ifSourceHere: host)
-        await persist?()
+        saveSoon()
         return await keptReplies(host: host, tid: tid)
     }
 
@@ -2865,7 +2876,7 @@ final class ShellSession {
         notes = notes.map { note in openings[note.key].map(note.with(opening:)) ?? note }
         Task {
             guard await store.keep(openings) else { return }
-            await persist?()
+            saveSoon()
         }
     }
 

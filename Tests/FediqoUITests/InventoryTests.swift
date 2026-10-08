@@ -79,6 +79,7 @@ struct InventoryTests {
         await session.reloadFromStore()
         #expect(await session.keep(months: months, from: now) == 0)
         #expect(session.notes.count == 3)
+        await session.saved()
         #expect(saves.count == 0)
     }
 
@@ -96,6 +97,7 @@ struct InventoryTests {
         #expect(session.notes.map(\.id).sorted() == ["1", "2"])
         #expect(session.holdings.posts == 2, "the counts were not rebuilt with the rows")
         #expect(session.sources.map(\.host) == [alpha.host, beta.host])
+        await session.saved()
         #expect(saves.count == 1)
         let opened = StoreFile.open(at: dir)
         #expect(opened.notes.map(\.id).sorted() == ["1", "2"])
@@ -103,6 +105,7 @@ struct InventoryTests {
 
         // Nothing more to drop: not written again. And anything older read later is not kept.
         #expect(await session.keep(months: 3, from: now) == 0)
+        await session.saved()
         #expect(saves.count == 1)
         await store.ingest([note("4", daysAgo: 400, from: beta)])
         #expect(await !store.all().contains { $0.id == "4" })

@@ -251,7 +251,7 @@ final class ShellRefs {
         case .notTaken, .letGo, .withdrawn:
             return
         }
-        await session.persist?()
+        session.saveSoon()
     }
 
     /// Other reads' word reaches the pacer from the one place answers are seen.

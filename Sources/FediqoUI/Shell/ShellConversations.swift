@@ -775,7 +775,7 @@ final class ShellConversations {
         guard !notes.isEmpty else { return Landed(changed: false, copies: [:]) }
         await session.store.ingest(notes, ifSourceHere: host)
         let changed = await session.store.refresh(notes, ifSourceHere: host)
-        await session.persist?()
+        session.saveSoon()
         return Landed(changed: changed, copies: await session.store.notes(notes.map(\.key)))
     }
 

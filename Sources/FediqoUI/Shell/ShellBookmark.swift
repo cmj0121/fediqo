@@ -100,6 +100,8 @@ extension ShellSession {
             readerMarksSwept = true
             if await store.forgetReaderMarks(keeping: mastodon.signedInHosts) { moved = true }
         }
+        // Waited for: what a source said of a reader who has left is not on disk a moment
+        // longer than it is in the store (#285, #292).
         if moved { await persist?() }
     }
 }
@@ -110,6 +112,7 @@ extension ShellSession {
     /// so no package carries what a source said of somebody who has signed out.
     func saveForCarry() async {
         await forgetReaderMarksDue()
+        // Waited for: what is packed next is read from the file this writes.
         await persist?()
     }
 }

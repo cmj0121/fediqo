@@ -94,6 +94,11 @@ extension ShellSession {
             }
         }
         let hosts = sources.map(\.host)
+        // What is weighed is the file, so every save asked for before now and not yet made is
+        // waited for first — in the check's own task, where nobody is waiting on a press. The
+        // one caller that does wait on the check is the launch (`FediqoRootView`'s task, where a
+        // room is set), which waited for it before saves were asked this way too.
+        await saved()
         var held = await weighStore()
         var copyBytes = await pictures.diskTotal() ?? 0
         var over = RoomPolicy.over(total: held + copyBytes, room: room)
@@ -120,6 +125,8 @@ extension ShellSession {
             posts += went.posts
             from.formUnion(went.sources)
             await reloadFromStore()
+            // Waited for, where nothing else waits for a save: the next line weighs the file
+            // this writes. Nobody pressed for it — the check runs in its own task.
             await persist?()
             let after = await weighStore()
             // A round that gave nothing back — a save that did not land — is not tried again.

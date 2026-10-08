@@ -212,8 +212,8 @@ extension ShellSession {
             let went = await store.letGo(span: span, host: host)
             guard went > 0 else { return 0 }
             await reloadFromStore()
-            await persist?()
-            await readStoreBytes()
+            // Waited for: the count is not said while the file still holds what went (#292).
+            await saveNow { [weak self] in await self?.readStoreBytes() }
             return went
         }
     }

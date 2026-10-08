@@ -28,7 +28,7 @@ extension ShellSession {
         }
         guard moved else { return false }
         await reloadFromStore()
-        await persist?()
+        saveSoon()
         return true
     }
 
@@ -52,7 +52,7 @@ extension ShellSession {
         guard stopped > 0 else { return StoppedKeeping() }
         for held in await store.notes(keys).values { conversations.replace(held) }
         await reloadFromStore()
-        await persist?()
+        saveSoon()
         return StoppedKeeping(ordinary: max(0, stopped - elsewhere), elsewhere: min(stopped, elsewhere))
     }
 

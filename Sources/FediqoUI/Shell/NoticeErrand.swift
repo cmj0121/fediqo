@@ -44,7 +44,7 @@ extension ShellSession {
         let row = note.key.rowID
         if heldNote(row) == nil {
             await store.ingest([note], ifSourceHere: note.source.host)
-            await persist?()
+            saveSoon()
             await reloadFromStore()
         }
         return heldNote(row) == nil ? nil : row

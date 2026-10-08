@@ -16,6 +16,11 @@ import Synchronization
 /// that one: it will read the store after this call anyway, so a second copy would write the same
 /// thing twice. And a save that finds the store at the revision it last wrote writes nothing.
 ///
+/// **Nobody has to ask.** `follow()` listens to the store and saves behind it — late and seldom,
+/// because a save writes every note down again — so a landing no caller thought to save is on
+/// disk within the minute. What is this device's alone, and whoever is about to read the file,
+/// still asks: `save()` and `flush(deadline:)` write at once and take the followed save with them.
+///
 /// **The write is off the main actor**, on GRDB's own queue, so a quit or a backgrounding waits
 /// for it without the interface stopping while it runs.
 ///
@@ -39,6 +44,13 @@ public actor StoreSaver {
     /// quit rather than a broken one.
     public static let deadline: Duration = .seconds(3)
 
+    /// After a change, before the save that follows it starts: a read lands page after page, and
+    /// the burst is one write.
+    public static let quiet: Duration = .seconds(2)
+    /// The least time between two followed saves. A save is every note written again, so reading
+    /// on for an hour is at most sixty of them; the one knob, set against the durations logged.
+    public static let gap: Duration = .seconds(60)
+
     private static let log = Logger(subsystem: "Fediqo", category: "index")
 
     private let store: ItemStore
@@ -46,7 +58,7 @@ public actor StoreSaver {
     /// The save queued last, running or waiting. The next save starts after it.
     private var tail: Task<Void, any Error>?
     /// The save waiting to start, if one is; a new `save()` joins it.
-    private var waiting: (id: Int, task: Task<Void, any Error>)?
+    private var waiting: (id: Int, task: Task<Bool, any Error>)?
     private var nextID = 0
     /// The store revision the last write landed, or nil before the first.
     private var written: Int?
@@ -99,6 +111,12 @@ public actor StoreSaver {
 
     /// Writes what the store holds now, after every save asked for before this one.
     public func save() async throws {
+        _ = try await saveAndTell()
+    }
+
+    /// `save()`, and whether the save this call made or joined wrote anything: false where it
+    /// found the store at the revision last written.
+    private func saveAndTell() async throws -> Bool {
         if let waiting { return try await waiting.task.value }
         nextID += 1
         let id = nextID
@@ -106,11 +124,11 @@ public actor StoreSaver {
         let task = Task {
             _ = await previous?.result
             self.started(id)
-            try await self.writeNow()
+            return try await self.writeNow()
         }
         waiting = (id, task)
-        tail = task
-        try await task.value
+        tail = Task { _ = try await task.value }
+        return try await task.value
     }
 
     /// `save()`, written whether or not the store has changed since the last write (#295): what
@@ -149,17 +167,76 @@ public actor StoreSaver {
         return outcome
     }
 
+    /// The store, followed: each change that moved the revision a save writes is saved by itself,
+    /// with nobody asking. Runs until the task it runs in is cancelled; the app starts it once.
+    ///
+    /// **One save a burst, and one a `gap`.** A change arms a save `quiet` from now, or `gap`
+    /// after the followed save before it where that is later. Changes landing while one is armed
+    /// do not push it out — it reads the store when it starts — and those landing while one
+    /// writes, or inside the gap after it, arm the next.
+    ///
+    /// **A save asked for meanwhile takes the armed one with it**: the follower wakes to a store
+    /// already written — or finds it so once the asked save under way has landed — writes nothing
+    /// and owes no gap. Only a followed save that wrote is owed one. A change that moved no
+    /// written revision (#208) arms nothing. A followed save that fails is in the log and is not
+    /// tried again by itself; the next change, or the next ask, is.
+    ///
+    /// `sleep` is `Task.sleep` but for a test, which drives it by hand. Every hop here is on this
+    /// actor but the store's own, so nothing of it touches the main actor.
+    public func follow(
+        quiet: Duration = StoreSaver.quiet, gap: Duration = StoreSaver.gap,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) async {
+        // Listening before the first look, so a change between the two is not missed; and the
+        // first look is for what changed before anything listened — since the last write, or
+        // since the store was made where nothing has been written yet: a store starts at
+        // revision 0, one a launch read back included (`ItemStore.revision`).
+        let changes = await store.changes()
+        var heard = written ?? 0
+        do {
+            heard = try await follow(from: heard, quiet: quiet, gap: gap, sleep: sleep)
+            for await _ in changes {
+                heard = try await follow(from: heard, quiet: quiet, gap: gap, sleep: sleep)
+            }
+        } catch {
+            // Cancelled in a wait: whoever stopped this flushes, as a quit does.
+        }
+    }
+
+    /// One change heard: the save it arms, and the gap that save is owed. Returns the revision
+    /// the store was at when this last looked; throws only what `sleep` throws.
+    private func follow(
+        from heard: Int, quiet: Duration, gap: Duration,
+        sleep: @Sendable (Duration) async throws -> Void
+    ) async throws -> Int {
+        let revision = await store.revision
+        guard revision != heard, revision != written else { return revision }
+        try await sleep(quiet)
+        let armed = await store.revision
+        guard armed != written else { return armed }
+        // A failure is already in the log, and there is nobody here to tell.
+        let wrote = (try? await saveAndTell()) ?? false
+        if wrote { try await sleep(gap - quiet) }
+        return armed
+    }
+
     private func started(_ id: Int) {
         if waiting?.id == id { waiting = nil }
     }
 
-    private func writeNow() async throws {
-        guard let write else { return }
+    /// Whether anything was written.
+    private func writeNow() async throws -> Bool {
+        guard let write else { return false }
         let snapshot = await store.snapshot()
-        guard snapshot.revision != written else { return }
+        guard snapshot.revision != written else { return false }
         do {
+            let began = ContinuousClock.now
             try await write(snapshot.sources, snapshot.notes, snapshot.said)
             written = snapshot.revision
+            // Only a count and a time: what `gap` is set by.
+            let took = ContinuousClock.now - began
+            Self.log.info("Saved \(snapshot.notes.count, privacy: .public) note(s) in \(String(describing: took), privacy: .public)")
+            return true
         } catch {
             Self.log.error("Saving the index failed: \(String(describing: error), privacy: .public)")
             throw error

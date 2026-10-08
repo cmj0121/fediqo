@@ -97,6 +97,10 @@ final class Launch {
         if let media {
             FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host), read: storeRead)
         }
+        // The store is saved behind every change from here on, on the saver's own actor. Started
+        // here and not by a window: one closed must not stop the saving, and nothing ends this
+        // but the run ending, which flushes (`end()`).
+        Task { [saver] in await saver.follow() }
     }
 
     /// What this device calls itself, written into a take-away's header so the device it came

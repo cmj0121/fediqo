@@ -133,6 +133,7 @@ struct BookmarkRowTests {
         #expect(try row(session).bookmarked == true)
         #expect(try row(session).favourited == true, "another mark moved")
         #expect(session.acts.standings.isEmpty, "nothing about the press is kept")
+        await session.saved()
         #expect(saved == 1)
 
         await session.toggle(.bookmark, on: try row(session))
@@ -265,6 +266,7 @@ struct BookmarkRowTests {
         #expect(Self.said(try row(session)) == [nil, nil, nil], "the next reader would be told what this one did")
         #expect(try row(session).kept, "what this device keeps is not the source's to take")
         #expect(await session.store.snapshot().notes.first?.bookmarked == nil, "and it rides no package")
+        await session.saved()
         #expect(saved >= 1)
     }
 
@@ -340,6 +342,7 @@ struct BookmarkRowTests {
 
         // Signed out, and nothing else asked of the session before the store is taken away.
         await session.signOut(host: host)
+        await session.saved()
         #expect(try file.load().notes.first?.bookmarked == nil, "still on disk after the sign-out")
         await session.saveForCarry()
         try await packager(root, file, session.store, suite)
@@ -436,6 +439,7 @@ struct BookmarkRowTests {
             try? await file.save(sources: snapshot.sources, notes: snapshot.notes)
         }
         await session.toggle(.bookmark, on: try row(session))
+        await session.saved()
 
         let opened = StoreFile.open(at: dir)
         let (relaunched, _) = try await shell(

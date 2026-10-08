@@ -88,6 +88,7 @@ struct CountsHeldTests {
         #expect(session.storeBytes == 1_000)
         await session.reloadFromStore()
         _ = await session.keep(months: 3, from: Self.now)
+        await session.saved()
         #expect(session.storeBytes == 2_000, "a drop by time measures the index again once it is written")
     }
 

@@ -160,6 +160,7 @@ struct WithdrawTests {
         #expect(!session.notes.contains { $0.key.rowID == mine.id })
         #expect(session.notes.count == 1, "somebody else's post stays")
         #expect(await session.store.all().count == 1, "gone from what a save writes")
+        await session.saved()
         #expect(saved == 1)
         #expect(session.acts.standings.isEmpty)
         #expect(await server.paths.filter { $0.contains("timelines") }.isEmpty, "no timeline read")
