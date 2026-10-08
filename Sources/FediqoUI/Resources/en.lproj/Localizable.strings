@@ -346,7 +346,6 @@
 
 "item.act.boost" = "Boost";
 "item.act.unboost" = "Take the boost back";
-"item.act.onItsWay" = "on its way";
 "item.act.failed" = "did not arrive. Press to try again.";
 "item.act.through" = "%1$@ through %2$@";
 "item.act.no.protocol" = "read only here";
@@ -1449,6 +1448,29 @@
 "said.act.answer.refused" = "%@ would not let this sign-in answer. Your answer was not sent.";
 "said.act.answer.declined" = "%@ did not take your answer. It was not sent.";
 "said.act.answer.unconfirmed" = "%@ did not confirm your answer was sent. Reload to see.";
+"said.post.yours" = "your post";
+"said.post.by" = "%@'s post";
+"said.act.boost.failed.of" = "%1$@ could not be reached, so the boost of %2$@ did not change. It is as it was.";
+"said.act.boost.refused.of" = "%1$@ would not let this sign-in change the boost of %2$@. It is as it was.";
+"said.act.boost.declined.of" = "%1$@ did not change the boost of %2$@. It is as it was.";
+"said.act.boost.unconfirmed.of" = "%1$@ did not confirm the boost of %2$@ changed. Reload to see.";
+"said.act.favourite.failed.of" = "%1$@ could not be reached, so the favourite on %2$@ did not change. It is as it was.";
+"said.act.favourite.refused.of" = "%1$@ would not let this sign-in change the favourite on %2$@. It is as it was.";
+"said.act.favourite.declined.of" = "%1$@ did not change the favourite on %2$@. It is as it was.";
+"said.act.favourite.unconfirmed.of" = "%1$@ did not confirm the favourite on %2$@ changed. Reload to see.";
+"said.act.bookmark.failed.of" = "%1$@ could not be reached, so the bookmark on %2$@ did not change. It is as it was.";
+"said.act.bookmark.refused.of" = "%1$@ would not let this sign-in change the bookmark on %2$@. It is as it was.";
+"said.act.bookmark.declined.of" = "%1$@ did not change the bookmark on %2$@. It is as it was.";
+"said.act.bookmark.unconfirmed.of" = "%1$@ did not confirm the bookmark on %2$@ changed. Reload to see.";
+"said.act.withdraw.failed.of" = "%1$@ could not be reached, so %2$@ was not taken back. It is still here.";
+"said.act.withdraw.refused.of" = "%1$@ would not let this sign-in take %2$@ back. It is still here.";
+"said.act.withdraw.declined.of" = "%1$@ did not take %2$@ back. It is still here.";
+"said.act.withdraw.unconfirmed.of" = "%1$@ did not confirm %2$@ was taken back. Reload to see.";
+"said.act.boost.many" = "%2$d boosts at %1$@ did not go through. Reload to see where each stands.";
+"said.act.favourite.many" = "%2$d favourites at %1$@ did not go through. Reload to see where each stands.";
+"said.act.bookmark.many" = "%2$d bookmarks at %1$@ did not go through. Reload to see where each stands.";
+"said.act.withdraw.many" = "%2$d posts at %1$@ were not taken back. Reload to see where each stands.";
+"said.act.answer.many" = "%2$d answers to %1$@ were not sent.";
 "said.title" = "Not done";
 "said.close" = "Close";
 "said.all.close" = "Close";

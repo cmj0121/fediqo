@@ -517,17 +517,17 @@ struct BookmarkRowTests {
         #expect(favourite.mark.look == .live)
     }
 
-    @Test("The mark fills when the source says it is bookmarked, changes shape on its way, and is named for what a press does")
+    @Test("The mark fills when the source says it is bookmarked and at the press before it answers, and is named for what a press does")
     func theMark() {
         #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: nil), on: false) == "bookmark")
         #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: nil), on: true) == "bookmark.fill")
-        #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: .onItsWay), on: true) != "bookmark.fill")
+        #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: .pressed(to: true)), on: true) == "bookmark.fill")
         #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: .failed), on: false) != "bookmark")
         #expect(ItemActs.spoken(.bookmark, done: false, standing: nil, language: .english) == "Bookmark")
         #expect(ItemActs.spoken(.bookmark, done: true, standing: nil, language: .english) == "Take the bookmark off")
         for language in [DummyLanguage.english, .taiwanese] {
             for done in [false, true] {
-                let said = ItemActs.spoken(.bookmark, done: done, standing: .onItsWay, language: language)
+                let said = ItemActs.spoken(.bookmark, done: done, standing: .pressed(to: done), language: language)
                 #expect(!said.contains("item.act."), "untranslated: \(said)")
             }
             let name = ItemActs.name(.bookmark, done: false, language: language)

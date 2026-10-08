@@ -345,7 +345,6 @@
 
 "item.act.boost" = "轉發";
 "item.act.unboost" = "收回轉發";
-"item.act.onItsWay" = "正在送出";
 "item.act.failed" = "沒有送達。按一下再試一次。";
 "item.act.through" = "%1$@（經由 %2$@）";
 "item.act.no.protocol" = "這裡只能讀";
@@ -1411,6 +1410,29 @@
 "said.act.answer.refused" = "%@ 不讓這個登入回應。你的回應沒有送出。";
 "said.act.answer.declined" = "%@ 沒有收下你的回應。它沒有送出。";
 "said.act.answer.unconfirmed" = "%@ 沒有確認你的回應已送出。重新載入看看。";
+"said.post.yours" = "你的貼文";
+"said.post.by" = " %@ 的貼文";
+"said.act.boost.failed.of" = "轉發%2$@：連不上 %1$@，沒有變動。它和原來一樣。";
+"said.act.boost.refused.of" = "轉發%2$@：%1$@ 不讓這個登入變動。它和原來一樣。";
+"said.act.boost.declined.of" = "轉發%2$@：%1$@ 沒有變動。它和原來一樣。";
+"said.act.boost.unconfirmed.of" = "轉發%2$@：%1$@ 沒有確認已變動。重新載入看看。";
+"said.act.favourite.failed.of" = "收藏%2$@：連不上 %1$@，沒有變動。它和原來一樣。";
+"said.act.favourite.refused.of" = "收藏%2$@：%1$@ 不讓這個登入變動。它和原來一樣。";
+"said.act.favourite.declined.of" = "收藏%2$@：%1$@ 沒有變動。它和原來一樣。";
+"said.act.favourite.unconfirmed.of" = "收藏%2$@：%1$@ 沒有確認已變動。重新載入看看。";
+"said.act.bookmark.failed.of" = "為%2$@加書籤：連不上 %1$@，沒有變動。它和原來一樣。";
+"said.act.bookmark.refused.of" = "為%2$@加書籤：%1$@ 不讓這個登入變動。它和原來一樣。";
+"said.act.bookmark.declined.of" = "為%2$@加書籤：%1$@ 沒有變動。它和原來一樣。";
+"said.act.bookmark.unconfirmed.of" = "為%2$@加書籤：%1$@ 沒有確認已變動。重新載入看看。";
+"said.act.withdraw.failed.of" = "收回%2$@：連不上 %1$@，沒有收回。它還在這裡。";
+"said.act.withdraw.refused.of" = "收回%2$@：%1$@ 不讓這個登入收回。它還在這裡。";
+"said.act.withdraw.declined.of" = "收回%2$@：%1$@ 沒有收回。它還在這裡。";
+"said.act.withdraw.unconfirmed.of" = "收回%2$@：%1$@ 沒有確認已收回。重新載入看看。";
+"said.act.boost.many" = "%1$@ 上有 %2$d 個轉發沒有完成。重新載入看看各自的狀況。";
+"said.act.favourite.many" = "%1$@ 上有 %2$d 個收藏沒有完成。重新載入看看各自的狀況。";
+"said.act.bookmark.many" = "%1$@ 上有 %2$d 個書籤沒有完成。重新載入看看各自的狀況。";
+"said.act.withdraw.many" = "%1$@ 上有 %2$d 則貼文沒有收回。重新載入看看各自的狀況。";
+"said.act.answer.many" = "有 %2$d 則給 %1$@ 的回應沒有送出。";
 "said.title" = "沒有完成的事";
 "said.close" = "關閉";
 "said.all.close" = "關閉";

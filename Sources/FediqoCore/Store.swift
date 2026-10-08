@@ -39,6 +39,25 @@ public actor ItemStore {
     /// nothing left for a place to be compared with. A post acted on is marked for as long as the
     /// run lasts, its row gone or not — one number a post, for the posts one reader pressed.
     private var acted: [NoteKey: UInt64] = [:]
+    /// Where in the run's order the latest read of each held post was sent, among the reads
+    /// whose word on what the reader did was taken (`outrun`). What tells "the source has been
+    /// asked about this post since" from a row that merely still says what it said — for a
+    /// press that did not arrive, and may have landed all the same. For the run, as `acted` is.
+    ///
+    /// **Let go with its post**: every way a row leaves says the store changed (`changed`), and
+    /// that drops what is kept here for rows no longer held — a post let go, a host removed.
+    private var readAt: [NoteKey: UInt64] = [:]
+
+    /// Where in the run's order each of these posts was last read, for the ones read this run.
+    public func lastRead(of keys: [NoteKey]) -> [NoteKey: UInt64] {
+        keys.reduce(into: [:]) { $0[$1] = readAt[$1] }
+    }
+
+    /// Notes that a read's copy of a held post was taken, where it says when it was sent.
+    private func read(_ copy: Note) {
+        guard let sent = copy.asked.place else { return }
+        readAt[copy.key] = max(readAt[copy.key] ?? 0, sent)
+    }
     /// Where in the run's order the reader's marks were last taken off each host's posts
     /// (`forgetReaderMarks`): a sign-in there ended, or became somebody else's. A copy from that
     /// host sent before it was read as the reader who has gone, and says nothing of this one —
@@ -105,6 +124,8 @@ public actor ItemStore {
         if kept { revision += 1 }
         if shown { drawn += 1 }
         if replies { repliesRevision += 1 }
+        // Only a held row's read is noted (`read`), so more entries than rows means some went.
+        if readAt.count > notes.count { readAt = readAt.filter { notes[$0.key] != nil } }
         for listener in listeners.values { listener.yield(revision) }
     }
 
@@ -395,7 +416,9 @@ public actor ItemStore {
                 // audience was written down takes it from the next timeline that brings it.
                 // …except what it says the reader did, where it was sent before their own act on
                 // the post landed (#291): a reload on its way when they pressed.
-                var merged = existing.filled(from: note, marksStand: outrun(note))
+                let older = outrun(note)
+                if !older { read(note) }
+                var merged = existing.filled(from: note, marksStand: older)
                 // **Its source has changed it since this row was read** (#286): the row says what
                 // the post says now, where it stood, and keeps what it said. A copy that is the
                 // older of the two — a read still on its way when a later one landed — changes no
@@ -553,6 +576,7 @@ public actor ItemStore {
             // word for it. So the act's own mark is always taken, and the other two only where
             // this copy is not the older — which is all a read's copy is ever taken for.
             let older = outrun(note)
+            if acted == nil, !older { read(note) }
             let own: Set<ReaderMark> = acted.map { [$0] } ?? []
             // …and every read sent before this moment is older than the answer — marked whether
             // or not the answer changes the row, since a read that already said as much changes

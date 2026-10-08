@@ -4,7 +4,7 @@ import Foundation
 import SwiftUI
 
 /// A bookmark is kept at the source (#285): the act itself is `toggle(.bookmark, on:)`, beside
-/// the boost and the favourite, and the mark is what the source last said. What lives here is the
+/// the boost and the favourite, and the mark is what the source last said, under a press still out. What lives here is the
 /// one thing only a bookmark needs — asking a sign-in made before bookmarks were asked for to
 /// allow them, **without signing anybody out**.
 ///
@@ -84,7 +84,8 @@ extension ShellSession {
             if await store.forgetReaderMarks(host: host) { moved = true }
             // What the source said happened to that reader is theirs alone too (#323).
             noticeList.forget(host: host)
-            // And so is what was said of what that reader asked of it.
+            // And so is what that reader pressed, and what was said of what they asked of it.
+            acts.forget(host: host)
             said.forget(host: host)
             // The reader of this source changed (#293). Gone — signed out, or ended by the
             // server — its line of loads is dropped, as the reader's own sign-out drops it.

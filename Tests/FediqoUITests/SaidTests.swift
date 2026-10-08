@@ -256,7 +256,9 @@ struct SaidTests {
         let width: CGFloat = layout == .wide ? 600 : 320
         let said = ShellSaid()
         said.announce = { _ in }
-        for id in 1...5 { said.say(Self.boost(Self.a, id)) }
+        // From two sources, so no more than three are about one act at one of them: more
+        // would be drawn as one line that says how many (`ShellSaid.folded`).
+        for id in 1...5 { said.say(Self.boost(id.isMultiple(of: 2) ? Self.a : Self.b, id)) }
         let (_, probe, _) = hosted(said, width: width, layout: layout)
         let drawn = said.lines.prefix(layout == .wide ? 3 : 1).map(\.id)
         #expect(lines(probe) == drawn)

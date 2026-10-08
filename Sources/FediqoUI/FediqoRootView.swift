@@ -2059,7 +2059,7 @@ public struct FediqoRootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // What did not happen is said at the foot of every page, inside it: over no rail,
             // no tab and no sheet. A modifier of its own — see `SaidStrip`.
-            .modifier(SaidStrip(said: session.said))
+            .modifier(SaidStrip(said: session.said, held: item != place || composing || stagePresented.wrappedValue || session.raisesOverPages))
             .background(ShellChrome.page(colorScheme))
             .environment(\.shellPlaceIsActive, item == place)
     }

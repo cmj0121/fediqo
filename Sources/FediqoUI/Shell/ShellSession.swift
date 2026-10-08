@@ -517,10 +517,16 @@ final class ShellSession {
     /// Both halves of what is held assigned in one breath, nil where one did not move, and the
     /// count rebuilt once for the pair rather than once an assignment. No await inside, so
     /// nothing else on this actor sees the count held back.
+    ///
+    /// **Less every row whose taking back is pressed and not yet answered** (`acts.leaving`):
+    /// it is left out of what every page draws, over a store that still holds it. Its copies'
+    /// own rows, and no more: a reblog of it, or a post that quotes it, still draws it inside
+    /// its own row until the source answers — the post is held until then.
     private func adoptHeld(notes items: [Note]?, replies: [Note]?) {
         guard items != nil || replies != nil else { return }
         recountHeld = true
-        if let items { notes = items }
+        let leaving = acts.leaving
+        if let items { notes = leaving.isEmpty ? items : items.filter { !leaving.contains($0.key.rowID) } }
         if let replies { heldReplies = replies }
         recountHeld = false
         recount()
@@ -812,6 +818,7 @@ final class ShellSession {
         // Built with the same forum browsers, for `posts`' reason (#209).
         self.blogs = blogs ?? ForumBlogs(through: forums)
         // An opening post read is kept with its row (#154). Weak: the cache is this session's.
+        conversations.acts = acts
         self.posts.keeping = { [weak self] key, opening in self?.keep(opening, for: key) }
         // A topic's replies land in the store and are read back from it (#177). Weak, likewise.
         self.posts.landing = { [weak self] host, tid, replies in
@@ -838,6 +845,9 @@ final class ShellSession {
         mastodon.onEnded = { [weak self] host in
             self?.dropSignOutAsk(host: host)
             self?.noticeList.forget(host: host)
+            // A press still out to it cannot be answered for, and one that did not arrive
+            // cannot be tried again: neither is left standing about a sign-in that ended.
+            self?.acts.forget(host: host)
             self?.said.forget(host: host)
         }
         // Last, once every property is set: a take-away or a read back holds the room limit still (#249).
@@ -1059,7 +1069,7 @@ final class ShellSession {
     /// goes through and where each has got to there. The panes add the presses.
     ///
     /// **Each standing is read off the copy its act goes through** (#136), which is where
-    /// `perform` keeps it, so a press through a merged row's second source is drawn on its way
+    /// `perform` keeps it, so a press through a merged row's second source is drawn as pressed
     /// and a failure there is drawn as one. `through` names only a copy that is not the row.
     ///
     /// Each copy's own acts are worked out once, and both the offer and each act's copy are read
@@ -1146,8 +1156,8 @@ final class ShellSession {
     }
 
     /// The menu's question answered yes. **Refused where `askToWithdraw` would refuse to ask**:
-    /// the post no longer offers it, or its taking back is already on its way. Returns whether
-    /// anything was sent for.
+    /// the post no longer offers it, or its taking back is pressed and not yet answered.
+    /// Returns whether anything was sent for.
     @discardableResult
     func withdrawAsked(_ item: DummyItem) -> Bool {
         guard let copy = actingCopy(of: item, for: .withdraw),
@@ -1162,9 +1172,10 @@ final class ShellSession {
         withdrawing = nil
     }
 
-    /// The question answered yes: the post is taken back from its source, and once the source
-    /// says so it leaves the timeline, any open thread and the store, so it stays gone after a
-    /// relaunch. A failure leaves it where it is and the same act asks again.
+    /// The question answered yes: the post is taken back from its source. At the yes it leaves
+    /// what is drawn — the timeline, any open thread, every page; once the source says so it
+    /// leaves the store, so it stays gone after a relaunch. A failure draws it again where it
+    /// was and says so, and the same act asks again.
     ///
     /// **A row that stands for two copies (#114) lets go of all of them.** The act goes through
     /// the copy that is the reader's own post on a source they signed in to (#136) — its source,
@@ -1181,7 +1192,7 @@ final class ShellSession {
         guard let copy = actingCopy(of: item, for: .withdraw) else { return }
         let others = item.copies.filter { $0.id != copy.id }
             .map { NoteKey(host: $0.source.host, id: $0.noteID) }
-        await perform(.withdraw, on: item) { door, note in
+        await perform(.withdraw, on: item, taking: Set(item.copies.map(\.id))) { door, note, _ in
             try await self.reach.write(door, landingIn: self.store).withdraw(note)
             for key in [note.key] + others {
                 await self.store.forget(key)
@@ -1208,25 +1219,37 @@ final class ShellSession {
     ///
     /// Nothing is written down about the press landing: the store takes the server's answer, and
     /// what the row draws afterwards is that. A refusal leaves the post exactly as it was and
-    /// leaves a failure the same press clears by trying again.
+    /// leaves a failure the same press clears by trying again. Until the answer the row draws
+    /// the press, over a store that has not moved.
     ///
     /// A bookmark (#285) is the third: put at the source or taken off it, by what the source
     /// last said of it.
     func toggle(_ act: PostAct, on item: DummyItem) async {
         guard act == .boost || act == .favourite || act == .bookmark else { return }
-        await perform(act, on: item) { door, note in
+        await perform(act, on: item, mark: { Self.mark(act, of: $0) }) { door, note, on in
             let write = self.reach.write(door, landingIn: self.store)
             switch act {
-            case .boost: return try await write.boost(note, on: note.boosted != true)
-            case .favourite: return try await write.favourite(note, on: note.favourited != true)
-            case .bookmark: return try await write.bookmark(note, on: note.bookmarked != true)
+            case .boost: return try await write.boost(note, on: on)
+            case .favourite: return try await write.favourite(note, on: on)
+            case .bookmark: return try await write.bookmark(note, on: on)
             case .answer, .withdraw: return note
             }
         }
     }
 
-    /// One act on one post, with everything every act shares: the guard against a second press
-    /// while the first is out, the sign-in, the store, and the three sentences #53 sets.
+    /// What the source last said of one act's mark on a post, or nothing where it said nothing
+    /// or the act has no mark.
+    private static func mark(_ act: PostAct, of note: Note) -> Bool? {
+        switch act {
+        case .boost: note.boosted
+        case .favourite: note.favourited
+        case .bookmark: note.bookmarked
+        case .answer, .withdraw: nil
+        }
+    }
+
+    /// One act on one post, with everything every act shares: what a second press does while
+    /// the first is out, the sign-in, the store, and the three sentences #53 sets.
     ///
     /// **Everything below is the acting copy's, never the row's** (#136): the held note, the door
     /// and the host a 401 or a 403 is written against are all read off the one copy `actingCopy`
@@ -1241,33 +1264,156 @@ final class ShellSession {
     /// A 401 the account check confirms signs the source out, and a 403 marks the source as
     /// having turned a write away — `writeFailed`, exactly as `post()` reads them.
     ///
-    /// **Every failure leaves the act failed**, a cancelled one included: a cancelled act is one
-    /// that did not arrive, said in the one sentence a reader can act on — press again. There is
-    /// no third thing to tell them, and leaving no standing at all would draw the post as though
-    /// the press had landed.
+    /// **Shown first, and the last press wins.** The states of one act on one row
+    /// (`ShellActs.standings`), and every way between them:
+    ///
+    /// | From | What happens | To |
+    /// | ---- | ------------ | -- |
+    /// | settled (no entry) or failed | a press: `begin`, the mark drawn the other way from what the source last said (`mark`), and the request for that goes | pressed(to) |
+    /// | pressed(to) | a press: `turn`, nothing sent | pressed(!to) |
+    /// | pressed(to), request for `sent` out | the source's yes, and after it is adopted `to != sent` | pressed(to), the request for `to` goes |
+    /// | pressed(to), request for `sent` out | the source's yes, and after it is adopted `to == sent` | settled; its line, if one stood, goes |
+    /// | pressed(to), request for `sent` out | an answer that says the mark is not as it was sent — the source's word, never asked a second time | settled; said as declined only where `to == sent`, since otherwise the mark is what was last pressed |
+    /// | pressed(to) | the request fails, runs out of time or is cancelled | failed, said once, with what was wanted and when (`settleMisses`) |
+    /// | pressed or failed | the sign-in ends, is signed out of or replaced, or its source is cleared (`ShellActs.forget`) | settled, nothing said; a request still out comes back to an entry that is not its own (`stands`) and does nothing |
+    /// | failed | a read of the post asked after the failure shows the mark as that press wanted (`settleMisses`) | settled; its line goes |
+    ///
+    /// **Between the last answer and the entry going there is no wait.** What is wanted is read
+    /// after the answer has been adopted, and the entry is dropped in the same breath, so a
+    /// press made while the answer was being adopted is seen and asked for, never dropped; and
+    /// the row never draws the old word in between. The store is not touched until the source
+    /// answers. One request at a time is out for a mark.
+    ///
+    /// Taking a post back has no second press (`askToWithdraw`): pressed, then settled or
+    /// failed. `taking` is every row it leaves out of what is drawn meanwhile.
+    ///
+    /// **Every failure leaves the act failed**, a cancelled one included, and the mark as the
+    /// source last said: a standing left as pressed would draw the post as though the press had
+    /// landed. It is said on whatever page is in front (`said`), naming whose post it was, with
+    /// what is known of why — and said before anything is waited for, so no line is ever said
+    /// of a standing that has gone.
     private func perform(
         _ act: PostAct,
         on item: DummyItem,
-        _ body: @escaping (MastodonAuthorized, Note) async throws -> Note
+        mark: ((Note) -> Bool?)? = nil,
+        taking: Set<String> = [],
+        _ body: @escaping (MastodonAuthorized, Note, Bool) async throws -> Note
     ) async {
         guard let copy = actingCopy(of: item, for: act) else { return }
         let host = copy.source.host
+        if mark != nil, acts.turn(copy.id, act) { return }
         // A store row, or an answer read in an open conversation, which #90 keeps out of the store.
-        guard let note = note(ofRow: copy.id),
+        guard var note = note(ofRow: copy.id),
               let door = mastodon.authorized(host: host, for: .write)
         else { return }
-        guard acts.begin(copy.id, act) else { return }
+        guard acts.begin(copy.id, act, to: mark.map { $0(note) != true } ?? true, taking: taking) else { return }
+        let flight = acts.flight(copy.id, act)
+        let whose: Said.Whose = isMine(copy) ? .yours : .by(copy.author.isEmpty ? copy.handle ?? "" : copy.author)
+        let what = Said.What.act(act, row: copy.id)
+        if !taking.isEmpty { await adopt(again: true) }
+        var answers = 0
         do {
-            let answered = try await body(door, note)
-            conversations.replace(answered)
-            acts.landed(copy.id, act)
-            await adopt()
-            // A post taken back is waited for: it is not said to be gone while the file still
-            // holds its words (#292). A mark is the source's, and is written behind the press.
-            if act == .withdraw { await persist?() } else { saveSoon() }
+            while stands(flight, copy.id, act, door) {
+                let sent = acts.wanted(copy.id, act) ?? true
+                note = try await body(door, note, sent)
+                conversations.replace(note)
+                answers += 1
+                // A post taken back is waited for: it left the screen at the yes, and nothing
+                // says it is gone — a kept copy drawn again, marked — while the file still
+                // holds its words (#292). Whatever became of the sign-in meanwhile: the source
+                // said yes, so the post is gone there.
+                if act == .withdraw { await persist?() }
+                guard stands(flight, copy.id, act, door) else { break }
+                if act == .withdraw {
+                    acts.landed(copy.id, act)
+                    said.takeDown(Said.id(what, host: host))
+                    await adopt(again: true)
+                    return
+                }
+                await adopt()
+                // No wait from here to the entry going: what is wanted is as it is now.
+                guard stands(flight, copy.id, act, door) else { break }
+                let wanted = acts.wanted(copy.id, act) ?? sent
+                let took = mark?(note).map { $0 == sent } ?? true
+                // Pressed again meanwhile, to the other way: that is asked now, of the post as
+                // the source has just said it.
+                if took, wanted != sent { continue }
+                acts.landed(copy.id, act)
+                // A mark is the source's, and is written behind the press.
+                saveSoon()
+                if !took, wanted == sent {
+                    said.say(Said(what, .declined, host: host, of: whose))
+                } else {
+                    said.takeDown(Said.id(what, host: host))
+                }
+                return
+            }
         } catch {
             writeFailed(error, host: host, bookmarkSentWith: act == .bookmark ? door.token : nil)
-            acts.failed(copy.id, act)
+            if stands(flight, copy.id, act, door) {
+                acts.failed(copy.id, act)
+                said.say(Said(what, WriteWhy(error), host: host, of: whose))
+                // What an earlier answer in this press brought is drawn, and written behind it.
+                await adopt(again: !taking.isEmpty)
+                if answers > 0 { saveSoon() }
+                return
+            }
+        }
+        // Let go of with its sign-in. Only an entry that is still this press's goes here.
+        if acts.flight(copy.id, act) == flight { acts.landed(copy.id, act) }
+        await adopt(again: !taking.isEmpty)
+    }
+
+    /// Whether an act's entry is still the press that began as `flight`, and the sign-in still
+    /// the one its request went with.
+    private func stands(_ flight: Int?, _ row: String, _ act: PostAct, _ door: MastodonAuthorized) -> Bool {
+        acts.flight(row, act) == flight
+            && mastodon.token(host: door.token.host)?.accessToken == door.token.accessToken
+    }
+
+    /// A press that did not arrive, let go of where a later read shows it had (`ShellActs.misses`):
+    /// "did not arrive, press to try again" would be said beside what the source says is done.
+    /// The standing goes, and its line with it.
+    ///
+    /// **Only on a read of that post asked after the failure** (`ItemStore.lastRead`, in #291's
+    /// order): the source must have been asked about the post later than the press failed, and
+    /// the post say the mark as that press wanted it. What was held already proves nothing —
+    /// pressed and pressed back, what is wanted is what was held all along — so a copy from
+    /// before is never taken for the write having landed. A post that was to be taken back and
+    /// is held nowhere any more went.
+    ///
+    /// **Only the misses that stood before the store was asked**, and still stand as they did
+    /// after it — the same press, failed at the same moment. One that failed during the wait
+    /// was not what the store was asked about, and a taking back that failed then is still left
+    /// out of `notes` until its own adopt: neither is touched here. One pressed again meanwhile
+    /// is no longer a miss.
+    ///
+    /// **A post that was to be taken back went** only where nothing draws it and nothing has it
+    /// out (`acts.leaving`), and the store, asked after the failure, holds no copy of it or
+    /// holds one its source has since said is gone.
+    private func settleMisses(_ before: [(key: ShellActKey, wanted: Bool, at: UInt64)]) async {
+        let keys = before.compactMap { NoteKey(rowID: $0.key.row) }
+        guard !keys.isEmpty else { return }
+        let reads = await store.lastRead(of: keys)
+        let stored = await store.notes(keys)
+        let standing = Dictionary(acts.misses.map { ($0.key, $0.at) }, uniquingKeysWith: { first, _ in first })
+        for miss in before where standing[miss.key] == miss.at {
+            guard let rowKey = NoteKey(rowID: miss.key.row) else { continue }
+            // Wherever this run holds it: an answer read in an open thread is not in the store.
+            let held = note(ofRow: miss.key.row)
+            let arrived: Bool
+            if miss.key.act == .withdraw {
+                arrived = !acts.leaving.contains(miss.key.row)
+                    && (held == nil || held?.goneSince != nil)
+                    && (stored[rowKey] == nil || stored[rowKey]?.goneSince != nil)
+            } else if let held, let read = reads[rowKey], read > miss.at {
+                arrived = Self.mark(miss.key.act, of: held) == miss.wanted
+            } else {
+                arrived = false
+            }
+            guard arrived else { continue }
+            acts.landed(miss.key.row, miss.key.act)
+            said.takeDown(Said.id(.act(miss.key.act, row: miss.key.row), host: rowKey.host))
         }
     }
 
@@ -2477,13 +2623,16 @@ final class ShellSession {
     /// here has assigned `notes` since either, they are what the store holds. **That count and
     /// not the revision** (#175), so a topic's reply kept — written down, drawn nowhere but in
     /// its topic — replaces nothing.
-    private func adopt() async {
+    ///
+    /// `again` reads the notes whatever the count says: what is drawn of them moved with no
+    /// word from the store — a taking back pressed, answered or failed (`acts.leaving`).
+    private func adopt(again: Bool = false) async {
         // Before anything is read: what an ended sign-in's reader had done to its posts (#285).
         await forgetReaderMarksDue()
         await adoptSources()
         let repliesRevision = await store.repliesRevision
         let drawn = await store.drawn
-        let all = adopted?.store != drawn || adopted?.notes != notesRevision ? await store.all() : nil
+        let all = again || adopted?.store != drawn || adopted?.notes != notesRevision ? await store.all() : nil
         // A forum topic's replies its forum gave no date have a count of their own, as the items
         // have, so a timeline's landing does not read them again. They are counted (#194) and
         // nothing else: nothing but the moment each was read could place it (#297). A reply the
@@ -2491,6 +2640,11 @@ final class ShellSession {
         let replies = adoptedReplies != repliesRevision ? await store.replies() : nil
         adoptHeld(notes: all, replies: replies)
         if all != nil { adopted = (store: drawn, notes: notesRevision) }
+        // The misses as they stand with what was just assigned: only these are settled, by
+        // what the store says of them after the waits below (`settleMisses`).
+        let misses = acts.misses
+        await adopting?()
+        if all != nil { await settleMisses(misses) }
         if replies != nil { adoptedReplies = repliesRevision }
         if heldRevision != renewedConversations {
             renewConversation()
@@ -2515,6 +2669,11 @@ final class ShellSession {
         guard let front = reload.inFront, let held = note(ofRow: front.id) else { return }
         conversations.renew(front.id, around: held, among: notes)
     }
+
+    /// Run in the middle of each adopt — what is held assigned, nothing settled yet — and
+    /// waited for. Nothing outside a test, which holds an adopt here to press, or to fail a
+    /// write, while it is in flight.
+    @ObservationIgnored var adopting: (@MainActor () async -> Void)?
 
     /// The store's `repliesRevision` as the last adopt read the topics' kept replies.
     @ObservationIgnored private var adoptedReplies: Int?
@@ -2720,8 +2879,8 @@ final class ShellSession {
         subBoards[host] = nil
         lookedUnder[host] = nil
         if restating?.host == host { restating = nil }
-        // Ten. A Clear signs this source out below, so an act still on its way to it is an act
-        // that cannot now arrive, and a failure left standing about a source the reader has just
+        // Ten. A Clear signs this source out below, so a press its source has not answered is
+        // one nobody is left to answer for, and a failure left standing about a source the reader has just
         // emptied is a sentence about nothing (#106).
         acts.forget(host: host)
         // And what was said of a write to it: a line about a source that is not here asks
@@ -2909,6 +3068,7 @@ final class ShellSession {
             await loads.letGo(host: host)
             refs.letGo(host: host)
             noticeList.forget(host: host)
+            acts.forget(host: host)
             said.forget(host: host)
             await mastodon.signOut(host: host)
             // What the source said this reader did to its posts goes with the sign-in, now and

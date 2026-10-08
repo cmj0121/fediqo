@@ -15,8 +15,15 @@ import SwiftUI
 ///
 /// **It takes no focus.** A line arriving moves neither the keys nor VoiceOver; it is said
 /// aloud once, by `ShellSaid.say`, and is there to be reached afterwards.
+///
+/// **The list behind the count is never over, or under, something the root raised.** It is
+/// this page's own sheet, which the root cannot see; so the root says when it has a sheet or a
+/// question up, or this page is not the one in front (`held`), and then the list is not
+/// opened, and one that is open closes.
 struct SaidStrip: ViewModifier {
     let said: ShellSaid
+    /// The root has something raised, or this page is not in front: no list is opened here.
+    var held = false
 
     /// The most lines drawn on a page; the rest are behind a count.
     ///
@@ -38,7 +45,7 @@ struct SaidStrip: ViewModifier {
         content
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !said.lines.isEmpty {
-                    SaidLines(said: said, showAll: { showingAll = true })
+                    SaidLines(said: said, showAll: { showingAll = Self.opensAll(held: held) })
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
@@ -50,7 +57,13 @@ struct SaidStrip: ViewModifier {
             .onChange(of: said.lines.isEmpty) { _, empty in
                 if empty { showingAll = false }
             }
+            .onChange(of: held) { _, held in
+                if held { showingAll = false }
+            }
     }
+
+    /// Whether a press on the count opens the list: not while the root holds this page.
+    static func opensAll(held: Bool) -> Bool { !held }
 
     /// What a page draws of `lines`, and how many more there are behind the count.
     static func drawn(_ lines: [Said], in layout: ShellLayout) -> (shown: [Said], more: Int) {
@@ -76,7 +89,7 @@ struct SaidLines: View {
     @Environment(\.shellSaidProbe) private var probe
 
     var body: some View {
-        let drawn = SaidStrip.drawn(said.lines, in: layout)
+        let drawn = SaidStrip.drawn(said.folded, in: layout)
         VStack(spacing: ShellSpace.tight) {
             ForEach(drawn.shown) { line in
                 SaidLine(line: line) { said.takeDown(line.id) }

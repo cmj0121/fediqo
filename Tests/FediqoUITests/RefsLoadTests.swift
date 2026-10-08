@@ -558,6 +558,41 @@ struct RefsLoadTests {
         #expect(await http.asks == 1, "only the load that was already on the wire was ever asked")
     }
 
+    @Test("A load whose item is only left out of what is drawn — its taking back pressed, not yet answered — is not taken back, and is still asked for when the row comes back")
+    func keptWhileItsItemIsLeaving() async throws {
+        let http = GatedHTTP(
+            ["/api/v1/statuses/1": .text(Self.status("1")), "/api/v1/statuses/3": .text(Self.status("3"))],
+            holding: "/api/v1/statuses/3"
+        )
+        let guardTask = hangGuard(http.gate)
+        defer { guardTask.cancel() }
+        let (session, _, _) = try await shell(unsigned: http)
+        var older = reply("2", to: "1"), newer = reply("4", to: "3")
+        older = Note(id: older.id, source: source, author: "Ada", handle: older.handle, body: "x", postedAt: Self.origin.addingTimeInterval(-60), categories: [.home], reply: older.reply, statusID: "2")
+        newer = Note(id: newer.id, source: source, author: "Ada", handle: newer.handle, body: "x", postedAt: Self.origin, categories: [.home], reply: newer.reply, statusID: "4")
+        await session.store.ingest([older, newer], ifSourceHere: host)
+        await session.reloadFromStore()
+        await session.refs.asked()
+        #expect(session.refs.count == 2)
+
+        // Its taking back pressed: left out of what is drawn, and held all the same.
+        #expect(session.acts.begin(older.key.rowID, .withdraw, taking: [older.key.rowID]))
+        // And the store moves under it — a post that owes nothing lands — so what is held is read again.
+        await session.store.ingest([Note(
+            id: "https://social.example/users/ada/statuses/6", source: source, author: "Ada", handle: "@ada@social.example",
+            body: "plain", postedAt: Self.origin.addingTimeInterval(-120), categories: [.home], statusID: "6"
+        )], ifSourceHere: host)
+        await session.reloadFromStore()
+        await session.refs.asked()
+        #expect(!session.notes.contains { $0.key == older.key }, "the premise: the row is not drawn")
+        #expect(session.refs.count == 2, "the load of a post still held was taken back")
+        #expect(await session.loads.standing(host: host).waiting == 1)
+        await http.gate.open()
+        await session.refs.settled()
+        let asked = await http.requested()
+        #expect(asked.contains { $0.hasSuffix("/api/v1/statuses/1") }, "what the leaving row owed was never asked")
+    }
+
     /// A client that answers every request with `status` and `headers`, as if from `answering`.
     private struct Answering: HTTPClient {
         let status: Int

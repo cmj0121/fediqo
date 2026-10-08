@@ -19,13 +19,14 @@ enum WriteWhy: Equatable, Sendable {
     /// The sign-in could not be read off this device, so nothing was sent.
     case locked
 
-    /// What a failure says happened: a 401 or a 403 is the source refusing this sign-in; any
+    /// What a failure says happened: a 401 or a 403 is the source refusing this sign-in, and so
+    /// is a 401 it stood by when asked who this is, which ended the sign-in (`signedOut`); any
     /// other answer is the source not doing it, for a reason nobody here was told; a write that
     /// ran out of time may have landed; and anything else never reached the source at all.
     ///
     /// `wrote` is false for a read, which has nothing to confirm.
     init(_ error: any Error, wrote: Bool = true) {
-        if Self.refuses(error) {
+        if Self.refuses(error) || error as? MastodonAuthError == .signedOut {
             self = .refused
         } else if case .http? = error as? MastodonAuthError {
             self = .declined
