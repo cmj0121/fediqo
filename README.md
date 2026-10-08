@@ -137,8 +137,77 @@ fill.
 ### Writing a post
 
 From a timeline, `c` or the compose control opens writing over the page. You pick a source
-you may write on, and how far the post goes from what that source offers. A send that fails
-keeps the text. What landed is in the timeline it belongs to, without reloading everything.
+you may write on, and how far the post goes from what that source offers. Pressing Post
+closes the sheet at once and leaves you on the page you were on; an answer, written inside a
+conversation and sent with Send, does the same. Nothing waits for the source. What landed is
+in the timeline it belongs to, without reloading everything.
+
+While a text is being sent it is a line at the foot of the page — "Sending your post to" and
+its source, or "Sending your answer to" — and a row nowhere: a post stands in a timeline or a
+conversation only once its source has taken it. Then it arrives by itself, and the line goes.
+The text is written to this device before the request leaves, so quitting loses no word of
+it. Two texts for one source reach it in the order you wrote them.
+
+What did not arrive is said on that line for what it was, with every character kept:
+
+| The line says             | When                                                           | It offers                   |
+| ------------------------- | -------------------------------------------------------------- | --------------------------- |
+| it was not sent           | no server that could act on it was reached, or the source said no | Send again, Edit, Discard |
+| it may have been posted   | anything else — see below                                      | Send again, Edit, Discard   |
+| it waits, or cannot go    | nobody may send it as things stand — see below                 | Copy, Discard               |
+| it could not be kept here | it could not be written to this device, so it did not leave    | Send anyway, Copy, Discard  |
+| it could not be removed   | discarded, or its source removed, and its words are still in the file | Discard               |
+
+Anything else is no answer in time, a connection lost, an error from the source or from
+something in front of it, or a quit while the text was out. A text waits, or cannot go, where
+nobody is signed in to its source with writing, somebody else is, or the post it answers is
+no longer here. One that "could not be removed from this device" is not sent, changed or
+opened; Discard tries again without asking a second time, and its line goes by itself once a
+later save has taken its words out of the file.
+
+Every window shows the same texts. One sent, changed or discarded in one window is so in the
+others at once, a text being sent from one window is the same "Sending your post to" line in
+the rest, with nothing to press, and no text is sent by two windows at the same time.
+
+Nothing is sent again by itself, in this run or the next. A text that may have been posted
+goes by itself when a read brings that post, and that is said once. Send again on such a text
+looks at your own recent posts on that source first. Found, the text is let go as arrived.
+Not found, and within fifty minutes of the first try, it is sent as the same request, which a
+source that knows the request does not post twice. Past that Fediqo asks first, saying it may
+be posted twice and where to look. Edit opens the sheet on the text; sending a changed text
+that may have been posted asks first too, since it goes as a new post and the first stays.
+Discard asks first, and for a text that may have been posted it says that only this device's
+copy is forgotten.
+
+A text belongs to the account that wrote it and is never sent as another. Where somebody else
+is signed in at that source it waits, naming both, to be copied or discarded. Unsent texts
+stay through a sign-out and a Clear, and their line says to sign in with writing. They go
+when their source is removed, counted in that question. They are not carried by Take away or
+Move nearby.
+
+### What you do is shown at once
+
+A boost, a favourite and a bookmark are drawn as done at the press, the count moved by one,
+and the source is asked after; taking one back is the same. Taking back a post of your own
+asks first, and at the yes its row leaves every list. The source's yes changes nothing more
+on screen.
+
+The last press wins. Press a mark again while its first press is still out and it is drawn as
+pressed again, with nothing more sent; when the answer lands, the opposite is asked only if
+the source and you now disagree.
+
+Where the source refuses, cannot be reached, or does not answer in time, the mark goes back
+to what the source last said — or the row comes back where it was — and a line says what did
+not happen, to whose post, at which source, and why.
+
+That line is on a strip at the foot of every page, so it is said wherever you have gone
+since. A line is one thing you did that did not happen, or one text being sent. No clock
+takes a line down. It stays until you close it, until the same act goes through or fails
+again and replaces it, or until its source is signed out of, cleared or removed. A wide page
+shows three lines and a narrow one shows one; past that it says how many more — "2 more" —
+and a press opens them all under Not done, where Close all puts them away. More than three
+of one act at one source are one line saying how many. Twenty are held, for this run only. A
+text being sent is not put away by any of that: it goes when it lands, or at its own Discard.
 
 ### Timelines you write
 
@@ -283,15 +352,15 @@ What a sign-in asks its server for, in the server's own words:
 
 A server that refuses `read:search` or `write:bookmarks` is asked again without it.
 
-A bookmark is kept at the source. The mark under a post is what its source last said — filled
-where it holds your bookmark, and never filled by a press that did not land — so it reads the
-same in any other app, and after a relaunch. A press the source turns away says so and leaves
+A bookmark is kept at the source. The mark under a post is what its source last said, under a
+press still on its way: it fills at the press, and a press that did not land puts it back and
+is never written down — so it reads the same in any other app, and after a relaunch. A press the source turns away says so and leaves
 the mark as it was; press again to try again. Keeping a post is another thing, and this
 device's own: see Keeping a post, below.
 
 What you just did to a post is not undone by a reload that was already on its way. Boost,
 favourite or bookmark a post — or take one back — while a timeline is still loading, and the
-mark stays as the source answered your press when that timeline lands. The next reload you ask
+mark stays as you pressed it, and then as the source answered, when that timeline lands. The next reload you ask
 for is the source's word again: a mark taken off in another app reads as off.
 
 What a source says you boosted, favourited and bookmarked is yours as its signed-in reader, and
@@ -318,7 +387,8 @@ copies, removing a timeline or a host you added, taking back a
 post of your own, dismissing a notice or every notice of a source, and letting go of what a
 source holds back. Signing out is the key itself, and asks first too. One is not asked: removing
 a rule from a timeline being edited is behind the dots as well, but it is only a draft, and
-nothing is kept until Done.
+nothing is kept until Done. Discarding a text that was not sent asks first as well, from its
+line at the foot of the page.
 
 The secret is kept in this device's Keychain. It is not in the
 store, it is not copied to iCloud, and it does not follow your Apple account to another
@@ -522,11 +592,16 @@ ends at the foot. A line never stands below a stretch another source has not bee
 what is older is held and shown as reading on reaches it. A source that fails is named above
 the list with a way to ask again, and the others still land.
 
-At most 2,000 notices are held of one source in a run. At that limit the newest are kept and
-reading on ends for that source. From then on it is named above the list: its older notices
-are not shown, and may belong among the lines below, since the other sources go on being read.
-The foot of the list says the limit was reached rather than that there are no older notices.
-Reading again still reads the newest.
+At most 2,000 notices are held of one source. At that limit the newest are kept and reading
+on ends for that source for as long as it holds that many. Meanwhile it is named above the
+list: its older notices are not shown, and may belong among the lines below, since the other
+sources go on being read. The foot of the list says the limit was reached rather than that
+there are no older notices. Reading again still reads the newest, and reading on goes on from
+where it stopped once there is room — when notices are dismissed, or the months limit lets
+old ones go.
+
+The months Keep posts holds apply to notices too. A notice older than that is let go, reading
+on stops there and asks nothing past it, and the foot of the list says so.
 
 The kinds shown are narrowed from the head of the page, which says how many kinds are left
 out. Narrowing asks nothing of a source and only changes what is drawn, and the choice is kept
@@ -540,20 +615,32 @@ device keeps says so on its line.
 Dismissing is done at the source. A notice is dismissed from the three dots on its line, or
 with `d`; every notice of one source at once from the three dots at the head of the page, a
 source at a time. Each asks first, and dismissing all takes every notice that source has for
-you, shown here or not. The line leaves only when the source has said so, and it is gone in
-your other apps too. Where a sign-in only reads, dismissing is dim and says why.
+you, shown here or not. The line leaves at your yes and the source is asked after; once it
+has said so, the notice is gone in your other apps too. Where the source refuses, fails or
+does not answer in time, the line is drawn again where it was, and the strip at the foot of
+the page says so and why: one line for every notice that was not dismissed, naming the one or
+saying how many. Where a sign-in only reads, dismissing is dim and says why.
 
 Where a source says it is holding notices back from people it does not trust, a line above the
 list says how many. Opened, it lists whose they are, and each can be let through or let go
 from its three dots, both asked first; the question names the person by their address
-(`@name@host`) first, and the name they chose after it. Letting one through also lets that person's later
+(`@name@host`) first, and the name they chose after it. At the yes the request leaves the
+list; a refusal or a failure draws it again and is said on the strip. Letting one through also lets that person's later
 notices through, at the source, and Fediqo cannot take that back; what was let through is said
 to be on its way until that source is next read. Letting go dismisses them there, unshown.
 Where a source holds none, or has no such thing, nothing is drawn.
 
-Notices are held for this run only. Nothing of them is written to what this device keeps, so
-after a relaunch the page is empty until its first read. The post a notice is about is held
-only once you open it.
+Notices are held on this device. The page draws what is held the moment it is entered —
+after a relaunch too — and reads behind it, and the list changes by itself as answers land.
+The post a notice is about is written with its line: it stands in no timeline, becomes a post
+like any other only once you open it, and leaves the line whenever that post is let go. What
+a source holds back is not written at all.
+
+A reader's notices go when the sign-in does: signing out, Clear, a sign-in the source ended,
+or another account signing in at that source. They go with a source that is removed, and when
+a store is read back or held from nearby. Each is gone from the store's file, not only from
+the screen. Keeping does not apply to a notice, and notices are not carried by Take away or
+Move nearby.
 
 ### On a phone
 
@@ -589,17 +676,40 @@ Older notices are read by pressing the foot of the list, or by scrolling to it.
 
 The Usage page is tabbed by purpose: Sources, Time, Keep, and Copies. Tab rotates them.
 Sources holds the totals and a row for each source: its mark, its hostname and the way in to
-its detail, which holds its figures, and its Clear behind three dots. There is one figure of posts for each
+its detail, which holds its figures — how many notices are held of it among them, where any
+are — and its Clear behind three dots. There is one figure of posts for each
 source, counting everything held from it, a forum topic's replies included. Time holds the week or month
 breakdown. Keep holds the two limits, Posts you keep, Let go by dates, and What the limits let go. Copies
 holds the pictures this device is keeping, and the drop that takes them. Clear takes a
 server's cached copies and its sign-in, and keeps its posts. Preferences keeps what you
 choose: language, theme, type, the latest date, what becomes of a removed source's posts,
-and the two ways the whole store leaves — Take away and Move nearby.
+and the two ways the store leaves — Take away and Move nearby.
 
 What a source says about itself — its name, its figures, how long a post may be — stays on
 this device with the source. After a relaunch, with or without a network, its page shows what
 it last said and when, and asks again behind it. Something new replaces what was kept.
+
+Nothing you do waits for saving. A press asks for a save and does not wait for it, several
+presses in a row are written together, and what reading brings in is saved once things have
+been quiet for a moment. A save of that kind which wrote posts is followed by the next no
+sooner than a minute later; what a press asks for is written at once all the same. Notices
+and the texts you pressed to send are written by themselves, with no post written for them
+and without that minute: notices a moment after they are read, a text before its request
+leaves. Leaving the app and quitting write at once, so nothing done just before is lost, and
+posts, notices and unsent texts are each written whatever became of the other two. One kind
+of press does wait: one that lets something go from this device — by dates, what its source
+deleted, a shorter Keep posts, what a source said of its reader at a sign-out, a post taken
+back, Dismiss on a notice, Discard on a text that was not sent, Remove and Clear. You are not
+told it is gone before it is gone from the file. Take away and Move nearby write first too,
+as they did.
+
+Where the write behind such a press fails, a line at the foot of the page says what "could
+not be taken off this device yet. It will be tried again." — a notice you dismissed, a post
+you took back, posts you let go, what a source you removed left here, what you cleared, or
+what a sign-in that ended left here. It is said once for each. Any save that fails is tried
+again by itself a minute later, up to five times running, and then with the next change or
+the next press that saves. The line goes at its Close, or when a save lands, whichever window or retry made it. Letting
+go by dates says the same sentence in the place of its count until then.
 
 What this device lets go is gone from its store, not only from the screen. When a post goes —
 dropped by you, by a limit, with its source, or taken back by its author — its words, and any
@@ -689,12 +799,13 @@ nothing reaches it again.
 
 #### Take away
 
-In Preferences. Take away writes the whole of what this device holds — posts, timelines,
+In Preferences. Take away writes what this device holds — posts, timelines,
 rules, what was read, sources, and what signs in to them — to one file locked by a password
 you set, and puts it where you choose: never anywhere of ours, never through the Apple
-account. It first weighs what is here and asks whether the picture copies ride, showing how
-much the file would be with them and without. With them, the file shows everything this
-device shows with no network; without, it is far smaller, and pictures come back as each
+account. Notices, and texts still waiting to be sent, are not in it. It first weighs what is
+here and asks whether the picture copies ride, showing how
+much the file would be with them and without. With them, the file shows every post as this
+device shows it with no network; without, it is far smaller, and pictures come back as each
 post is read again. The password is at least eight characters, and a lost one is not
 recovered: the file can sign in to every source, so it is nothing without its password, and
 nobody — not this app, not anyone else — can open it otherwise. The app says so before the
@@ -704,6 +815,7 @@ Read back opens such a file, asks its password, and shows what it holds — how 
 from which sources, and when it was taken away — before anything changes. On a clean install
 or a new device it gives the same store, every source signed in as it was. On a device that
 already holds a store it replaces that store: nothing is merged, and the question says so.
+The notices held there go with it; texts waiting to be sent there stay.
 It is proven whole first: a file that is not a Fediqo take-away, one cut short or altered,
 one written by a newer Fediqo, or the wrong password is refused with its own reason, and the
 store is untouched. A read back that fails midway leaves the store as it was.
