@@ -54,6 +54,11 @@ public struct MastodonToken: Sendable, Equatable, CustomStringConvertible,
         MastodonOAuth.bookmarks(asked) && !MastodonOAuth.bookmarks(scopes)
     }
 
+    /// Whether this sign-in asked for notices and was not given them (#323).
+    public var noticesRefused: Bool {
+        MastodonOAuth.notices(asked) && !MastodonOAuth.notices(scopes)
+    }
+
     public var app: MastodonApp {
         MastodonApp(host: host, clientID: clientID, clientSecret: clientSecret)
     }
@@ -116,6 +121,20 @@ public protocol MastodonTokenStore: Sendable {
     /// answered, across a relaunch. A sign-in made before bookmarks were asked for is in neither
     /// this nor `bookmarking()`.
     func bookmarksRefused() throws -> Set<String>
+    /// The hosts whose sign-in may read notices (#323), **without reading a token** —
+    /// `bookmarking()`'s rule, off the same attribute. A sign-in made before notices were asked
+    /// for is not among them, and does everything it did.
+    func noticing() throws -> Set<String>
+    /// The hosts whose sign-in may dismiss notices (#323), read the same way.
+    func dismissing() throws -> Set<String>
+    /// The hosts whose sign-in asked for notices and was not given them (#323), **without
+    /// reading a token** — `bookmarksRefused()`'s rule: a sign-in that never asked is in neither
+    /// this nor `noticing()`.
+    func noticesRefused() throws -> Set<String>
+    /// `noticing()`, `dismissing()` and `noticesRefused()` at once, each nothing where it could
+    /// not be had — for whoever asks all three, so a store that answers them off one look makes
+    /// that look once. A store that does not say is asked each in turn.
+    func noticeGrants() -> MastodonNoticeGrants
 
     func app(host: String) throws -> MastodonApp?
     func save(_ app: MastodonApp) throws
@@ -135,6 +154,37 @@ extension MastodonTokenStore {
 
     /// No host, for a store that does not say: a source nobody can show was asked is asked.
     public func bookmarksRefused() throws -> Set<String> { [] }
+
+    /// No host, for a store that does not say: no notice is read through a sign-in nobody can
+    /// show bought it.
+    public func noticing() throws -> Set<String> { [] }
+
+    /// No host, for a store that does not say, as `noticing()` is.
+    public func dismissing() throws -> Set<String> { [] }
+
+    /// No host, for a store that does not say: a source nobody can show was asked is asked.
+    public func noticesRefused() throws -> Set<String> { [] }
+
+    /// The three asked one by one, each failing by itself.
+    public func noticeGrants() -> MastodonNoticeGrants {
+        MastodonNoticeGrants(
+            noticing: try? noticing(), dismissing: try? dismissing(), refused: try? noticesRefused()
+        )
+    }
+}
+
+/// What the held sign-ins may do with notices (#323), by host: `MastodonTokenStore`'s three
+/// answers about them together. One that is nothing could not be read, which is not "no host".
+public struct MastodonNoticeGrants: Equatable, Sendable {
+    public let noticing: Set<String>?
+    public let dismissing: Set<String>?
+    public let refused: Set<String>?
+
+    public init(noticing: Set<String>?, dismissing: Set<String>?, refused: Set<String>?) {
+        self.noticing = noticing
+        self.dismissing = dismissing
+        self.refused = refused
+    }
 }
 
 /// The query dictionaries, built where a test can read them back.
@@ -231,6 +281,25 @@ public enum MastodonKeychain {
     /// (#285): asked is written down, and what it was given leaves them out.
     public static func bookmarksRefused(_ row: [String: Any]) -> Bool {
         MastodonOAuth.bookmarks(row[kSecAttrComment as String] as? String) && !bookmarks(row)
+    }
+
+    /// Whether one item's attributes say its sign-in may read notices (#323). Nothing written
+    /// down is no, as it is for bookmarks.
+    public static func notices(_ row: [String: Any]) -> Bool {
+        guard let data = row[kSecAttrGeneric as String] as? Data else { return false }
+        return MastodonOAuth.notices(String(decoding: data, as: UTF8.self))
+    }
+
+    /// Whether one item's attributes say its sign-in may dismiss notices (#323).
+    public static func dismisses(_ row: [String: Any]) -> Bool {
+        guard let data = row[kSecAttrGeneric as String] as? Data else { return false }
+        return MastodonOAuth.dismisses(String(decoding: data, as: UTF8.self))
+    }
+
+    /// Whether one item's attributes say its sign-in asked for notices and was not given them
+    /// (#323): asked is written down, and what it was given leaves them out.
+    public static func noticesRefused(_ row: [String: Any]) -> Bool {
+        MastodonOAuth.notices(row[kSecAttrComment as String] as? String) && !notices(row)
     }
 
     /// Every host this app holds a token for, attributes only — no `kSecReturnData`.
@@ -349,6 +418,32 @@ public struct KeychainMastodonTokens: MastodonTokenStore {
         Set(try rows().filter { MastodonKeychain.bookmarksRefused($0.value) }.keys)
     }
 
+    /// `bookmarking()`'s query and its failure direction: an attribute that stops coming back is
+    /// a host that may not read notices, and the notices page asks again.
+    public func noticing() throws -> Set<String> {
+        Set(try rows().filter { MastodonKeychain.notices($0.value) }.keys)
+    }
+
+    public func dismissing() throws -> Set<String> {
+        Set(try rows().filter { MastodonKeychain.dismisses($0.value) }.keys)
+    }
+
+    public func noticesRefused() throws -> Set<String> {
+        Set(try rows().filter { MastodonKeychain.noticesRefused($0.value) }.keys)
+    }
+
+    /// One query for the three: they are read off the same rows, so they are had or not together.
+    public func noticeGrants() -> MastodonNoticeGrants {
+        guard let rows = try? rows() else {
+            return MastodonNoticeGrants(noticing: nil, dismissing: nil, refused: nil)
+        }
+        return MastodonNoticeGrants(
+            noticing: Set(rows.filter { MastodonKeychain.notices($0.value) }.keys),
+            dismissing: Set(rows.filter { MastodonKeychain.dismisses($0.value) }.keys),
+            refused: Set(rows.filter { MastodonKeychain.noticesRefused($0.value) }.keys)
+        )
+    }
+
     /// Every held token's attributes, by host, and never a value.
     private func rows() throws -> [String: [String: Any]] {
         var item: CFTypeRef?
@@ -441,6 +536,18 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
 
     public func bookmarksRefused() throws -> Set<String> {
         lock.withLock { Set(held.filter(\.value.bookmarksRefused).keys) }
+    }
+
+    public func noticing() throws -> Set<String> {
+        lock.withLock { Set(held.filter { MastodonOAuth.notices($0.value.scopes) }.keys) }
+    }
+
+    public func dismissing() throws -> Set<String> {
+        lock.withLock { Set(held.filter { MastodonOAuth.dismisses($0.value.scopes) }.keys) }
+    }
+
+    public func noticesRefused() throws -> Set<String> {
+        lock.withLock { Set(held.filter(\.value.noticesRefused).keys) }
     }
 
     public func app(host: String) throws -> MastodonApp? {

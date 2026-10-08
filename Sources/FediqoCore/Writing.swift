@@ -77,6 +77,21 @@ public enum BookmarkStanding: Sendable, Equatable, CaseIterable {
     case unavailable
 }
 
+/// Whether a sign-in may read what its source says happened to the reader (#323) — a third
+/// question beside `SourceWriting` and `BookmarkStanding`, because a sign-in made before notices
+/// were asked for reads, writes and bookmarks exactly as it did and lacks only this.
+///
+/// **Asked of no sign-in until the reader presses for it on the notices page**, so `unasked` is
+/// where every sign-in starts, whatever else it bought.
+public enum NoticeStanding: Sendable, Equatable, CaseIterable {
+    /// The sign-in bought it.
+    case allowed
+    /// The sign-in has not asked for notices. Asking again is what changes it.
+    case unasked
+    /// Asked for, and the source did not grant it. Nothing the reader does here changes that.
+    case unavailable
+}
+
 /// One thing a reader does to a post on the source they read it through — #54's acts, named so
 /// that the rule about which of them a post offers is a value rather than a run of conditions
 /// inside a view body.

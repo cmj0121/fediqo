@@ -113,20 +113,38 @@ public struct MastodonOAuth: Sendable {
     /// Asked for with the writing part and never without it: reading alone asks for what it
     /// always asked.
     public static let bookmarking = "write:bookmarks"
+    /// What reading notices needs (#323), and no more: what the source says happened to the
+    /// reader. **Apart from `reading` and not a fifth word in it**, for `bookmarking`'s reason
+    /// turned the other way: every sign-in made before this asked for `reading` to the letter,
+    /// and a registration made for it would stop being one this build may start on.
+    ///
+    /// **Asked for only where the reader pressed for it on the notices page** — no sign-in asks
+    /// for it unasked, so one that never wanted notices is byte-for-byte what it was.
+    public static let noticing = "read:notifications"
+    /// What dismissing a notice needs (#323) — and letting through or letting go one the source
+    /// held back. An act, so it is asked for with `noticing` only where the writing part is
+    /// asked for too, and never a word in `writing`: `writes(_:)` asks for every word of that.
+    public static let dismissing = "write:notifications"
 
     /// The whole of what one sign-in asks for: reading, and the writing part after it where the
     /// reader agreed to it — with bookmarking after that, unless `bookmarks` is false, which is
     /// the rung a server that refuses the bookmark scope is asked on, and what a sign-in to act
-    /// asked for before #285.
+    /// asked for before #285. Where `notices` is asked (#323), reading them comes after all of
+    /// that, and dismissing them after it where the writing part is asked.
     ///
-    /// **Reading first, writing next, bookmarking last, always in this order**, because the string
-    /// is also what a registration records and what `known(writing:)` compares against — two
-    /// spellings of one ask would register twice for one choice.
+    /// **Reading first, writing next, then bookmarking, noticing and dismissing, always in this
+    /// order**, because the string is also what a registration records and what `known(writing:)`
+    /// compares against — two spellings of one ask would register twice for one choice.
     public static func scopes(
-        reading: String = reading, writing wanted: Bool, bookmarks: Bool = true
+        reading: String = reading, writing wanted: Bool, bookmarks: Bool = true,
+        notices: Bool = false
     ) -> String {
-        guard wanted else { return reading }
-        return bookmarks ? "\(reading) \(Self.writing) \(bookmarking)" : "\(reading) \(Self.writing)"
+        var asked = [reading]
+        if wanted { asked.append(Self.writing) }
+        if wanted, bookmarks { asked.append(bookmarking) }
+        if notices { asked.append(noticing) }
+        if notices, wanted { asked.append(dismissing) }
+        return asked.joined(separator: " ")
     }
 
     /// The ladder one answer is asked on, widest first: what a sign-in registers for, and what it
@@ -141,11 +159,19 @@ public struct MastodonOAuth: Sendable {
     /// **One owner for every rung.** `MastodonSessions.signIn` needs them in order and needs to
     /// know which registrations it may reuse, and those were two derivations of one ladder in two
     /// files — true together only by inspection. `known(writing:)` is read off this.
-    public static func ladder(writing wanted: Bool) -> [String] {
+    ///
+    /// **Asking for notices adds no rung** (#323): each rung carries the notices words after its
+    /// own, and that is all. Notices are only ever asked on top of a sign-in already held, and a
+    /// sign-in replaces the one held only where it succeeds — so the rung "without notices" is
+    /// the sign-in the reader already has, and a server with no such scope fails the ask and
+    /// takes nothing.
+    public static func ladder(writing wanted: Bool, notices: Bool = false) -> [String] {
         let readings = [reading, readingWithoutSearch]
-        guard wanted else { return readings }
-        return readings.map { scopes(reading: $0, writing: true) }
-            + readings.map { scopes(reading: $0, writing: true, bookmarks: false) }
+        guard wanted else {
+            return readings.map { scopes(reading: $0, writing: false, notices: notices) }
+        }
+        return readings.map { scopes(reading: $0, writing: true, notices: notices) }
+            + readings.map { scopes(reading: $0, writing: true, bookmarks: false, notices: notices) }
     }
 
     /// The registrations this build may start a sign-in on that wants `writing`, or not: the
@@ -161,8 +187,25 @@ public struct MastodonOAuth: Sendable {
     /// is a rung: a sign-in started on it would never ask for bookmarks, and a reader asked to
     /// allow them would be sent to a page that does not mention them. It is reached only by
     /// falling to it, within one sign-in.
-    public static func known(writing wanted: Bool) -> Set<String> {
-        Set(ladder(writing: wanted).filter { !wanted || bookmarks($0) })
+    ///
+    /// **And it is per notices choice** (#323), read off that choice's ladder: a sign-in that
+    /// asks for notices starts on no registration that cannot ask for them, and one that does not
+    /// starts on none made for them — its page would ask for what nobody pressed for.
+    public static func known(writing wanted: Bool, notices: Bool = false) -> Set<String> {
+        Set(ladder(writing: wanted, notices: notices).filter { !wanted || bookmarks($0) })
+    }
+
+    /// Whether a scope string bought reading notices (#323) — read scope by scope, as
+    /// `writes(_:)` is.
+    public static func notices(_ scopes: String?) -> Bool {
+        guard let scopes else { return false }
+        return scopes.split(separator: " ").contains(Substring(noticing))
+    }
+
+    /// Whether a scope string bought dismissing notices (#323), read the same way.
+    public static func dismisses(_ scopes: String?) -> Bool {
+        guard let scopes else { return false }
+        return scopes.split(separator: " ").contains(Substring(dismissing))
     }
 
     /// Whether a scope string bought bookmarking — read scope by scope, as `writes(_:)` is.
