@@ -110,9 +110,14 @@ struct SourceReachMovedPinTests {
     @Test("A forum's next page: a Discuz! board under the board's name, a Discuz! front page and a Discourse's under none, all through the plain door where nobody is signed in to the forum")
     func aForumsNextPage() async throws {
         let boarded = Source(host: Self.z, kind: .discuz, boards: [BoardSubscription(fid: 42, name: "Dev")])
+        // The Discourse's listing is answered, and readably. Its two asks go out side by side,
+        // and a listing that cannot be read ends the read at once and takes the other ask back:
+        // whether that one had been made yet was then a matter of which ran first, and on a
+        // loaded machine the section names were sometimes never asked for at all.
         let (session, log) = try await Self.shell(
             signedIn: false, sources: [boarded, Self.discourse],
-            holding: [Self.thread(9, on: Self.z, kind: .discuz, board: "42"), Self.thread(3, on: Self.d, kind: .discourse)]
+            holding: [Self.thread(9, on: Self.z, kind: .discuz, board: "42"), Self.thread(3, on: Self.d, kind: .discourse)],
+            routes: ["/latest.json": #"{"users":[],"topic_list":{"topics":[]}}"#]
         )
         await session.reload.more(.all, in: session)
         let lines = log.take()
