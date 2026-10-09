@@ -25,10 +25,26 @@ cd "$(dirname "$0")/.."
 # (fifty seconds, a minute) then ran out of it without anything being wrong: forty-five
 # failed that way on a run where nothing else did. Taken one at a time they have the machine
 # to themselves, and the run is a minute longer. `make test` on a desk stays as it was.
-if [ -f Package.resolved ]; then
-    swift test --no-parallel --enable-code-coverage --only-use-versions-from-resolved-file
-else
-    swift test --no-parallel --enable-code-coverage
+#
+# What the run says is kept in a file and what matters of it is said afterwards. Left to
+# write straight to a runner's log, the run's output stopped a few seconds in and the step
+# ended with a bare exit code: a failure nobody could read. Every test that starts and
+# passes is tens of thousands of lines; what is said here is everything else, and each
+# test that did not pass, in full.
+RUN_LOG="$(mktemp -t fediqo-tests)"
+RESOLVED=()
+[ -f Package.resolved ] && RESOLVED=(--only-use-versions-from-resolved-file)
+set +e
+swift test --no-parallel --enable-code-coverage ${RESOLVED[@]+"${RESOLVED[@]}"} > "$RUN_LOG" 2>&1
+TEST_CODE=$?
+set -e
+grep -vE '^◇ |^✔ (Test|Suite)|^↳ ' "$RUN_LOG" | tail -300 || true
+grep -E 'Test run with' "$RUN_LOG" || true
+if [ "$TEST_CODE" -ne 0 ]; then
+    echo
+    echo "the tests failed (swift test exited $TEST_CODE); each issue, as it was recorded:"
+    grep -E -A12 'recorded an issue' "$RUN_LOG" | grep -vE '^◇ |^✔ ' | head -400 || true
+    exit "$TEST_CODE"
 fi
 
 BIN_PATH="$(swift build --show-bin-path)"
