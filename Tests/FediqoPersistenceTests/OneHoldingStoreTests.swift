@@ -183,7 +183,7 @@ struct OneHoldingStoreTests {
         #expect(try Data(contentsOf: index).range(of: Data("aside".utf8)) == nil, "the word is still readable in the file")
         #expect(try migrations(index) == [
             "v1-index", "v2-categories", "v3-holding", "v4-gone", "v5-said", "v6-kept", "v7-bookmarked", "v8-revisions",
-            "v9-language", "v10-references", "v11-one-holding", "v12-references-only",
+            "v9-language", "v10-references", "v11-one-holding", "v12-references-only", "v13-unsent", "v14-notices",
         ])
     }
 

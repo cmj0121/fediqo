@@ -74,6 +74,16 @@ final class ShellSession {
     /// Nothing it holds is in the store's list of rows; see its own doc.
     let conversations = ShellConversations()
 
+    /// What each signed-in source says happened to the reader (#323), as one list. On the
+    /// session for `conversations`' reason, and held nowhere else: it is read each run.
+    let noticeList = ShellNoticeList()
+
+    /// What the person asked of a source that changed nothing, said on every page
+    /// (`SaidStrip`). On the session for `conversations`' reason; for the run only.
+    let said = ShellSaid()
+    /// What the person pressed to send and no source has said landed (`ShellOutbox`).
+    let outbox = ShellOutbox()
+
     /// What each server says it is, asked of that server rather than read off what was written
     /// down when it was joined — #86. On the session for `conversations`' reason.
     let flavours = ShellFlavours()
@@ -172,6 +182,13 @@ final class ShellSession {
     /// The source whose sign-in is being asked to allow bookmarks, where one is (#285). Observed,
     /// and the question is presented from it; a press on a row's mark writes it.
     var bookmarkAsk: String?
+    /// What the sign-in question open about a host said of notices, kept from when it was first
+    /// drawn until it is answered or put down (`ShellNoticeAsk`). Not observed: it is read by
+    /// the question being drawn, and must not draw it again.
+    @ObservationIgnored var noticesSaid: [String: Bool] = [:]
+    /// The source whose sign-in is being asked to allow notices, where one is (#323). Observed,
+    /// and the question is presented from it; the press on the notices page writes it.
+    var noticeAsk: String?
     /// Whether the rows of every source nobody is signed in to have been checked once this run
     /// for what an earlier reader left on them (`forgetReaderMarksDue`).
     @ObservationIgnored var readerMarksSwept = false
@@ -485,6 +502,10 @@ final class ShellSession {
     /// figure is the store's and not a timeline's. Rebuilt where either is assigned or the
     /// breakdown switches between week and month, never on a redraw.
     private(set) var holdings = Holdings(notes: [], per: .month)
+    /// How many notices the store holds of each source, by host (#323): what Usage says.
+    /// Counted off the store and not off what the notices page draws, which is empty while
+    /// who is signed in cannot be read and the disk still holds them.
+    private(set) var noticesHeld: [String: Int] = [:]
 
     /// Whether the breakdown is by week or by month.
     var heldPeriod: HeldPeriod = .month {
@@ -502,10 +523,16 @@ final class ShellSession {
     /// Both halves of what is held assigned in one breath, nil where one did not move, and the
     /// count rebuilt once for the pair rather than once an assignment. No await inside, so
     /// nothing else on this actor sees the count held back.
+    ///
+    /// **Less every row whose taking back is pressed and not yet answered** (`acts.leaving`):
+    /// it is left out of what every page draws, over a store that still holds it. Its copies'
+    /// own rows, and no more: a reblog of it, or a post that quotes it, still draws it inside
+    /// its own row until the source answers — the post is held until then.
     private func adoptHeld(notes items: [Note]?, replies: [Note]?) {
         guard items != nil || replies != nil else { return }
         recountHeld = true
-        if let items { notes = items }
+        let leaving = acts.leaving
+        if let items { notes = leaving.isEmpty ? items : items.filter { !leaving.contains($0.key.rowID) } }
         if let replies { heldReplies = replies }
         recountHeld = false
         recount()
@@ -757,7 +784,23 @@ final class ShellSession {
     var searchFocused = false
 
     /// Writes the store to disk. Set by the app so a drop by time survives a relaunch.
-    @ObservationIgnored var persist: (@MainActor () async -> Void)?
+    ///
+    /// **Asked through `saveSoon()`**, which does not wait for it (`ShellSaving`). Awaited only by
+    /// what reads the file next — `saveForCarry()` and the room's check — and by an act that
+    /// takes something off this device (`saveNow`). **Says whether the write happened**: no
+    /// where it failed, which whoever asked for something to be gone tells the person.
+    @ObservationIgnored var persist: (@MainActor () async -> Bool)?
+    /// Writes only what the person pressed to send (`Unsent`) — a handful of rows, whatever the
+    /// store holds — and says whether they are on disk. Set by the app beside `persist`.
+    /// Awaited by a send before its request leaves, which does not leave on a no, and by a
+    /// discard before it says the text is gone; never by a sheet. Nothing in a session nobody
+    /// gave a disk — a test, a preview — where a text is held in memory as everything is.
+    @ObservationIgnored var persistUnsent: (@MainActor () async -> Bool)?
+    /// Each save that wrote every part after a write had failed, whoever made it
+    /// (`StoreSaver.landings`). Set by the app beside `persist`; followed by `followSaves()`.
+    @ObservationIgnored var savesLanded: (@Sendable () async -> AsyncStream<Void>)?
+    /// The save asked for last through `saveSoon()`, running or waiting; the next runs after it.
+    @ObservationIgnored var saving: Task<Void, Never>?
 
     init(
         http: any HTTPClient,
@@ -791,6 +834,7 @@ final class ShellSession {
         // Built with the same forum browsers, for `posts`' reason (#209).
         self.blogs = blogs ?? ForumBlogs(through: forums)
         // An opening post read is kept with its row (#154). Weak: the cache is this session's.
+        conversations.acts = acts
         self.posts.keeping = { [weak self] key, opening in self?.keep(opening, for: key) }
         // A topic's replies land in the store and are read back from it (#177). Weak, likewise.
         self.posts.landing = { [weak self] host, tid, replies in
@@ -813,9 +857,21 @@ final class ShellSession {
             let from = (note.object as AnyObject?).map(ObjectIdentifier.init)
             MainActor.assumeIsolated { self?.allowancesChanged(by: from) }
         }
+        // What the notices page draws is what the store holds (#323).
+        noticeList.store = store
         // A source that ends a sign-in itself answers a sign-out still being asked about it.
         mastodon.onEnded = { [weak self] host in
             self?.dropSignOutAsk(host: host)
+            self?.noticeList.forget(host: host)
+            // And from the store and the disk, by the path a sign-out takes and waited for
+            // there (`forgetReaderMarksDue`, #292) — **here, the one place every ended sign-in
+            // comes through**, whichever read or write found it: a reload, a thread, an act,
+            // a text being sent, the notices read. After every save asked for before it.
+            self?.sweepEndedReader()
+            // A press still out to it cannot be answered for, and one that did not arrive
+            // cannot be tried again: neither is left standing about a sign-in that ended.
+            self?.acts.forget(host: host)
+            self?.said.forget(host: host)
         }
         // Last, once every property is set: a take-away or a read back holds the room limit still (#249).
         carry.holding = { [weak self] held in self?.holdsStill = held }
@@ -827,6 +883,7 @@ final class ShellSession {
     @ObservationIgnored private nonisolated(unsafe) var allowanceWatch: (any NSObjectProtocol)?
 
     /// The unsent text, kept when the composer closes without sending (#56). In-session only.
+    /// A send takes it at the press (`send()`), and what is typed afterwards is a new draft.
     var composeDraft = ""
     /// The source the composer will write to, among those that may be written on.
     var composeHost: String?
@@ -913,30 +970,6 @@ final class ShellSession {
         )
     }
 
-    /// Writes the draft to the chosen source and takes the returned post into the store.
-    /// Empty or over-long text is not sent. A failure keeps the draft.
-    func post() async throws {
-        let text = ComposerSheet.trimmed(composeDraft)
-        guard !text.isEmpty, let host = composeHost else { return }
-        guard writableSources.contains(where: { $0.host == host }) else {
-            throw MastodonWriteError.noSource
-        }
-        guard text.count <= postLimit(of: host) else { return }
-        guard let door = mastodon.authorized(host: host, for: .write) else {
-            throw MastodonWriteError.noSource
-        }
-        do {
-            _ = try await reach.write(door, landingIn: store)
-                .post(text, visibility: composeAudience)
-            composeDraft = ComposerSheet.draftAfterLanding(current: composeDraft, sent: text)
-            await adopt()
-            await persist?()
-        } catch {
-            writeFailed(error, host: host)
-            throw error
-        }
-    }
-
     /// What a write's failure says about the sign-in it went through, written against `host`:
     /// a 401 the account check confirmed signs the source out, and a 403 marks the source as
     /// having turned a write away. **One reading for every write** — a post, an answer and each
@@ -948,7 +981,7 @@ final class ShellSession {
     /// for the rest of this run the mark is not offered on that source's rows, every other act
     /// it offers stays, and the reader is told, here and on the source's row. `sent` is the token
     /// the request went with, so a refusal about a sign-in since replaced is not laid on the new.
-    private func writeFailed(
+    func writeFailed(
         _ error: any Error, host: String, bookmarkSentWith sent: MastodonToken? = nil
     ) {
         switch error as? MastodonAuthError {
@@ -1036,7 +1069,7 @@ final class ShellSession {
     /// goes through and where each has got to there. The panes add the presses.
     ///
     /// **Each standing is read off the copy its act goes through** (#136), which is where
-    /// `perform` keeps it, so a press through a merged row's second source is drawn on its way
+    /// `perform` keeps it, so a press through a merged row's second source is drawn as pressed
     /// and a failure there is drawn as one. `through` names only a copy that is not the row.
     ///
     /// Each copy's own acts are worked out once, and both the offer and each act's copy are read
@@ -1123,8 +1156,8 @@ final class ShellSession {
     }
 
     /// The menu's question answered yes. **Refused where `askToWithdraw` would refuse to ask**:
-    /// the post no longer offers it, or its taking back is already on its way. Returns whether
-    /// anything was sent for.
+    /// the post no longer offers it, or its taking back is pressed and not yet answered.
+    /// Returns whether anything was sent for.
     @discardableResult
     func withdrawAsked(_ item: DummyItem) -> Bool {
         guard let copy = actingCopy(of: item, for: .withdraw),
@@ -1139,9 +1172,10 @@ final class ShellSession {
         withdrawing = nil
     }
 
-    /// The question answered yes: the post is taken back from its source, and once the source
-    /// says so it leaves the timeline, any open thread and the store, so it stays gone after a
-    /// relaunch. A failure leaves it where it is and the same act asks again.
+    /// The question answered yes: the post is taken back from its source. At the yes it leaves
+    /// what is drawn — the timeline, any open thread, every page; once the source says so it
+    /// leaves the store, so it stays gone after a relaunch. A failure draws it again where it
+    /// was and says so, and the same act asks again.
     ///
     /// **A row that stands for two copies (#114) lets go of all of them.** The act goes through
     /// the copy that is the reader's own post on a source they signed in to (#136) — its source,
@@ -1158,7 +1192,7 @@ final class ShellSession {
         guard let copy = actingCopy(of: item, for: .withdraw) else { return }
         let others = item.copies.filter { $0.id != copy.id }
             .map { NoteKey(host: $0.source.host, id: $0.noteID) }
-        await perform(.withdraw, on: item) { door, note in
+        await perform(.withdraw, on: item, taking: Set(item.copies.map(\.id))) { door, note, _ in
             try await self.reach.write(door, landingIn: self.store).withdraw(note)
             for key in [note.key] + others {
                 await self.store.forget(key)
@@ -1185,25 +1219,37 @@ final class ShellSession {
     ///
     /// Nothing is written down about the press landing: the store takes the server's answer, and
     /// what the row draws afterwards is that. A refusal leaves the post exactly as it was and
-    /// leaves a failure the same press clears by trying again.
+    /// leaves a failure the same press clears by trying again. Until the answer the row draws
+    /// the press, over a store that has not moved.
     ///
     /// A bookmark (#285) is the third: put at the source or taken off it, by what the source
     /// last said of it.
     func toggle(_ act: PostAct, on item: DummyItem) async {
         guard act == .boost || act == .favourite || act == .bookmark else { return }
-        await perform(act, on: item) { door, note in
+        await perform(act, on: item, mark: { Self.mark(act, of: $0) }) { door, note, on in
             let write = self.reach.write(door, landingIn: self.store)
             switch act {
-            case .boost: return try await write.boost(note, on: note.boosted != true)
-            case .favourite: return try await write.favourite(note, on: note.favourited != true)
-            case .bookmark: return try await write.bookmark(note, on: note.bookmarked != true)
+            case .boost: return try await write.boost(note, on: on)
+            case .favourite: return try await write.favourite(note, on: on)
+            case .bookmark: return try await write.bookmark(note, on: on)
             case .answer, .withdraw: return note
             }
         }
     }
 
-    /// One act on one post, with everything every act shares: the guard against a second press
-    /// while the first is out, the sign-in, the store, and the three sentences #53 sets.
+    /// What the source last said of one act's mark on a post, or nothing where it said nothing
+    /// or the act has no mark.
+    private static func mark(_ act: PostAct, of note: Note) -> Bool? {
+        switch act {
+        case .boost: note.boosted
+        case .favourite: note.favourited
+        case .bookmark: note.bookmarked
+        case .answer, .withdraw: nil
+        }
+    }
+
+    /// One act on one post, with everything every act shares: what a second press does while
+    /// the first is out, the sign-in, the store, and the three sentences #53 sets.
     ///
     /// **Everything below is the acting copy's, never the row's** (#136): the held note, the door
     /// and the host a 401 or a 403 is written against are all read off the one copy `actingCopy`
@@ -1216,33 +1262,158 @@ final class ShellSession {
     /// between them can answer differently.
     ///
     /// A 401 the account check confirms signs the source out, and a 403 marks the source as
-    /// having turned a write away — `writeFailed`, exactly as `post()` reads them.
+    /// having turned a write away — `writeFailed`, exactly as a post's send reads them.
     ///
-    /// **Every failure leaves the act failed**, a cancelled one included: a cancelled act is one
-    /// that did not arrive, said in the one sentence a reader can act on — press again. There is
-    /// no third thing to tell them, and leaving no standing at all would draw the post as though
-    /// the press had landed.
+    /// **Shown first, and the last press wins.** The states of one act on one row
+    /// (`ShellActs.standings`), and every way between them:
+    ///
+    /// | From | What happens | To |
+    /// | ---- | ------------ | -- |
+    /// | settled (no entry) or failed | a press: `begin`, the mark drawn the other way from what the source last said (`mark`), and the request for that goes | pressed(to) |
+    /// | pressed(to) | a press: `turn`, nothing sent | pressed(!to) |
+    /// | pressed(to), request for `sent` out | the source's yes, and after it is adopted `to != sent` | pressed(to), the request for `to` goes |
+    /// | pressed(to), request for `sent` out | the source's yes, and after it is adopted `to == sent` | settled; its line, if one stood, goes |
+    /// | pressed(to), request for `sent` out | an answer that says the mark is not as it was sent — the source's word, never asked a second time | settled; said as declined only where `to == sent`, since otherwise the mark is what was last pressed |
+    /// | pressed(to) | the request fails, runs out of time or is cancelled | failed, said once, with what was wanted and when (`settleMisses`) |
+    /// | pressed or failed | the sign-in ends, is signed out of or replaced, or its source is cleared (`ShellActs.forget`) | settled, nothing said; a request still out comes back to an entry that is not its own (`stands`) and does nothing |
+    /// | failed | a read of the post asked after the failure shows the mark as that press wanted (`settleMisses`) | settled; its line goes |
+    ///
+    /// **Between the last answer and the entry going there is no wait.** What is wanted is read
+    /// after the answer has been adopted, and the entry is dropped in the same breath, so a
+    /// press made while the answer was being adopted is seen and asked for, never dropped; and
+    /// the row never draws the old word in between. The store is not touched until the source
+    /// answers. One request at a time is out for a mark.
+    ///
+    /// Taking a post back has no second press (`askToWithdraw`): pressed, then settled or
+    /// failed. `taking` is every row it leaves out of what is drawn meanwhile.
+    ///
+    /// **Every failure leaves the act failed**, a cancelled one included, and the mark as the
+    /// source last said: a standing left as pressed would draw the post as though the press had
+    /// landed. It is said on whatever page is in front (`said`), naming whose post it was, with
+    /// what is known of why — and said before anything is waited for, so no line is ever said
+    /// of a standing that has gone.
     private func perform(
         _ act: PostAct,
         on item: DummyItem,
-        _ body: @escaping (MastodonAuthorized, Note) async throws -> Note
+        mark: ((Note) -> Bool?)? = nil,
+        taking: Set<String> = [],
+        _ body: @escaping (MastodonAuthorized, Note, Bool) async throws -> Note
     ) async {
         guard let copy = actingCopy(of: item, for: act) else { return }
         let host = copy.source.host
+        if mark != nil, acts.turn(copy.id, act) { return }
         // A store row, or an answer read in an open conversation, which #90 keeps out of the store.
-        guard let note = note(ofRow: copy.id),
+        guard var note = note(ofRow: copy.id),
               let door = mastodon.authorized(host: host, for: .write)
         else { return }
-        guard acts.begin(copy.id, act) else { return }
+        guard acts.begin(copy.id, act, to: mark.map { $0(note) != true } ?? true, taking: taking) else { return }
+        let flight = acts.flight(copy.id, act)
+        let whose: Said.Whose = isMine(copy) ? .yours : .by(copy.author.isEmpty ? copy.handle ?? "" : copy.author)
+        let what = Said.What.act(act, row: copy.id)
+        if !taking.isEmpty { await adopt(again: true) }
+        var answers = 0
         do {
-            let answered = try await body(door, note)
-            conversations.replace(answered)
-            acts.landed(copy.id, act)
-            await adopt()
-            await persist?()
+            while stands(flight, copy.id, act, door) {
+                let sent = acts.wanted(copy.id, act) ?? true
+                note = try await body(door, note, sent)
+                conversations.replace(note)
+                answers += 1
+                // A post taken back is waited for: it left the screen at the yes, and nothing
+                // says it is gone — a kept copy drawn again, marked — while the file still
+                // holds its words (#292). Whatever became of the sign-in meanwhile: the source
+                // said yes, so the post is gone there. A write that did not land is said.
+                if act == .withdraw { await saveNow(.post) }
+                guard stands(flight, copy.id, act, door) else { break }
+                if act == .withdraw {
+                    acts.landed(copy.id, act)
+                    said.takeDown(Said.id(what, host: host))
+                    await adopt(again: true)
+                    return
+                }
+                await adopt()
+                // No wait from here to the entry going: what is wanted is as it is now.
+                guard stands(flight, copy.id, act, door) else { break }
+                let wanted = acts.wanted(copy.id, act) ?? sent
+                let took = mark?(note).map { $0 == sent } ?? true
+                // Pressed again meanwhile, to the other way: that is asked now, of the post as
+                // the source has just said it.
+                if took, wanted != sent { continue }
+                acts.landed(copy.id, act)
+                // A mark is the source's, and is written behind the press.
+                saveSoon()
+                if !took, wanted == sent {
+                    said.say(Said(what, .declined, host: host, of: whose))
+                } else {
+                    said.takeDown(Said.id(what, host: host))
+                }
+                return
+            }
         } catch {
             writeFailed(error, host: host, bookmarkSentWith: act == .bookmark ? door.token : nil)
-            acts.failed(copy.id, act)
+            if stands(flight, copy.id, act, door) {
+                acts.failed(copy.id, act)
+                said.say(Said(what, WriteWhy(error), host: host, of: whose))
+                // What an earlier answer in this press brought is drawn, and written behind it.
+                await adopt(again: !taking.isEmpty)
+                if answers > 0 { saveSoon() }
+                return
+            }
+        }
+        // Let go of with its sign-in. Only an entry that is still this press's goes here.
+        if acts.flight(copy.id, act) == flight { acts.landed(copy.id, act) }
+        await adopt(again: !taking.isEmpty)
+    }
+
+    /// Whether an act's entry is still the press that began as `flight`, and the sign-in still
+    /// the one its request went with.
+    private func stands(_ flight: Int?, _ row: String, _ act: PostAct, _ door: MastodonAuthorized) -> Bool {
+        acts.flight(row, act) == flight
+            && mastodon.token(host: door.token.host)?.accessToken == door.token.accessToken
+    }
+
+    /// A press that did not arrive, let go of where a later read shows it had (`ShellActs.misses`):
+    /// "did not arrive, press to try again" would be said beside what the source says is done.
+    /// The standing goes, and its line with it.
+    ///
+    /// **Only on a read of that post asked after the failure** (`ItemStore.lastRead`, in #291's
+    /// order): the source must have been asked about the post later than the press failed, and
+    /// the post say the mark as that press wanted it. What was held already proves nothing —
+    /// pressed and pressed back, what is wanted is what was held all along — so a copy from
+    /// before is never taken for the write having landed. A post that was to be taken back and
+    /// is held nowhere any more went.
+    ///
+    /// **Only the misses that stood before the store was asked**, and still stand as they did
+    /// after it — the same press, failed at the same moment. One that failed during the wait
+    /// was not what the store was asked about, and a taking back that failed then is still left
+    /// out of `notes` until its own adopt: neither is touched here. One pressed again meanwhile
+    /// is no longer a miss.
+    ///
+    /// **A post that was to be taken back went** only where nothing draws it and nothing has it
+    /// out (`acts.leaving`), and the store, asked after the failure, holds no copy of it or
+    /// holds one its source has since said is gone.
+    private func settleMisses(_ before: [(key: ShellActKey, wanted: Bool, at: UInt64)]) async {
+        let keys = before.compactMap { NoteKey(rowID: $0.key.row) }
+        guard !keys.isEmpty else { return }
+        let reads = await store.lastRead(of: keys)
+        let stored = await store.notes(keys)
+        let standing = Dictionary(acts.misses.map { ($0.key, $0.at) }, uniquingKeysWith: { first, _ in first })
+        for miss in before where standing[miss.key] == miss.at {
+            guard let rowKey = NoteKey(rowID: miss.key.row) else { continue }
+            // Wherever this run holds it: an answer read in an open thread is not in the store.
+            let held = note(ofRow: miss.key.row)
+            let arrived: Bool
+            if miss.key.act == .withdraw {
+                arrived = !acts.leaving.contains(miss.key.row)
+                    && (held == nil || held?.goneSince != nil)
+                    && (stored[rowKey] == nil || stored[rowKey]?.goneSince != nil)
+            } else if let held, let read = reads[rowKey], read > miss.at {
+                arrived = Self.mark(miss.key.act, of: held) == miss.wanted
+            } else {
+                arrived = false
+            }
+            guard arrived else { continue }
+            acts.landed(miss.key.row, miss.key.act)
+            said.takeDown(Said.id(.act(miss.key.act, row: miss.key.row), host: rowKey.host))
         }
     }
 
@@ -1252,7 +1423,8 @@ final class ShellSession {
     /// the one surface by writing the one value.
     var answering: AnswerTarget?
     /// What has been written to each post and not yet sent, by row. Kept when the sheet closes
-    /// unsent and when a send fails, so every character survives both; cleared only by a landing.
+    /// unsent. A send takes the text at the press and holds it, on disk, until it lands or the
+    /// person discards it (`ShellOutbox`).
     var answerDrafts: [String: String] = [:]
     /// Who each unsent answer reaches, by row — chosen before it is sent, from where it started.
     var answerReach: [String: Audience] = [:]
@@ -1293,42 +1465,15 @@ final class ShellSession {
         )
     }
 
-    /// Sends the answer to the source the post was read through — **the post decides it; it is
-    /// not a choice** — and lays what landed into the conversation under what it answers.
-    ///
-    /// A failure throws and keeps every character: the draft is only cleared by a landing, and
-    /// only where it is still the text that was sent, `ComposerSheet.draftAfterLanding`'s rule.
-    /// 401 and 403 are read as `post()` reads them.
-    func answer(_ target: AnswerTarget) async throws {
-        let item = target.item
-        let host = item.source.host
-        let text = ComposerSheet.trimmed(answerDraft(target))
-        guard !text.isEmpty, text.count <= postLimit(of: host) else { return }
-        // Asked of the row as it is now, not as the sheet opened on it: a post its source said
-        // was gone while the answer was being written offers nothing to answer (#179).
-        guard acts(on: held(item.id) ?? item).offers(.answer),
-              let answered = note(ofRow: item.id),
-              let door = mastodon.authorized(host: host, for: .write)
-        else { throw MastodonWriteError.noSource }
-        let reach = answerReach[item.id] ?? target.start
-        do {
-            let note = try await self.reach.write(door, landingIn: store)
-                .post(text, visibility: reach, answering: answered)
-            answerDrafts[item.id] = ComposerSheet.draftAfterLanding(
-                current: answerDraft(target), sent: text
-            )
-            if answerDrafts[item.id]?.isEmpty == true {
-                answerDrafts[item.id] = nil
-                answerReach[item.id] = nil
-            }
-            conversations.landed(note, under: target.root.id, rootID: target.root.statusID)
-            await adopt()
-            await persist?()
-        } catch {
-            writeFailed(error, host: host)
-            throw error
-        }
-    }
+    /// The text of the outbox's that the sheet is open on, where one is (`ShellOutbox.edit`).
+    /// Observed, and the sheet is presented from it.
+    var editingUnsent: UnsentAsk?
+    /// The text of the outbox's whose discarding is being asked about. Nothing goes while it
+    /// is only asked.
+    var discardingUnsent: UnsentAsk?
+    /// The text that may have been posted and is asked about before it is sent all the same —
+    /// again, or changed (`ShellOutbox.sendAnyway`). Nothing is sent while it is only asked.
+    var resendingUnsent: UnsentAsk?
 
     func isAdded(_ domain: String) -> Bool {
         let host = domain.lowercased()
@@ -2389,6 +2534,17 @@ final class ShellSession {
         await adopt()
     }
 
+    /// What the last run pressed to send and no source said landed, drawn as it stands and not
+    /// sent (`ShellOutbox.follow`). Asked as a launch reads the store; every adopt after it
+    /// follows the texts where they moved.
+    func adoptUnsent() async {
+        let view = await store.unsentView()
+        adoptedUnsent = view.mark
+        outbox.follow(view, in: self)
+        // One whose post the last run's reads already brought is let go here and now.
+        outbox.reconcile(in: self)
+    }
+
     /// What a read back replaced, adopted without a relaunch (#247): the store, the person's
     /// timelines and choices read again off the preferences, who is signed in read again off
     /// the Keychain, and the picture copies measured again.
@@ -2409,6 +2565,10 @@ final class ShellSession {
         emojis.clear()
         pictures.disk?.trim()
         cleared += 1
+        // What this run pressed and said was about rows the store no longer holds: a mark left
+        // on a press that did not arrive, and a line about one, would be about nothing.
+        acts.clear()
+        said.clear()
         // The package's account rides with its store (#251): this device's lines give way to
         // it, then the months limit has its turn on what was read back and writes its line as
         // at a launch.
@@ -2452,13 +2612,38 @@ final class ShellSession {
     /// here has assigned `notes` since either, they are what the store holds. **That count and
     /// not the revision** (#175), so a topic's reply kept — written down, drawn nowhere but in
     /// its topic — replaces nothing.
-    private func adopt() async {
+    ///
+    /// `again` reads the notes whatever the count says: what is drawn of them moved with no
+    /// word from the store — a taking back pressed, answered or failed (`acts.leaving`).
+    private func adopt(again: Bool = false) async {
         // Before anything is read: what an ended sign-in's reader had done to its posts (#285).
         await forgetReaderMarksDue()
         await adoptSources()
+        // What each source said happened to the person, where what is held of it moved (#323):
+        // drawn from this device before anybody is asked, and again whenever a letting go
+        // reaches a notice. Only once who is signed in could be read (`ShellNoticeList.follow`).
+        let noticesMark = await store.noticesMark
+        if countedNotices != noticesMark {
+            // How many are held, said by Usage whoever may read them just now.
+            let count = await store.noticesCount()
+            if count != noticesHeld { noticesHeld = count }
+            countedNotices = noticesMark
+        }
+        if adoptedNotices != noticesMark, mastodon.grantsKnown {
+            adoptedNotices = noticesMark
+            await noticeList.follow(in: self)
+        }
+        // What waits to be sent, where the store's texts or who is sending one moved — through
+        // this window or another: the outbox draws what the store holds (`ShellOutbox.follow`).
+        // The view is read in one hop of the store's and laid in with no wait between.
+        if await store.unsentMark != adoptedUnsent {
+            let view = await store.unsentView()
+            adoptedUnsent = view.mark
+            outbox.follow(view, in: self)
+        }
         let repliesRevision = await store.repliesRevision
         let drawn = await store.drawn
-        let all = adopted?.store != drawn || adopted?.notes != notesRevision ? await store.all() : nil
+        let all = again || adopted?.store != drawn || adopted?.notes != notesRevision ? await store.all() : nil
         // A forum topic's replies its forum gave no date have a count of their own, as the items
         // have, so a timeline's landing does not read them again. They are counted (#194) and
         // nothing else: nothing but the moment each was read could place it (#297). A reply the
@@ -2466,6 +2651,13 @@ final class ShellSession {
         let replies = adoptedReplies != repliesRevision ? await store.replies() : nil
         adoptHeld(notes: all, replies: replies)
         if all != nil { adopted = (store: drawn, notes: notesRevision) }
+        // A text that may have been posted is let go where its post is now among what is held.
+        if all != nil { outbox.reconcile(in: self) }
+        // The misses as they stand with what was just assigned: only these are settled, by
+        // what the store says of them after the waits below (`settleMisses`).
+        let misses = acts.misses
+        await adopting?()
+        if all != nil { await settleMisses(misses) }
         if replies != nil { adoptedReplies = repliesRevision }
         if heldRevision != renewedConversations {
             renewConversation()
@@ -2489,6 +2681,39 @@ final class ShellSession {
     func renewConversation() {
         guard let front = reload.inFront, let held = note(ofRow: front.id) else { return }
         conversations.renew(front.id, around: held, among: notes)
+    }
+
+    /// Run in the middle of each adopt — what is held assigned, nothing settled yet — and
+    /// waited for. Nothing outside a test, which holds an adopt here to press, or to fail a
+    /// write, while it is in flight.
+    @ObservationIgnored var adopting: (@MainActor () async -> Void)?
+
+    /// The sources and the notices held of them, adopted for a notices page that reads before
+    /// anything else has adopted the store (`ShellNoticeList.read`).
+    func adoptHeldNotices() async {
+        await adoptSources()
+        await noticeList.follow(in: self)
+    }
+
+    /// The sweep of readers who changed that is in flight (`forgetReaderMarksDue`), if one is.
+    @ObservationIgnored var readerSweep: Task<Void, Never>?
+
+    /// The store's `noticesMark` as the last adopt handed the notices to their list, and as it
+    /// last counted them.
+    @ObservationIgnored private var adoptedNotices: [Int]?
+    /// The store's `unsentMark` as the last adopt handed the texts to the outbox.
+    @ObservationIgnored private var adoptedUnsent: Int?
+    @ObservationIgnored private var countedNotices: [Int]?
+
+    /// The sweep of an ended sign-in's reader, asked for by `mastodon.onEnded` and not waited
+    /// for there — the ending is found inside a read — but itself waiting for the write, and
+    /// in the line of saves, so `saved()` is past it.
+    private func sweepEndedReader() {
+        let before = saving
+        saving = Task {
+            await before?.value
+            await forgetReaderMarksDue()
+        }
     }
 
     /// The store's `repliesRevision` as the last adopt read the topics' kept replies.
@@ -2649,11 +2874,16 @@ final class ShellSession {
     /// `keepingRows` is `remove(host:keepingPosts:)`'s case (#250): the rows of this host are
     /// staying on screen, so the pictures go without the generation bump that would make every
     /// one of them ask a host nothing may ask.
-    func clear(host: String, keepingRows: Bool = false) async {
-        await holdingStill { await clearNow(host: host, keepingRows: keepingRows) }
+    ///
+    /// **Waited for on disk** (#292): a Clear is the person asking for what this source said of
+    /// itself and of its reader to be gone from this device, and it is not done while the
+    /// file still holds that. `gone` is what a write that did not land is said to be of — a
+    /// Remove's, where it is a Remove that clears.
+    func clear(host: String, keepingRows: Bool = false, as gone: Said.Unwritten = .cleared) async {
+        await holdingStill { await clearNow(host: host, keepingRows: keepingRows, as: gone) }
     }
 
-    private func clearNow(host: String, keepingRows: Bool) async {
+    private func clearNow(host: String, keepingRows: Bool, as gone: Said.Unwritten) async {
         let host = host.lowercased()
         // A Clear takes the sign-in itself, and a Remove clears: a sign-out still being asked
         // about this source has nothing left to ask.
@@ -2683,6 +2913,8 @@ final class ShellSession {
         // Seven became eight, for the same reason: an open thread's answers are this device's
         // copy of that server's words too.
         conversations.forget(host: host)
+        // What the source said happened to its reader goes with the sign-in a Clear takes (#323).
+        noticeList.forget(host: host)
         // And nine: what the server last said it was is that server's word, not this device's
         // note. Dropped with the rest, so the next read asks it again — and what it said about
         // itself with it (#188), from this run and from the store, for the same reason.
@@ -2693,10 +2925,13 @@ final class ShellSession {
         subBoards[host] = nil
         lookedUnder[host] = nil
         if restating?.host == host { restating = nil }
-        // Ten. A Clear signs this source out below, so an act still on its way to it is an act
-        // that cannot now arrive, and a failure left standing about a source the reader has just
+        // Ten. A Clear signs this source out below, so a press its source has not answered is
+        // one nobody is left to answer for, and a failure left standing about a source the reader has just
         // emptied is a sentence about nothing (#106).
         acts.forget(host: host)
+        // And what was said of a write to it: a line about a source that is not here asks
+        // the person to act on nothing.
+        said.forget(host: host)
         await forums.forget(host: host)
         // Decision 10: a Mastodon's sign-in goes with a Clear as a forum's does. Signing out
         // drops nothing that Home or a list brought in.
@@ -2711,6 +2946,8 @@ final class ShellSession {
         // joined source's timeline a second time, so dropping its notes here would leave a source
         // still joined and permanently empty; the drop by time is what lets posts go.
         cleared += 1
+        // Last, so everything above is in the write, and nothing above waits for it.
+        await saveNow(gone)
     }
 
     /// The drop by cache (#7), and exactly one set: the pictures held in memory and on disk
@@ -2739,16 +2976,27 @@ final class ShellSession {
     /// how many posts and from which sources — the one thing that can still be said of them.
     @discardableResult
     func keep(months: Int?, from now: Date = Date()) async -> Int {
+        let told = await store.noticesRevision
         let went = await store.letGoBeyond(months: months, from: now)
-        guard went.posts > 0 else { return 0 }
+        // The notices page draws nothing past the limit from this moment (`ShellNoticeList.cut`).
+        await noticeList.follow(in: self)
+        guard went.posts > 0 else {
+            // Only notices older than the limit went, or the copy of a post that old one
+            // carried: waited for all the same, and counted nowhere — a notice is not a post.
+            if await store.noticesRevision != told { await saveNow(.posts) }
+            return 0
+        }
         // The window cuts a topic's kept replies too, and the count says so at once (#194).
         let all = await store.all()
         let replies = await store.replies()
         adoptHeld(notes: all, replies: replies)
         adoptedReplies = await store.repliesRevision
-        await persist?()
-        try? await compactStore?()
-        await readStoreBytes()
+        // Waited for: what the window dropped is not said to be gone while the file still holds
+        // it (#292). Giving the file back its room, and measuring it, follow and are not.
+        await saveNow(.posts) { [weak self] in
+            try? await self?.compactStore?()
+            await self?.readStoreBytes()
+        }
         await record(LimitAct(limit: .months, at: now, posts: went.posts, sources: went.sources))
         return went.posts
     }
@@ -2762,7 +3010,7 @@ final class ShellSession {
     func keep(_ opening: ForumOpening, for key: NoteKey) {
         Task {
             guard await store.keep([key: opening]) else { return }
-            await persist?()
+            saveSoon()
         }
     }
 
@@ -2780,7 +3028,7 @@ final class ShellSession {
         let opening = blog.opening
         notes = notes.map { $0.key == key && $0.opening != opening ? $0.with(opening: opening) : $0 }
         guard await store.keep([key: opening], shown: true) else { return }
-        await persist?()
+        saveSoon()
     }
 
     /// One page of a topic's replies, landed in the store as that topic's kept replies and saved,
@@ -2810,7 +3058,7 @@ final class ShellSession {
         }
         await store.ingest(notes, ifSourceHere: host)
         await store.refresh(notes.filter { $0.opening != nil }, ifSourceHere: host)
-        await persist?()
+        saveSoon()
         return await keptReplies(host: host, tid: tid)
     }
 
@@ -2851,7 +3099,7 @@ final class ShellSession {
         notes = notes.map { note in openings[note.key].map(note.with(opening:)) ?? note }
         Task {
             guard await store.keep(openings) else { return }
-            await persist?()
+            saveSoon()
         }
     }
 
@@ -2875,6 +3123,9 @@ final class ShellSession {
             stopReadingAsYou(host: host)
             await loads.letGo(host: host)
             refs.letGo(host: host)
+            noticeList.forget(host: host)
+            acts.forget(host: host)
+            said.forget(host: host)
             await mastodon.signOut(host: host)
             // What the source said this reader did to its posts goes with the sign-in, now and
             // on disk (#285) — before anything can take the store away with it still said.
@@ -2915,10 +3166,13 @@ final class ShellSession {
 
     /// The question before `host` is removed, with what this session holds for it read here: the
     /// boards it takes, and how many of its posts the person keeps, which stay (#294).
+    ///
+    /// **And how many texts wait to be sent to it**: a sign-out leaves them waiting, and a
+    /// Remove lets them go, which is said before the yes.
     func removeQuestion(host: String, postsStay: Bool) -> ShellConfirmation {
         ShellQuestion.remove(
             host: host, boards: Self.boards(of: host, in: sources), postsStay: postsStay,
-            kept: holdings.kept(host: host).posts
+            kept: holdings.kept(host: host).posts, unsent: outbox.count(host: host)
         )
     }
 
@@ -2949,14 +3203,19 @@ final class ShellSession {
     /// (#69) — `askSignIn(_:)` raises it and only a button in it reaches here. It is never assumed
     /// and never remembered from a previous sign-in: a reader who did not say yes this time signs
     /// in to read, on exactly the scopes this app asked for before it could write at all.
-    func signIn(host raw: String, through browser: any OAuthBrowser, writing: Bool = false) async {
+    ///
+    /// `noticesSaid` is what that question said of notices (`SignInAsked.notices`); nothing
+    /// where none was put.
+    func signIn(
+        host raw: String, through browser: any OAuthBrowser, writing: Bool = false, noticesSaid: Bool? = nil
+    ) async {
         guard let host = try? Host.parse(raw) else { return }
         guard kind(of: host) == .mastodon else {
             await signIn(host: host)
             return
         }
         if rowRefusal?.host == host { rowRefusal = nil }
-        let failure = await mastodon.signIn(host: host, through: browser, writing: writing)
+        let failure = await mastodon.signIn(host: host, through: browser, writing: writing, noticesSaid: noticesSaid)
         // **Before the first read as whoever signed in** (#285): what the source said an earlier
         // reader did is let go of first, so what it now says of this one is not taken with it.
         await forgetReaderMarksDue()
@@ -3150,13 +3409,20 @@ final class ShellSession {
             unreadAll = 0
             progressHost = ""
         }
+        // Its posts, where they go with it, and what it said happened to the person, posts
+        // kept or not, are off the disk before the rest is said to have gone (#292): removing
+        // a source is the person asking for them to be gone, whatever it held.
         await store.remove(host: host, keepingPosts: keepingPosts)
+        await saveNow(.source)
+        // What waited to be sent to it goes with it, as its question said — off the disk
+        // before the rest is said to have gone (#292). A sign-out and a Clear leave them.
+        await outbox.forget(host: host, in: self)
         await adopt()
         // A post the person keeps stays though the rest went (#284), and a row that stays is
         // `keepingPosts`' case for the pictures: let go without the bump, so it asks nothing of
         // a host nothing may ask.
         let rowsStay = keepingPosts ? true : !(await store.held(host: host)).isEmpty
-        await clear(host: host, keepingRows: rowsStay)
+        await clear(host: host, keepingRows: rowsStay, as: .source)
 
         // Folded on both sides rather than on one. `Host.parse` lowercases everything it returns,
         // so all three of these are already folded today — and that is a guarantee three files

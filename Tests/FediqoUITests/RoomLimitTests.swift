@@ -189,7 +189,7 @@ struct RoomCheckTests {
         let dir = LimitRoom.scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let room = try await LimitRoom(at: dir, notes: LimitRoom.held())
-        room.session.persist = {}
+        room.session.persist = { true }
         room.session.roomBytes = room.index / 2
 
         let act = try #require(await room.session.keepWithinRoom(at: origin))

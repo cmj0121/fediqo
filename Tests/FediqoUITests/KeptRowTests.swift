@@ -47,18 +47,20 @@ struct KeptRowTests {
     func pressKeepsAndUnkeeps() async throws {
         let session = await Self.shell([Self.note("1"), Self.note("2")])
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
 
         #expect(await session.toggleKept(try Self.row(session, "1")) == true)
         #expect(try Self.row(session, "1").kept)
         #expect(try !Self.row(session, "2").kept, "nothing else moved")
         #expect(await session.store.note(Self.note("1").key)?.kept == true)
+        await session.saved()
         #expect(saved == 1)
         #expect(Self.names("item.toast.kept.on").contains(session.toast?.text ?? ""), "the mark and y say it alike")
 
         #expect(await session.toggleKept(try Self.row(session, "1")) == false)
         #expect(try !Self.row(session, "1").kept)
         #expect(await session.store.note(Self.note("1").key)?.kept == false)
+        await session.saved()
         #expect(saved == 2)
     }
 
@@ -66,8 +68,9 @@ struct KeptRowTests {
     func nothingHeldNothingKept() async {
         let session = await Self.shell([Self.note("1")])
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
         #expect(await session.toggleKept(DummyItem(Self.note("stranger"))) == nil)
+        await session.saved()
         #expect(saved == 0)
         #expect(session.toast == nil, "nothing happened, so nothing is said")
     }
@@ -117,6 +120,7 @@ struct KeptRowTests {
         let room = try await LimitRoom(at: dir, notes: LimitRoom.held() + [LimitRoom.note("kept", daysAgo: 300, from: Self.alpha)])
         let kept = try #require(room.session.notes.first { $0.id == "kept" })
         await room.session.setKept(true, on: DummyItem(kept))
+        await room.session.saved()
         room.session.roomBytes = room.index / 2
 
         let act = try #require(await room.session.keepWithinRoom(at: Self.origin))
@@ -213,6 +217,7 @@ struct KeptRowTests {
     private static func heldOver(at dir: URL, limit: Int? = nil) async throws -> (LimitRoom, Int) {
         let room = try await LimitRoom(at: dir, notes: (0..<40).map { LimitRoom.note("\($0)", daysAgo: Double($0), from: alpha) })
         for note in room.session.notes { await room.session.setKept(true, on: DummyItem(note)) }
+        await room.session.saved()
         let limit = limit ?? room.index / 2
         room.session.roomBytes = limit
         #expect(await room.session.keepWithinRoom(at: origin) == nil)
@@ -497,6 +502,7 @@ struct KeptRowTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let room = try await LimitRoom(at: dir, notes: [LimitRoom.note("1", daysAgo: 1, from: Self.alpha), LimitRoom.note("2", daysAgo: 2, from: Self.alpha)])
         await room.session.setKept(true, on: DummyItem(try #require(room.session.notes.first { $0.id == "2" })))
+        await room.session.saved()
 
         let opened = StoreFile.open(at: dir)
         let again = ShellSession(http: FixtureHTTP(), store: ItemStore(sources: opened.sources, notes: opened.notes))

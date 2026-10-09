@@ -44,7 +44,7 @@ struct ItemActing {
     /// The press on the keep mark (#284): keeps the row, or un-keeps it. **Beside `perform` and
     /// not one of its acts**, because it is none of #54's: nothing is sent to a source, so it is
     /// offered on a row whatever its source offers, signed in or not, and it has no standing to
-    /// be on its way or to fail. Nothing where the list cannot act, and then its mark is dim.
+    /// wait on a source or to fail. Nothing where the list cannot act, and then its mark is dim.
     var keep: (() -> Void)?
     /// The press on a mark whose act the sign-in must be asked again for (#285) — bookmarking,
     /// on a sign-in made before it was asked for. It raises the question and sends nothing.
@@ -78,19 +78,16 @@ struct ItemMark: Equatable {
 enum ItemActs {
     /// The glyph of an act's mark, unfilled: the act's own, or where the act has got to.
     ///
-    /// **The act's own glyph is replaced while the act is not settled, and that is the whole of
-    /// "the mark shows the act is on its way".** A mark that kept its shape and changed only its
-    /// colour would say nothing to a reader who cannot tell the two colours apart. On its way is
-    /// `hourglass` and never `ellipsis`, which on this row is the menu and nothing else.
+    /// **The glyph is replaced only where the act did not arrive.** A press still out is drawn
+    /// as the act's own glyph, done or not as it was pressed (`mark`); a failure changes the
+    /// shape, because a mark that changed only its colour would say nothing to a reader who
+    /// cannot tell the two colours apart — and never to `ellipsis`, which on this row is the
+    /// menu and nothing else.
     ///
     /// **Whether the act is offered is not asked**: a mark the source does not offer is the same
     /// glyph in the dim ink (`look`), so there is no second glyph for "must be asked first".
     static func glyph(_ act: PostAct, standing: ShellActStanding?) -> String {
-        switch standing {
-        case .onItsWay: return "hourglass"
-        case .failed: return "exclamationmark.triangle"
-        case nil: break
-        }
+        if standing == .failed { return "exclamationmark.triangle" }
         switch act {
         case .boost: return "arrow.2.squarepath"
         case .favourite: return "star"
@@ -120,7 +117,8 @@ enum ItemActs {
     }
 
     /// The whole of what a reader using VoiceOver is owed about one mark: what a press does, and
-    /// where the last press got to.
+    /// where the last press got to. A press still out adds nothing: the name already says what
+    /// the next press does, which is what the mark is drawn as.
     ///
     /// **One reader for the glyph and the listener**, which is #97's arrangement and for its
     /// reason: a mark and a sentence built from two derivations of one fact are two things that
@@ -138,17 +136,17 @@ enum ItemActs {
             name = String(format: L10n.t("item.act.through", language: language), name, host)
         }
         switch standing {
-        case .onItsWay: return name + " " + L10n.t("item.act.onItsWay", language: language)
         case .failed: return name + " " + L10n.t("item.act.failed", language: language)
-        case nil: return name
+        case .pressed, nil: return name
         }
     }
 
     /// Everything one act's mark draws on one row: its glyph, whether it is done, the count
     /// beside it and the sentence a pointer and VoiceOver are given.
     ///
-    /// `done` is what the source last said, never what was pressed: a boost the reader made in
-    /// another app reads as done here the moment this device has fetched the post.
+    /// `done` is what was pressed while the press is out, and what the source last said
+    /// otherwise: a boost the reader made in another app reads as done here the moment this
+    /// device has fetched the post. A press that moves the mark moves its count by one with it.
     ///
     /// **All of it is read off the copy the act goes through** (#136) — `acting.through`, or the
     /// row where there is none — so the row never shows one source's state and presses another's.
@@ -159,7 +157,7 @@ enum ItemActs {
     ) -> ItemMark {
         let copy = acting.through[act] ?? item
         let standing = acting.standings[act]
-        let (done, count): (Bool, Int?) = switch act {
+        var (done, count): (Bool, Int?) = switch act {
         case .boost: (copy.boosted == true, copy.counts.reblogs)
         case .favourite: (copy.favourited == true, copy.counts.favourites)
         case .answer: (false, copy.counts.replies)
@@ -167,6 +165,10 @@ enum ItemActs {
         case .withdraw: (false, nil)
         // What the source the act goes through last said (#285); a source counts no bookmarks.
         case .bookmark: (copy.bookmarked == true, nil)
+        }
+        if case .pressed(let to) = standing, act != .answer, act != .withdraw, to != done {
+            count = count.map { max(0, $0 + (to ? 1 : -1)) }
+            done = to
         }
         let host = item.otherCopies.isEmpty ? nil : copy.source.host
         var said = spoken(act, done: done, standing: standing, through: host, language: language)
@@ -350,8 +352,9 @@ extension ItemActs {
     /// a live mark acts, the one that must be asked again puts its question, and any other dim
     /// mark takes the press and does nothing. `…` is a menu and has no press of its own.
     ///
-    /// **Never filled on a press**: filled is what the source last said, and kept is what the
-    /// store holds, so nothing looks done that is not. Each act goes to the post the row shows,
+    /// **Filled at the press, over a store that has not moved** (`mark`): what the source last
+    /// said is what is held, and a press it does not take is put back and said. Kept is what
+    /// the store holds. Each act goes to the post the row shows,
     /// and on a reblog's row keeping alone is the reblog's (#290).
     static func press(_ mark: RowMark, acting: ItemActing) {
         switch mark.kind {
@@ -385,15 +388,15 @@ extension ItemActs {
         if let leave {
             items.append(.plain("arrow.up.forward.app", item.outwardName, act: leave))
         }
-        if acting.acts.offers(.withdraw), let withdraw = acting.withdraw {
-            let standing = acting.standings[.withdraw]
-            // **On its way it is dim and still the trash**: grey and not grey are one glyph, so
-            // the hourglass an act's mark wears while it is out is not worn here.
-            let onItsWay = standing == .onItsWay
+        // **Not offered on a post already leaving**: its row is on no list to have a menu
+        // (`ShellActs.leaving`), and where the post is still drawn — a conversation opened on
+        // it — an item whose yes would be dropped is not shown as one to choose.
+        let standing = acting.standings[.withdraw]
+        if acting.acts.offers(.withdraw), let withdraw = acting.withdraw, standing == nil || standing == .failed {
             items.append(.danger(
-                glyph(.withdraw, standing: onItsWay ? nil : standing),
+                glyph(.withdraw, standing: standing),
                 spoken(.withdraw, done: false, standing: standing, language: language),
-                look: onItsWay ? .dim(.notNow) : .live,
+                look: .live,
                 asks: withdraw.asks(), act: withdraw.yes
             ))
         }

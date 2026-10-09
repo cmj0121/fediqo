@@ -174,26 +174,28 @@ struct ActTests {
 
     // MARK: - The mark, and what it says
 
-    @Test("The mark shows on its way and a failure by shape, not only by colour")
+    @Test("The mark shows a failure by shape, not only by colour; while a press is out the glyph is the act's own")
     func theMarkChangesShape() {
         let settled = ShellMark.drawn(ItemActs.glyph(.boost, standing: nil), on: false)
         #expect(ShellMark.drawn(ItemActs.glyph(.boost, standing: nil), on: true) == settled)
-        #expect(ShellMark.drawn(ItemActs.glyph(.boost, standing: .onItsWay), on: false) != settled)
+        for to in [false, true] {
+            #expect(ShellMark.drawn(ItemActs.glyph(.boost, standing: .pressed(to: to)), on: to) == settled)
+        }
         #expect(ShellMark.drawn(ItemActs.glyph(.boost, standing: .failed), on: false) != settled)
-        #expect(ShellMark.drawn(ItemActs.glyph(.boost, standing: .failed), on: false)
-            != ShellMark.drawn(ItemActs.glyph(.boost, standing: .onItsWay), on: false))
     }
 
     @Test("VoiceOver hears the mark, which way a press goes, and where the last press got to")
     func theMarkIsSpoken() {
         #expect(ItemActs.spoken(.boost, done: false, standing: nil) == "Boost")
         #expect(ItemActs.spoken(.boost, done: true, standing: nil) == "Take the boost back")
-        #expect(ItemActs.spoken(.boost, done: false, standing: .onItsWay) == "Boost on its way")
+        // A press still out is named for what the next press does, and nothing is added.
+        #expect(ItemActs.spoken(.boost, done: true, standing: .pressed(to: true)) == "Take the boost back")
+        #expect(ItemActs.spoken(.boost, done: false, standing: .pressed(to: false)) == "Boost")
         #expect(ItemActs.spoken(.boost, done: false, standing: .failed)
             == "Boost did not arrive. Press to try again.")
         for language in [DummyLanguage.english, .taiwanese] {
             for done in [false, true] {
-                for standing in [nil, ShellActStanding.onItsWay, .failed] {
+                for standing in [nil, ShellActStanding.pressed(to: done), .failed] {
                     let said = ItemActs.spoken(.boost, done: done, standing: standing, language: language)
                     #expect(!said.contains("item.act."), "untranslated in \(language): \(said)")
                 }
@@ -211,13 +213,16 @@ struct ActTests {
 
     // MARK: - The press
 
-    @Test("A press is on its way until the source answers, and a second press sends nothing more",
+    @Test("A press is on its way until the source answers, and a second press sends nothing more until it has: then the last press is asked",
           .timeLimit(.minutes(1)))
     func onItsWay() async throws {
         let gate = Gate()
         let (session, server) = try await shell(
             scopes: writing, holding: note(boosted: false),
-            routes: ["/api/v1/statuses/9/reblog": .json(Self.status(reblogged: true))],
+            routes: [
+                "/api/v1/statuses/9/reblog": .json(Self.status(reblogged: true)),
+                "/api/v1/statuses/9/unreblog": .json(Self.status(reblogged: false)),
+            ],
             held: "/api/v1/statuses/9/reblog", gate: gate
         )
         let item = try row(session)
@@ -231,7 +236,9 @@ struct ActTests {
         await first.value
         watchdog.cancel()
         #expect(session.acts.standing(of: item.id, .boost) == nil)
-        #expect(session.notes.first?.boosted == true)
+        // The second press took the boost back, and the last press wins.
+        #expect(await server.paths == ["/api/v1/statuses/9/reblog", "/api/v1/statuses/9/unreblog"])
+        #expect(session.notes.first?.boosted == false)
     }
 
     @Test("A failure leaves the post as it was, says so, and the same press tries again")
@@ -324,18 +331,18 @@ struct ActTests {
         }
     }
 
-    @Test("The star fills when the source says it is done, and changes shape on its way")
+    @Test("The star fills when the source says it is done, and at the press before it answers")
     func theStar() {
         #expect(ShellMark.drawn(ItemActs.glyph(.favourite, standing: nil), on: false) == "star")
         #expect(ShellMark.drawn(ItemActs.glyph(.favourite, standing: nil), on: true) == "star.fill")
-        #expect(ShellMark.drawn(ItemActs.glyph(.favourite, standing: .onItsWay), on: true) != "star.fill")
+        #expect(ShellMark.drawn(ItemActs.glyph(.favourite, standing: .pressed(to: true)), on: true) == "star.fill")
         #expect(ShellMark.drawn(ItemActs.glyph(.favourite, standing: .failed), on: false) != "star")
         #expect(ItemActs.spoken(.favourite, done: false, standing: nil) == "Favourite")
         #expect(ItemActs.spoken(.favourite, done: true, standing: nil) == "Take the favourite back")
         #expect(ItemActs.spoken(.favourite, done: false, standing: .failed)
             == "Favourite did not arrive. Press to try again.")
         for done in [false, true] {
-            let said = ItemActs.spoken(.favourite, done: done, standing: .onItsWay, language: .taiwanese)
+            let said = ItemActs.spoken(.favourite, done: done, standing: .pressed(to: done), language: .taiwanese)
             #expect(!said.contains("item.act."), "untranslated: \(said)")
         }
     }

@@ -111,7 +111,8 @@ seed_mastodon() {
     "${COMPOSE[@]}" cp mastodon-web:/tmp/fediqo-mastodon-token \
         "$RUN_DIR/mastodon-token"
     [ -s "$RUN_DIR/mastodon-token" ] || die "Mastodon seed did not write a token"
-    # A second person, and a sign-in of each that may do everything a person can (#298).
+    # A second person, and a sign-in of each that may do everything a person can (#298);
+    # what the writer has been told of, and their sign-ins as this app makes them (#323).
     "${COMPOSE[@]}" cp mastodon-web:/tmp/fediqo-mastodon-tokens.json \
         "$RUN_DIR/mastodon-tokens.json"
     [ -s "$RUN_DIR/mastodon-tokens.json" ] || die "Mastodon seed did not write the other tokens"

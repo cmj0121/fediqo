@@ -210,7 +210,13 @@ struct LoadPacerTests {
         func watch(_ ticket: LoadTicket) { tickets.withLockUnchecked { $0.append(ticket) } }
 
         func arm(_ clock: HandClock, _ wire: LoadWire) {
-            let task = Task {
+            // **`[weak self]`, or the guard is never cancelled.** The task is what `deinit` below
+            // cancels, and a task that holds `self` keeps `self` from ever reaching `deinit`: every
+            // guard then ran its fifty seconds and recorded its issue against a test that had
+            // passed. Nobody saw it where this target's tests are a process of their own that is
+            // over in seconds; a runner that runs every target in one process, for longer than
+            // fifty seconds, failed all of them.
+            let task = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(50))
                 guard !Task.isCancelled else { return }
                 Issue.record("watchdog let everything through; the test lost its synchronisation")
@@ -218,7 +224,7 @@ struct LoadPacerTests {
                 await wire.abandon()
                 // After everything was let through and had its chance to end for itself.
                 try? await Task.sleep(for: .seconds(1))
-                for ticket in self.tickets.withLockUnchecked({ $0 }) { ticket.finish(.notTaken(.already)) }
+                for ticket in self?.tickets.withLockUnchecked({ $0 }) ?? [] { ticket.finish(.notTaken(.already)) }
             }
             tasks.withLockUnchecked { $0.append(task) }
         }

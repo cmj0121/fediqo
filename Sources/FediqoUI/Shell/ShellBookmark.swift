@@ -4,7 +4,7 @@ import Foundation
 import SwiftUI
 
 /// A bookmark is kept at the source (#285): the act itself is `toggle(.bookmark, on:)`, beside
-/// the boost and the favourite, and the mark is what the source last said. What lives here is the
+/// the boost and the favourite, and the mark is what the source last said, under a press still out. What lives here is the
 /// one thing only a bookmark needs — asking a sign-in made before bookmarks were asked for to
 /// allow them, **without signing anybody out**.
 ///
@@ -26,6 +26,7 @@ extension ShellSession {
 
     /// The question answered no: everything stays as it was.
     func cancelBookmarkAsk() {
+        if let bookmarkAsk { noticesSaid[bookmarkAsk.lowercased()] = nil }
         bookmarkAsk = nil
     }
 
@@ -41,12 +42,15 @@ extension ShellSession {
     /// still does everything it did, whatever happened on the page — so a failure is "bookmarks
     /// were not allowed", never "the sign-in failed", and a source with none to give is said to
     /// have none. A page closed says nothing, as any sign-in's does.
-    func allowBookmarks(host raw: String, through browser: any OAuthBrowser) async {
-        bookmarkAsk = nil
+    ///
+    /// `noticesSaid` is what the question said of notices (`SignInAsked`): said to carry none,
+    /// the page asks for none.
+    func allowBookmarks(host raw: String, through browser: any OAuthBrowser, noticesSaid said: Bool? = nil) async {
+        cancelBookmarkAsk()
         let host = raw.lowercased()
         guard mastodon.bookmarks(host: host) == .unasked else { return }
         if rowRefusal?.host == host { rowRefusal = nil }
-        let failure = await mastodon.signIn(host: host, through: browser, writing: true)
+        let failure = await mastodon.signIn(host: host, through: browser, writing: true, noticesSaid: said)
         await forgetReaderMarksDue()
         if let failure {
             NetLog.auth.notice("\(NetLog.line("bookmarks", host: host, error: failure), privacy: .public)")
@@ -74,10 +78,37 @@ extension ShellSession {
     /// **Asked for wherever a sign-in ends or changes, and not left to the next read of the
     /// store**: right after a sign-out, a Clear or a Remove, after a sign-in and before its first
     /// read, and before a take-away or a move nearby saves the store (`saveForCarry`).
+    ///
+    /// **One at a time, and a caller is past every one begun before it.** Who changed is
+    /// taken once, by whichever call comes first, and that call waits for the write; a second
+    /// call arriving meanwhile — a sign-out's own, while a server-ended sign-in's sweep is in
+    /// flight and has taken its host too — would otherwise find nothing left to do and say it
+    /// was done while the first was still writing. Nothing to do is still no wait at all.
     func forgetReaderMarksDue() async {
+        while let running = readerSweep {
+            await running.value
+            // Whoever is first past it lets go of it: a finished sweep answers at once, and
+            // left standing would be waited on for ever by a caller that never gives way.
+            if readerSweep == running { readerSweep = nil }
+        }
+        let changed = mastodon.takeReadersChanged().sorted()
+        let first = !readerMarksSwept && mastodon.grantsKnown
+        guard !changed.isEmpty || first else { return }
+        let sweep = Task { await forgetReaderMarks(of: changed) }
+        readerSweep = sweep
+        await sweep.value
+        if readerSweep == sweep { readerSweep = nil }
+    }
+
+    private func forgetReaderMarks(of changed: [String]) async {
         var moved = false
-        for host in mastodon.takeReadersChanged().sorted() {
+        for host in changed {
             if await store.forgetReaderMarks(host: host) { moved = true }
+            // What the source said happened to that reader is theirs alone too (#323).
+            noticeList.forget(host: host)
+            // And so is what that reader pressed, and what was said of what they asked of it.
+            acts.forget(host: host)
+            said.forget(host: host)
             // The reader of this source changed (#293). Gone — signed out, or ended by the
             // server — its line of loads is dropped, as the reader's own sign-out drops it.
             // Signed in — again, or as somebody new — the source is asked again from the start.
@@ -94,7 +125,12 @@ extension ShellSession {
             readerMarksSwept = true
             if await store.forgetReaderMarks(keeping: mastodon.signedInHosts) { moved = true }
         }
-        if moved { await persist?() }
+        // Before any read for whoever signs in next can land: its first stretch is written
+        // under the epoch the letting go left (`ShellNoticeList.learnEpochs`).
+        await noticeList.learnEpochs()
+        // Waited for: what a source said of a reader who has left is not on disk a moment
+        // longer than it is in the store (#285, #292).
+        if moved { await saveNow(.reader) }
     }
 }
 
@@ -104,7 +140,8 @@ extension ShellSession {
     /// so no package carries what a source said of somebody who has signed out.
     func saveForCarry() async {
         await forgetReaderMarksDue()
-        await persist?()
+        // Waited for: what is packed next is read from the file this writes.
+        await write()
     }
 }
 
@@ -116,16 +153,20 @@ struct BookmarkQuestion: ViewModifier {
     let session: ShellSession
 
     func body(content: Content) -> some View {
-        content.shellConfirm(asked, question: { ShellQuestion.bookmarks(host: $0) }) { host, _ in
+        content.shellConfirm(asked, question: question) { ask, _ in
             Task {
                 await session.allowBookmarks(
-                    host: host, through: WebAuthBrowser(session: webAuthenticationSession)
+                    host: ask.host, through: WebAuthBrowser(session: webAuthenticationSession), noticesSaid: ask.notices
                 )
             }
         }
     }
 
-    private var asked: Binding<String?> {
-        Binding(get: { session.bookmarkAsk }, set: { if $0 == nil { session.cancelBookmarkAsk() } })
+    private func question(_ ask: SignInAsked) -> ShellConfirmation {
+        session.bookmarkQuestion(host: ask.host)
+    }
+
+    private var asked: Binding<SignInAsked?> {
+        Binding(get: { session.bookmarkAsk.map(session.signInAsked) }, set: { if $0 == nil { session.cancelBookmarkAsk() } })
     }
 }

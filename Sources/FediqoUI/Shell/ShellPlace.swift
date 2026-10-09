@@ -91,11 +91,12 @@ struct ShellAvailability: Hashable, Sendable {
         ShellPlace.allCases.filter(allows)
     }
 
+    /// **Notices is always there** (#323): with nobody signed in the page itself says what
+    /// would make it fill, which a place that could not be entered never got to say.
     func allows(_ place: ShellPlace) -> Bool {
         switch place {
         case .timeline: timelineEnabled
-        case .notices: signedIn
-        case .account, .usage, .preferences: true
+        case .notices, .account, .usage, .preferences: true
         }
     }
 
@@ -119,7 +120,6 @@ struct ShellAvailability: Hashable, Sendable {
         guard !allows(place) else { return nil }
         switch place {
         case .timeline: return "shell.timeline.disabled"
-        case .notices: return "shell.notices.disabled"
         default: return nil
         }
     }

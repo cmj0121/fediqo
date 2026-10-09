@@ -99,6 +99,11 @@ struct SourceReach {
         MastodonSearch(door: door)
     }
 
+    /// What happened to the reader (#323), which is only ever asked as them.
+    func notices(_ door: MastodonAuthorized) -> MastodonNotices {
+        MastodonNotices(door: door)
+    }
+
     /// An act, a post or a taking back, through `door`; its answer lands in `store`.
     func write(_ door: MastodonAuthorized, landingIn store: ItemStore) -> MastodonWrite {
         MastodonWrite(door: door, store: store)

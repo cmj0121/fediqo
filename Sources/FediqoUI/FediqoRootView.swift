@@ -22,6 +22,15 @@ public struct FediqoRootView: View {
     /// one stack is the honest shape. Held here because leaving it is `Escape` and `q`, and the
     /// keys are read here.
     @State private var walk = ShellWalk()
+    /// The line the lamp is on in Notices (#323), and under a finger the line being read
+    /// there: that page's own, so walking its lines leaves the timeline's lamp where it was.
+    @State private var noticeSelectedID: String?
+    @State private var noticeMark = ShellReadingMark()
+    @State private var noticeJump = 0
+    /// The walk a notice began, until its last step is left. See `NoticeErrand`.
+    @State private var noticeErrand: NoticeErrand?
+    /// The line whose post could not be opened: older than this device keeps.
+    @State private var noticeTooOld: String?
     /// What `/` opened (#32). Its results stand in for the stream while it is open.
     @State private var search = ShellSearch()
     @State private var jumpToTop = 0
@@ -101,7 +110,9 @@ public struct FediqoRootView: View {
         store: ItemStore = ItemStore(),
         forums: ForumSessions = ForumSessions(),
         mastodon: MastodonSessions = MastodonSessions(),
-        persist: (@MainActor () async -> Void)? = nil,
+        persist: (@MainActor () async -> Bool)? = nil,
+        persistUnsent: (@MainActor () async -> Bool)? = nil,
+        savesLanded: (@Sendable () async -> AsyncStream<Void>)? = nil,
         measureStore: (@Sendable () async -> Int)? = nil,
         compactStore: (@Sendable () async throws -> Void)? = nil,
         weighStore: (@Sendable () async -> Int)? = nil,
@@ -122,6 +133,8 @@ public struct FediqoRootView: View {
             timelines: staged == nil ? WrittenTimelineStore(defaults: .standard) : nil
         )
         session.persist = persist
+        session.persistUnsent = persistUnsent
+        session.savesLanded = savesLanded
         session.carrier = carrier
         session.nearbyLink = nearby
         session.deviceName = deviceName
@@ -252,6 +265,7 @@ public struct FediqoRootView: View {
                 await session.loadLimitAccount()
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()
+                await session.adoptUnsent()
                 // Then the room (#249), judged once what is held is known and the months limit
                 // has had its turn — the one order in which each limit acts once at a launch.
                 session.roomBytes = prefs.roomBytes
@@ -274,6 +288,8 @@ public struct FediqoRootView: View {
             }
             // Posts their source deleted go on this device's wait (#179).
             .modifier(LettingGoneGo(session: session))
+            // A save that lands after one failed takes down what was said of the failure.
+            .modifier(FollowingSaves(session: session))
             // And the store is held within the room the person gave it (#249).
             .modifier(KeepingWithinRoom(session: session))
             .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
@@ -281,6 +297,11 @@ public struct FediqoRootView: View {
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
                 guard accepted != old else { return }
+                // A walk a notice began is come back from by leaving it, and not by leaving
+                // the timeline some other way.
+                if accepted != .timeline { noticeErrand = nil }
+                // Nothing is asked for notices while their page is closed.
+                if old == .notices { session.noticeList.stop() }
                 if search.closes(leavingFor: accepted) { closeSearch() }
                 // A picture opened over the timeline is not opened over the account page.
                 _ = closeViewer()
@@ -315,6 +336,8 @@ public struct FediqoRootView: View {
             // its own rather than the dialog spelled here — see `WithdrawQuestion`.
             .modifier(WithdrawQuestion(session: session))
             .modifier(BookmarkQuestion(session: session))
+            .modifier(NoticeQuestion(session: session))
+            .modifier(UnsentPresenters(session: session))
             // An answer, over the conversation it belongs to (#108). Driven by the session's one
             // value, so the key and the mark open the same surface by writing the same thing.
             .sheet(item: $session.answering) { target in
@@ -561,13 +584,13 @@ public struct FediqoRootView: View {
             place = availability.rotate(from: place, by: -1)
             return true
         case .nextPost:
-            return moveInList(by: 1)
+            return place == .notices ? moveInNotices(by: 1) : moveInList(by: 1)
         case .previousPost:
-            return moveInList(by: -1)
+            return place == .notices ? moveInNotices(by: -1) : moveInList(by: -1)
         case .goTop:
-            return jumpListOrThreadToTop()
+            return place == .notices ? jumpNoticesToTop() : jumpListOrThreadToTop()
         case .expandPost:
-            return openThread()
+            return place == .notices ? openFocusedNotice() : openThread()
         case .nextAttachment:
             return onActedItem(turn)
         case .reveal:
@@ -623,9 +646,9 @@ public struct FediqoRootView: View {
         case .answer:
             return answerFocused()
         case .withdraw:
-            return onFocusedItem { session.askToWithdraw($0) }
+            return place == .notices ? dismissFocusedNotice() : onFocusedItem { session.askToWithdraw($0) }
         case .openAuthor:
-            return openAuthor()
+            return place == .notices ? openFocusedNoticePerson() : openAuthor()
         case .openTag:
             return openTagFocused()
         case .openQuote:
@@ -650,6 +673,14 @@ public struct FediqoRootView: View {
             // So is a thread's next page on its way (#177), before the thread itself closes.
             if place == .timeline, session.reload.stop() { return true }
             if place == .timeline, session.stopReadingFurther() { return true }
+            // On Notices: the read on the wire, then that page's own lamp.
+            if Self.noticesInFront(place: place, open: openLayers) {
+                if session.noticeList.stop() { return true }
+                if noticeSelectedID != nil {
+                    noticeSelectedID = nil
+                    return true
+                }
+            }
             // Only what is on screen: a walk left open on the timeline is not unwound from Usage.
             let open = Self.escapeSees(openLayers, place: place)
             // A source's detail on Usage goes back to its list before anything further out.
@@ -1392,6 +1423,7 @@ public struct FediqoRootView: View {
     /// so not under the viewer, the keys list or the timeline editor. A second press while the
     /// same one runs is taken and does nothing (`ShellReload.press`); Esc is what stops it.
     private func reload() -> Bool {
+        if place == .notices { return readNotices() }
         guard Self.canReload(
             place: place,
             editing: session.editing != nil,
@@ -1402,6 +1434,157 @@ public struct FediqoRootView: View {
         let opened = walk.openedThread.flatMap(session.held)
         session.reload.press(thread: opened, timeline: session.currentTimeline, in: session)
         return true
+    }
+
+    // MARK: - Notices — #323
+
+    /// Whether the notices page is what the keys act on: it is in front, and nothing is drawn
+    /// over it. The timeline's own layers are not on screen here (`escapeSees`), and its lamp
+    /// is not this page's.
+    static func noticesInFront(place: ShellPlace, open: Set<DummyLayer>) -> Bool {
+        place == .notices && escapeSees(open, place: place).subtracting([.selection]).isEmpty
+    }
+
+    /// Whether `r` — and the page's reload mark, its touch path — has anybody to ask:
+    /// `canReload`'s shape, for the page whose sources are those whose sign-in may read notices.
+    static func canReadNotices(place: ShellPlace, open: Set<DummyLayer>, asked: Bool) -> Bool {
+        noticesInFront(place: place, open: open) && asked
+    }
+
+    /// `r` on Notices: every source's newest stretch. A press while one is on the wire waits
+    /// on that one and asks nothing twice (`ShellNoticeList.read`); Esc is what stops it.
+    private func readNotices() -> Bool {
+        guard Self.canReadNotices(
+            place: place, open: openLayers, asked: !ShellNoticeList.asked(in: session).isEmpty
+        ) else { return false }
+        noticeTooOld = nil
+        Task { await session.noticeList.acts.readPage(in: session) }
+        return true
+    }
+
+    /// The lines `j` and `k` walk: what the page draws.
+    private var shownNotices: [Notice] {
+        session.noticeList.shown(hiding: prefs.noticesHidden)
+    }
+
+    private func moveInNotices(by step: Int) -> Bool {
+        guard Self.noticesInFront(place: place, open: openLayers) else { return false }
+        let moved = Self.noticesStep(
+            in: shownNotices.map(\.id), from: noticeSelectedID, by: step,
+            hasMore: session.noticeList.hasMore(in: session)
+        )
+        switch moved {
+        case .lamp(let id):
+            noticeSelectedID = id
+        case .readOn:
+            Task { await session.noticeList.readOn(in: session) }
+        case .nothing:
+            return false
+        }
+        return true
+    }
+
+    /// What `j` or `k` does on Notices.
+    enum NoticesStep: Equatable {
+        /// The lamp moves to this line.
+        case lamp(String)
+        /// Already on the last line, and older notices can be asked for: the keys' press on
+        /// the foot.
+        case readOn
+        case nothing
+    }
+
+    /// The lamp walks the lines; **`j` pressed on the last one reads on**, one stretch a press.
+    /// `hasMore` is `ShellNoticeList.hasMore`, which is false while a read is on the wire, so a
+    /// key held down asks no faster than answers land. And where a stretch brought only kinds
+    /// left out — the lamp has nowhere new to go — the next press reads on again.
+    static func noticesStep(in ids: [String], from selected: String?, by step: Int, hasMore: Bool) -> NoticesStep {
+        if step > 0, let selected, selected == ids.last { return hasMore ? .readOn : .nothing }
+        if step > 0, ids.isEmpty { return hasMore ? .readOn : .nothing }
+        guard let next = DummyCommand.stepped(ids, from: selected, by: step), next != selected else { return .nothing }
+        return .lamp(next)
+    }
+
+    private func jumpNoticesToTop() -> Bool {
+        guard Self.noticesInFront(place: place, open: openLayers), let first = shownNotices.first else { return false }
+        noticeSelectedID = first.id
+        noticeJump += 1
+        return true
+    }
+
+    private var focusedNotice: Notice? {
+        noticeSelectedID.flatMap { id in shownNotices.first { $0.id == id } }
+    }
+
+    /// `Return` on Notices: what the line the lamp is on is about.
+    private func openFocusedNotice() -> Bool {
+        focusedNotice.map(openNotice) ?? false
+    }
+
+    /// `p` on Notices: whoever the line the lamp is on names first.
+    private func openFocusedNoticePerson() -> Bool {
+        guard let notice = focusedNotice, let person = notice.firstPerson else { return false }
+        return openNoticePerson(person, of: notice)
+    }
+
+    /// `d` on the notices page: asks to dismiss the line the lamp is on, as its `…` asks.
+    private func dismissFocusedNotice() -> Bool {
+        guard Self.noticesInFront(place: place, open: openLayers), let notice = focusedNotice else { return false }
+        return NoticeActs.askToDismiss(notice, in: session)
+    }
+
+    /// A line opened: its post in its conversation, or the person — a step of the timeline
+    /// place's walk, come back from by leaving it. A line that is only words opens nothing.
+    private func openNotice(_ notice: Notice) -> Bool {
+        guard Self.noticesInFront(place: place, open: openLayers) else { return false }
+        switch NoticeWords.opens(notice) {
+        case .nothing:
+            return false
+        case .person(let person):
+            return openNoticePerson(person, of: notice)
+        case .post(let post):
+            Task { await openNoticePost(post, of: notice) }
+            return true
+        }
+    }
+
+    /// A face or a name on a line, pressed: that person, as a face on a post's row opens them.
+    private func openNoticePerson(_ person: DummyPerson, of notice: Notice) -> Bool {
+        guard Self.noticesInFront(place: place, open: openLayers) else { return false }
+        return setOutFromNotices(to: .person(person), for: notice, lighting: nil)
+    }
+
+    /// The post is held first, as a thread's posts are, and the conversation opens from what is
+    /// held. One the store would not take — older than the person keeps — is said on its line.
+    private func openNoticePost(_ post: Note, of notice: Notice) async {
+        guard let row = await session.landed(noticePost: post) else {
+            noticeTooOld = notice.id
+            return
+        }
+        // The reader went elsewhere while the store answered: nothing is opened under them.
+        guard Self.noticesInFront(place: place, open: openLayers) else { return }
+        _ = setOutFromNotices(to: .thread(row), for: notice, lighting: row)
+    }
+
+    /// The step itself: the walk takes it keeping the timeline's own lamp to hand back, the
+    /// page remembers which line it left by, and the timeline place comes in front.
+    private func setOutFromNotices(to step: ShellStep, for notice: Notice, lighting row: String?) -> Bool {
+        guard availability.allows(.timeline) else { return false }
+        noticeTooOld = nil
+        noticeErrand = NoticeErrand.setOut(to: step, for: notice.id, on: &walk, lamp: selectedItemID)
+        if let row { selectedItemID = row }
+        place = .timeline
+        return true
+    }
+
+    /// Leaving the last step a notice's walk took puts the reader back on Notices, on the line
+    /// they pressed: lit with a keyboard or a pointer, marked and at the top under a finger.
+    private func returnToNotices() {
+        guard let errand = noticeErrand, errand.isOver(walk) else { return }
+        noticeErrand = nil
+        noticeMark.keep(errand.notice)
+        if !ShellHands.shared.touch { noticeSelectedID = errand.notice }
+        place = .notices
     }
 
     // MARK: - A hashtag — #124
@@ -1546,6 +1729,7 @@ public struct FediqoRootView: View {
         // A tag's ask goes with its page (#124).
         if case .tag = left.step { session.reload.endTag() }
         selectedItemID = left.lamp
+        returnToNotices()
         return true
     }
 
@@ -1565,6 +1749,8 @@ public struct FediqoRootView: View {
     /// would answer by whichever ran last. The lamp stays on the page's row where the page still
     /// shows it under the new timeline's rules, and goes out where it does not.
     private func timelineSwitched(from left: TimelineQuery?, to arrived: TimelineQuery?) {
+        // The list a notice's walk stood on is replaced: there is no step left to come back by.
+        noticeErrand = nil
         let hadLink = walk.openedLink != nil
         guard let tag = Self.timelineSwitched(
             on: &walk, places: &session.timelinePlaces, from: left, to: arrived,
@@ -1604,6 +1790,7 @@ public struct FediqoRootView: View {
         if walk.openedLink != nil { linkReader.close() }
         session.reload.endTag()
         walk.clear()
+        noticeErrand = nil
     }
 
     /// Hands the link reader the question of where a page opens (#169). On a Mac it is one more
@@ -1842,7 +2029,20 @@ public struct FediqoRootView: View {
                 }
             }
             .modifier(LinkInPlace(reader: linkReader, onBack: leaveLink))
-        case .notices: NoticesPane()
+        case .notices:
+            NoticesPane(
+                session: session,
+                selectedID: $noticeSelectedID,
+                mark: noticeMark,
+                canReload: Self.canReadNotices(
+                    place: place, open: openLayers, asked: !ShellNoticeList.asked(in: session).isEmpty
+                ),
+                onReload: { _ = readNotices() },
+                onOpen: { _ = openNotice($0) },
+                onOpenPerson: { person, notice in _ = openNoticePerson(person, of: notice) },
+                tooOld: noticeTooOld,
+                jumpToTop: noticeJump
+            )
         case .account: AccountPane(session: session)
         case .usage: UsagePane()
         case .preferences: PreferencesPane()
@@ -1855,6 +2055,9 @@ public struct FediqoRootView: View {
     /// alive and a value set above them all would be true in the tab nobody can see. See
     /// `EnvironmentValues.shellPlaceIsActive`.
     ///
+    /// **And each page says what did not happen** (`SaidStrip`), so it is said whichever place
+    /// is in front, and stands inside the page rather than over what is drawn around it.
+    ///
     /// **Each page brings the ground with it**, in the narrow arrangement as in the wide one: a
     /// tab is drawn on the system's own background unless its page covers it, and the chassis
     /// has one ground whatever is drawn around the page.
@@ -1862,6 +2065,9 @@ public struct FediqoRootView: View {
     private func placedPage(_ item: ShellPlace) -> some View {
         pageFor(item)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // What did not happen is said at the foot of every page, inside it: over no rail,
+            // no tab and no sheet. A modifier of its own — see `SaidStrip`.
+            .modifier(SaidStrip(said: session.said, session: session, held: item != place || composing || stagePresented.wrappedValue || session.raisesOverPages))
             .background(ShellChrome.page(colorScheme))
             .environment(\.shellPlaceIsActive, item == place)
     }
@@ -1896,6 +2102,49 @@ private struct WithdrawQuestion: ViewModifier {
         Binding(
             get: { session.withdrawing.map { Asked(item: $0, copy: session.withdrawingCopy ?? $0) } },
             set: { if $0 == nil { session.cancelWithdraw() } }
+        )
+    }
+}
+
+/// A text that waits to be sent, opened again, and the question before one is discarded
+/// (`ShellOutbox`) — out of the chain for `WithdrawQuestion`'s reason. The sheet closing by any
+/// way changes nothing of the text, and keeps what was typed for the next time it is opened;
+/// a question answered any way but its yes changes nothing. And the question before a text
+/// that may have been posted is sent all the same.
+private struct UnsentPresenters: ViewModifier {
+    let session: ShellSession
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: editing) { asked in
+                UnsentSheet(id: asked.id)
+                    #if os(iOS)
+                    .presentationDetents([.medium, .large])
+                    #endif
+            }
+            .shellConfirm(discarding, question: { ShellQuestion.discard($0) }) { sending, _ in
+                session.outbox.discardSoon(sending.id, in: session)
+            }
+            .shellConfirm(resending, question: { ShellQuestion.resend($0, changed: session.outbox.changed($0.id) != nil) }) { sending, _ in
+                session.outbox.sendAnyway(sending.id, in: session)
+            }
+    }
+
+    private var editing: Binding<UnsentAsk?> {
+        Binding(get: { session.editingUnsent }, set: { session.editingUnsent = $0 })
+    }
+
+    private var resending: Binding<ShellOutbox.Sending?> {
+        Binding(
+            get: { session.resendingUnsent.flatMap { session.outbox.sending($0.id) } },
+            set: { if $0 == nil { session.resendingUnsent = nil } }
+        )
+    }
+
+    private var discarding: Binding<ShellOutbox.Sending?> {
+        Binding(
+            get: { session.discardingUnsent.flatMap { session.outbox.sending($0.id) } },
+            set: { if $0 == nil { session.discardingUnsent = nil } }
         )
     }
 }

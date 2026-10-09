@@ -493,4 +493,25 @@ struct ActOutrunsReadTests {
         let written = try await MastodonWrite(door: door, store: store).post("hello", visibility: .everyone)
         try await said(written, on: signed, "a post the reader wrote")
     }
+
+    @Test("The store says when a held post was last read again, and lets that go with the post and with its host")
+    func whenAPostWasLastRead() async throws {
+        let (_, store) = try await reader(holding: false, [:])
+        let key = try #require(await store.all().first?.key)
+        #expect(await store.lastRead(of: [key]).isEmpty, "the read that brought a post is not a read of a held one")
+        // A read again says the same words, and is noted all the same; an older one is not the latest.
+        let earlier = ReadMoment.now(), later = ReadMoment.now()
+        await store.refresh([try copy(false, sent: later)], ifSourceHere: host)
+        await store.ingest([try copy(false, sent: earlier)], ifSourceHere: host)
+        #expect(await store.lastRead(of: [key])[key] == later.place)
+
+        await store.forget(key)
+        #expect(await store.lastRead(of: [key]).isEmpty, "let go with its post")
+
+        await store.ingest([try copy(false, sent: .now())], ifSourceHere: host)
+        await store.ingest([try copy(false, sent: .now())], ifSourceHere: host)
+        #expect(await store.lastRead(of: [key])[key] != nil)
+        await store.remove(host: host)
+        #expect(await store.lastRead(of: [key]).isEmpty, "let go with its host")
+    }
 }

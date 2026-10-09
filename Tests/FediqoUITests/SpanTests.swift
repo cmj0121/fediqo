@@ -49,7 +49,7 @@ struct SpanTests {
         let store = Self.held()
         let session = ShellSession(http: FixtureHTTP(), store: store)
         let saves = Counter()
-        session.persist = { await saves.bump() }
+        session.persist = { await saves.bump(); return true }
         let measures = Counter()
         session.measureStore = { await measures.bump() }
         await session.reloadFromStore()
@@ -65,6 +65,7 @@ struct SpanTests {
         #expect(session.holdings.posts(host: Self.beta.host) == 1, "another source is untouched")
         let snapshot = await store.snapshot()
         #expect(snapshot.notes.count == session.holdings.posts, "the count and the store agree")
+        await session.saved()
         #expect(await saves.value == 1, "written once, so it holds after a relaunch")
         #expect(await measures.value == 1, "and the disk figure read again")
         #expect(session.storeBytes == 1)
@@ -89,11 +90,12 @@ struct SpanTests {
     func nothingToLetGo() async {
         let session = ShellSession(http: FixtureHTTP(), store: Self.held())
         let saves = Counter()
-        session.persist = { await saves.bump() }
+        session.persist = { await saves.bump(); return true }
         await session.reloadFromStore()
         let span = SpanSection.span(from: Self.day(1), to: Self.day(0))
         #expect(await session.spanHeld(span, host: nil) == 0)
         #expect(await session.letGo(span: span, host: nil) == 0)
+        await session.saved()
         #expect(await saves.value == 0)
         #expect(session.holdings.posts == 4)
     }
@@ -107,9 +109,11 @@ struct SpanTests {
         session.persist = {
             let snapshot = await store.snapshot()
             try? await StoreFile(at: dir).save(sources: snapshot.sources, notes: snapshot.notes)
+            return true
         }
         await session.reloadFromStore()
         await session.letGo(span: SpanSection.span(from: Self.day(9), to: Self.day(5)), host: nil)
+        await session.saved()
         let reopened = StoreFile.open(at: dir)
         #expect(reopened.notes.map(\.id) == ["a3"])
         #expect(reopened.sources.map(\.host) == ["alpha.test", "beta.test"])

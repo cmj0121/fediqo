@@ -14,7 +14,7 @@ struct SourceOffersTests {
         #expect(ProtocolKind.mastodon.offers == SourceOffers(
             timelines: true, trends: true, writes: true,
             fields: [.audience, .language, .covered, .reblog, .reblogOf],
-            loadsReferences: true, saysReaderMarks: true, saysQuotes: true
+            loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true
         ))
         for kind in Self.microblogs {
             #expect(kind.offers == SourceOffers(timelines: true, trends: true), "\(kind)")

@@ -160,7 +160,8 @@ struct MergedRowActTests {
         #expect(target.item.source.host == second, "the sheet names the source it goes to")
         #expect(target.item.statusID == "222")
         session.answerDrafts[target.id] = "@ada@origin.example yes"
-        try await session.answer(target)
+        #expect(session.send(answer: target))
+        await session.outbox.settled()
 
         let request = try #require(await server.requests.first)
         #expect(request.url?.host == second)
@@ -237,7 +238,7 @@ struct MergedRowActTests {
 
     // MARK: - On its way, failed, tried again
 
-    @Test("On its way and failed read on the acting copy; a failure leaves the row and tries again",
+    @Test("Pressed and failed read on the acting copy; a failure leaves the row and tries again",
           .timeLimit(.minutes(1)))
     func standingsAreTheActingCopys() async throws {
         let gate = Gate()
@@ -251,8 +252,10 @@ struct MergedRowActTests {
         let press = Task { await session.toggle(.boost, on: row) }
         #expect(await spun { await server.paths.count == 1 })
         let out = session.acting(on: row)
-        #expect(out.standings[.boost] == .onItsWay)
-        #expect(ItemActs.mark(.boost, on: row, acting: out).spoken == "Boost through b.example on its way")
+        #expect(out.standings[.boost] == .pressed(to: true))
+        let pressed = ItemActs.mark(.boost, on: row, acting: out)
+        #expect(pressed.done && pressed.glyph == "arrow.2.squarepath", "the acting copy's mark is drawn boosted")
+        #expect(pressed.spoken == "Take the boost back through b.example")
         await session.toggle(.boost, on: row)
         #expect(await server.paths.count == 1, "one act, not two")
         await gate.open()

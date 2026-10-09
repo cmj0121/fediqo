@@ -17,7 +17,7 @@ extension ShellSession {
     func markGone(_ key: NoteKey, at moment: Date = Date()) async {
         guard await store.markGone(key, at: moment) else { return }
         await reloadFromStore()
-        await persist?()
+        saveSoon()
     }
 
     /// Whether `error`, from reading `held` by its server id `id`, is its source saying it no longer
@@ -53,8 +53,8 @@ extension ShellSession {
         let went = WentGone(posts: posts, places: await store.letSettledGo(markedBy: cutoff))
         guard !went.isNone else { return went }
         await reloadFromStore()
-        await persist?()
-        await readStoreBytes()
+        // Waited for: what was let go is not said to be gone while the file still holds it (#292).
+        await saveNow(.posts) { [weak self] in await self?.readStoreBytes() }
         return went
     }
 }

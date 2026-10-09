@@ -120,6 +120,29 @@ public struct MastodonAccount: Sendable {
         if let stopped = down.stopped { throw stopped }
     }
 
+    /// The newest posts the account itself wrote, by the id this source gives the account,
+    /// **handed back and not landed**: what a text nobody confirmed is looked for among
+    /// (`Unsent`), one read, no reblogs. Looking changes nothing this device holds — these are
+    /// posts of every reach and any age, which no timeline here was reading. Each says the
+    /// categories a post the person had just written would be given (`MastodonWrite.categories`),
+    /// so the one that is found can be landed as that.
+    ///
+    /// Throws what the read threw; nothing is read for an id that is not one path segment.
+    public func own(of accountID: String) async throws -> [Note] {
+        guard let source = await source(), ListSubscription.isPathSegment(accountID) else { return [] }
+        let sent = ReadMoment.now()
+        let data = try await door.get(path: "/api/v1/accounts/\(accountID)/statuses", query: [
+            URLQueryItem(name: "limit", value: String(MastodonReadOn.limit)),
+            URLQueryItem(name: "exclude_reblogs", value: "true"),
+        ])
+        try Task.checkCancellation()
+        return try MastodonJSON.decoder.decode([StatusDTO].self, from: data).map { status in
+            var note = status.asNote(source: source, categories: [], sent: sent)
+            note.categories = note.audience.map(MastodonWrite.categories(for:)) ?? []
+            return note
+        }
+    }
+
     /// Where Home, or a list this source still reads, is asked. Nothing for anything else.
     private static func path(of category: Category, in source: Source) -> String? {
         switch category {

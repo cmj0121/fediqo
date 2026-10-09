@@ -20,6 +20,7 @@ struct LimitAccountTests {
         let first = try await LimitRoom(at: dir, notes: LimitRoom.held() + [LimitRoom.note("old", daysAgo: 400, from: beta)])
         try first.copies(2, of: 50_000, host: alpha.host)
         #expect(await first.session.keep(months: 3, from: origin) == 1)
+        await first.session.saved()
         first.session.roomBytes = first.index + 60_000
         #expect(await first.session.keepWithinRoom(at: origin)?.copies == 1)
         let written = first.session.limitAccount

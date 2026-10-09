@@ -34,6 +34,9 @@ public struct MastodonWrite: Sendable {
 
     private var host: String { door.token.host }
 
+    /// The header a post is sent under so that sending it again makes no second post.
+    public static let idempotencyKey = "Idempotency-Key"
+
     /// A positive advertised ceiling, or 500. Zero and below are not a real limit.
     public static func limit(advertised: Int?) -> Int {
         guard let advertised, advertised > 0 else { return defaultLimit }
@@ -58,9 +61,13 @@ public struct MastodonWrite: Sendable {
     /// same refusals, the same store. A post that cannot be named on its server is not sent, rather
     /// than sent as a new post that answers nothing, which is the one failure here a reader could
     /// not see from the screen.
+    ///
+    /// **`key` is the request's `Idempotency-Key`**: the same text sent again under the same key
+    /// is answered, by a source that honours it, with the post it already made — which is what
+    /// lets a send nobody confirmed be sent again without posting twice.
     @discardableResult
     public func post(
-        _ text: String, visibility: Audience, answering: Note? = nil
+        _ text: String, visibility: Audience, answering: Note? = nil, key: UUID? = nil
     ) async throws -> Note {
         guard let source = await store.sources().first(where: { $0.host == host }) else {
             throw MastodonWriteError.noSource
@@ -73,7 +80,10 @@ public struct MastodonWrite: Sendable {
             form.append(("in_reply_to_id", id))
         }
         let sent = ReadMoment.now()
-        let data = try await door.post(path: "/api/v1/statuses", form: form)
+        let data = try await door.post(
+            path: "/api/v1/statuses", form: form,
+            headers: key.map { [Self.idempotencyKey: $0.uuidString] } ?? [:]
+        )
         guard let note = try? MastodonJSON.decoder.decode(StatusDTO.self, from: data)
             .asNote(source: source, categories: Self.categories(for: visibility), sent: sent)
         else {

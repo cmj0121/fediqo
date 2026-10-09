@@ -71,10 +71,57 @@ enum LocalServers {
             let reblog: String
             let reblogged: String
         }
+        /// What the seed made happen to the writer (#323), and the writer's sign-ins as this app
+        /// makes them — none of which a check can make for itself: this server tells nobody of
+        /// anything until its queued jobs are run, and the seed runs them.
+        struct Notices: Decodable {
+            /// A sign-in and the scopes it was made with, word for word.
+            struct SignIn: Decodable {
+                let token: String
+                let scopes: String
+            }
+            /// One person's private mention the server is holding back, and who.
+            struct Held: Decodable {
+                let by: String
+                let post: String
+            }
+            /// This app as it registers itself to ask for notices on top of reading and acting,
+            /// registered by the seed.
+            struct App: Decodable {
+                let id: String
+                let secret: String
+                let scopes: String
+            }
+            /// Made before notices were asked for: one that reads, one that reads and acts.
+            let reading: SignIn
+            let acting: SignIn
+            /// Made since: one that reads notices, one that reads and dismisses them.
+            let noticing: SignIn
+            let dismissing: SignIn
+            let app: App
+            /// Somebody the writer does not follow, who favoured, boosted and followed.
+            let third: String
+            /// The other person's posts: one naming the writer, one answering them, one the
+            /// writer boosted that was then changed, one quoting a post of the writer's.
+            let mention: String
+            let answer: String
+            let changed: String
+            let quoting: String
+            /// The writer's own: a post favoured and boosted by two, a poll that ended, and a
+            /// post whose two favourites lie more than a page apart.
+            let liked: String
+            let poll: String
+            let cut: String
+            /// The writer's posts whose one favourite is there to be dismissed.
+            let spare: [String]
+            let held: [Held]
+        }
         let writer: String
         let other: String
         let client: String
         let seeded: Posts
+        /// Nothing in a file a seed older than #323 wrote, which the checks of posts still read.
+        let notices: Notices?
     }
 
     static func seeded() throws -> Seeded {

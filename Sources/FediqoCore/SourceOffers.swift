@@ -40,11 +40,14 @@ public struct SourceOffers: Hashable, Sendable {
     /// Whether a post read from it says whether it quotes one (#214): a read that says nothing
     /// of a quote is then a post with none, not a source that never said.
     public let saysQuotes: Bool
+    /// Whether it says what happened to its signed-in reader (#323) — who answered, boosted,
+    /// favoured or followed them — so the notices page can ask this source.
+    public let notices: Bool
 
     public init(
         timelines: Bool = false, trends: Bool = false, boards: Bool = false, authorsAreItsOwn: Bool = false,
         writes: Bool = false, fields: [SourceField] = [], loadsReferences: Bool = false,
-        saysReaderMarks: Bool = false, saysQuotes: Bool = false
+        saysReaderMarks: Bool = false, saysQuotes: Bool = false, notices: Bool = false
     ) {
         self.timelines = timelines
         self.trends = trends
@@ -55,6 +58,7 @@ public struct SourceOffers: Hashable, Sendable {
         self.loadsReferences = loadsReferences
         self.saysReaderMarks = saysReaderMarks
         self.saysQuotes = saysQuotes
+        self.notices = notices
     }
 
     /// The field it declares under `name`, or nothing.
@@ -103,7 +107,7 @@ extension ProtocolKind {
             SourceOffers(
                 timelines: true, trends: true, writes: true,
                 fields: [.audience, .language, .covered, .reblog, .reblogOf],
-                loadsReferences: true, saysReaderMarks: true, saysQuotes: true
+                loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true
             )
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial:
             SourceOffers(timelines: true, trends: true)

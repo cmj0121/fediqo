@@ -77,6 +77,23 @@ public struct DummyPerson: Identifiable, Hashable, Sendable {
         emojis = item.emojis
     }
 
+    /// Somebody a notice names (#323), met through the source that said so: the page this opens
+    /// is what this device holds of theirs there, which may be nothing.
+    ///
+    /// **Their name is the one made fit for a line** (`NoticePerson.lineName`), so everything a
+    /// notice's person goes on to — the page, a tooltip, an action's name — has it so. The
+    /// handle is kept as sent: it is what they are matched to their posts by (`wrote`).
+    init?(_ person: NoticePerson, host: String) {
+        let handle = person.handle.isEmpty ? nil : person.handle
+        let name = person.lineName
+        guard !name.isEmpty || handle != nil else { return nil }
+        self.host = host
+        self.name = name
+        self.handle = handle
+        avatarURL = person.avatarURL
+        emojis = person.emojis
+    }
+
     /// Whether this person wrote that note.
     ///
     /// **The host first, and then the strongest name the note carries.** A handle is compared to a

@@ -180,23 +180,23 @@ struct RowMenuTests {
         #expect(dim.map(\.mark.on) == [false, false, false, true, true, true, false])
     }
 
-    @Test("An act on its way is an hourglass and a failed one a warning triangle — never the three dots, which on a post's row are the menu and nothing else")
+    @Test("An act pressed and not yet answered is its own glyph, drawn as it was pressed, and a failed one a warning triangle — never the three dots, which on a post's row are the menu and nothing else")
     func onItsWayIsAnHourglass() {
         for act in PostAct.allCases {
-            #expect(ItemActs.glyph(act, standing: .onItsWay) == "hourglass")
             #expect(ItemActs.glyph(act, standing: .failed) == "exclamationmark.triangle")
             for done in [false, true] {
-                #expect(ShellMark.drawn(ItemActs.glyph(act, standing: .onItsWay), on: done) == "hourglass")
-                #expect(ShellMark.drawn(ItemActs.glyph(act, standing: .onItsWay), on: done) != ShellMore.symbol)
+                let pressed = ShellMark.drawn(ItemActs.glyph(act, standing: .pressed(to: done)), on: done)
+                #expect(pressed == ShellMark.drawn(ItemActs.glyph(act, standing: nil), on: done), "no hourglass")
+                #expect(pressed != "hourglass" && pressed != ShellMore.symbol)
             }
         }
         var acting = Self.writes
-        acting.standings = [.boost: .onItsWay, .favourite: .failed]
+        acting.standings = [.boost: .pressed(to: false), .favourite: .failed]
         let drawn = marks(DummyItem(Self.note(boosted: true)), acting)
-        #expect(drawn.map(\.mark.drawn) == ["arrowshape.turn.up.left", "hourglass", "quote.bubble", "exclamationmark.triangle", "bookmark", "archivebox", "ellipsis"])
+        #expect(drawn.map(\.mark.drawn) == ["arrowshape.turn.up.left", "arrow.2.squarepath", "quote.bubble", "exclamationmark.triangle", "bookmark", "archivebox", "ellipsis"])
         #expect(drawn.filter { $0.mark.drawn == ShellMore.symbol }.map(\.kind) == [.more])
-        #expect(drawn[1].mark.on && drawn[1].mark.look == .live, "on its way is where the act is, not whether it is offered")
-        #expect(drawn[1].label == "Take the boost back on its way")
+        #expect(!drawn[1].mark.on && drawn[1].mark.look == .live, "a boost pressed to be taken back is drawn taken back, and is still offered")
+        #expect(drawn[1].label == "Boost", "named for what the next press does, nothing added")
     }
 
     @Test("An act already done says the way to undo it, in the words its mark says")
@@ -330,12 +330,11 @@ struct RowMenuTests {
         // Somebody else's post, and a list that cannot ask: not offered, dim or otherwise.
         #expect(more(item, Self.writes).dangers.isEmpty)
         #expect(more(item, ItemActing(acts: PostActs(offered: Set(PostAct.allCases)), perform: { _ in })).dangers.isEmpty)
-        // On its way, it is still there and cannot be asked twice — dim, and the same glyph:
-        // grey and not grey are one icon, so it wears no hourglass.
-        own.standings = [.withdraw: .onItsWay]
-        let waiting = try #require(more(item, own).dangers.first)
-        #expect(waiting.look == .dim(.notNow) && !waiting.answers && waiting.drawn == danger.drawn)
-        #expect(waiting.name == "Take back what you wrote on its way", "the words still say where it has got to")
+        // Pressed and not yet answered, the row is on no list (`ShownFirstTests`); where the
+        // post is still drawn — a conversation opened on it — the item is not offered at all,
+        // so nothing can be chosen whose yes would be dropped.
+        own.standings = [.withdraw: .pressed(to: true)]
+        #expect(more(item, own).dangers.isEmpty)
         // Failed, it can be asked again, and says so in its glyph as a mark does.
         own.standings = [.withdraw: .failed]
         let failed = try #require(more(item, own).dangers.first)

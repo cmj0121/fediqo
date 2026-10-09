@@ -42,7 +42,7 @@ struct AccountAddTests {
         #expect(session.queries.map(\.id) == ["all", "trends"])
         #expect(session.timelineID == .all)
         #expect(session.availability.timelineEnabled)
-        #expect(!session.availability.allows(.notices))
+        #expect(session.availability.allows(.notices))
         #expect(!session.availability.canCompose)
         #expect(!session.notes.isEmpty)
         #expect(session.refuse == nil)

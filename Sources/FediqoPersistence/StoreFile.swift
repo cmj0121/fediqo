@@ -119,7 +119,8 @@ public struct StoreFile: Sendable {
         return (try? probe.read(migrator.hasBeenSuperseded)) ?? false
     }
 
-    /// Whether the index standing at `path` holds nothing — no source and no post — or `nil`
+    /// Whether the index standing at `path` holds nothing — no source, no post and no text the
+    /// person pressed to send — or `nil`
     /// where that cannot be asked. Asked on a read-only connection, so asking changes nothing.
     static func holdsNothing(indexAt path: String) -> Bool? {
         var readOnly = Configuration()
@@ -127,7 +128,7 @@ public struct StoreFile: Sendable {
         guard let probe = try? DatabaseQueue(path: path, configuration: readOnly) else { return nil }
         return try? probe.read { db in
             let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'")
-            for table in ["source", "note"] where tables.contains(table) {
+            for table in ["source", "note", "unsent"] where tables.contains(table) {
                 if try Int.fetchOne(db, sql: "SELECT count(*) FROM \(table)") ?? 0 > 0 { return false }
             }
             return true
@@ -143,6 +144,10 @@ public struct StoreFile: Sendable {
         public let notes: [Note]
         /// What each source last said about itself, as of when (#188).
         public let said: [SourceProfile]
+        /// What the person pressed to send and no source had said landed (`Unsent`).
+        public let unsent: [Unsent]
+        /// What each source said happened to the person, as the last run left it (`NoticeReach`).
+        public let notices: [NoticeReach]
         /// Where an unreadable index was moved by this launch, when one was. Nothing in the app
         /// reads it again; it is deleted once the person has been told and what took its place
         /// has been saved (`trouble`, `StoreFile.told(in:)`).
@@ -155,8 +160,11 @@ public struct StoreFile: Sendable {
 
         init(
             file: StoreFile?, sources: [Source] = [], notes: [Note] = [], said: [SourceProfile] = [],
+            unsent: [Unsent] = [], notices: [NoticeReach] = [],
             setAside: URL? = nil, storeIsNewer: Bool = false, trouble: StoreTrouble? = nil
         ) {
+            self.unsent = unsent
+            self.notices = notices
             self.trouble = trouble
             self.file = file
             self.sources = sources
@@ -206,6 +214,8 @@ public struct StoreFile: Sendable {
         do {
             let file = try opening(directory)
             let snapshot = try file.load()
+            let unsent = try file.loadUnsent()
+            let notices = try file.loadNotices(of: snapshot.sources)
             // Read, and so not about to be set aside: only now is it rewritten (#292).
             file.scrub()
             // One put aside by a launch that was quit before it could say so is said now — and
@@ -216,6 +226,7 @@ public struct StoreFile: Sendable {
             }
             return Opened(
                 file: file, sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said,
+                unsent: unsent, notices: notices,
                 trouble: untold.isEmpty ? nil : .damaged(replacedBy: restored ? .otherStore : .empty)
             )
         } catch is Newer {
@@ -370,8 +381,18 @@ public struct StoreFile: Sendable {
     /// itself (#188), written on its source's row; one of a host not in `sources` goes nowhere.
     /// The app saves through `StoreSaver`.
     public func save(sources: [Source], notes: [Note], said: [SourceProfile] = []) async throws {
+        try await save(sources: sources, notes: notes, said: said, replacingNotices: nil)
+    }
+
+    /// `save(sources:notes:said:)`, with the notices replaced by `notices` **in the same
+    /// transaction** where any are named — a read back, which lays in another store's items
+    /// and lets go of what this device's sign-ins were told, both or neither.
+    func save(
+        sources: [Source], notes: [Note], said: [SourceProfile], replacingNotices notices: [NoticeReach]?
+    ) async throws {
         let saidByHost = Dictionary(said.map { ($0.host, $0) }, uniquingKeysWith: { a, _ in a })
         try await db.write { db in
+            if let notices { try Self.write(notices: notices, in: db) }
             try NoteRecord.deleteAll(db)
             try SourceRecord.deleteAll(db)
             for source in sources {
@@ -760,7 +781,83 @@ private var migrator: DatabaseMigrator {
             try strip.execute(arguments: [rowid])
         }
     }
+    // What the person pressed to send and no source has said landed (`Unsent`), in a table of
+    // its own: written as a part of its own (`StoreFile.save(unsent:)`), read in the order
+    // pressed. `answers` and `root` name a post as a row is named, or are NULL for a post.
+    // `writer_id` and `writer` are who wrote it at its source — the one account it is ever sent
+    // as — and `asked_at` is when that source was first asked.
+    //
+    // **A migration id for `v3-holding`'s reason.** A build from before would open the store
+    // and never show, send or let go of a text the person believes is waiting. The id makes it
+    // refuse the store instead.
+    migrator.registerMigration("v13-unsent") { db in
+        try db.create(table: "unsent") { t in
+            t.primaryKey("id", .text)
+            t.column("host", .text).notNull()
+            t.column("body", .text).notNull()
+            t.column("audience", .text).notNull()
+            t.column("answers", .text)
+            t.column("root", .text)
+            t.column("pressed_at", .datetime).notNull()
+            t.column("standing", .text).notNull()
+            t.column("writer_id", .text)
+            t.column("writer", .text)
+            t.column("asked_at", .datetime)
+        }
+    }
+    // What each signed-in source says happened to the person (`NoticeReach`, #323), in two
+    // tables of their own, written as a part of their own (`StoreFile.save(notices:)`): a
+    // source's reach — which read it answers with, the id its next older stretch is asked
+    // before, the moment it was read down to — and its lines,
+    // each at its place in the source's order. `people` is a JSON array; `post` is the post the
+    // line is about as a row of `note` would write it, as JSON, or NULL — carried, and in no
+    // timeline until somebody opens it.
+    //
+    // **A migration id for `v3-holding`'s reason.** A build from before would open the store,
+    // never draw or let go of a notice, and at a sign-out leave every line — and the words of
+    // the posts they carry — readable in the file. The id makes it refuse the store instead.
+    migrator.registerMigration("v14-notices") { db in
+        try db.create(table: "notice_reach") { t in
+            t.primaryKey("host", .text)
+            t.column("gathered", .boolean).notNull()
+            t.column("before", .text)
+            t.column("reached", .datetime)
+        }
+        try db.create(table: "notice") { t in
+            t.column("host", .text).notNull()
+            t.column("handle", .text).notNull()
+            t.column("name", .text).notNull()
+            t.primaryKey(["host", "handle", "name"])
+            t.column("place", .integer).notNull()
+            t.column("kind", .text).notNull()
+            t.column("at", .datetime).notNull()
+            t.column("newest_id", .text).notNull()
+            t.column("oldest_id", .text).notNull()
+            t.column("count", .integer).notNull()
+            t.column("people", .text).notNull()
+            t.column("post", .text)
+        }
+    }
     return migrator
+}
+
+/// The post a notice's line is about, as that line's own cell holds it: **the one encoding of a
+/// post** (`NoteRecord`), as JSON. Not a row of `note` — it stands in no timeline, and is an
+/// item only once somebody opens it.
+enum CarriedPost {
+    static func text(_ note: Note?) -> String? {
+        guard let note, let data = try? JSONEncoder().encode(NoteRecord(note)) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Read leniently, as `earlier` is: a cell that will not read is a line without what it was
+    /// about, never a store judged damaged. Nothing either where its source is not `source`'s.
+    static func note(_ text: String?, from source: Source) -> Note? {
+        guard let text, let record = try? JSONDecoder().decode(NoteRecord.self, from: Data(text.utf8)),
+              record.host == source.host
+        else { return nil }
+        return record.note(from: source)
+    }
 }
 
 /// One `Reference` as `note.refs` writes it, a JSON array of these in the order the item holds

@@ -39,6 +39,25 @@ public actor ItemStore {
     /// nothing left for a place to be compared with. A post acted on is marked for as long as the
     /// run lasts, its row gone or not — one number a post, for the posts one reader pressed.
     private var acted: [NoteKey: UInt64] = [:]
+    /// Where in the run's order the latest read of each held post was sent, among the reads
+    /// whose word on what the reader did was taken (`outrun`). What tells "the source has been
+    /// asked about this post since" from a row that merely still says what it said — for a
+    /// press that did not arrive, and may have landed all the same. For the run, as `acted` is.
+    ///
+    /// **Let go with its post**: every way a row leaves says the store changed (`changed`), and
+    /// that drops what is kept here for rows no longer held — a post let go, a host removed.
+    private var readAt: [NoteKey: UInt64] = [:]
+
+    /// Where in the run's order each of these posts was last read, for the ones read this run.
+    public func lastRead(of keys: [NoteKey]) -> [NoteKey: UInt64] {
+        keys.reduce(into: [:]) { $0[$1] = readAt[$1] }
+    }
+
+    /// Notes that a read's copy of a held post was taken, where it says when it was sent.
+    private func read(_ copy: Note) {
+        guard let sent = copy.asked.place else { return }
+        readAt[copy.key] = max(readAt[copy.key] ?? 0, sent)
+    }
     /// Where in the run's order the reader's marks were last taken off each host's posts
     /// (`forgetReaderMarks`): a sign-in there ended, or became somebody else's. A copy from that
     /// host sent before it was read as the reader who has gone, and says nothing of this one —
@@ -63,6 +82,71 @@ public actor ItemStore {
     public private(set) var repliesRevision = 0
     /// Everyone listening for a change. See `changes()`.
     private var listeners: [UUID: AsyncStream<Int>.Continuation] = [:]
+    /// What the person pressed to send and no source has said landed, in the order pressed.
+    ///
+    /// **Beside the items and none of them** (`Unsent`): untouched by `replace`, by
+    /// `remove(host:)`, and by every limit and purge — only a landing or the person lets one go.
+    private var unsent: [Unsent] = []
+    /// Counts the changes to `unsent`, apart from `revision`: a saver writes the texts as a
+    /// part of their own, so holding one rewrites no post, and a landing rewrites no text.
+    public private(set) var unsentRevision = 0
+    /// The texts let go of — landed, discarded, their source removed — by name: **what a write
+    /// of a text is asked against, so one made of a copy from before the letting go is not
+    /// taken** (`hold(_:)`), as the notices' epochs do for a host. Kept here, where the letting
+    /// go happens, so no order of arrival can put a text back. A name is given once and never
+    /// to a second text. For the run.
+    private var unsentGone: Set<UUID> = []
+    /// Who is sending each text that is being sent, by the name its sender goes by — a session's
+    /// outbox (`claim(unsent:for:)`). **One sender a text**: decided here, in the store's own
+    /// isolation, so two windows over one store cannot both send it. For the run, never written.
+    private var unsentSenders: [UUID: UUID] = [:]
+    /// Counts every change to the texts and to who is sending them: what a page that draws
+    /// them has taken, or has yet to (`unsentView`). Apart from `unsentRevision`, which a
+    /// saver writes by and a claim does not move.
+    public private(set) var unsentMark = 0
+
+    /// The texts, or who is sending one, changed: everyone listening is told, as for a notice.
+    /// The revision a save writes the posts by stays where it is.
+    private func unsentChanged() {
+        unsentMark += 1
+        for listener in listeners.values { listener.yield(revision) }
+    }
+    /// What each signed-in source says happened to the person, and how far down it was read, by
+    /// host (`NoticeReach`, #323).
+    ///
+    /// **Beside the items and none of them**: a notice stands in no timeline, nothing keeps one,
+    /// and the post one is about lies in its line as carried — an item only once somebody opens
+    /// it. Let go with the reader they were said to (`forgetReaderMarks`), with their source
+    /// (`remove`), by a read back (`replace`) and, the old ones, by the months limit; and the
+    /// carried copy of a post is struck by every call that lets that post go (`strike`).
+    private var reaches: [String: NoticeReach] = [:]
+    /// Counts the changes to `reaches`, apart from `revision`: a saver writes the notices as a
+    /// part of their own, so a page of them read rewrites no post. Everyone listening is told
+    /// all the same (`noticesChanged`), which is how the page follows what is held.
+    public private(set) var noticesRevision = 0
+    /// Counts the times notices were let go by host — a reader signed out or replaced, a source
+    /// removed, a store read back: **what a write of notices names, so one made of a copy from
+    /// before the letting go is not taken** (`hold(_:fresh:since:)`). A sign-out leaves the
+    /// source here, so nothing else would stop such a write putting the gone reader's notices
+    /// back. For the run.
+    private var noticeEpochs: [String: Int] = [:]
+    /// The epoch of every host not let go of since the last read back.
+    private var noticeEpochBase = 0
+    private var noticeEpochLast = 0
+
+    private func noticeEpoch(_ host: String) -> Int { noticeEpochs[host] ?? noticeEpochBase }
+
+    /// Whoever listens is told, though nothing held need have moved: a page that writes
+    /// notices has to learn the epoch its next write is of (`noticesMark`).
+    private func endNoticeEpoch(_ host: String) {
+        noticeEpochLast += 1
+        noticeEpochs[host] = noticeEpochLast
+        for listener in listeners.values { listener.yield(revision) }
+    }
+
+    /// The notices' revision and the count of their epochs ended, in one hop: a page that has
+    /// taken the notices at this mark has nothing new to take.
+    public var noticesMark: [Int] { [noticesRevision, noticeEpochLast] }
 
     public init() {}
 
@@ -105,6 +189,15 @@ public actor ItemStore {
         if kept { revision += 1 }
         if shown { drawn += 1 }
         if replies { repliesRevision += 1 }
+        // Only a held row's read is noted (`read`), so more entries than rows means some went.
+        if readAt.count > notes.count { readAt = readAt.filter { notes[$0.key] != nil } }
+        for listener in listeners.values { listener.yield(revision) }
+    }
+
+    /// The notices held changed: their own revision moves and everyone listening is told. The
+    /// revision a save writes the posts by stays where it is.
+    private func noticesChanged() {
+        noticesRevision += 1
         for listener in listeners.values { listener.yield(revision) }
     }
 
@@ -120,7 +213,17 @@ public actor ItemStore {
     /// **A row that still owes a load comes in still owing it** (`Note.refsDue`, #293): the last
     /// run did not get to it, and this one asks for it — within the pace every load keeps
     /// (`LoadPacer`). Only a store laid in whole from elsewhere owes nothing (`replace`).
-    public init(sources: [Source], notes incoming: [Note], said: [SourceProfile] = []) {
+    ///
+    /// **Notices come in only of a source still here**, the first reach of a host winning. Whether
+    /// anybody is still signed in to it is not known here: the sweep that lets a gone reader's
+    /// marks go lets their notices go with them (`forgetReaderMarks`).
+    public init(
+        sources: [Source], notes incoming: [Note], said: [SourceProfile] = [], notices: [NoticeReach] = [],
+        unsent: [Unsent] = []
+    ) {
+        for text in unsent where !self.unsent.contains(where: { $0.id == text.id }) {
+            self.unsent.append(text)
+        }
         for source in sources where !sourceList.contains(where: { $0.host == source.host }) {
             sourceList.append(source)
         }
@@ -129,6 +232,9 @@ public actor ItemStore {
         let hosts = Set(sourceList.map(\.host))
         for profile in said where Self.isWord(profile) && hosts.contains(profile.host) {
             saidByHost[profile.host] = profile
+        }
+        for reach in notices where hosts.contains(reach.host) {
+            if reaches[reach.host] == nil { reaches[reach.host] = reach.bounded() }
         }
         notes = Dictionary(incoming.map { note in
             // A row holds nothing of another post (`Note.brought`): what a snapshot's rows
@@ -188,6 +294,10 @@ public actor ItemStore {
     /// yet to ask its sources for is not this device's to ask: a store that arrived with every
     /// row marked would otherwise be a request a row to the person's own servers, set off by
     /// whoever made the package.
+    ///
+    /// **Every notice held goes**: they were said to whoever was signed in here before, and the
+    /// sign-ins a read back leaves may be somebody else's. The next read of the page says them
+    /// again, to whoever is signed in then.
     public func replace(sources: [Source], notes arriving: [Note], said: [SourceProfile] = []) {
         let incoming = arriving.map { note in
             var settled = note
@@ -222,6 +332,13 @@ public actor ItemStore {
             arrivals += 1
         }
         sourcesWatcher?(sourceList.map(\.host))
+        noticeEpochLast += 1
+        noticeEpochBase = noticeEpochLast
+        noticeEpochs = [:]
+        if !reaches.isEmpty {
+            reaches = [:]
+            noticesChanged()
+        }
         changed(shown: true, replies: true)
     }
 
@@ -395,7 +512,9 @@ public actor ItemStore {
                 // audience was written down takes it from the next timeline that brings it.
                 // …except what it says the reader did, where it was sent before their own act on
                 // the post landed (#291): a reload on its way when they pressed.
-                var merged = existing.filled(from: note, marksStand: outrun(note))
+                let older = outrun(note)
+                if !older { read(note) }
+                var merged = existing.filled(from: note, marksStand: older)
                 // **Its source has changed it since this row was read** (#286): the row says what
                 // the post says now, where it stood, and keeps what it said. A copy that is the
                 // older of the two — a read still on its way when a later one landed — changes no
@@ -504,6 +623,7 @@ public actor ItemStore {
             moved = true
             shown = true
         }
+        recarry(incoming.map(\.key))
         // **A landing that only recounted is drawn and not written down** (#208). A timeline read
         // every minute moves some count on nearly every page, and a save for each would be the
         // every-minute write this function exists not to make; the next change that is kept
@@ -553,6 +673,7 @@ public actor ItemStore {
             // word for it. So the act's own mark is always taken, and the other two only where
             // this copy is not the older — which is all a read's copy is ever taken for.
             let older = outrun(note)
+            if acted == nil, !older { read(note) }
             let own: Set<ReaderMark> = acted.map { [$0] } ?? []
             // …and every read sent before this moment is older than the answer — marked whether
             // or not the answer changes the row, since a read that already said as much changes
@@ -574,6 +695,7 @@ public actor ItemStore {
             replies = replies || refreshed.isPartOfTopic || existing.isPartOfTopic
         }
         if moved { changed(shown: shown, replies: replies) }
+        recarry(held.map(\.key))
         // The posts these quote, taken in as `ingest` takes them (#214): a quote read again may
         // name one this device has not held yet.
         let quoted = held.flatMap(\.brought)
@@ -779,14 +901,20 @@ public actor ItemStore {
     /// **A post the person keeps stays either way** (#284), exactly as `keepingPosts` leaves one:
     /// still drawn, still naming the source it was read through, and marked by the row as from a
     /// host no longer here. It goes once it is un-kept and something lets it go.
-    public func remove(host raw: String, keepingPosts: Bool = false) {
+    ///
+    /// **What it said happened to the person goes either way**: a notice is not a post, and
+    /// nothing reads it once its source is not here. Returns whether any did, so a caller
+    /// that must have them off the disk before it goes on knows to wait for the write.
+    @discardableResult
+    public func remove(host raw: String, keepingPosts: Bool = false) -> Bool {
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
         saidByHost[host] = nil
+        let told = letNoticesGo(host: host)
         sourcesWatcher?(sourceList.map(\.host))
         if keepingPosts {
             changed(shown: false, replies: false)
-            return
+            return told
         }
         let shown = shownByKept()
         let going = notes.values.filter { $0.key.host == host && !$0.kept && !shown.contains($0.key) }
@@ -795,6 +923,7 @@ public actor ItemStore {
             arrival[note.key] = nil
         }
         changed(shown: true, replies: going.contains { $0.isPartOfTopic })
+        return told
     }
 
     public func sources() -> [Source] {
@@ -861,6 +990,16 @@ public actor ItemStore {
     public func letGoBeyond(months: Int?, from now: Date = Date(), calendar: Calendar = .current) -> WentByLimit {
         retention = KeepPolicy.cutoff(keepingMonths: months, from: now, calendar: calendar)
         guard let retention else { return .none }
+        // A notice older than the limit goes as a post does, and so does the copy of a post that
+        // old a newer notice carries: left, they would be words older than the limit on disk.
+        var noticed = false
+        for (host, reach) in reaches {
+            let kept = reach.within(retention).bounded()
+            guard kept != reach else { continue }
+            reaches[host] = kept
+            noticed = true
+        }
+        if noticed { noticesChanged() }
         let before = notes.count
         // A quoted post a kept post quotes stays, as `ingest` keeps it (#214): the window's reach
         // has passed it, the quote's has not.
@@ -902,6 +1041,7 @@ public actor ItemStore {
             notes[note.key] = nil
             self.arrival[note.key] = nil
         }
+        strike(carried: Set(going.map(\.key)))
         changed(shown: going.contains { !$0.isPartOfTopic }, replies: going.contains { $0.isPartOfTopic })
         return WentByLimit(posts: going.count, sources: Set(going.map(\.key.host)).sorted())
     }
@@ -980,6 +1120,14 @@ public actor ItemStore {
         let host = raw?.lowercased()
         let shown = shownByKept()
         let going = notes.values.filter { Self.inside(span, host: host, $0, shown) }
+        // **And the copy of a post of those days a notice carries**, an item or not: the reader
+        // said these days go. Not one of a post that stays held — a kept one.
+        let leaving = Set(going.map(\.key))
+        let held = notes
+        strike { post in
+            span.contains(post.postedAt) && (host == nil || post.source.host == host)
+                && (held[post.key] == nil || leaving.contains(post.key))
+        }
         guard !going.isEmpty else { return 0 }
         for note in going {
             notes[note.key] = nil
@@ -1010,6 +1158,216 @@ public actor ItemStore {
         // By host, so one state of the store is always written one way.
         let said = saidByHost.values.sorted { $0.host < $1.host }
         return (sourceList, ordered, said, revision)
+    }
+
+    /// Holds a text pressed to send, or what is now known of one already held — in its place.
+    ///
+    /// **Not one let go of this run** (`unsentGone`): whoever writes it now took its copy before
+    /// the person, or its landing, said it goes (#292). Returns whether it is held — **and
+    /// whoever is about to send it does not, on a no.**
+    @discardableResult
+    public func hold(_ text: Unsent) -> Bool {
+        guard !unsentGone.contains(text.id) else { return false }
+        if let at = unsent.firstIndex(where: { $0.id == text.id }) {
+            guard unsent[at] != text else { return true }
+            unsent[at] = text
+        } else {
+            unsent.append(text)
+        }
+        unsentRevision += 1
+        unsentChanged()
+        return true
+    }
+
+    /// Lets a text go: it landed, or the person discarded it. Held or not, its name is not
+    /// held again (`hold(_:)`), and nobody is sending it any more.
+    public func letGo(unsent id: UUID) {
+        var moved = unsentGone.insert(id).inserted
+        if unsentSenders.removeValue(forKey: id) != nil { moved = true }
+        if let at = unsent.firstIndex(where: { $0.id == id }) {
+            unsent.remove(at: at)
+            unsentRevision += 1
+            moved = true
+        }
+        if moved { unsentChanged() }
+    }
+
+    /// Takes the sending of one text for `sender`, where nobody else has it: **the one place
+    /// it is decided who sends a text**, so it is never sent by two at once. True where
+    /// `sender` has it — now, or already. Whether the text is still held is not asked here:
+    /// that is `hold(_:)`'s to say, and a sender asks both.
+    public func claim(unsent id: UUID, for sender: UUID) -> Bool {
+        if let has = unsentSenders[id] { return has == sender }
+        unsentSenders[id] = sender
+        unsentChanged()
+        return true
+    }
+
+    /// Gives the sending of one text back, where `sender` has it: its request has ended,
+    /// whatever became of it.
+    public func release(unsent id: UUID, from sender: UUID) {
+        guard unsentSenders[id] == sender else { return }
+        unsentSenders[id] = nil
+        unsentChanged()
+    }
+
+    /// The texts as they stand, read in one hop: each held, who is sending which, and the
+    /// names let go of this run — what every page that draws them draws from, so a text
+    /// discarded, landed, changed or taken to send through one of them is so in all.
+    public func unsentView() -> UnsentView {
+        UnsentView(texts: unsent, senders: unsentSenders, gone: unsentGone, mark: unsentMark)
+    }
+
+    /// Every text held, in the order pressed.
+    public func unsentHeld() -> [Unsent] { unsent }
+
+    /// The texts and the revision they are at, read in one hop — what a save writes of them.
+    public func unsentSnapshot() -> (unsent: [Unsent], revision: Int) {
+        (unsent, unsentRevision)
+    }
+
+    // MARK: - What each source says happened to the person (#323)
+
+    /// Holds what one source has handed over of its notices, in the place of what was held of
+    /// it: its lines, and how far down it was read. Only while its host is a source here, and
+    /// nothing where it is what is held already. Kept to `NoticeReach.capacity` lines. Returns
+    /// the notices' revision as this call left it, so whoever wrote knows what it wrote.
+    ///
+    /// **`fresh` names the lines the source has just said**, where the caller knows: every
+    /// other line is one it held already, and where the copy here has had its post struck
+    /// since — the post was let go while the caller's copy was on its way — it stays struck.
+    /// A copy of what was held must not put back words this device let go (#292); only the
+    /// source saying them again does. Nothing named is everything taken as given.
+    @discardableResult
+    public func hold(_ reach: NoticeReach, fresh: Set<String>? = nil) -> Int {
+        hold(reach, fresh: fresh, since: nil).revision
+    }
+
+    /// `hold(_:fresh:)`, by a writer that says which epoch of the host its copy is from —
+    /// **and is not taken where the host's notices were let go since**: the copy is of what a
+    /// reader no longer here was told. Checked here, where the letting go happens, so no
+    /// order of arrival can put it back. `nil` is a writer with nothing from before: taken.
+    /// Returns the epoch the host is at, for the writer's next.
+    @discardableResult
+    public func hold(_ reach: NoticeReach, fresh: Set<String>?, since epoch: Int?) -> (revision: Int, epoch: Int) {
+        let now = noticeEpoch(reach.host)
+        guard epoch == nil || epoch == now else { return (noticesRevision, now) }
+        return (held(reach, fresh: fresh), now)
+    }
+
+    private func held(_ reach: NoticeReach, fresh: Set<String>?) -> Int {
+        guard sourceList.contains(where: { $0.host == reach.host }) else { return noticesRevision }
+        // No line older than the months limit is held, whoever wrote it and whenever: a
+        // write made of a copy from before the limit acted puts none back.
+        var bounded = reach.withinLines(retention).bounded()
+        if let fresh, let held = reaches[reach.host] {
+            let struck = Set(held.notices.lazy.filter { $0.post == nil }.map(\.id))
+            if bounded.notices.contains(where: { $0.post != nil && struck.contains($0.id) && !fresh.contains($0.id) }) {
+                bounded.notices = bounded.notices.map { line in
+                    line.post != nil && struck.contains(line.id) && !fresh.contains(line.id) ? line.carrying(nil) : line
+                }
+            }
+        }
+        guard reaches[reach.host] != bounded else { return noticesRevision }
+        reaches[reach.host] = bounded
+        noticesChanged()
+        return noticesRevision
+    }
+
+    /// Lets go of everything one source said happened to the person. Whether anything went.
+    @discardableResult
+    public func letNoticesGo(host raw: String) -> Bool {
+        endNoticeEpoch(raw.lowercased())
+        guard reaches.removeValue(forKey: raw.lowercased()) != nil else { return false }
+        noticesChanged()
+        return true
+    }
+
+    /// The revision a save writes the posts by and the one it writes the notices by, in one hop:
+    /// what a saver following this store looks at.
+    public var revisions: (items: Int, notices: Int) { (revision, noticesRevision) }
+
+    /// Every source's notices as held, in host order, and the revision they are at — read in
+    /// one hop, so a page taking them knows whether they are newer than what it last wrote.
+    ///
+    /// With them, the epoch each source's notices are at (`hold(_:fresh:since:)`) and the
+    /// moment the months limit lets go of everything before, where there is a limit: a page
+    /// draws no line past it, though a stretch read on to this run is held until the limit acts.
+    public func noticesHeld() -> (notices: [NoticeReach], revision: Int, epochs: [String: Int], cutoff: Date?) {
+        (
+            reaches.values.sorted { $0.host < $1.host }, noticesRevision,
+            Dictionary(sourceList.map { ($0.host, noticeEpoch($0.host)) }, uniquingKeysWith: { first, _ in first }),
+            retention
+        )
+    }
+
+    /// How many lines are held of each source, by host: what Usage says of them.
+    public func noticesCount() -> [String: Int] {
+        reaches.mapValues { $0.withinLines(retention).notices.count }
+    }
+
+    /// The epoch each source's notices are at: what a page that writes them names.
+    public func noticesEpochs() -> [String: Int] {
+        Dictionary(sourceList.map { ($0.host, noticeEpoch($0.host)) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// What a save writes of the notices, and the revision it is of. **Nothing older than the
+    /// months limit**: a line read on to past it, or the copy of a post that old a newer line
+    /// carries, is drawn for the run as it was read and is never written (`NoticeReach.within`).
+    public func noticesSnapshot() -> (notices: [NoticeReach], revision: Int) {
+        (reaches.values.sorted { $0.host < $1.host }.map { $0.within(retention).bounded() }, noticesRevision)
+    }
+
+    /// Strikes the carried copy of each post `gone` names from every line that carries it —
+    /// **called by every function here that lets a post go**: `letGoOldest`, `letGo(span:host:)`,
+    /// `forget`, `letGoneGo`; `letGoBeyond` strikes by age and `remove`, `replace` and
+    /// `forgetReaderMarks` let the lines themselves go. A purge leaves nothing behind (#282): a
+    /// post let go and still readable in a notice's line would be exactly that. The line stays.
+    private func strike(carried gone: (Note) -> Bool) {
+        var moved = false
+        for (host, reach) in reaches {
+            let struck = reach.striking(gone)
+            guard struck != reach else { continue }
+            reaches[host] = struck
+            moved = true
+        }
+        if moved { noticesChanged() }
+    }
+
+    private func strike(carried keys: Set<NoteKey>) {
+        strike { keys.contains($0.key) }
+    }
+
+    /// The carried copy of each post among `keys` made what the row held now says, where the
+    /// source has said something else of it since: its words, its cover, what it shows. Called
+    /// where a post is read again — opened from its notice among them — so a post its author
+    /// has since covered or changed is not left as it was in the notice's line.
+    ///
+    /// **What stays as it was read**: the copy of a post nobody has opened or read again.
+    /// Whether a post is gone, covered or changed is learnt only when it is loaded; until
+    /// then its line carries what the source said when the line was read — until that stretch
+    /// is read again, the months limit lets the line go, or the bound does.
+    private func recarry(_ keys: some Sequence<NoteKey>) {
+        guard !reaches.isEmpty else { return }
+        let named = Set(keys)
+        var moved = false
+        for (host, reach) in reaches {
+            var lines = reach.notices
+            var touched = false
+            for (place, line) in lines.enumerated() {
+                guard let carried = line.post, named.contains(carried.key), let held = notes[carried.key],
+                      held.body != carried.body || held.spoiler != carried.spoiler
+                      || held.sensitive != carried.sensitive || held.title != carried.title
+                      || held.attachments != carried.attachments || held.editedAt != carried.editedAt
+                else { continue }
+                lines[place] = line.carrying(held)
+                touched = true
+            }
+            guard touched else { continue }
+            reaches[host]?.notices = lines
+            moved = true
+        }
+        if moved { noticesChanged() }
     }
 
     /// Every item this device holds, newest first (#296): whatever brought it — a timeline, a
@@ -1314,9 +1672,14 @@ public actor ItemStore {
     /// marked is let go. One already marked keeps the moment it was first heard. **Nor is the
     /// post a kept reblog shows** (#290), the reader's own post taken back included: it stays,
     /// marked the same way, for as long as that reblog is kept.
+    ///
+    /// **The copy a notice carries of it is struck**, whether or not the post was ever an item
+    /// here — but for one that stays held, which is still this device's to show.
     public func forget(_ key: NoteKey, at moment: Date = Date()) {
+        let stays = notes[key].map { $0.kept || shownByKept().contains(key) } ?? false
+        if !stays { strike(carried: [key]) }
         guard var gone = notes[key] else { return }
-        if gone.kept || shownByKept().contains(key) {
+        if stays {
             guard gone.goneSince == nil else { return }
             gone.goneSince = moment
             notes[key] = gone
@@ -1333,6 +1696,11 @@ public actor ItemStore {
     /// were that reader's, and left here they would be told to the next one, whose first press
     /// would undo an act they never made. The posts stay; what this device keeps of its own
     /// (`kept`) is untouched. Returns whether any row changed, so a caller writes only then.
+    ///
+    /// **What that host said happened to the reader goes whole** (#323): a notice was said to one
+    /// reader as a mark was, and unlike the posts nothing of it is anybody else's to read. Gone
+    /// from here in this call, and counted in what it returns — so its caller writes, and what a
+    /// signed-out reader was told is not on disk a moment longer than it is held (#292).
     @discardableResult
     public func forgetReaderMarks(host raw: String) -> Bool {
         forgetReaderMarks { $0 == raw.lowercased() }
@@ -1352,6 +1720,14 @@ public actor ItemStore {
         for host in Set(sourceList.map(\.host)).union(notes.keys.map(\.host)) where gone(host) {
             swept[host] = moment
         }
+        let told = reaches.keys.filter(gone)
+        for host in told { reaches[host] = nil }
+        // Every host named, held of or not: a read of the gone reader's may still be on its
+        // way here with the first of them.
+        for host in Set(sourceList.map(\.host)).union(noticeEpochs.keys).union(told) where gone(host) {
+            endNoticeEpoch(host)
+        }
+        if !told.isEmpty { noticesChanged() }
         var shown = false
         var replies = false
         for (key, note) in notes where gone(key.host) {
@@ -1371,7 +1747,7 @@ public actor ItemStore {
             shown = shown || !note.isPartOfTopic
             replies = replies || note.isPartOfTopic
         }
-        guard shown || replies else { return false }
+        guard shown || replies else { return !told.isEmpty }
         changed(shown: shown, replies: replies)
         return true
     }
@@ -1441,6 +1817,8 @@ public actor ItemStore {
         else { return false }
         held.goneSince = moment
         notes[key] = held
+        // Its source says it is gone: the copy a notice carries of it is not left readable.
+        strike(carried: [key])
         changed(shown: !held.isPartOfTopic, replies: held.isPartOfTopic)
         return true
     }
@@ -1470,6 +1848,7 @@ public actor ItemStore {
             notes[note.key] = nil
             arrival[note.key] = nil
         }
+        strike(carried: Set(going.map(\.key)))
         changed(shown: going.contains { !$0.isPartOfTopic }, replies: going.contains { $0.isPartOfTopic })
         return going.count
     }

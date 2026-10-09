@@ -150,7 +150,7 @@ struct WithdrawTests {
     func confirmedItGoes() async throws {
         let (session, server) = try await shell(routes: ["/api/v1/statuses/1": .json("{}")])
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
         let mine = try item(session, by: "me")
         session.askToWithdraw(mine)
         await session.withdraw(mine)
@@ -160,6 +160,7 @@ struct WithdrawTests {
         #expect(!session.notes.contains { $0.key.rowID == mine.id })
         #expect(session.notes.count == 1, "somebody else's post stays")
         #expect(await session.store.all().count == 1, "gone from what a save writes")
+        await session.saved()
         #expect(saved == 1)
         #expect(session.acts.standings.isEmpty)
         #expect(await server.paths.filter { $0.contains("timelines") }.isEmpty, "no timeline read")

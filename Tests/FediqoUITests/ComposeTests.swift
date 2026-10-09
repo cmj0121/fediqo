@@ -135,7 +135,7 @@ struct ComposeTests {
         #expect(writes.availability.allows(.notices))
     }
 
-    @Test("Closing without sending keeps the draft; a send that lands clears it")
+    @Test("Closing without sending keeps the draft; the press takes it, and the post lands behind it")
     func theDraftSurvivesDismissAndClearsOnALanding() async throws {
         let (session, server, _) = try await shell(
             scopes: writing,
@@ -146,8 +146,10 @@ struct ComposeTests {
         session.composeAudience = .everyone
         #expect(session.composeDraft == "hello", "closing the sheet does not touch the session")
 
-        try await session.post()
-        #expect(session.composeDraft.isEmpty)
+        #expect(session.send())
+        #expect(session.composeDraft.isEmpty, "the press took the text")
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.isEmpty)
         #expect(session.notes.contains { $0.body == "hello" && $0.categories.contains(.home) })
         #expect(await server.form("/api/v1/statuses") == [
             "status": "hello", "visibility": "public",
@@ -155,7 +157,7 @@ struct ComposeTests {
         #expect(await server.paths == ["/api/v1/statuses"])
     }
 
-    @Test("A send that fails keeps the text, names the source, and can be tried again")
+    @Test("A send the source answers with a fault keeps the text, names the source, and is not called unsent: it may have been posted, and sending it again asks first")
     func aFailedSendKeepsTheText() async throws {
         let (session, server, _) = try await shell(
             scopes: writing,
@@ -163,20 +165,28 @@ struct ComposeTests {
         )
         session.prepareCompose()
         session.composeDraft = "kept"
-        await #expect(throws: MastodonAuthError.http(500)) {
-            try await session.post()
-        }
-        #expect(session.composeDraft == "kept")
+        #expect(session.send())
+        await session.outbox.settled()
+        let entry = try #require(session.outbox.sendings.first)
+        #expect(entry.unsent.text == "kept")
+        #expect(entry.standing == .unconfirmed, "a 500 is a fault past the door: the post may exist")
         #expect(session.notes.isEmpty)
-        #expect(ShellFailure.spoken([host]).contains(host))
-        #expect(!ShellFailure.retryName.isEmpty)
+        #expect(OutboxWords.line(entry, hold: nil, whom: nil).contains(host))
+        #expect(OutboxWords.presses(entry, hold: session.outbox.hold(entry, in: session)).contains(.again))
 
-        // The same draft can be sent again: the next call still posts it.
+        // Send again looks first; nobody can look here, so the person is asked, and the yes sends.
         #expect(await server.paths == ["/api/v1/statuses"])
-        #expect(session.canPost)
+        #expect(session.outbox.again(entry.id, in: session))
+        await session.outbox.settled()
+        #expect(session.resendingUnsent == UnsentAsk(id: entry.id))
+        #expect(await server.paths == ["/api/v1/statuses"])
+        #expect(session.outbox.sendAnyway(entry.id, in: session))
+        await session.outbox.settled()
+        #expect(await server.paths == ["/api/v1/statuses", "/api/v1/statuses"])
+        #expect(session.outbox.sendings.map(\.unsent.text) == ["kept"])
     }
 
-    @Test("A 403 marks the source refused and keeps the draft")
+    @Test("A 403 marks the source refused and keeps the text")
     func aRefusedWriteIsMarked() async throws {
         let (session, _, _) = try await shell(
             scopes: writing,
@@ -184,18 +194,18 @@ struct ComposeTests {
         )
         session.prepareCompose()
         session.composeDraft = "kept"
-        await #expect(throws: MastodonAuthError.http(403)) {
-            try await session.post()
-        }
-        #expect(session.composeDraft == "kept")
+        #expect(session.send())
+        await session.outbox.settled()
+        let entry = try #require(session.outbox.sendings.first)
+        #expect(entry.unsent.text == "kept")
+        #expect(entry.standing == .failed(.refused))
         #expect(session.rows.first { $0.source.host == host }?.writing == .refused)
         #expect(session.writableSources.isEmpty)
         #expect(session.isSignedIn(host: host))
         #expect(surface(session, failed: host) == .composing, "the failure is not the empty notice")
-        #expect(surface(session) == .composing, "the draft alone keeps the editor")
     }
 
-    @Test("A 401 that signs out keeps the draft and the failure, not the empty notice")
+    @Test("A 401 that signs out keeps the text, and a refusal in hand is not the empty notice")
     func aSignOutOnWriteKeepsTheComposer() async throws {
         let (session, _, _) = try await shell(
             scopes: writing,
@@ -206,10 +216,10 @@ struct ComposeTests {
         )
         session.prepareCompose()
         session.composeDraft = "kept"
-        await #expect(throws: MastodonAuthError.signedOut) {
-            try await session.post()
-        }
-        #expect(session.composeDraft == "kept")
+        #expect(session.send())
+        await session.outbox.settled()
+        #expect(session.outbox.sendings.map(\.unsent.text) == ["kept"])
+        #expect(session.outbox.sendings.first?.standing == .failed(.refused))
         #expect(!session.isSignedIn(host: host))
         #expect(session.writableSources.isEmpty)
         #expect(surface(session, failed: host) == .composing)
@@ -219,18 +229,8 @@ struct ComposeTests {
         )
     }
 
-    @Test("Cancel is refused while a send is on the wire")
-    func cancelIsRefusedWhileSending() {
-        #expect(ComposerSheet.canDismiss(sending: false))
-        #expect(!ComposerSheet.canDismiss(sending: true))
-    }
-
-    @Test("A late success clears only the snapshot that was sent")
+    @Test("A draft typed after the press is untouched by the landing")
     func lateSuccessClearsOnlyTheSnapshot() async throws {
-        #expect(ComposerSheet.draftAfterLanding(current: "hello", sent: "hello").isEmpty)
-        #expect(ComposerSheet.draftAfterLanding(current: "hello\n", sent: "hello").isEmpty)
-        #expect(ComposerSheet.draftAfterLanding(current: "newer", sent: "hello") == "newer")
-
         let gate = Gate()
         let watchdog = hangGuard(gate)
         defer { watchdog.cancel() }
@@ -242,11 +242,11 @@ struct ComposeTests {
         )
         session.prepareCompose()
         session.composeDraft = "hello"
-        let task = Task { try await session.post() }
+        #expect(session.send())
         #expect(await spun { await server.paths.contains("/api/v1/statuses") })
         session.composeDraft = "newer"
         await gate.open()
-        try await task.value
+        await session.outbox.settled()
         #expect(session.composeDraft == "newer")
         #expect(session.notes.contains { $0.body == "hello" })
     }
@@ -260,8 +260,10 @@ struct ComposeTests {
         #expect(!session.canPost)
         #expect(ComposerSheet.remaining(session.composeDraft, limit: 500) == -1)
         #expect(ComposerSheet.limitLine(remaining: 499, limit: 500) == "499 / 500")
-        try await session.post()
+        #expect(!session.send())
+        await session.outbox.settled()
         #expect(await server.paths.isEmpty)
+        #expect(session.outbox.sendings.isEmpty)
         #expect(session.composeDraft.count == 501)
 
         session.composeDraft = "ok"

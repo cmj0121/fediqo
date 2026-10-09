@@ -125,7 +125,7 @@ struct BookmarkRowTests {
             ]
         )
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
 
         await session.toggle(.bookmark, on: try row(session))
         #expect(await server.paths == ["/api/v1/statuses/9/bookmark"])
@@ -133,6 +133,7 @@ struct BookmarkRowTests {
         #expect(try row(session).bookmarked == true)
         #expect(try row(session).favourited == true, "another mark moved")
         #expect(session.acts.standings.isEmpty, "nothing about the press is kept")
+        await session.saved()
         #expect(saved == 1)
 
         await session.toggle(.bookmark, on: try row(session))
@@ -257,7 +258,7 @@ struct BookmarkRowTests {
         let (session, _, _) = try await marked()
         #expect(Self.said(try row(session)) == [true, true, true])
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
 
         await session.signOut(host: host)
         await session.reloadFromStore()
@@ -265,6 +266,7 @@ struct BookmarkRowTests {
         #expect(Self.said(try row(session)) == [nil, nil, nil], "the next reader would be told what this one did")
         #expect(try row(session).kept, "what this device keeps is not the source's to take")
         #expect(await session.store.snapshot().notes.first?.bookmarked == nil, "and it rides no package")
+        await session.saved()
         #expect(saved >= 1)
     }
 
@@ -324,8 +326,8 @@ struct BookmarkRowTests {
         let (session, tokens, _) = try await marked()
         let file = try StoreFile(at: root)
         let saver = StoreSaver(store: session.store, file: file)
-        session.persist = { try? await saver.save() }
-        await session.persist?()
+        session.persist = { (try? await saver.save()) != nil }
+        _ = await session.persist?()
         #expect(try file.load().notes.first?.bookmarked == true)
         func packager(_ directory: URL, _ file: StoreFile?, _ store: ItemStore, _ suite: String) throws -> StorePackager {
             StorePackager(
@@ -340,6 +342,7 @@ struct BookmarkRowTests {
 
         // Signed out, and nothing else asked of the session before the store is taken away.
         await session.signOut(host: host)
+        await session.saved()
         #expect(try file.load().notes.first?.bookmarked == nil, "still on disk after the sign-out")
         await session.saveForCarry()
         try await packager(root, file, session.store, suite)
@@ -358,7 +361,7 @@ struct BookmarkRowTests {
     func endedThenSavedForCarry() async throws {
         let (session, tokens, _) = try await marked()
         var saved = 0
-        session.persist = { saved += 1 }
+        session.persist = { saved += 1; return true }
         try tokens.forget(host: host)
         session.mastodon.endedByServer(host: host)
 
@@ -434,8 +437,10 @@ struct BookmarkRowTests {
         session.persist = {
             let snapshot = await session.store.snapshot()
             try? await file.save(sources: snapshot.sources, notes: snapshot.notes)
+            return true
         }
         await session.toggle(.bookmark, on: try row(session))
+        await session.saved()
 
         let opened = StoreFile.open(at: dir)
         let (relaunched, _) = try await shell(
@@ -513,17 +518,17 @@ struct BookmarkRowTests {
         #expect(favourite.mark.look == .live)
     }
 
-    @Test("The mark fills when the source says it is bookmarked, changes shape on its way, and is named for what a press does")
+    @Test("The mark fills when the source says it is bookmarked and at the press before it answers, and is named for what a press does")
     func theMark() {
         #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: nil), on: false) == "bookmark")
         #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: nil), on: true) == "bookmark.fill")
-        #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: .onItsWay), on: true) != "bookmark.fill")
+        #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: .pressed(to: true)), on: true) == "bookmark.fill")
         #expect(ShellMark.drawn(ItemActs.glyph(.bookmark, standing: .failed), on: false) != "bookmark")
         #expect(ItemActs.spoken(.bookmark, done: false, standing: nil, language: .english) == "Bookmark")
         #expect(ItemActs.spoken(.bookmark, done: true, standing: nil, language: .english) == "Take the bookmark off")
         for language in [DummyLanguage.english, .taiwanese] {
             for done in [false, true] {
-                let said = ItemActs.spoken(.bookmark, done: done, standing: .onItsWay, language: language)
+                let said = ItemActs.spoken(.bookmark, done: done, standing: .pressed(to: done), language: language)
                 #expect(!said.contains("item.act."), "untranslated: \(said)")
             }
             let name = ItemActs.name(.bookmark, done: false, language: language)

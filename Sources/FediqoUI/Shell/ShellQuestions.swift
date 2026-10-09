@@ -106,6 +106,49 @@ enum ShellQuestion {
         )
     }
 
+    /// Discarding a text that waits to be sent (`ShellOutbox`). **A loss, and drawn as one**:
+    /// the words are deleted from this device and do not come back.
+    ///
+    /// **One that may have been posted is not said to be unsent.** Its question is about this
+    /// device's copy alone: forgetting it here takes nothing back from its source, where — if
+    /// it was posted — it stays, to be taken back from its own row.
+    static func discard(_ sending: ShellOutbox.Sending, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let kind = sending.unsent.answers == nil ? "post" : "answer"
+        let maybe = sending.standing == .unconfirmed
+        let opening = OutboxWords.opening(sending.unsent.text)
+        return ShellConfirmation(
+            symbol: "trash",
+            title: L10n.t("outbox.discard.title\(maybe ? ".unconfirmed" : "").\(kind)", language: language),
+            line: maybe
+                ? String(format: L10n.t("outbox.discard.line.unconfirmed", language: language), sending.unsent.host)
+                : String(format: L10n.t("outbox.discard.line", language: language), opening),
+            help: maybe ? String(format: L10n.t("outbox.discard.detail.unconfirmed", language: language), opening) : nil,
+            choices: [.init(
+                yes, L10n.t(maybe ? "outbox.discard.confirm.unconfirmed" : "outbox.discard", language: language),
+                role: .destructive
+            )],
+            cancel: L10n.t("compose.cancel", language: language)
+        )
+    }
+
+    /// Before a text that may have been posted is sent all the same: said plainly that it may
+    /// then be posted twice, and where to look first. `changed` is the person having typed
+    /// over it: what goes is then a new post, and the first — if it was posted — stays.
+    static func resend(
+        _ sending: ShellOutbox.Sending, changed: Bool, language: DummyLanguage? = nil
+    ) -> ShellConfirmation {
+        let kind = sending.unsent.answers == nil ? "post" : "answer"
+        let host = sending.unsent.host
+        return ShellConfirmation(
+            symbol: "questionmark.circle",
+            title: L10n.t("outbox.resend.title.\(kind)", language: language),
+            line: String(format: L10n.t(changed ? "outbox.resend.line.changed" : "outbox.resend.line", language: language), host),
+            help: String(format: L10n.t("outbox.resend.detail", language: language), host),
+            choices: [.init(yes, L10n.t("outbox.resend.confirm", language: language), role: .destructive)],
+            cancel: L10n.t("compose.cancel", language: language)
+        )
+    }
+
     /// Removing a source. The line says what will happen to its posts — they go, or they stay
     /// as the reader chose on Preferences (#250, `postsStay`) — and the boards it takes do not
     /// come back, so where there are any the line names them too; the (?) says the rest.
@@ -114,8 +157,12 @@ enum ShellQuestion {
     /// itself says how many stay for that — a line of its own, so the count is read before the
     /// yes — and the (?) says the rest as before. Where they all stay it says nothing of them:
     /// none goes.
+    ///
+    /// `unsent` is how many texts wait to be sent to it (`ShellOutbox`): they are deleted with
+    /// it, and the question says how many — on the line where the line can take it.
     static func remove(
-        host: String, boards: Int, postsStay: Bool = false, kept: Int = 0, language: DummyLanguage? = nil
+        host: String, boards: Int, postsStay: Bool = false, kept: Int = 0, unsent: Int = 0,
+        language: DummyLanguage? = nil
     ) -> ShellConfirmation {
         let stay = postsStay ? ".stay" : ""
         // Only the boards keys carry a count to format; the rest are said as written.
@@ -135,6 +182,10 @@ enum ShellQuestion {
                 ? String(format: L10n.t("account.remove.detail.boards.counted", language: language), boards)
                 : L10n.t("account.remove.detail.counted", language: language)
         }
+        (line, help) = saying(
+            unsent > 0 ? L10n.count("question.unsent.go", unsent, language: language) : nil,
+            line: line, help: help, language: language
+        )
         return ShellConfirmation(
             symbol: "trash", title: String(format: L10n.t("account.remove.title", language: language), host),
             line: line, help: help,
@@ -186,11 +237,18 @@ enum ShellQuestion {
     /// Reading, or reading and writing, on a source being signed in to. Neither is a loss, and
     /// neither is lit: the narrower comes first and is the one a key answers (⌘Return), so the
     /// answer given without looking is the one that grants the least.
-    static func signIn(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+    ///
+    /// `notices` where this sign-in carries the notices the one held has
+    /// (`MastodonSessions.carriesNotices`): the source's page then asks to read them, and to
+    /// dismiss them where acting is chosen, and **everything the page will ask is said before
+    /// it opens** (#283) — in the words the notices question's own choice has.
+    static func signIn(host: String, notices: Bool = false, language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellConfirmation(
             symbol: "key", title: String(format: L10n.t("account.signin.ask.title", language: language), host),
-            line: L10n.t("account.signin.ask.line", language: language),
-            help: L10n.t("account.signin.ask.detail", language: language),
+            line: L10n.t(notices ? "notices.ask.choose.line" : "account.signin.ask.line", language: language),
+            help: notices
+                ? String(format: L10n.t("notices.ask.signin.detail", language: language), host)
+                : L10n.t("account.signin.ask.detail", language: language),
             choices: [
                 .init(signInRead, L10n.t("account.signin.ask.read", language: language), role: .keyed),
                 .init(signInWrite, L10n.t("account.signin.ask.write", language: language), role: .plain),
@@ -230,13 +288,130 @@ enum ShellQuestion {
     /// Bookmarks, asked of a sign-in that already reads and acts (#285). Not a loss: what the
     /// sign-in does today it goes on doing, and the source's own page asks again before anything
     /// is granted. The line says what the page will ask for, bookmarks among it.
-    static func bookmarks(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
-        ShellConfirmation(
+    ///
+    /// `notices` where that sign-in carries notices: the page asks to read and to dismiss them
+    /// with the rest, and the question says so in the words the notices question has for a
+    /// sign-in that acts and lacks bookmarks — the same page, asked for from the other side.
+    static func bookmarks(host: String, notices: Bool = false, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let key = notices ? "notices.ask.actsBookmarks" : "item.bookmark.ask"
+        return ShellConfirmation(
             symbol: "bookmark",
             title: String(format: L10n.t("item.bookmark.ask.title", language: language), host),
-            line: L10n.t("item.bookmark.ask.line", language: language),
-            help: String(format: L10n.t("item.bookmark.ask.detail", language: language), host),
+            line: L10n.t(key + ".line", language: language),
+            help: String(format: L10n.t(key + ".detail", language: language), host),
             choices: [.init(yes, L10n.t("item.bookmark.ask.confirm", language: language), role: .keyed)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Notices, asked of a sign-in already held (#323), **naming what the source's own page is
+    /// about to ask for before it opens**: reading notices, and dismissing them too where that
+    /// sign-in acts. Not a loss: the sign-in goes on as it is whatever happens on the page.
+    ///
+    /// A sign-in made before any was asked what it may do (`unasked`) has never chosen between
+    /// reading and acting, and asking it for notices alone would write that choice down for
+    /// it: its question is the read-or-act one (`signIn`), with notices in both answers.
+    ///
+    /// **Everything the page will ask is said** (#283). A sign-in that acts is asked for
+    /// bookmarks with the rest; where it was made before bookmarks were asked for (`bookmarks`,
+    /// #285) that is one thing more than it holds, and the question names it as #285's own does.
+    static func notices(
+        host: String, grant: MastodonGrant?, bookmarks: Bool = false, language: DummyLanguage? = nil
+    ) -> ShellConfirmation {
+        let title = String(format: L10n.t("notices.ask.title", language: language), host)
+        let cancel = L10n.t("board.choose.cancel", language: language)
+        guard grant == .unasked else {
+            let key = grant != .writing ? "notices.ask.reads" : bookmarks ? "notices.ask.actsBookmarks" : "notices.ask.acts"
+            return ShellConfirmation(
+                symbol: "bell", title: title, line: L10n.t(key + ".line", language: language),
+                help: String(format: L10n.t(key + ".detail", language: language), host),
+                choices: [.init(yes, L10n.t("item.bookmark.ask.confirm", language: language), role: .keyed)],
+                cancel: cancel
+            )
+        }
+        return ShellConfirmation(
+            symbol: "bell", title: title, line: L10n.t("notices.ask.choose.line", language: language),
+            help: String(format: L10n.t("notices.ask.choose.detail", language: language), host),
+            choices: [
+                .init(signInRead, L10n.t("notices.ask.choose.read", language: language), role: .keyed),
+                .init(signInWrite, L10n.t("notices.ask.choose.write", language: language), role: .plain),
+            ],
+            cancel: cancel
+        )
+    }
+
+    /// What an answer to the notices question says of acting: read or act, where the question
+    /// was that choice, and nothing where it was the one yes of a sign-in that keeps its part.
+    static func noticesChose(_ id: String) -> Bool? {
+        switch id {
+        case signInRead: false
+        case signInWrite: true
+        default: nil
+        }
+    }
+
+    /// Dismissing one line of the notices page at its source (#323). **A loss**: it goes
+    /// there, and so in every other app the person reads that source with, and does not come
+    /// back. A line the source gathered says how many notices go with it.
+    static func dismiss(_ notice: Notice, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let host = notice.source.host
+        let many = notice.count > 1
+        return ShellConfirmation(
+            symbol: NoticeActs.dismissSymbol,
+            title: many
+                ? counted("notices.dismiss.title.gathered", notice.count, host, language: language)
+                : String(format: L10n.t("notices.dismiss.title", language: language), host),
+            line: L10n.t(many ? "notices.dismiss.line.gathered" : "notices.dismiss.line", language: language),
+            help: nil,
+            choices: [.init(yes, L10n.t("notices.dismiss", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Dismissing every notice one source has (#323). **A loss, and a wider one than the page
+    /// shows**: the source takes away the ones not read on to and the kinds left out as well,
+    /// which the line says before the yes. Other sources are left alone, and the (?) says so.
+    static func dismissAll(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: NoticeActs.dismissSymbol,
+            title: String(format: L10n.t("notices.dismissAll.title", language: language), host),
+            line: L10n.t("notices.dismissAll.line", language: language),
+            help: String(format: L10n.t("notices.dismissAll.detail", language: language), host),
+            choices: [.init(yes, L10n.t("notices.dismissAll.confirm", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Letting one person's held-back notices through (#323). **Asked first, and not drawn as
+    /// a loss**: nothing is taken away, but the source also stops holding back what that person
+    /// sends from then on, and nothing Fediqo can ask of it takes that back — so it is not done
+    /// on one press. Keyed, as Clear's yes is.
+    ///
+    /// **Who is named by their handle** (`NoticeWords.named`), here and in letting go: the
+    /// question is whose notices, and a name is whatever its owner typed.
+    static func letThrough(_ request: NoticeRequest, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let name = NoticeWords.named(request.person, language: language), host = request.source.host
+        return ShellConfirmation(
+            symbol: NoticeActs.throughSymbol,
+            title: String(format: L10n.t("notices.held.through.title", language: language), name, host),
+            line: L10n.t("notices.held.through.line", language: language),
+            help: String(format: L10n.t("notices.held.through.detail", language: language), name, host),
+            choices: [.init(yes, L10n.t("notices.held.through", language: language), role: .keyed)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Letting go of one person's notices a source is holding back (#323). **A loss**: they
+    /// are dismissed there without having been shown.
+    static func letGo(_ request: NoticeRequest, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: NoticeActs.dismissSymbol,
+            title: String(
+                format: L10n.t("notices.held.go.title", language: language),
+                NoticeWords.named(request.person, language: language), request.source.host
+            ),
+            line: L10n.t("notices.held.go.line", language: language), help: nil,
+            choices: [.init(yes, L10n.t("notices.held.go", language: language), role: .destructive)],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
     }
@@ -589,7 +764,7 @@ enum ShellQuestion {
 
     /// A count and a name in one sentence, singular where the count is one and the language has
     /// it (`L10n.count`'s rule): the count is `%1$d` and the name `%2$@`.
-    static func counted(_ key: String, _ count: Int, _ name: String, language: DummyLanguage? = nil) -> String {
+    nonisolated static func counted(_ key: String, _ count: Int, _ name: String, language: DummyLanguage? = nil) -> String {
         let one = key + ".one"
         let singular = count == 1 ? L10n.t(one, language: language) : one
         return String(format: singular == one ? L10n.t(key, language: language) : singular, count, name)

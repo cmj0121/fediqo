@@ -93,7 +93,9 @@ final class ShellRefs {
         guard session.startsLoads else { return }
         listen(in: session)
         readAsYou.formUnion(session.mastodon.signedInHosts)
-        let held = Set(session.notes.map(\.key))
+        // A row whose taking back is pressed is left out of `notes` and is held all the same:
+        // what was asked for it is not taken back unless the post really goes.
+        let held = Set(session.notes.map(\.key)).union(session.acts.leaving.compactMap(NoteKey.init(rowID:)))
         for (host, posts) in asking {
             for (statusID, one) in posts where one.owed.allSatisfy({ !held.contains($0.item) }) {
                 if await session.loads.withdraw(host: host, id: statusID) { asking[host]?[statusID] = nil }
@@ -251,7 +253,7 @@ final class ShellRefs {
         case .notTaken, .letGo, .withdrawn:
             return
         }
-        await session.persist?()
+        session.saveSoon()
     }
 
     /// Other reads' word reaches the pacer from the one place answers are seen.

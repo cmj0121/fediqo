@@ -230,9 +230,26 @@ final class ShellConversations {
     /// The pane draws these rows and the root walks them with `j`, `k` and `Return`; a list the
     /// keys walked that was not the list on screen would put the lamp on a post the reader
     /// cannot see. One function, so the two cannot come apart.
+    ///
+    /// **Less every post whose taking back is pressed and not yet answered** (`leaving`): it is
+    /// left out of what is drawn here as it is out of the timeline, and what is held of the
+    /// thread is not touched — so a failure draws it again where it was.
     func conversation(around item: DummyItem) -> DummyConversation {
-        views[item.id].map { .opened(item, $0) } ?? item.dummyConversation()
+        guard var view = views[item.id] else { return item.dummyConversation() }
+        let leaving = acts?.leaving ?? []
+        if !leaving.isEmpty {
+            let stays = { (note: Note) in !leaving.contains(note.key.rowID) }
+            view.beyond = view.beyond.filter(stays)
+            view.above = view.above.filter(stays)
+            view.below = view.below.filter(stays)
+            view.quoting = view.quoting.filter(stays)
+        }
+        return .opened(item, view)
     }
+
+    /// The session's acts, for the rows a taking back has out (`ShellActs.leaving`). Set by the
+    /// session that holds both; nothing where a thread is drawn with no session behind it.
+    @ObservationIgnored weak var acts: ShellActs?
 
     /// What is drawn around `item` laid again from what the store holds now. Nothing asked of
     /// any source. A post this device does not hold — one a thread read brought that is older
@@ -775,7 +792,7 @@ final class ShellConversations {
         guard !notes.isEmpty else { return Landed(changed: false, copies: [:]) }
         await session.store.ingest(notes, ifSourceHere: host)
         let changed = await session.store.refresh(notes, ifSourceHere: host)
-        await session.persist?()
+        session.saveSoon()
         return Landed(changed: changed, copies: await session.store.notes(notes.map(\.key)))
     }
 

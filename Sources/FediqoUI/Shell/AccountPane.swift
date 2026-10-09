@@ -132,8 +132,8 @@ struct AccountPane: View {
             // **Reading first and the wider answer second**, which is `previewActions`' rule on
             // this page: the narrower act is never the one a reader reaches by reflex. Neither is
             // a loss; what each half buys is a sentence, behind the question's (?).
-            .modifier(SignInChoiceQuestion(session: session) { host, writing in
-                Task { await chose(host: host, writing: writing) }
+            .modifier(SignInChoiceQuestion(session: session) { ask, writing in
+                Task { await chose(host: ask.host, writing: writing, noticesSaid: ask.notices) }
             })
             // The key pressed while signed in: the question, and only its yes signs out.
             .modifier(SignOutQuestion(session: session, signOut: signOutAnswered))
@@ -795,11 +795,13 @@ struct AccountPane: View {
     /// `ShellSession.signIn(host:through:writing:)` answering it with a page fixture; what nothing
     /// verifies is that this method hands the reader's own answer to that call. Named here rather
     /// than left to be discovered.
-    func chose(host: String, writing: Bool) async {
-        session.signInChoice = nil
+    ///
+    /// `noticesSaid` is what the question said of notices, handed over with its answer.
+    func chose(host: String, writing: Bool, noticesSaid: Bool? = nil) async {
+        session.putDownSignInChoice()
         await session.signIn(
             host: host, through: WebAuthBrowser(session: webAuthenticationSession),
-            writing: writing
+            writing: writing, noticesSaid: noticesSaid
         )
     }
 
@@ -890,15 +892,19 @@ private struct SignOutQuestion: ViewModifier {
 /// page's chain gains one plain call and no presenter closure of its own.
 private struct SignInChoiceQuestion: ViewModifier {
     let session: ShellSession
-    let chose: @MainActor (String, Bool) -> Void
+    let chose: @MainActor (SignInAsked, Bool) -> Void
 
     func body(content: Content) -> some View {
-        content.shellConfirm(asked, question: { ShellQuestion.signIn(host: $0) }) { host, id in
-            chose(host, id == ShellQuestion.signInWrite)
+        content.shellConfirm(asked, question: question) { ask, id in
+            chose(ask, id == ShellQuestion.signInWrite)
         }
     }
 
-    private var asked: Binding<String?> {
-        Binding(get: { session.signInChoice }, set: { if $0 == nil { session.signInChoice = nil } })
+    private func question(_ ask: SignInAsked) -> ShellConfirmation {
+        session.signInQuestion(host: ask.host)
+    }
+
+    private var asked: Binding<SignInAsked?> {
+        Binding(get: { session.signInChoice.map(session.signInAsked) }, set: { if $0 == nil { session.putDownSignInChoice() } })
     }
 }
