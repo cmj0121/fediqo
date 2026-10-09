@@ -18,10 +18,17 @@ cd "$(dirname "$0")/.."
 
 # Pin to Package.resolved when there is one, so a run never quietly
 # resolves a newer dependency. A dummy with no packages has no file.
+#
+# One test at a time. A runner builds every test target into one process, and with a few
+# thousand tests started together -- most of them bound to the one main actor -- each step of
+# a test waits behind every other test's. The tests that guard against a hang by the clock
+# (fifty seconds, a minute) then ran out of it without anything being wrong: forty-five
+# failed that way on a run where nothing else did. Taken one at a time they have the machine
+# to themselves, and the run is a minute longer. `make test` on a desk stays as it was.
 if [ -f Package.resolved ]; then
-    swift test --enable-code-coverage --only-use-versions-from-resolved-file
+    swift test --no-parallel --enable-code-coverage --only-use-versions-from-resolved-file
 else
-    swift test --enable-code-coverage
+    swift test --no-parallel --enable-code-coverage
 fi
 
 BIN_PATH="$(swift build --show-bin-path)"
