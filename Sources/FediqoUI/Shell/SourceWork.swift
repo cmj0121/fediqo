@@ -58,6 +58,8 @@ final class SourceWork {
         case signOut
         case write
         case search
+        /// What happened to the reader, read from a source they are signed in to (#323).
+        case notices
         /// A post another post refers to — what it answers, quotes or reblogs — read because the
         /// post that refers to it arrived, and nobody pressed anything (#293). Paced
         /// (`LoadPacer`), and listed like every other read so the record shows each one.
@@ -94,7 +96,7 @@ final class SourceWork {
         /// Everything else reaches wherever a post, a page or a directory points.
         var isOfTheSource: Bool {
             switch self {
-            case .timeline, .conversation, .lists, .search, .write, .reference, .signInCheck: true
+            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
                  .nearbyMove:

@@ -1,0 +1,18 @@
+# The stock rules, and one thing they take for a key that is not one.
+[extend]
+useDefault = true
+
+# A Mastodon source names a gathered line of notices `group_key`: its kind, the post's id and a
+# stretch of hours — "favourite-117402373970258685-497616". It is in what the server answers, so
+# it is in the answers the tests are written against (#323). Nothing else has this shape.
+#
+# **Only in the tests that hold those answers** — both must be so, the shape and the file: the
+# same shape anywhere else is looked at by the stock rules, as everything is.
+[[allowlists]]
+description = "a Mastodon notice's group key: kind, post id, hour stretch"
+condition = "AND"
+paths = [
+    '''^Tests/FediqoCoreTests/MastodonNotice[A-Za-z]*\.swift$''',
+    '''^Tests/FediqoUITests/Notice[A-Za-z]*\.swift$''',
+]
+regexes = ['''^[a-z_.]+-\d+-\d+$''']
