@@ -27,6 +27,9 @@ final class ShellHostsKnown {
     /// The document asks on the wire, by host, and the number each host's answer is awaited by.
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var awaits: [String: Int] = [:]
+    /// How many times each host has been asked afresh this run: what tells an answer asked for
+    /// before the last of them from one asked for since.
+    @ObservationIgnored private var rounds: [String: Int] = [:]
     @ObservationIgnored private let errands: PageErrands
     /// How long the document may take. A test shortens it.
     @ObservationIgnored var deadline: Duration = .seconds(30)
@@ -48,8 +51,19 @@ final class ShellHostsKnown {
 
     /// The address of `thing` answered that `host` has no such address: it is not there for
     /// the rest of the run, or until the host is asked afresh.
-    func notFound(_ thing: MastodonHostThing, at host: String) {
+    ///
+    /// **Only where the ask that heard it was begun since the host was last asked afresh**:
+    /// `round` is what `round(at:)` said when that ask started. A not-found that comes late —
+    /// asked for before the person asked again, answered after — is written down nowhere.
+    func notFound(_ thing: MastodonHostThing, at host: String, round: Int) {
+        guard round == self.round(at: host) else { return }
         known.notFound(thing, at: host)
+    }
+
+    /// Which asking-afresh of `host` this is: taken as an ask of one of its addresses starts,
+    /// and handed back with what that ask heard (`notFound`).
+    func round(at host: String) -> Int {
+        rounds[Self.key(host), default: 0]
     }
 
     /// Everything known of `host` let go, and its document owed again. A document already
@@ -60,6 +74,7 @@ final class ShellHostsKnown {
         asks[key] = nil
         awaits[key] = nil
         came.remove(key)
+        rounds[key, default: 0] += 1
         known.askAfresh(host)
     }
 

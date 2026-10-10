@@ -226,6 +226,7 @@ struct TimelinePane: View {
                         onOpen: onOpenListed,
                         onAskAgain: { Task { await people.lists.again(list, in: session) } },
                         onReadOn: { Task { await people.lists.readOn(list, in: session) } },
+                        onChoose: { choice in Task { await people.lists.choose(choice, for: list, in: session) } },
                         jumpToTop: jumpToTop,
                         onBack: onBack
                     )

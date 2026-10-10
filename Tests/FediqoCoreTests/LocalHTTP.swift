@@ -152,6 +152,9 @@ enum LocalServers {
             /// Two of `elsewhere.example`, the second holding its lists hidden.
             let far: Named
             let farHidden: Named
+            /// The five followers of `person`, in the order the seed made them. With `person` and
+            /// `far` they are who the seed lists in the directory (#315).
+            let fans: [Named]
             /// What `person` wrote that anyone is given, oldest first: five posts, one in public,
             /// an answer to the first, and a boost.
             let posts: [String]

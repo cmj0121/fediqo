@@ -94,9 +94,10 @@ struct MastodonHostSaysTests {
             let answer = try await ask(path)
             #expect(answer.status == 200 && !answer.ofTheAddress, "\(thing): \(answer.status)")
         }
-        // The directory is empty on a new server. What is rising was too — exactly as it is
-        // switched off — until the seed made a hashtag and a link rise (#320).
-        #expect(try await ask("/api/v1/directory").body == Data("[]".utf8))
+        // The directory was empty on a new server until the seed listed a few people in it
+        // (#315). What is rising was too — exactly as it is switched off — until the seed made
+        // a hashtag and a link rise (#320).
+        #expect(((try await ask("/api/v1/directory").json as? [Any])?.count ?? 0) > 0, "the people the seed listed")
         for thing in [MastodonHostThing.risingTags, .risingLinks] {
             let path = try #require(open.first { $0.0 == thing }?.1)
             #expect((try await ask(path).json as? [Any])?.count == 1, "\(thing): what the seed made rise")

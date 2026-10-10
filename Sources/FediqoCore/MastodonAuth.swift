@@ -506,6 +506,17 @@ public struct MastodonAuthorized: Sendable {
     }
 
     /// A form POST through the same door: the token, the 401 rule, and never off this host.
+    /// As `get`, with a not-found of the address told from every other refusal: throws
+    /// `MastodonHostMoreError.noSuchAddress` where the host says it has no such address
+    /// (`MastodonHostNotFound`) — which is a word about the host, and nothing about the sign-in.
+    public func getAtAddress(path: String, query: [URLQueryItem] = []) async throws -> Data {
+        let result = try await send(path: path, query: query)
+        if MastodonHostNotFound.isOfTheAddress(status: result.status, body: result.body) {
+            throw MastodonHostMoreError.noSuchAddress
+        }
+        return try await finish(result, path: path)
+    }
+
     public func post(path: String, form: [(String, String)]) async throws -> Data {
         try await post(path: path, form: form, headers: [:])
     }

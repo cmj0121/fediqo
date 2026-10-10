@@ -109,6 +109,19 @@ struct SourceReach {
         MastodonPeople(http: wire(small(), for: purpose, within: limit), host: host)
     }
 
+    /// A source's directory of people (#315), as the reader, through `door`: the source then
+    /// leaves out the people they block or mute.
+    func directory(_ door: MastodonAuthorized) -> MastodonDirectory {
+        MastodonDirectory(door: door)
+    }
+
+    /// A source's directory of people (#315), with no token: anyone is given it. Listed as
+    /// `purpose`, ended within `limit`, under the small body's ceiling — put on the plain client
+    /// before it is listed and bounded — and of that host alone.
+    func unsignedDirectory(_ host: String, for purpose: SourceWork.Purpose, within limit: Duration) -> MastodonDirectory {
+        MastodonDirectory(http: wire(Self.smallAtItsHost(http), for: purpose, within: limit), host: host)
+    }
+
     /// How much body an ask known to be small may bring: what the signed-in door takes.
     static let smallBody = 1 << 20
 

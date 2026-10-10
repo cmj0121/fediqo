@@ -412,7 +412,7 @@ public struct FediqoRootView: View {
             // device is the preview sitting on screen while the session says boards. `JoinSheet`
             // reads `session.stage` inside its own body and switches there, which is a redraw.
             .sheet(isPresented: stagePresented) {
-                JoinSheet(session: session, onOwnPage: ownPageOpener, more: people.more)
+                JoinSheet(session: session, onOwnPage: ownPageOpener, onDirectory: directoryOpener, more: people.more)
             }
             // The timeline editor (#27), on the root beside the other presenters for their reason.
             // Dismissed by any route it is Cancel: the draft is dropped (Decision 21).
@@ -1856,12 +1856,25 @@ public struct FediqoRootView: View {
     /// lamp to hand back, and leaving the step comes back to the place pressed. On the timeline
     /// place it is a face pressed, and nothing more.
     private func openOwnPage(_ me: DummyPerson) {
+        setOut(to: .person(me))
+    }
+
+    /// "Its directory of people" on a source's page (#315): the directory, set out to as the
+    /// reader's own page is.
+    private var directoryOpener: ((PeopleList) -> Void)? {
+        guard availability.allows(.timeline) else { return nil }
+        return { list in setOut(to: .people(list)) }
+    }
+
+    /// One step taken from a source's page or from Account: on the timeline place a step like
+    /// any other, keeping the lamp to hand back; from another place an errand (`PlaceErrand`).
+    private func setOut(to step: ShellStep) {
         guard place != .timeline else {
-            _ = openPerson(me)
+            if Self.canWalk(place: place, open: openLayers) { _ = walk.walk(to: step, from: selectedItemID) }
             return
         }
         guard availability.allows(.timeline) else { return }
-        errand = PlaceErrand.setOut(to: .person(me), from: place, on: &walk, lamp: selectedItemID)
+        errand = PlaceErrand.setOut(to: step, from: place, on: &walk, lamp: selectedItemID)
         place = .timeline
     }
 

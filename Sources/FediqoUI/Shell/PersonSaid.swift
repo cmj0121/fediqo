@@ -203,7 +203,7 @@ struct PersonSaid: Equatable {
     static func counts(of person: Person, language: DummyLanguage? = nil) -> [Count] {
         let said = counts(of: Person.Tally(posts: person.tally.posts), language: language).map { Count(words: $0) }
         if person.suspended { return said }
-        return said + PeopleList.Which.allCases.map { which in
+        return said + PeopleList.Which.ofSomebody.map { which in
             let list = PeopleList(which, of: person)
             let key = "person.count.\(which.rawValue)"
             let words = list.counted.map { figure(key, $0, language: language) } ?? L10n.t(key + ".unsaid", language: language)

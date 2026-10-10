@@ -279,12 +279,13 @@ final class ShellRising {
         pages[key]?.awaits = errand
         pages[key]?.asking = true
         let through = reaching?(host) ?? session.reach.unsignedRising(host, for: .rising, within: deadline)
-        let task = Task { await self.ask(which, at: host, of: through, errand: errand) }
+        let round = hosts.round(at: host)
+        let task = Task { await self.ask(which, at: host, of: through, errand: errand, round: round) }
         asks[key] = task
         return task
     }
 
-    private func ask(_ which: RisingWhich, at host: String, of through: MastodonRising, errand: Int) async {
+    private func ask(_ which: RisingWhich, at host: String, of through: MastodonRising, errand: Int, round: Int) async {
         let key = Self.key(which, host)
         defer { if pages[key]?.awaits == errand { asks[key] = nil } }
         do {
@@ -300,7 +301,7 @@ final class ShellRising {
             guard pages[key]?.awaits == errand else { return }
             if (error as? MastodonHostMoreError) == .noSuchAddress {
                 // The host's own word that the address is not there: no band, for the run.
-                hosts.notFound(which.thing, at: host)
+                hosts.notFound(which.thing, at: host, round: round)
             } else if Cancellation.happened(error) {
                 // Stopped before it answered: what was said before stands, and nothing is.
                 if pages[key]?.reading == .asking { pages[key]?.reading = .stopped }

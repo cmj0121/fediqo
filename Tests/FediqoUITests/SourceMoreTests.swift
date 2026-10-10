@@ -111,7 +111,7 @@ struct SourceMoreTests {
         #expect(more.said(at: Self.host, in: session)?.weeks == nil && more.said(at: Self.host, in: session)?.servers == .waiting)
         await more.servers(Self.host, in: session)
         let said = try #require(more.said(at: Self.host, in: session))
-        #expect(said.servers == nil && said.account == Self.whole.account && !said.askingServers && !said.isAbsent)
+        #expect(said.servers == nil && said.account == Self.whole.account && !said.askingServers && !said.isAbsent(opensDirectory: false))
         #expect(more.hosts.has(.knownServers, at: Self.host) == .absent && more.hosts.has(.longerAccount, at: Self.host) == .unsaid)
         await more.servers(Self.host, in: session)
         await more.opened(Self.host, in: session)
@@ -134,7 +134,7 @@ struct SourceMoreTests {
         let nothing = ShellPersonPages().more
         await nothing.opened(Self.host, in: bare)
         await nothing.servers(Self.host, in: bare)
-        #expect(nothing.said(at: Self.host, in: bare)?.isAbsent == true)
+        #expect(nothing.said(at: Self.host, in: bare)?.isAbsent(opensDirectory: false) == true)
         #expect(SourceMoreSaid.offersNone(Self.host, language: .english) == "m.example offers none of these here.")
         await none.answer(Self.account, Self.served()[Self.account])
         await nothing.again(Self.host, in: bare)
@@ -291,7 +291,7 @@ struct SourceMoreTests {
         await server.hold(Self.document)
         let late = Task { await hosts.hear(Self.host, in: session) }
         await server.arrival(of: Self.document, times: 3)
-        hosts.notFound(.activity, at: Self.host)
+        hosts.notFound(.activity, at: Self.host, round: hosts.round(at: Self.host))
         hosts.askAfresh(Self.host)
         #expect(hosts.has(.activity, at: Self.host) == .unsaid)
         await server.release(Self.document)
@@ -406,7 +406,7 @@ struct SourceMoreTests {
             guard line.hasPrefix("\"source.more.") || line.hasPrefix("\"work.purpose.serverSays\"") else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 34 && keys.contains("source.more.servers.kept") && keys.contains("work.purpose.serverSays"))
+        #expect(keys.count == 36 && keys.contains("source.more.servers.kept") && keys.contains("work.purpose.serverSays"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }

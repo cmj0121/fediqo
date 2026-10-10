@@ -17,6 +17,8 @@ struct PeopleSaid: Equatable {
         case said
         /// The source refused, failed, or sent what could not be read.
         case failed
+        /// The source says it has no such list at all: its directory's address is not there.
+        case absent
     }
 
     /// What stands under the rows.
@@ -31,6 +33,8 @@ struct PeopleSaid: Equatable {
         case failed
         /// The source stopped handing the list on in order. It ends here, and no press asks again.
         case stopped
+        /// A directory read as far as one is read here: the source may have more, and none is asked for.
+        case farthest
 
         var presses: Bool { self == .more || self == .failed }
     }
@@ -49,6 +53,9 @@ struct PeopleSaid: Equatable {
     /// Whether the list is being asked from the top.
     var asking = false
     var foot: Foot?
+    /// How a directory is asked for — its order, and whether only the people who live there —
+    /// or nothing where the list is somebody's, which has no such choice.
+    var sorting: DirectoryChoice?
 
     /// The host of the source that says.
     var source: String { list.host }
@@ -58,8 +65,42 @@ struct PeopleSaid: Equatable {
     /// Whose list it is, in the page's head. **Their handle is a stranger's word set in a
     /// sentence of ours**, and is the one made fit for a line.
     static func title(_ list: PeopleList, language: DummyLanguage? = nil) -> String {
-        String(format: L10n.t("people.title.\(list.which.rawValue)", language: language), list.lineHandle)
+        String(
+            format: L10n.t("people.title.\(list.which.rawValue)", language: language),
+            list.isDirectory ? list.host : list.lineHandle
+        )
     }
+
+    /// What an order of a directory is called, in the control that chooses it.
+    static func orderName(_ order: DirectoryOrder, language: DummyLanguage? = nil) -> String {
+        L10n.t("people.directory.order.\(order.rawValue)", language: language)
+    }
+
+    /// What the choice of only the people who live at the source is called.
+    static func localName(_ source: String, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("people.directory.local", language: language), source)
+    }
+
+    /// How a directory is being read, as one sentence under its title — where a list of
+    /// somebody's says what its source counts.
+    static func sortingLine(_ choice: DirectoryChoice, source: String, language: DummyLanguage? = nil) -> String {
+        let key = "people.directory.line.\(choice.order.rawValue)" + (choice.localOnly ? ".local" : "")
+        return String(format: L10n.t(key, language: language), source)
+    }
+
+    /// The order the other of the two would be, and the choice with the people who live
+    /// elsewhere let in or kept out: what the control's presses choose.
+    static func choosing(_ order: DirectoryOrder, from choice: DirectoryChoice) -> DirectoryChoice {
+        DirectoryChoice(order: order, localOnly: choice.localOnly)
+    }
+
+    static func choosing(localOnly: Bool, from choice: DirectoryChoice) -> DirectoryChoice {
+        DirectoryChoice(order: choice.order, localOnly: localOnly)
+    }
+
+    /// Whether the control that chooses how a directory is read takes a press: there is a
+    /// directory, and it is not being asked from the top.
+    var choosesSorting: Bool { sorting != nil && reading != .absent && !asking }
 
     /// What the source counts in the list, where it said: its figure, said as its figure.
     static func counts(_ list: PeopleList, language: DummyLanguage? = nil) -> String? {
@@ -71,15 +112,18 @@ struct PeopleSaid: Equatable {
     /// What is said above the rows: that the list is being asked for, that it could not be —
     /// or, once the source has given it, what asking again came to.
     func stateLine(language: DummyLanguage? = nil) -> String? {
-        switch reading {
-        case .asking: String(format: L10n.t("people.asking", language: language), source)
-        case .failed: String(format: L10n.t("people.failed", language: language), source)
+        let asked = list.isDirectory ? "people.directory" : "people"
+        return switch reading {
+        case .asking: String(format: L10n.t("\(asked).asking", language: language), source)
+        case .failed: String(format: L10n.t("\(asked).failed", language: language), source)
+        case .absent: String(format: L10n.t("people.directory.absent", language: language), source)
         case .said: againFailed ? String(format: L10n.t("people.again.failed", language: language), source) : nil
         }
     }
 
-    /// Whether the line above the rows offers the press that asks again.
-    var offersAgain: Bool { reading == .failed || againFailed }
+    /// Whether the line above the rows offers the press that asks again. Beside a directory
+    /// the source says it has not, too: nothing stays absent until the app is quit.
+    var offersAgain: Bool { reading == .failed || reading == .absent || againFailed }
 
     /// How many the source counts beyond who it gave, where the list has ended short of its
     /// own figure — or nothing where it has not ended, said no figure, or gave as many.
@@ -95,6 +139,7 @@ struct PeopleSaid: Equatable {
         case .end: short == nil ? "checkmark.circle" : "circle.dotted"
         case .failed: "exclamationmark.arrow.circlepath"
         case .stopped: "exclamationmark.circle"
+        case .farthest: "circle.dotted"
         }
     }
 
@@ -107,6 +152,11 @@ struct PeopleSaid: Equatable {
         case .reading: return L10n.t("people.foot.reading", language: language)
         case .failed: return String(format: L10n.t("people.foot.failed", language: language), source)
         case .stopped: return String(format: L10n.t("people.foot.stopped", language: language), source)
+        case .farthest:
+            return String(
+                format: L10n.t("people.directory.foot.farthest", language: language),
+                L10n.grouped(people.count, language: language), source
+            )
         case .end:
             guard short != nil, let counted = list.counted else {
                 return String(format: L10n.t("people.foot.end", language: language), source)
@@ -131,6 +181,11 @@ struct PeopleSaid: Equatable {
     /// gave nobody. Always about the source, never that they follow nobody.
     func nothing(language: DummyLanguage? = nil) -> String? {
         guard reading == .said, people.isEmpty, foot == nil else { return nil }
+        // A directory that answered with nobody is one nobody is in — never one switched off,
+        // which answers that its address is not there.
+        if let sorting {
+            return String(format: L10n.t(sorting.localOnly ? "people.directory.none.local" : "people.directory.none", language: language), source)
+        }
         if list.hidden, !own {
             return String(format: L10n.t("people.hidden", language: language), list.lineHandle)
         }
@@ -156,6 +211,8 @@ struct PeoplePane: View {
     var onAskAgain: () -> Void = {}
     /// The foot's press: the next stretch.
     var onReadOn: () -> Void = {}
+    /// A directory's order chosen, or only the people who live there: asked from the top.
+    var onChoose: (DirectoryChoice) -> Void = { _ in }
     var jumpToTop: Int = 0
     var onBack: () -> Void
 
@@ -167,7 +224,7 @@ struct PeoplePane: View {
         VStack(alignment: .leading, spacing: 0) {
             bar
             ShellRule()
-            PeopleHead(list: said.list)
+            PeopleHead(list: said.list, sorting: said.sorting, chooses: said.choosesSorting, onChoose: onChoose)
             ShellRule()
             list
         }
@@ -238,10 +295,13 @@ struct PeoplePane: View {
         WordsThenPress(
             words: Text(line)
                 .shellFont(.meta)
-                .foregroundStyle(said.reading == .asking ? ShellChrome.inkFaint(colorScheme) : ShellChrome.ink(colorScheme)),
+                .foregroundStyle(
+                    said.reading == .asking || said.reading == .absent
+                        ? ShellChrome.inkFaint(colorScheme) : ShellChrome.ink(colorScheme)
+                ),
             press: Group {
                 if said.offersAgain {
-                    ShellLinkButton(L10n.t("person.retry"), action: onAskAgain)
+                    ShellLinkButton(L10n.t(said.reading == .absent ? "source.more.again" : "person.retry"), action: onAskAgain)
                         .disabled(said.asking)
                         .fixedSize()
                 }
@@ -268,8 +328,18 @@ struct PeoplePane: View {
 
 /// The head of a list of people: whose list this is and which source keeps it, and under them
 /// what that source counts — said as its figure, in its name, since the rows below may be fewer.
+///
+/// **A directory's head says how it is being read, and holds the one control that chooses**
+/// (#315): where a list of somebody's has the source's count, a directory has a sentence — in
+/// which order, and whether only of the people who live there — and beside it a menu named by
+/// the order in force. The sentence and the title are the heading a listener hears; the menu
+/// is an element of its own after it.
 struct PeopleHead: View {
     let list: PeopleList
+    var sorting: DirectoryChoice?
+    /// Whether the control takes a press: not while the directory is being asked from the top.
+    var chooses = true
+    var onChoose: (DirectoryChoice) -> Void = { _ in }
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -279,7 +349,7 @@ struct PeopleHead: View {
                     .shellFont(.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
-                if let figure = PeopleSaid.counts(list) {
+                if let figure = sorting.map({ PeopleSaid.sortingLine($0, source: list.host) }) ?? PeopleSaid.counts(list) {
                     Text(figure)
                         .shellFont(.reading)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
@@ -287,11 +357,77 @@ struct PeopleHead: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            ShellWellPill(list.host).fixedSize()
+            .modifier(HeadElement(alone: sorting != nil))
+            if let sorting {
+                DirectoryChoiceMenu(choice: sorting, source: list.host, onChoose: onChoose)
+                    .disabled(!chooses)
+                    .fixedSize()
+            } else {
+                ShellWellPill(list.host).fixedSize()
+            }
         }
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.step)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
+        // A list of somebody's is one heading to a listener, its source's pill within it, as
+        // before; a directory's words are the heading and its control an element after it.
+        .modifier(HeadElement(alone: sorting == nil))
+    }
+
+    /// Makes what it is put on one heading for a listener, where it is told to.
+    private struct HeadElement: ViewModifier {
+        let alone: Bool
+
+        func body(content: Content) -> some View {
+            if alone {
+                content
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isHeader)
+            } else {
+                content
+            }
+        }
+    }
+}
+
+/// How a source's directory is read, chosen behind one press in the page's head: a menu named
+/// by the order in force, as the notices' page keeps its kinds behind one mark. The two orders
+/// are the two a source takes; under them, only the people who live there.
+///
+/// It chooses and asks nothing itself: the asking is `ShellPeoplePages`'s.
+struct DirectoryChoiceMenu: View {
+    let choice: DirectoryChoice
+    let source: String
+    var onChoose: (DirectoryChoice) -> Void
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Menu {
+            ForEach(DirectoryOrder.allCases, id: \.self) { order in
+                Toggle(PeopleSaid.orderName(order), isOn: Binding(
+                    get: { choice.order == order },
+                    set: { _ in onChoose(PeopleSaid.choosing(order, from: choice)) }
+                ))
+            }
+            Divider()
+            Toggle(PeopleSaid.localName(source), isOn: Binding(
+                get: { choice.localOnly },
+                set: { onChoose(PeopleSaid.choosing(localOnly: $0, from: choice)) }
+            ))
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                Text(PeopleSaid.orderName(choice.order))
+                Image(systemName: "chevron.down")
+                    .imageScale(.small)
+                    .accessibilityHidden(true)
+            }
+            .shellFont(.meta, weight: .medium)
+            .foregroundStyle(isEnabled ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkFaint(colorScheme))
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .shellNamed("people.directory.choose")
+        .accessibilityValue(PeopleSaid.sortingLine(choice, source: source))
     }
 }

@@ -458,6 +458,13 @@ follows.call(fans.first, far_hidden)
 follows.call(far_hidden, shown)
 counted.call(far_hidden, 77, 55, 33)
 
+# What the checks of a directory of people need (#315): people who chose to be listed. The one
+# who is whole, their five followers and the first of another server are listed; one suspended
+# and one limited chose to be too, and a server gives neither. Written in the row itself, as
+# the rest here is: nobody is told, and somebody suspended or of another server is not saved
+# the ordinary way.
+[shown, far, gone, limited, *fans].each { |who| who.update_columns(discoverable: true) unless who.discoverable }
+
 # Sign-ins the checks of people ask as: the writer's as this app makes it for reading, with and
 # without the word that says how they stand to somebody; and one of the person who hides their
 # lists, who is shown them all the same.

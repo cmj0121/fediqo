@@ -60,9 +60,15 @@ struct SourceMoreSaid: Equatable {
     var asking = false
     /// Whether the servers it knows are being asked for: their line was pressed.
     var askingServers = false
+    /// Whether its directory of people is offered (#315): everywhere but where the host said,
+    /// this run, that the directory's address is not there. Asked for by the page it opens.
+    var directory = true
 
-    /// Whether the host has none of the three: there is then nothing to draw, and no heading.
-    var isAbsent: Bool { account == nil && servers == nil && weeks == nil }
+    /// Whether the host has none of the three, and no directory that this page can open: there
+    /// is then nothing to list, and one sentence says so.
+    func isAbsent(opensDirectory: Bool) -> Bool {
+        account == nil && servers == nil && weeks == nil && !(directory && opensDirectory)
+    }
 }
 
 /// What every source's page was told this run of what its host says of itself, by host.
@@ -145,7 +151,8 @@ final class ShellSourceMore {
         }
         return SourceMoreSaid(
             source: source.host, account: told(.longerAccount, page?.account), servers: told(.knownServers, page?.servers),
-            weeks: told(.activity, page?.weeks), asking: page?.asking ?? false, askingServers: page?.askingServers ?? false
+            weeks: told(.activity, page?.weeks), asking: page?.asking ?? false, askingServers: page?.askingServers ?? false,
+            directory: hosts.has(.directory, at: source.host) != .absent
         )
     }
 
@@ -206,15 +213,17 @@ final class ShellSourceMore {
         pages[host]?.awaits = errand
         pages[host]?.asking = true
         let through = reaching?(host) ?? session.reach.unsignedHost(host, for: .serverSays, within: deadline)
-        let task = Task { await self.ask(host, of: through, errand: errand) }
+        // Taken after this round's own asking afresh: what it hears is of the host as asked now.
+        let round = hosts.round(at: host)
+        let task = Task { await self.ask(host, of: through, errand: errand, round: round) }
         asks[host] = task
         return task
     }
 
-    private func ask(_ host: String, of through: MastodonHostMore, errand: Int) async {
+    private func ask(_ host: String, of through: MastodonHostMore, errand: Int, round: Int) async {
         defer { if pages[host]?.awaits == errand { asks[host] = nil } }
-        if await take(.longerAccount, at: host, errand: errand, into: \.account, { try await through.longerAccount() }) {
-            _ = await take(.activity, at: host, errand: errand, into: \.weeks) { try await through.activity() }
+        if await take(.longerAccount, at: host, errand: errand, round: round, into: \.account, { try await through.longerAccount() }) {
+            _ = await take(.activity, at: host, errand: errand, round: round, into: \.weeks) { try await through.activity() }
         }
         // Nothing is left asking with nothing on the wire — and a newer round's mark is its own.
         if pages[host]?.awaits == errand { pages[host]?.asking = false }
@@ -241,12 +250,13 @@ final class ShellSourceMore {
         pages[host]?.awaitsServers = errand
         pages[host]?.askingServers = true
         let through = reaching?(host) ?? session.reach.unsignedHostServers(host, for: .serverSays, within: deadline)
-        let task = Task { await self.askServers(host, of: through, errand: errand) }
+        let round = hosts.round(at: host)
+        let task = Task { await self.askServers(host, of: through, errand: errand, round: round) }
         serverAsks[host] = task
         await task.value
     }
 
-    private func askServers(_ host: String, of through: MastodonHostMore, errand: Int) async {
+    private func askServers(_ host: String, of through: MastodonHostMore, errand: Int, round: Int) async {
         defer { if pages[host]?.awaitsServers == errand { serverAsks[host] = nil } }
         do {
             let said = try await through.knownServers()
@@ -255,7 +265,7 @@ final class ShellSourceMore {
         } catch {
             guard pages[host]?.awaitsServers == errand else { return }
             if (error as? MastodonHostMoreError) == .noSuchAddress {
-                hosts.notFound(.knownServers, at: host)
+                hosts.notFound(.knownServers, at: host, round: round)
                 pages[host]?.servers = .waiting
             } else if (error as? URLError)?.code == .dataLengthExceedsMaximum {
                 pages[host]?.servers = .tooLarge
@@ -270,7 +280,7 @@ final class ShellSourceMore {
     /// awaited. False where the round is over: superseded, or stopped — and a thing stopped
     /// before it answered is left waiting, to be asked when the page next opens.
     private func take<Value>(
-        _ thing: MastodonHostThing, at host: String, errand: Int, into slot: WritableKeyPath<Page, Told<Value>>,
+        _ thing: MastodonHostThing, at host: String, errand: Int, round: Int, into slot: WritableKeyPath<Page, Told<Value>>,
         _ read: () async throws -> Value
     ) async -> Bool {
         guard hosts.has(thing, at: host) != .absent else { return true }
@@ -283,7 +293,7 @@ final class ShellSourceMore {
             if Cancellation.happened(error) { return false }
             if (error as? MastodonHostMoreError) == .noSuchAddress {
                 // The host's own word that the address is not there: absent, for the run.
-                hosts.notFound(thing, at: host)
+                hosts.notFound(thing, at: host, round: round)
                 pages[host]?[keyPath: slot] = .waiting
             } else {
                 pages[host]?[keyPath: slot] = .failed

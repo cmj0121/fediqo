@@ -224,9 +224,9 @@ final class ShellPersonPages {
         let count = PageErrands(), looks = PageReaders()
         errands = count
         readers = looks
-        let lists = ShellPeoplePages(errands: count, readers: looks)
-        self.lists = lists
         let hosts = ShellHostsKnown(errands: count)
+        let lists = ShellPeoplePages(errands: count, readers: looks, hosts: hosts)
+        self.lists = lists
         let more = ShellSourceMore(errands: count, readers: looks, hosts: hosts)
         self.more = more
         let rising = ShellRising(errands: count, readers: looks, hosts: hosts)

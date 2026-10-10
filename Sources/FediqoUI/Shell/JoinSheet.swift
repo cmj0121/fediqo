@@ -400,6 +400,9 @@ struct JoinSheet: View {
     /// by the root once the sheet has come down. Nothing where nobody answers, and then the
     /// line that offers it is not drawn.
     var onOwnPage: ((DummyPerson) -> Void)?
+    /// Opens a joined source's directory of people (#315), answered by the root once the sheet
+    /// has come down. Nothing where nobody answers, and then the line that offers it is not drawn.
+    var onDirectory: ((PeopleList) -> Void)?
     /// What a joined source says of itself beyond its document (#321), asked and kept by the
     /// pages the root holds. Nothing where the sheet is drawn with none: nothing more is then
     /// asked of any source, or drawn.
@@ -602,7 +605,9 @@ struct JoinSheet: View {
                         if let me = ownPage(at: source.host) { OwnPageLine(me: me, press: { openOwnPage(me) }) }
                     }
                     SourcePreviewView(preview: preview, surface: .sheet, origin: origin)
-                    if case .joined(let source) = origin, let more { SourceMoreBlock(host: source.host, more: more, session: session) }
+                    if case .joined(let source) = origin, let more {
+                        SourceMoreBlock(host: source.host, more: more, session: session, onDirectory: directoryPress(at: source.host))
+                    }
                 }
             }
         case .choosingBoards(let offer, _):
@@ -624,6 +629,18 @@ struct JoinSheet: View {
     func openOwnPage(_ me: DummyPerson) {
         session.dismissStage()
         onOwnPage?(me)
+    }
+
+    /// What the line "Its directory of people" presses on a joined source's page, or nothing
+    /// where nobody answers: the sheet comes down, as its Close takes it down, and the
+    /// directory opens. **Which sources have such a line is not decided here**: the block that
+    /// draws it is handed nothing for a source that does not say who people are.
+    func directoryPress(at host: String) -> (() -> Void)? {
+        guard let onDirectory else { return nil }
+        return {
+            session.dismissStage()
+            onDirectory(PeopleList(directoryAt: host))
+        }
     }
 
     /// What the source's row had to cut to its one line, whole (#244): the errand running, a
