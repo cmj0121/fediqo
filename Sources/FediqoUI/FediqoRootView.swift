@@ -143,7 +143,6 @@ public struct FediqoRootView: View {
         session.persistUnsent = persistUnsent
         session.savesLanded = savesLanded
         session.carrier = carrier
-        if let carrier { session.carry.say(leftBy: carrier) }
         session.nearbyLink = nearby
         session.deviceName = deviceName
         session.measureStore = measureStore
@@ -270,6 +269,10 @@ public struct FediqoRootView: View {
                 placeLinksInPage()
                 tags.placing = { tag, row in openTag(tag, from: row) }
                 placeQuotes()
+                // What an earlier run could not put back and did not live to (#344): said once,
+                // as the launch begins, and from here — a listing of the store's folder is no
+                // work for an initializer that runs every time the view is made.
+                if let carrier = session.carrier { session.carry.say(leftBy: carrier) }
                 await session.loadLimitAccount()
                 await session.keep(months: prefs.keepMonths)
                 await session.reloadFromStore()

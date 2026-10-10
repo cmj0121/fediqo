@@ -83,6 +83,24 @@ public actor StoreSaver {
     private let write: Write?
     private let writeUnsent: WriteUnsent?
     private let writeNotices: WriteNotices?
+    /// Whether what this device keeps can be read: **asked of the canary, only when a write
+    /// has failed or something says the device may be back** — never before a write, a probe
+    /// being a file made and unlinked on a phone, and never of the system's flag, which on a
+    /// Mac may be told "unavailable" at a lock and nothing after.
+    private let protected: ProtectedData
+    /// Makes the store's own connection again (`StoreFile.remakeConnection`); nil where this
+    /// run has no file, which then has nothing to make again.
+    private let remake: (@Sendable () throws -> Void)?
+    /// A write failed and the canary then refused: the device is locked. **Held, not counted
+    /// down** — no try is spent on a lock — until something says the device may be back
+    /// (`owedNow`). Only ever set by a write that failed: a save that goes through, as one on
+    /// a Mac's held connection does behind a locked screen, is never held by anything.
+    private var locked = false
+    /// A write has failed since the canary was last asked why.
+    private var unclassed = false
+    /// The connection has been made again since a save last landed: it is not made twice for
+    /// one run of failures.
+    private var remade = false
     /// The save queued last, running or waiting. The next save starts after it.
     private var tail: Task<Void, any Error>?
     /// The save waiting to start, if one is; a new `save()` joins it.
@@ -127,14 +145,81 @@ public actor StoreSaver {
     /// A write of one part failed: the follower is told, and owes another.
     private func owe() {
         unlanded = true
+        unclassed = true
         wake?.yield()
     }
+
+    /// **A write held since the device locked, written now** (#344): asked when something
+    /// says the device may be back — it became available, the scene became active, any of
+    /// the gate's wake-ups. Nothing where nothing is owed, and then nothing is probed either.
+    ///
+    /// **Only a save that was held for a lock.** A wake-up is not rare — on a Mac a window
+    /// coming back into sight is one — and a write failing for want of room, or on a volume
+    /// that takes none, is not a lock: that stays the follower's, asked a handful of times a
+    /// minute apart and then let be (`retry`). Here the canary is asked once; a write that
+    /// failed and was not yet asked about is classed by the answer, and that is all that is
+    /// done for it. Where one was held and the canary no longer refuses, the tries are counted
+    /// afresh and the save is made at once. A save refused by a lock is never trouble: it is
+    /// this, later.
+    ///
+    /// **And where something is still not on disk after that save, with the canary reading
+    /// before it and after**, the store's own connection is made again — to the same file and
+    /// no other (`StoreFile.remakeConnection`) — and the save tried once more. **Once for a
+    /// run of failures**: not again until a save has landed. That is for a device whose files
+    /// close under lock, where the connection held through it may not come back; "nothing is
+    /// lost" does not rest on its coming back.
+    ///
+    /// Judged by what is still owed, and not by whether the save threw: every part of a save
+    /// that fails — the words waiting to be sent, the notices, the items — marks it owed
+    /// (`owe`) before it throws, and so does one asked for by itself (`saveUnsent`).
+    public func owedNow() async {
+        guard unlanded else { return }
+        let wasHeld = locked
+        let answer = protected.canary()
+        unclassed = false
+        // Not "reads": "refuses". With no canary at all nothing says this is a lock.
+        locked = answer == .refused
+        guard wasHeld, !locked else { return }
+        retried = 0
+        _ = try? await saveAndTell()
+        guard unlanded, !remade, let remake, protected.canary() == .reads else { return }
+        remade = true
+        do {
+            // Where a save would run: nothing of this saver's is writing while the
+            // connection is changed under it.
+            try await exclusively { try remake() }
+            Self.log.notice("The index's connection was made again after a save failed on an unlocked device")
+        } catch {
+            Self.log.error("The index's connection could not be made again: \(String(describing: type(of: error)), privacy: .public)")
+            return
+        }
+        _ = try? await saveAndTell()
+    }
+
+    /// Whether a write is owed and held for a lock: for the checks, and nothing the app reads.
+    var isHeldForALock: Bool { unlanded && locked }
 
     /// `write` is `nil` when this run must not write at all — the fail-closed case of
     /// `StoreFile.open(at:now:)`. Every save is then a logged no-op.
     public init(
-        store: ItemStore, write: Write?, writeUnsent: WriteUnsent? = nil, writeNotices: WriteNotices? = nil
+        store: ItemStore, write: Write?, writeUnsent: WriteUnsent? = nil, writeNotices: WriteNotices? = nil,
+        protected: ProtectedData = .always
     ) {
+        self.init(
+            store: store, write: write, writeUnsent: writeUnsent, writeNotices: writeNotices,
+            protected: protected, remake: nil
+        )
+    }
+
+    /// The same, with how the store's connection is made again. **Not the public
+    /// initializer's to take**: a closure handed in there could open anything. Only a file
+    /// this run opened supplies one (`init(store:file:protected:)`) — and a check.
+    init(
+        store: ItemStore, write: Write?, writeUnsent: WriteUnsent?, writeNotices: WriteNotices?,
+        protected: ProtectedData, remake: (@Sendable () throws -> Void)?
+    ) {
+        self.protected = protected
+        self.remake = remake
         self.store = store
         self.write = write
         self.writeUnsent = writeUnsent
@@ -145,18 +230,25 @@ public actor StoreSaver {
     }
 
     /// Saves into `file`, or nowhere when it is `nil`.
-    public init(store: ItemStore, file: StoreFile?) {
+    public init(store: ItemStore, file: StoreFile?, protected: ProtectedData = .always) {
         var write: Write?
         var writeUnsent: WriteUnsent?
         var writeNotices: WriteNotices?
+        var remake: (@Sendable () throws -> Void)?
         if let file {
             write = { sources, notes, said in
                 try await file.save(sources: sources, notes: notes, said: said)
             }
             writeUnsent = { try await file.save(unsent: $0) }
             writeNotices = { try await file.save(notices: $0) }
+            remake = { try file.remakeConnection() }
         }
-        self.init(store: store, write: write, writeUnsent: writeUnsent, writeNotices: writeNotices)
+        // The re-make is the file's own, and there is one only where there is a file: a run
+        // that opened no store is handed nothing that could open one.
+        self.init(
+            store: store, write: write, writeUnsent: writeUnsent, writeNotices: writeNotices,
+            protected: protected, remake: remake
+        )
     }
 
     /// Runs `body` where a save would run: after every save asked for before it, and before any
@@ -350,8 +442,17 @@ public actor StoreSaver {
     /// while this waited, or where `retries` have been made running — **so a disk that will not
     /// be written is asked a handful of times, a minute apart, and then let be**. A try that
     /// fails wakes the follower again (`owe`), which is what makes the next one.
-    private func retry(gap: Duration, sleep: @Sendable (Duration) async throws -> Void) async throws {
-        guard unlanded, retried < Self.retries else { return }
+    func retry(gap: Duration, sleep: @Sendable (Duration) async throws -> Void) async throws {
+        guard unlanded else { return }
+        // Why it failed is asked once for each failure, here and not where the write is made:
+        // a canary that refuses is the device locked, and a lock spends no tries — the save is
+        // held until something says the device may be back (`owedNow`).
+        if unclassed {
+            unclassed = false
+            locked = protected.canary() == .refused
+            if locked { Self.log.notice("A save is held: the device is locked") }
+        }
+        guard !locked, retried < Self.retries else { return }
         retried += 1
         try await sleep(gap)
         // Read after the wait: a save somebody asked for meanwhile may have written it all.
@@ -428,6 +529,9 @@ public actor StoreSaver {
             for listener in landingListeners.values { listener.yield() }
         }
         retried = 0
+        locked = false
+        unclassed = false
+        remade = false
         return wrote
     }
 

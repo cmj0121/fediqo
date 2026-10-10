@@ -397,7 +397,9 @@ struct StoreGateTests {
         // What takes the store away and reads one back asks the same canary, and what a lock
         // kept it from putting back is done at a wake-up.
         #expect(code.contains("saver: saver, protected: protected\n        )"))
-        #expect(code.contains("for await _ in protected.changes() { await carrier.finishOwed() }"))
+        // And a save a lock refused is written at a wake-up too: both ask the canary themselves.
+        #expect(code.contains("for await _ in protected.changes() {\n                await carrier.finishOwed()\n                await saver.owedNow()\n            }"))
+        #expect(code.contains("saver = StoreSaver(store: store, file: opened.file, protected: protected)"))
     }
 
     // MARK: - The platform's signals

@@ -7,7 +7,107 @@ import GRDB
 
 /// The on-device index. Lives in Application Support and is excluded from backup.
 public struct StoreFile: Sendable {
-    let db: DatabaseQueue
+    /// The connection, kept where it can be made again (`remakeConnection`): whoever uses it
+    /// takes it once, for the one thing they do.
+    private let held: Held
+    var db: DatabaseQueue { held.queue }
+
+    /// The one connection a `StoreFile` has, and — for one opened on disk — where it was
+    /// opened and **which file that was**, so that it can be made again to that file and to
+    /// no other.
+    private final class Held: @unchecked Sendable {
+        struct Origin {
+            let path: String
+            let directory: URL
+            let busyWait: TimeInterval
+            /// The file's own identity on its volume, as it was when this was opened: a name
+            /// can come to mean another file, and this cannot.
+            let file: (any NSObjectProtocol)?
+        }
+
+        private let lock = NSLock()
+        private var current: DatabaseQueue
+        private var opened: Origin?
+
+        init(_ queue: DatabaseQueue) { current = queue }
+
+        var queue: DatabaseQueue {
+            lock.lock()
+            defer { lock.unlock() }
+            return current
+        }
+
+        var origin: Origin? {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return opened
+            }
+            set {
+                lock.lock()
+                defer { lock.unlock() }
+                opened = newValue
+            }
+        }
+
+        func swap(_ fresh: DatabaseQueue) {
+            lock.lock()
+            defer { lock.unlock() }
+            current = fresh
+        }
+    }
+
+    /// Why a connection could not be made again.
+    enum Remake: Error, Equatable {
+        /// This store was never a file on disk opened by path.
+        case notOpenedOnDisk
+        /// The file at the path is not the file that was opened.
+        case anotherFile
+    }
+
+    private static func identity(at path: String) -> (any NSObjectProtocol)? {
+        try? URL(fileURLWithPath: path).resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier
+    }
+
+    /// Makes this store's own connection again (#344): for a device whose files close when it
+    /// locks — a phone — where the connection held through the lock may not write again
+    /// after the unlock. (On a Mac it does, seen across a real lock; there this is not reached.)
+    ///
+    /// **To the same file, and to nothing else.** The path it was opened at must still be the
+    /// very file that was opened — by the file's identity on its volume, recorded then — not
+    /// written by a newer build since, and not opened for reading alone. The same
+    /// configuration and the same `secure_delete`. **No migration, no load, no rebuild**: what
+    /// the session holds is not read again, and nothing is written but by the save that follows.
+    ///
+    /// **Why this is not a store opened under a run that began without it.** That hazard is a
+    /// session that never read the store writing its emptiness over it. This session read
+    /// *this* file; what it holds is that file's contents and what was done since, and the
+    /// save was already owed. A run with no `StoreFile` has no connection to make again and
+    /// nothing here gives it one: this is a method of a store that was opened, and the saver
+    /// reaches it only where it was handed one.
+    ///
+    /// **Called where a save would run** (`StoreSaver.exclusively`), so no transaction of the
+    /// saver's is in flight on the connection being let go. A reader that took the old one a
+    /// moment before finishes on it. Should the old connection still hold a lock on the file,
+    /// the new one waits for it as any connection does — `busyWait` for its first read and
+    /// again for the pragma — with the saver waiting behind it, and then fails as busy: the
+    /// save stays owed.
+    func remakeConnection() throws {
+        guard let origin = held.origin, let was = origin.file else { throw Remake.notOpenedOnDisk }
+        guard let now = Self.identity(at: origin.path), now.isEqual(was) else { throw Remake.anotherFile }
+        if Self.isNewer(at: origin.path) { throw Newer() }
+        let fresh = try DatabaseQueue(path: origin.path, configuration: Self.configuration(busyWait: origin.busyWait))
+        if try fresh.read(migrator.hasBeenSuperseded) { throw Newer() }
+        try fresh.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA secure_delete = ON") }
+        let readOnly = try fresh.read { db in sqlite3_db_readonly(db.sqliteConnection, "main") == 1 }
+        guard !readOnly, FileManager.default.isWritableFile(atPath: origin.directory.path) else {
+            throw DatabaseError(resultCode: .SQLITE_READONLY)
+        }
+        // Asked once more, with the new connection open and before it is taken: the name may
+        // have come to mean another file between the first asking and the opening.
+        guard let still = Self.identity(at: origin.path), still.isEqual(was) else { throw Remake.anotherFile }
+        held.swap(fresh)
+    }
 
     /// `busyWait` is how long this connection waits on another before a read or a write fails
     /// as busy (#295): another copy of the app saving into the same folder is an ordinary thing,
@@ -27,6 +127,10 @@ public struct StoreFile: Sendable {
         guard !readOnly, FileManager.default.isWritableFile(atPath: directory.path) else {
             throw DatabaseError(resultCode: .SQLITE_READONLY)
         }
+        // Which file this is, for as long as this run has it: a rebuild writes back into the
+        // same file (its copy is a temporary one, and never takes the index's place), so
+        // nothing a run does makes this stale.
+        held.origin = Held.Origin(path: path, directory: directory, busyWait: busyWait, file: Self.identity(at: path))
     }
 
     /// How every connection to an index on disk is made (#344), the probes that only read
@@ -91,7 +195,7 @@ public struct StoreFile: Sendable {
         // Asked before `migrate`: GRDB migrates a superseded store without complaint, and the
         // first save would then empty tables this build only half understands.
         if try database.read(migrator.hasBeenSuperseded) { throw Newer() }
-        db = database
+        held = Held(database)
         // Before anything is written, a migration's rewriting of rows included.
         try db.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA secure_delete = ON") }
         try migrator.migrate(db)

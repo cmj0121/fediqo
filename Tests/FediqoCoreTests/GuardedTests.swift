@@ -591,6 +591,32 @@ struct GuardedNoClassTests {
         #expect(Guarded.probeCanary(in: folder, anew: true, on: device) == .reads)
     }
 
+    @Test("On a phone the probe also makes a file beside the canary: a folder that takes none is the lock, though the canary still reads")
+    func thePhonesHalfOfTheProbe() throws {
+        let folder = try scratch()
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+            try? FileManager.default.removeItem(at: folder)
+        }
+        // The class asked is the one a file has anyway, so nothing here turns on this machine's lock.
+        func device(phone: Bool) -> Guarded.Device {
+            Guarded.Device(
+                asks: .completeUntilFirstUserAuthentication, phone: phone,
+                held: { $0.hasDirectoryPath ? .completeUntilFirstUserAuthentication : Guarded.Device.real.heldNow($0) },
+                canaryTook: { true }, count: {}
+            )
+        }
+        #expect(Guarded.probeCanary(in: folder, on: device(phone: true)) == .reads)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path) == [Guarded.canaryName], "the scratch file is gone")
+        // At complete, under lock, nothing new can be made — and that is a refusal by itself.
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: folder.path)
+        #expect(Guarded.probeCanary(in: folder, on: device(phone: true)) == .refused)
+        #expect(Guarded.probeCanary(in: folder, on: device(phone: false)) == .reads, "a Mac is not asked that: at its class a new file says nothing")
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        #expect(Guarded.probeCanary(in: folder, on: device(phone: true)) == .reads)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path) == [Guarded.canaryName])
+    }
+
     @Test("Everything is made as the system makes it, and nothing is read back, thrown or counted")
     func plain() throws {
         let folder = try scratch()

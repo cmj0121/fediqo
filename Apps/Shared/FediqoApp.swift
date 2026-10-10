@@ -117,7 +117,7 @@ final class Launch {
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
-        saver = StoreSaver(store: store, file: opened.file)
+        saver = StoreSaver(store: store, file: opened.file, protected: protected)
         file = opened.file
         // Only beside an index this run writes: a run that must not write the index (a newer
         // build's, or one that could not be set aside) writes no lines about it either.
@@ -135,8 +135,13 @@ final class Launch {
         )
         // An undo a lock refused is still owed (#344), and done when the device is back: each
         // wake-up asks, and the carrier asks the canary itself before it does anything.
-        Task { [carrier] in
-            for await _ in protected.changes() { await carrier.finishOwed() }
+        // And a save a lock refused is written then: the saver asks the canary, counts its
+        // tries afresh and saves at once.
+        Task { [carrier, saver] in
+            for await _ in protected.changes() {
+                await carrier.finishOwed()
+                await saver.owedNow()
+            }
         }
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).

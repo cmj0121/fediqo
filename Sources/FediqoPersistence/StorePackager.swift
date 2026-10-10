@@ -1,5 +1,6 @@
 import FediqoCore
 import Foundation
+import GRDB
 
 /// The real `StoreCarrier` (#247): what this device holds, taken away as one `FDQ1` package and
 /// read back from one.
@@ -530,7 +531,29 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
 
     public func stagingFolder() -> URL { directory }
 
+    public func isLocked() -> Bool { protected.canary() == .refused }
+
+    /// `body`, with a file the system would not make or open — or SQLite could not, on a
+    /// file opened a moment before — said as the lock where the canary refuses (#344): asked
+    /// only once something has failed that way. A lock reports through SQLite in codes that
+    /// say nothing of a lock; left as they are, they would reach the person as an error's
+    /// own words.
+    private func lockAware<T>(_ body: () async throws -> T) async throws -> T {
+        do {
+            return try await body()
+        } catch where Guarded.isRefusal(error) || error is DatabaseError {
+            throw isLocked() ? PackageFault.locked : error
+        }
+    }
+
     public func takeAway(
+        to url: URL, key: PackageKey, pictures: Bool, contents: PackageSummary.Contents,
+        progress: @escaping @Sendable (PackageProgress) -> Void
+    ) async throws {
+        try await lockAware { try await takeAwayNow(to: url, key: key, pictures: pictures, contents: contents, progress: progress) }
+    }
+
+    private func takeAwayNow(
         to url: URL, key: PackageKey, pictures: Bool, contents: PackageSummary.Contents,
         progress: @escaping @Sendable (PackageProgress) -> Void
     ) async throws {
@@ -849,6 +872,12 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     public func readBack(
         _ url: URL, key: PackageKey, replacing: Bool, progress: @escaping @Sendable (PackageProgress) -> Void
     ) async throws {
+        try await lockAware { try await readBackNow(url, key: key, replacing: replacing, progress: progress) }
+    }
+
+    private func readBackNow(
+        _ url: URL, key: PackageKey, replacing: Bool, progress: @escaping @Sendable (PackageProgress) -> Void
+    ) async throws {
         try await unlocked()
         let reader = try PackageReader(at: url)
         let summary = try reader.open(with: key)
@@ -947,6 +976,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             } catch is StoreFile.Newer {
                 throw PackageRefusal.newer
             } catch {
+                // A device that locked while the staged index was being opened says nothing
+                // of what the package holds (#344): the canary is asked before that is said.
+                if isLocked() { throw PackageFault.locked }
                 throw PackageFault.unreadableStore
             }
             // **The header's word on what is kept is checked against the store it came with**
@@ -985,6 +1017,22 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     private final class Owed: @unchecked Sendable {
         private let lock = NSLock()
         private var steps: [Undo] = []
+        private var saidWhatWasLeft = false
+
+        /// What an earlier run left has been said in this one: it is not said twice in a run,
+        /// whether or not its name could be removed.
+        var told: Bool {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return saidWhatWasLeft
+            }
+            set {
+                lock.lock()
+                defer { lock.unlock() }
+                saidWhatWasLeft = newValue
+            }
+        }
 
         func keep(_ refused: [Undo]) {
             lock.lock()
@@ -1034,6 +1082,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// the sentence they were given at the time, that the device is neither as it was nor as
     /// the package says, and which parts.
     public func leftOwed() -> [String] {
+        guard !owed.told else { return [] }
         let mine = Set(owed.names)
         return Self.owedNames(in: directory).filter { !mine.contains($0) }
     }
@@ -1042,6 +1091,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// and no read back begins.
     public func toldLeftOwed() {
         for step in leftOwed() { try? FileManager.default.removeItem(at: owedFile(step)) }
+        owed.told = true
     }
 
     /// Does what a lock kept a refused read back from putting back, **where the canary reads

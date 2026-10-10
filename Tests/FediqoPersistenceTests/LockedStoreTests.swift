@@ -128,6 +128,8 @@ struct LockedStoreTests {
         #expect(opened.trouble == .damaged(replacedBy: .empty))
         #expect(opened.file != nil && opened.setAside != nil)
         #expect(asked == 3, "the read, the read again on a fresh connection, and the store made in its place")
+        // The second try repeated the read and nothing else: the store was put aside once.
+        #expect(try names(dir).filter { $0.hasPrefix("index-unreadable-") && $0.hasSuffix(".sqlite") }.count == 1)
         #expect(canary.looks == 4, "before the attempt, after the failure, after the second, and before anything is moved")
     }
 

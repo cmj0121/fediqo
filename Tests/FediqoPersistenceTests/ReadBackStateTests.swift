@@ -569,6 +569,7 @@ struct ReadBackStateTests {
         }
         #expect(next.leftOwed().isEmpty && StorePackager.owedNames(in: folder).isEmpty, "told, and so no longer kept to be said")
         try Guarded.write(Data(), to: folder.appendingPathComponent(".owed-index"), atomic: false)
+        #expect(next.leftOwed().isEmpty, "said once in a run, whether or not its name could be removed")
         // Unlocked, and the step still failing for a reason that is no lock: said as what is
         // not put back, and not as a locked device.
         hand.turn(canary: .reads)

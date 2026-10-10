@@ -50,7 +50,12 @@ extension ShellSession {
     /// the main actor.
     func followSaves() async {
         guard let landings = await savesLanded?() else { return }
-        for await _ in landings { landed() }
+        for await _ in landings {
+            landed()
+            // A save that had failed has landed — on a phone, the device unlocked: the limits'
+            // account that could not be read then can be now, and a clear owed since is done.
+            await loadLimitAccount()
+        }
     }
 
     /// Asks for a save now and does not wait. Each ask runs after the one before it.

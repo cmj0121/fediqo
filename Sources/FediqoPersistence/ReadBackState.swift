@@ -36,6 +36,13 @@ import Foundation
 /// today is a test's. What a lock can leave owed in the app is the other steps — the
 /// sign-ins, the index saved back, the pictures, the settings, the limits (`finishOwed`).
 extension StorePackager {
+    ///
+    /// **A build after this one must not add a name here without a way back.** A name this
+    /// build does not know, or two at once, is not read as anything: it throws at every launch
+    /// and everything is kept — so a person going back to this build from one that wrote a new
+    /// name would be left with no store opened until they went forward again. A later build
+    /// that needs another state takes its asides back to a name written here before it can be
+    /// left for this one.
     enum AsideState: String, CaseIterable, Sendable {
         /// The old index is here, moved out of the way; nothing has taken its place.
         case aside

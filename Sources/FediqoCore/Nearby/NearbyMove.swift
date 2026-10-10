@@ -251,7 +251,9 @@ public actor NearbyMove {
                 NearbyLog.note(.receiver, "stopped")
                 return
             }
-            let refusal = NearbyRefusal(error)
+            // A file the system would not make or open, on a device that has locked: the
+            // lock, and not something gone wrong for the person to act on (#344).
+            let refusal = Guarded.isRefusal(error) && carrier.isLocked() ? NearbyRefusal.locked : NearbyRefusal(error)
             NearbyLog.note(.receiver, "refused", error: refusal)
             emit(.refused(refusal))
         }
@@ -587,7 +589,7 @@ public actor NearbyMove {
                 NearbyLog.note(.sender, "stopped")
                 return
             }
-            let refusal = NearbyRefusal(error)
+            let refusal = Guarded.isRefusal(error) && carrier.isLocked() ? NearbyRefusal.locked : NearbyRefusal(error)
             NearbyLog.note(.sender, "refused", error: refusal)
             emit(.refused(refusal))
         }
