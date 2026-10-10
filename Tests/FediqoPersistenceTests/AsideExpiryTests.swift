@@ -432,7 +432,8 @@ struct AsideExpiryTests {
         let order = one.removal
         #expect(Set(order) == Set(files) && order.count == files.count)
         // Which store took its place is known for as long as the person being told is.
-        #expect(order.suffix(3) == [one.base + ".restored", one.base + ".told", one.base + ".sqlite"])
+        let last: [String] = [".restored", ".told", ".sqlite"].map { one.base + $0 }
+        #expect(Array(order.suffix(3)) == last)
         // Cut short just before the index: the index alone is left, and it is still an aside.
         for name in order.dropLast() { try FileManager.default.removeItem(at: dir.appendingPathComponent(name)) }
         #expect(StoreFile.asides(in: dir).map(\.names) == [[one.base + ".sqlite"]])
