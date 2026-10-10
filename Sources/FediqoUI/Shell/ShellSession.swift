@@ -1894,6 +1894,7 @@ final class ShellSession {
     /// it is asked.
     private func allowancesChanged(by from: ObjectIdentifier?) {
         guard from == ObjectIdentifier(work) else { return }
+        kept(.allowances, written: work.allowancesWritten)
         switch stage {
         case .browsingServers(let kind):
             guard ServerDirectory.covers(kind) else { return }

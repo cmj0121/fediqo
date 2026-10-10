@@ -97,6 +97,21 @@ extension ShellSession {
         return written
     }
 
+    /// One of the person's own lists was written, or would not be (#344). **Where it would
+    /// not, the person is told**: what they see is what they just decided, and the file beside
+    /// the store does not hold it — one line on the strip naming the list, said once, standing
+    /// until that list is next written. Nothing tries again by itself. For what is allowed
+    /// beyond a source it is asked by every session as the list changes (`allowancesChanged`),
+    /// so every window says it.
+    func kept(_ list: Said.Unkept, written: Bool) {
+        let line = Said(.unkept(list), .unreachable, host: "")
+        if written {
+            said.takeDown(line.id)
+        } else if !said.lines.contains(where: { $0.id == line.id }) {
+            said.say(line)
+        }
+    }
+
     /// Every save asked for before this call, and its tail, has returned. Not the ones asked for
     /// while it waits: a caller in the middle of steady landings would otherwise never be let go.
     /// What a test awaits before it looks at the file or counts the saves.

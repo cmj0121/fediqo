@@ -201,7 +201,7 @@ struct LanguageStoreTests {
         try await from.packager().takeAway(to: url, key: .password("open sesame"), pictures: false) { _ in }
         try await onto.packager().readBack(url, key: .password("open sesame"), replacing: false) { _ in }
 
-        #expect(onto.defaults.data(forKey: "fediqo.timelines") == timelines, "the rule did not come with what the device holds")
+        #expect(onto.lists.timelines.read() == .data(timelines), "the rule did not come with what the device holds")
         #expect(await onto.store.snapshot().notes.map(\.language) == ["ja", nil])
         #expect(try StoreFile(at: onto.directory).load().notes.map(\.language) == ["ja", nil])
     }

@@ -130,6 +130,7 @@ public struct FediqoRootView: View {
         storeTroubleAnswered: (@MainActor (StoreTroubleAnswer) -> Void)? = nil,
         carrier: (any StoreCarrier)? = nil,
         storeWritable: Bool = true,
+        lists: ListFiles? = nil,
         nearby: (any NearbyLink)? = nil,
         deviceName: String = "",
         staged: ShellStaged? = nil
@@ -138,7 +139,7 @@ public struct FediqoRootView: View {
             http: http, store: store, forums: forums, mastodon: mastodon,
             // A launch made for a picture writes no timeline down: one it makes for itself
             // (`ShellStaged.Step.empty`) is gone with the launch.
-            timelines: staged == nil ? WrittenTimelineStore(defaults: .standard) : nil
+            timelines: staged == nil ? WrittenTimelineStore(defaults: .standard, file: lists?.timelines) : nil
         )
         session.persist = persist
         session.persistUnsent = persistUnsent
@@ -169,11 +170,15 @@ public struct FediqoRootView: View {
     /// let go — one writer, however many windows are open; a host the person names to add is
     /// theirs from the moment they name it.
     ///
-    /// What may be reached beyond a source is the person's list (#226), read from their
-    /// preferences here. Where the store was `read` whole, a host they added for a source that is
-    /// not in it goes; from then on one goes with its source, **in the order the store lets its
-    /// sources go** — one stream, read on the main actor.
-    public static func onlyToSources(_ hosts: [String], kept store: ItemStore, read: Bool = true) {
+    /// What may be reached beyond a source is the person's list (#226), read here from its file
+    /// beside the store (`lists`, #344) — said to the book before the book is first touched.
+    /// Where the store was `read` whole, a host they added for a source that is not in it
+    /// goes; from then on one goes with its source, **in the order the store lets its sources
+    /// go** — one stream, read on the main actor.
+    public static func onlyToSources(
+        _ hosts: [String], kept store: ItemStore, read: Bool = true, lists: ListFiles? = nil
+    ) {
+        if let lists { AllowanceBook.kept = lists.allowances }
         let work = SourceWork.shared
         work.govern(sources: hosts)
         // A launch that did not read its store asks for nothing nobody pressed for (#293, #295).

@@ -1088,6 +1088,11 @@
 "allow.own.refused.address" = "Add a host by its name, not a numbered address: a source's pictures are named by host.";
 "allow.own.refused.port" = "Leave the port off: a host you add is reached on the web's own ports.";
 "allow.own.refused.path" = "Type only the host, with no path or query after it: an entry is for the whole host.";
+"allow.own.refused.unread" = "The list could not be read this time, so nothing is added to it. Open Fediqo again.";
+"allow.unknown.notRead" = "This list could not be read this time. Nothing beyond your sources is reached until it can be. Open Fediqo again.";
+"allow.unknown.cannotKeep" = "This device will not let Fediqo keep this list right now: it has no room left, or Fediqo's folder cannot be written. Nothing beyond your sources is reached until it can.";
+"said.unkept.allowances" = "A change to what is allowed beyond your sources could not be kept on this device. It holds for now, and is gone the next time Fediqo is opened.";
+"said.unkept.timelines" = "A change to your timelines could not be kept on this device. It holds for now, and is gone the next time Fediqo is opened.";
 
 /* The shared pieces every screen is built from (#232). */
 "help.about" = "More about %@";

@@ -1067,6 +1067,11 @@
 "allow.own.refused.address" = "請用主機名稱，不要用數字位址：來源的圖片是以主機名稱指向的。";
 "allow.own.refused.port" = "請拿掉連接埠：你加入的主機只經由網頁的標準連接埠連線。";
 "allow.own.refused.path" = "只輸入主機名稱，後面不要有路徑或查詢：一個項目涵蓋的是整個主機。";
+"allow.own.refused.unread" = "這次讀不到這份清單，所以沒有加入任何東西。請再打開 Fediqo 一次。";
+"allow.unknown.notRead" = "這次讀不到這份清單。在讀得到之前，不會連到你的來源之外。請再打開 Fediqo 一次。";
+"allow.unknown.cannotKeep" = "這台裝置現在不讓 Fediqo 保存這份清單：沒有空間了，或 Fediqo 的資料夾無法寫入。在可以保存之前，不會連到你的來源之外。";
+"said.unkept.allowances" = "你對放行清單的更動沒辦法留在這台裝置上。它現在有效，但下次打開 Fediqo 時就不在了。";
+"said.unkept.timelines" = "你對時間軸的更動沒辦法留在這台裝置上。它現在有效，但下次打開 Fediqo 時就不在了。";
 
 /* The shared pieces every screen is built from (#232). */
 "help.about" = "關於「%@」的說明";

@@ -95,7 +95,10 @@ struct StorePackagerTests {
         #expect(await onto.store.said(host: Self.mastodon.host) == word)
         #expect(reopened.said == [word])
         // The person's settings.
-        #expect(onto.defaults.data(forKey: "fediqo.timelines") == from.defaults.data(forKey: "fediqo.timelines"))
+        // The timelines in their file beside the index (#344), and under no key.
+        let timelines = try #require(try from.lists.timelines.held())
+        #expect(onto.lists.timelines.read() == .data(timelines))
+        #expect(onto.defaults.object(forKey: "fediqo.timelines") == nil)
         #expect(onto.defaults.string(forKey: "fediqo.dummy.language") == "zh-TW")
         #expect(onto.defaults.string(forKey: "fediqo.dummy.keepMonths") == "6")
         // What signs in.

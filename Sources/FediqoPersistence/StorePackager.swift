@@ -37,6 +37,10 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     private let tokens: any MastodonTokenStore
     private let credentials: any ForumCredentialStore
     private let defaults: UserDefaults
+    /// The person's own lists beside the index (#344): a package carries each under the key it
+    /// was once kept by, composed from the file and laid back into it. A test hands in one
+    /// whose folder refuses.
+    var lists: ListFiles
     private let device: String
     private let appVersion: String
     private let freeSpace: @Sendable (URL) -> Int
@@ -107,6 +111,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         self.tokens = tokens
         self.credentials = credentials
         self.defaults = defaults
+        lists = ListFiles(directory: directory, defaults: defaults, protected: protected)
         self.device = device
         self.appVersion = appVersion
         self.freeSpace = freeSpace
@@ -133,6 +138,17 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             for name in names where name.hasPrefix(prefix) {
                 try? manager.removeItem(at: folder.appendingPathComponent(name))
             }
+        }
+        // A list of the person's own that a read back moved aside and never settled: put back
+        // where its list has no file — or where that read back's undo of them was owed and
+        // never done — and gone where the package's landed. **Not while a read back's anchor
+        // is in this folder**: one may be in flight in another copy of the app, and its lists
+        // aside are not this launch's to settle.
+        let inFlight = ((try? manager.contentsOfDirectory(atPath: directory.path)) ?? []).contains { name in
+            name.hasPrefix("incoming-") && manager.fileExists(atPath: directory.appendingPathComponent(name).appendingPathComponent(committingMarker).path)
+        }
+        if !inFlight {
+            ListFile.settleAsides(in: directory, failed: owedNames(in: directory).contains("settings"))
         }
         // (`.owed-…` names beside the index are not leftovers and are not swept: they go when
         // the step is done, or when the person has been told it never will be — `toldLeftOwed`.)
@@ -647,19 +663,42 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         return pieces
     }
 
-    /// How many timelines the person wrote, read off their default as the timeline store keeps
+    /// How many timelines the person wrote, read off their file as the timeline store keeps
     /// it — a count for the header, never the rules themselves.
     private func timelinesKept() -> Int {
-        guard let data = defaults.data(forKey: "fediqo.timelines"),
+        guard case .data(let data) = lists.timelines.read(),
               let top = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let rows = top["timelines"] as? [Any]
         else { return 0 }
         return rows.count
     }
 
-    /// Every `fediqo.` default, as a plist.
+    /// What `list` holds, for a package: nil where nothing is kept. **A file that will not be
+    /// read throws**, and so does a list not known because the device locked meanwhile — said
+    /// as the lock. Only in a run with no canary at all, where nothing can say more, is a
+    /// list with no file and no key carried as none: such a run opens its store too.
+    private func held(_ list: ListFile) throws -> Data? {
+        do {
+            return try list.held()
+        } catch is ListFile.NotKnown {
+            switch protected.canary() {
+            case .none: return nil
+            case .reads:
+                // Asked once more; not known a second time, the canary came and went, and
+                // that is the lock.
+                do { return try list.held() } catch is ListFile.NotKnown { throw PackageFault.locked }
+            case .refused, .closed: throw PackageFault.locked
+            }
+        }
+    }
+
+    /// Every `fediqo.` default, as a plist — **and the person's own lists under the keys they
+    /// were once kept by** (#344), read off their files: what a package holds is what it held
+    /// before the lists left the preferences, and a build on either side reads it the same.
+    /// Throws where a list cannot be read: one is not taken away as "none".
     private func settingsPlist() throws -> Data {
-        let kept = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix(Self.defaultsPrefix) }
+        var kept = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix(Self.defaultsPrefix) }
+        for list in lists.all { kept[list.key] = try held(list) }
         return try PropertyListSerialization.data(fromPropertyList: kept, format: .xml, options: 0)
     }
 
@@ -1179,7 +1218,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 undo.append(Undo(name: "pictures") { try media.restore(aside) })
                 settle.append { media.settle(aside) }
             }
-            try await commitDefaults(staged, into: &undo)
+            try await commitDefaults(staged, into: &undo, settle: &settle)
             try commitLimits(staged, into: &undo)
             await store.replace(sources: contents.sources, notes: contents.notes, said: contents.said)
         } catch {
@@ -1295,18 +1334,64 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         return (undo, settle)
     }
 
-    /// The defaults replaced, with what they held read first and how to set it back.
-    private func commitDefaults(_ staged: Staged, into undo: inout [Undo]) async throws {
+    /// The defaults replaced, with what they held read first and how to set it back — **and
+    /// the person's own lists with them** (#344), each in its file: written where the package
+    /// carries its key and **removed where it does not**, as every `fediqo.` default the
+    /// package does not carry is, so that nobody's lists outlive a read back.
+    ///
+    /// What each list held is read first, and a list that cannot be read stops this before
+    /// anything is replaced: there would be nothing to put back. **The person's own file is
+    /// moved aside, not written over**, so the undo is a rename back — which a device that
+    /// has locked does not refuse, as it would a new file — and it goes only when the whole
+    /// read back has held (`settle`). Where the undo is refused all the same it is owed with
+    /// the rest (`commitNow`); a run killed with a list aside leaves it for the next launch
+    /// (`ListFile.settleAsides`).
+    private func commitDefaults(
+        _ staged: Staged, into undo: inout [Undo], settle: inout [() -> Void]
+    ) async throws {
         guard let settings = staged.settings else { return }
-        let previous = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix(Self.defaultsPrefix) }
+        let keys = Set(lists.all.map(\.key))
+        let previous = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix(Self.defaultsPrefix) && !keys.contains($0.key) }
+        let listed = try lists.all.map { (list: $0, held: try held($0)) }
         func set(_ values: [String: Any]) {
             for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(Self.defaultsPrefix) {
                 defaults.removeObject(forKey: key)
             }
-            for (key, value) in values { defaults.set(value, forKey: key) }
+            // A list's key is never set: its file is the list, and a key would be taken for
+            // an earlier build's and removed.
+            for (key, value) in values where !keys.contains(key) { defaults.set(value, forKey: key) }
+        }
+        let asides = Asides()
+        // Said before anything is replaced: a list refused midway leaves the others to undo.
+        undo.append(Undo(name: "settings") {
+            set(previous)
+            for (list, held) in listed {
+                guard asides.reached(list.key) else { continue }
+                try list.putBack(asides[list.key], held: held)
+            }
+        })
+        settle.append {
+            for (list, _) in listed {
+                if let aside = asides[list.key] { try? FileManager.default.removeItem(at: aside) }
+            }
         }
         set(settings)
-        undo.append(Undo(name: "settings") { set(previous) })
+        for list in lists.all {
+            asides.note(try list.putAside(), for: list.key)
+            try list.lay(settings[list.key] as? Data)
+        }
+    }
+
+    /// Where each list a read back replaced was moved aside to, by its key — nil where it had
+    /// no file — filled as the commit goes and read by its undo.
+    private final class Asides: @unchecked Sendable {
+        private let lock = NSLock()
+        private var moved: [String: URL?] = [:]
+
+        func note(_ aside: URL?, for key: String) { lock.withLock { moved[key] = .some(aside) } }
+        /// Whether the commit got as far as this list: one it never reached is as it was.
+        func reached(_ key: String) -> Bool { lock.withLock { moved[key] != nil } }
+        subscript(key: String) -> URL? { lock.withLock { moved[key] ?? nil } }
     }
 
     /// An empty folder to adopt as the copies where the package carried none.

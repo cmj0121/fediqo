@@ -91,6 +91,9 @@ final class Launch {
     let file: StoreFile?
     /// The limits' account beside the index (#251); nil where the folder could not be made.
     let limits: LimitAccountFile?
+    /// The person's own lists beside the index (#344): what may be reached beyond a source,
+    /// and the timelines they wrote. Read in every kind of run, with a store or without.
+    let lists: ListFiles
     /// The index was written by a newer build and left alone; the root view says so. Cleared when
     /// the reader dismisses that, so it is said once a launch rather than once a window.
     var storeIsNewer: Bool
@@ -153,8 +156,10 @@ final class Launch {
         }
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).
+        lists = ListFiles(directory: StoreFile.applicationSupportDirectory, defaults: .standard, protected: protected)
         FediqoRootView.onlyToSources(
-            opened.sources.map(\.host), kept: store, read: opened.file != nil && opened.setAside == nil
+            opened.sources.map(\.host), kept: store, read: opened.file != nil && opened.setAside == nil,
+            lists: lists
         )
         // Built on first use only: a reader with no forum never opens the WebKit store.
         let sessions = ForumSessions(dataStore: ForumWebsiteData.onDevice())
@@ -440,6 +445,7 @@ private struct Live: View {
             },
             carrier: launch.carrier,
             storeWritable: launch.file != nil,
+            lists: launch.lists,
             nearby: NWNearbyLink(), deviceName: Launch.deviceName
         )
         .onChange(of: scenePhase) { _, phase in

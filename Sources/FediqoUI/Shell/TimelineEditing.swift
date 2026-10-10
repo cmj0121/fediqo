@@ -372,7 +372,8 @@ extension ShellSession {
 
     private func keep(_ timelines: [TimelineDefinition]) {
         written = timelines
-        timelineStore?.save(timelines)
+        // Where the device would not keep it, what is shown is not what is kept: said.
+        if let timelineStore { kept(.timelines, written: timelineStore.save(timelines)) }
         rebuildQueries()
     }
 }

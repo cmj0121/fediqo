@@ -105,8 +105,9 @@ public enum Guarded {
         // In the options and not left to the folder: an atomic write is a temporary file and a
         // rename, and the class must be the temporary file's from its first byte.
         let plain: Data.WritingOptions = atomic ? .atomic : []
+        let landed = device.landing(data)
         try made(on: device) { asked in
-            try data.write(to: url, options: asked.map { plain.union(option(for: $0)) } ?? plain)
+            try landed.write(to: url, options: asked.map { plain.union(option(for: $0)) } ?? plain)
         }
         try settle(url, was ? .written : .file, on: device)
     }
@@ -514,6 +515,9 @@ public enum Guarded {
         /// Asked just before anything is made at the class; a test throws here for a volume
         /// that refuses the asking itself.
         package var asking: @Sendable () throws -> Void
+        /// What a write lands as. The bytes it was given, on every device there is; a test
+        /// hands in another, for a write that returns and does not hold what was written.
+        package var landing: @Sendable (Data) -> Data = { $0 }
 
         /// The class `url` is at on the disk now, whatever that URL read before.
         package func heldNow(_ url: URL) -> FileProtectionType? { held(URL(fileURLWithPath: url.path)) }

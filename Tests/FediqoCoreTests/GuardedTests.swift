@@ -802,6 +802,9 @@ struct GuardedSourceTests {
             if renames > 0 { found[file.path] = renames }
         }
         #expect(found == [
+            // One of the person's own lists, made by `Guarded`, moved aside under another name
+            // in its own folder while a read back replaces it, and back again.
+            "Sources/FediqoCore/ListFile.swift": 3,
             // A cache of pictures swapped with one a read back staged, both made by `Guarded`.
             "Sources/FediqoPersistence/MediaCache.swift": 4,
             // The index and what lies beside it, put aside under another name in its own folder.
