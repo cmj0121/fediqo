@@ -181,11 +181,23 @@ public struct MastodonClient: Sendable {
     /// **Throws where the document did not come**, so a caller that remembers the answer can tell
     /// a dark network, which is worth asking again, from a server that answered (#222).
     public func introduction() async throws -> (kind: ProtocolKind, profile: SourceProfile?) {
+        let said = try await said()
+        return (said.kind, said.profile)
+    }
+
+    /// `introduction()`, and what the same document says the host has (`MastodonHostSays`) — one
+    /// request, three readings, so whoever wants the third asks nothing the other two did not.
+    ///
+    /// Each reading is its own: a document the profile cannot be read from still says what kind
+    /// of server it is and what it has, and one that says nothing of what it has
+    /// (`MastodonHostSays.nothing`) still has a profile. **Throws where the document did not come**, as
+    /// `introduction()` does, so a host that was not heard is not taken for one that said nothing.
+    public func said() async throws -> (kind: ProtocolKind, profile: SourceProfile?, has: MastodonHostSays) {
         let data = try await instanceDocument()
         let kind = Probe.kind(from: data)
         let profile = (try? MastodonJSON.decoder.decode(InstanceDTO.self, from: data))?
             .asProfile(host: host, kind: kind)
-        return (kind, profile)
+        return (kind, profile, MastodonHostSays(document: data))
     }
 
     private func statuses(
