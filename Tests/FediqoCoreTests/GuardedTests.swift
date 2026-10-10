@@ -862,6 +862,49 @@ struct GuardedSourceTests {
         #expect(carry.contains("try Guarded.handOut(url) return .moving(url)"))
     }
 
+    /// Once the app asks the system for protection by default (below), a file made with no
+    /// class asked is at complete on a phone — so a package handed out must be asked for at
+    /// its own class by name, on the path that changes the class and on the one that writes it
+    /// again. Held here, where it runs whatever the screen: what the class then reads back as
+    /// is the real-class suite's.
+    @Test("A package handed out is asked for at its own class by name on both paths, never left to what a file gets when nothing is asked")
+    func theHandOutNamesItsClass() throws {
+        let place = try String(contentsOf: Self.root.appendingPathComponent(Self.theOnePlace), encoding: .utf8)
+        let from = try #require(place.range(of: "package static func handOut(_ url: URL, on device: Device) throws {"))
+        let to = try #require(place.range(of: "package static let handedOutClass = ", range: from.upperBound..<place.endIndex))
+        let body = String(place[from.upperBound..<to.lowerBound])
+        #expect(body.contains("manager.setAttributes([.protectionKey: handedOutClass], ofItemAtPath: url.path)"))
+        #expect(body.contains("try Data().write(to: copy, options: option(for: handedOutClass))"))
+        // Nothing in it is made any other way: one write, with the class; no file made bare.
+        #expect(Self.count(#"\.write\(to:"#, in: body) == 1 && !body.contains("createFile(") && !body.contains("copyItem("))
+        #expect(place.contains("package static let handedOutClass = FileProtectionType.completeUntilFirstUserAuthentication\n"))
+        #expect(place.contains("case .completeUntilFirstUserAuthentication: .completeFileProtectionUntilFirstUserAuthentication\n"))
+        #expect(Guarded.handedOutClass == .completeUntilFirstUserAuthentication)
+    }
+
+    /// The second half of D2: what the system writes for the app — its preferences, its web
+    /// store, its caches — is asked for at the class by the iOS app's entitlement, since the
+    /// app never gets to make those. The Mac asks nothing here: it is held at its own class by
+    /// `Guarded`, and must go on writing behind a locked screen.
+    @Test("The iOS app asks the system for the complete class by default, in its entitlements and from project.yml; the Mac app's entitlements stay empty")
+    func theEntitlement() throws {
+        let project = try String(contentsOf: Self.root.appendingPathComponent("project.yml"), encoding: .utf8)
+        let phone = try #require(project.range(of: "\n  Fediqo-iOS:\n    type: application"))
+        let asked = "    entitlements:\n      path: Apps/iOS/Fediqo.entitlements\n      properties:\n        com.apple.developer.default-data-protection: NSFileProtectionComplete\n"
+        let found = try #require(project.range(of: asked))
+        #expect(found.lowerBound > phone.lowerBound, "asked of the iOS target")
+        #expect(project.components(separatedBy: "default-data-protection").count - 1 == 1, "and of no other")
+        #expect(project[phone.upperBound...].contains("        CODE_SIGN_ENTITLEMENTS: Apps/iOS/Fediqo.entitlements\n"))
+        // The file XcodeGen writes from that block, as it is kept in the repository.
+        func entitlements(_ path: String) throws -> [String: Any] {
+            let data = try Data(contentsOf: Self.root.appendingPathComponent(path))
+            return try #require(try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        }
+        let ios = try entitlements("Apps/iOS/Fediqo.entitlements")
+        #expect(ios.count == 1 && ios["com.apple.developer.default-data-protection"] as? String == "NSFileProtectionComplete")
+        #expect(try entitlements("Apps/macOS/Fediqo.entitlements").isEmpty)
+    }
+
     @Test("The app's launch classes its folders before it opens the index, and walks the rest off the main actor")
     func theLaunch() throws {
         let app = try String(contentsOf: Self.root.appendingPathComponent("Apps/Shared/FediqoApp.swift"), encoding: .utf8)
