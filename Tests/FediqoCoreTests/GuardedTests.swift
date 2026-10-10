@@ -685,6 +685,8 @@ struct GuardedSourceTests {
         ("setAttributes(", #"\bsetAttributes\("#),
         ("FileProtectionType", #"\b(URL)?FileProtection(Type)?\b"#),
         ("SQLite told to forget its temporary folder", #"keepTemporaries\( ?in: ?nil"#),
+        // The log's lines of a failed write would then carry what was being written: hosts, post ids.
+        ("SQLite's arguments made public in errors", #"publicStatementArguments"#),
         ("a connection past the one configuration", #"\bDatabaseQueue\((?! ?path: [^,()]+, configuration: (StoreFile|Self)\.configuration\()"#),
     ]
 
@@ -748,6 +750,7 @@ struct GuardedSourceTests {
         "let held = try url.resourceValues(forKeys: [.fileProtectionKey]).fileProtection",
         "let kind = FileProtectionType.completeUnlessOpen",
         "StoreFile.keepTemporaries(in: nil)",
+        "configuration.publicStatementArguments = true",
         "let queue = try DatabaseQueue(path: path)",
         "let queue = try DatabaseQueue()",
         "let queue = try DatabaseQueue(path: path, configuration: readOnly)",

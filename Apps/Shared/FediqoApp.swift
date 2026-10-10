@@ -85,6 +85,8 @@ final class Launch {
     /// What takes the store away as one locked file and reads one back (#247). Built on what
     /// this launch opened, so it writes the index this run writes and replaces it in place.
     let carrier: StorePackager
+    /// Whether what this device keeps can be read: the canary the gate asked.
+    private let protected: ProtectedData
     /// The index on disk, measured for Usage (#194); nil where this run has none.
     let file: StoreFile?
     /// The limits' account beside the index (#251); nil where the folder could not be made.
@@ -110,6 +112,7 @@ final class Launch {
         let media = try? MediaCache.caches()
         // The one the gate asked: made once for the store, and the same one here.
         let protected = ProtectedSignals.protected(store: StoreFile.applicationSupportDirectory)
+        self.protected = protected
         store = ItemStore(
             sources: opened.sources, notes: opened.notes, said: opened.said, notices: opened.notices,
             unsent: opened.unsent
@@ -117,7 +120,12 @@ final class Launch {
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
-        saver = StoreSaver(store: store, file: opened.file, protected: protected)
+        // Handed what was read, so that from the first save what is this device's alone — a
+        // post kept or let go, a source added or removed — is written ahead of everything else.
+        saver = StoreSaver(
+            store: store, file: opened.file, protected: protected,
+            holding: opened.setAside == nil ? (opened.sources, opened.notes) : nil
+        )
         file = opened.file
         // Only beside an index this run writes: a run that must not write the index (a newer
         // build's, or one that could not be set aside) writes no lines about it either.
@@ -214,11 +222,27 @@ final class Launch {
     /// As the app goes to the background, which may be a moment away to a password manager in the
     /// middle of a sign-in: the save, and only the forum browser's copies of what it fetched. The
     /// rest waits for the quit, or for the next launch's sweep.
+    #if os(iOS)
+    /// **On a phone** this is the last the app does before the device may lock (#344): the
+    /// save first and to its end, under the grant the caller already holds, and the cache
+    /// dropped only where there is still time and a device to do it on (`Leaving`).
+    func pause(holding grant: any BackgroundGranting) async {
+        await Leaving.leave(
+            holding: grant, decide: { await forgetChangedReaders() }, saver: saver, protected: protected,
+            stillLeft: { UIApplication.shared.applicationState != .active },
+            then: { await forums.dropCache(within: StoreSaver.deadline) }
+        )
+    }
+    #else
+    /// **A Mac has no leaving step for a lock, and needs none**: nothing announces one, its
+    /// app is not suspended behind a locked screen, and a save goes through the lock on the
+    /// connection it holds. Where a phase is delivered at all, this is what it always was.
     func pause() async {
         await forgetChangedReaders()
         _ = await saver.flush()
         await forums.dropCache(within: StoreSaver.deadline)
     }
+    #endif
 }
 
 #if os(macOS)
@@ -439,27 +463,26 @@ private struct Live: View {
         (try? await launch.saver.saveUnsent()) ?? false
     }
 
-    /// On iOS a backgrounded app is suspended within moments, which would stop a write halfway;
-    /// the background task asks for the time to finish it, and gives it back as soon as it has —
-    /// or at the deadline, the same one a quit has.
+    /// On iOS a backgrounded app is suspended within moments, which would stop a write halfway:
+    /// the background task asks for the time to finish it, and is given back when leaving is
+    /// done — the save having run to its end, not to a deadline — or when the system takes it.
     private func saveInBackground() {
         #if os(iOS)
+        // Taken now, as the app is told, and not a turn of the run loop later: everything
+        // leaving does is done under it, and it is given back there (`Leaving`).
         let grant = BackgroundGrant()
+        Task { await launch.pause(holding: grant) }
+        #else
+        Task { await launch.pause() }
         #endif
-        Task {
-            await Launch.shared?.pause()
-            #if os(iOS)
-            grant.end()
-            #endif
-        }
     }
 }
 
 #if os(iOS)
-/// One background task, ended exactly once: when the save returns, or when the system runs out
+/// One background task, ended exactly once: when leaving is done, or when the system runs out
 /// of patience first.
 @MainActor
-private final class BackgroundGrant {
+private final class BackgroundGrant: BackgroundGranting {
     private var id = UIBackgroundTaskIdentifier.invalid
 
     init() {

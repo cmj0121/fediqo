@@ -649,6 +649,40 @@ public struct StoreFile: Sendable {
         }
     }
 
+    /// **Only what is this device's alone and changed** (#344), in one small transaction:
+    /// the rows let go deleted — zeroed as they go, `secure_delete` being on — the rows whose
+    /// `kept` changed updated in that one column, and the source rows that changed written or
+    /// removed. Nothing else is touched. What a full save would also write, ahead of it: so
+    /// that these are on disk where the full save, which rewrites every row and takes as long
+    /// as the store is large, is cut off by a device locking or a quit that will not wait.
+    ///
+    /// Every row here is one a full save writes the same way, and the full save that follows
+    /// rewrites them all. **Between the two the index is neither the store as it was nor as it
+    /// is** — the device's own brought up to date, the sources' word as last saved — and that
+    /// is the point: it is the state a save cut off there leaves, and every row of it is one
+    /// that was true, with nothing the person let go still in it.
+    ///
+    /// **What is not here, because it is not in the index at all**: where the reader was
+    /// standing on each timeline, and which posts were read this run. Both are kept for the
+    /// run alone, in memory (`TimelinePlaces`, `ItemStore.readAt`), and no save — whole or cut
+    /// off — writes or loses them.
+    func save(own changes: OwnChanges) async throws {
+        try await db.write { db in
+            for host in changes.removed {
+                try db.execute(sql: "DELETE FROM source WHERE host = ?", arguments: [host])
+            }
+            for row in changes.sources {
+                try SourceRecord(row.source, said: row.said).save(db)
+            }
+            for key in changes.gone {
+                try db.execute(sql: "DELETE FROM note WHERE host = ? AND id = ?", arguments: [key.host, key.id])
+            }
+            for row in changes.kept {
+                try db.execute(sql: "UPDATE note SET kept = ? WHERE host = ? AND id = ?", arguments: [row.kept, row.key.host, row.key.id])
+            }
+        }
+    }
+
     /// Empties both tables and writes `sources` and `notes` in their place, in one transaction,
     /// on GRDB's queue rather than the caller's. `said` is what each source last said about
     /// itself (#188), written on its source's row; one of a host not in `sources` goes nowhere.
@@ -725,6 +759,31 @@ public struct StoreFile: Sendable {
     /// replacing into, are named by.
     static let unreadablePrefix = "index-unreadable-"
     static let readBackAsidePrefix = "incoming-aside-"
+}
+
+/// What is this device's alone and has changed since the last write that landed (#344): what
+/// `StoreFile.save(own:)` writes ahead of a full save.
+struct OwnChanges: Sendable, Equatable {
+    struct Kept: Sendable, Equatable {
+        let key: NoteKey
+        let kept: Bool
+    }
+
+    struct SourceRow: Sendable, Equatable {
+        let source: Source
+        let said: SourceProfile?
+    }
+
+    /// Rows let go: by hand, by a limit, with their source.
+    var gone: [NoteKey] = []
+    /// Rows the person keeps, or no longer does.
+    var kept: [Kept] = []
+    /// Sources added, or following something else now.
+    var sources: [SourceRow] = []
+    /// Sources removed, by host.
+    var removed: [String] = []
+
+    var isEmpty: Bool { gone.isEmpty && kept.isEmpty && sources.isEmpty && removed.isEmpty }
 }
 
 private var migrator: DatabaseMigrator {

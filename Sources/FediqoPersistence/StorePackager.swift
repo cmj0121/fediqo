@@ -1221,10 +1221,14 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             try await file.save(
                 sources: contents.sources, notes: contents.notes, said: contents.said, replacingNotices: []
             )
-            return ({
+            // Written through the file, past the saver: what it knew the index to hold is not
+            // what the index holds now (`StoreSaver.indexReplaced`).
+            await saver?.indexReplaced()
+            return ({ [saver] in
                 try await file.save(
                     sources: previous.sources, notes: previous.notes, said: previous.said, replacingNotices: told
                 )
+                await saver?.indexReplaced()
             }, {})
         }
         guard let index = staged.index else { return ({}, {}) }

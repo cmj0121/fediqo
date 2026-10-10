@@ -256,7 +256,10 @@ struct LeftBehindTests {
         #expect(code.contains("guard ending == nil else { return }"), "the end runs once")
         #expect(code.contains("func applicationWillTerminate(_ application: UIApplication)"))
         #expect(code.contains("UIScene.didDisconnectNotification"))
-        #expect(code.components(separatedBy: "await Launch.shared?.pause()").count - 1 == 1)
+        // A Mac's, where a phase is delivered; a phone leaves under the grant it took (#344).
+        // By the run the window already holds, so a grant taken is never left with nobody to end it.
+        #expect(code.components(separatedBy: "await launch.pause()").count - 1 == 1)
+        #expect(code.components(separatedBy: "await launch.pause(holding: grant)").count - 1 == 1)
         #expect(!code.contains("saver.flush()") || code.components(separatedBy: "saver.flush()").count - 1 == 2, "only inside the run's own end and pause")
         let sweep = try #require(code.range(of: "forums.sweepAtLaunch("))
         let signIn = try #require(code.range(of: "forums.signInAgain("))

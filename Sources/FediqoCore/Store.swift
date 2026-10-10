@@ -1152,6 +1152,15 @@ public actor ItemStore {
     /// for the sources and the notes in two awaits would let an ingest or a remove land between
     /// them, writing notes whose source is gone. This is the counterpart of
     /// `init(sources:notes:)`. `revision` is the one this snapshot is of, read in the same hop.
+    /// **What is this device's alone**, as it stands (#344): which posts are held and which of
+    /// them the person keeps, and the sources with what each follows. Everything else a post
+    /// or a source carries is the source's own word and can be read again; these cannot.
+    /// No order and no copy of a post: one pass, for a save that writes these few things
+    /// ahead of everything else.
+    public func ownSnapshot() -> (sources: [Source], said: [SourceProfile], held: [NoteKey: Bool], revision: Int) {
+        (sourceList, Array(saidByHost.values), notes.mapValues(\.kept), revision)
+    }
+
     public func snapshot() -> (sources: [Source], notes: [Note], said: [SourceProfile], revision: Int) {
         let arrival = self.arrival
         let ordered = notes.values.sorted { (arrival[$0.key] ?? 0) < (arrival[$1.key] ?? 0) }

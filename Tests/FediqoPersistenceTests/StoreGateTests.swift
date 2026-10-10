@@ -383,7 +383,8 @@ struct StoreGateTests {
         let store = try #require(code.range(of: "store = ItemStore("))
         #expect(made.upperBound < store.lowerBound)
         #expect(count("Launch.shared.") == 0, "a quit or a backgrounding before the store is opened must not build the run")
-        #expect(count("Launch.shared?.end()") == 2 && count("Launch.shared?.pause()") == 1)
+        #expect(count("Launch.shared?.end()") == 2 && count("Launch.shared?.pause(") == 0)
+        #expect(count("launch.pause()") == 1 && count("launch.pause(holding: grant)") == 1, "a Mac's, and a phone's under its grant: no other")
         // The gate is made from a body, never from a static or the app's initializer.
         #expect(code.contains("private static var gate: StoreGate?"))
         #expect(code.contains("@State private var launch = Launch.atOnce()"))
@@ -399,7 +400,7 @@ struct StoreGateTests {
         #expect(code.contains("saver: saver, protected: protected\n        )"))
         // And a save a lock refused is written at a wake-up too: both ask the canary themselves.
         #expect(code.contains("for await _ in protected.changes() {\n                await carrier.finishOwed()\n                await saver.owedNow()\n            }"))
-        #expect(code.contains("saver = StoreSaver(store: store, file: opened.file, protected: protected)"))
+        #expect(code.contains("saver = StoreSaver(\n            store: store, file: opened.file, protected: protected,\n            holding: opened.setAside == nil ? (opened.sources, opened.notes) : nil\n        )"))
     }
 
     // MARK: - The platform's signals
