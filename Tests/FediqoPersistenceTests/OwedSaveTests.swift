@@ -346,3 +346,30 @@ struct OwedSaveTests {
         #expect(!onto.packager().isLocked())
     }
 }
+
+/// #344: a save's failure is said in the log by its kind and SQLite's number — never by the
+/// error's own words, which can carry what was being written.
+@Suite("A failed save of what is this device's own is logged by its kind alone")
+struct SaveFailureLogTests {
+    @Test("What is said of an error is its type and SQLite's code, and nothing of its message, its statement or its arguments")
+    func kind() {
+        let raised = DatabaseError(
+            resultCode: .SQLITE_IOERR_WRITE, message: "disk I/O error at one.example",
+            sql: "UPDATE source SET title = ? WHERE host = ?", arguments: ["A small place", "one.example"]
+        )
+        let said = StoreSaver.kind(of: raised)
+        #expect(said == "DatabaseError \(ResultCode.SQLITE_IOERR_WRITE.rawValue)")
+        #expect(!said.contains("one.example") && !said.contains("UPDATE") && !said.contains("small"))
+        struct Refusal: Error { let host = "one.example" }
+        #expect(StoreSaver.kind(of: Refusal()) == "Refusal")
+    }
+
+    @Test("The line for what is this device's own says only that, in public")
+    func theLine() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let code = try String(contentsOf: root.appendingPathComponent("Sources/FediqoPersistence/StoreSaver.swift"), encoding: .utf8)
+        let line = try #require(code.split(separator: "\n").first { $0.contains("Saving what is this device's own failed") })
+        #expect(line.contains("\\(Self.kind(of: error), privacy: .public)") && !line.contains("String(describing: error)"))
+    }
+}

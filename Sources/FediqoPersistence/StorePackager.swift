@@ -87,6 +87,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         case undoing
         /// Being undone, the new index taken out and the old one not yet back.
         case undoneGap
+        /// Every step of the read back held and the commit's own name says so (`Flight`);
+        /// nothing put aside has gone yet, and each step's name is still beside the index.
+        case held
     }
 
     /// `directory` is where the index lives; `file` is the index as this run opened it, or nil
@@ -140,18 +143,31 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             }
         }
         // A list of the person's own that a read back moved aside and never settled: put back
-        // where its list has no file — or where that read back's undo of them was owed and
-        // never done — and gone where the package's landed. **Not while a read back's anchor
-        // is in this folder**: one may be in flight in another copy of the app, and its lists
-        // aside are not this launch's to settle.
-        let inFlight = ((try? manager.contentsOfDirectory(atPath: directory.path)) ?? []).contains { name in
+        // where its list has no file — or where that read back's undo of them was not done —
+        // and gone where the package's landed. **Not while a commit's own name is held in
+        // this folder** (`Flight`): one is in flight in another copy of the app — or its undo
+        // is owed there — and neither its lists aside nor its steps' names are this launch's
+        // to settle. **Nor while a read back's anchor is here**, an earlier build's or one
+        // nobody has chosen between yet.
+        let flights = Flight.standing(in: directory)
+        let anchored = ((try? manager.contentsOfDirectory(atPath: directory.path)) ?? []).contains { name in
             name.hasPrefix("incoming-") && manager.fileExists(atPath: directory.appendingPathComponent(name).appendingPathComponent(committingMarker).path)
         }
-        if !inFlight {
-            ListFile.settleAsides(in: directory, failed: owedNames(in: directory).contains("settings"))
+        if !flights.live {
+            // Every step of that commit held, and it said so: the names beside it are ones it
+            // did not live to remove. They go unsaid, and nothing is settled as though it failed.
+            if !flights.believed {
+                for step in owedNames(in: directory) { try? manager.removeItem(at: directory.appendingPathComponent(owedPrefix + step)) }
+            }
+            // What is known of the read back that left a list aside: that it held, by its
+            // own word; that it failed, by the settings' step still being named; or neither.
+            let outcome: ListFile.Outcome = !flights.believed
+                ? .held : owedNames(in: directory).contains("settings") ? .failed : .notKnown
+            if !anchored { ListFile.settleAsides(in: directory, after: outcome) }
         }
         // (`.owed-…` names beside the index are not leftovers and are not swept: they go when
-        // the step is done, or when the person has been told it never will be — `toldLeftOwed`.)
+        // the step is done or settled, or when the person has been told it never will be —
+        // `toldLeftOwed`.)
         sweep(temporary, prefix: "takeaway-")
         // A read back killed midway is settled first, one way or the other, so that the index
         // this run opens is either the one this device held or the one the package brought —
@@ -159,6 +175,16 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         // staging go: by now nothing under `incoming-` without a marker is the only copy of
         // anything.
         let settled = settleHalfCommits(in: directory)
+        if !flights.live {
+            // An old index this launch has just put back as it was is put back: that step
+            // is no longer one to say.
+            if settled.putBack > 0 { _ = unsay("index", in: directory) }
+            // A commit's own name that has nothing left to speak for goes. One beside steps
+            // still named stays with them, until the person has been told (`toldLeftOwed`).
+            if owedNames(in: directory).isEmpty {
+                for name in flights.cutShort + flights.held { try? manager.removeItem(at: name) }
+            }
+        }
         let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
         for name in names where name.hasPrefix("incoming-") {
             let folder = directory.appendingPathComponent(name)
@@ -547,6 +573,10 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
 
     public func stagingFolder() -> URL { directory }
 
+    /// **Refused is the lock, on a phone and on a Mac alike.** `.closed` is not asked about:
+    /// only a probe that has just written the canary anew answers it (`Guarded.probeCanary`,
+    /// `anew`), which the gate alone does at launch; this is the plain probe, and a locked
+    /// Mac answers it by refusing the read.
     public func isLocked() -> Bool { protected.canary() == .refused }
 
     /// `body`, with a file the system would not make or open — or SQLite could not, on a
@@ -1052,10 +1082,15 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         let run: () async throws -> Void
     }
 
-    /// The steps of a read back's undo that a locked device refused, newest first.
+    /// The steps of a read back's undo that a locked device refused, newest first — with
+    /// the names of steps that were put back and whose names would not go, and each such
+    /// commit's own name, held for as long as anything of it is.
     private final class Owed: @unchecked Sendable {
         private let lock = NSLock()
         private var steps: [Undo] = []
+        private var spent: [String] = []
+        private var flights: [Flight] = []
+        private var said: Set<String> = []
         private var saidWhatWasLeft = false
 
         /// What an earlier run left has been said in this one: it is not said twice in a run,
@@ -1073,10 +1108,50 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             }
         }
 
-        func keep(_ refused: [Undo]) {
+        func keep(_ refused: [Undo], spent names: [String] = [], of flight: Flight? = nil) {
             lock.lock()
             defer { lock.unlock() }
             steps += refused
+            spent += names
+            if let flight { flights.append(flight) }
+        }
+
+        /// Steps this run has itself said were not put back, and left named for the next
+        /// launch to act on: not this run's to say again, or to take the names of.
+        func saidHere(_ names: [String]) {
+            lock.lock()
+            defer { lock.unlock() }
+            said.formUnion(names)
+        }
+
+        var saidByThisRun: Set<String> {
+            lock.lock()
+            defer { lock.unlock() }
+            return said
+        }
+
+        /// The names of steps that are done, still to be removed.
+        func takeSpent() -> [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            defer { spent = [] }
+            return spent
+        }
+
+        /// Nothing is owed and no name is left to remove: every commit held here is over.
+        func endFlights() {
+            lock.lock()
+            defer { lock.unlock() }
+            guard steps.isEmpty, spent.isEmpty else { return }
+            for flight in flights { flight.end() }
+            flights = []
+        }
+
+        /// Whether nothing at all is held: no step, and no name to remove.
+        var isClear: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return steps.isEmpty && spent.isEmpty
         }
 
         func take() -> [Undo] {
@@ -1114,22 +1189,48 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
 
     private func owedFile(_ step: String) -> URL { directory.appendingPathComponent(Self.owedPrefix + step) }
 
+    /// Whether a list of the person's own is aside in `directory` (`ListFile.putAside`).
+    private static func listAside(in directory: URL) -> Bool {
+        ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).contains { $0.contains(ListFile.asideInfix) }
+    }
+
+    /// Takes the name of `step` away: whether it is gone.
+    private static func unsay(_ step: String, in directory: URL) -> Bool {
+        let name = directory.appendingPathComponent(owedPrefix + step)
+        try? FileManager.default.removeItem(at: name)
+        return !FileManager.default.fileExists(atPath: name.path)
+    }
+
+    /// The steps named in `directory` that a run is to take as not put back: every one
+    /// named, **unless the commit that named them is still held by a run that lives, or left
+    /// its word that every step held** (`Flight`). Names with no commit's name beside them
+    /// are believed as they stand.
+    static func leftNames(in directory: URL) -> [String] {
+        Flight.standing(in: directory).believed ? owedNames(in: directory) : []
+    }
+
     /// **What an earlier run owed and did not live to do** (#344): the steps named beside the
-    /// index that this run holds no undo for. A lock refused them, and the process ended
-    /// before the device was unlocked. **They cannot be done now** — what was to be put back
+    /// index that this run holds no undo for. A lock refused them and the process ended
+    /// before the device was unlocked, or it ended in the middle of the read back — the names
+    /// are made before each step, so either leaves them. **They cannot be done now** — what was to be put back
     /// was in that run's memory — and nothing here pretends otherwise: the person is told, in
     /// the sentence they were given at the time, that the device is neither as it was nor as
     /// the package says, and which parts.
     public func leftOwed() -> [String] {
         guard !owed.told else { return [] }
-        let mine = Set(owed.names)
-        return Self.owedNames(in: directory).filter { !mine.contains($0) }
+        let mine = Set(owed.names).union(owed.saidByThisRun)
+        return Self.leftNames(in: directory).filter { !mine.contains($0) }
     }
 
     /// The person has been told what `leftOwed` named: the names go. Until then no take-away
     /// and no read back begins.
     public func toldLeftOwed() {
         for step in leftOwed() { try? FileManager.default.removeItem(at: owedFile(step)) }
+        // And the name of the commit that left them, which nobody holds: it has been spoken for.
+        let flights = Flight.standing(in: directory)
+        if !flights.live, Self.owedNames(in: directory).isEmpty {
+            for name in flights.cutShort { try? FileManager.default.removeItem(at: name) }
+        }
         owed.told = true
     }
 
@@ -1148,22 +1249,27 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// a gap, known: saying it needs a notice of its own that this does not have.
     @discardableResult
     public func finishOwed() async -> Bool {
-        guard !owed.isEmpty else { return true }
-        guard protected.canary() == .reads else { return false }
+        guard !owed.isClear else { return true }
+        guard protected.canary() == .reads else { return !owesUndo }
         let directory = self.directory
         let finish: @Sendable () async -> (done: [String], still: Bool) = { [owed] in
             var still: [Undo] = []
             var done: [String] = []
+            // A step that is done and still named would be said by the next run as not put
+            // back: its name is asked to go again for as long as this run lives.
+            var spent = owed.takeSpent().filter { !Self.unsay($0, in: directory) }
             for step in owed.take() {
                 do {
                     try await step.run()
                     done.append(step.name)
-                    try? FileManager.default.removeItem(at: directory.appendingPathComponent(Self.owedPrefix + step.name))
+                    if !Self.unsay(step.name, in: directory) { spent.append(step.name) }
                 } catch {
                     still.append(step)
                 }
             }
-            owed.keep(still)
+            owed.keep(still, spent: spent)
+            // With nothing owed and no name left, the commit's own name goes too.
+            owed.endFlights()
             return (done, !still.isEmpty)
         }
         let result: (done: [String], still: Bool)
@@ -1185,7 +1291,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// naming the parts, and never as a lock on a device that is not locked. Nothing is
     /// staged, nothing moved, and nothing read as "none" that is only out of reach.
     private func unlocked() async throws {
-        if protected.canary() == .refused { throw PackageFault.locked }
+        if isLocked() { throw PackageFault.locked }
         if !(await finishOwed()) { throw PackageFault.unwound(steps: owed.names) }
         // What an earlier run left owed: said now, if it has not been already — and with
         // that, told.
@@ -1199,49 +1305,115 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     private func commitNow(
         _ staged: Staged, contents: (sources: [Source], notes: [Note], said: [SourceProfile])?
     ) async throws {
+        // The commit's own name first (`Flight`), held from here until nothing of this is
+        // owed: while it is, no other copy of the app settles a list this has aside or says
+        // a step this has named.
+        let flight = try Flight(in: directory)
         var undo: [Undo] = []
         var settle: [() -> Void] = []
+        // **Each step is named beside the index before it runs** (#344), while the device
+        // can still be written: a phone that has locked takes no new file, so a name made
+        // only once an undo had been refused could never be made there. The name goes when
+        // the step is settled or put back; a run that ends first leaves it for the next.
+        var named: [String] = []
+        func naming(_ step: String) throws {
+            try Guarded.write(Data(), to: owedFile(step), atomic: false)
+            named.append(step)
+        }
+        /// Every step held: said first, by the commit's own name, so that nothing after it
+        /// can be taken for a read back that failed; then what was put aside goes; and the
+        /// steps' names and the commit's own last.
+        func allHeld() {
+            let said = flight.sayHeld()
+            // **Where that could not be said, the steps' names go first**, before anything
+            // put aside does: every step did hold, and a run that ended while settling
+            // would otherwise leave names the next launch believes — and put the person's
+            // old list back over the package's. Without them it leaves a commit's name
+            // with nothing named, which is settled as nothing that failed.
+            var lingering = said ? [] : named.filter { !Self.unsay($0, in: directory) }
+            witness?(.held)
+            for step in settle { step() }
+            if said { lingering = named.filter { !Self.unsay($0, in: directory) } }
+            // A step's name that would not go is not to be believed, and the word that
+            // every step held is what says so: it stays beside it for the next launch.
+            flight.end(keepingName: said && !lingering.isEmpty)
+        }
         do {
             if let secrets = staged.secrets {
+                try naming("secrets")
                 let previous = try refile(secrets, onlyTheirs: contents == nil)
                 undo.append(Undo(name: "secrets") { try unfile(secrets, previous: previous) })
             }
-            guard let contents else { return }
+            guard let contents else { return allHeld() }
             witness?(.staged)
+            try naming("index")
             let index = try await commitIndex(contents, staged: staged)
             undo.append(Undo(name: "index", run: index.undo))
             settle.append(index.settle)
             if let media {
                 // The copies kept here were for posts that are no longer here: replaced by the
                 // package's where it carried any, and dropped where it did not.
+                try naming("pictures")
                 let aside = try media.adopt(staged.media ?? Self.emptyFolder(beside: directory))
                 undo.append(Undo(name: "pictures") { try media.restore(aside) })
                 settle.append { media.settle(aside) }
             }
+            if staged.settings != nil { try naming("settings") }
             try await commitDefaults(staged, into: &undo, settle: &settle)
+            if staged.limits != nil { try naming("limits") }
             try commitLimits(staged, into: &undo)
             await store.replace(sources: contents.sources, notes: contents.notes, said: contents.said)
         } catch {
             // Newest first, every one tried, and the ones that refused named: the device is
             // then neither as it was nor as the package says, and the sentence must say so.
             var refused: [Undo] = []
-            for step in undo.reversed() {
-                do { try await step.run() } catch { refused.append(step) }
+            // A step put back whose name would not go — or one that refused before it had
+            // changed anything, and so was never to be put back.
+            var spent: [String] = []
+            /// The name of a step that is put back, or was never begun, taken away —
+            /// **but never the settings' while a list of the person's own is aside**. This
+            /// commit's own asides are back by the time its name is asked to go, so one
+            /// still there is an earlier read back's in this run, whose undo was refused
+            /// (below): that name is what makes the next launch put the list back, and is
+            /// not this commit's to take. Decided by what is on disk, not by what this run
+            /// remembers having said.
+            func dropping(_ step: String) {
+                if step == "settings", Self.listAside(in: directory) { return }
+                if !Self.unsay(step, in: directory) { spent.append(step) }
             }
-            if refused.isEmpty { throw error }
+            let reached = Set(undo.map(\.name))
+            for step in named where !reached.contains(step) { dropping(step) }
+            for step in undo.reversed() {
+                do { try await step.run() } catch {
+                    refused.append(step)
+                    continue
+                }
+                dropping(step.name)
+            }
             // **What a lock refused is still owed** (#344), and is not forgotten with this
             // throw: it is done when the canary reads again (`finishOwed`). Until then the
-            // device is as the sentence says — neither as it was nor as the package says.
-            if protected.canary() == .refused {
-                owed.keep(refused)
-                // And said beside the index, by a name: should the process end before the
-                // device is unlocked, the next launch still knows something was not put back.
-                for step in refused { try? Guarded.write(Data(), to: owedFile(step.name), atomic: false) }
+            // device is as the sentence says — neither as it was nor as the package says —
+            // and should the process end before the device is unlocked, the next launch
+            // still knows what was not put back: the names are beside the index already.
+            if !(refused.isEmpty && spent.isEmpty), isLocked() {
+                owed.keep(refused, spent: spent, of: flight)
+            } else {
+                // Refused by something that is no lock: said now, by this throw, and not
+                // kept to be said again — **but for the settings, where a list of the
+                // person's own is still aside**. With no name the next launch would take
+                // that aside for what a read back replaced and delete it where the
+                // package's landed; with it, the launch puts the list back, and says once
+                // more what was not. Not said again by this run (`Owed.saidHere`).
+                let kept = refused.map(\.name).filter { $0 == "settings" && Self.listAside(in: directory) }
+                for step in refused where !kept.contains(step.name) { _ = Self.unsay(step.name, in: directory) }
+                owed.saidHere(kept)
+                flight.end(keepingName: !kept.isEmpty)
             }
+            if refused.isEmpty { throw error }
             throw PackageFault.unwound(steps: refused.map(\.name))
         }
         // Every step held: what was put aside for putting back goes, explicitly and last.
-        for step in settle { step() }
+        allHeld()
     }
 
     /// The index replaced, and how to put it back: through the open file where this run has one,
@@ -1366,8 +1538,11 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         undo.append(Undo(name: "settings") {
             set(previous)
             for (list, held) in listed {
-                guard asides.reached(list.key) else { continue }
+                // One already put back is not looked for again: asked twice, its aside
+                // would be missing, and a missing aside is a refusal (`ListFile.putBack`).
+                guard asides.reached(list.key), !asides.isBack(list.key) else { continue }
                 try list.putBack(asides[list.key], held: held)
+                asides.back(list.key)
             }
         })
         settle.append {
@@ -1387,7 +1562,11 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     private final class Asides: @unchecked Sendable {
         private let lock = NSLock()
         private var moved: [String: URL?] = [:]
+        private var putBack: Set<String> = []
 
+        /// The undo has put this list back.
+        func back(_ key: String) { lock.withLock { _ = putBack.insert(key) } }
+        func isBack(_ key: String) -> Bool { lock.withLock { putBack.contains(key) } }
         func note(_ aside: URL?, for key: String) { lock.withLock { moved[key] = .some(aside) } }
         /// Whether the commit got as far as this list: one it never reached is as it was.
         func reached(_ key: String) -> Bool { lock.withLock { moved[key] != nil } }

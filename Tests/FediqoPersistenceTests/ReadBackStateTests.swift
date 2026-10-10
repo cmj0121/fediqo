@@ -355,6 +355,11 @@ struct ReadBackStateTests {
         for name in try names(dir) where name.hasPrefix("incoming-") && !name.hasPrefix("incoming-aside-") {
             try FileManager.default.removeItem(at: dir.appendingPathComponent(name))
         }
+        // What the run killed there left named — its steps, and the commit's own name — has
+        // been said to the person, and gone with that (`toldLeftOwed`).
+        for name in try names(dir) where name.hasPrefix(StorePackager.owedPrefix) || name.hasPrefix(StorePackager.Flight.prefix) {
+            try FileManager.default.removeItem(at: dir.appendingPathComponent(name))
+        }
         try Data("beside the package's index".utf8).write(to: dir.appendingPathComponent("index.sqlite-shm"))
         return (dir, cleanup)
     }
@@ -559,16 +564,25 @@ struct ReadBackStateTests {
             return
         }
         #expect(try oldStoreKept(under: copy))
-        // **The process dies with it owed.** The next run holds no undo — what was to be put
-        // back was in that run's memory — and finds the name: it is said, in the sentence the
-        // person was given at the time, and nothing begins until it has been.
-        let next = onto.packager(protected: ProtectedData.always)
+        // **While the run that owes it lives, it is nobody else's to say**: another packager
+        // on the folder — another copy of the app — finds the commit's own name held.
+        #expect(onto.packager(protected: ProtectedData.always).leftOwed().isEmpty)
+        // **The process dies with it owed** — the folder as it stands, with nobody holding
+        // the commit's name. The next run holds no undo — what was to be put back was in that
+        // run's memory — and finds the name: it is said, in the sentence the person was given
+        // at the time, and nothing begins until it has been.
+        let next = StorePackager(
+            directory: copy, file: nil, store: ItemStore(sources: [], notes: []), media: nil, tokens: onto.tokens,
+            credentials: onto.credentials, defaults: onto.defaults, device: "a test", appVersion: "0.7.0",
+            protected: .always, freeSpace: { _ in .max }, rounds: 1000
+        )
         #expect(next.leftOwed() == ["index"] && !next.owesUndo)
         await #expect(throws: PackageFault.unwound(steps: ["index"])) {
             try await next.readBack(package, key: .password("password"), replacing: true) { _ in }
         }
-        #expect(next.leftOwed().isEmpty && StorePackager.owedNames(in: folder).isEmpty, "told, and so no longer kept to be said")
-        try Guarded.write(Data(), to: folder.appendingPathComponent(".owed-index"), atomic: false)
+        #expect(next.leftOwed().isEmpty && StorePackager.owedNames(in: copy).isEmpty, "told, and so no longer kept to be said")
+        #expect(try !names(copy).contains { $0.hasPrefix(StorePackager.Flight.prefix) }, "and the name of the commit that left it goes with it")
+        try Guarded.write(Data(), to: copy.appendingPathComponent(".owed-index"), atomic: false)
         #expect(next.leftOwed().isEmpty, "said once in a run, whether or not its name could be removed")
         // Unlocked, and the step still failing for a reason that is no lock: said as what is
         // not put back, and not as a locked device.
@@ -582,6 +596,7 @@ struct ReadBackStateTests {
         #expect(await packager.finishOwed())
         #expect(!packager.owesUndo)
         #expect(StorePackager.owedNames(in: folder).isEmpty, "its name goes as the step is done")
+        #expect(try !names(folder).contains { $0.hasPrefix(StorePackager.Flight.prefix) }, "and the commit's own, with nothing owed any more")
         #expect(try asides(folder).isEmpty)
         #expect(try Data(contentsOf: folder.appendingPathComponent("index.sqlite")).range(of: Self.old) != nil)
     }

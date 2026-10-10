@@ -228,7 +228,11 @@ final class ShellCarry {
             }
             // Sealed and finished, and about to be the person's own file wherever they put it:
             // let out of the class the staging kept it at, so a backup or a sync can read the
-            // copy behind a locked screen (#344).
+            // copy behind a locked screen (#344). **Before the mover is shown, and not once
+            // it has a place**: the mover moves the file itself and offers no moment between
+            // the two. Until it is done — or, killed with it up, until the next launch that
+            // can read the device sweeps the scratch folder — the sealed package lies here at
+            // the lesser class (`Guarded.handOut`).
             try Guarded.handOut(url)
             return .moving(url)
         }

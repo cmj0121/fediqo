@@ -22,6 +22,13 @@ public enum ProtectedFolders {
         /// Whether the temporary directory is this app's alone. Outside a sandbox it is every
         /// program's the person runs, and nothing in it but what this app named is touched.
         var sandboxed: Bool
+        /// The iPhone build on a phone: there the system keeps the app's preferences, its
+        /// cookies and its caches inside the app's own container, and is asked to close them
+        /// (the entitlement). A Mac build asks nothing of the kind — **and neither does the
+        /// iPhone build run on a Mac**: a Mac goes on running behind a locked screen, and
+        /// its preferences are written by another process that opens the file afresh, which
+        /// a file brought to the class would refuse.
+        var phoneBuild = false
 
         /// This app's own, in its container.
         public static var container: Places {
@@ -32,8 +39,17 @@ public enum ProtectedFolders {
                     .appendingPathComponent("Fediqo", isDirectory: true),
                 temporary: manager.temporaryDirectory,
                 library: manager.urls(for: .libraryDirectory, in: .userDomainMask)[0],
-                bundleID: ForumWebsiteData.bundleID, sandboxed: ForumWebsiteData.isSandboxed
+                bundleID: ForumWebsiteData.bundleID, sandboxed: ForumWebsiteData.isSandboxed,
+                phoneBuild: isPhoneBuild
             )
+        }
+
+        private static var isPhoneBuild: Bool {
+            #if os(macOS)
+            false
+            #else
+            !ProcessInfo.processInfo.isiOSAppOnMac
+            #endif
         }
 
         /// What the film player keeps of a film while it plays, which nothing else removes.
@@ -64,6 +80,18 @@ public enum ProtectedFolders {
             return ((sandboxed ? ["SplashBoard", "Caches/Snapshots"] : []) + named).map {
                 library.appendingPathComponent($0, isDirectory: true)
             }
+        }
+
+        /// Folders of the system's own that were there before this build asked for anything:
+        /// the preferences, the cookies, and the top of Caches. **What the entitlement asks
+        /// reaches what is made from then on**, and may not reach a folder an earlier install
+        /// already had, or the file in it the system writes again and again — so each is
+        /// brought, itself and what it holds directly, and **nothing below that**: under them
+        /// are the system's trees, which are not this app's to walk. Only for the iPhone build
+        /// on a phone, in its sandbox; anywhere else the Library is not this app's alone.
+        var systemOwned: [URL] {
+            guard sandboxed, phoneBuild else { return [] }
+            return ["Preferences", "Cookies", "Caches"].map { library.appendingPathComponent($0, isDirectory: true) }
         }
     }
 
@@ -152,7 +180,8 @@ public enum ProtectedFolders {
 
     /// The rest, which may be a good deal and is nothing a first frame waits for: everything
     /// under the store's folder that `first` did not walk, the picture copies, the temporary
-    /// directory, and what the system keeps for the app. **Off the main actor** — it is a walk
+    /// directory, what the system keeps for the app, and — for the iPhone build — the tops of
+    /// the folders the system had made before this build asked for the class (`systemOwned`). **Off the main actor** — it is a walk
     /// of every file. Returns how many would not take the class.
     @discardableResult
     public static func rest(_ places: Places = .container) -> Int {
@@ -166,6 +195,7 @@ public enum ProtectedFolders {
             ? places.temporary : places.temporary.appendingPathComponent("FediqoPageRules", isDirectory: true)
         let roots = [places.store, places.caches, scratch] + places.perApp + places.systemKept
         let refused = roots.reduce(0) { $0 + Guarded.bring($1, on: device) }
+            + places.systemOwned.reduce(0) { $0 + Guarded.bring($1, below: false, on: device) }
         let counted = Guarded.refused
         if refused > 0 || counted > 0 {
             NetLog.protection.error("\(refused, privacy: .public) file(s) already here would not take the protection class; \(counted, privacy: .public) made since launch did not")

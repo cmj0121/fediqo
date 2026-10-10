@@ -809,12 +809,75 @@ struct GuardedSourceTests {
             "Sources/FediqoPersistence/MediaCache.swift": 4,
             // The index and what lies beside it, put aside under another name in its own folder.
             "Sources/FediqoPersistence/StoreFile.swift": 3,
-            // A read back's state, moved on from one name to the next in its own aside.
-            "Sources/FediqoPersistence/ReadBackState.swift": 1,
+            // A read back's state, moved on from one name to the next in its own aside — and
+            // a commit's own name, an empty file `Guarded` made beside the index, moved on to
+            // the name that says every step held.
+            "Sources/FediqoPersistence/ReadBackState.swift": 2,
             // A read back: the index to and from an aside `Guarded` made, in the store's folder —
             // and a choice between two stores, or a launch finishing one, moving the other aside.
             "Sources/FediqoPersistence/StorePackager.swift": 8,
         ])
+    }
+
+    /// The entries that take what says whether the device can be read, each of which goes by
+    /// `.always` — nothing is ever closed — where it is handed none, for the tests' sake.
+    private static let asksTheCanary = [
+        "StoreFile.open(", "StoreFile.openApplicationSupport(", "StoreSaver(", "StorePackager(", ".sweepLeftovers(",
+    ]
+
+    /// The calls in `text` of an entry that takes the canary and is handed none: each by
+    /// its spelling. What a call is handed is what stands between its brackets, however
+    /// many lines it is broken over.
+    static func withoutACanary(in text: String) -> [String] {
+        let code = folded(text)
+        var found: [String] = []
+        for entry in asksTheCanary {
+            var from = code.startIndex
+            while let call = code.range(of: entry, range: from..<code.endIndex) {
+                from = call.upperBound
+                // Part of a longer name is another thing's call.
+                if let before = code[..<call.lowerBound].last, entry.first != ".", before.isLetter || before.isNumber || before == "_" { continue }
+                var depth = 1
+                var end = call.upperBound
+                while end < code.endIndex, depth > 0 {
+                    if code[end] == "(" { depth += 1 } else if code[end] == ")" { depth -= 1 }
+                    end = code.index(after: end)
+                }
+                if !code[call.upperBound..<end].contains("protected:") { found.append(entry) }
+            }
+        }
+        return found
+    }
+
+    /// **A call that leaves it out gets `.always`, silently**: damage classed, the sweep and
+    /// the expiry run, with no canary asked. The default stays, because some two hundred and
+    /// thirty calls in the tests rest on it; what the app itself spells must name it.
+    @Test("Every call in the app of an entry that takes the canary hands it one: none goes by the default, under which nothing is ever closed")
+    func theCanaryIsHandedIn() throws {
+        for file in try Self.sources() {
+            let found = Self.withoutACanary(in: file.text)
+            #expect(found.isEmpty, "\(file.path) leaves `protected:` to its default: \(found)")
+        }
+        let app = try #require(try Self.sources().first { $0.path == "Apps/Shared/FediqoApp.swift" }).text
+        for entry in ["StoreFile.openApplicationSupport(", "StoreSaver(", "StorePackager(", ".sweepLeftovers("] {
+            #expect(Self.folded(app).contains(entry), "the app's launch is where \(entry) is called")
+        }
+    }
+
+    @Test("A call that leaves the canary out is one the reading of the source catches, however it is broken over lines; one that names it, and another thing's call, are not", arguments: [
+        ("return StoreFile.openApplicationSupport(unlocked: unlocked)", 1),
+        ("StorePackager.sweepLeftovers(directory: directory, media: media?.location)", 1),
+        ("saver = StoreSaver(\n    store: store, file: opened.file,\n    holding: (opened.sources, opened.notes)\n)", 1),
+        ("carrier = StorePackager(directory: directory, file: file, store: ItemStore(sources: [], notes: []), saver: saver)", 1),
+        ("let opened = StoreFile.open(at: directory, now: Date())", 1),
+        ("return StoreFile.openApplicationSupport(protected: protected, unlocked: unlocked)", 0),
+        ("saver = StoreSaver(\n    store: store, file: opened.file, protected: protected,\n    holding: nil\n)", 0),
+        ("StorePackager.sweepLeftovers(directory: directory, media: nil, protected: protected)", 0),
+        ("let other = OtherStoreSaver(store: store)", 0),
+        ("/// `StoreSaver(store:file:)` saves into a file", 0),
+    ])
+    func caughtWithoutACanary(line: String, count: Int) {
+        #expect(Self.withoutACanary(in: "    \(line)\n").count == count)
     }
 
     @Test("The switch that asks for no class is compiled for a debug build alone, and nothing in the app calls it")

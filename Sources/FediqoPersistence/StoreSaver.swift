@@ -1,5 +1,6 @@
 import FediqoCore
 import Foundation
+import GRDB
 import os
 import Synchronization
 
@@ -652,7 +653,9 @@ public actor StoreSaver {
         do {
             try await writeOwn(changes)
         } catch {
-            Self.log.error("Saving what is this device's own failed: \(String(describing: error), privacy: .public)")
+            // What kind of failure and SQLite's own number for it, and nothing the error says
+            // in words: this write is of keeps and sources, and an error's words may name them.
+            Self.log.error("Saving what is this device's own failed: \(Self.kind(of: error), privacy: .public)")
             owe()
             throw error
         }
@@ -661,6 +664,14 @@ public actor StoreSaver {
         for row in changes.kept { known.held[row.key] = row.kept }
         known.sources = now.sources
         landed = known
+    }
+
+    /// What may be said of `error` in a public log line: its type, and SQLite's result code
+    /// where SQLite raised it. Never its own words, which can carry what was being written.
+    static func kind(of error: any Error) -> String {
+        let type = String(describing: type(of: error))
+        guard let raised = error as? DatabaseError else { return type }
+        return "\(type) \(raised.extendedResultCode.rawValue)"
     }
 
     private func writeItemsNow() async throws -> Bool {

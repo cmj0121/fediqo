@@ -192,12 +192,18 @@ extension ShellSession {
 
     /// Clears the account (#251). Only the lines go: nothing held, and nothing on disk but the
     /// file they were in, is touched.
+    ///
+    /// **Where the file would not take the clear, the person is told** (#344): the lines are
+    /// gone from the page and still on the device — they name sources — and a quit before
+    /// the clear lands brings them back. One line on the strip, as for a list that would not
+    /// be kept (`kept`), standing until the account is next written.
     func clearLimitAccount() async {
         await loadLimitAccount()
         limitAccount = []
         // Not read, so not written over — and the clear is owed until it can be.
         if !limitAccountLoaded { limitAccountClearOwed = true }
-        await writeLimitAccount()
+        let written = await writeLimitAccount()
+        if !written { kept(.limits, written: false) }
     }
 
     /// One act, at the head of the account and written down — after the account has been read,
@@ -208,10 +214,18 @@ extension ShellSession {
         await writeLimitAccount()
     }
 
-    private func writeLimitAccount() async {
-        guard limitAccountLoaded, let limitStore else { return }
+    /// Writes the account down, and says whether what is on disk is now what this session
+    /// holds — yes, too, where there is nowhere to keep it. A write that lands takes down
+    /// what was said of a clear that had not (`clearLimitAccount`).
+    @discardableResult
+    private func writeLimitAccount() async -> Bool {
+        guard let limitStore else { return true }
+        // Not read, and so not written: kept only where no clear waits for the read.
+        guard limitAccountLoaded else { return !limitAccountClearOwed }
         let lines = limitAccount
-        await Task.detached { try? limitStore.write(lines) }.value
+        let written = await Task.detached { (try? limitStore.write(lines)) != nil }.value
+        if written { kept(.limits, written: true) }
+        return written
     }
 }
 

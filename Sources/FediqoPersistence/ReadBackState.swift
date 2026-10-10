@@ -1,5 +1,6 @@
 import FediqoCore
 import Foundation
+import os
 
 /// How far a read back's commit got, as **a name in the aside** (#344) and not as something
 /// written inside a file.
@@ -145,5 +146,124 @@ extension StorePackager {
         // Nothing left from a move cut short may stand where the name is going, or beside it.
         for stale in marks.states.dropFirst() { try manager.removeItem(at: stale.file) }
         if current.state != state { try manager.moveItem(at: current.file, to: named) }
+    }
+}
+
+// MARK: - A commit's own name
+
+extension StorePackager {
+    /// **A read back's commit, said by a name of its own beside the index** (#344), from before
+    /// its first step until its last has been settled or put back.
+    ///
+    /// The steps' own names (`.owed-<step>`) are made before each step runs — while the device
+    /// can still be written — so a run that ends midway, or with an undo a lock refused, leaves
+    /// them for the next. This name is what says whether they are to be believed:
+    ///
+    /// - **`.reading-back-<id>`, held open and locked by the process that made it** — a commit
+    ///   is running, or its undo is still owed, in a run that lives. Nothing of it is anybody
+    ///   else's to settle or to say. The lock is the system's own (`flock`), which goes with
+    ///   the process however it ends: **a name nobody holds is a run that ended**, and that is
+    ///   how a name left by a killed process is told from a live one — never by its age.
+    /// - **The same name with nobody holding it** — the run ended midway. The steps named
+    ///   beside it were not put back, and are said.
+    /// - **`.read-back-held-<id>`** — every step held, said by one rename before anything of
+    ///   the commit is cleared away. Steps still named beside it are only names that run did
+    ///   not live to remove: they go, and nothing is said.
+    ///
+    /// Nothing is ever read out of the file: a listing, and whether the lock can be had.
+    final class Flight: @unchecked Sendable {
+        static let prefix = ".reading-back-"
+        static let heldPrefix = ".read-back-held-"
+
+        private let lock = NSLock()
+        private var url: URL
+        private var handle: FileHandle?
+
+        /// Makes the name in `directory` and holds it. Throws where it cannot be made or
+        /// held: the commit then does not begin.
+        init(in directory: URL) throws {
+            let id = UUID().uuidString
+            url = directory.appendingPathComponent(Self.prefix + id)
+            let made = try Guarded.makeFile(at: url)
+            guard flock(made.fileDescriptor, LOCK_EX | LOCK_NB) == 0 else {
+                let refusal = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                try? made.close()
+                try? FileManager.default.removeItem(at: url)
+                throw refusal
+            }
+            handle = made
+        }
+
+        deinit { try? handle?.close() }
+
+        /// Every step held: said by one rename, which keeps the file and the hold on it.
+        /// Whether it could be said.
+        @discardableResult
+        func sayHeld() -> Bool {
+            lock.withLock {
+                let name = url.lastPathComponent
+                guard name.hasPrefix(Self.prefix) else { return true }
+                let held = url.deletingLastPathComponent()
+                    .appendingPathComponent(Self.heldPrefix + String(name.dropFirst(Self.prefix.count)))
+                guard (try? FileManager.default.moveItem(at: url, to: held)) != nil else { return false }
+                url = held
+                return true
+            }
+        }
+
+        /// The commit is over and nothing of it is owed: the hold is let go, and the name
+        /// with it — unless `keepingName`, where a step's name would not go and this one
+        /// must stay to say what that is.
+        func end(keepingName: Bool = false) {
+            lock.withLock {
+                if !keepingName { try? FileManager.default.removeItem(at: url) }
+                try? handle?.close()
+                handle = nil
+            }
+        }
+
+        /// What stands in a folder: whether a commit there is held by a run that lives, and
+        /// the names nobody holds.
+        struct Standing {
+            var live = false
+            var cutShort: [URL] = []
+            var held: [URL] = []
+
+            /// Whether the steps named in the folder are to be believed: nobody is still
+            /// at them, and no commit left its word that every step held — or one that
+            /// ended midway is there as well, and what it left is said.
+            var believed: Bool { !live && (!cutShort.isEmpty || held.isEmpty) }
+        }
+
+        static func standing(in directory: URL) -> Standing {
+            var found = Standing()
+            let names = ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).sorted()
+            for name in names where name.hasPrefix(prefix) || name.hasPrefix(heldPrefix) {
+                let url = directory.appendingPathComponent(name)
+                switch isHeld(url) {
+                case nil: continue
+                case true?: found.live = true
+                case false?: if name.hasPrefix(prefix) { found.cutShort.append(url) } else { found.held.append(url) }
+                }
+            }
+            return found
+        }
+
+        /// Whether a process holds `url`; nil where it has gone meanwhile. **One that will
+        /// not be opened is not known to be let go**, and is taken for held: nothing is
+        /// settled or said on a guess.
+        private static func isHeld(_ url: URL) -> Bool? {
+            guard let asked = try? FileHandle(forReadingFrom: url) else {
+                guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+                // Said, because nothing else would: while it will not open, nothing in
+                // this folder is settled and no step named in it is said.
+                NetLog.protection.error("A read back's own name would not be opened and is taken for held; nothing beside it is settled")
+                return true
+            }
+            defer { try? asked.close() }
+            guard flock(asked.fileDescriptor, LOCK_SH | LOCK_NB) == 0 else { return true }
+            flock(asked.fileDescriptor, LOCK_UN)
+            return false
+        }
     }
 }

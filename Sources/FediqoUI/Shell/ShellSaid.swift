@@ -29,6 +29,10 @@ struct Said: Identifiable, Equatable, Sendable {
         case timelines
         /// What may be reached beyond a source.
         case allowances
+        /// The limits' account (#251), where what would not be kept is the person clearing
+        /// it: the lines are gone from what they see and still in the file
+        /// (`ShellSession.clearLimitAccount`).
+        case limits
     }
 
     /// What the person asked to be gone from this device, as its line names it.

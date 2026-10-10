@@ -1072,6 +1072,7 @@
 "allow.unknown.cannotKeep" = "這台裝置現在不讓 Fediqo 保存這份清單：沒有空間了，或 Fediqo 的資料夾無法寫入。在可以保存之前，不會連到你的來源之外。";
 "said.unkept.allowances" = "你對放行清單的更動沒辦法留在這台裝置上。它現在有效，但下次打開 Fediqo 時就不在了。";
 "said.unkept.timelines" = "你對時間軸的更動沒辦法留在這台裝置上。它現在有效，但下次打開 Fediqo 時就不在了。";
+"said.unkept.limits" = "上限放下了什麼的紀錄沒辦法在這台裝置上清除。它現在是空的，但下次打開 Fediqo 時那些紀錄還會在。";
 
 /* The shared pieces every screen is built from (#232). */
 "help.about" = "關於「%@」的說明";

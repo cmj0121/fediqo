@@ -1093,6 +1093,7 @@
 "allow.unknown.cannotKeep" = "This device will not let Fediqo keep this list right now: it has no room left, or Fediqo's folder cannot be written. Nothing beyond your sources is reached until it can.";
 "said.unkept.allowances" = "A change to what is allowed beyond your sources could not be kept on this device. It holds for now, and is gone the next time Fediqo is opened.";
 "said.unkept.timelines" = "A change to your timelines could not be kept on this device. It holds for now, and is gone the next time Fediqo is opened.";
+"said.unkept.limits" = "The account of what the limits let go could not be cleared on this device. It is empty for now, and its lines are back the next time Fediqo is opened.";
 
 /* The shared pieces every screen is built from (#232). */
 "help.about" = "More about %@";

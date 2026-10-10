@@ -207,9 +207,12 @@ struct ListFileTests {
         try place.list().lay(Self.other)
         try place.list(device: Self.refusing).putBack(aside, held: Self.kept)
         #expect(place.onDisk == Self.kept && place.names == [ListFile.timelinesName])
-        // Done twice it is done once.
-        try place.list(device: Self.refusing).putBack(aside, held: Self.kept)
-        #expect(place.onDisk == Self.kept)
+        // Handed an aside that is not there — somebody else moved it or took it — it refuses,
+        // and what is in the list's place is left: the list is not said to be back.
+        try place.list().lay(Self.other)
+        #expect(throws: (any Error).self) { try place.list().putBack(aside, held: Self.kept) }
+        #expect(place.onDisk == Self.other)
+        try place.list().lay(Self.kept)
         // With nothing to move aside there is nothing aside, and putting back lays it down.
         try place.list().lay(nil)
         #expect(try place.list().putAside() == nil)
@@ -245,6 +248,109 @@ struct ListFileTests {
         StorePackager.sweepLeftovers(directory: place.directory, media: nil, temporary: place.directory)
         #expect(lists.allowances.read() == .data(Self.other), "the person's own list went, and the package's stayed")
         #expect(place.names == [StorePackager.owedPrefix + "settings", ListFile.allowancesName].sorted())
+    }
+
+    @Test("Put back over what landed, what landed will not go: the aside — the person's own list, the only copy — is kept, and so is what landed")
+    func aFailedReadBackWhoseListWillNotGo() throws {
+        let place = try Place()
+        let lists = ListFiles(directory: place.directory, defaults: place.defaults, protected: .always)
+        #expect(lists.timelines.write(Self.kept))
+        let aside = try #require(try lists.timelines.putAside())
+        // What landed in the list's place, and cannot be taken out of it.
+        let landed = place.directory.appendingPathComponent(ListFile.timelinesName, isDirectory: true)
+        try FileManager.default.createDirectory(at: landed, withIntermediateDirectories: true)
+        try Data("held".utf8).write(to: landed.appendingPathComponent("held"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: landed.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: landed.path) }
+        try Data().write(to: place.directory.appendingPathComponent(StorePackager.owedPrefix + "settings"))
+        StorePackager.sweepLeftovers(directory: place.directory, media: nil, temporary: place.directory)
+        #expect(try Data(contentsOf: aside) == Self.kept, "the only copy of the person's own list went")
+        #expect(FileManager.default.fileExists(atPath: landed.appendingPathComponent("held").path))
+        // With what stood in its way gone, the next launch puts it back.
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: landed.path)
+        try FileManager.default.removeItem(at: landed.appendingPathComponent("held"))
+        StorePackager.sweepLeftovers(directory: place.directory, media: nil, temporary: place.directory)
+        #expect(place.onDisk == Self.kept && !FileManager.default.fileExists(atPath: aside.path))
+    }
+
+    @Test("Two asides for one list: which is the person's own is nothing their names say, so neither is chosen, put back or removed — after a read back that failed, where the list has no file, and where a list stands and nothing is known",
+          arguments: [(true, true), (false, false), (false, true)])
+    func twoAsidesForOneList(failed: Bool, landed: Bool) throws {
+        let place = try Place()
+        let lists = ListFiles(directory: place.directory, defaults: place.defaults, protected: .always)
+        #expect(lists.timelines.write(Self.kept))
+        let first = try #require(try lists.timelines.putAside())
+        #expect(lists.timelines.write(Self.other))
+        let second = try #require(try lists.timelines.putAside())
+        if landed { try lists.timelines.lay(Data("the package's".utf8)) }
+        if failed { try Data().write(to: place.directory.appendingPathComponent(StorePackager.owedPrefix + "settings")) }
+        StorePackager.sweepLeftovers(directory: place.directory, media: nil, temporary: place.directory)
+        #expect((try? Data(contentsOf: first)) == Self.kept && (try? Data(contentsOf: second)) == Self.other)
+        #expect(place.onDisk == (landed ? Data("the package's".utf8) : nil), "one of the two was chosen")
+    }
+
+    // MARK: - A read back's own name
+
+    @Test("While a read back's own name is held in the folder — its commit is running, or its undo is owed, in a run that lives — a list aside is not settled and its steps' names are not said; once nobody holds it, the names are believed")
+    func notUnderACommitThatLives() throws {
+        let place = try Place()
+        let lists = ListFiles(directory: place.directory, defaults: place.defaults, protected: .always)
+        #expect(lists.timelines.write(Self.kept) && lists.allowances.write(Self.other))
+        let flight = try StorePackager.Flight(in: place.directory)
+        try Data().write(to: place.directory.appendingPathComponent(StorePackager.owedPrefix + "settings"))
+        // Midway through the lists: one aside with the package's in its place, one aside
+        // with nothing laid yet.
+        let allowances = try #require(try lists.allowances.putAside())
+        try lists.allowances.lay(Self.kept)
+        let timelines = try #require(try lists.timelines.putAside())
+        let before = place.names
+        StorePackager.sweepLeftovers(directory: place.directory, media: nil, temporary: place.directory)
+        #expect(place.names == before, "settled under a commit that lives")
+        #expect(FileManager.default.fileExists(atPath: allowances.path) && FileManager.default.fileExists(atPath: timelines.path))
+        #expect(StorePackager.leftNames(in: place.directory).isEmpty, "said by another run while the one that owes it lives")
+        // The run ends there, as a killed one does: its name stays, and nobody holds it.
+        flight.end(keepingName: true)
+        #expect(StorePackager.leftNames(in: place.directory) == ["settings"])
+        StorePackager.sweepLeftovers(directory: place.directory, media: nil, temporary: place.directory)
+        #expect(lists.allowances.read() == .data(Self.other) && lists.timelines.read() == .data(Self.kept), "the person's own, put back")
+        #expect(!place.names.contains { $0.contains(ListFile.asideInfix) })
+        #expect(StorePackager.leftNames(in: place.directory) == ["settings"], "kept to be said until it has been")
+    }
+
+    @Test("A read back's own name that nobody holds and that has no step named beside it — every undo was done, and the run ended before the name went — says nothing, blocks nothing, and goes at the next launch that can read")
+    func aNameWithNothingLeftToSay() throws {
+        let place = try Place()
+        let lists = ListFiles(directory: place.directory, defaults: place.defaults, protected: .always)
+        #expect(lists.timelines.write(Self.kept))
+        _ = try #require(try lists.timelines.putAside())
+        try StorePackager.Flight(in: place.directory).end(keepingName: true)
+        #expect(place.names.contains { $0.hasPrefix(StorePackager.Flight.prefix) })
+        #expect(StorePackager.leftNames(in: place.directory).isEmpty)
+        StorePackager.sweepLeftovers(directory: place.directory, media: nil, temporary: place.directory, protected: CanaryByHand(.refused).protected)
+        #expect(place.names.contains { $0.hasPrefix(StorePackager.Flight.prefix) }, "removed behind a lock")
+        StorePackager.sweepLeftovers(directory: place.directory, media: nil, temporary: place.directory)
+        #expect(place.names == [ListFile.timelinesName] && place.onDisk == Self.kept)
+    }
+
+    @Test("Where a read back said that every step held and ended before its steps' names went, the names are not believed: nothing is said, nothing is settled as though it had failed, and they go")
+    func namesLeftByAReadBackThatHeld() throws {
+        let place = try Place()
+        let lists = ListFiles(directory: place.directory, defaults: place.defaults, protected: .always)
+        #expect(lists.timelines.write(Self.kept))
+        _ = try #require(try lists.timelines.putAside())
+        try lists.timelines.lay(Self.other)
+        // And a list the package did not carry: aside, with nothing in its place.
+        #expect(lists.allowances.write(Self.kept))
+        _ = try #require(try lists.allowances.putAside())
+        let flight = try StorePackager.Flight(in: place.directory)
+        for step in ["index", "settings"] { try Data().write(to: place.directory.appendingPathComponent(StorePackager.owedPrefix + step)) }
+        #expect(flight.sayHeld())
+        #expect(StorePackager.leftNames(in: place.directory).isEmpty, "held by a run that lives")
+        flight.end(keepingName: true)
+        #expect(StorePackager.leftNames(in: place.directory).isEmpty, "believed, of a read back that held")
+        StorePackager.sweepLeftovers(directory: place.directory, media: nil, temporary: place.directory)
+        #expect(place.names == [ListFile.timelinesName], "a list the package did not carry was brought back, or an aside left")
+        #expect(place.onDisk == Self.other, "the package's list, which had landed, was replaced as though the read back had failed")
     }
 
     @Test("While a read back's anchor is in the folder — one may be in flight in another copy of the app — a list aside is left alone; with the anchor gone, it is settled")

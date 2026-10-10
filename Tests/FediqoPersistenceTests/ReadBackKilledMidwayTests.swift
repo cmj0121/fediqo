@@ -74,7 +74,7 @@ struct ReadBackKilledMidwayTests {
                 try await packager.readBack(package, key: .password("password"), replacing: true) { _ in }
             }
             #expect(try StoreFile(at: folder).load().notes.map(\.body) == Self.old, "the premise: undone, the store is as it was")
-            #expect(try names(in: folder) == ["index.sqlite", LimitAccountFile.name], "and nothing is left aside")
+            #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted() == ["index.sqlite", LimitAccountFile.name], "and nothing is left aside, or named")
         } else {
             try await packager.readBack(package, key: .password("password"), replacing: true) { _ in }
             #expect(try StoreFile(at: folder).load().notes.map(\.body) == Self.new, "the premise: unkilled, it lands")
@@ -86,9 +86,18 @@ struct ReadBackKilledMidwayTests {
         })
     }
 
+    /// What `dir` holds of a store — every name but the ones a commit cut short leaves for
+    /// the person to be told by, which stay until they have been: each test that asks this
+    /// says beside it what those are (`said(in:)`). **The word that every step held
+    /// (`.read-back-held-`) is deliberately not left out**: a launch removes it, and one that
+    /// stayed would fail the listing.
     private func names(in dir: URL) throws -> [String] {
         try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+            .filter { !$0.hasPrefix(StorePackager.owedPrefix) && !$0.hasPrefix(StorePackager.Flight.prefix) }
     }
+
+    /// The steps the next run says were not put back.
+    private func said(in dir: URL) -> [String] { StorePackager.leftNames(in: dir) }
 
     /// What a launch does before anything else, and then what it opens.
     private func launch(in dir: URL) -> StoreFile.Opened {
@@ -109,6 +118,8 @@ struct ReadBackKilledMidwayTests {
         let opened = launch(in: dir)
         #expect(bodies(opened) == Self.old)
         #expect(try names(in: dir) == ["index.sqlite"])
+        // The sign-ins had gone in by then, and nothing put them back: that is said.
+        #expect(said(in: dir) == ["secrets"])
     }
 
     @Test("Killed with the old index aside and the new one not in place: the old index is the index again, the read back did not happen, and a save loses nothing")
@@ -126,6 +137,8 @@ struct ReadBackKilledMidwayTests {
         #expect(bodies(opened) == Self.old, "the store this device held is not what launch opened")
         #expect(opened.setAside == nil)
         #expect(try names(in: dir) == ["index.sqlite"], "the aside, its marker and the staging are settled")
+        // The index this launch put back is not said as not put back; the sign-ins are.
+        #expect(said(in: dir) == ["secrets"])
 
         try await file.save(sources: opened.sources, notes: opened.notes, said: opened.said)
         #expect(bodies(StoreFile.open(at: dir)) == Self.old)
@@ -153,6 +166,7 @@ struct ReadBackKilledMidwayTests {
         }
         #expect(opened.file == nil && opened.notes.isEmpty, "no store is opened until the person has said")
         #expect(try names(in: dir) == before, "neither store was touched")
+        #expect(said(in: dir) == ["index", "secrets"])
         let old = Data("old-store-phrase".utf8), new = Data("new-store-phrase".utf8)
         #expect(try Data(contentsOf: aside.appendingPathComponent("index.sqlite")).range(of: old) != nil)
         #expect(try Data(contentsOf: dir.appendingPathComponent("index.sqlite")).range(of: new) != nil)
@@ -169,6 +183,7 @@ struct ReadBackKilledMidwayTests {
         let opened = launch(in: dir)
         #expect(bodies(opened) == Self.new)
         #expect(try names(in: dir) == ["index.sqlite", LimitAccountFile.name], "a replaced store outlived what replaced it")
+        #expect(said(in: dir) == [])
         let old = Data("old-store-phrase".utf8)
         #expect(try Data(contentsOf: dir.appendingPathComponent("index.sqlite")).range(of: old) == nil)
     }
@@ -187,6 +202,9 @@ struct ReadBackKilledMidwayTests {
         let opened = launch(in: dir)
         #expect(opened.file != nil && bodies(opened) == Self.old)
         #expect(try names(in: dir) == ["index.sqlite"])
+        // Settled by hand above and not by the launch, which therefore put no index back
+        // itself and goes on saying that step.
+        #expect(said(in: dir) == ["index", "secrets"])
     }
 
     @Test("The marker says the new index is on its way in before it is moved: killed there with nothing in place, the old index is put back")
@@ -223,6 +241,7 @@ struct ReadBackKilledMidwayTests {
         let opened = StoreFile.open(at: dir)
         #expect(opened.file == nil && opened.notes.isEmpty && opened.setAside == nil && !opened.storeIsNewer)
         #expect(try names(in: dir) == before, "an index was made in the gap")
+        #expect(said(in: dir) == ["index", "secrets"])
 
         #expect(bodies(launch(in: dir)) == Self.old)
         #expect(try !StorePackager.hasUnsettledReadBack(in: dir))
@@ -250,6 +269,7 @@ struct ReadBackKilledMidwayTests {
         try FileManager.default.removeItem(at: blocking)
         #expect(bodies(launch(in: dir)) == Self.old)
         #expect(try names(in: dir) == ["index.sqlite"])
+        #expect(said(in: dir) == ["secrets"])
     }
 
     @Test("An index standing in the old one's place that holds anything is not deleted for it: both are kept, nothing changes, and the run has no index")
@@ -270,6 +290,7 @@ struct ReadBackKilledMidwayTests {
         let opened = launch(in: dir)
         #expect(opened.file == nil && opened.notes.isEmpty)
         #expect(try names(in: dir) == before)
+        #expect(said(in: dir) == ["index", "secrets"])
         #expect(try Data(contentsOf: dir.appendingPathComponent("index.sqlite")) == index, "the standing index was touched")
         let aside = dir.appendingPathComponent(try asideName(in: dir))
         #expect(try Data(contentsOf: aside.appendingPathComponent("index.sqlite")).range(of: Data("old-store-phrase".utf8)) != nil)
@@ -334,6 +355,9 @@ struct ReadBackKilledMidwayTests {
 
         #expect(bodies(launch(in: dir)) == Self.old)
         #expect(try names(in: dir) == ["index.sqlite", LimitAccountFile.name])
+        // Newest first: the sign-ins' undo had not been reached. The index is back, by this
+        // launch; the step that refused before it changed anything was never named for long.
+        #expect(said(in: dir) == ["secrets"])
     }
 
     @Test("Killed mid-undo — the package's index taken out, the old one not yet back: the old one is put back, and nothing has deleted it")
@@ -347,6 +371,7 @@ struct ReadBackKilledMidwayTests {
 
         #expect(bodies(launch(in: dir)) == Self.old)
         #expect(try names(in: dir) == ["index.sqlite", LimitAccountFile.name])
+        #expect(said(in: dir) == ["secrets"])
     }
 
     @Test("An undo that cannot take the package's index out moves nothing back: the old index and what SQLite kept beside it stay aside, and the next launch settles it")
@@ -411,6 +436,7 @@ struct ReadBackKilledMidwayTests {
 
         #expect(bodies(launch(in: dir)) == Self.old)
         #expect(try names(in: dir) == ["index.sqlite", LimitAccountFile.name])
+        #expect(said(in: dir) == [])
     }
 
     @Test("Killed while being put back — what SQLite kept beside the old index is back, the index is not — the next launch finishes, and what is already back is left")
@@ -423,6 +449,7 @@ struct ReadBackKilledMidwayTests {
 
         StorePackager.sweepLeftovers(directory: dir, media: nil, temporary: dir.appendingPathComponent("no-such-tmp"))
         #expect(try names(in: dir) == ["index.sqlite", "index.sqlite-wal"], "what was already back beside the gap was taken for the new index's")
+        #expect(said(in: dir) == ["secrets"])
         #expect(try Data(contentsOf: dir.appendingPathComponent("index.sqlite-wal")) == Data("the old index's journal".utf8))
     }
 

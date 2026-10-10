@@ -141,6 +141,15 @@ public enum Guarded {
     /// Set to `handedOutClass`, asked for by name — never left to whatever a file gets when
     /// nothing is asked, which is not this once the app asks the system for protection by
     /// default.
+    ///
+    /// **A limit, known.** Whoever asks this does so before the person has said where the
+    /// package goes: the system's mover takes a file as it is and moves it itself, and gives
+    /// nothing between the choice of a place and the move in which the class could be
+    /// changed; afterwards the file is in a place this app may not write beside. So from this
+    /// call until the mover is done the sealed package lies in the app's scratch space at the
+    /// lesser class — readable, still sealed by its password, from the first unlock after a
+    /// restart. A run killed with the mover up leaves it there until the next launch at which
+    /// the device can be read, whose sweep removes it (`StorePackager.sweepLeftovers`).
     public static func handOut(_ url: URL) throws {
         try handOut(url, on: .this)
     }

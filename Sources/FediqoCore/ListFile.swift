@@ -152,35 +152,71 @@ public struct ListFile: @unchecked Sendable {
     }
 
     /// The list as it was before a read back: the file moved aside put back in place of
-    /// whatever is there — or, where none was moved aside, `held` laid down again. Done
-    /// twice it is done once: an aside already put back is not looked for again.
+    /// whatever is there — or, where none was moved aside, `held` laid down again.
+    ///
+    /// **Throws where the aside it was handed is not there**, with nothing touched: somebody
+    /// else moved or removed the person's own list, and a read back is not said to be undone
+    /// with that list gone. Whoever asks twice keeps count of what it has put back.
     package func putBack(_ aside: URL?, held: Data?) throws {
         guard let aside else { return try lay(held) }
-        guard FileManager.default.fileExists(atPath: aside.path) else { return }
+        guard FileManager.default.fileExists(atPath: aside.path) else { throw CocoaError(.fileNoSuchFile) }
         defaults.removeObject(forKey: key)
         do { try FileManager.default.removeItem(at: url) } catch where Self.isAbsent(error) {}
         try FileManager.default.moveItem(at: aside, to: url)
     }
 
+    /// What is known of the read back that left a list aside.
+    package enum Outcome: Sendable {
+        /// Every step held, and it said so: what it replaced was replaced.
+        case held
+        /// Its undo of the settings was never done.
+        case failed
+        /// Nothing says either.
+        case notKnown
+    }
+
     /// **What a read back that never finished left aside**, asked at launch where the canary
-    /// reads (`StorePackager.sweepLeftovers`): each list moved aside and neither put back nor
-    /// let go. Where its list has no file, it is the person's own and is put back; where the
-    /// package's landed, it goes — **unless that read back is known to have failed**
-    /// (`failed`: its undo of the settings was owed and never done), and then it is the
-    /// person's own list and the only copy, and is put back over what landed.
-    package static func settleAsides(in directory: URL, failed: Bool) {
+    /// reads and no read back is in flight (`StorePackager.sweepLeftovers`): each list moved
+    /// aside and neither put back nor let go.
+    ///
+    /// - **Where that read back is known to have held**, every aside is what it replaced, and
+    ///   goes — whether or not a list stands in its place: a list the package did not carry
+    ///   is not brought back.
+    /// - **Where the package's landed** and nothing is known of that read back, the one aside
+    ///   is what it replaced, and goes.
+    /// - **Where its list has no file, or that read back is known to have failed**, the one
+    ///   aside is the person's own list and the only copy: put back, over what landed where
+    ///   something did — what landed taken out and the aside moved in, and **the aside never
+    ///   removed**: it leaves its name only by becoming the list. Where what landed will not
+    ///   go, both stay as they are.
+    /// - **Two asides for one list, short of a read back known to have held**: which is the
+    ///   person's own is nothing a name can say, and none is chosen, put back or removed.
+    ///   They stay until a read back that holds and says so finds them — nothing else takes
+    ///   them, and no later write of the list does.
+    package static func settleAsides(in directory: URL, after outcome: Outcome) {
         let manager = FileManager.default
         let names = ((try? manager.contentsOfDirectory(atPath: directory.path)) ?? []).sorted()
         for name in [allowancesName, timelinesName] {
-            for stray in names where stray.hasPrefix(name + asideInfix) {
-                let aside = directory.appendingPathComponent(stray)
-                let list = directory.appendingPathComponent(name)
-                if failed { try? manager.removeItem(at: list) }
-                if manager.fileExists(atPath: list.path) {
-                    try? manager.removeItem(at: aside)
-                } else {
-                    try? manager.moveItem(at: aside, to: list)
-                }
+            let strays = names.filter { $0.hasPrefix(name + asideInfix) }.map { directory.appendingPathComponent($0) }
+            let list = directory.appendingPathComponent(name)
+            if outcome == .held {
+                for aside in strays { try? manager.removeItem(at: aside) }
+                continue
+            }
+            guard strays.count == 1, let aside = strays.first else {
+                if strays.count > 1 { NetLog.protection.error("More than one of the person's own lists is aside for one list; all are kept") }
+                continue
+            }
+            let landed = manager.fileExists(atPath: list.path)
+            if landed, outcome == .notKnown {
+                try? manager.removeItem(at: aside)
+                continue
+            }
+            do {
+                if landed { try manager.removeItem(at: list) }
+                try manager.moveItem(at: aside, to: list)
+            } catch {
+                NetLog.protection.error("One of the person's own lists could not be put back from where a read back left it: \(String(describing: type(of: error)), privacy: .public)")
             }
         }
     }

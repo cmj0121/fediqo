@@ -85,6 +85,38 @@ struct LimitAccountTests {
         #expect(try file.read() == [line])
     }
 
+    @Test("A clear the device would not keep is said on the strip, once — the lines are gone from the page and still in the file — and the line comes down when the account is written; a clear that is kept says nothing")
+    func aClearNotKeptIsSaid() async throws {
+        let dir = LimitRoom.scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let earlier = [LimitAct(limit: .room, at: origin, posts: 2, copies: 3, sources: [beta.host])]
+        let file = try LimitAccountFile(directory: dir)
+        try file.write(earlier)
+        let kept = ShellSession(http: FixtureHTTP(), store: ItemStore(sources: [], notes: []))
+        kept.limitStore = file
+        await kept.clearLimitAccount()
+        #expect(kept.said.lines.isEmpty)
+        #expect(try file.read().isEmpty)
+        try file.write(earlier)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.url.path)
+        let session = ShellSession(http: FixtureHTTP(), store: ItemStore(sources: [], notes: []))
+        session.limitStore = file
+        await session.clearLimitAccount()
+        #expect(session.limitAccount.isEmpty)
+        #expect(session.said.lines.map(\.what) == [.unkept(.limits)])
+        await session.clearLimitAccount()
+        #expect(session.said.lines.map(\.what) == [.unkept(.limits)], "said once")
+        let words = try #require(session.said.lines.first).words(language: .english)
+        #expect(words == L10n.t("said.unkept.limits", language: .english) && words.hasSuffix("."))
+        // It can be read again: the next thing that asks for the account clears what was
+        // owed, writes it, and the line comes down.
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.url.path)
+        let line = LimitAct(limit: .months, at: origin.addingTimeInterval(60), posts: 1, sources: [alpha.host])
+        await session.record(line)
+        #expect(try file.read() == [line])
+        #expect(session.said.lines.isEmpty)
+    }
+
     @Test("After a read back the package's lines are the account, and this device's old lines are not written over them")
     func readBackReplacesTheLines() async throws {
         let dir = LimitRoom.scratch()

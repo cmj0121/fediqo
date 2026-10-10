@@ -384,3 +384,46 @@ private extension Database.BusyMode {
         return false
     }
 }
+
+/// #344: on an install that was there before the app asked the system for the class, the
+/// folders the system writes into for it already exist, and what is asked may not reach them.
+/// Held to what is asked of each file, with a device made by hand: it runs whatever the screen.
+@Suite("The system's own folders that were there before are brought, at the top and no deeper")
+struct SystemOwnedFoldersTests {
+    @Test("The iPhone build in its sandbox brings the preferences, the cookies and the top of Caches — each folder and what it holds directly, and nothing below; a Mac build, and one outside a sandbox, brings none of them",
+          arguments: [(true, true), (false, true), (true, false)])
+    func broughtAtTheTop(phoneBuild: Bool, sandboxed: Bool) throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = root.appendingPathComponent("Library", isDirectory: true)
+        let left = [
+            "Preferences/b.id.plist", "Cookies/Cookies.binarycookies", "Caches/com.apple.somebody/deep/file",
+        ]
+        for path in left {
+            let file = library.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: file)
+        }
+        let places = ProtectedFolders.Places(
+            store: library.appendingPathComponent("Application Support/Fediqo", isDirectory: true),
+            caches: library.appendingPathComponent("Caches/Fediqo", isDirectory: true),
+            temporary: root.appendingPathComponent("tmp", isDirectory: true),
+            library: library, bundleID: "b.id", sandboxed: sandboxed, phoneBuild: phoneBuild
+        )
+        // Everything answers that it is at the class already: nothing is changed, and what
+        // was asked about is what was brought.
+        let asked = OSAllocatedUnfairLock(initialState: Set<String>())
+        let device = Guarded.Device(
+            asks: .complete, held: { url in
+                asked.withLock { _ = $0.insert(url.path) }
+                return .complete
+            },
+            canaryTook: { true }, count: {}
+        )
+        #expect(ProtectedFolders.rest(places, on: device) == 0)
+        func brought(_ path: String) -> Bool { asked.withLock { $0.contains { $0.hasSuffix("/Library/" + path) } } }
+        let tops = ["Preferences", "Preferences/b.id.plist", "Cookies", "Cookies/Cookies.binarycookies", "Caches", "Caches/com.apple.somebody"]
+        for path in tops { #expect(brought(path) == (phoneBuild && sandboxed), "\(path)") }
+        #expect(!brought("Caches/com.apple.somebody/deep") && !brought("Caches/com.apple.somebody/deep/file"), "the system's own tree was walked")
+    }
+}
