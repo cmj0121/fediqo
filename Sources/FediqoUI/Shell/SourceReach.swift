@@ -30,6 +30,8 @@ struct SourceReach {
     /// each request runs, and ended within `limit` where there is one. **The one way an
     /// unsigned ask is wired**; a signed one is wired the same way by the door it goes through
     /// (`MastodonSessions.authorized`).
+    // Only `unsignedPerson` hands in a base with a small body ceiling (`small`); the other
+    // unsigned readers go out on the plain client, which has no size ceiling but its last line.
     func wire(
         _ base: (any HTTPClient)? = nil, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil,
         within limit: Duration?
@@ -80,6 +82,29 @@ struct SourceReach {
     /// `limit`. **Only for a caller whose own rule says an unsigned read is right here.**
     func unsignedPost(_ host: String, for purpose: SourceWork.Purpose, within limit: Duration) -> MastodonPost {
         MastodonPost(http: wire(for: purpose, within: limit), host: host)
+    }
+
+    /// Somebody a source knows and their posts, as the reader, through `door`.
+    func person(_ door: MastodonAuthorized) -> MastodonPerson {
+        MastodonPerson(door: door)
+    }
+
+    /// Somebody a source knows and their posts with no token, listed as `purpose` and ended
+    /// within `limit`.
+    ///
+    /// **Under the ceiling a signed-in read has**: a person and a stretch of their posts are
+    /// small, and a stranger's server is not trusted to keep them so.
+    func unsignedPerson(_ host: String, for purpose: SourceWork.Purpose, within limit: Duration) -> MastodonPerson {
+        MastodonPerson(http: wire(small(), for: purpose, within: limit), host: host)
+    }
+
+    /// How much body an ask known to be small may bring: what the signed-in door takes.
+    static let smallBody = 1 << 20
+
+    /// The plain client under `smallBody`. The live client is held to it as it transfers; any
+    /// other — a test's — has what it brought refused past it.
+    func small() -> any HTTPClient {
+        (http as? URLSessionClient)?.capped(to: Self.smallBody) ?? SmallBody(http, limit: Self.smallBody)
     }
 
     /// What is under a tag, as the reader, through `door`.
@@ -140,5 +165,22 @@ extension ShellSession {
     /// Where this session reaches its sources from. See `SourceReach`.
     var reach: SourceReach {
         SourceReach(http: http, work: work, forums: forums)
+    }
+}
+
+/// A client whose answers are refused past `limit` bytes, as `URLSessionClient` refuses its own.
+private struct SmallBody: HTTPClient {
+    private let inner: any HTTPClient
+    private let limit: Int
+
+    init(_ inner: any HTTPClient, limit: Int) {
+        self.inner = inner
+        self.limit = limit
+    }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        let answer = try await inner.data(from: url)
+        guard answer.0.count <= limit else { throw URLError(.dataLengthExceedsMaximum) }
+        return answer
     }
 }

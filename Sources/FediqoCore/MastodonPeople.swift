@@ -2,12 +2,9 @@ import Foundation
 
 /// A Mastodon read this device could not make people of.
 public enum MastodonPeopleError: Error, Equatable, Sendable {
-    /// The server answered, and not with people: a body that is not a list of accounts, or a
-    /// way on that names no place to go on from.
+    /// The server answered, and not with what was asked for: a body that is not an account, a
+    /// list of them or a list of posts, or a way on that names no place to go on from.
     case unreadable
-    /// The way on the source named is the place this stretch was asked from: a server that is
-    /// not paging, which would be read on for ever.
-    case notPaging
 }
 
 /// A Mastodon asked for a list of people (#311), a stretch at a time: `/api/v1/accounts/:id/followers`
@@ -54,24 +51,16 @@ public struct MastodonPeople: Sendable {
         }
     }
 
-    private enum Door: Sendable {
-        case unsigned(any HTTPClient)
-        case signedIn(MastodonAuthorized)
-    }
-
-    private let door: Door
-    private let host: String
+    private let door: MastodonReading
 
     /// Unsigned, as the public timeline is read.
     public init(http: any HTTPClient, host: String) {
-        door = .unsigned(http)
-        self.host = host
+        door = MastodonReading(http: http, host: host)
     }
 
     /// As the reader, through the one signed-in door.
     public init(door: MastodonAuthorized) {
-        self.door = .signedIn(door)
-        host = door.token.host
+        self.door = MastodonReading(door: door)
     }
 
     /// The first stretch of `list`, or with `next` the stretch after the one that handed it
@@ -87,14 +76,14 @@ public struct MastodonPeople: Sendable {
     public func stretch(
         _ list: List, source: Source, after next: String? = nil, limit: Int? = nil
     ) async throws -> PeopleStretch {
-        guard source.host == host, let path = list.path else { throw MastodonRequestError.invalidURL }
+        guard source.host == door.host, let path = list.path else { throw MastodonRequestError.invalidURL }
         let length = limit.map { [URLQueryItem(name: "limit", value: String(max(1, $0)))] } ?? []
-        let (body, link) = try await get(path: path, query: length + (try MastodonPage.older(than: next)))
+        let (body, link) = try await door.get(path: path, query: length + (try MastodonPage.older(than: next)))
         guard let read = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<AccountDTO>].self, from: body) else {
             throw MastodonPeopleError.unreadable
         }
         let onward = try MastodonLink.next(in: link)
-        guard onward == nil || onward != next else { throw MastodonPeopleError.notPaging }
+        guard onward == nil || onward != next else { throw PagingError.notPaging }
         return PeopleStretch(people: read.compactMap { $0.value?.asPerson(source: source) }, next: onward)
     }
 
@@ -105,7 +94,36 @@ public struct MastodonPeople: Sendable {
         return person
     }
 
-    private func get(path: String, query: [URLQueryItem]) async throws -> (body: Data, link: String?) {
+}
+
+/// The way a read that anyone is given goes out: as the reader through the one signed-in door,
+/// or unsigned — one host either way, and the answer's `Link` header handed back beside its
+/// body, since that is where a Mastodon says where a list goes on.
+struct MastodonReading: Sendable {
+    private enum Door: Sendable {
+        case unsigned(any HTTPClient)
+        case signedIn(MastodonAuthorized)
+    }
+
+    private let door: Door
+    /// The host every ask goes to, folded as a source's own is so the two compare in one
+    /// spelling.
+    let host: String
+
+    init(http: any HTTPClient, host: String) {
+        door = .unsigned(http)
+        self.host = host.lowercased()
+    }
+
+    init(door: MastodonAuthorized) {
+        self.door = .signedIn(door)
+        // Folded already: a sign-in keeps its host in lower case (`MastodonToken.init`).
+        host = door.token.host
+    }
+
+    /// Throws what the door threw: `MastodonAuthError` signed in, `MastodonRequestError.http`
+    /// unsigned.
+    func get(path: String, query: [URLQueryItem] = []) async throws -> (body: Data, link: String?) {
         switch door {
         case .signedIn(let door):
             return try await door.getLinked(path: path, query: query)
@@ -119,6 +137,11 @@ public struct MastodonPeople: Sendable {
             }
             return (body, response.value(forHTTPHeaderField: "Link"))
         }
+    }
+
+    /// Whether `error` is this door's "nothing of that name": a 404 by either way out.
+    static func notFound(_ error: any Error) -> Bool {
+        (error as? MastodonAuthError) == .http(404) || (error as? MastodonRequestError) == .http(404)
     }
 }
 
@@ -229,10 +252,18 @@ struct AccountDTO: Decodable, Sendable {
         )
     }
 
-    /// The first `length` scalars of `text`.
-    private static func cut(_ text: String, to length: Int) -> String {
+    /// The first `length` scalars of marked-up `text`, **ending where a tag or an entity ends**:
+    /// one cut through its middle would leave the half of it — `<a href="…` — standing in their
+    /// words as words. What is dropped for that is the unfinished tail and no more.
+    static func cut(_ text: String, to length: Int) -> String {
         let scalars = text.unicodeScalars
-        return scalars.count > length ? String(String.UnicodeScalarView(scalars.prefix(length))) : text
+        guard scalars.count > length else { return text }
+        var kept = Substring(String(String.UnicodeScalarView(scalars.prefix(length))))
+        if let open = kept.lastIndex(of: "<"), kept[open...].firstIndex(of: ">") == nil { kept = kept[..<open] }
+        if let amp = kept.lastIndex(of: "&"), kept[amp...].count <= 10, kept[amp...].firstIndex(of: ";") == nil {
+            kept = kept[..<amp]
+        }
+        return String(kept)
     }
 
     /// A count as the source said it, or nothing where it said none — and where it said less

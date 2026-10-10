@@ -27,7 +27,7 @@ public struct URLSessionClient: HTTPClient, Sendable {
     public static let defaultByteLimit = 128 << 20
 
     let session: URLSession
-    private let byteLimit: Int
+    let byteLimit: Int
     /// Whether every redirect must stay on the request's own origin, and not only one carrying a
     /// token. The sign-in's client sets it: its bodies carry the client secret, the code and the
     /// token itself.
@@ -61,6 +61,14 @@ public struct URLSessionClient: HTTPClient, Sendable {
         self.byteLimit = byteLimit
         self.sameOriginOnly = sameOriginOnly
         self.watchedOnly = watchedOnly
+    }
+
+    /// This client taking no body over `bytes`, and otherwise as it is: the same session, the
+    /// same rules. For an ask whose answer is known to be small. Never raises a ceiling.
+    public func capped(to bytes: Int) -> URLSessionClient {
+        URLSessionClient(
+            session: session, byteLimit: min(byteLimit, bytes), sameOriginOnly: sameOriginOnly, watchedOnly: watchedOnly
+        )
     }
 
     public func data(from url: URL) async throws -> (Data, HTTPURLResponse) {

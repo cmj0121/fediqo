@@ -4,7 +4,7 @@ import Testing
 
 /// A server that answers by path and query, with a `Link` header where it is given one, and
 /// remembers what it was asked, of which host, and as whom.
-private actor PeopleServer: HTTPClient, HTTPSender {
+actor PeopleServer: HTTPClient, HTTPSender {
     enum Answer: Sendable {
         case json(String, link: String? = nil, status: Int = 200)
         case fail
@@ -221,6 +221,17 @@ struct MastodonPeopleTests {
         let long = try said(#"{"id":"42","acct":"a@\#(String(repeating: "a", count: 100_000))"}"#)
         #expect(long.home == nil && long.lineHandle.count <= LineText.nameLength + 1)
         #expect(try said(#"{"id":"42","acct":"a@Far.Example"}"#).home == "far.example")
+
+        // The source's own host is home to its own people whatever form its name has.
+        for host in ["[::1]", "192.0.2.7", "bücher.example"] {
+            let source = Source(host: host, kind: .mastodon)
+            let local = try MastodonPeople.person(from: Data(#"{"id":"42","acct":"u"}"#.utf8), source: source)
+            #expect(local.home == source.host && local.livesHere, "\(host)")
+            let far = try MastodonPeople.person(from: Data(#"{"id":"42","acct":"u@far.example"}"#.utf8), source: source)
+            #expect(far.home == "far.example" && !far.livesHere, "\(host)")
+        }
+        // And only its own: the same digits in a stranger's handle at another source are no home.
+        #expect(try said(#"{"id":"42","acct":"u@[::1]"}"#).home == nil)
     }
 
     @Test("What is kept is cut before it is worked on: their words and a field's value are bounded before the markup is taken out, by scalars and not by characters, and the fields and the pictures are bounded by how many")
@@ -236,6 +247,17 @@ struct MastodonPeopleTests {
         #expect(person.words == String(repeating: "A", count: AccountDTO.noteLength / 5))
         #expect(person.fields.map(\.value) == ["", "tail"])
         #expect(person.emojis.count == Person.emojiCount && person.emojis.first?.shortcode == "e1")
+
+        // Cut through a tag or an entity, the half of it is dropped and not left as words.
+        let markup = String(repeating: "<i>", count: (AccountDTO.noteLength - 11) / 3) + "w"
+        #expect(markup.count == AccountDTO.noteLength - 10)
+        for (tail, words) in [
+            ("<a href='https://far.example/a/long/address'>x</a>", "w"), ("1234567&amp; and more", "w1234567"),
+            ("12 &lt; 3456 and more", "w12 < 34"),
+        ] {
+            #expect(try said(#"{"id":"42","acct":"u","note":"\#(markup)\#(tail)"}"#).words == words, "\(tail)")
+        }
+        #expect(AccountDTO.cut("ab<i>cd</i>", to: 5) == "ab<i>" && AccountDTO.cut("ab<i>cd", to: 4) == "ab" && AccountDTO.cut("ab", to: 5) == "ab")
 
         // One letter under thousands of marks is one character, and is still cut.
         let stacked = "a" + String(repeating: "\u{0301}", count: Person.wordsLength * 2)
@@ -379,7 +401,7 @@ struct MastodonPeopleTests {
             "\(Self.followersPath)?max_id=19": .json(Captures.followers[1].body, link: Captures.followers[0].link),
             Self.followersPath: .json(Captures.followers[0].body, link: #"<https://mastodon.localhost/x?page=2>; rel="next""#),
         ])
-        await #expect(throws: MastodonPeopleError.notPaging) {
+        await #expect(throws: PagingError.notPaging) {
             _ = try await people.stretch(Self.followers, source: Self.source, after: "19")
         }
         await #expect(throws: MastodonPeopleError.unreadable) { _ = try await people.stretch(Self.followers, source: Self.source) }
@@ -403,7 +425,7 @@ struct MastodonPeopleTests {
         // A ring of two: A, B, and A again.
         var ring = try PeopleRead().readingOn(PeopleStretch(people: people[0], next: "19"))
         ring = try ring.readingOn(PeopleStretch(people: people[1], next: "7"))
-        #expect(throws: MastodonPeopleError.notPaging) { _ = try ring.readingOn(PeopleStretch(people: people[2], next: "19")) }
+        #expect(throws: PagingError.notPaging) { _ = try ring.readingOn(PeopleStretch(people: people[2], next: "19")) }
         #expect(ring.people.count == 4 && ring.next == "7", "and what was read stands as it stood")
 
         // Nobody new, a fresh place every time.
@@ -414,7 +436,7 @@ struct MastodonPeopleTests {
         for step in 1..<PeopleRead.barren {
             barren = try barren.readingOn(PeopleStretch(people: step.isMultiple(of: 2) ? people[0] : [], next: String(98 - step)))
         }
-        #expect(throws: MastodonPeopleError.notPaging) { _ = try barren.readingOn(PeopleStretch(people: [], next: "1")) }
+        #expect(throws: PagingError.notPaging) { _ = try barren.readingOn(PeopleStretch(people: [], next: "1")) }
         #expect(barren.people.count == 4)
         // Somebody new starts the count again.
         barren = try barren.readingOn(PeopleStretch(people: people[2], next: "2"))
@@ -428,6 +450,11 @@ struct MastodonPeopleTests {
             _ = try await people.stretch(Self.followers, source: Source(host: "other.example", kind: .mastodon))
         }
         #expect(await server.asked.isEmpty)
+
+        // The host a reader is made with is folded as a source's own is: one name, one source.
+        let shouted = MastodonPeople(http: server, host: "Mastodon.LOCALHOST")
+        #expect(try await shouted.stretch(Self.followers, source: Self.source).people.count == 2)
+        #expect(await server.hosts == [Captures.host])
     }
 
     // MARK: - Refused, failed, unreadable

@@ -162,10 +162,19 @@ public struct Person: Hashable, Sendable, Identifiable {
         self.sort = sort
         self.moved = moved
         self.suspended = suspended
-        home = Self.host(named: handle)
+        home = Self.home(of: handle, at: source)
         lineName = LineText.oneLine(name)
         lineHandle = LineText.oneLine(handle)
         id = "\(source.host)\u{1e}person\u{1e}\(accountID)"
+    }
+
+    /// Where a handle says somebody lives. **The source's own host, as the source is named,
+    /// where the handle names it** — whatever form that name has: a source added by an address
+    /// in digits is home to its own people as any other is. Any other name is a stranger's word
+    /// and is a host or nothing (`host(named:)`).
+    static func home(of handle: String, at source: Source) -> String? {
+        let named = handle.split(separator: "@", omittingEmptySubsequences: false).last.map { $0.lowercased() }
+        return handle.contains("@") && named == source.host ? source.host : host(named: handle)
     }
 
     /// The host a handle names — what follows its last `@` — or nothing where that is no host.
@@ -198,7 +207,7 @@ public struct Person: Hashable, Sendable, Identifiable {
 
     /// Whether they live on the source that said this. Where they do not — or where their
     /// handle names no server at all — what it says of them is the part that has reached it.
-    public var livesHere: Bool { home != nil && home == Self.host(named: "here@\(source.host)") }
+    public var livesHere: Bool { home == source.host }
 }
 
 /// One stretch of a list of people, as one source handed it over.
@@ -213,6 +222,13 @@ public struct PeopleStretch: Hashable, Sendable {
         self.people = people
         self.next = next
     }
+}
+
+/// Why something a source hands over a stretch at a time was not read on.
+public enum PagingError: Error, Equatable, Sendable {
+    /// The source named a next place it had named before, or went on naming new ones with
+    /// nothing new: it is not paging, and would be read on for ever.
+    case notPaging
 }
 
 /// A list of people as far as it has been read: who it has brought, where the source said the
@@ -233,12 +249,11 @@ public struct PeopleRead: Hashable, Sendable {
     /// Whether a stretch has been read and the source named no next: the end of what it has,
     /// or will show.
     public private(set) var ended = false
-    private var named: Set<String> = []
-    private var barrenRun = 0
+    private var paging = PagingGuard()
 
     public init() {}
 
-    /// This list with `stretch` read on to. Throws `MastodonPeopleError.notPaging`, changing
+    /// This list with `stretch` read on to. Throws `PagingError.notPaging`, changing
     /// nothing, where the stretch names a next the list was already sent to, or is one too many
     /// in a row to bring nobody new and name a next all the same.
     public func readingOn(_ stretch: PeopleStretch) throws -> PeopleRead {
@@ -246,11 +261,25 @@ public struct PeopleRead: Hashable, Sendable {
         read.people = people.readingOn(stretch.people)
         read.next = stretch.next
         read.ended = stretch.next == nil
-        guard let onward = stretch.next else { return read }
-        guard read.named.insert(onward).inserted else { throw MastodonPeopleError.notPaging }
-        read.barrenRun = read.people.count == people.count ? barrenRun + 1 : 0
-        guard read.barrenRun < Self.barren else { throw MastodonPeopleError.notPaging }
+        try read.paging.step(to: stretch.next, addingNothing: read.people.count == people.count)
         return read
+    }
+}
+
+/// What stops a read-on that would never end: every place a source has named as its next, and
+/// how many stretches in a row brought nothing new. One step for each stretch read on to.
+struct PagingGuard: Hashable, Sendable {
+    private var named: Set<String> = []
+    private var barrenRun = 0
+
+    /// Notes that a stretch named `next` as its way on. Nothing to check where it named none:
+    /// that is the end. Throws `PagingError.notPaging` where the place was named before, or
+    /// where this is the `PeopleRead.barren`th stretch in a row to add nothing and go on.
+    mutating func step(to next: String?, addingNothing: Bool) throws {
+        guard let next else { return }
+        guard named.insert(next).inserted else { throw PagingError.notPaging }
+        barrenRun = addingNothing ? barrenRun + 1 : 0
+        guard barrenRun < PeopleRead.barren else { throw PagingError.notPaging }
     }
 }
 
