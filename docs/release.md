@@ -66,6 +66,13 @@ Leave what you do not fill in commented out. A name with nothing after it is not
 fastlane reads `.env` too, and in Ruby an empty string is true, so an empty `MATCH_PASSWORD=` is taken for the
 passphrase and the keychain is never asked.
 
+**The phone app's provisioning has to carry Data Protection.** The iOS app asks the system to close whatever is
+written on its behalf while the device is locked, and it asks by an entitlement, which only a signed build
+carries. A profile for that app ID that was made before the capability was switched on does not sign such a
+build, and nothing that builds without a certificate shows it. Switch Data Protection on for the app ID, at
+its strictest setting, then let match make the iOS profile again. The Mac app asks for nothing of the kind and
+needs no change.
+
 ## The two ways in
 
 The lane takes whichever is whole, and prefers the key where both are.
@@ -181,7 +188,8 @@ user's own data -- which is the category the question exempts from carrying a co
 `false` does *not* settle is the annual self-classification report to the US Bureau of Industry and Security,
 which may apply to a distributed app using standard encryption; whoever publishes decides that once, records
 it here, and does not have it decided by a build setting. A build that ever adds a cipher of its own, or a
-library carrying one, has to revisit both before it is uploaded.
+library carrying one, has to revisit both before it is uploaded. Closing what the app writes while the device
+is locked changes none of this: the app asks the system for it, and the system does it.
 
 The screenshots are next door, and the lane picks them up from `fastlane/screenshots/<platform>/` in the same
 run without being told.

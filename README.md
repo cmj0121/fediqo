@@ -66,7 +66,10 @@ it is for:
 Preferences' Allowed tab lists them, says why each is there, and lets you switch any of them
 off, or add a host of your own for one source — a forum whose pictures live elsewhere, say.
 Switching one off refuses what it let through from that moment. The list keeps only what you
-decided, never what was reached.
+decided, never what was reached. A list that cannot be read is not taken for an empty one:
+nothing beyond your sources is reached until it can be read, nothing is added to it, and the
+tab says so. A change this device would not keep is said there and on the strip at the foot
+of the page: it holds for now, and is gone the next time Fediqo is opened.
 
 Every request this run makes can be watched: Preferences, In flight, then Everything this run
 has asked. Each line names the source it was for, when it left, and what it was for — never
@@ -85,6 +88,10 @@ through nowhere of ours and not through the Apple account. Part of it goes when 
 by a span of dates, by a source — or when a limit you set is reached, and what a limit let go
 says which limit did. Nothing goes that neither you nor your own limit chose, and a post you
 keep goes by none of them. How each works is under What this device holds, below.
+
+What Fediqo writes on this device is closed while the device is locked. A phone closes all of
+it. A Mac keeps what a running Fediqo already has open and refuses whatever would open it
+afresh. What that covers, and what it does not, is under While the device is locked, below.
 
 Several sources go in and one timeline comes out, so the same post from two of them is one
 row rather than two. Nothing is scored or re-ordered on the way: the only thing between what
@@ -217,7 +224,9 @@ gave them. `e` opens the editor for the selected timeline; on All or Trends it s
 cannot be edited. Double-click or long-press a tab to edit it. To add one, press `+`. In the
 editor you name, reorder, and remove a timeline, and the editor shows its own keys. Edits
 apply on Done; Esc leaves the timeline as it was. Your timelines stay on this device across a
-relaunch. Removing one takes its rules with it; its posts stay under All.
+relaunch. A change this device would not keep is said on the strip at the foot of the page:
+it holds for now, and is gone the next time Fediqo is opened. Removing one takes its rules
+with it; its posts stay under All.
 
 A timeline is its rules. A rule names one kind of thing:
 
@@ -405,8 +414,17 @@ and shares none with Safari, so each sign-in asks for your password on the serve
 signing out leaves nothing on this device that could sign in as you there. A server that ends
 the sign-in shows the source as signed out and says so; it does not pretend to still work.
 
+Where Fediqo opened without a store it can write — it could not be opened, a newer Fediqo
+wrote it, or a read back cut short is not settled yet — signing out takes nothing out of the
+store, and the question says so in place of what it usually says. The sign-in is handed back
+all the same: this device forgets it and asks the server to end it. The marks for what you
+boosted, favourited and bookmarked on that source's posts, and what it told you, stay on this
+device until Fediqo next opens with its store.
+
 A forum sign-in keeps its cookies on this device until you sign out, Clear, or Remove, and each
-of those takes them, with any password you saved for it.
+of those takes them, with any password you saved for it. Signing out of a forum never changed
+the store, so in a run without a store it can write the question says what goes and what
+stays as it always does, and that the store could not be written this time.
 
 Removing a source also stops everything Fediqo would ask of it by itself: the wait, a reload
 already on its way, its pictures and emoji still queued, and an open thread from it. Nothing
@@ -695,8 +713,15 @@ been quiet for a moment. A save of that kind which wrote posts is followed by th
 sooner than a minute later; what a press asks for is written at once all the same. Notices
 and the texts you pressed to send are written by themselves, with no post written for them
 and without that minute: notices a moment after they are read, a text before its request
-leaves. Leaving the app and quitting write at once, so nothing done just before is lost, and
-posts, notices and unsent texts are each written whatever became of the other two. One kind
+leaves. Leaving the app and quitting write at once, and posts, notices and unsent texts are
+each written whatever became of the other two. What is this device's alone is written first
+and by itself — texts waiting to be sent, then notices, then the posts let go, the posts kept,
+and the sources as they now are — in a write as large as what changed and not as large as the
+store. Everything a source can be asked for again follows. On a phone, leaving waits for the
+save to end before it does anything else. A write cut off all the same — by a lock, or by a
+quit that does not wait for a very large one — leaves the store as the last whole save left
+it, and the next launch opens it as it is. A post that arrived and was kept within the same
+few seconds is kept only once a whole save has written it. One kind
 of press does wait: one that lets something go from this device — by dates, what its source
 deleted, a shorter Keep posts, what a source said of its reader at a sign-out, a post taken
 back, Dismiss on a notice, Discard on a text that was not sent, Remove and Clear. You are not
@@ -711,14 +736,19 @@ again by itself a minute later, up to five times running, and then with the next
 the next press that saves. The line goes at its Close, or when a save lands, whichever window or retry made it. Letting
 go by dates says the same sentence in the place of its count until then.
 
+A save a locked device refused is not one of those five. It is held, and written as soon as
+the device can be read again: at the unlock, or when somebody comes back to the app. On a Mac
+a save goes on through a locked screen, so nothing is held there.
+
 What this device lets go is gone from its store, not only from the screen. When a post goes —
 dropped by you, by a limit, with its source, or taken back by its author — its words, and any
 earlier wording kept with it, are written over in the store's file by the save that follows,
 and a store an earlier version left such words in is rid of them the first time this version
-opens it. A store that a read back replaced is not kept either, and nor is one that was put
-aside because it was damaged: it is deleted once you have been told of it and what took its
-place has been saved. Beyond that, what the system keeps beneath a file is the system's, and a
-package you took away earlier still holds what it held.
+opens it. A store that a read back replaced is not kept either, once the whole read back has
+held, and nor is one that was put aside because it was damaged: it is deleted once you have
+been told of it and what took its place has been saved, and, told or not, the first time
+Fediqo is opened 30 days or more after it was put aside. Beyond that, what the system keeps
+beneath a file is the system's, and a package you took away earlier still holds what it held.
 
 When the store cannot be opened, Fediqo says why at the first thing you see, and what it does
 depends on the reason. If the store is only out of reach — another copy of Fediqo is using it,
@@ -731,10 +761,54 @@ would have nothing to take. If the store is damaged, it is put aside and an empt
 its place; the notice says so, and that the damaged one will be deleted. It is deleted once
 you have pressed I understand on that notice and the new store has been saved, and there is no
 getting it back after that. Put the notice down any other way, or quit before reading it, and
-the damaged one is kept and the notice is shown again. If a read back was interrupted and left
-two stores, Fediqo opens neither and asks which to keep, saying how many posts each holds and
-when it was last written; the other is deleted only after the one you chose has opened and
-been saved, and if the one you chose proves damaged the other is put back.
+the damaged one is kept and the notice is shown again — but not without end. Answered or not,
+it is deleted the first time Fediqo is opened 30 days or more after it was put aside, and the
+notice says so. The days are counted to the next time Fediqo is opened, not to a date: a
+store put aside and never opened again stays where it is. They are counted by this device's
+clock, so a clock set a month ahead when Fediqo is opened deletes it then. Nothing is deleted
+while the device is locked. If a read back was interrupted and left two stores, Fediqo opens
+neither and asks which to keep, saying how many posts each holds and when it was last
+written; that is so too where it was cut short just after the new store landed. The other is
+deleted only after the one you chose has opened and been saved, and if the one you chose
+proves damaged the other is put back. A locked device is neither out of reach nor damaged:
+the launch waits, as While the device is locked says.
+
+#### While the device is locked
+
+Everything Fediqo writes on this device is made so that the device closes it while it is
+locked: the store, the picture copies, the two lists kept beside the store — what you allowed
+beyond your sources, and the timelines you wrote — a store put aside, and what is staged
+while a store is taken away or read back. What an earlier version wrote is brought to the
+same at the first launch of this one.
+
+A phone closes all of it once it is locked. A Mac does not, and the difference is worth knowing. A
+Mac goes on running behind a locked screen, so there what Fediqo already has open stays
+usable, and what is closed cannot be opened afresh until the Mac is unlocked. A Fediqo left
+running on a locked Mac still holds its store and goes on saving. What a locked Mac gives is
+that the files cannot be opened anew, by Fediqo or by anything else; it is not that nothing
+is readable.
+
+Some of what is kept for an app is written by the system and not by the app: its
+preferences, what a forum page shown in the app stores, caches. The phone app asks the system
+to close those as it closes Fediqo's own files, and that takes effect only in a signed build.
+The Mac app does not ask it. That is why the two lists are no longer in the preferences.
+They are moved beside the store once; the copy that was in the preferences may stay in the
+system's file, and in backups of it, until the system writes that file again.
+
+Opened while the device is still locked, Fediqo shows its launch ground and waits for its
+store. A lock is not taken for damage: nothing is put aside, swept or settled while it waits.
+It goes on at the unlock, or when somebody is plainly there — the screen wakes, the app or a
+window comes to the front, a key or a touch reaches it.
+
+Take away, Read back and Move nearby do not begin while the device is locked: they say "This
+device is locked", and nothing changes. Where a lock stops one midway it says the same, and
+not that the file or the store is bad. What a lock would not let a read back put back as it
+was is put back once the device can be read again, without a word. If Fediqo ends first, the
+next launch says what was not put back before anything else is taken away or read back.
+
+One thing Fediqo writes is not closed: a file you take away. It is sealed under your
+password, and it is handed to you as your own file, so that whatever backs up or syncs your
+files can read it while the device is locked.
 
 #### Keeping a post
 
@@ -800,7 +874,8 @@ nothing reaches it again.
 #### Take away
 
 In Preferences. Take away writes what this device holds — posts, timelines,
-rules, what was read, sources, and what signs in to them — to one file locked by a password
+rules, what you allowed beyond your sources, what was read, sources, and what signs in to
+them — to one file locked by a password
 you set, and puts it where you choose: never anywhere of ours, never through the Apple
 account. Notices, and texts still waiting to be sent, are not in it. It first weighs what is
 here and asks whether the picture copies ride, showing how
@@ -815,10 +890,15 @@ Read back opens such a file, asks its password, and shows what it holds — how 
 from which sources, and when it was taken away — before anything changes. On a clean install
 or a new device it gives the same store, every source signed in as it was. On a device that
 already holds a store it replaces that store: nothing is merged, and the question says so.
-The notices held there go with it; texts waiting to be sent there stay.
+The notices held there go with it; texts waiting to be sent there stay. The timelines you
+wrote and what you allowed beyond your sources are replaced by the file's, and a list the
+file does not carry is gone with the rest.
 It is proven whole first: a file that is not a Fediqo take-away, one cut short or altered,
 one written by a newer Fediqo, or the wrong password is refused with its own reason, and the
-store is untouched. A read back that fails midway leaves the store as it was.
+store is untouched. A read back that fails midway leaves the store as it was, and your own
+lists are put back with it. A list that cannot be read stops a take-away before anything is
+written, and a read back before anything is replaced. What a locked device does to either is
+under While the device is locked, above.
 
 Nothing leaves this device either way. Both are listed under This device in the run's
 requests.
@@ -852,6 +932,11 @@ recorded one and carries none; a source rule still reaches it.
 
 A build older than the store it finds does not open it. It says a newer Fediqo wrote it, and
 leaves it exactly as it was: it does not read it, write over it, or set it aside.
+
+Going back a version: a build from before the two lists were kept beside the store opens the
+same store, and finds neither list where it looks for them. It starts without them — nothing
+in Allowed switched off, no host of your own, no timeline you wrote. What it then writes of
+either is dropped when this version returns, which shows both lists as it last kept them.
 
 This checkout has no release tag yet. It is building toward 0.7.0.
 
