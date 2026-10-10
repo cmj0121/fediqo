@@ -35,8 +35,8 @@ public struct MediaCache: MediaCopies {
     }
 
     public func store(_ data: Data, host: String, url: URL) throws {
-        try FileManager.default.createDirectory(at: folder(for: host), withIntermediateDirectories: true)
-        try data.write(to: file(host: host, url: url), options: .atomic)
+        try Guarded.makeFolder(folder(for: host))
+        try Guarded.write(data, to: file(host: host, url: url))
     }
 
     public func data(host: String, url: URL) -> Data? {
@@ -117,7 +117,7 @@ public struct MediaCache: MediaCopies {
     /// Nothing between leaves a mix. The parent is made first: Caches may have been purged.
     func adopt(_ staged: URL) throws -> URL? {
         let manager = FileManager.default
-        try manager.createDirectory(at: directory.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Guarded.makeFolder(directory.deletingLastPathComponent())
         let aside = directory.deletingLastPathComponent()
             .appendingPathComponent("media-aside-\(UUID().uuidString)", isDirectory: true)
         let had = manager.fileExists(atPath: directory.path)

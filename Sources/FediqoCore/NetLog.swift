@@ -13,6 +13,9 @@ public enum NetLog {
     public static let auth = Logger(subsystem: "Fediqo", category: "auth")
     /// A move nearby, step by step, on either side (#253), its lines built by `NearbyLog`.
     public static let nearby = Logger(subsystem: "Fediqo", category: "nearby")
+    /// What would not take the protection class (#344): a count, or a fixed line, and never a
+    /// file's name.
+    public static let protection = Logger(subsystem: "Fediqo", category: "protection")
 
     /// What stands where a host is not named: an ask of a server nobody added.
     public static let unnamed = "(unnamed)"

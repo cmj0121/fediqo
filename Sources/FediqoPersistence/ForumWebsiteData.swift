@@ -1,3 +1,4 @@
+import FediqoCore
 import Foundation
 import WebKit
 
@@ -35,10 +36,18 @@ public enum ForumWebsiteData {
     /// Makes and marks both directories. The app's own WebKit root is marked as well as the
     /// store: everything WebKit keeps there is a cache or a session, and all of it comes back
     /// from the web rather than from a restore.
-    static func markOutOfBackups(library: URL, sandboxed: Bool, bundleID: String) throws {
+    ///
+    /// **And both are at the class before WebKit opens them** (#344): WebKit's own processes
+    /// write here, and what they write takes the class of the folder it is written into. What
+    /// an earlier run left under them is brought to it here, in the same step, so there is no
+    /// order of launch in which WebKit opens a file this has not reached.
+    static func markOutOfBackups(
+        library: URL, sandboxed: Bool, bundleID: String, on device: Guarded.Device = .this
+    ) throws {
         let found = directories(library: library, sandboxed: sandboxed, bundleID: bundleID)
-        try makeExcludedFromBackup(found.root)
-        try makeExcludedFromBackup(found.store)
+        try makeExcludedFromBackup(found.root, on: device)
+        try makeExcludedFromBackup(found.store, on: device)
+        _ = Guarded.bring(found.root, on: device)
     }
 
     /// Where `WKWebsiteDataStore(forIdentifier:)` keeps its files, and the app's WebKit root
@@ -64,11 +73,11 @@ public enum ForumWebsiteData {
         return (root, store)
     }
 
-    private static var bundleID: String {
+    static var bundleID: String {
         Bundle.main.bundleIdentifier ?? ProcessInfo.processInfo.processName
     }
 
-    private static var isSandboxed: Bool {
+    static var isSandboxed: Bool {
         #if os(macOS)
         ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
         #else

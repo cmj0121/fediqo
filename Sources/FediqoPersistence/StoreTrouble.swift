@@ -9,12 +9,9 @@ extension StoreGlance {
     /// Asked of the file's own date and of a read-only connection, so asking changes nothing.
     static func of(indexAt url: URL, wait: TimeInterval = StoreGlance.wait) -> StoreGlance {
         let written = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        var readOnly = Configuration()
-        readOnly.readonly = true
         // A store another connection is just then writing is not one that cannot be read: it is
         // waited on for a moment before that is concluded.
-        readOnly.busyMode = .timeout(wait)
-        let posts = (try? DatabaseQueue(path: url.path, configuration: readOnly))
+        let posts = (try? DatabaseQueue(path: url.path, configuration: StoreFile.configuration(readOnly: true, busyWait: wait)))
             .flatMap { try? $0.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM note") } }
         return StoreGlance(written: written, posts: posts)
     }
@@ -97,7 +94,7 @@ extension StoreFile {
     /// were told would go.
     public static func told(in directory: URL) {
         for aside in putAside(in: directory) where !aside.told {
-            try? Data().write(to: directory.appendingPathComponent(aside.base + toldSuffix))
+            try? Guarded.write(Data(), to: directory.appendingPathComponent(aside.base + toldSuffix), atomic: false)
         }
     }
 }

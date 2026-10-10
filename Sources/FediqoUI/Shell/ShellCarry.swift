@@ -223,6 +223,10 @@ final class ShellCarry {
             try await carrier.takeAway(to: url, key: .password(password), pictures: pictures) { progress in
                 Task { @MainActor in self?.advance(.taking(progress)) }
             }
+            // Sealed and finished, and about to be the person's own file wherever they put it:
+            // let out of the class the staging kept it at, so a backup or a sync can read the
+            // copy behind a locked screen (#344).
+            try Guarded.handOut(url)
             return .moving(url)
         }
     }
@@ -252,7 +256,7 @@ final class ShellCarry {
         let day = now.formatted(Date.ISO8601FormatStyle(dateSeparator: .dash).year().month().day())
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("takeaway-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? Guarded.makeFolder(folder)
         return folder.appendingPathComponent("Fediqo \(day).fediqo")
     }
 

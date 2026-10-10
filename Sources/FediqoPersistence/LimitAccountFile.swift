@@ -27,6 +27,6 @@ public struct LimitAccountFile: LimitAccountStore {
     }
 
     public func write(_ lines: [LimitAct]) throws {
-        try LimitAccount.data(lines).write(to: url, options: .atomic)
+        try Guarded.write(LimitAccount.data(lines), to: url)
     }
 }

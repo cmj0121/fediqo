@@ -44,6 +44,12 @@ final class Launch {
     /// off would leave the store empty while the first frame draws, and every save asked for in
     /// that gap would have to be held back or it would write the empty store over the index.
     private init() {
+        // First of all (#344): the store's folder, the canary, and the folders the system writes
+        // into are at the class before anything here opens, reads or writes a file — and what an
+        // earlier build left in the store's folder is brought to it before the index is opened.
+        // The walk of everything else is nothing a first frame waits for.
+        ProtectedFolders.first()
+        Task.detached(priority: .utility) { ProtectedFolders.rest() }
         // What a take-away or a read back that was killed midway left on disk goes first (#247):
         // a plaintext index in scratch is nothing a later run reads.
         let media = try? MediaCache.caches()

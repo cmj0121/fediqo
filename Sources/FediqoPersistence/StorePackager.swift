@@ -241,12 +241,12 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         guard let aside = unsettledAside(in: directory) else { return }
         switch choice {
         case .keepInPlace:
-            try? displacedMark.write(to: aside.appendingPathComponent(committingMarker), options: .atomic)
+            try? Guarded.write(displacedMark, to: aside.appendingPathComponent(committingMarker))
         case .putBack:
             let other = directory.appendingPathComponent("\(StoreFile.readBackAsidePrefix)\(UUID().uuidString)", isDirectory: true)
             do {
-                try manager.createDirectory(at: other, withIntermediateDirectories: true)
-                try displacedMark.write(to: other.appendingPathComponent(committingMarker))
+                try Guarded.makeFolder(other)
+                try Guarded.write(displacedMark, to: other.appendingPathComponent(committingMarker), atomic: false)
                 for suffix in StoreFile.sidecars + [""] {
                     let stands = directory.appendingPathComponent(indexName + suffix)
                     guard manager.fileExists(atPath: stands.path) else { continue }
@@ -269,7 +269,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         for name in names.sorted() where name.hasPrefix(StoreFile.readBackAsidePrefix) {
             let aside = directory.appendingPathComponent(name)
             guard wasDisplaced(aside), manager.fileExists(atPath: aside.appendingPathComponent(indexName).path) else { continue }
-            guard (try? Data().write(to: aside.appendingPathComponent(committingMarker), options: .atomic)) != nil else { continue }
+            guard (try? Guarded.write(Data(), to: aside.appendingPathComponent(committingMarker))) != nil else { continue }
             return true
         }
         return false
@@ -454,7 +454,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         }
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("takeaway-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        try Guarded.makeFolder(scratch)
         defer { try? FileManager.default.removeItem(at: scratch) }
         let snapshot = await store.snapshot()
         let pieces: [Piece]
@@ -742,9 +742,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         guard let data = staged.limits else { return }
         let target = directory.appendingPathComponent(LimitAccountFile.name)
         let previous = try? Data(contentsOf: target)
-        try data.write(to: target, options: .atomic)
+        try Guarded.write(data, to: target)
         undo.append(Undo(name: "limits") {
-            if let previous { try previous.write(to: target, options: .atomic) } else { try? FileManager.default.removeItem(at: target) }
+            if let previous { try Guarded.write(previous, to: target) } else { try? FileManager.default.removeItem(at: target) }
         })
     }
 
@@ -765,7 +765,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
 
         let manager = FileManager.default
         let incoming = directory.appendingPathComponent("incoming-\(UUID().uuidString)", isDirectory: true)
-        try manager.createDirectory(at: incoming, withIntermediateDirectories: true)
+        try Guarded.makeFolder(incoming)
         defer { try? manager.removeItem(at: incoming) }
         var staged = Staged()
         var done = 0
@@ -811,7 +811,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 guard parts.count == 2, parts.allSatisfy(Self.isDigest) else { throw PackageRefusal.altered }
                 let media = incoming.appendingPathComponent("media", isDirectory: true)
                 let folder = media.appendingPathComponent(String(parts[0]), isDirectory: true)
-                try manager.createDirectory(at: folder, withIntermediateDirectories: true)
+                try Guarded.makeFolder(folder)
                 try await Self.write(entry, to: folder.appendingPathComponent(String(parts[1])))
                 staged.media = media
                 staged.pictures += 1
@@ -947,11 +947,11 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         let manager = FileManager.default
         let target = directory.appendingPathComponent(Self.indexName)
         let aside = directory.appendingPathComponent("\(StoreFile.readBackAsidePrefix)\(UUID().uuidString)", isDirectory: true)
-        try manager.createDirectory(at: aside, withIntermediateDirectories: true)
+        try Guarded.makeFolder(aside)
         // The marker first, and empty: while it is there and says no more, what is in this
         // folder is the old index, not replaced, and a launch puts it back (`settleHalfCommits`).
         let marker = aside.appendingPathComponent(Self.committingMarker)
-        try Data().write(to: marker)
+        try Guarded.write(Data(), to: marker, atomic: false)
         var moved: [(from: URL, to: URL)] = []
         for suffix in [""] + StoreFile.sidecars {
             let file = directory.appendingPathComponent(Self.indexName + suffix)
@@ -964,14 +964,14 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         do {
             // Said before it is done: from here an index in place is the package's, whether or
             // not the commit lives to say it replaced the old one.
-            try Self.replacingMark.write(to: marker, options: .atomic)
+            try Guarded.write(Self.replacingMark, to: marker)
             witness?(.replacing)
             try manager.moveItem(at: index, to: target)
             witness?(.movedIn)
             // Only now is the old index replaced, and the marker says so — whole or not at all,
             // so a kill here leaves it saying what it said. One that cannot be written leaves the
             // old index to be put back by a launch, which is the side to err on.
-            try Self.replacedMark.write(to: marker, options: .atomic)
+            try Guarded.write(Self.replacedMark, to: marker)
         } catch {
             try? manager.removeItem(at: target)
             for (kept, file) in moved { try? manager.moveItem(at: kept, to: file) }
@@ -984,7 +984,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             // The marker first, whole or not at all: from here the index in place is on its way
             // out and the aside is the store again. Taken out before the marker said so, a kill
             // would leave an aside marked replaced beside no index.
-            try Self.undoingMark.write(to: marker, options: .atomic)
+            try Guarded.write(Self.undoingMark, to: marker)
             witness?(.undoing)
             // Refused, the undo stops here with nothing moved: what SQLite kept beside the old
             // index must not come back to lie beside the package's.
@@ -1019,13 +1019,12 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// An empty folder to adopt as the copies where the package carried none.
     private static func emptyFolder(beside directory: URL) throws -> URL {
         let folder = directory.appendingPathComponent("incoming-empty-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Guarded.makeFolder(folder)
         return folder
     }
 
     private static func write(_ entry: PackageReader.Entry, to url: URL) async throws {
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-        let handle = try FileHandle(forWritingTo: url)
+        let handle = try Guarded.makeFile(at: url)
         defer { try? handle.close() }
         var written = 0
         for try await chunk in entry.chunks {

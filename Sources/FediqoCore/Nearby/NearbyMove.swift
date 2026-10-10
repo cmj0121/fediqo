@@ -428,9 +428,9 @@ public actor NearbyMove {
             // Staged only once the yes was heard on the wire: a link that drops on the way
             // leaves nothing to sweep.
             let folder = carrier.stagingFolder().appendingPathComponent("incoming-\(UUID().uuidString)", isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Guarded.makeFolder(folder)
             let file = folder.appendingPathComponent("package.fdq")
-            FileManager.default.createFile(atPath: file.path, contents: nil)
+            try Guarded.makeFile(at: file).close()
             accepted = Accepted(offer: offer, folder: folder, file: file, held: weight.holdsStore)
         }
         guard var held = accepted else { throw NearbyRefusal.malformed }
@@ -454,7 +454,7 @@ public actor NearbyMove {
         var milestones = NearbyLog.Milestones()
         Self.progress(.receiver, &milestones, done: have, total: held.offer.fileBytes)
         await emit(.moving(PackageProgress(done: Int(have), total: Int(held.offer.fileBytes)), peer: peer))
-        let handle = try FileHandle(forWritingTo: held.file)
+        let handle = try Guarded.reopen(held.file)
         defer { try? handle.close() }
         try handle.seekToEnd()
         while true {
@@ -518,7 +518,7 @@ public actor NearbyMove {
             .appendingPathComponent("takeaway-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
         do {
-            try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+            try Guarded.makeFolder(scratch)
             let file = scratch.appendingPathComponent("package.fdq")
             let key = SymmetricKey(size: .bits256)
             NearbyLog.note(.sender, "packing")

@@ -1,7 +1,9 @@
 import FediqoCore
 import Foundation
 import GRDB
-import SQLite3
+// For `sqlite3_temp_directory` alone, a variable of C's that Swift cannot vouch for: see
+// `keepTemporaries(in:)` for when it is set and why that is safe.
+@preconcurrency import SQLite3
 
 /// The on-device index. Lives in Application Support and is excluded from backup.
 public struct StoreFile: Sendable {
@@ -14,9 +16,7 @@ public struct StoreFile: Sendable {
         try makeExcludedFromBackup(directory)
         let path = directory.appendingPathComponent(Self.indexName).path
         if Self.isNewer(at: path) { throw Newer() }
-        var waiting = Configuration()
-        waiting.busyMode = .timeout(busyWait)
-        try self.init(database: DatabaseQueue(path: path, configuration: waiting))
+        try self.init(database: DatabaseQueue(path: path, configuration: Self.configuration(busyWait: busyWait)))
         // **A store that can be read and not written is not one this run may use** (#295).
         // SQLite opens a file it may not write for reading alone and says nothing until the
         // first write — which would be the first save, failing into a log after the person had
@@ -28,6 +28,64 @@ public struct StoreFile: Sendable {
             throw DatabaseError(resultCode: .SQLITE_READONLY)
         }
     }
+
+    /// How every connection to an index on disk is made (#344), the probes that only read
+    /// included: one place, so that what is true of one connection is true of all of them.
+    ///
+    /// `busyWait` is how long the connection waits on another; nil is SQLite's own, no wait.
+    static func configuration(readOnly: Bool = false, busyWait: TimeInterval? = nil) -> Configuration {
+        var made = Configuration()
+        made.readonly = readOnly
+        if let busyWait { made.busyMode = .timeout(busyWait) }
+        return made
+    }
+
+    /// What the folder SQLite's own temporary files are made in is called, in the store's folder.
+    static let temporariesName = ".temporary"
+
+    /// **What SQLite writes outside the index and its journal is written in `folder`** (#344): a
+    /// rebuild's copy of the whole index, a statement's journal, a temporary table. Left to
+    /// itself SQLite makes these in the system's temporary directory, where nothing of this
+    /// app's sets their class; `folder` is one `Guarded` made, in the store's folder, so each
+    /// takes the class the index has. Each is unlinked as it is opened and so has no name to
+    /// find it by — but a file with no name is still a file on the disk until it is closed.
+    ///
+    /// **Kept in a file and not in memory**: a rebuild holds a copy of the index, and in memory
+    /// that was 2.3 GB for a store of 2 GB — more than a phone gives an app. In a file it is
+    /// 180 MB whatever the store weighs.
+    ///
+    /// **SQLite's own variable, and not the environment's.** Its unix layer asks, in order,
+    /// `sqlite3_temp_directory`, then `SQLITE_TMPDIR`, then `TMPDIR`, then fixed paths, and takes
+    /// the first that is a folder it may write in (checked against the SQLite this links,
+    /// 3.51). The first of those is this process's alone and is read each time; the environment
+    /// is read once, when SQLite starts, which a system framework may have made happen already.
+    ///
+    /// **Process-wide, and set before the first connection is opened** — by the launch
+    /// (`ProtectedFolders.first`), once. Set as SQLite sets it itself (`PRAGMA
+    /// temp_store_directory`): under the mutex its unix layer holds while it reads the variable
+    /// to name a temporary file — `SQLITE_MUTEX_STATIC_VFS1`, checked against its source — so
+    /// no connection reads it half-changed, and what it replaces is freed under the same
+    /// mutex. Allocated by SQLite, as its documentation asks of whoever sets it.
+    ///
+    /// **Where `folder` is gone or cannot be written, SQLite goes on down its list without a
+    /// word**, and nothing here can stop it: the copy is then made in the temporary directory,
+    /// which inside a sandbox the launch has classed as well.
+    ///
+    /// `nil` un-says it, and SQLite goes by its own list again: for a test, whose folder is
+    /// about to go while other tests' connections are open. Nothing in the app asks for that.
+    static func keepTemporaries(in folder: URL?) {
+        let mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_VFS1)
+        sqlite3_mutex_enter(mutex)
+        defer { sqlite3_mutex_leave(mutex) }
+        if let folder, let now = sqlite3_temp_directory, String(cString: now) == folder.path { return }
+        sqlite3_free(sqlite3_temp_directory)
+        sqlite3_temp_directory = folder.flatMap { folder in
+            folder.path.withCString { path in withVaList([path]) { sqlite3_vmprintf("%s", $0) } }
+        }
+    }
+
+    /// Where SQLite's temporary files are made now, where that was ever said.
+    static var temporaries: String? { sqlite3_temp_directory.map { String(cString: $0) } }
 
     public init(database: DatabaseQueue) throws {
         // Asked before `migrate`: GRDB migrates a superseded store without complaint, and the
@@ -113,9 +171,7 @@ public struct StoreFile: Sendable {
     /// falls through to the read-write open, whose own check still stands behind it.
     private static func isNewer(at path: String) -> Bool {
         guard FileManager.default.fileExists(atPath: path) else { return false }
-        var readOnly = Configuration()
-        readOnly.readonly = true
-        guard let probe = try? DatabaseQueue(path: path, configuration: readOnly) else { return false }
+        guard let probe = try? DatabaseQueue(path: path, configuration: Self.configuration(readOnly: true)) else { return false }
         return (try? probe.read(migrator.hasBeenSuperseded)) ?? false
     }
 
@@ -123,9 +179,7 @@ public struct StoreFile: Sendable {
     /// person pressed to send — or `nil`
     /// where that cannot be asked. Asked on a read-only connection, so asking changes nothing.
     static func holdsNothing(indexAt path: String) -> Bool? {
-        var readOnly = Configuration()
-        readOnly.readonly = true
-        guard let probe = try? DatabaseQueue(path: path, configuration: readOnly) else { return nil }
+        guard let probe = try? DatabaseQueue(path: path, configuration: Self.configuration(readOnly: true)) else { return nil }
         return try? probe.read { db in
             let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'")
             for table in ["source", "note", "unsent"] where tables.contains(table) {
@@ -247,7 +301,7 @@ public struct StoreFile: Sendable {
                     // Written down beside the damaged one, so that the launch that comes to say
                     // it was damaged says what took its place.
                     let base = aside.deletingPathExtension().lastPathComponent
-                    try? Data().write(to: directory.appendingPathComponent(base + restoredSuffix))
+                    try? Guarded.write(Data(), to: directory.appendingPathComponent(base + restoredSuffix), atomic: false)
                     return Opened(file: nil, setAside: aside, trouble: .unreachable(.otherComesBack))
                 }
                 guard let fresh = try? opening(directory) else {
@@ -324,7 +378,7 @@ public struct StoreFile: Sendable {
         return aside
     }
 
-    private static let indexName = "index.sqlite"
+    static let indexName = "index.sqlite"
     /// What SQLite may leave beside the index: moved with it, and weighed with it.
     static let sidecars = ["-journal", "-wal", "-shm"]
 
