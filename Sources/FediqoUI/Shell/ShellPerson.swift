@@ -89,6 +89,44 @@ final class PageReaders {
     }
 }
 
+/// One count for every ask a page makes this run — a person's page or a list of people's, an
+/// opening or a reading-on — so no two asks anywhere share a number, and an answer lands only
+/// where its own number is still the one awaited.
+@MainActor
+final class PageErrands {
+    private var count = 0
+
+    /// The number of the ask about to go out.
+    func next() -> Int {
+        count += 1
+        return count
+    }
+}
+
+/// Which pages are kept, oldest first: the walk is seldom deeper than a few, and a page left
+/// long ago is asked again when it is opened again.
+struct PageOrder {
+    private var order: [String] = []
+
+    mutating func touch(_ id: String) {
+        order.removeAll { $0 == id }
+        order.append(id)
+    }
+
+    mutating func forget(_ id: String) {
+        order.removeAll { $0 == id }
+    }
+
+    /// Notes `id` as the newest, and hands back the pages let go to keep `kept` — the oldest,
+    /// but never one that is `busy`: its ask is still on the wire.
+    mutating func keep(_ id: String, among kept: Int, busy: (String) -> Bool) -> [String] {
+        touch(id)
+        let gone = order.dropLast(kept).filter { !busy($0) }
+        order.removeAll(where: gone.contains)
+        return gone
+    }
+}
+
 /// Every person's page opened this run, by who they are.
 ///
 /// Held by the root beside the walk, and handed the session at each ask: the session's own
@@ -162,18 +200,27 @@ final class ShellPersonPages {
     /// The rows last built of each page, and what they were built from. Not observed: it is
     /// written while a page is drawn.
     @ObservationIgnored private var built: [String: (key: RowsKey, items: [DummyItem])] = [:]
-    @ObservationIgnored private var order: [String] = []
+    @ObservationIgnored private var order = PageOrder()
     /// The asks on the wire, by page: what a second opening waits on, and asks nothing.
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
-    /// One count for every page's asks and readings-on.
-    @ObservationIgnored private var errands = 0
+    /// One count for every page's asks and readings-on, and for the lists' beside them.
+    @ObservationIgnored private let errands: PageErrands
     /// How long one ask may take. A test shortens it.
     @ObservationIgnored var deadline: Duration = .seconds(30)
     /// Whose sign-in each host's pages were last read through.
-    @ObservationIgnored private let readers = PageReaders()
+    @ObservationIgnored private let readers: PageReaders
+    /// The lists of people opened this run (#311): pages of the same kind, asked the same way,
+    /// numbered on the same count, and let go with the same reader.
+    let lists: ShellPeoplePages
 
     init() {
-        readers.whenChanged { [weak self] host in self?.letGo(at: host) }
+        let count = PageErrands(), looks = PageReaders()
+        errands = count
+        readers = looks
+        let lists = ShellPeoplePages(errands: count, readers: looks)
+        self.lists = lists
+        looks.whenChanged { [weak self] host in self?.letGo(at: host) }
+        looks.whenChanged { [weak lists] host in lists?.letGo(at: host) }
     }
 
     /// A page opening, as its pane's task is named: who they are **and who asks**, so a page
@@ -195,7 +242,7 @@ final class ShellPersonPages {
             asks[id] = nil
             pages[id] = nil
             built[id] = nil
-            order.removeAll { $0 == id }
+            order.forget(id)
         }
     }
 
@@ -203,10 +250,13 @@ final class ShellPersonPages {
 
     /// The source `who` is asked of, where it says who people are and they have a handle.
     static func source(of who: DummyPerson, in session: ShellSession) -> Source? {
-        guard who.handle != nil, let source = session.sources.first(where: { $0.host == who.host }),
-              source.kind.offers.people
-        else { return nil }
-        return source
+        who.handle == nil ? nil : source(at: who.host, in: session)
+    }
+
+    /// The source at `host`, where there is one and it says who people are: **the one place
+    /// that fact is read**, for a person's page and for a list of people alike.
+    static func source(at host: String, in session: ShellSession) -> Source? {
+        session.sources.first { source in source.host == host && source.kind.offers.people }
     }
 
     /// The signed-in reader's own page at `host` (#310) — the page of anybody, opened for
@@ -299,7 +349,7 @@ final class ShellPersonPages {
         guard let source = Self.source(of: who, in: session) else { return }
         let held = readers.look(at: source.host, in: session).held
         if let page = self.standing(of: who, at: source, in: session) {
-            touch(who.id)
+            order.touch(who.id)
             named(who.id, as: Self.askedAs(at: source.host, in: session))
             if page.asking {
                 await asks[who.id]?.value
@@ -335,8 +385,7 @@ final class ShellPersonPages {
         }
         named(id, as: askedAs)
         keep(id)
-        errands += 1
-        let errand = errands
+        let errand = errands.next()
         pages[id]?.awaits = errand
         pages[id]?.asking = true
         // A reading-on still on the wire is this ask's to supersede: its answer will not land.
@@ -361,7 +410,7 @@ final class ShellPersonPages {
             guard pages[id]?.awaits == errand else { return }
             pages[id]?.asking = false
             if Cancellation.happened(error) { return }
-            concluded(error, at: source, askedAs: askedAs, in: session)
+            Self.concluded(error, at: source, askedAs: askedAs, in: session)
             let trouble: PersonSaid.Trouble = (error as? PersonReadError) == .unheardOf ? .unheardOf : .failed
             if case .said = pages[id]?.reading {
                 // What it said before stands, and this is said beside it.
@@ -387,7 +436,7 @@ final class ShellPersonPages {
         } catch {
             guard pages[id]?.awaits == errand else { return }
             if !Cancellation.happened(error) {
-                concluded(error, at: source, askedAs: askedAs, in: session)
+                Self.concluded(error, at: source, askedAs: askedAs, in: session)
                 // Who they are stands; their posts are a stretch that did not come.
                 pages[id]?.answered = true
                 pages[id]?.footFailed = true
@@ -417,8 +466,7 @@ final class ShellPersonPages {
         guard next != nil || page.footFailed else { return }
         let id = who.id
         let askedAs = page.askedAs
-        errands += 1
-        let errand = errands
+        let errand = errands.next()
         pages[id]?.awaits = errand
         pages[id]?.readingOn = true
         pages[id]?.footFailed = false
@@ -433,7 +481,7 @@ final class ShellPersonPages {
             if error is PagingError {
                 pages[id]?.notPaging = true
             } else if !Cancellation.happened(error) {
-                concluded(error, at: source, askedAs: askedAs, in: session)
+                Self.concluded(error, at: source, askedAs: askedAs, in: session)
                 pages[id]?.footFailed = true
             }
         }
@@ -505,7 +553,7 @@ final class ShellPersonPages {
     /// signed-in door confirmed by its own check that the source took the token back — **and
     /// whoever asks now is still who the ask was made as**. An answer come late says nothing of
     /// a sign-in that has since ended, begun or changed.
-    private func concluded(_ error: any Error, at source: Source, askedAs: AskedAs, in session: ShellSession) {
+    static func concluded(_ error: any Error, at source: Source, askedAs: AskedAs, in session: ShellSession) {
         guard (error as? MastodonAuthError) == .signedOut,
               Self.askedAs(at: source.host, in: session).isTheSame(as: askedAs)
         else { return }
@@ -523,17 +571,10 @@ final class ShellPersonPages {
     /// Keeps the page `id` among the newest `kept`, letting the oldest go — but never one
     /// whose ask is still on the wire.
     private func keep(_ id: String) {
-        touch(id)
-        for gone in order.dropLast(Self.kept) where pages[gone]?.asking != true {
+        for gone in order.keep(id, among: Self.kept, busy: { pages[$0]?.asking == true }) {
             pages[gone] = nil
             built[gone] = nil
             asks[gone] = nil
-            order.removeAll { $0 == gone }
         }
-    }
-
-    private func touch(_ id: String) {
-        order.removeAll { $0 == id }
-        order.append(id)
     }
 }

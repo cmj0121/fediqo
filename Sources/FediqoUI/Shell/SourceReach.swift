@@ -30,7 +30,7 @@ struct SourceReach {
     /// each request runs, and ended within `limit` where there is one. **The one way an
     /// unsigned ask is wired**; a signed one is wired the same way by the door it goes through
     /// (`MastodonSessions.authorized`).
-    // Only `unsignedPerson` hands in a base with a small body ceiling (`small`); the other
+    // `unsignedPerson` and `unsignedPeople` hand in a base with a small body ceiling (`small`); the other
     // unsigned readers go out on the plain client, which has no size ceiling but its last line.
     func wire(
         _ base: (any HTTPClient)? = nil, for purpose: SourceWork.Purpose, name: SourceWork.Name? = nil,
@@ -96,6 +96,17 @@ struct SourceReach {
     /// small, and a stranger's server is not trusted to keep them so.
     func unsignedPerson(_ host: String, for purpose: SourceWork.Purpose, within limit: Duration) -> MastodonPerson {
         MastodonPerson(http: wire(small(), for: purpose, within: limit), host: host)
+    }
+
+    /// A list of people a source keeps, as the reader, through `door`.
+    func people(_ door: MastodonAuthorized) -> MastodonPeople {
+        MastodonPeople(door: door)
+    }
+
+    /// A list of people a source keeps with no token, listed as `purpose`, ended within
+    /// `limit`, and under the ceiling a signed-in read has: a stretch of people is small.
+    func unsignedPeople(_ host: String, for purpose: SourceWork.Purpose, within limit: Duration) -> MastodonPeople {
+        MastodonPeople(http: wire(small(), for: purpose, within: limit), host: host)
     }
 
     /// How much body an ask known to be small may bring: what the signed-in door takes.

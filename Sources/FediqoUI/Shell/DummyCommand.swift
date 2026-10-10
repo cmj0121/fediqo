@@ -208,7 +208,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     public static func canEditTimeline(whenOpen open: Set<DummyLayer>) -> Bool {
         switch outermost(of: open) {
         case .selection, nil: true
-        case .viewer, .shortcuts, .person, .tag, .thread, .link, .search: false
+        case .viewer, .shortcuts, .person, .tag, .people, .thread, .link, .search: false
         }
     }
 
@@ -278,7 +278,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// `ShellWalk` holds them in one stack and only its innermost step is open. Their order
     /// relative to each other in `allCases` is therefore never asked — which of them is in front
     /// is what the reader walked, not what this list says.
-    public static let walk: Set<DummyLayer> = [.person, .tag, .thread, .link]
+    public static let walk: Set<DummyLayer> = [.person, .tag, .people, .thread, .link]
 
     /// Whether the reader may walk one step further out from where they are now.
     ///
@@ -365,6 +365,9 @@ public enum DummyLayer: Hashable, Sendable, CaseIterable {
     /// What this device holds under a hashtag, opened by pressing it (#124). One walk with
     /// `.person`, and for `.person`'s reason: it is a page of rows opened from a row.
     case tag
+    /// A list of people a source keeps (#311). One walk with `.person`: a row of it opens a
+    /// person, and it is opened from one.
+    case people
     /// The conversation opened over whatever it was opened from: the stream, a search's results,
     /// another conversation, or somebody's page. One walk with `.person` — see there.
     case thread

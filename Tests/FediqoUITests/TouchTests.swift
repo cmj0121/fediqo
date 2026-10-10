@@ -212,6 +212,11 @@ struct TouchTests {
             case .tag:
                 #expect(!searchable)
                 #expect(!reloadable)
+            // A list of people is asked again only where its source is one to ask (#311): with
+            // nobody said to be, as here, neither mark has anything to do.
+            case .people:
+                #expect(!searchable)
+                #expect(!reloadable)
             // A page read out of a post is somebody else's page: the search is under it, and it
             // holds nothing of this device's to ask for (#169).
             case .link:

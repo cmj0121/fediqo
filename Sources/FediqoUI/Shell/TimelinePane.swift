@@ -71,6 +71,9 @@ struct TimelinePane: View {
     /// walk. Nothing where the pane is drawn with none: every page is then what this device
     /// holds, and nobody is asked.
     var people: ShellPersonPages?
+    /// A row of a list of people opened (#311), answered by the root: it lights the row and
+    /// takes the step together, so leaving that person's page gives the row back.
+    var onOpenListed: (Person) -> Void = { _ in }
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
     /// again. Per host and not one counter for the pane: see `waitForCatalogues`.
     @State private var settledHosts: Set<String> = []
@@ -203,6 +206,27 @@ struct TimelinePane: View {
                     onBack: onBack
                 )
                 .id(HeldUnderTag.folded(tag))
+            case .people(let list):
+                // A list whose source is no longer one that says who people are — removed since
+                // — draws the stream instead, as a conversation no longer held does.
+                if let people, let said = people.lists.said(of: list, in: session) {
+                    PeoplePane(
+                        said: said,
+                        selectedID: $selectedID,
+                        onOpen: onOpenListed,
+                        onAskAgain: { Task { await people.lists.again(list, in: session) } },
+                        onReadOn: { Task { await people.lists.readOn(list, in: session) } },
+                        jumpToTop: jumpToTop,
+                        onBack: onBack
+                    )
+                    // One pane per list, so a second list opened from inside one draws afresh.
+                    .id(list.id)
+                    // **The ask is the page opening**, once a list a run: its first stretch, of
+                    // the source that keeps it and nobody else. Nothing reads on unpressed.
+                    .task(id: ShellPeoplePages.opening(list, in: session)) { await people.lists.opened(list, in: session) }
+                } else {
+                    underneath
+                }
             case .thread(let id):
                 // A root this device no longer holds draws the stream instead, which is the same
                 // answer the pane gave when it looked the root up among the timeline's own rows.
@@ -490,7 +514,7 @@ struct TimelinePane: View {
     /// opened over it, or a page read out of a post, which is somebody's own.
     static func page(_ standing: ShellStep?) -> TimelineSwipe.Page {
         switch standing {
-        case .person, .tag, .thread: .opened
+        case .person, .tag, .people, .thread: .opened
         case .link: .link
         case nil: .timeline
         }
@@ -502,6 +526,7 @@ struct TimelinePane: View {
         case .thread(let id): "thread:" + id
         case .person(let person): "person:" + person.id
         case .tag(let tag): "tag:" + String(describing: tag)
+        case .people(let list): "people:" + list.id
         case .link, nil: nil
         }
     }

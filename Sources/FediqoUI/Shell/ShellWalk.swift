@@ -33,6 +33,10 @@ enum ShellStep: Hashable, Sendable {
     /// The tag as the author wrote it where it was pressed; which posts carry it is asked without
     /// regard to case, as the servers this app reads treat a tag.
     case tag(PostTag)
+    /// A list of people a source keeps (#311) — whom somebody follows, who follows them — opened
+    /// from where the source counts them. A row of it opens that person, and leaving their page
+    /// gives the row back: both are the walk's own.
+    case people(PeopleList)
 }
 
 /// How far the reader has walked from the stream, and what each step is owed when it is left.
@@ -80,6 +84,12 @@ struct ShellWalk: Hashable, Sendable {
     var openedTag: PostTag? {
         guard case .tag(let tag) = standing else { return nil }
         return tag
+    }
+
+    /// The list of people in front, where one is (#311).
+    var openedPeople: PeopleList? {
+        guard case .people(let list) = standing else { return nil }
+        return list
     }
 
     /// The page read out of a post that is in front, where one is (#169).

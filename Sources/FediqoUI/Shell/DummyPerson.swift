@@ -112,6 +112,16 @@ public struct DummyPerson: Identifiable, Hashable, Sendable {
         emojis = []
     }
 
+    /// Somebody a source listed (#311), met through that source: the page this opens is asked
+    /// of it by their handle as it sent it. Their name is the one made fit for a line.
+    init(_ person: Person) {
+        host = person.source.host
+        name = person.lineName
+        handle = person.handle
+        avatarURL = person.avatarURL
+        emojis = person.emojis
+    }
+
     /// Whether this person wrote that note.
     ///
     /// **The host first, and then the strongest name the note carries.** A handle is compared to a

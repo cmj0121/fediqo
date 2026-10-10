@@ -61,6 +61,7 @@ extension SourceWork.Purpose {
         case .nearbyMove: "dot.radiowaves.left.and.right"
         case .ownPosts: "person.text.rectangle"
         case .person: "person.crop.rectangle"
+        case .people: "person.2"
         }
     }
 }

@@ -90,6 +90,10 @@ final class SourceWork {
         /// Somebody a source knows and their posts, read for their page because the person
         /// opened it or read on there (#310). Nothing read under it is held.
         case person
+        /// A list of people a source keeps — whom somebody follows, who follows them — read a
+        /// stretch at a time because the person opened it or read on there (#311). Nothing
+        /// read under it is held.
+        case people
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -102,7 +106,7 @@ final class SourceWork {
         /// Everything else reaches wherever a post, a page or a directory points.
         var isOfTheSource: Bool {
             switch self {
-            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person: true
+            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
                  .nearbyMove:

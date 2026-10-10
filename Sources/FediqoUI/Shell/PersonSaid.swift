@@ -320,14 +320,27 @@ struct PersonSaidBlock: View {
 /// what the source gives, or a stretch that did not come — the notices page's foot, for a list
 /// that reads on only when pressed.
 struct PersonFootRow: View {
-    let foot: PersonSaid.Foot
-    let source: String
+    let symbol: String
+    let words: String
+    /// Whether the foot is a press: it reads on, or asks again for a stretch that did not come.
+    let presses: Bool
     let onPress: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
+    init(foot: PersonSaid.Foot, source: String, onPress: @escaping () -> Void) {
+        self.init(symbol: foot.symbol, words: foot.words(source), presses: foot.presses, onPress: onPress)
+    }
+
+    /// The same foot under a list that is not of posts: what it says is that list's own.
+    init(symbol: String, words: String, presses: Bool, onPress: @escaping () -> Void) {
+        self.symbol = symbol
+        self.words = words
+        self.presses = presses
+        self.onPress = onPress
+    }
+
     var body: some View {
-        let words = foot.words(source)
-        if foot.presses {
+        if presses {
             Button(action: onPress) { label(words) }
                 .buttonStyle(.plain)
                 .accessibilityElement(children: .ignore)
@@ -342,14 +355,14 @@ struct PersonFootRow: View {
 
     private func label(_ words: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-            Image(systemName: foot.symbol)
+            Image(systemName: symbol)
                 .accessibilityHidden(true)
             Text(words)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .shellFont(.meta)
-        .foregroundStyle(foot.presses ? ShellChrome.inkDim(colorScheme) : ShellChrome.inkFaint(colorScheme))
+        .foregroundStyle(presses ? ShellChrome.inkDim(colorScheme) : ShellChrome.inkFaint(colorScheme))
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.step)
         .contentShape(Rectangle())
