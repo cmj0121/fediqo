@@ -154,13 +154,14 @@ public enum ProtectedSignals {
     @MainActor
     public static func protected(store: URL) -> ProtectedData {
         if let made = made[store] { return made }
-        let told = OSAllocatedUnfairLock(initialState: Told())
+        // What the application says of itself now, **read here, on the main actor**, and only
+        // then put where anything may read it: asked from inside the lock it would be asked
+        // from a closure that is no actor's.
+        var first = Told()
         var watched: [(NotificationCenter, Notification.Name, @Sendable (inout Told) -> Void)] = []
         #if os(macOS)
-        told.withLock {
-            $0.available = NSApp?.isProtectedDataAvailable ?? true
-            $0.active = NSApp?.isActive ?? false
-        }
+        first.available = NSApp?.isProtectedDataAvailable ?? true
+        first.active = NSApp?.isActive ?? false
         watched = [
             (.default, NSNotification.Name.NSApplicationProtectedDataDidBecomeAvailable, { $0.available = true }),
             (.default, NSNotification.Name.NSApplicationProtectedDataWillBecomeUnavailable, { $0.available = false }),
@@ -168,10 +169,8 @@ public enum ProtectedSignals {
             (.default, NSApplication.didResignActiveNotification, { $0.active = false }),
         ]
         #elseif os(iOS)
-        told.withLock {
-            $0.available = UIApplication.shared.isProtectedDataAvailable
-            $0.active = UIApplication.shared.applicationState == .active
-        }
+        first.available = UIApplication.shared.isProtectedDataAvailable
+        first.active = UIApplication.shared.applicationState == .active
         watched = [
             (.default, UIApplication.protectedDataDidBecomeAvailableNotification, { $0.available = true }),
             (.default, UIApplication.protectedDataWillBecomeUnavailableNotification, { $0.available = false }),
@@ -179,6 +178,7 @@ public enum ProtectedSignals {
             (.default, UIApplication.willResignActiveNotification, { $0.active = false }),
         ]
         #endif
+        let told = OSAllocatedUnfairLock(initialState: first)
         // For the life of the process: there is one of these for a store, and it is never let go.
         for (center, name, change) in watched {
             _ = center.addObserver(forName: name, object: nil, queue: nil) { _ in told.withLock(change) }
