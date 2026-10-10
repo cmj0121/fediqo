@@ -30,8 +30,9 @@ public struct FediqoRootView: View {
     @State private var noticeSelectedID: String?
     @State private var noticeMark = ShellReadingMark()
     @State private var noticeJump = 0
-    /// The walk a notice began, until its last step is left. See `NoticeErrand`.
-    @State private var noticeErrand: NoticeErrand?
+    /// The walk a press on another place began — a notice's line (#323), the reader's own page
+    /// from Account (#310) — until its last step is left. See `PlaceErrand`.
+    @State private var errand: PlaceErrand?
     /// The line whose post could not be opened: older than this device keeps.
     @State private var noticeTooOld: String?
     /// What `/` opened (#32). Its results stand in for the stream while it is open.
@@ -305,7 +306,7 @@ public struct FediqoRootView: View {
                 guard accepted != old else { return }
                 // A walk a notice began is come back from by leaving it, and not by leaving
                 // the timeline some other way.
-                if accepted != .timeline { noticeErrand = nil }
+                if accepted != .timeline { errand = nil }
                 // Nothing is asked for notices while their page is closed.
                 if old == .notices { session.noticeList.stop() }
                 if search.closes(leavingFor: accepted) { closeSearch() }
@@ -411,7 +412,7 @@ public struct FediqoRootView: View {
             // device is the preview sitting on screen while the session says boards. `JoinSheet`
             // reads `session.stage` inside its own body and switches there, which is a redraw.
             .sheet(isPresented: stagePresented) {
-                JoinSheet(session: session)
+                JoinSheet(session: session, onOwnPage: ownPageOpener)
             }
             // The timeline editor (#27), on the root beside the other presenters for their reason.
             // Dismissed by any route it is Cancel: the draft is dropped (Decision 21).
@@ -1603,20 +1604,23 @@ public struct FediqoRootView: View {
     private func setOutFromNotices(to step: ShellStep, for notice: Notice, lighting row: String?) -> Bool {
         guard availability.allows(.timeline) else { return false }
         noticeTooOld = nil
-        noticeErrand = NoticeErrand.setOut(to: step, for: notice.id, on: &walk, lamp: selectedItemID)
+        errand = PlaceErrand.setOut(to: step, from: .notices, line: notice.id, on: &walk, lamp: selectedItemID)
         if let row { selectedItemID = row }
         place = .timeline
         return true
     }
 
-    /// Leaving the last step a notice's walk took puts the reader back on Notices, on the line
-    /// they pressed: lit with a keyboard or a pointer, marked and at the top under a finger.
-    private func returnToNotices() {
-        guard let errand = noticeErrand, errand.isOver(walk) else { return }
-        noticeErrand = nil
-        noticeMark.keep(errand.notice)
-        if !ShellHands.shared.touch { noticeSelectedID = errand.notice }
-        place = .notices
+    /// Leaving the last step such a walk took puts the reader back on the place they pressed —
+    /// and on Notices, on the line they pressed: lit with a keyboard or a pointer, marked and at
+    /// the top under a finger.
+    private func returnFromErrand() {
+        guard let left = errand, left.isOver(walk) else { return }
+        errand = nil
+        if left.from == .notices, let line = left.line {
+            noticeMark.keep(line)
+            if !ShellHands.shared.touch { noticeSelectedID = line }
+        }
+        place = left.from
     }
 
     // MARK: - A hashtag — #124
@@ -1720,6 +1724,31 @@ public struct FediqoRootView: View {
         return walk.walk(to: .person(person), from: selectedItemID)
     }
 
+    /// "Your page there" on Account, and "Signed in as …" on a source's page: the signed-in
+    /// reader's own page at that source — anybody's page, opened for their own account (#310).
+    ///
+    /// **Set out as a notice's line sets out** where the press was made on another place: the
+    /// page is drawn in the timeline place, the walk takes the step keeping the timeline's own
+    /// lamp to hand back, and leaving the step comes back to the place pressed. On the timeline
+    /// place it is a face pressed, and nothing more.
+    private func openOwnPage(_ me: DummyPerson) {
+        guard place != .timeline else {
+            _ = openPerson(me)
+            return
+        }
+        guard availability.allows(.timeline) else { return }
+        errand = PlaceErrand.setOut(to: .person(me), from: place, on: &walk, lamp: selectedItemID)
+        place = .timeline
+    }
+
+    /// What the entries to the reader's own page press, or nothing where the timeline place —
+    /// the one place a page is drawn — cannot be entered: **the entries are then not drawn**, so
+    /// no press takes a sheet down and then opens nothing.
+    private var ownPageOpener: ((DummyPerson) -> Void)? {
+        guard availability.allows(.timeline) else { return nil }
+        return { me in openOwnPage(me) }
+    }
+
     /// `p` — whoever wrote the post the lamp is on (#140). The face's own press, from the keyboard.
     ///
     /// **Through `openPerson` and not beside it**, so the key and the face are one act with one
@@ -1761,7 +1790,7 @@ public struct FediqoRootView: View {
         // A tag's ask goes with its page (#124).
         if case .tag = left.step { session.reload.endTag() }
         selectedItemID = left.lamp
-        returnToNotices()
+        returnFromErrand()
         return true
     }
 
@@ -1782,7 +1811,7 @@ public struct FediqoRootView: View {
     /// shows it under the new timeline's rules, and goes out where it does not.
     private func timelineSwitched(from left: TimelineQuery?, to arrived: TimelineQuery?) {
         // The list a notice's walk stood on is replaced: there is no step left to come back by.
-        noticeErrand = nil
+        errand = nil
         let hadLink = walk.openedLink != nil
         guard let tag = Self.timelineSwitched(
             on: &walk, places: &session.timelinePlaces, from: left, to: arrived,
@@ -1822,7 +1851,7 @@ public struct FediqoRootView: View {
         if walk.openedLink != nil { linkReader.close() }
         session.reload.endTag()
         walk.clear()
-        noticeErrand = nil
+        errand = nil
     }
 
     /// Hands the link reader the question of where a page opens (#169). On a Mac it is one more
@@ -2077,7 +2106,7 @@ public struct FediqoRootView: View {
                 tooOld: noticeTooOld,
                 jumpToTop: noticeJump
             )
-        case .account: AccountPane(session: session)
+        case .account: AccountPane(session: session, onOwnPage: ownPageOpener)
         case .usage: UsagePane()
         case .preferences: PreferencesPane()
         }

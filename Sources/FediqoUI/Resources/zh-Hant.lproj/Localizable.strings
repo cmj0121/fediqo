@@ -1537,3 +1537,7 @@
 "person.again.failed" = "無法再向 %@ 詢問一次。它先前說的仍然都在。";
 "person.again.unheardOf" = "%@ 已經不認得這個人了。它先前說的仍然都在。";
 "person.unheld" = "這則貼文無法留在這台裝置上，所以什麼都沒做。";
+"person.line.moved.open" = "開啟他們的新頁面";
+"person.own.there" = "你在 %@ 的頁面";
+"person.own.signedIn" = "已用 %@ 登入。";
+"person.own.open" = "你在那裡的頁面";

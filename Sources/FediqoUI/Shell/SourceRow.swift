@@ -523,6 +523,17 @@ extension SourceRow {
         var remove: () -> Void = {}
         /// The row's own press: it opens what this server says about itself.
         var open: () -> Void = {}
+        /// Opens the signed-in reader's own page at this source (#310). Nothing where there is
+        /// no such page to open — no sign-in, a source that does not say who people are, or
+        /// one that has not yet said who the reader is there — and then no item is drawn.
+        var ownPage: (() -> Void)?
+    }
+
+    /// The glyph and the name of the item that opens the reader's own page at a source.
+    static let ownPageSymbol = "person.crop.rectangle"
+
+    static func ownPageLabel(_ host: String, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("person.own.there", language: language), host)
     }
 
     /// The row's `…`, as a value.
@@ -531,6 +542,9 @@ extension SourceRow {
     /// — the lock where one is drawn, and the key — the only place a finger reads either. Then
     /// Boards and Lists, dim with their reason in their own title where the source has none or
     /// cannot just now; then, under the divider, Clear and Remove (`inMore`'s order).
+    ///
+    /// **"Your page there" stands first, and only where there is such a page** (`Presses.ownPage`):
+    /// an item of this menu that a kind of source has not got is absent, never dim.
     ///
     /// **Clear and Remove are built here and nowhere else, and only as `danger`**: the menu puts
     /// each one's question, and only its yes reaches the act. The questions are the session's
@@ -546,9 +560,10 @@ extension SourceRow {
             Self.mark(control, source: row.source, signedIn: row.signedIn, actsLive: actsLive)
         }
         let drawn = [permission(row, actsLive: actsLive)].compactMap { $0 } + onRow.map(mark)
+        let own = presses.ownPage.map { ShellMoreItem.plain(ownPageSymbol, ownPageLabel(row.source.host), act: $0) }
         return ShellMore(
             head: head(row, said: said) + ShellMore.reasons(of: drawn),
-            items: [
+            items: [own].compactMap { $0 } + [
                 .plain(mark(.boards), act: presses.changeBoards),
                 .plain(mark(.lists), act: presses.chooseLists),
                 .danger(mark(.clear), asks: clearAsks(), act: presses.clear),

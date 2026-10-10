@@ -396,6 +396,10 @@ enum JoinStage: Identifiable, Equatable {
 /// window does not resize as the reader moves between stages.
 struct JoinSheet: View {
     @Bindable var session: ShellSession
+    /// Opens the signed-in reader's own page at the source this sheet is about (#310), answered
+    /// by the root once the sheet has come down. Nothing where nobody answers, and then the
+    /// line that offers it is not drawn.
+    var onOwnPage: ((DummyPerson) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
@@ -589,7 +593,10 @@ struct JoinSheet: View {
             // comment records: the list squeezed to a sliver at 320pt with nothing to scroll.
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if case .joined(let source) = origin { standing(source.host) }
+                    if case .joined(let source) = origin {
+                        standing(source.host)
+                        if let me = ownPage(at: source.host) { OwnPageLine(me: me, press: { openOwnPage(me) }) }
+                    }
                     SourcePreviewView(preview: preview, surface: .sheet, origin: origin)
                 }
             }
@@ -600,6 +607,18 @@ struct JoinSheet: View {
         case nil:
             EmptyView()
         }
+    }
+
+    /// Whose page "Signed in as …" opens on a joined source's page, or nobody: no sign-in there,
+    /// a source that does not say who people are, or nobody to answer the press.
+    func ownPage(at host: String) -> DummyPerson? {
+        onOwnPage == nil ? nil : ShellPersonPages.own(at: host, in: session)
+    }
+
+    /// The line's press: the sheet comes down, as its Close takes it down, and the page opens.
+    func openOwnPage(_ me: DummyPerson) {
+        session.dismissStage()
+        onOwnPage?(me)
     }
 
     /// What the source's row had to cut to its one line, whole (#244): the errand running, a
@@ -1068,4 +1087,32 @@ struct JoinSheet: View {
         return locale.localizedString(forLanguageCode: trimmed) ?? trimmed
     }
 
+}
+
+/// Who the reader is signed in as at a source, on that source's page, and the press that opens
+/// their own page there (#310). Drawn only where there is such a page.
+///
+/// **Their handle is a source's word set in a sentence of ours**, so it is made fit for a line
+/// where the sentence is made.
+struct OwnPageLine: View {
+    let me: DummyPerson
+    let press: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    static func words(_ me: DummyPerson, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("person.own.signedIn", language: language), LineText.oneLine(me.handle ?? me.name))
+    }
+
+    static func pressWords(language: DummyLanguage? = nil) -> String {
+        L10n.t("person.own.open", language: language)
+    }
+
+    var body: some View {
+        WordsThenPress(
+            words: Text(Self.words(me))
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme)),
+            press: ShellLinkButton(Self.pressWords(), symbol: SourceRow.ownPageSymbol, action: press).fixedSize()
+        )
+    }
 }

@@ -129,6 +129,22 @@ final class ShellPersonPages {
         return source
     }
 
+    /// The signed-in reader's own page at `host` (#310) — the page of anybody, opened for
+    /// their own account — or nothing: the source there does not say who people are, nobody is
+    /// signed in to it, or it has not yet said who the reader is there. **By the handle the
+    /// source gave them**, so it is the very page a row of their own opens.
+    ///
+    /// **A sign-in that only reads has no such page, and no entry to one.** Who the reader is at
+    /// a source is learnt only for a sign-in that may write (`MastodonSessions.signedIn`), so a
+    /// reading one has no handle here to open a page by. Offering it means learning who every
+    /// sign-in is, which is the sign-in's own unit to do.
+    static func own(at host: String, in session: ShellSession) -> DummyPerson? {
+        guard session.mastodon.signedInHosts.contains(host), let handle = session.mastodon.handles[host],
+              let me = DummyPerson(handle: handle, host: host), source(of: me, in: session) != nil
+        else { return nil }
+        return me
+    }
+
     /// Who an ask of `host` is made as now.
     static func askedAs(at host: String, in session: ShellSession) -> AskedAs {
         session.mastodon.signedInHosts.contains(host) ? .reader(session.mastodon.handles[host]) : .nobody

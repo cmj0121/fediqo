@@ -584,6 +584,144 @@ struct PersonSaidTests {
         return url.appending(path: "Sources/FediqoUI/Shell")
     }
 
+    // MARK: - Your own page, and where somebody moved to
+
+    private static let who = "/api/v1/accounts/verify_credentials"
+
+    /// A session signed in to the source as `@me@m.example`, once the source has said so.
+    private func signedIn(_ routes: [String: PageServer.Answer] = [:]) async throws -> (ShellSession, PageServer) {
+        let (session, server, _) = await session(Self.served([Self.who: PageServer.Answer(body: #"{"id":"1","acct":"me"}"#)]).merging(routes) { $1 })
+        try session.mastodon.tokens.save(MastodonToken(host: Self.host, accessToken: "tok", clientID: "c", clientSecret: "s"))
+        session.mastodon.refresh()
+        return (session, server)
+    }
+
+    @Test("Your own page at a source is anybody's page opened for your own account: there only where you are signed in, the source says who people are and has said who you are — by the handle it gave, so it is the page a row of your own opens — and it is asked as you")
+    func yourOwnPage() async throws {
+        let (session, server) = try await signedIn(["/api/v1/accounts/lookup?acct=me": PageServer.Answer(body: #"{"id":"1","acct":"me","display_name":"Me"}"#), "/api/v1/accounts/1/statuses": Self.stretch([])])
+        #expect(ShellPersonPages.own(at: Self.host, in: session) == nil, "signed in, and the source has not said who as")
+        await session.mastodon.learnWho(host: Self.host)
+        let me = try #require(ShellPersonPages.own(at: Self.host, in: session))
+        #expect(me.handle == "@me@m.example" && me.name == "me" && me.host == Self.host)
+        #expect(me.id == Self.someone("Me", "@me@m.example", at: Self.source).id, "the page a row of theirs opens")
+        #expect(ShellPersonPages.own(at: "forum.example", in: session) == nil && ShellPersonPages.own(at: "gone.example", in: session) == nil)
+
+        let pages = ShellPersonPages()
+        await pages.opened(me, in: session)
+        #expect(pages.said(of: me, in: session)?.person?.lineName == "Me")
+        #expect(await server.asked.suffix(2) == ["/api/v1/accounts/lookup?acct=me", "/api/v1/accounts/1/statuses"])
+        #expect(await server.bearers.suffix(2) == ["Bearer tok", "Bearer tok"])
+
+        // Signed in to a source that does not say who people are, and named there: still no page.
+        try session.mastodon.tokens.save(MastodonToken(host: "forum.example", accessToken: "f", clientID: "c", clientSecret: "s"))
+        session.mastodon.refresh()
+        await session.mastodon.learnWho(host: "forum.example")
+        #expect(session.mastodon.handles["forum.example"] != nil && ShellPersonPages.own(at: "forum.example", in: session) == nil)
+
+        // Signed out: there is no such page.
+        let held = try #require(try session.mastodon.tokens.token(host: Self.host))
+        _ = try session.mastodon.tokens.forget(held)
+        session.mastodon.refresh()
+        #expect(ShellPersonPages.own(at: Self.host, in: session) == nil)
+        // A handle that is nothing names nobody; a stranger's is made fit for a line as a name.
+        #expect(DummyPerson(handle: "", host: Self.host) == nil)
+        #expect(DummyPerson(handle: "@a\u{202E}b\nc@m.example", host: Self.host)?.name == "ab c")
+    }
+
+    @Test("The entries that open your own page are drawn only where there is one and somebody answers the press: first in the source row's menu, and as a line on the source's page whose press takes the sheet down — and a source with no such page keeps the menu it had")
+    func theEntriesToYourOwnPage() async throws {
+        let (session, _) = try await signedIn()
+        func row(_ host: String) throws -> SourceRow { try #require(session.rows.first { $0.id == host }) }
+        func names(_ row: SourceRow, _ presses: SourceRow.Presses) -> [String] {
+            SourceRow.more(
+                row, actsLive: true, said: [], clearAsks: { ShellQuestion.clear(host: row.source.host, detailKey: "account.clear.detail") },
+                removeAsks: { ShellQuestion.remove(host: row.source.host, boards: 0) }, presses: presses
+            ).items.map(\.name)
+        }
+        var opened: [DummyPerson] = []
+        let answered = AccountPane(session: session, onOwnPage: { opened.append($0) })
+        let before = names(try row(Self.host), AccountPane(session: session).presses(try row(Self.host)))
+        #expect(before.count == 4)
+        // Signed in, and not yet told who as: nothing is offered.
+        #expect(answered.ownPage(try row(Self.host)) == nil && JoinSheet(session: session, onOwnPage: { _ in }).ownPage(at: Self.host) == nil)
+        #expect(names(try row(Self.host), answered.presses(try row(Self.host))) == before)
+
+        await session.mastodon.learnWho(host: Self.host)
+        let wired = answered.presses(try row(Self.host))
+        #expect(names(try row(Self.host), wired) == [SourceRow.ownPageLabel(Self.host)] + before)
+        #expect(SourceRow.ownPageLabel(Self.host, language: .english) == "Your page at m.example")
+        wired.ownPage?()
+        #expect(opened.map(\.handle) == ["@me@m.example"])
+        // Nobody to answer the press, or a source that does not say who people are: no entry.
+        #expect(AccountPane(session: session).ownPage(try row(Self.host)) == nil)
+        #expect(JoinSheet(session: session).ownPage(at: Self.host) == nil)
+        #expect(answered.ownPage(try row("forum.example")) == nil)
+        #expect(names(try row("forum.example"), answered.presses(try row("forum.example"))) == names(try row("forum.example"), SourceRow.Presses()))
+
+        // The source's page: who the reader is signed in as, and the press that leaves the sheet.
+        let sheet = JoinSheet(session: session, onOwnPage: { opened.append($0) })
+        let me = try #require(sheet.ownPage(at: Self.host))
+        #expect(OwnPageLine.words(me, language: .english) == "Signed in as @me@m.example.")
+        #expect(OwnPageLine.pressWords(language: .english) == "Your page there" && sheet.ownPage(at: "forum.example") == nil)
+        session.openSource(host: Self.host)
+        #expect(session.stage != nil)
+        sheet.openOwnPage(me)
+        #expect(session.stage == nil && opened.count == 2)
+    }
+
+    @Test("A page opened from another place is a walk that remembers the place: leaving its last step is over, a step further is not, and from the timeline place — or onto the step already in front — there is nothing to come back by")
+    func theWalkFromAnotherPlace() throws {
+        let me = try #require(DummyPerson(handle: "@me@m.example", host: Self.host))
+        var walk = ShellWalk()
+        _ = walk.walk(to: .thread("under"), from: nil)
+        let errand = try #require(PlaceErrand.setOut(to: .person(me), from: .account, on: &walk, lamp: "lit"))
+        #expect(errand == PlaceErrand(from: .account, line: nil, base: 1) && walk.openedPerson == me && !errand.isOver(walk))
+        _ = walk.walk(to: .thread("theirs"), from: "row")
+        let inner = walk.back()
+        #expect(inner?.lamp == "row" && !errand.isOver(walk))
+        let outer = walk.back()
+        #expect(outer?.lamp == "lit" && errand.isOver(walk) && walk.openedThread == "under", "what was under it is untouched")
+
+        let fromTimeline = PlaceErrand.setOut(to: .person(me), from: .timeline, on: &walk, lamp: nil)
+        #expect(fromTimeline == nil && walk.depth == 1)
+        _ = walk.walk(to: .person(me), from: nil)
+        let ontoItself = PlaceErrand.setOut(to: .person(me), from: .account, on: &walk, lamp: nil)
+        #expect(ontoItself == nil && walk.depth == 2)
+    }
+
+    @Test("Where the source says somebody moved, the line that says so carries where to — and that account's page is asked of the same source by the handle it gave, which may be that it has not heard of them")
+    func whereTheyMovedOpens() async throws {
+        let moved = try person(#","moved":{"id":"7","acct":"ada@new.example"}"#)
+        let line = try #require(PersonSaid.lines(of: moved, source: Self.host).first { $0.moved != nil })
+        #expect(line.moved == Person.Moved(accountID: "7", handle: "@ada@new.example") && line.words == String(format: L10n.t("person.line.moved"), "@ada@new.example"))
+        #expect(PersonSaid.lines(of: try person(""), source: Self.host).allSatisfy { $0.moved == nil })
+        #expect(PersonSaid.openMoved(language: .english) == "Open their new page")
+
+        let there = try #require(DummyPerson(handle: "@ada@new.example", host: Self.host))
+        #expect(there.name == "ada" && there.id != Self.ada.id)
+        let lookup = "/api/v1/accounts/lookup?acct=ada@new.example"
+        let (session, server, _) = await session([
+            lookup: PageServer.Answer(body: #"{"id":"7","acct":"ada@new.example","display_name":"Ada anew"}"#), "/api/v1/accounts/7/statuses": Self.stretch([]),
+        ])
+        let pages = ShellPersonPages()
+        await pages.opened(there, in: session)
+        #expect(await server.asked == [lookup, "/api/v1/accounts/7/statuses"], "the same source, and nobody else")
+        let said = try #require(pages.said(of: there, in: session))
+        #expect(said.person?.lineName == "Ada anew" && said.person?.home == "new.example" && said.source == Self.host)
+
+        await server.answer(lookup, PageServer.Answer(body: "{}", status: 404))
+        let unheard = ShellPersonPages()
+        await unheard.opened(there, in: session)
+        #expect(unheard.said(of: there, in: session)?.reading == .unheardOf)
+
+        // The line with its press is laid out no shorter than the line alone, and at a phone's width too.
+        for width in [CGFloat(720), 320] {
+            let alone = height(PersonSaidBlock(person: moved, source: Self.host), width: width, layout: .narrow, scheme: .light)
+            let pressed = height(PersonSaidBlock(person: moved, source: Self.host, onOpenMoved: { _ in }), width: width, layout: .narrow, scheme: .dark)
+            #expect(alone > 0 && pressed >= alone, "\(pressed) against \(alone) at \(width)")
+        }
+    }
+
     // MARK: - What the page says
 
     private func person(_ more: String) throws -> Person {
@@ -686,6 +824,7 @@ struct PersonSaidTests {
             "person.count.posts", "person.count.following", "person.count.followers", "person.posts.none",
             "person.posts.noneOf", "person.field.checked", "person.foot.more", "person.foot.reading", "person.foot.end",
             "person.foot.failed", "person.foot.stopped", "person.again.failed", "person.again.unheardOf", "person.unheld",
+            "person.line.moved.open", "person.own.there", "person.own.signedIn", "person.own.open",
         ]
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()

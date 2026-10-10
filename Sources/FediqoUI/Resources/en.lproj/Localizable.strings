@@ -1581,3 +1581,7 @@
 "person.again.failed" = "Could not ask %@ again. What it said before is still here.";
 "person.again.unheardOf" = "%@ no longer knows them. What it said before is still here.";
 "person.unheld" = "This post could not be kept on this device, so nothing was done with it.";
+"person.line.moved.open" = "Open their new page";
+"person.own.there" = "Your page at %@";
+"person.own.signedIn" = "Signed in as %@.";
+"person.own.open" = "Your page there";

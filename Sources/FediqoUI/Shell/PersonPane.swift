@@ -63,6 +63,9 @@ struct PersonPane: View {
     var onAskAgain: () -> Void = {}
     /// The foot's press: the stretch of their posts older than what is drawn.
     var onReadOn: () -> Void = {}
+    /// The press beside "They moved to …": the page of the account the source says they went
+    /// to, asked of that same source.
+    var onOpenMoved: ((Person.Moved) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
@@ -244,7 +247,7 @@ struct PersonPane: View {
                         ShellRule()
                     }
                     if let subject = said.person {
-                        PersonSaidBlock(person: subject, source: said.source)
+                        PersonSaidBlock(person: subject, source: said.source, onOpenMoved: onOpenMoved)
                         ShellRule()
                     }
                     if let sentence = Self.emptyLine(said, held: items.count) {

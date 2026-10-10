@@ -159,7 +159,12 @@ struct TimelinePane: View {
                     // anybody else, and then this is the page it always was.
                     said: people?.said(of: person, in: session),
                     onAskAgain: { Task { await people?.again(person, in: session) } },
-                    onReadOn: { Task { await people?.readOn(person, in: session) } }
+                    onReadOn: { Task { await people?.readOn(person, in: session) } },
+                    // Where they moved to is somebody this same source names: their page is
+                    // asked of it by that name, and "not heard of" is a state of that page.
+                    onOpenMoved: { moved in
+                        if let there = DummyPerson(handle: moved.handle, host: person.host) { onOpenPerson(there) }
+                    }
                 )
                 // One pane per person, so opening a second face from inside one draws afresh.
                 .id(person.id)

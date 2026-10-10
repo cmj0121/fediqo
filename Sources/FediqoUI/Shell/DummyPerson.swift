@@ -94,6 +94,24 @@ public struct DummyPerson: Identifiable, Hashable, Sendable {
         emojis = person.emojis
     }
 
+    /// Somebody a source named by a handle and nothing else (#310): the signed-in reader at a
+    /// source, or the account the source says somebody moved to. Nothing where the handle is
+    /// empty.
+    ///
+    /// **Their name is the part of the handle before the server's**, made fit for a line: it is
+    /// what the heading says until the source has said who they are, and what the source says
+    /// replaces it. The handle is kept as sent — it is what the page is asked by, and what makes
+    /// this the same page a row of theirs opens.
+    init?(handle: String, host: String) {
+        guard !handle.isEmpty else { return nil }
+        let called = handle.split(separator: "@").first.map(String.init) ?? handle
+        self.host = host
+        name = LineText.oneLine(called)
+        self.handle = handle
+        avatarURL = nil
+        emojis = []
+    }
+
     /// Whether this person wrote that note.
     ///
     /// **The host first, and then the strongest name the note carries.** A handle is compared to a

@@ -122,7 +122,14 @@ struct PersonSaid: Equatable {
     struct Line: Equatable, Identifiable {
         let symbol: String
         let words: String
+        /// Where they went, on the line that says they moved: what its press opens.
+        var moved: Person.Moved?
         var id: String { symbol }
+    }
+
+    /// What the press beside "They moved to …" says.
+    static func openMoved(language: DummyLanguage? = nil) -> String {
+        L10n.t("person.line.moved.open", language: language)
     }
 
     /// The lines an account earns, in the order they are drawn: gone before moved before the
@@ -133,7 +140,10 @@ struct PersonSaid: Equatable {
             lines.append(Line(symbol: symbol, words: String(format: L10n.t(key, language: language), arguments: arguments)))
         }
         if person.suspended { say("person.slash", "person.line.suspended", source) }
-        if let moved = person.moved { say("arrow.turn.up.right", "person.line.moved", moved.lineHandle) }
+        if let moved = person.moved {
+            say("arrow.turn.up.right", "person.line.moved", moved.lineHandle)
+            lines[lines.count - 1].moved = moved
+        }
         if person.limited { say("eye.slash", "person.line.limited", source) }
         switch person.sort {
         case .automated: say("gearshape.2", "person.line.automated")
@@ -189,6 +199,9 @@ struct PersonSaid: Equatable {
 struct PersonSaidBlock: View {
     let person: Person
     let source: String
+    /// The press beside "They moved to …": that account's page, through this same source.
+    /// Nothing where the block is drawn with nobody to answer, and then the line is words alone.
+    var onOpenMoved: ((Person.Moved) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     @ShellMetric(relativeTo: .body) private var bandHeight: CGFloat = 96
@@ -200,13 +213,29 @@ struct PersonSaidBlock: View {
             if !lines.isEmpty {
                 VStack(alignment: .leading, spacing: ShellSpace.tight) {
                     ForEach(lines) { line in
-                        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+                        let words = HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
                             Image(systemName: line.symbol).accessibilityHidden(true)
                             Text(line.words).fixedSize(horizontal: false, vertical: true)
                         }
                         .shellFont(.meta)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .accessibilityElement(children: .combine)
+                        if let moved = line.moved, let onOpenMoved {
+                            // The words, and the press under them where one line has no room
+                            // for both: neither is cut.
+                            ViewThatFits(in: .horizontal) {
+                                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
+                                    words.fixedSize()
+                                    movedPress(moved, onOpenMoved)
+                                }
+                                VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                                    words
+                                    movedPress(moved, onOpenMoved)
+                                }
+                            }
+                        } else {
+                            words
+                        }
                     }
                 }
             }
@@ -242,6 +271,10 @@ struct PersonSaidBlock: View {
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.step)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func movedPress(_ moved: Person.Moved, _ open: @escaping (Person.Moved) -> Void) -> some View {
+        ShellLinkButton(PersonSaid.openMoved()) { open(moved) }.fixedSize()
     }
 
     /// The fields they filled in: a label, and what stands under it.

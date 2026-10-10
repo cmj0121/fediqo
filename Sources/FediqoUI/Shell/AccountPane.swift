@@ -11,6 +11,10 @@ import SwiftUI
 /// list to be a tab of, and the page is the hero and the field alone.
 struct AccountPane: View {
     @Bindable var session: ShellSession
+    /// Opens the signed-in reader's own page at a source (#310), answered by the root: the page
+    /// is drawn in the timeline place, and leaving it comes back here. Nothing where this page
+    /// is drawn with nobody to answer, and then no row offers it.
+    var onOwnPage: ((DummyPerson) -> Void)?
     @FocusState private var searchFocused: Bool
     /// `JoinSheet`'s `headerFocused` doctrine applied to the page: without it a VoiceOver reader
     /// who pressed Return in the field is left with focus on a field while a screenful of new
@@ -646,8 +650,16 @@ struct AccountPane: View {
             chooseLists: { Task { await changeLists(row) } },
             clear: { Task { await clear(row) } },
             remove: { Task { await remove(row, keepingPosts: postsStay()) } },
-            open: { openSource(row) }
+            open: { openSource(row) },
+            ownPage: ownPage(row)
         )
+    }
+
+    /// What a row's "Your page there" does, or nothing where the reader has no page to open at
+    /// that source (`ShellPersonPages.own`) or nobody answers the press.
+    func ownPage(_ row: SourceRow) -> (() -> Void)? {
+        guard let onOwnPage, let me = ShellPersonPages.own(at: row.source.host, in: session) else { return nil }
+        return { onOwnPage(me) }
     }
 
     // MARK: - What every control on this page actually does
