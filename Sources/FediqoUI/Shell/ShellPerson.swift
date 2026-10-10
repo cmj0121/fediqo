@@ -32,6 +32,20 @@ import Observation
 // followers among them. So each page remembers who it was asked as, and is not there for
 // anybody else: a sign-in that ends, begins or changes asks afresh.
 //
+// **Told by the sign-in itself, and then by name.** A reader the source has not named — every
+// sign-in that only reads, and any in its first moment — is not told from another by a handle.
+// So at every press that reads a page (`opened`, `again`, `readOn`, `holding`) the sign-in held
+// now is looked at once, and where it is not the one the pages of that host were last read
+// through, every page of that host is let go and its ask called off before anything else is
+// done (`PageReaders`). The handle stays the second check, and the one a page is drawn by.
+//
+// **What that leaves, for the unit that owns the sign-in.** Drawing looks at no sign-in: a
+// Keychain read a frame is not paid. So a sign-in replaced by another unnamed one, while a page
+// stays where it can be drawn and nothing is pressed, is drawn that page until the next press
+// or the next time it opens — at most the frame before its pane's own opening asks. Closing
+// that needs a count kept where the sign-in code already notes that a host's reader may have
+// changed, bumped there and compared here in `standing`; these files do not own that code.
+//
 // **Only where the source says who people are** (`SourceOffers.people`), and only for somebody
 // with a handle: a forum's author is a name on a host, and is asked of nobody.
 //
@@ -39,6 +53,41 @@ import Observation
 // as it answers nobody, so an answer says nothing of the sign-in — and a refusal is a page that
 // failed, nothing more. Where the signed-in door itself confirmed a sign-out by its own check,
 // the session is told, as it is for any read.
+
+/// Whose sign-in the pages of each host were last read through, so a page given to one reader
+/// is never there for the next — whether or not the source has named either.
+///
+/// **A sign-in is told from another by its token, and the token is not kept**: what is held is
+/// a hash of it made for this run alone, in memory, compared and never written, logged or
+/// shown. Nobody's sign-in is its own mark, so signing in and signing out are both a change.
+@MainActor
+final class PageReaders {
+    /// A sign-in's mark: nothing for nobody.
+    private struct Seal: Equatable {
+        let print: Int?
+    }
+
+    private var seals: [String: Seal] = [:]
+    private var letGo: [(String) -> Void] = []
+
+    /// Whoever keeps pages says how the pages of one host are let go.
+    func whenChanged(_ drop: @escaping (String) -> Void) {
+        letGo.append(drop)
+    }
+
+    /// The one look a press makes at who is signed in to `host`: the sign-in held now — what
+    /// the press's door is then built with, so it is read once — and whether it is another
+    /// than the pages of that host were last read through. **Where it is, they are let go here,
+    /// before the press does anything else.**
+    func look(at host: String, in session: ShellSession) -> (held: MastodonToken?, changed: Bool) {
+        let held = session.mastodon.token(host: host)
+        let seal = Seal(print: held.map { $0.accessToken.hashValue })
+        let changed = seals[host].map { $0 != seal } ?? false
+        seals[host] = seal
+        if changed { for drop in letGo { drop(host) } }
+        return (held, changed)
+    }
+}
 
 /// Every person's page opened this run, by who they are.
 ///
@@ -49,7 +98,7 @@ import Observation
 final class ShellPersonPages {
     /// Who a page was asked as: nobody, or the reader signed in to that source — by the handle
     /// the source gave them, where it has said.
-    enum AskedAs: Equatable, Sendable {
+    enum AskedAs: Hashable, Sendable {
         case nobody
         case reader(String?)
 
@@ -68,6 +117,8 @@ final class ShellPersonPages {
 
     /// One page: what the source said, and how far its posts were read.
     private struct Page {
+        /// The host of the source asked: what its pages are let go by when its reader changes.
+        let host: String
         var askedAs: AskedAs
         var reading: PersonSaid.Reading = .asking
         /// What asking again came to, where the source had said who they are before: the
@@ -118,6 +169,35 @@ final class ShellPersonPages {
     @ObservationIgnored private var errands = 0
     /// How long one ask may take. A test shortens it.
     @ObservationIgnored var deadline: Duration = .seconds(30)
+    /// Whose sign-in each host's pages were last read through.
+    @ObservationIgnored private let readers = PageReaders()
+
+    init() {
+        readers.whenChanged { [weak self] host in self?.letGo(at: host) }
+    }
+
+    /// A page opening, as its pane's task is named: who they are **and who asks**, so a page
+    /// in front whose reader ends, begins or changes opens again by itself, and is asked.
+    struct Opening: Hashable {
+        let id: String
+        let askedAs: AskedAs
+    }
+
+    static func opening(_ who: DummyPerson, in session: ShellSession) -> Opening {
+        Opening(id: who.id, askedAs: askedAs(at: who.host, in: session))
+    }
+
+    /// Every page of `host` let go, and its ask called off: its reader is no longer who they
+    /// were given to. Whatever an ask already out brings, it brings to no page.
+    private func letGo(at host: String) {
+        for (id, page) in pages where page.host == host {
+            asks[id]?.cancel()
+            asks[id] = nil
+            pages[id] = nil
+            built[id] = nil
+            order.removeAll { $0 == id }
+        }
+    }
 
     // MARK: - What the page is handed
 
@@ -217,6 +297,7 @@ final class ShellPersonPages {
     /// an ask that came to nothing, or as somebody else, it is asked again.
     func opened(_ who: DummyPerson, in session: ShellSession) async {
         guard let source = Self.source(of: who, in: session) else { return }
+        let held = readers.look(at: source.host, in: session).held
         if let page = self.standing(of: who, at: source, in: session) {
             touch(who.id)
             named(who.id, as: Self.askedAs(at: source.host, in: session))
@@ -226,7 +307,7 @@ final class ShellPersonPages {
             }
             if page.settled { return }
         }
-        await begin(who, at: source, in: session)?.value
+        await begin(who, at: source, with: held, in: session)?.value
     }
 
     /// `r` and "Try again": who they are, and their newest stretch, asked again. What the page
@@ -234,19 +315,22 @@ final class ShellPersonPages {
     /// nothing**, as a second press of any reload asks nothing.
     func again(_ who: DummyPerson, in session: ShellSession) async {
         guard let source = Self.source(of: who, in: session) else { return }
+        let held = readers.look(at: source.host, in: session).held
         if self.standing(of: who, at: source, in: session)?.asking == true { return }
-        await begin(who, at: source, in: session)?.value
+        await begin(who, at: source, with: held, in: session)?.value
     }
 
     /// Starts the two asks of a page, and hands back the task they run in. Everything they
     /// need is taken here, before anything waits: the source, the handle, who asks, the door.
-    private func begin(_ who: DummyPerson, at source: Source, in session: ShellSession) -> Task<Void, Never>? {
+    private func begin(
+        _ who: DummyPerson, at source: Source, with held: MastodonToken?, in session: ShellSession
+    ) -> Task<Void, Never>? {
         guard let handle = who.handle else { return nil }
         let id = who.id
         let askedAs = Self.askedAs(at: source.host, in: session)
         if pages[id]?.askedAs.isTheSame(as: askedAs) != true {
             // Nobody's page yet, or somebody else's: what was said to them is not said to this one.
-            pages[id] = Page(askedAs: askedAs)
+            pages[id] = Page(host: source.host, askedAs: askedAs)
             built[id] = nil
         }
         named(id, as: askedAs)
@@ -257,7 +341,7 @@ final class ShellPersonPages {
         pages[id]?.asking = true
         // A reading-on still on the wire is this ask's to supersede: its answer will not land.
         pages[id]?.readingOn = false
-        let through = self.door(to: source, in: session)
+        let through = self.door(to: source, with: held, in: session)
         let task = Task {
             await self.ask(id, handle: handle, of: through, at: source, as: askedAs, errand: errand, in: session)
         }
@@ -315,8 +399,17 @@ final class ShellPersonPages {
     /// The foot's press: the stretch older than what the page holds. One at a time, none while
     /// the page is being asked again, and none where the source named no next or stopped
     /// handing its posts on.
+    ///
+    /// **Pressed by a reader the page was not given to, it reads nothing on**: the page is let
+    /// go, and asked afresh as them — begun here, and waited on by whoever opens it.
     func readOn(_ who: DummyPerson, in session: ShellSession) async {
-        guard let source = Self.source(of: who, in: session), let page = self.standing(of: who, at: source, in: session),
+        guard let source = Self.source(of: who, in: session) else { return }
+        let looked = readers.look(at: source.host, in: session)
+        if looked.changed {
+            _ = begin(who, at: source, with: looked.held, in: session)
+            return
+        }
+        guard let page = self.standing(of: who, at: source, in: session),
               !page.readingOn, !page.asking, !page.notPaging, case .said(let person) = page.reading
         else { return }
         // A stretch that did not come is asked again from where the page stands.
@@ -329,7 +422,7 @@ final class ShellPersonPages {
         pages[id]?.awaits = errand
         pages[id]?.readingOn = true
         pages[id]?.footFailed = false
-        let through = self.door(to: source, in: session)
+        let through = self.door(to: source, with: looked.held, in: session)
         do {
             let stretch = try await through.posts(of: person.accountID, source: source, after: next)
             guard pages[id]?.awaits == errand, let held = pages[id]?.read else { return }
@@ -353,7 +446,17 @@ final class ShellPersonPages {
     /// pressed a mark on it: held as a thread's posts are held, with the post it boosts where
     /// it is a boost. The row it now is — or nothing, **and then the person is told**: the
     /// store would not take it, which it will not for a post older than this device keeps.
+    ///
+    /// **Pressed by a reader the page was not given to, nothing is held**: the row was another
+    /// reader's. The page is let go and asked afresh, and the press does nothing more.
     func holding(_ rowID: String, of who: DummyPerson, in session: ShellSession) async -> DummyItem? {
+        if let source = Self.source(of: who, in: session) {
+            let looked = readers.look(at: source.host, in: session)
+            if looked.changed {
+                _ = begin(who, at: source, with: looked.held, in: session)
+                return nil
+            }
+        }
         if session.heldNote(rowID) == nil, let read = pages[who.id]?.read,
            let note = read.posts.first(where: { $0.key.rowID == rowID })
         {
@@ -391,9 +494,9 @@ final class ShellPersonPages {
 
     /// The door to `source`: as the person where they are signed in to it, and with no token
     /// — listed, bounded, and under the small body's ceiling — where they are not.
-    private func door(to source: Source, in session: ShellSession) -> MastodonPerson {
-        if let signedIn = session.mastodon.authorized(host: source.host, within: deadline, for: .person) {
-            return session.reach.person(signedIn)
+    private func door(to source: Source, with held: MastodonToken?, in session: ShellSession) -> MastodonPerson {
+        if let held {
+            return session.reach.person(session.mastodon.authorized(token: held, within: deadline, for: .person))
         }
         return session.reach.unsignedPerson(source.host, for: .person, within: deadline)
     }

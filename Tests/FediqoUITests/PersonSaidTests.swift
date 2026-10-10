@@ -13,7 +13,7 @@ import Testing
 /// arriving or being let go. But a wait for something that never comes — the code under test
 /// broken so that an ask is never made, or never answered — must fail the check and not park
 /// the run, so a held ask is let go, and a wait for an arrival given up, after `patience`.
-private actor PageServer: HTTPClient, HTTPSender {
+actor PageServer: HTTPClient, HTTPSender {
     struct Answer: Sendable {
         var body: String
         var link: String?
@@ -536,6 +536,109 @@ struct PersonSaidTests {
         #expect(await heard.next() == "boost 9 held:true")
     }
 
+    // MARK: - Told by the sign-in itself
+
+    /// Signs whoever is signed in out and `access` in, as a second account on one host is: the
+    /// source has named neither, so no handle tells them apart.
+    private func signIn(_ session: ShellSession, as access: String) throws {
+        if let held = try session.mastodon.tokens.token(host: Self.host) {
+            _ = try session.mastodon.tokens.forget(held)
+            session.mastodon.refresh()
+        }
+        try session.mastodon.tokens.save(MastodonToken(host: Self.host, accessToken: access, clientID: "c", clientSecret: "s"))
+        session.mastodon.refresh()
+    }
+
+    @Test("Two readers the source never named are two readers: the second sees nothing of the page the first was given, whichever press of theirs comes first — the page opening, the foot, a row of it, asking again — and each time the page is asked afresh as them; the same reader pressing again is asked nothing more")
+    func twoUnnamedReaders() async throws {
+        let (session, server, _) = await session(Self.served(["\(Self.statuses)?max_id=7": Self.stretch([6])]))
+        let pages = ShellPersonPages()
+        try signIn(session, as: "first")
+        await pages.opened(Self.ada, in: session)
+        #expect(ShellPersonPages.askedAs(at: Self.host, in: session) == .reader(nil))
+        #expect(pages.said(of: Self.ada, in: session)?.posts?.map(\.statusID) == ["9", "8", "7"])
+        await pages.opened(Self.ada, in: session)
+        #expect(await server.asked == [Self.lookup, Self.statuses], "the same sign-in, pressing again, is asked nothing more")
+
+        // The second reader presses the foot of what is drawn: nothing is read on from the first's place.
+        try signIn(session, as: "second")
+        #expect(ShellPersonPages.askedAs(at: Self.host, in: session) == .reader(nil), "no handle tells them apart")
+        await server.answer(Self.statuses, Self.stretch([5, 4]))
+        await pages.readOn(Self.ada, in: session)
+        await server.arrival(of: Self.lookup, times: 2)
+        #expect(await server.asked.filter { $0 == Self.lookup }.count == 2, "the press itself asks the page afresh")
+        await pages.opened(Self.ada, in: session)
+        #expect(await server.asked == [Self.lookup, Self.statuses, Self.lookup, Self.statuses])
+        #expect(await server.bearers == ["Bearer first", "Bearer first", "Bearer second", "Bearer second"])
+        let second = try #require(pages.said(of: Self.ada, in: session)?.posts)
+        #expect(second.map(\.statusID) == ["5", "4"])
+
+        // A third presses a row the second was given: nothing is held, nothing is said, and the page is theirs afresh.
+        try signIn(session, as: "third")
+        #expect(await pages.holding(second[0].id, of: Self.ada, in: session) == nil)
+        #expect(session.notes.isEmpty && session.toast == nil)
+        await pages.opened(Self.ada, in: session)
+        #expect(await server.bearers.suffix(2) == ["Bearer third", "Bearer third"])
+
+        // A fourth asks again: what they are given is not laid over what the third was.
+        try signIn(session, as: "fourth")
+        await server.answer(Self.statuses, Self.stretch([6, 5]))
+        await pages.again(Self.ada, in: session)
+        #expect(pages.said(of: Self.ada, in: session)?.posts?.map(\.statusID) == ["6", "5"])
+        let all = await server.asked
+        #expect(all.count == 8 && !all.contains("\(Self.statuses)?max_id=7"))
+    }
+
+    @Test("An answer to a reader the source never named, come back after another such reader has taken their place, lands nowhere, and their posts are not asked for it")
+    func theFirstReadersLateAnswer() async throws {
+        let (session, server, _) = await session(Self.served())
+        let pages = ShellPersonPages()
+        try signIn(session, as: "first")
+        await server.hold(Self.lookup)
+        defer { Task { await server.release(Self.lookup) } }
+        let first = Task { await pages.opened(Self.ada, in: session) }
+        await server.arrival(of: Self.lookup)
+        try signIn(session, as: "second")
+        let second = Task { await pages.opened(Self.ada, in: session) }
+        await server.arrival(of: Self.lookup, times: 2)
+        await server.releaseOne(Self.lookup)
+        await first.value
+        #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking, askingPosts: true))
+        #expect(await server.asked == [Self.lookup, Self.lookup])
+        await server.release(Self.lookup)
+        await second.value
+        #expect(await server.bearers == ["Bearer first", "Bearer second", "Bearer second"])
+        #expect(pages.said(of: Self.ada, in: session)?.posts?.count == 3)
+    }
+
+    @Test("Signing out lets the reader's pages go and calls their asks off: the ask still out is walked away from, and the page is asked afresh as nobody")
+    func signingOutCallsOff() async throws {
+        let server = PageServer(Self.served())
+        let off = CalledOff()
+        let door = CancellableDoor(server, heard: off)
+        let session = ShellSession(http: door, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: door))
+        session.work = SourceWork()
+        await session.store.add(Self.source)
+        session.sources = await session.store.sources()
+        let pages = ShellPersonPages()
+        try signIn(session, as: "first")
+        await server.hold(Self.lookup)
+        defer { Task { await server.release(Self.lookup) } }
+        let reader = Task { await pages.opened(Self.ada, in: session) }
+        await server.arrival(of: Self.lookup)
+        let held = try #require(try session.mastodon.tokens.token(host: Self.host))
+        _ = try session.mastodon.tokens.forget(held)
+        session.mastodon.refresh()
+        let nobody = Task { await pages.opened(Self.ada, in: session) }
+        await off.wait()
+        #expect(await off.asks == [Self.lookup])
+        await server.release(Self.lookup)
+        await reader.value
+        await nobody.value
+        #expect(await server.bearers == ["Bearer first", "", ""])
+        #expect(pages.said(of: Self.ada, in: session)?.posts?.count == 3)
+    }
+
     // MARK: - A source that is not asked who people are
 
     @Test("A forum's author is asked of nobody: their page is handed nothing, opening it asks nothing, the keys walk what this device holds — and the page handed nothing says what it always said")
@@ -913,6 +1016,54 @@ struct PersonSaidTests {
             let hosted = NSHostingView(rootView: pane.frame(width: 320, height: 700))
             hosted.layoutSubtreeIfNeeded()
             #expect(hosted.fittingSize.height == 700)
+        }
+    }
+}
+
+/// Hears which asks were walked away from while they were out.
+actor CalledOff {
+    private(set) var asks: [String] = []
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func heard(_ ask: String) {
+        asks.append(ask)
+        for one in waiting { one.resume() }
+        waiting = []
+    }
+
+    /// Returns once an ask was called off — or, so a broken build fails and does not park, after
+    /// the server's patience.
+    func wait() async {
+        guard asks.isEmpty else { return }
+        Task {
+            try? await Task.sleep(for: PageServer.patience)
+            self.heard("nothing was called off")
+        }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+}
+
+/// A client that passes every ask on, and tells `heard` when the task asking was cancelled
+/// while its answer was awaited — which is what calling an ask off does to a real transfer.
+struct CancellableDoor: HTTPClient, HTTPSender {
+    private let inner: PageServer
+    private let heard: CalledOff
+
+    init(_ inner: PageServer, heard: CalledOff) {
+        self.inner = inner
+        self.heard = heard
+    }
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        try await send(URLRequest(url: url))
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let ask = (request.url?.path ?? "") + (request.url?.query.map { "?\($0)" } ?? "")
+        return try await withTaskCancellationHandler {
+            try await inner.send(request)
+        } onCancel: {
+            Task { await heard.heard(ask) }
         }
     }
 }

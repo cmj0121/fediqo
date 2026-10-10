@@ -170,7 +170,9 @@ struct TimelinePane: View {
                 .id(person.id)
                 // **The ask is the page opening**, once a person a run: who they are and their
                 // newest posts, of the source they were met through and nobody else.
-                .task(id: person.id) { await people?.opened(person, in: session) }
+                // And who asks is part of which opening it is: a reader who ends, begins or
+                // changes while the page is in front opens it again, and it is asked as them.
+                .task(id: ShellPersonPages.opening(person, in: session)) { await people?.opened(person, in: session) }
             case .tag(let tag):
                 TagPane(
                     tag: tag,
