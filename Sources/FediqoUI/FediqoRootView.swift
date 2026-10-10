@@ -1028,11 +1028,13 @@ public struct FediqoRootView: View {
     /// nothing. Static so a test that follows the reader's keys presses the rule the root does
     /// (#168), rather than a copy of it.
     ///
-    /// Entering the selection obeys the entry rule the same as any other layer. Moving an
-    /// existing one does not — the lamp is already on, and `j` means move rather than enter.
-    /// With a thread or the viewer open the selection is always already on, so in practice
-    /// this only ever refuses a first press under the guide — or under a search, which is why
-    /// Return lights the first result rather than leaving `j` to.
+    /// Entering the selection obeys the entry rule the same as any other layer — asked with the
+    /// walk set aside (`DummyCommand.canLightRow`), since the rows walked are the walk's own
+    /// step's: a page reached with nothing lit takes a first `j`. Moving an existing lamp asks
+    /// nothing — it is already on, and `j` means move rather than enter. So this refuses a
+    /// first press under the viewer or the guide — or among a search's results, which is why
+    /// Return lights the first rather than leaving `j` to; a page opened from a result is a step
+    /// over the search, and takes it.
     ///
     /// **`entry` is where a lamp that is on none of the rows comes down to**, where the list
     /// has rows over the one reading starts at — the figures over somebody's posts (#311): `j`
@@ -1042,7 +1044,7 @@ public struct FediqoRootView: View {
         in ids: [String]?, from selected: String?, by step: Int, open: Set<DummyLayer>, entry: String? = nil
     ) -> String? {
         guard let ids else { return nil }
-        if selected == nil, !DummyCommand.canOpen(.selection, whenOpen: open) { return nil }
+        if selected == nil, !DummyCommand.canLightRow(whenOpen: open) { return nil }
         if let entry, step > 0, ids.contains(entry), selected.map(ids.contains) != true { return entry }
         return DummyCommand.stepped(ids, from: selected, by: step)
     }

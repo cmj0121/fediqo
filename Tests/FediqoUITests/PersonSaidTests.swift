@@ -672,7 +672,7 @@ struct PersonSaidTests {
         #expect(pages.walkedIDs(of: author, in: session) == held && pages.entry(of: author, in: session) == held.first)
         #expect(held.allSatisfy { pages.list($0, of: author, in: session) == nil })
         for (lamp, step) in [(nil, 1), (nil, -1), ("elsewhere", 1), ("elsewhere", -1), (held[0], 1), (held[2], -1), (held[0], -1)] as [(String?, Int)] {
-            let entry = pages.entry(of: author, in: session), open: Set<DummyLayer> = lamp == nil ? [] : [.person, .selection]
+            let entry = pages.entry(of: author, in: session), open: Set<DummyLayer> = lamp == nil ? [.person] : [.person, .selection]
             let now = FediqoRootView.moved(in: held, from: lamp, by: step, open: open, entry: entry)
             #expect(now != nil && now == FediqoRootView.moved(in: held, from: lamp, by: step, open: open), "\(lamp ?? "nothing lit") by \(step)")
         }
@@ -1104,8 +1104,10 @@ struct PersonSaidTests {
         #expect(moved(posts[0], -1) == lists[1].id && moved(lists[1].id, -1) == lists[0].id && moved(lists[0].id, -1) == lists[0].id)
         #expect(moved(lists[0].id, 1) == lists[1].id && moved(lists[1].id, 1) == posts[0] && moved(posts[0], 1) == posts[1])
         #expect(moved("a row of the stream", -1) == posts[2] && moved(posts[2], 1) == posts[2])
-        // A first press is let in or refused as it was: the figures change nothing of that.
-        #expect(moved(nil, 1, open: [.person]) == FediqoRootView.moved(in: ids, from: nil, by: 1, open: [.person]))
+        // A page reached with nothing lit — a face pressed by a pointer, your own page from Account —
+        // takes a first press: `j` lights the first post and `k` the last, as from a row elsewhere.
+        #expect(moved(nil, 1, open: [.person]) == posts[0] && moved(nil, -1, open: [.person]) == posts[2])
+        #expect(moved(nil, 1, open: [.shortcuts, .person]) == nil && moved(nil, -1, open: [.viewer, .person]) == nil)
         // Nowhere to start but the figures: a page the source gave no posts for.
         #expect(FediqoRootView.moved(in: lists.map(\.id), from: "elsewhere", by: 1, open: [.person, .selection], entry: nil) == lists[0].id)
         #expect(FediqoRootView.moved(in: lists.map(\.id), from: "elsewhere", by: 1, open: [.person, .selection], entry: "gone") == lists[0].id)

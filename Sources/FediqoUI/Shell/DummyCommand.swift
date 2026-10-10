@@ -292,6 +292,28 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         canOpen(.person, whenOpen: open.subtracting(walk))
     }
 
+    /// Whether `j` or `k` may light a first row of the list in front, where none is lit.
+    ///
+    /// **The list in front is the walk's innermost step, and its rows are that step's own** — a
+    /// person's posts, the people of a list, the posts under a tag — so the lamp enters *on* the
+    /// step and not under it. So the order is asked what would be in front with a lamp lit: the
+    /// lamp itself — the stream, with nothing over it — or a step of the walk, and then it
+    /// enters. Under the viewer or the guide it does not; nor under a search that is over the
+    /// stream, whose results keep the keys until Return lights the first (#168).
+    ///
+    /// **A step over a search takes the lamp.** The one order puts every step of the walk in
+    /// front of a search, and a search cannot be opened over a step (`canOpen`), so the two open
+    /// together are always a page opened from a result — and the rows walked are that page's.
+    ///
+    /// Without this a page reached with nothing lit — a face pressed by a pointer, somebody's
+    /// own page opened from Account — took no `j` at all, because `.selection` stands behind
+    /// every step of the walk in the one order there is; and the lines on such a page that only
+    /// the keys reach (#311) were then reached by nothing.
+    public static func canLightRow(whenOpen open: Set<DummyLayer>) -> Bool {
+        guard let front = outermost(of: open.union([.selection])) else { return false }
+        return front == .selection || walk.contains(front)
+    }
+
     /// Whether `p` may open the author of the row the lamp is on (#140).
     ///
     /// **`canWalk`, and one thing more.** A person is a step of the walk like any other, so the

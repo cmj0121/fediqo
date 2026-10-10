@@ -53,6 +53,67 @@ struct ViewerTests {
         #expect(DummyCommand.canOpen(.shortcuts, whenOpen: [.shortcuts, .thread]))
     }
 
+    /// `j` and `k` with nothing lit (#310), over **every** set of open layers there is.
+    ///
+    /// The rows walked are the rows of the walk's innermost step, so the lamp enters on the step:
+    /// a page reached with nothing lit takes a first press. What must not change is everything
+    /// else — a lamp already lit moves under anything, as it did; with no step of the walk open
+    /// the answer is the entry rule's own, as it was; and what stands in front of the walk still
+    /// keeps the lamp out.
+    @Test("A first j or k lights a row on the step of the walk in front, and nowhere it did not before: not under the viewer, the guide or a search, and on the stream as it always did")
+    @MainActor
+    func aFirstPressLightsARow() {
+        let rows = ["first", "second", "third"]
+        let layers = DummyLayer.allCases
+        for mask in 0..<(1 << layers.count) {
+            let open = Set(layers.enumerated().filter { mask & (1 << $0.offset) != 0 }.map(\.element))
+            // Worked out without the order: nothing over the app, and no search unless a step stands over it.
+            let onAStep = !open.isDisjoint(with: DummyCommand.walk)
+            let lights = !open.contains(.viewer) && !open.contains(.shortcuts) && (onAStep || !open.contains(.search))
+            #expect(DummyCommand.canLightRow(whenOpen: open) == lights, "\(open)")
+            if open.isDisjoint(with: DummyCommand.walk) {
+                #expect(DummyCommand.canLightRow(whenOpen: open) == DummyCommand.canOpen(.selection, whenOpen: open), "off the walk, the entry rule's own answer: \(open)")
+            }
+            for step in [1, -1] {
+                // Nothing lit: the first row for `j` and the last for `k`, or nothing at all.
+                let entered = FediqoRootView.moved(in: rows, from: nil, by: step, open: open)
+                #expect(entered == (lights ? (step > 0 ? "first" : "third") : nil), "\(open) by \(step)")
+                // A lamp already lit moves whatever is open: that was never asked, and is not now.
+                #expect(FediqoRootView.moved(in: rows, from: "second", by: step, open: open) == (step > 0 ? "third" : "first"))
+                // No rows, no lamp.
+                #expect(FediqoRootView.moved(in: nil, from: nil, by: step, open: open) == nil)
+            }
+        }
+        // The steps of the walk, each reached with nothing lit.
+        for step in [DummyLayer.person, .tag, .people, .thread] {
+            #expect(FediqoRootView.moved(in: rows, from: nil, by: 1, open: [step]) == "first", "\(step)")
+            #expect(FediqoRootView.moved(in: rows, from: nil, by: 1, open: [.shortcuts, step]) == nil, "\(step) under the guide")
+            // Opened from a result of a search with none lit: the step is over the search, and its rows take the keys.
+            #expect(FediqoRootView.moved(in: rows, from: nil, by: 1, open: [step, .search]) == "first", "\(step) over a search")
+            #expect(FediqoRootView.moved(in: rows, from: nil, by: -1, open: [step, .search]) == "third", "\(step) over a search")
+            // And a search is never over a step: it does not open there, so the two open are one order only.
+            #expect(!DummyCommand.canOpen(.search, whenOpen: [step]) && !FediqoRootView.canSearch(place: .timeline, open: [step]), "\(step)")
+            #expect(DummyCommand.outermost(of: [step, .search]) == step)
+        }
+        // The stream, and a search over it: as before.
+        #expect(FediqoRootView.moved(in: rows, from: nil, by: 1, open: []) == "first")
+        #expect(FediqoRootView.moved(in: rows, from: nil, by: -1, open: []) == "third")
+        // The results of a search keep the keys until Return lights the first (#168): no first press there.
+        #expect(FediqoRootView.moved(in: rows, from: nil, by: 1, open: [.search]) == nil)
+        #expect(FediqoRootView.moved(in: rows, from: nil, by: -1, open: [.search]) == nil)
+        #expect(FediqoRootView.moved(in: rows, from: "first", by: 1, open: [.search, .selection]) == "second")
+        // A key that acts on a post is not a key that walks: with nothing lit it lights the first
+        // row on the stream, and still lights nothing under a page.
+        let row = DummyItem(Note(
+            id: "https://m.example/a/1", source: Source(host: "m.example", kind: .mastodon), author: "A", handle: "@a@m.example",
+            body: "a post", postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: []
+        ))
+        #expect(!DummyCommand.canOpen(.selection, whenOpen: [.person]) && DummyCommand.canLightRow(whenOpen: [.person]))
+        #expect(FediqoRootView.focused(in: [row], selected: nil, open: []) == .first(row.id))
+        #expect(FediqoRootView.focused(in: [row], selected: nil, open: [.person]) == .nothing)
+        #expect(FediqoRootView.focused(in: [row], selected: row.id, open: [.person, .selection]) == .post(row))
+    }
+
     /// The two rules, over **every** set of open layers there is, against an order worked out
     /// independently of them.
     ///
