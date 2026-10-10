@@ -62,6 +62,7 @@ extension SourceWork.Purpose {
         case .ownPosts: "person.text.rectangle"
         case .person: "person.crop.rectangle"
         case .people: "person.2"
+        case .serverSays: "doc.plaintext"
         }
     }
 }

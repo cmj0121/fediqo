@@ -212,6 +212,10 @@ final class ShellPersonPages {
     /// The lists of people opened this run (#311): pages of the same kind, asked the same way,
     /// numbered on the same count, and let go with the same reader.
     let lists: ShellPeoplePages
+    /// What a source says of itself beyond its document, for that source's own page (#321):
+    /// asked the same way, numbered on the same count, and let go with the same reader. It
+    /// holds the one keeper of what this run knows each host has (`ShellHostsKnown`).
+    let more: ShellSourceMore
 
     init() {
         let count = PageErrands(), looks = PageReaders()
@@ -219,8 +223,11 @@ final class ShellPersonPages {
         readers = looks
         let lists = ShellPeoplePages(errands: count, readers: looks)
         self.lists = lists
+        let more = ShellSourceMore(errands: count, readers: looks, hosts: ShellHostsKnown(errands: count))
+        self.more = more
         looks.whenChanged { [weak self] host in self?.letGo(at: host) }
         looks.whenChanged { [weak lists] host in lists?.letGo(at: host) }
+        looks.whenChanged { [weak more] host in more?.letGo(at: host) }
     }
 
     /// A page opening, as its pane's task is named: who they are **and who asks**, so a page
@@ -256,7 +263,14 @@ final class ShellPersonPages {
     /// The source at `host`, where there is one and it says who people are: **the one place
     /// that fact is read**, for a person's page and for a list of people alike.
     static func source(at host: String, in session: ShellSession) -> Source? {
-        session.sources.first { source in source.host == host && source.kind.offers.people }
+        session.sources.first { source in source.host == host && saysPeople(source) }
+    }
+
+    /// Whether `source` says who people are: the fact itself, read here and by nobody else —
+    /// of a source held (`source(at:)`), and of a host as its own document has just named what
+    /// it speaks (`ShellHostsKnown`).
+    static func saysPeople(_ source: Source) -> Bool {
+        source.kind.offers.people
     }
 
     /// The signed-in reader's own page at `host` (#310) — the page of anybody, opened for

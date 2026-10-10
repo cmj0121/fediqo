@@ -128,6 +128,36 @@ struct SourceReach {
         (http as? URLSessionClient)?.capped(to: Self.smallBody) ?? SmallBody(http, limit: Self.smallBody)
     }
 
+    /// `http` under `smallBody` and kept to the host it is asked at: `small`, and every redirect
+    /// off that origin refused — for an ask that is of one source and of nowhere it points to.
+    /// A test's client, which follows nothing, is `small` and no more.
+    static func smallAtItsHost(_ http: any HTTPClient) -> any HTTPClient {
+        atItsHost(http, under: Self.smallBody)
+    }
+
+    /// `http` taking no body over `limit` and kept to the host it is asked at.
+    static func atItsHost(_ http: any HTTPClient, under limit: Int) -> any HTTPClient {
+        (http as? URLSessionClient)?.capped(to: limit).stayingOnOrigin() ?? SmallBody(http, limit: limit)
+    }
+
+    /// How much body the list of servers a host knows may bring: a large host names tens of
+    /// thousands, which is past what a small ask may bring and still a list of names.
+    static let serversBody = 8 << 20
+
+    /// The servers a host knows (#321), with no token, asked at their line's press: as
+    /// `unsignedHost`, under `serversBody` — held to it as the body arrives, on the plain
+    /// client before it is listed and bounded — and of that host alone.
+    func unsignedHostServers(_ host: String, for purpose: SourceWork.Purpose, within limit: Duration) -> MastodonHostMore {
+        MastodonHostMore(http: wire(Self.atItsHost(http, under: Self.serversBody), for: purpose, within: limit), host: host)
+    }
+
+    /// What a host says of itself beyond its document (#321) — its longer account, the servers
+    /// it knows, how busy it has been — with no token: anyone is given them. Listed as
+    /// `purpose`, ended within `limit`, under the small body's ceiling, and of that host alone.
+    func unsignedHost(_ host: String, for purpose: SourceWork.Purpose, within limit: Duration) -> MastodonHostMore {
+        MastodonHostMore(http: wire(Self.smallAtItsHost(http), for: purpose, within: limit), host: host)
+    }
+
     /// What is under a tag, as the reader, through `door`.
     func tag(_ door: MastodonAuthorized) -> MastodonTag {
         MastodonTag(door: door)

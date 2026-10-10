@@ -94,6 +94,10 @@ final class SourceWork {
         /// stretch at a time because the person opened it or read on there (#311). Nothing
         /// read under it is held.
         case people
+        /// What a server says of itself beyond its one document — its longer account, the
+        /// servers it knows, how busy it has been — read because the person opened that
+        /// source's page or asked again there (#321). Nothing read under it is held.
+        case serverSays
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -106,7 +110,7 @@ final class SourceWork {
         /// Everything else reaches wherever a post, a page or a directory points.
         var isOfTheSource: Bool {
             switch self {
-            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people: true
+            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
                  .nearbyMove:

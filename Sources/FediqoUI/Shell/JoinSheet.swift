@@ -400,6 +400,10 @@ struct JoinSheet: View {
     /// by the root once the sheet has come down. Nothing where nobody answers, and then the
     /// line that offers it is not drawn.
     var onOwnPage: ((DummyPerson) -> Void)?
+    /// What a joined source says of itself beyond its document (#321), asked and kept by the
+    /// pages the root holds. Nothing where the sheet is drawn with none: nothing more is then
+    /// asked of any source, or drawn.
+    var more: ShellSourceMore?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
@@ -598,6 +602,7 @@ struct JoinSheet: View {
                         if let me = ownPage(at: source.host) { OwnPageLine(me: me, press: { openOwnPage(me) }) }
                     }
                     SourcePreviewView(preview: preview, surface: .sheet, origin: origin)
+                    if case .joined(let source) = origin, let more { SourceMoreBlock(host: source.host, more: more, session: session) }
                 }
             }
         case .choosingBoards(let offer, _):

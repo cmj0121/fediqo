@@ -71,6 +71,12 @@ public struct URLSessionClient: HTTPClient, Sendable {
         )
     }
 
+    /// This client refusing every redirect off the origin it was asked at, and otherwise as it
+    /// is. For an ask that is of one host and of nowhere that host may point to.
+    public func stayingOnOrigin() -> URLSessionClient {
+        URLSessionClient(session: session, byteLimit: byteLimit, sameOriginOnly: true, watchedOnly: watchedOnly)
+    }
+
     public func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
