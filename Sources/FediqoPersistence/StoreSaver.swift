@@ -328,6 +328,14 @@ public actor StoreSaver {
         }
     }
 
+    /// How many stores put aside a launch removed, their thirty days gone (#344,
+    /// `StoreFile.dropExpired`) — said here, where the index's log is, and only as a count.
+    static func reportExpired(_ count: Int) {
+        if count > 0 {
+            log.notice("Removed \(count, privacy: .public) store(s) put aside thirty days ago or more")
+        }
+    }
+
     /// Writes what the store holds now, after every save asked for before this one.
     public func save() async throws {
         _ = try await saveAndTell()

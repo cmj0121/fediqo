@@ -155,6 +155,18 @@ struct StoreTroubleNoticeTests {
         }
     }
 
+    @Test("Every notice of a store put aside says when it goes if nobody answers: the first time Fediqo is opened thirty days or more after", arguments: languages)
+    func saysHowLongItIsKept(_ language: DummyLanguage) {
+        let phrase = language == .english
+            ? "the first time Fediqo is opened 30 days or more after it was put aside"
+            : "放到一旁滿 30 天後，下一次打開 Fediqo 時"
+        for key in ["store.damaged.detail", "store.damaged.other.detail", "store.unreachable.putAside.detail", "store.unreachable.otherBack.detail"] {
+            let said = L10n.t(key, language: language)
+            #expect(said.contains(phrase), "\(key)")
+            #expect(said != key && !said.contains(key), "\(key)")
+        }
+    }
+
     @Test("A read back refused because the store did not open, and a take-away with nothing to take, each say so in a line of their own — from a file and from a device nearby", arguments: languages)
     func refusedForWantOfAStore(_ language: DummyLanguage) {
         var lines: Set<String> = []

@@ -401,6 +401,13 @@ public struct StoreFile: Sendable {
             guard unlocked else { return Opened(file: nil, trouble: .unreachable(.locked)) }
             canary = false
         }
+        // **First, and in a run with a store or without**: a store put aside thirty days ago
+        // goes (#344). Only where the canary reads — it is a deletion.
+        if canary { dropExpired(in: directory, now: now) }
+        // When the index was last written, read before anything here can write it: an open
+        // that rolls a journal back writes it again, under this launch's clock (`setAside`).
+        let written = (try? directory.appendingPathComponent(indexName)
+            .resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         /// What a failure is where it may not be called damage: the lock, where the canary
         /// refuses now; else its own cause, and where that would be damage, out of reach.
         func notDamage(_ error: any Error) -> Opened {
@@ -492,7 +499,7 @@ public struct StoreFile: Sendable {
                 }
                 // Asked once more, directly before anything is moved.
                 guard protected.canary() == .reads else { return notDamage(error) }
-                guard let aside = try? setAside(in: directory, now: now) else {
+                guard let aside = try? setAside(in: directory, now: now, written: written) else {
                     return Opened(file: nil, trouble: .unreachable(.outOfReach))
                 }
                 // Nothing is made in the damaged one's place — the next launch puts the other
@@ -572,14 +579,21 @@ public struct StoreFile: Sendable {
     /// same instant never lands on the first one's copy.
     /// Throws when there is no index to move, which is the case where the directory itself could
     /// not be made: then there is nothing to protect by moving, and nowhere safe to write either.
-    private static func setAside(in directory: URL, now: Date) throws -> URL {
+    private static func setAside(in directory: URL, now: Date, written before: Date?) throws -> URL {
         let manager = FileManager.default
         let index = directory.appendingPathComponent(indexName)
         guard manager.fileExists(atPath: index.path) else { throw CocoaError(.fileNoSuchFile) }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime, .withFractionalSeconds, .withTimeZone]
         let random = UUID().uuidString.prefix(8).lowercased()
-        let base = "\(unreadablePrefix)\(formatter.string(from: now))-\(random)"
+        // Never a time before the index was last written: a clock that is behind — a device
+        // come back from a dead battery — must not name it as put aside years ago, which is
+        // what its thirty days are counted from (`dropExpired`). As it was before this launch
+        // tried it (`before`) and as it is now, whichever is later: the failed open may itself
+        // have written the index, under the clock that is behind.
+        let written = (try? index.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        let at = max(now, before ?? now, written ?? now)
+        let base = "\(unreadablePrefix)\(formatter.string(from: at))-\(random)"
         let aside = directory.appendingPathComponent(base + ".sqlite")
         try manager.moveItem(at: index, to: aside)
         for suffix in sidecars {
@@ -733,8 +747,10 @@ public struct StoreFile: Sendable {
     /// **Never an aside that was only moved out of the way.** One whose marker says neither
     /// replaced nor displaced is the store this device held and the only copy of it.
     ///
-    /// Deleting is unlinking; what the file system keeps beneath is the system's, as above. Each
-    /// store's mark goes last, so a deleting cut short is finished by the next save.
+    /// Deleting is unlinking; what the file system keeps beneath is the system's, as above. Of a
+    /// store put aside, the mark that the person was told outlives everything but the index, so
+    /// a deleting cut short is finished by the next save; cut short between those two, it is
+    /// said once more.
     private func dropWhatWasReplaced() {
         let path = db.path
         guard path != ":memory:", !path.isEmpty else { return }
@@ -748,10 +764,11 @@ public struct StoreFile: Sendable {
                 try? manager.removeItem(at: kept)
             }
         }
-        for aside in Self.putAside(in: folder) where aside.told {
-            for ending in [".sqlite"] + Self.sidecars.map({ ".sqlite" + $0 }) + ["-" + LimitAccountFile.name, Self.restoredSuffix, Self.toldSuffix] {
-                try? manager.removeItem(at: folder.appendingPathComponent(aside.base + ending))
-            }
+        // Everything under its name, the mark of when its days are counted from among it, and
+        // the index last (`remove`). By the mark and not by the index: what an earlier build,
+        // which took the index first, left of one it was cut short on is finished here too.
+        for aside in Self.asides(in: folder) where aside.names.contains(aside.base + Self.toldSuffix) {
+            Self.remove(aside, in: folder)
         }
     }
 
