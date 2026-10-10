@@ -630,7 +630,7 @@ final class ShellReload {
         // and is not asked again until a Clear or a Remove.
         await withTaskGroup(of: Void.self) { group in
             for ask in asks where sources.first(where: { $0.host == ask.host })?.kind.hasTimelines == true {
-                let asking = self.timed(session.http, for: .serverCheck, in: session)
+                let asking = self.checking(in: session)
                 group.addTask {
                     await self.onSource(ask.host) {
                         await session.flavours.ask(ask.host, through: asking, into: session.store)
@@ -1231,6 +1231,20 @@ final class ShellReload {
         in session: ShellSession
     ) -> any HTTPClient {
         session.reach.wire(http, for: purpose, name: name, within: deadline)
+    }
+
+    /// What a server is asked through for what it says of itself: `timed`, as a check of the
+    /// server, **over the plain client held to the ceiling a small ask has**. The document is a
+    /// few kilobytes, a stranger's server writes it, and it is read whole three times over —
+    /// so the ceiling is put on the plain client, before it is listed and bounded, where the
+    /// live client is held to it as the body arrives (`SourceReach.small`).
+    func checking(in session: ShellSession) -> any HTTPClient {
+        timed(Self.checked(session.http), for: .serverCheck, in: session)
+    }
+
+    /// The plain client such a check goes out on, under that ceiling.
+    static func checked(_ http: any HTTPClient) -> any HTTPClient {
+        SourceReach.small(http)
     }
 
     /// The name a reader knows each of a Mastodon source's timelines by, as it stands when the

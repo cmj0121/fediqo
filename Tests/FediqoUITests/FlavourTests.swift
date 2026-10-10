@@ -126,6 +126,40 @@ struct FlavourTests {
         #expect(session.reload.unspoken == nil)
     }
 
+    @Test("What a server says of itself is asked under the ceiling a small ask has, put on the plain client before it is listed and bounded: the live client is held to it as the body arrives, with its session and its rules as they were; a document past it is refused whole and the host is one that would not say; one just under it is read; and the ask is still listed as a check of the server")
+    func aDocumentTooLargeIsRefused() async throws {
+        // The app's own client: capped itself, and not wrapped in something that only looks afterwards.
+        let live = URLSessionClient(sameOriginOnly: true)
+        let checked = try #require(ShellReload.checked(live) as? URLSessionClient, "the live client is not held as it transfers")
+        #expect(checked.byteLimit == SourceReach.smallBody && SourceReach.smallBody == 1 << 20)
+        #expect(checked.session === live.session && checked.sameOriginOnly && checked.watchedOnly == live.watchedOnly)
+        // Wired first and capped after, the live client is out of sight and nothing is held as it arrives.
+        let wired = SourceReach(http: live, work: SourceWork()).wire(live, for: .serverCheck, within: .seconds(5))
+        #expect(!(SourceReach.small(wired) is URLSessionClient), "which is why the ceiling goes on before the wiring")
+
+        func said(padding: Int) async -> (ShellFlavour?, [SourceWork.Purpose]) {
+            let document = #"{"version":"4.6.6","title":"\#(String(repeating: "a", count: padding))"}"#
+            let (session, _) = await shell(Self.stillMastodon.merging([Self.flavour: .text(document)]) { $1 })
+            let work = SourceWork()
+            session.work = work
+            await session.reload.timeline(.all, in: session)
+            return (session.flavours.flavour(of: Self.host), work.record.filter { $0.reached == Self.host }.map(\.purpose))
+        }
+        let over = await said(padding: SourceReach.smallBody), under = await said(padding: SourceReach.smallBody - 64)
+        #expect(over.0 == .unsaid && under.0 == .said(.mastodon))
+        #expect(over.1.contains(.serverCheck) && under.1.contains(.serverCheck))
+
+        // The reload asks through that client, and nothing else in it is put under the ceiling.
+        var root = URL(fileURLWithPath: #filePath)
+        while root.pathComponents.count > 1, !FileManager.default.fileExists(atPath: root.appending(path: "Package.swift").path) {
+            root.deleteLastPathComponent()
+        }
+        let reload = try String(contentsOf: root.appending(path: "Sources/FediqoUI/Shell/ShellReload.swift"), encoding: .utf8)
+        #expect(reload.components(separatedBy: "let asking = self.checking(in: session)").count == 2)
+        #expect(reload.components(separatedBy: "timed(Self.checked(session.http), for: .serverCheck, in: session)").count == 2)
+        #expect(reload.components(separatedBy: "SourceReach.small(").count == 2)
+    }
+
     @Test("Nothing asked yet speaks what was stored, and an answer replaces only that")
     func fallsBackToStored() {
         let flavours = ShellFlavours()

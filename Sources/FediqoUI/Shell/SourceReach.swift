@@ -115,6 +115,16 @@ struct SourceReach {
     /// The plain client under `smallBody`. The live client is held to it as it transfers; any
     /// other — a test's — has what it brought refused past it.
     func small() -> any HTTPClient {
+        Self.small(http)
+    }
+
+    /// `http` under `smallBody`: held to it as it transfers where it is the live client, and
+    /// refused what it brought past it where it is any other — a test's.
+    ///
+    /// **Handed the plain client, before it is wired** (`wire(small(…), …)`): a client already
+    /// listed or bounded is no longer the live one to look at, and capping it would let the
+    /// whole body be transferred and held before it is refused.
+    static func small(_ http: any HTTPClient) -> any HTTPClient {
         (http as? URLSessionClient)?.capped(to: Self.smallBody) ?? SmallBody(http, limit: Self.smallBody)
     }
 
