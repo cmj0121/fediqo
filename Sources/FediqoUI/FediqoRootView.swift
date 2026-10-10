@@ -143,6 +143,7 @@ public struct FediqoRootView: View {
         session.persistUnsent = persistUnsent
         session.savesLanded = savesLanded
         session.carrier = carrier
+        if let carrier { session.carry.say(leftBy: carrier) }
         session.nearbyLink = nearby
         session.deviceName = deviceName
         session.measureStore = measureStore

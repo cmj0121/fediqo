@@ -429,6 +429,8 @@
 "carry.refused.storeNotOpened.line" = "Reading back would replace a store that did not open. Nothing changed.";
 "carry.refused.nothingToTake.title" = "Nothing to take away";
 "carry.refused.nothingToTake.line" = "The store did not open this time, so there is nothing to take.";
+"carry.refused.locked.title" = "This device is locked";
+"carry.refused.locked.line" = "It cannot be read or written until it is unlocked. Nothing changed.";
 "store.newer.title" = "A newer Fediqo wrote this device's index";
 "store.newer.detail" = "This version cannot read it, so it has left it exactly as it was and will save nothing over it. Open Fediqo in the newer version to see what it holds.";
 "store.newer.ok" = "OK";

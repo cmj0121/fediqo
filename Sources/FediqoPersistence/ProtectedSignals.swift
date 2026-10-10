@@ -61,11 +61,13 @@ public enum ProtectedSignals {
     }
 
     #if os(macOS)
-    /// Any key or pointer event that reaches this app says somebody is here, for as long as
+    /// A key pressed or a button clicked in this app — each a person's own act, and few
+    /// enough that asking the store again at each costs nothing; a pointer only passing over
+    /// is not listened for. Each says somebody is here, for as long as
     /// what this returns is kept; `stop` ends it. Local to the app: nothing outside it is heard.
     @MainActor
     public static func listenForSomebody() -> Any? {
-        NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .mouseMoved, .scrollWheel]) { event in
+        NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { event in
             somebodyIsHere()
             return event
         }

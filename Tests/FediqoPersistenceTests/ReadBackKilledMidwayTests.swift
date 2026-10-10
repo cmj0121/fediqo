@@ -131,17 +131,44 @@ struct ReadBackKilledMidwayTests {
         #expect(bodies(StoreFile.open(at: dir)) == Self.old)
     }
 
-    @Test("Killed with the new index in place: the package's store is the store, and the old one, replaced, is dropped")
+    /// **Inverted for #344**, from what #292 (700c5df0) pinned at this point: there, a run
+    /// killed with the new index in place left the package's store as the store and dropped
+    /// the old one. The index landing is no longer "replaced" — that is said only once every
+    /// step after it has held — so a kill here keeps both stores and asks. It is what makes a
+    /// device locking in those few steps harmless; accepted by the user on 2026-10-10.
+    @Test("Killed with the new index landed and the rest of the read back not yet held: both stores are kept, and the launch asks which is the store")
+    func killedLanded() async throws {
+        let (copies, cleanup) = try await killed()
+        defer { cleanup() }
+        let dir = try #require(copies[.landed])
+        let aside = dir.appendingPathComponent(try asideName(in: dir))
+        #expect(try StorePackager.state(of: aside) == .landed, "the premise: landed, and not said to be replaced")
+        #expect(try !StorePackager.wasReplaced(aside, in: dir))
+        let before = try names(in: dir).filter { !$0.hasPrefix("incoming-") || $0.hasPrefix("incoming-aside-") }
+
+        let opened = launch(in: dir)
+        guard case .twoStores = opened.trouble else {
+            Issue.record("not asked which is the store: \(String(describing: opened.trouble))")
+            return
+        }
+        #expect(opened.file == nil && opened.notes.isEmpty, "no store is opened until the person has said")
+        #expect(try names(in: dir) == before, "neither store was touched")
+        let old = Data("old-store-phrase".utf8), new = Data("new-store-phrase".utf8)
+        #expect(try Data(contentsOf: aside.appendingPathComponent("index.sqlite")).range(of: old) != nil)
+        #expect(try Data(contentsOf: dir.appendingPathComponent("index.sqlite")).range(of: new) != nil)
+    }
+
+    @Test("Killed once the whole read back held and the old store was said to be replaced: the package's store is the store, and the old one is dropped")
     func killedReplaced() async throws {
         let (copies, cleanup) = try await killed()
         defer { cleanup() }
         let dir = try #require(copies[.replaced])
         let aside = try #require(try names(in: dir).first { $0.hasPrefix("incoming-aside-") })
-        #expect(try StorePackager.wasReplaced(dir.appendingPathComponent(aside), in: dir), "the premise: the marker says replaced")
+        #expect(try StorePackager.wasReplaced(dir.appendingPathComponent(aside), in: dir), "the premise: the state says replaced")
 
         let opened = launch(in: dir)
         #expect(bodies(opened) == Self.new)
-        #expect(try names(in: dir) == ["index.sqlite"], "a replaced store outlived what replaced it")
+        #expect(try names(in: dir) == ["index.sqlite", LimitAccountFile.name], "a replaced store outlived what replaced it")
         let old = Data("old-store-phrase".utf8)
         #expect(try Data(contentsOf: dir.appendingPathComponent("index.sqlite")).range(of: old) == nil)
     }
@@ -152,7 +179,7 @@ struct ReadBackKilledMidwayTests {
         defer { cleanup() }
         let dir = try #require(copies[.movedIn])
         let aside = dir.appendingPathComponent(try #require(try names(in: dir).first { $0.hasPrefix("incoming-aside-") }))
-        #expect(try Data(contentsOf: aside.appendingPathComponent(StorePackager.committingMarker)) == StorePackager.replacingMark, "the premise")
+        #expect(try StorePackager.state(of: aside) == .replacing, "the premise")
         #expect(StoreFile.holdsNothing(indexAt: dir.appendingPathComponent("index.sqlite").path) == false, "the premise: the package's index, rows and all")
         #expect(try !StorePackager.wasReplaced(aside, in: dir))
 
@@ -168,7 +195,7 @@ struct ReadBackKilledMidwayTests {
         defer { cleanup() }
         let dir = try #require(copies[.replacing])
         let aside = dir.appendingPathComponent(try #require(try names(in: dir).first { $0.hasPrefix("incoming-aside-") }))
-        #expect(try Data(contentsOf: aside.appendingPathComponent(StorePackager.committingMarker)) == StorePackager.replacingMark, "the word was not there before the move")
+        #expect(try StorePackager.state(of: aside) == .replacing, "the word was not there before the move")
         #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("index.sqlite").path), "the premise: nothing in place yet")
         #expect(StorePackager.settleHalfCommits(in: dir) == (putBack: 1, unsettled: 0))
         #expect(bodies(StoreFile.open(at: dir)) == Self.old)
@@ -301,7 +328,7 @@ struct ReadBackKilledMidwayTests {
         defer { cleanup() }
         let dir = try #require(copies[.undoing])
         let aside = dir.appendingPathComponent(try asideName(in: dir))
-        #expect(try Data(contentsOf: aside.appendingPathComponent(StorePackager.committingMarker)) == StorePackager.undoingMark, "the premise")
+        #expect(try StorePackager.state(of: aside) == .undoing, "the premise")
         #expect(StoreFile.holdsNothing(indexAt: dir.appendingPathComponent("index.sqlite").path) == false, "the premise: the package's index, rows and all")
         #expect(try !StorePackager.wasReplaced(aside, in: dir))
 
@@ -316,7 +343,7 @@ struct ReadBackKilledMidwayTests {
         let dir = try #require(copies[.undoneGap])
         #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("index.sqlite").path), "the premise: no index in place")
         let aside = dir.appendingPathComponent(try asideName(in: dir))
-        #expect(try Data(contentsOf: aside.appendingPathComponent(StorePackager.committingMarker)) != StorePackager.replacedMark, "the marker still says replaced, with the new index gone")
+        #expect(try StorePackager.state(of: aside) == .undoing, "the state still says the index landed, with the new index gone")
 
         #expect(bodies(launch(in: dir)) == Self.old)
         #expect(try names(in: dir) == ["index.sqlite", LimitAccountFile.name])
@@ -358,7 +385,7 @@ struct ReadBackKilledMidwayTests {
         try manager.setAttributes([.immutable: false], ofItemAtPath: inPlace)
 
         let aside = folder.appendingPathComponent(try asideName(in: folder))
-        #expect(try Data(contentsOf: aside.appendingPathComponent(StorePackager.committingMarker)) == StorePackager.undoingMark)
+        #expect(try StorePackager.state(of: aside) == .undoing)
         #expect(manager.fileExists(atPath: aside.appendingPathComponent("index.sqlite").path), "the old index left the aside")
         #expect(manager.fileExists(atPath: aside.appendingPathComponent("index.sqlite-shm").path), "what was beside the old index was moved back beside the package's")
         #expect(!manager.fileExists(atPath: folder.appendingPathComponent("index.sqlite-shm").path))
@@ -377,13 +404,13 @@ struct ReadBackKilledMidwayTests {
         let dir = try #require(copies[.replaced])
         try FileManager.default.removeItem(at: dir.appendingPathComponent("index.sqlite"))
         let aside = dir.appendingPathComponent(try asideName(in: dir))
-        #expect(try Data(contentsOf: aside.appendingPathComponent(StorePackager.committingMarker)) == StorePackager.replacedMark, "the premise")
+        #expect(try StorePackager.state(of: aside) == .replaced, "the premise")
         #expect(try !StorePackager.wasReplaced(aside, in: dir))
         #expect(try StorePackager.hasUnsettledReadBack(in: dir))
         #expect(StoreFile.open(at: dir).file == nil, "an index was made beside the only store there is")
 
         #expect(bodies(launch(in: dir)) == Self.old)
-        #expect(try names(in: dir) == ["index.sqlite"])
+        #expect(try names(in: dir) == ["index.sqlite", LimitAccountFile.name])
     }
 
     @Test("Killed while being put back — what SQLite kept beside the old index is back, the index is not — the next launch finishes, and what is already back is left")

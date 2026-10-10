@@ -55,6 +55,8 @@ final class ShellCarry {
         case storeNotOpened
         /// This run did not open this device's store, so there is nothing to take away.
         case nothingToTake
+        /// The device is locked: nothing of its store can be read or written until it is unlocked.
+        case locked
         /// A step refused and an earlier one could not be put back: neither as it was nor as
         /// the package says, and which.
         case unwound([String])
@@ -70,6 +72,7 @@ final class ShellCarry {
             case PackageFault.indexIsNewer: self = .indexIsNewer
             case PackageFault.storeNotOpened: self = .storeNotOpened
             case PackageFault.nothingToTake: self = .nothingToTake
+            case PackageFault.locked: self = .locked
             case PackageFault.unwound(let steps): self = .unwound(steps)
             default: self = .other(error.localizedDescription)
             }
@@ -325,12 +328,30 @@ final class ShellCarry {
         }
     }
 
+    // MARK: - What an earlier run left
+
+    /// What to do once the person has been told what an earlier run left not put back.
+    @ObservationIgnored private var told: (() -> Void)?
+
+    /// Says, as a launch begins, what a read back in an earlier run could not put back and
+    /// did not live to (#344): the same sentence the person was given then, naming the parts.
+    /// Kept to be said again at the next launch until it has been put away here.
+    func say(leftBy carrier: any StoreCarrier) {
+        let steps = carrier.leftOwed()
+        guard step == nil, !steps.isEmpty else { return }
+        step = .refused(.unwound(steps))
+        told = { carrier.toldLeftOwed() }
+    }
+
     // MARK: - Every way out
 
     /// Whatever is up comes down and whatever is running stops; nothing half done is kept.
     /// Except a read back under way, which runs to its end — see `confirmReadBack`.
     func dismiss() {
         if case .reading = step { return }
+        // Told: what an earlier run left not put back is no longer kept to be said again.
+        told?()
+        told = nil
         // A task still running releases the hold itself as it ends (`run`); only where none is
         // running is there nobody else to.
         let running = task != nil

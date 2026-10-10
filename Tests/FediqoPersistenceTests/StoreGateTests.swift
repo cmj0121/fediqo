@@ -17,7 +17,7 @@ final class ProtectedByHand: Sendable {
         var somebody = false
         var remakes = 0
         var subscribers: [AsyncStream<Void>.Continuation] = []
-        var waiting: [CheckedContinuation<Bool, Never>] = []
+        var waiting: [(above: Int, resume: CheckedContinuation<Bool, Never>)] = []
         var ended = false
         var closed = false
     }
@@ -41,6 +41,8 @@ final class ProtectedByHand: Sendable {
     /// has returned without subscribing, whichever of the two happens — and one of them does.
     @MainActor
     func parked(_ gate: StoreGate) async -> (waiting: Task<Void, Never>, parked: Bool) {
+        // Its own subscription is waited for, and not one some earlier wait made.
+        let before = state.withLock { $0.subscribers.count }
         let waiting = Task { @MainActor in
             await gate.wait()
             let left = self.state.withLock { state in
@@ -48,13 +50,13 @@ final class ProtectedByHand: Sendable {
                 defer { state.waiting = [] }
                 return state.waiting
             }
-            left.forEach { $0.resume(returning: false) }
+            left.forEach { $0.resume.resume(returning: false) }
         }
         let parked = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             let known: Bool? = state.withLock { state in
-                if !state.subscribers.isEmpty { return true }
+                if state.subscribers.count > before { return true }
                 if state.ended { return false }
-                state.waiting.append(continuation)
+                state.waiting.append((before, continuation))
                 return nil
             }
             if let known { continuation.resume(returning: known) }
@@ -91,10 +93,11 @@ final class ProtectedByHand: Sendable {
                     if state.withLock({ $0.closed }) { return continuation.finish() }
                     let waiting = state.withLock { state in
                         state.subscribers.append(continuation)
-                        defer { state.waiting = [] }
-                        return state.waiting
+                        let count = state.subscribers.count
+                        defer { state.waiting.removeAll { count > $0.above } }
+                        return state.waiting.filter { count > $0.above }
                     }
-                    waiting.forEach { $0.resume(returning: true) }
+                    waiting.forEach { $0.resume.resume(returning: true) }
                 }
             }
         )
@@ -218,9 +221,9 @@ struct StoreGateTests {
         let gate = gate(hand, asked)
         let (first, parked) = await hand.parked(gate)
         try #require(parked, "the wait returned without waiting for anything")
-        let second = Task { @MainActor in await gate.wait() }
-        // Let the second window's wait reach the events too: it subscribes before it suspends.
-        await Task.yield()
+        // The second window's wait, waited for until it too is listening: both hear each wake.
+        let (second, alsoParked) = await hand.parked(gate)
+        try #require(alsoParked, "the second wait returned without waiting for anything")
         hand.turn(canary: .reads)
         hand.wake()
         hand.wake()
@@ -391,6 +394,10 @@ struct StoreGateTests {
         #expect(count("ProtectedSignals.somebodyIsHere()") == 1)
         #expect(code.contains("listening = ProtectedSignals.listenForSomebody()") && code.contains("ProtectedSignals.stop(listening)"))
         #expect(code.contains(".map { make($0) }") && !code.contains(".map(make)"))
+        // What takes the store away and reads one back asks the same canary, and what a lock
+        // kept it from putting back is done at a wake-up.
+        #expect(code.contains("saver: saver, protected: protected\n        )"))
+        #expect(code.contains("for await _ in protected.changes() { await carrier.finishOwed() }"))
     }
 
     // MARK: - The platform's signals

@@ -777,8 +777,11 @@ struct GuardedSourceTests {
             "Sources/FediqoPersistence/MediaCache.swift": 4,
             // The index and what lies beside it, put aside under another name in its own folder.
             "Sources/FediqoPersistence/StoreFile.swift": 3,
-            // A read back: the index to and from an aside `Guarded` made, in the store's folder.
-            "Sources/FediqoPersistence/StorePackager.swift": 7,
+            // A read back's state, moved on from one name to the next in its own aside.
+            "Sources/FediqoPersistence/ReadBackState.swift": 1,
+            // A read back: the index to and from an aside `Guarded` made, in the store's folder —
+            // and a choice between two stores, or a launch finishing one, moving the other aside.
+            "Sources/FediqoPersistence/StorePackager.swift": 8,
         ])
     }
 

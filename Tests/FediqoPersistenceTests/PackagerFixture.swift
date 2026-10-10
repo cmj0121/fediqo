@@ -41,11 +41,11 @@ enum PackagerFixture {
             }
         }
 
-        func packager(free: Int = .max) -> StorePackager {
+        func packager(free: Int = .max, protected: ProtectedData = .always) -> StorePackager {
             StorePackager(
                 directory: directory, file: file, store: store, media: media, tokens: tokens,
                 credentials: credentials, defaults: defaults, device: "a test", appVersion: "0.7.0",
-                freeSpace: { _ in free }, rounds: 1000
+                protected: protected, freeSpace: { _ in free }, rounds: 1000
             )
         }
 

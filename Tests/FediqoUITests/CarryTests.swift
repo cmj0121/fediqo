@@ -18,6 +18,11 @@ struct CarryTests {
 
     /// A carrier that does nothing to any disk and answers as it is told.
     final class FakeCarrier: StoreCarrier, @unchecked Sendable {
+        /// What an earlier run left not put back, and whether the person was told.
+        var left: [String] = []
+        var told = 0
+        func leftOwed() -> [String] { left }
+        func toldLeftOwed() { told += 1; left = [] }
         var weight = PackageWeight(withoutPictures: 100, withPictures: 300, free: 1_000, holdsStore: false)
         var summary = CarryTests.summary
         var refuse: (any Error)?
@@ -86,6 +91,26 @@ struct CarryTests {
         #expect(SourceAct.shown(acts[0].source, language: .english) == "This device")
         #expect(SourceAct.shown(acts[0].source, language: .taiwanese) == "這部裝置")
         #expect(SourceAct.shown("one.example") == "one.example")
+    }
+
+    @Test("What an earlier run could not put back is said as the launch begins, in the sentence given then — and kept to be said until it has been put away")
+    func whatAnEarlierRunLeft() {
+        let carrier = FakeCarrier()
+        carrier.left = ["secrets", "index"]
+        let carry = ShellCarry(work: SourceWork())
+        carry.say(leftBy: carrier)
+        #expect(carry.step == .refused(.unwound(["secrets", "index"])))
+        #expect(carrier.told == 0, "not told until the person has put it away")
+        let notice = ShellQuestion.carryRefused(.unwound(["secrets", "index"]))
+        #expect(!notice.line.contains("carry.") && !notice.title.contains("carry."))
+        carry.dismiss()
+        #expect(carry.step == nil && carrier.told == 1)
+        // Nothing left: nothing said, and nothing put up.
+        let quiet = ShellCarry(work: SourceWork())
+        quiet.say(leftBy: carrier)
+        #expect(quiet.step == nil)
+        quiet.dismiss()
+        #expect(carrier.told == 1)
     }
 
     @Test("A package that would not fit is refused with the numbers before a password is asked; an empty password is refused too")

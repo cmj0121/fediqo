@@ -259,6 +259,9 @@ public enum Guarded {
         let fresh = folder.appendingPathComponent(canaryName + "-new")
         do {
             try write(Data([1]), to: fresh, atomic: false, on: alone)
+            // Its owner's to read, whatever this process's mask would have made it: a canary
+            // the process cannot read back is, to the probe, a lock that never ends.
+            chmod(fresh.path, 0o600)
             if let asks = device.asks, !device.simulated {
                 switch device.heldNow(fresh) {
                 case asks:
@@ -311,8 +314,8 @@ public enum Guarded {
     /// complete nothing new can be made under lock either. At unless-open a new file is made
     /// while locked and says nothing, so a Mac is not asked that.
     ///
-    /// **Made where there is none, and written anew where it is at another class** — whole, by
-    /// an atomic write over what was there, never removed first: a writer that looked between
+    /// **Made where there is none, and written anew where it is at another class** — whole, as
+    /// a file of its own renamed over what was there, never removed first: a writer that looked between
     /// the two would find no canary and take the volume for one that keeps no class. `anew`
     /// writes it again whatever is there: what is tried once where it will not read on a
     /// device known to be unlocked.

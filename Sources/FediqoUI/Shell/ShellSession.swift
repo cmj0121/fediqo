@@ -605,7 +605,10 @@ final class ShellSession {
     /// written after the read rather than over it.
     @ObservationIgnored var limitAccountLoaded = false
     /// The person cleared the account while it could not be read (#344): the lines on disk are
-    /// still there, and go when it can be.
+    /// still there, and go when it can be. **Owed by this session alone, and only so far**: it
+    /// is not written down, so a quit before then forgets it and the lines are back at the next
+    /// launch; and it is done only when the account is next asked for — a line recorded, a
+    /// clear, a read back — not at the unlock itself.
     @ObservationIgnored var limitAccountClearOwed = false
 
     /// The limits' account (#251), newest first: each time a limit acted, which, when, how many

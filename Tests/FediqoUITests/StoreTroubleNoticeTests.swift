@@ -161,12 +161,16 @@ struct StoreTroubleNoticeTests {
         for notice in [
             ShellQuestion.carryRefused(.init(PackageFault.storeNotOpened), language: language),
             ShellQuestion.carryRefused(.init(PackageFault.nothingToTake), language: language),
+            // And one refused because the device is locked (#344): a sentence, not an error's name.
+            ShellQuestion.carryRefused(.init(PackageFault.locked), language: language),
         ] {
             #expect(!notice.title.contains("carry.") && !notice.line.contains("carry.") && !notice.line.contains("FediqoCore"))
             #expect(ShellQuestion.width(notice.line) <= ShellQuestion.lineLength, "\(notice.line)")
             lines.insert(notice.line)
         }
-        #expect(lines.count == 2)
+        #expect(lines.count == 3)
+        #expect(ShellQuestion.nearbyRefused(.locked, language: language) == ShellQuestion.carryRefused(.locked, language: language))
+        #expect(ShellCarry.Trouble(PackageFault.locked) == .locked && NearbyRefusal(PackageFault.locked) == .locked)
         #expect(ShellQuestion.nearbyRefused(.storeNotOpened, language: language)
             == ShellQuestion.carryRefused(.storeNotOpened, language: language))
         #expect(ShellQuestion.nearbyRefused(.nothingToTake, language: language)

@@ -108,6 +108,8 @@ final class Launch {
     private init(_ opened: StoreFile.Opened) {
         // Where Caches cannot be made, pictures are read from their hyperlinks only.
         let media = try? MediaCache.caches()
+        // The one the gate asked: made once for the store, and the same one here.
+        let protected = ProtectedSignals.protected(store: StoreFile.applicationSupportDirectory)
         store = ItemStore(
             sources: opened.sources, notes: opened.notes, said: opened.said, notices: opened.notices,
             unsent: opened.unsent
@@ -129,8 +131,13 @@ final class Launch {
             defaults: .standard, device: Self.deviceName,
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
             storeIsNewer: opened.storeIsNewer,
-            storeNotOpened: opened.file == nil && !opened.storeIsNewer, saver: saver
+            storeNotOpened: opened.file == nil && !opened.storeIsNewer, saver: saver, protected: protected
         )
+        // An undo a lock refused is still owed (#344), and done when the device is back: each
+        // wake-up asks, and the carrier asks the canary itself before it does anything.
+        Task { [carrier] in
+            for await _ in protected.changes() { await carrier.finishOwed() }
+        }
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).
         FediqoRootView.onlyToSources(
@@ -345,7 +352,11 @@ private struct Waiting: View {
             .contentShape(Rectangle())
             .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in ProtectedSignals.somebodyIsHere() })
             #if os(macOS)
-            .onAppear { listening = ProtectedSignals.listenForSomebody() }
+            .onAppear {
+                // One at a time: a ground shown again without having gone would leave the first.
+                ProtectedSignals.stop(listening)
+                listening = ProtectedSignals.listenForSomebody()
+            }
             .onDisappear { ProtectedSignals.stop(listening) }
             #endif
             .task { opened(await Launch.whenOpened()) }

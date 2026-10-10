@@ -50,6 +50,12 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// read back that would replace it is refused, as a newer build's is, and a take-away has
     /// nothing to take.
     private let storeNotOpened: Bool
+    /// Whether what this device keeps can be read right now: asked of the canary before a
+    /// take-away or a read back begins, and before an undo a lock refused is tried again.
+    private let protected: ProtectedData
+    /// What a read back that a later step refused could not put back, because the device had
+    /// locked: still owed, and done when the canary reads again (`finishOwed`).
+    private let owed = Owed()
     /// Told as a read back's commit passes each point a run killed there would leave on disk.
     /// Nothing in the app sets it: a test does, to copy the folder as it stands at that point.
     var witness: (@Sendable (CommitPoint) -> Void)?
@@ -65,7 +71,11 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         case replacing
         /// The new index is in place and the marker still says it is on its way in.
         case movedIn
-        /// The new index is in place and the marker says the old one was replaced.
+        /// The new index is in place and the state says so — landed, and **not** replaced: the
+        /// rest of the read back has not yet held.
+        case landed
+        /// Every step held, and the state says the old index was replaced; the aside is about
+        /// to go.
         case replaced
         /// A later step refused: the marker says the commit is being undone; the new index is
         /// still in place.
@@ -81,7 +91,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         directory: URL, file: StoreFile?, store: ItemStore, media: MediaCache?,
         tokens: any MastodonTokenStore, credentials: any ForumCredentialStore,
         defaults: UserDefaults, device: String, appVersion: String, storeIsNewer: Bool = false,
-        storeNotOpened: Bool = false, saver: StoreSaver? = nil,
+        storeNotOpened: Bool = false, saver: StoreSaver? = nil, protected: ProtectedData = .always,
         freeSpace: @escaping @Sendable (URL) -> Int = StorePackager.volumeFree,
         rounds: UInt32 = PackageFormat.rounds
     ) {
@@ -90,6 +100,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         self.saver = saver
         self.storeIsNewer = storeIsNewer
         self.storeNotOpened = storeNotOpened
+        self.protected = protected
         self.store = store
         self.media = media
         self.tokens = tokens
@@ -122,6 +133,8 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 try? manager.removeItem(at: folder.appendingPathComponent(name))
             }
         }
+        // (`.owed-…` names beside the index are not leftovers and are not swept: they go when
+        // the step is done, or when the person has been told it never will be — `toldLeftOwed`.)
         sweep(temporary, prefix: "takeaway-")
         // A read back killed midway is settled first, one way or the other, so that the index
         // this run opens is either the one this device held or the one the package brought —
@@ -161,9 +174,10 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// (`StoreFile.dropWhatWasReplaced`).
     static let displacedMark = Data("displaced".utf8)
 
-    /// What the marker in `aside` says, or nil where there is no marker. **Throws where it is
-    /// there and will not be read** (#344): a locked device's refusal is not "says nothing",
-    /// and a marker that says nothing is one a launch acts on.
+    /// What the anchor in `aside` holds, or nil where there is none: an earlier build's word,
+    /// where it holds anything. **Throws where it is there and will not be read** (#344): a
+    /// locked device's refusal is not "says nothing", and a marker that says nothing is one a
+    /// launch acts on.
     static func word(in aside: URL) throws -> Data? {
         let marker = aside.appendingPathComponent(committingMarker)
         guard FileManager.default.fileExists(atPath: marker.path) else { return nil }
@@ -172,19 +186,19 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
 
     /// Whether `aside` holds a store the person chose against.
     static func wasDisplaced(_ aside: URL) throws -> Bool {
-        try word(in: aside) == displacedMark
+        try state(of: aside) == .displaced
     }
 
-    /// Whether the old index in `aside` was replaced — the package's index is in its place —
-    /// rather than only moved out of the way.
+    /// Whether the old index in `aside` was replaced — the whole read back held, and the
+    /// package's index is in its place — rather than only moved out of the way.
     ///
-    /// **The marker's word, and an index standing where the old one was** (`directory`). The
-    /// marker alone is not enough: one that says replaced beside no index at all is a commit
-    /// whose new index has gone again, and the aside is then the only store there is. And an
-    /// index found in place is not enough without the marker: any run that opened this folder
-    /// in between would have made one.
+    /// **The state's word, and an index standing where the old one was** (`directory`). The
+    /// word alone is not enough: replaced beside no index at all is a commit whose new index
+    /// has gone again, and the aside is then the only store there is. And an index found in
+    /// place is not enough without the word: any run that opened this folder in between would
+    /// have made one.
     static func wasReplaced(_ aside: URL, in directory: URL) throws -> Bool {
-        try word(in: aside) == replacedMark
+        try state(of: aside) == .replaced
             && FileManager.default.fileExists(atPath: directory.appendingPathComponent(indexName).path)
     }
 
@@ -209,7 +223,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// The first aside in `directory` that is neither replaced, displaced nor put back.
     private static func unsettledAside(in directory: URL) throws -> URL? {
         try asides(in: directory).first { aside in
-            try word(in: aside) != nil && !wasReplaced(aside, in: directory) && !wasDisplaced(aside)
+            try state(of: aside) != nil && !wasReplaced(aside, in: directory) && !wasDisplaced(aside)
         }
     }
 
@@ -243,30 +257,40 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// (`StoreFile.dropWhatWasReplaced`). Should the chosen one turn out damaged, it comes back
     /// (`reinstateDisplaced`).
     ///
-    /// - **Keep the one in place**: the aside's marker is rewritten, whole or not at all, to say
-    ///   displaced. Nothing moves.
-    /// - **Put back the one set aside**: the one in place is moved into an aside of its own,
-    ///   marked displaced before anything moves — what SQLite kept beside it first, the index
-    ///   last, so that the aside holds the index only once it holds all of it. Then the old one
-    ///   is put back the way a launch puts one back (`settleHalfCommits`), there being nothing
-    ///   in its place now. A step that fails leaves a state a launch settles or asks about again.
+    /// - **Keep the one in place**: the aside's state is moved on to displaced, by one rename.
+    ///   Nothing else moves.
+    /// - **Put back the one set aside**: the one in place is moved into an aside of its own —
+    ///   **its index first**, then what SQLite kept beside it — and only then said to be
+    ///   displaced. Index first, so that a build before this one never meets an aside with a
+    ///   journal and no index, which it would remove. Then the old one is put back the way a
+    ///   launch puts one back (`settleHalfCommits`), there being nothing in its place now.
+    ///   **A move cut short is finished by the next launch** before anything is put back: what
+    ///   is still in place beside the gap follows its index.
     public static func choose(_ choice: Choice, in directory: URL) {
+        choose(choice, in: directory, moved: nil)
+    }
+
+    /// `choose(_:in:)`, told as each file of the store in place has been moved out of the way
+    /// — by what ends its name, the index's being nothing. A test stops the move there, where
+    /// a kill would.
+    static func choose(_ choice: Choice, in directory: URL, moved: ((String) throws -> Void)?) {
         let manager = FileManager.default
-        // A marker that will not be read chooses nothing: the question is asked again.
+        // A state that cannot be read chooses nothing: the question is asked again.
         guard let aside = try? unsettledAside(in: directory) else { return }
         switch choice {
         case .keepInPlace:
-            try? Guarded.write(displacedMark, to: aside.appendingPathComponent(committingMarker))
+            try? say(.displaced, of: aside)
         case .putBack:
             let other = directory.appendingPathComponent("\(StoreFile.readBackAsidePrefix)\(UUID().uuidString)", isDirectory: true)
             do {
-                try Guarded.makeFolder(other)
-                try Guarded.write(displacedMark, to: other.appendingPathComponent(committingMarker), atomic: false)
-                for suffix in StoreFile.sidecars + [""] {
+                try begin(other, as: .displacing)
+                for suffix in [""] + StoreFile.sidecars {
                     let stands = directory.appendingPathComponent(indexName + suffix)
                     guard manager.fileExists(atPath: stands.path) else { continue }
                     try manager.moveItem(at: stands, to: other.appendingPathComponent(indexName + suffix))
+                    try moved?(suffix)
                 }
+                try say(.displaced, of: other)
             } catch {
                 return
             }
@@ -292,9 +316,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         }
     }
 
-    /// `aside`, a store chosen against, made the store to put back: whether its marker was written.
+    /// `aside`, a store chosen against, made the store to put back: whether that could be said.
     static func reinstate(_ aside: URL) -> Bool {
-        (try? Guarded.write(Data(), to: aside.appendingPathComponent(committingMarker))) != nil
+        (try? say(.aside, of: aside)) != nil
     }
 
     /// Settles every read back a run was killed in the middle of (#247, #292), before any index
@@ -343,26 +367,62 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         var putBack = 0
         var unsettled = 0
         let target = directory.appendingPathComponent(indexName)
-        let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
-        for name in names.sorted() where name.hasPrefix(StoreFile.readBackAsidePrefix) {
-            let aside = directory.appendingPathComponent(name)
-            let marker = aside.appendingPathComponent(committingMarker)
-            guard manager.fileExists(atPath: marker.path) else { continue }
-            // A marker that will not be read settles nothing (#344): refused is not "says
-            // nothing", which would put the old index back over the package's.
-            guard let word = try? Data(contentsOf: marker) else {
-                unsettled += 1
-                continue
-            }
-            if word == replacedMark, manager.fileExists(atPath: target.path) {
+        let asides = (try? asides(in: directory)) ?? []
+        /// The state of `aside`: nil where it has no anchor; a throw where it cannot be read.
+        func read(_ aside: URL) -> Result<AsideState?, any Error> { Result { try state(of: aside) } }
+        // **First, a choice cut short** (#344): a store that was being moved out of the way,
+        // its index gone ahead, is moved the rest of the way — what SQLite kept beside it
+        // follows its index — before anything is put back into the place it is leaving.
+        for aside in asides {
+            guard case .success(.displacing) = read(aside) else { continue }
+            guard manager.fileExists(atPath: aside.appendingPathComponent(indexName).path) else {
+                // Nothing had moved: there is no choice to finish, and it is asked again.
                 try? manager.removeItem(at: aside)
                 continue
             }
-            if word == displacedMark {
+            do {
+                // Only what lies beside a gap is the leaving store's; an index standing there
+                // is somebody's, and nothing beside it is taken.
+                guard !manager.fileExists(atPath: target.path) else { throw CocoaError(.fileWriteFileExists) }
+                for suffix in StoreFile.sidecars {
+                    let stands = directory.appendingPathComponent(indexName + suffix)
+                    guard manager.fileExists(atPath: stands.path) else { continue }
+                    try manager.moveItem(at: stands, to: aside.appendingPathComponent(indexName + suffix))
+                }
+                try say(.displaced, of: aside)
+            } catch {
+                unsettled += 1
+            }
+        }
+        for aside in asides {
+            let state: AsideState
+            switch read(aside) {
+            case .success(nil): continue
+            case .success(let found?): state = found
+            case .failure:
+                // A state that will not be read settles nothing (#344): refused is not "says
+                // nothing", which would put the old index back over the package's.
+                unsettled += 1
+                continue
+            }
+            let inPlace = manager.fileExists(atPath: target.path)
+            switch state {
+            case .replaced where inPlace:
+                try? manager.removeItem(at: aside)
+                continue
+            case .landed where inPlace:
+                // The package's index landed and the read back never said the rest held:
+                // both stores are kept, and which is the store is the person's to say.
+                unsettled += 1
+                continue
+            case .displacing:
+                // Counted above, where it could not be finished.
+                continue
+            case .displaced:
                 // A store the person chose against (#295): kept, untouched, until the one they
-                // chose has opened and saved. One that never came to hold its index — a choice
-                // cut short while the index in place was being moved in — hands back what it
-                // took from beside that index and goes; the choice is then asked again.
+                // chose has opened and saved. One that never came to hold its index — left by a
+                // build before this one, which moved the index last — hands back what it took
+                // from beside that index and goes; the choice is then asked again.
                 if !manager.fileExists(atPath: aside.appendingPathComponent(indexName).path) {
                     for suffix in StoreFile.sidecars {
                         let taken = aside.appendingPathComponent(indexName + suffix)
@@ -374,22 +434,24 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                     try? manager.removeItem(at: aside)
                 }
                 continue
+            default:
+                break
             }
             guard manager.fileExists(atPath: aside.appendingPathComponent(indexName).path) else {
-                // The marker was written and the index never left, or is already back: there
+                // The state was said and the index never left, or is already back: there
                 // is nothing to put back.
                 try? manager.removeItem(at: aside)
                 continue
             }
-            // Whether the marker says whose the index in place is: the package's, on its way in
+            // Whether the state says whose the index in place is: the package's, on its way in
             // or on its way out.
-            let thePackages = word == replacingMark || word == undoingMark
-            if manager.fileExists(atPath: target.path), !thePackages, StoreFile.holdsNothing(indexAt: target.path) != true {
+            let thePackages = state == .replacing || state == .undoing
+            if inPlace, !thePackages, StoreFile.holdsNothing(indexAt: target.path) != true {
                 unsettled += 1
                 continue
             }
             do {
-                if manager.fileExists(atPath: target.path) {
+                if inPlace {
                     for suffix in [""] + StoreFile.sidecars {
                         let stands = directory.appendingPathComponent(indexName + suffix)
                         if manager.fileExists(atPath: stands.path) { try manager.removeItem(at: stands) }
@@ -475,6 +537,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         // A run that did not open this device's store holds none of it: what it would take away
         // is an empty store under this device's name, which is not what the person asked for.
         if storeNotOpened || storeIsNewer { throw PackageFault.nothingToTake }
+        try await unlocked()
         if case .password(let password) = key {
             if password.isEmpty { throw PackageFault.emptyPassword }
             if password.count < PackageFormat.minPasswordCount { throw PackageFault.shortPassword }
@@ -786,6 +849,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     public func readBack(
         _ url: URL, key: PackageKey, replacing: Bool, progress: @escaping @Sendable (PackageProgress) -> Void
     ) async throws {
+        try await unlocked()
         let reader = try PackageReader(at: url)
         let summary = try reader.open(with: key)
         if storeIsNewer, summary.contents == .whole { throw PackageFault.indexIsNewer }
@@ -912,9 +976,135 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
 
     /// One step of the commit that can be put back: its name, for the sentence that says it
     /// could not be, and the putting back, which says so by throwing.
-    private struct Undo {
+    private struct Undo: @unchecked Sendable {
         let name: String
         let run: () async throws -> Void
+    }
+
+    /// The steps of a read back's undo that a locked device refused, newest first.
+    private final class Owed: @unchecked Sendable {
+        private let lock = NSLock()
+        private var steps: [Undo] = []
+
+        func keep(_ refused: [Undo]) {
+            lock.lock()
+            defer { lock.unlock() }
+            steps += refused
+        }
+
+        func take() -> [Undo] {
+            lock.lock()
+            defer { lock.unlock() }
+            defer { steps = [] }
+            return steps
+        }
+
+        var isEmpty: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return steps.isEmpty
+        }
+
+        var names: [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return steps.map(\.name)
+        }
+    }
+
+    /// Whether an undo is still owed.
+    public var owesUndo: Bool { !owed.isEmpty }
+
+    /// What begins the name of the file that says a step of a read back's undo is owed.
+    static let owedPrefix = ".owed-"
+
+    /// The names of the steps said to be owed in `directory`, by a listing and nothing else:
+    /// no contents to be refused or misread.
+    static func owedNames(in directory: URL) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).sorted()
+            .filter { $0.hasPrefix(owedPrefix) }.map { String($0.dropFirst(owedPrefix.count)) }
+    }
+
+    private func owedFile(_ step: String) -> URL { directory.appendingPathComponent(Self.owedPrefix + step) }
+
+    /// **What an earlier run owed and did not live to do** (#344): the steps named beside the
+    /// index that this run holds no undo for. A lock refused them, and the process ended
+    /// before the device was unlocked. **They cannot be done now** — what was to be put back
+    /// was in that run's memory — and nothing here pretends otherwise: the person is told, in
+    /// the sentence they were given at the time, that the device is neither as it was nor as
+    /// the package says, and which parts.
+    public func leftOwed() -> [String] {
+        let mine = Set(owed.names)
+        return Self.owedNames(in: directory).filter { !mine.contains($0) }
+    }
+
+    /// The person has been told what `leftOwed` named: the names go. Until then no take-away
+    /// and no read back begins.
+    public func toldLeftOwed() {
+        for step in leftOwed() { try? FileManager.default.removeItem(at: owedFile(step)) }
+    }
+
+    /// Does what a lock kept a refused read back from putting back, **where the canary reads
+    /// again** — asked of the canary itself, never of what the system was last heard to say —
+    /// and says whether nothing is owed any more. A step refused again stays owed.
+    ///
+    /// **Where the index was among them, the store is then saved again.** The undo writes
+    /// what the index held when the read back began; the session has gone on since, and what
+    /// it holds now is the store — so that is written over the snapshot, once, by the saver's
+    /// own `resave`. It cannot go round: a save asks nothing of this, and nothing is owed any
+    /// more for that step when it is asked.
+    ///
+    /// **The person is not told that it was done.** They were told at the time that parts
+    /// were not put back; that they since were is written to the log and nowhere they see —
+    /// a gap, known: saying it needs a notice of its own that this does not have.
+    @discardableResult
+    public func finishOwed() async -> Bool {
+        guard !owed.isEmpty else { return true }
+        guard protected.canary() == .reads else { return false }
+        let directory = self.directory
+        let finish: @Sendable () async -> (done: [String], still: Bool) = { [owed] in
+            var still: [Undo] = []
+            var done: [String] = []
+            for step in owed.take() {
+                do {
+                    try await step.run()
+                    done.append(step.name)
+                    try? FileManager.default.removeItem(at: directory.appendingPathComponent(Self.owedPrefix + step.name))
+                } catch {
+                    still.append(step)
+                }
+            }
+            owed.keep(still)
+            return (done, !still.isEmpty)
+        }
+        let result: (done: [String], still: Bool)
+        if let saver {
+            guard let finished = try? await saver.exclusively({ await finish() }) else { return false }
+            result = finished
+            if result.done.contains("index") { try? await saver.resave() }
+        } else {
+            result = await finish()
+        }
+        if !result.done.isEmpty {
+            NetLog.protection.notice("\(result.done.count, privacy: .public) step(s) of a read back's undo, owed since the device locked, were put back")
+        }
+        return !result.still
+    }
+
+    /// Refuses where the device is locked (#344) — the canary beside the index will not be
+    /// read — and where part of an earlier read back is still not put back: said as that,
+    /// naming the parts, and never as a lock on a device that is not locked. Nothing is
+    /// staged, nothing moved, and nothing read as "none" that is only out of reach.
+    private func unlocked() async throws {
+        if protected.canary() == .refused { throw PackageFault.locked }
+        if !(await finishOwed()) { throw PackageFault.unwound(steps: owed.names) }
+        // What an earlier run left owed: said now, if it has not been already — and with
+        // that, told.
+        let left = leftOwed()
+        if !left.isEmpty {
+            toldLeftOwed()
+            throw PackageFault.unwound(steps: left)
+        }
     }
 
     private func commitNow(
@@ -945,12 +1135,21 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         } catch {
             // Newest first, every one tried, and the ones that refused named: the device is
             // then neither as it was nor as the package says, and the sentence must say so.
-            var refused: [String] = []
+            var refused: [Undo] = []
             for step in undo.reversed() {
-                do { try await step.run() } catch { refused.append(step.name) }
+                do { try await step.run() } catch { refused.append(step) }
             }
             if refused.isEmpty { throw error }
-            throw PackageFault.unwound(steps: refused)
+            // **What a lock refused is still owed** (#344), and is not forgotten with this
+            // throw: it is done when the canary reads again (`finishOwed`). Until then the
+            // device is as the sentence says — neither as it was nor as the package says.
+            if protected.canary() == .refused {
+                owed.keep(refused)
+                // And said beside the index, by a name: should the process end before the
+                // device is unlocked, the next launch still knows something was not put back.
+                for step in refused { try? Guarded.write(Data(), to: owedFile(step.name), atomic: false) }
+            }
+            throw PackageFault.unwound(steps: refused.map(\.name))
         }
         // Every step held: what was put aside for putting back goes, explicitly and last.
         for step in settle { step() }
@@ -982,11 +1181,10 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         let manager = FileManager.default
         let target = directory.appendingPathComponent(Self.indexName)
         let aside = directory.appendingPathComponent("\(StoreFile.readBackAsidePrefix)\(UUID().uuidString)", isDirectory: true)
-        try Guarded.makeFolder(aside)
-        // The marker first, and empty: while it is there and says no more, what is in this
-        // folder is the old index, not replaced, and a launch puts it back (`settleHalfCommits`).
-        let marker = aside.appendingPathComponent(Self.committingMarker)
-        try Guarded.write(Data(), to: marker, atomic: false)
+        // The anchor and the state first: while the state says no more than this, what is in
+        // this folder is the old index, not replaced, and a launch puts it back
+        // (`settleHalfCommits`).
+        try Self.begin(aside, as: .aside)
         var moved: [(from: URL, to: URL)] = []
         for suffix in [""] + StoreFile.sidecars {
             let file = directory.appendingPathComponent(Self.indexName + suffix)
@@ -998,28 +1196,29 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         witness?(.movedAside)
         do {
             // Said before it is done: from here an index in place is the package's, whether or
-            // not the commit lives to say it replaced the old one.
-            try Guarded.write(Self.replacingMark, to: marker)
+            // not the commit lives to say it landed.
+            try Self.say(.replacing, of: aside)
             witness?(.replacing)
             try manager.moveItem(at: index, to: target)
             witness?(.movedIn)
-            // Only now is the old index replaced, and the marker says so — whole or not at all,
-            // so a kill here leaves it saying what it said. One that cannot be written leaves the
-            // old index to be put back by a launch, which is the side to err on.
-            try Guarded.write(Self.replacedMark, to: marker)
+            // Landed — and **not yet replaced**: the old index is replaced only when every
+            // step after this one has held too (`settle`, below). A run killed from here on
+            // leaves both stores, and the next launch asks which is the store: it is what
+            // makes a lock in these few steps harmless (#344).
+            try Self.say(.landed, of: aside)
         } catch {
             try? manager.removeItem(at: target)
             for (kept, file) in moved { try? manager.moveItem(at: kept, to: file) }
             try? manager.removeItem(at: aside)
             throw error
         }
-        witness?(.replaced)
+        witness?(.landed)
         let witness = self.witness
         let undo: () async throws -> Void = {
-            // The marker first, whole or not at all: from here the index in place is on its way
-            // out and the aside is the store again. Taken out before the marker said so, a kill
-            // would leave an aside marked replaced beside no index.
-            try Guarded.write(Self.undoingMark, to: marker)
+            // The state first, by one rename: from here the index in place is on its way out
+            // and the aside is the store again. Refused — a lock — nothing has moved and the
+            // state still says landed: both stores are kept, and this stays owed.
+            try Self.say(.undoing, of: aside)
             witness?(.undoing)
             // Refused, the undo stops here with nothing moved: what SQLite kept beside the old
             // index must not come back to lie beside the package's.
@@ -1027,11 +1226,16 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             witness?(.undoneGap)
             // The index itself last, as `settleHalfCommits` puts one back: while the aside still
             // holds it, a launch that finds this half done does the rest.
-            for (kept, file) in moved.reversed() { try manager.moveItem(at: kept, to: file) }
+            for (kept, file) in moved.reversed() where manager.fileExists(atPath: kept.path) {
+                try manager.moveItem(at: kept, to: file)
+            }
             try? manager.removeItem(at: aside)
         }
         let settle: () -> Void = {
-            try? manager.removeItem(at: aside.appendingPathComponent(Self.committingMarker))
+            // Only now, the whole read back having held, is the old index replaced — said, and
+            // then gone. Where it cannot be said the aside stays, landed, and a launch asks.
+            guard (try? Self.say(.replaced, of: aside)) != nil else { return }
+            witness?(.replaced)
             try? manager.removeItem(at: aside)
         }
         return (undo, settle)

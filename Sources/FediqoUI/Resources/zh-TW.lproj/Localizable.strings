@@ -428,6 +428,8 @@
 "carry.refused.storeNotOpened.line" = "讀回會取代一份沒能打開的 store。沒有任何改變。";
 "carry.refused.nothingToTake.title" = "沒有東西可以帶走";
 "carry.refused.nothingToTake.line" = "這次 store 沒有打開，所以沒有東西可以帶走。";
+"carry.refused.locked.title" = "這台裝置已鎖定";
+"carry.refused.locked.line" = "解鎖之前，它保存的內容無法讀取或寫入。沒有任何改變。";
 "store.newer.title" = "這台裝置的索引是較新版的 Fediqo 寫的";
 "store.newer.detail" = "這個版本讀不了它，所以原封不動地留著，也不會在上面存任何東西。用較新版的 Fediqo 開啟，就能看到裡面的內容。";
 "store.newer.ok" = "好";

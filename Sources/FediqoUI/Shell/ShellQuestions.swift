@@ -693,6 +693,9 @@ enum ShellQuestion {
         case .nothingToTake:
             key = "carry.refused.nothingToTake"
             line = L10n.t(key + ".line", language: language)
+        case .locked:
+            key = "carry.refused.locked"
+            line = L10n.t(key + ".line", language: language)
         case .unwound(let steps):
             key = "carry.refused.unwound"
             let named = steps.map { L10n.t("carry.step.\($0)", language: language) }.joined(separator: ", ")
@@ -799,6 +802,8 @@ enum ShellQuestion {
             return carryRefused(.storeNotOpened, language: language)
         case .nothingToTake:
             return carryRefused(.nothingToTake, language: language)
+        case .locked:
+            return carryRefused(.locked, language: language)
         case .notAllowed, .wrongCode, .refusedThere, .lost, .malformed, .unsure, .guessing, .timedOut:
             key = "nearby.refused.\(refusal)"
             line = L10n.t(key + ".line", language: language)
