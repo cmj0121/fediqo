@@ -101,6 +101,9 @@ final class SourceWork {
         /// The hashtags and the links rising on a source, read because the person opened the
         /// page of them or asked again there (#320). Nothing read under it is held.
         case rising
+        /// What the person set at a source for the posts they write there, read as them
+        /// because they opened that source's page (#321). Nothing read under it is held.
+        case ownSettings
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -113,7 +116,7 @@ final class SourceWork {
         /// Everything else reaches wherever a post, a page or a directory points.
         var isOfTheSource: Bool {
             switch self {
-            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising: true
+            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
                  .nearbyMove:

@@ -64,6 +64,7 @@ extension SourceWork.Purpose {
         case .people: "person.2"
         case .serverSays: "doc.plaintext"
         case .rising: "chart.line.uptrend.xyaxis"
+        case .ownSettings: "person.crop.square.filled.and.at.rectangle"
         }
     }
 }

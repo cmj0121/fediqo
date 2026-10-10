@@ -152,6 +152,12 @@ enum LocalServers {
             /// Two of `elsewhere.example`, the second holding its lists hidden.
             let far: Named
             let farHidden: Named
+            /// A sign-in of the writer's for reading posts and nothing else (#321). Nothing in a
+            /// file a seed older than that wrote.
+            struct Token: Decodable {
+                let token: String
+            }
+            let narrow: Token?
             /// The five followers of `person`, in the order the seed made them. With `person` and
             /// `far` they are who the seed lists in the directory (#315).
             let fans: [Named]

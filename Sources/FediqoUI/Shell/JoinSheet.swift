@@ -407,6 +407,9 @@ struct JoinSheet: View {
     /// pages the root holds. Nothing where the sheet is drawn with none: nothing more is then
     /// asked of any source, or drawn.
     var more: ShellSourceMore?
+    /// What the person set at a joined source they are signed in to (#321), asked and kept by
+    /// the pages the root holds. Nothing where the sheet is drawn with none.
+    var you: ShellYouThere?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
@@ -605,6 +608,7 @@ struct JoinSheet: View {
                         if let me = ownPage(at: source.host) { OwnPageLine(me: me, press: { openOwnPage(me) }) }
                     }
                     SourcePreviewView(preview: preview, surface: .sheet, origin: origin)
+                    if case .joined(let source) = origin, let you { YouThereBlock(host: source.host, you: you, session: session) }
                     if case .joined(let source) = origin, let more {
                         SourceMoreBlock(host: source.host, more: more, session: session, onDirectory: directoryPress(at: source.host))
                     }

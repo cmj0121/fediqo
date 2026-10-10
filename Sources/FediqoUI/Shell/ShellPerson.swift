@@ -219,6 +219,10 @@ final class ShellPersonPages {
     /// The hashtags and the links rising on the sources (#320): pages asked the same way,
     /// numbered on the same count, and let go with the same reader.
     let rising: ShellRising
+    /// What the person set at a source for the posts they write there, for that source's own
+    /// page (#321): asked the same way, numbered on the same count, and let go with the same
+    /// reader.
+    let you: ShellYouThere
 
     init() {
         let count = PageErrands(), looks = PageReaders()
@@ -231,10 +235,13 @@ final class ShellPersonPages {
         self.more = more
         let rising = ShellRising(errands: count, readers: looks, hosts: hosts)
         self.rising = rising
+        let you = ShellYouThere(errands: count, readers: looks)
+        self.you = you
         looks.whenChanged { [weak self] host in self?.letGo(at: host) }
         looks.whenChanged { [weak lists] host in lists?.letGo(at: host) }
         looks.whenChanged { [weak more] host in more?.letGo(at: host) }
         looks.whenChanged { [weak rising] host in rising?.letGo(at: host) }
+        looks.whenChanged { [weak you] host in you?.letGo(at: host) }
     }
 
     /// A page opening, as its pane's task is named: who they are **and who asks**, so a page

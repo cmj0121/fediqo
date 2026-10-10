@@ -465,11 +465,22 @@ counted.call(far_hidden, 77, 55, 33)
 # the ordinary way.
 [shown, far, gone, limited, *fans].each { |who| who.update_columns(discoverable: true) unless who.discoverable }
 
+# What the checks of what somebody set here need (#321): one person who set all three things a
+# new post starts from — the one who hides their lists, whom the checks already sign in as and
+# who writes nothing more. The writer sets nothing, and is answered what a server gives then.
+hidden_settings = { "default_privacy" => "unlisted", "default_language" => "zh-TW", "default_sensitive" => true }
+unless hidden_settings.all? { |key, value| hidden.user.settings[key] == value }
+  hidden.user.settings.update(hidden_settings)
+  hidden.user.save!
+end
+
 # Sign-ins the checks of people ask as: the writer's as this app makes it for reading, with and
 # without the word that says how they stand to somebody; and one of the person who hides their
 # lists, who is shown them all the same.
 standing = "#{reading} read:follows"
-people_sign_ins = { "standing" => [user, standing], "hidden" => [hidden.user, "read write"] }.transform_values do |(owner, scopes)|
+# And one of the writer's that lacks the word for reading their own account, which what they
+# set here is refused to (#321).
+people_sign_ins = { "standing" => [user, standing], "hidden" => [hidden.user, "read write"], "narrow" => [user, "read:statuses"] }.transform_values do |(owner, scopes)|
   held = Doorkeeper::AccessToken.find_by(application: grained, resource_owner_id: owner.id, scopes: scopes, revoked_at: nil) ||
     Doorkeeper::AccessToken.create!(application: grained, resource_owner_id: owner.id, scopes: scopes, expires_in: nil)
   { "token" => held.token, "scopes" => scopes }

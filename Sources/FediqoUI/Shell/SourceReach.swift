@@ -178,6 +178,12 @@ struct SourceReach {
         MastodonRising(http: wire(Self.smallAtItsHost(http), for: purpose, within: limit), host: host)
     }
 
+    /// What the person set at a source for the posts they write there (#321), which is only
+    /// ever asked as them, through `door`.
+    func settings(_ door: MastodonAuthorized) -> MastodonSettings {
+        MastodonSettings(door: door)
+    }
+
     /// What is under a tag, as the reader, through `door`.
     func tag(_ door: MastodonAuthorized) -> MastodonTag {
         MastodonTag(door: door)
