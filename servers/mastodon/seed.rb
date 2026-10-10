@@ -285,6 +285,152 @@ asking = Doorkeeper::Application.find_or_create_by!(name: "fediqo-servers-notice
   record.scopes = sign_ins["dismissing"]["scopes"]
 end
 
+# What the checks of what a Mastodon says of a person need (#310, #311): people who are each
+# one thing a page has to say — somebody with a name, words and fields of their own, a locked
+# account, one that hides who it follows, one that moved, one suspended, one limited, a bot
+# with nothing at all, one who blocks the writer — and two who live on another server, which
+# this one knows only part of. Idempotent, as the rest is.
+#
+# **Nobody is told of anything here, and nothing reaches a home or a list.** Follows and the
+# one boost are made in the model, which tells nobody; a post's fan-out is left queued and never
+# run (`tell` runs only the fan-outs it is handed); nobody is mentioned. One post is public and
+# so stands in the public timeline; the rest are unlisted, for followers or for nobody. None of
+# these people follows the writer, so the checks of notices read what they read before.
+wrote = lambda do |who, words, visibility = "unlisted", **more|
+  Status.where(account: who, reblog_of_id: nil).where("text LIKE ?", "%#{words}%").first ||
+    PostStatusService.new.call(who, text: words, visibility: visibility, **more)
+end
+follows = ->(who, whom) { who.follow!(whom) unless who.following?(whom) }
+
+# A picture a name can be partly written in: the smallest PNG there is, one pixel. Said and
+# gone on from where this server cannot make a picture of it — the checks then say so.
+pixel = Base64.decode64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+pictured = lambda do |shortcode, domain|
+  CustomEmoji.find_by(shortcode: shortcode, domain: domain) || begin
+    file = StringIO.new(pixel)
+    file.define_singleton_method(:original_filename) { "#{shortcode}.png" }
+    file.define_singleton_method(:content_type) { "image/png" }
+    CustomEmoji.create!(shortcode: shortcode, domain: domain, image: file)
+  rescue StandardError => e
+    warn "seed: no picture for :#{shortcode}: — #{e.class}: #{e.message}"
+    nil
+  end
+end
+pictured.call("fediqo_mark", nil)
+pictured.call("far_mark", "elsewhere.example")
+
+# Somebody whole: a name partly written in a picture, words that name a hashtag, a person and a
+# link, two fields — one of them checked — and posts of every reach.
+shown = person.call("fediqo_person")
+shown.display_name = "Per :fediqo_mark: Son"
+shown.note = "Reads #fediqo309 beside @fediqo_other :fediqo_mark:\nhttps://example.com/about"
+shown[:fields] = [
+  { "name" => "Site", "value" => "https://example.com/per", "verified_at" => "2026-10-01T00:00:00.000Z" },
+  { "name" => "Pronouns :fediqo_mark:", "value" => "they/them" }
+]
+shown.save! if shown.changed?
+person_posts = (1..5).map { |n| wrote.call(shown, format("fediqo309seed post %02d", n)) }
+person_public = wrote.call(shown, "fediqo309seed in public :fediqo_mark:", "public")
+person_private = wrote.call(shown, "fediqo309seed for followers", "private")
+person_direct = wrote.call(shown, "fediqo309seed for nobody", "direct")
+person_answer = wrote.call(shown, "fediqo309seed answering", thread: person_posts.first)
+# The boost is the row a boost is and no more: the service would queue a notice for its author.
+person_boost = Status.where(account: shown, reblog_of_id: plain.id).first ||
+  shown.statuses.create!(reblog: plain, text: "", visibility: "public")
+
+# Who follows them and whom they follow. With the one who hides their lists and the two who
+# live elsewhere, below, that is eight followers — four full stretches of two, and a fifth with
+# nobody — and four they follow.
+fans = (1..5).map { |n| person.call("fediqo_fan_#{n}") }
+fans.each { |fan| follows.call(fan, shown) }
+fans.first(3).each { |fan| follows.call(shown, fan) }
+follows.call(shown, other)
+
+# One who must agree to be followed, whom the writer has asked.
+locked = person.call("fediqo_locked")
+locked.update!(locked: true) unless locked.locked?
+writer_account.request_follow!(locked) unless writer_account.requested?(locked) || writer_account.following?(locked)
+
+# One who hides who they follow and who follows them — and has both.
+hidden = person.call("fediqo_hidden")
+hidden.update!(hide_collections: true) unless hidden.hide_collections
+fans.first(2).each { |fan| follows.call(fan, hidden) }
+follows.call(hidden, shown)
+wrote.call(hidden, "fediqo309seed hidden")
+
+# One who moved to the first; one this server suspended, who had a post and a follower; one it
+# limited; an automated account with nothing; one who blocks the writer.
+moved = person.call("fediqo_moved")
+moved.update!(moved_to_account: shown) unless moved.moved_to_account_id == shown.id
+gone = person.call("fediqo_gone")
+unless gone.suspended?
+  wrote.call(gone, "fediqo309seed gone")
+  follows.call(fans.first, gone)
+  gone.suspend!(block_email: false)
+end
+limited = person.call("fediqo_limited")
+limited.silence! unless limited.silenced?
+robot = person.call("fediqo_robot")
+robot.update!(actor_type: "Service") unless robot.actor_type == "Service"
+blocker = person.call("fediqo_blocker")
+wrote.call(blocker, "fediqo309seed blocker")
+follows.call(fans.first, blocker)
+blocker.block!(writer_account) unless blocker.blocking?(writer_account)
+
+# How the writer stands to people: they mute one and block another.
+writer_account.mute!(fans[4]) unless writer_account.muting?(fans[4])
+writer_account.block!(fans[3]) unless writer_account.blocking?(fans[3])
+
+# **Two who live on another server**, as this one would hold them once it had heard of them: a
+# name there, counts their own server said, and only the follows and the posts that reached
+# here. Made in the model — nothing is asked of `elsewhere.example`, which does not exist. One
+# says it hides its lists; the other says nothing either way.
+afar = lambda do |username, **more|
+  Account.find_by(username: username, domain: "elsewhere.example") || Account.create!(
+    username: username, domain: "elsewhere.example", protocol: :activitypub, actor_type: "Person",
+    uri: "https://elsewhere.example/users/#{username}", url: "https://elsewhere.example/@#{username}",
+    inbox_url: "https://elsewhere.example/users/#{username}/inbox",
+    shared_inbox_url: "https://elsewhere.example/inbox",
+    outbox_url: "https://elsewhere.example/users/#{username}/outbox",
+    followers_url: "https://elsewhere.example/users/#{username}/followers",
+    **more
+  )
+end
+heard = lambda do |who, n|
+  uri = "#{who.uri}/statuses/#{n}"
+  Status.find_by(uri: uri) || Status.create!(
+    account: who, uri: uri, url: "https://elsewhere.example/@#{who.username}/#{n}",
+    text: "<p>fediqo309seed far #{n}</p>", visibility: :unlisted, language: "en"
+  )
+end
+counted = lambda do |who, followers, following, statuses|
+  stat = who.account_stat
+  stat.update!(followers_count: followers, following_count: following, statuses_count: statuses)
+end
+far = afar.call(
+  "far", display_name: "Far :far_mark: Away", note: "<p>Lives elsewhere :far_mark:</p>",
+  fields: [{ "name" => "Home", "value" => "<a href=\"https://elsewhere.example/far\">elsewhere.example/far</a>" }]
+)
+far_posts = (1..3).map { |n| heard.call(far, n) }
+fans.first(2).each { |fan| follows.call(fan, far) }
+follows.call(far, shown)
+counted.call(far, 2811, 310, 1204)
+far_hidden = afar.call("far_hidden", display_name: "Far Hidden", hide_collections: true)
+follows.call(fans.first, far_hidden)
+follows.call(far_hidden, shown)
+counted.call(far_hidden, 77, 55, 33)
+
+# Sign-ins the checks of people ask as: the writer's as this app makes it for reading, with and
+# without the word that says how they stand to somebody; and one of the person who hides their
+# lists, who is shown them all the same.
+standing = "#{reading} read:follows"
+people_sign_ins = { "standing" => [user, standing], "hidden" => [hidden.user, "read write"] }.transform_values do |(owner, scopes)|
+  held = Doorkeeper::AccessToken.find_by(application: grained, resource_owner_id: owner.id, scopes: scopes, revoked_at: nil) ||
+    Doorkeeper::AccessToken.create!(application: grained, resource_owner_id: owner.id, scopes: scopes, expires_in: nil)
+  { "token" => held.token, "scopes" => scopes }
+end
+named = ->(who) { { "id" => who.id.to_s, "acct" => who.acct } }
+
 more = "/tmp/fediqo-mastodon-tokens.json"
 File.write(more, JSON.generate(tokens.merge(
   # The sign-in page is asked by this id for a scope the registration does not include.
@@ -301,6 +447,17 @@ File.write(more, JSON.generate(tokens.merge(
     "cut" => cut.id.to_s,
     "spare" => spared.call(spares).map { |notice| notice.target_status.id.to_s },
     "held" => waiting.call.map { |request| { "by" => request.from_account.username, "post" => request.last_status_id.to_s } }
+  ),
+  "people" => people_sign_ins.merge(
+    "person" => named.call(shown), "locked" => named.call(locked), "hidden" => named.call(hidden).merge(people_sign_ins["hidden"]),
+    "moved" => named.call(moved), "gone" => named.call(gone), "limited" => named.call(limited),
+    "robot" => named.call(robot), "blocker" => named.call(blocker),
+    "muted" => named.call(fans[4]), "blocked" => named.call(fans[3]),
+    "far" => named.call(far), "farHidden" => named.call(far_hidden),
+    "fans" => fans.map { |fan| named.call(fan) },
+    "posts" => (person_posts + [person_public, person_answer, person_boost]).map { |post| post.id.to_s },
+    "kept" => { "private" => person_private.id.to_s, "direct" => person_direct.id.to_s },
+    "farPosts" => far_posts.map { |post| post.id.to_s }
   )
 )))
 puts "wrote #{more}"

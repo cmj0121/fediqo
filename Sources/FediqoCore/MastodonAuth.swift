@@ -498,6 +498,13 @@ public struct MastodonAuthorized: Sendable {
         try await finish(try await send(path: path, query: query), path: path)
     }
 
+    /// `get(path:query:)`, and beside the body what the answer's `Link` header says: where a
+    /// list that pages by its own word names its next stretch. Nothing where it sent none.
+    public func getLinked(path: String, query: [URLQueryItem] = []) async throws -> (body: Data, link: String?) {
+        let answer = try await send(path: path, query: query)
+        return (try await finish(answer, path: path), answer.link)
+    }
+
     /// A form POST through the same door: the token, the 401 rule, and never off this host.
     public func post(path: String, form: [(String, String)]) async throws -> Data {
         try await post(path: path, form: form, headers: [:])
@@ -536,10 +543,18 @@ public struct MastodonAuthorized: Sendable {
         try await finish(try await send(path: path, method: "DELETE"), path: path)
     }
 
-    private func finish(_ result: (Data, status: Int), path: String) async throws -> Data {
+    /// What one request was answered: its body, its status, and its `Link` header where it
+    /// sent one.
+    private struct Answered {
+        let body: Data
+        let status: Int
+        let link: String?
+    }
+
+    private func finish(_ result: Answered, path: String) async throws -> Data {
         switch result.status {
         case 200..<300:
-            return result.0
+            return result.body
         case 401:
             if path != Self.accountCheck,
                (try? await send(path: Self.accountCheck))?.status != 401
@@ -559,7 +574,7 @@ public struct MastodonAuthorized: Sendable {
         query: [URLQueryItem] = [],
         form: [(String, String)]? = nil,
         headers: [String: String] = [:]
-    ) async throws -> (Data, status: Int) {
+    ) async throws -> Answered {
         guard let url = Host.httpsURL(host: token.host, path: path, query: query) else {
             throw URLError(.badURL)
         }
@@ -571,6 +586,6 @@ public struct MastodonAuthorized: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let form { request.setForm(form) }
         let (body, response) = try await sender.send(request)
-        return (body, response.statusCode)
+        return Answered(body: body, status: response.statusCode, link: response.value(forHTTPHeaderField: "Link"))
     }
 }

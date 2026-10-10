@@ -116,12 +116,51 @@ enum LocalServers {
             let spare: [String]
             let held: [Held]
         }
+        /// The people the seed made for the checks of what a Mastodon says of a person (#309):
+        /// each one thing a page has to say, none of whom a check can make — an account is
+        /// suspended, moved or held as somebody of another server only from inside the server.
+        struct People: Decodable {
+            /// Somebody by the id this server gives them and the `acct` it names them by.
+            struct Named: Decodable {
+                let id: String
+                let acct: String
+            }
+            /// Somebody the checks also sign in as.
+            struct SignedIn: Decodable {
+                let id: String
+                let acct: String
+                let token: String
+            }
+            /// Somebody whole, with eight followers and four they follow.
+            let person: Named
+            let locked: Named
+            /// Hides their lists, and has two followers.
+            let hidden: SignedIn
+            /// Moved to `person`.
+            let moved: Named
+            /// Suspended.
+            let gone: Named
+            /// Limited by this server.
+            let limited: Named
+            /// Automated, with nothing.
+            let robot: Named
+            /// Blocks the writer; has a post and a follower.
+            let blocker: Named
+            /// Followers of `person` the writer mutes and blocks.
+            let muted: Named
+            let blocked: Named
+            /// Two of `elsewhere.example`, the second holding its lists hidden.
+            let far: Named
+            let farHidden: Named
+        }
         let writer: String
         let other: String
         let client: String
         let seeded: Posts
         /// Nothing in a file a seed older than #323 wrote, which the checks of posts still read.
         let notices: Notices?
+        /// Nothing in a file a seed older than #309 wrote.
+        let people: People?
     }
 
     static func seeded() throws -> Seeded {

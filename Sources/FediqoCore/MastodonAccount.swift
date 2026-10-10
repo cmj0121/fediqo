@@ -250,10 +250,14 @@ struct ListDTO: Decodable, Sendable {
 }
 
 extension ListSubscription {
+    /// How long an id may be. A Mastodon's are some eighteen digits, and no server this app
+    /// reads names a thing in more than a few dozen characters.
+    public static let idLength = 64
+
     /// Whether `id` can stand in a signed-in path as one segment. Mastodon's are digits; a
-    /// stranger's server, and a store on disk, are held to that shape rather than trusted with
-    /// the path.
+    /// stranger's server, and a store on disk, are held to that shape — and to a length a name
+    /// has — rather than trusted with the path.
     public static func isPathSegment(_ id: String) -> Bool {
-        !id.isEmpty && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        !id.isEmpty && id.utf8.count <= idLength && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
 }
