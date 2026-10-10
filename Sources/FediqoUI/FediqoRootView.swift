@@ -22,6 +22,9 @@ public struct FediqoRootView: View {
     /// one stack is the honest shape. Held here because leaving it is `Escape` and `q`, and the
     /// keys are read here.
     @State private var walk = ShellWalk()
+    /// What sources say of the people whose pages were opened this run (#310). Beside the walk,
+    /// because the keys that walk a page's rows and read it again are read here.
+    @State private var people = ShellPersonPages()
     /// The line the lamp is on in Notices (#323), and under a finger the line being read
     /// there: that page's own, so walking its lines leaves the timeline's lamp where it was.
     @State private var noticeSelectedID: String?
@@ -106,6 +109,9 @@ public struct FediqoRootView: View {
     #endif
 
     public init(
+        // **A bare `URLSessionClient`, and it must stay one**: `SourceReach.small()` holds an
+        // ask known to be small to its ceiling *as it transfers* only where the plain client
+        // is this type; wrapped in anything else, the ceiling is applied after the body came.
         http: any HTTPClient = URLSessionClient(),
         store: ItemStore = ItemStore(),
         forums: ForumSessions = ForumSessions(),
@@ -1091,7 +1097,8 @@ public struct FediqoRootView: View {
     private var currentListItems: [DummyItem] {
         switch walk.standing {
         case .person(let person):
-            return session.heldPosts(of: person)
+            // What the page draws: the source's posts once it answered, what is held until then.
+            return people.walked(of: person, in: session)
         case .tag(let tag):
             return session.heldPosts(under: tag, latest: prefs.latestDate)
         case .thread(let opened):
@@ -1375,6 +1382,18 @@ public struct FediqoRootView: View {
     /// lamp moves only where the open is allowed, for `openViewer`'s reason: a press that can
     /// open nothing must not move anything either.
     private func openThread(_ id: String) -> Bool {
+        // A post read for somebody's page is no item until it is opened (#310): opening holds
+        // it, and then opens it as any held post opens. One the store will not take opens nothing.
+        if let person = walk.openedPerson, Self.canWalk(place: place, open: openLayers),
+           people.isOnlyOnPage(id, of: person, in: session)
+        {
+            selectedItemID = id
+            Task {
+                guard await people.holding(id, of: person, in: session) != nil, walk.openedPerson == person else { return }
+                _ = openThread(id)
+            }
+            return true
+        }
         // A reblog opens the post it reblogs (#290), and one whose post is not held opens nothing.
         guard Self.canWalk(place: place, open: openLayers), let opened = session.rowOpened(by: id) else {
             return false
@@ -1402,21 +1421,28 @@ public struct FediqoRootView: View {
     /// that pressed it. What is on the wire is the bottom toast, not a plate on the mark.
     ///
     /// **No `default:`**, for `.back`'s reason: a sixth layer has to say what `r` does about it.
-    static func canReload(place: ShellPlace, editing: Bool, hasSources: Bool, open: Set<DummyLayer>) -> Bool {
+    static func canReload(
+        place: ShellPlace, editing: Bool, hasSources: Bool, open: Set<DummyLayer>, personAsked: Bool = false
+    ) -> Bool {
         guard place == .timeline, !editing, hasSources else { return false }
         switch DummyCommand.outermost(of: open) {
         // A search's results are what this device holds, found without asking anybody.
         case .viewer, .shortcuts, .search: return false
-        // **Nothing to ask for on somebody's page**, and that is the whole of 0.4.0's boundary
-        // rather than an oversight: what is drawn there is what this device already holds, and a
-        // reload that went and got more of the world would be 0.5.0 arriving through `r`.
-        case .person: return false
+        // **Nothing to ask for on the page of somebody whose source is not asked who people
+        // are**: what is drawn there is what this device already holds. Where their source says
+        // who they are (#310) the page is its word, and `r` asks it again.
+        case .person: return personAsked
         // A tag's page asks for itself as it opens, and says so there with a way to ask again.
         case .tag: return false
         // A page read out of a post is not a timeline; there is nothing of ours on it to ask for.
         case .link: return false
         case .thread, .selection, nil: return true
         }
+    }
+
+    /// Whether the page in front is somebody's whose source says who people are.
+    private var personAsked: Bool {
+        walk.openedPerson.map { people.canAskAgain($0, in: session) } ?? false
     }
 
     /// `r`: the open thread, or else the selected timeline — and only on what the reader can see,
@@ -1428,8 +1454,14 @@ public struct FediqoRootView: View {
             place: place,
             editing: session.editing != nil,
             hasSources: !session.sources.isEmpty,
-            open: openLayers
+            open: openLayers,
+            personAsked: personAsked
         ) else { return false }
+        // On somebody's page `r` asks their source again: who they are, and their newest posts.
+        if DummyCommand.outermost(of: openLayers) == .person, let person = walk.openedPerson {
+            Task { await people.again(person, in: session) }
+            return true
+        }
         // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
         let opened = walk.openedThread.flatMap(session.held)
         session.reload.press(thread: opened, timeline: session.currentTimeline, in: session)
@@ -2009,11 +2041,13 @@ public struct FediqoRootView: View {
                         place: place,
                         editing: session.editing != nil,
                         hasSources: !session.sources.isEmpty,
-                        open: openLayers
+                        open: openLayers,
+                        personAsked: personAsked
                     ),
                     onReload: { _ = reload() }
                 ),
-                search: search
+                search: search,
+                people: people
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if search.isOpen {

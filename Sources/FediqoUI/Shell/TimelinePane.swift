@@ -67,6 +67,10 @@ struct TimelinePane: View {
     var ways: TimelineWays
     /// While open, its results are the list and the timeline waits under it (#32).
     var search: ShellSearch?
+    /// What sources say of the people whose pages are opened (#310), held by the app beside the
+    /// walk. Nothing where the pane is drawn with none: every page is then what this device
+    /// holds, and nobody is asked.
+    var people: ShellPersonPages?
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
     /// again. Per host and not one counter for the pane: see `waitForCatalogues`.
     @State private var settledHosts: Set<String> = []
@@ -138,8 +142,11 @@ struct TimelinePane: View {
                     posts: session.posts,
                     selectedID: $selectedID,
                     // A row here opens the conversation it belongs to (#122), so the answer mark
-                    // does what it does on the timeline: it opens that conversation first.
-                    acting: acting,
+                    // does what it does on the timeline: it opens that conversation first. A post
+                    // that is on the page only is made an item by the press, and then acts.
+                    acting: { item in
+                        people?.acting(item, of: person, in: session, held: { acting($0) }) ?? acting(item)
+                    },
                     decks: $decks,
                     playback: playback,
                     onPlayRow: onPlayRow,
@@ -147,10 +154,18 @@ struct TimelinePane: View {
                     onTurnRow: onTurnRow,
                     onOpenThread: onOpenThread,
                     jumpToTop: jumpToTop,
-                    onBack: onBack
+                    onBack: onBack,
+                    // What their source says of them, where it says who people are; nothing for
+                    // anybody else, and then this is the page it always was.
+                    said: people?.said(of: person, in: session),
+                    onAskAgain: { Task { await people?.again(person, in: session) } },
+                    onReadOn: { Task { await people?.readOn(person, in: session) } }
                 )
                 // One pane per person, so opening a second face from inside one draws afresh.
                 .id(person.id)
+                // **The ask is the page opening**, once a person a run: who they are and their
+                // newest posts, of the source they were met through and nobody else.
+                .task(id: person.id) { await people?.opened(person, in: session) }
             case .tag(let tag):
                 TagPane(
                     tag: tag,

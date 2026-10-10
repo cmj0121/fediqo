@@ -60,6 +60,7 @@ extension SourceWork.Purpose {
         case .readBack: "square.and.arrow.down"
         case .nearbyMove: "dot.radiowaves.left.and.right"
         case .ownPosts: "person.text.rectangle"
+        case .person: "person.crop.rectangle"
         }
     }
 }

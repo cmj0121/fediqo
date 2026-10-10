@@ -43,11 +43,15 @@ public struct SourceOffers: Hashable, Sendable {
     /// Whether it says what happened to its signed-in reader (#323) — who answered, boosted,
     /// favoured or followed them — so the notices page can ask this source.
     public let notices: Bool
+    /// Whether it says who somebody is when asked (#310) — their words, their fields, what it
+    /// counts of them, and their posts — so somebody's page can be what this source says of
+    /// them, and not only what this device holds of theirs.
+    public let people: Bool
 
     public init(
         timelines: Bool = false, trends: Bool = false, boards: Bool = false, authorsAreItsOwn: Bool = false,
         writes: Bool = false, fields: [SourceField] = [], loadsReferences: Bool = false,
-        saysReaderMarks: Bool = false, saysQuotes: Bool = false, notices: Bool = false
+        saysReaderMarks: Bool = false, saysQuotes: Bool = false, notices: Bool = false, people: Bool = false
     ) {
         self.timelines = timelines
         self.trends = trends
@@ -59,6 +63,7 @@ public struct SourceOffers: Hashable, Sendable {
         self.saysReaderMarks = saysReaderMarks
         self.saysQuotes = saysQuotes
         self.notices = notices
+        self.people = people
     }
 
     /// The field it declares under `name`, or nothing.
@@ -107,7 +112,7 @@ extension ProtocolKind {
             SourceOffers(
                 timelines: true, trends: true, writes: true,
                 fields: [.audience, .language, .covered, .reblog, .reblogOf],
-                loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true
+                loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true
             )
         case .pleroma, .akkoma, .misskey, .pixelfed, .lemmy, .peertube, .friendica, .gotosocial:
             SourceOffers(timelines: true, trends: true)

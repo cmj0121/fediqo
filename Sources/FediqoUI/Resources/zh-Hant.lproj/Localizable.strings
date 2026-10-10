@@ -1507,3 +1507,33 @@
 "work.purpose.ownPosts" = "再送一次之前，先找你的一則貼文";
 "outbox.found.post" = "在 %@ 上找到你的貼文了：它已經發佈，不再在這裡等著。";
 "outbox.found.answer" = "在 %@ 上找到你的回應了：它已經發佈，不再在這裡等著。";
+
+/* P2 — somebody's page as their source says it (#310) */
+"work.purpose.person" = "讀取某個人是誰，以及他們的貼文";
+"person.said.by" = "依 %@ 的說法。";
+"person.said.elsewhere" = "依 %1$@ 的說法。他們住在 %2$@。";
+"person.asking" = "正在向 %1$@ 詢問 %2$@…";
+"person.unheardOf" = "%@ 沒聽過這個人。這台裝置上有的他們的貼文在下面。";
+"person.failed" = "無法向 %1$@ 詢問 %2$@。這台裝置上有的他們的貼文在下面。";
+"person.retry" = "再試一次";
+"person.line.suspended" = "%@ 說這個帳號已被停權。";
+"person.line.moved" = "他們搬到 %@ 了。";
+"person.line.limited" = "%@ 限制了這個帳號。";
+"person.line.locked" = "要先經過同意才能跟隨";
+"person.line.automated" = "自動化帳號。";
+"person.line.group" = "群組帳號。";
+"person.line.partial" = "對住在別處的人，%@ 只知道一部分。";
+"person.count.posts" = "%@ 則貼文";
+"person.count.following" = "跟隨 %@ 人";
+"person.count.followers" = "%@ 位跟隨者";
+"person.posts.none" = "%@ 沒有給出他們的貼文。";
+"person.posts.noneOf" = "%1$@ 算有他們的 %2$@ 則貼文，在這裡一則也沒給。";
+"person.field.checked" = "%@ 確認過這個網址有指回他們";
+"person.foot.more" = "還有更早的貼文，按這裡就會讀取。";
+"person.foot.reading" = "正在讀取更早的貼文…";
+"person.foot.end" = "沒有更早的貼文了：%@ 把會給的都送來了。";
+"person.foot.failed" = "無法從 %@ 讀取更早的貼文。按這裡再試一次。";
+"person.foot.stopped" = "%@ 不再依序給出更早的貼文。清單到這裡為止。";
+"person.again.failed" = "無法再向 %@ 詢問一次。它先前說的仍然都在。";
+"person.again.unheardOf" = "%@ 已經不認得這個人了。它先前說的仍然都在。";
+"person.unheld" = "這則貼文無法留在這台裝置上，所以什麼都沒做。";

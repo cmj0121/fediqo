@@ -111,7 +111,8 @@ struct MastodonPeopleTests {
         #expect(person.emojis.map(\.shortcode) == ["fediqo_mark"])
         #expect(person.emojis.first?.url.host() == Captures.host && person.emojis.first?.staticURL != nil)
         #expect(person.avatarURL?.absoluteString == "https://mastodon.localhost/avatars/original/missing.png")
-        #expect(person.headerURL?.absoluteString == "https://mastodon.localhost/headers/original/missing.png")
+        #expect(person.headerURL == nil, "the plate a Mastodon serves where none was set is no picture of theirs")
+        #expect(try said(#"{"id":"1","acct":"a","header":"https://mastodon.localhost/system/accounts/headers/1/original/a.png"}"#).headerURL != nil)
         #expect(person.words == "Reads #fediqo309 beside @fediqo_other :fediqo_mark:\nhttps://example.com/about")
         #expect(person.fields == [
             Person.Field(name: "Site", value: "https://example.com/per", verifiedAt: MastodonJSON.date(from: "2026-10-01T00:00:00.000+00:00")),
@@ -154,7 +155,8 @@ struct MastodonPeopleTests {
 
         let gone = try said(Captures.gone)
         #expect(gone.suspended && gone.words.isEmpty && gone.fields.isEmpty && gone.handle == "@fediqo_gone@mastodon.localhost")
-        #expect(try !said(Captures.limited).suspended)
+        let limited = try said(Captures.limited)
+        #expect(limited.limited && !limited.suspended && !gone.limited && !moved.limited)
     }
 
     @Test("What a stranger's server sent is made fit where it enters: a name that would turn a line round or run on is one bounded line, their words and their fields are bounded, a picture this device will not fetch is none, and a count that is not a count is one the source did not say")

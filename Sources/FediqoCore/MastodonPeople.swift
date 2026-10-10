@@ -194,6 +194,7 @@ struct AccountDTO: Decodable, Sendable {
     let bot: Lenient<Bool>?
     let group: Lenient<Bool>?
     let suspended: Lenient<Bool>?
+    let limited: Lenient<Bool>?
     let hideCollections: Lenient<Bool>?
     let followersCount: Lenient<Int>?
     let followingCount: Lenient<Int>?
@@ -228,7 +229,7 @@ struct AccountDTO: Decodable, Sendable {
         return Person(
             source: source, accountID: id, handle: StatusDTO.handle(acct, host: source.host),
             name: named.isEmpty ? (username?.value ?? acct) : named,
-            avatarURL: Host.fetchableURL(avatar?.value), headerURL: Host.fetchableURL(header?.value),
+            avatarURL: Host.fetchableURL(avatar?.value), headerURL: Self.picture(header?.value),
             words: HTMLText.plain(Self.cut(note?.value ?? "", to: Self.noteLength)),
             fields: (fields?.value ?? []).lazy.compactMap(\.value).prefix(Person.fieldCount).map {
                 Person.Field(
@@ -248,8 +249,14 @@ struct AccountDTO: Decodable, Sendable {
                 there.id != id && ListSubscription.isPathSegment(there.id) && !there.acct.isEmpty
                     ? Person.Moved(accountID: there.id, handle: StatusDTO.handle(there.acct, host: source.host)) : nil
             },
-            suspended: suspended?.value ?? false
+            suspended: suspended?.value ?? false, limited: limited?.value ?? false
         )
+    }
+
+    /// A picture somebody set, or nothing where the address is the one a Mastodon serves for
+    /// "none set" — `…/missing.png`, a plain plate, which is not a picture of theirs.
+    private static func picture(_ address: String?) -> URL? {
+        Host.fetchableURL(address).flatMap { $0.lastPathComponent == "missing.png" ? nil : $0 }
     }
 
     /// The first `length` scalars of marked-up `text`, **ending where a tag or an entity ends**:

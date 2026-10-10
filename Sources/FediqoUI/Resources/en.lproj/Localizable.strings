@@ -1548,3 +1548,36 @@
 "work.purpose.ownPosts" = "Looking for a post of yours before sending it again";
 "outbox.found.post" = "Your post was found on %@: it had been posted, and is no longer waiting here.";
 "outbox.found.answer" = "Your answer was found on %@: it had been posted, and is no longer waiting here.";
+
+/* P2 — somebody's page as their source says it (#310) */
+"work.purpose.person" = "Reading who someone is, and their posts";
+"person.said.by" = "As %@ says.";
+"person.said.elsewhere" = "As %1$@ says. They live on %2$@.";
+"person.asking" = "Asking %1$@ for %2$@…";
+"person.unheardOf" = "%@ has not heard of them. What this device holds of theirs is below.";
+"person.failed" = "Could not ask %1$@ for %2$@. What this device holds of theirs is below.";
+"person.retry" = "Try again";
+"person.line.suspended" = "%@ says this account is suspended.";
+"person.line.moved" = "They moved to %@.";
+"person.line.limited" = "%@ limits this account.";
+"person.line.locked" = "Asks before anyone may follow";
+"person.line.automated" = "An automated account.";
+"person.line.group" = "A group account.";
+"person.line.partial" = "%@ knows only part of someone who lives elsewhere.";
+"person.count.posts" = "%@ posts";
+"person.count.posts.one" = "%@ post";
+"person.count.following" = "Follows %@";
+"person.count.followers" = "%@ followers";
+"person.count.followers.one" = "%@ follower";
+"person.posts.none" = "%@ gave no posts of theirs.";
+"person.posts.noneOf" = "%1$@ counts %2$@ posts of theirs and gave none of them here.";
+"person.posts.noneOf.one" = "%1$@ counts %2$@ post of theirs and did not give it here.";
+"person.field.checked" = "%@ checked that this address names them back";
+"person.foot.more" = "Older posts can be read. Press here to read them.";
+"person.foot.reading" = "Reading older posts…";
+"person.foot.end" = "No older posts: %@ has sent all it gives.";
+"person.foot.failed" = "Could not read older posts from %@. Press here to try again.";
+"person.foot.stopped" = "%@ stopped handing older posts on in order. The list ends here.";
+"person.again.failed" = "Could not ask %@ again. What it said before is still here.";
+"person.again.unheardOf" = "%@ no longer knows them. What it said before is still here.";
+"person.unheld" = "This post could not be kept on this device, so nothing was done with it.";

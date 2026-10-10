@@ -104,7 +104,7 @@ struct MastodonPeopleSaysTests {
         #expect(person.tally.followers == 8 && person.tally.following == 4)
         #expect(person.tally.posts == raw.object["statuses_count"] as? Int)
         #expect(person.livesHere && !person.hidesLists && !person.locked && person.sort == .person)
-        #expect(person.avatarURL != nil && person.headerURL != nil)
+        #expect(person.avatarURL != nil && person.headerURL == nil, "no header set: the plate is not taken for one")
 
         let nobody = try await ask("/api/v1/accounts/lookup?acct=fediqo_nobody_here")
         #expect(nobody.status == 404 && nobody.object["error"] as? String == "Record not found")
@@ -266,7 +266,7 @@ struct MastodonPeopleSaysTests {
             #expect(unknown.status == 404 && unknown.object["error"] as? String == "Record not found")
         }
         let limited = try await read(seeded.limited.id)
-        #expect(limited.raw.object["limited"] as? Bool == true && !limited.person.suspended)
+        #expect(limited.raw.object["limited"] as? Bool == true && limited.person.limited && !limited.person.suspended)
     }
 
     // MARK: - 5. Nobody there

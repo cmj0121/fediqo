@@ -87,6 +87,9 @@ final class SourceWork {
         /// The person's own newest posts at a source, read once before a text that may have
         /// been posted is sent again (`ShellOutbox`): asked by their press, and nothing landed.
         case ownPosts
+        /// Somebody a source knows and their posts, read for their page because the person
+        /// opened it or read on there (#310). Nothing read under it is held.
+        case person
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -99,7 +102,7 @@ final class SourceWork {
         /// Everything else reaches wherever a post, a page or a directory points.
         var isOfTheSource: Bool {
             switch self {
-            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts: true
+            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
                  .nearbyMove:

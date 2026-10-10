@@ -125,6 +125,9 @@ public struct Person: Hashable, Sendable, Identifiable {
     public let moved: Moved?
     /// Whether the source says the account is suspended: it names them, and says nothing else.
     public let suspended: Bool
+    /// Whether the source says it limits the account: it is given to whoever asks for it by
+    /// name, and kept out of what the source shows unasked.
+    public let limited: Bool
     /// The server they live on, as a host this device could name and reach: the last part of
     /// their handle, lower case, in the one spelling a name that is not ASCII has (`xn--…`).
     /// **A host or nothing.** A handle whose last part is no host — a direction override, a
@@ -142,7 +145,7 @@ public struct Person: Hashable, Sendable, Identifiable {
         source: Source, accountID: String, handle: String, name: String, avatarURL: URL? = nil,
         headerURL: URL? = nil, words: String = "", fields: [Field] = [], emojis: [CustomEmoji] = [],
         tally: Tally = Tally(), hidesLists: Bool = false, locked: Bool = false, sort: Sort = .person,
-        moved: Moved? = nil, suspended: Bool = false
+        moved: Moved? = nil, suspended: Bool = false, limited: Bool = false
     ) {
         self.source = source
         self.accountID = accountID
@@ -162,6 +165,7 @@ public struct Person: Hashable, Sendable, Identifiable {
         self.sort = sort
         self.moved = moved
         self.suspended = suspended
+        self.limited = limited
         home = Self.home(of: handle, at: source)
         lineName = LineText.oneLine(name)
         lineHandle = LineText.oneLine(handle)

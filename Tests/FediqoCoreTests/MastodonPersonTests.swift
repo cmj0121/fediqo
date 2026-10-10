@@ -266,4 +266,27 @@ struct MastodonPersonTests {
         #expect(barren.posts.count == 6 && barren.carried.count == 1, "something new starts the count again, and nothing lands twice")
         #expect(try barren.readingOn(stretches[2]).posts.map(\.statusID) == Self.listed)
     }
+
+    @Test("Reading the newest again puts what is newer above what is held, takes each held post as the source now says it, and leaves how far down was read; where the newest reaches nothing held, the page starts again from it rather than draw a hole nothing marks")
+    func theNewestReadAgain() throws {
+        let stretches = try captured()
+        let held = try PostsRead().readingOn(stretches[1]).readingOn(stretches[2])
+        #expect(held.ended && held.posts.count == 5)
+
+        // The newest stretch reaches the held ones: one of its posts is the first held.
+        var changed = held.posts[0]
+        changed.counts = Counts(replies: 9, reblogs: 9, favourites: 9)
+        let reaching = PostStretch(posts: stretches[0].posts + [changed], carried: stretches[0].carried, next: "5")
+        let renewed = held.renewed(by: reaching)
+        #expect(renewed.posts.map(\.statusID) == Self.listed && renewed.posts[3].counts.favourites == 9)
+        #expect(renewed.carried.count == 1 && renewed.ended && renewed.next == nil, "how far down was read stands")
+        #expect(held.renewed(by: PostStretch(posts: [changed], next: nil)).posts.map(\.statusID) == held.posts.map(\.statusID))
+
+        // It reaches nothing held: start again.
+        let apart = held.renewed(by: stretches[0])
+        #expect(apart.posts.map(\.statusID) == Array(Self.listed.prefix(3)) && apart.next == "117417151807144931" && !apart.ended)
+        #expect(throws: PagingError.notPaging) { _ = try apart.readingOn(PostStretch(posts: stretches[1].posts, next: "117417151807144931")) }
+        #expect(try apart.readingOn(stretches[1]).readingOn(stretches[2]).posts.map(\.statusID) == Self.listed)
+        #expect(PostsRead().renewed(by: stretches[2]).ended)
+    }
 }

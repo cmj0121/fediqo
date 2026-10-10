@@ -14,8 +14,9 @@ struct SourceOffersTests {
         #expect(ProtocolKind.mastodon.offers == SourceOffers(
             timelines: true, trends: true, writes: true,
             fields: [.audience, .language, .covered, .reblog, .reblogOf],
-            loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true
+            loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true
         ))
+        #expect(ProtocolKind.allCases.filter(\.offers.people) == [.mastodon], "only a Mastodon is asked who somebody is")
         for kind in Self.microblogs {
             #expect(kind.offers == SourceOffers(timelines: true, trends: true), "\(kind)")
         }
