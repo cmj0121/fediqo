@@ -129,6 +129,10 @@ final class ShellSession {
     /// What takes this device's store away and reads one back (#247), or nothing where the app
     /// handed none in — a preview, a test — and then Preferences offers neither.
     @ObservationIgnored var carrier: (any StoreCarrier)?
+    /// Whether this run has a store it can write (#344): no where it did not open, is a newer
+    /// build's, or a read back is unsettled. Read by the questions whose answer leaves
+    /// something on this device that a run with a store would have taken off it.
+    @ObservationIgnored var storeWritable = true
     /// The take-away and read-back flow, its steps and its questions.
     let carry: ShellCarry
     /// The file picker for a read back is up.
@@ -3153,7 +3157,7 @@ final class ShellSession {
     func signOutQuestion(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellQuestion.signOut(
             host: host, mastodon: kind(of: host) == .mastodon,
-            hasPassword: forums.hasPassword(host: host), language: language
+            hasPassword: forums.hasPassword(host: host), storeWritable: storeWritable, language: language
         )
     }
 

@@ -774,6 +774,12 @@
 "account.signout.ask.forum.detail" = "這個論壇在這台裝置上的登入狀態會清掉。需要登入才能讀的版塊，要再登入才讀得到。這台裝置為它存的圖片、表情名稱和文章都還在，你選的版塊也在。";
 "account.signout.ask.forum.password.line" = "你會登出，為它存的密碼也會刪掉。";
 "account.signout.ask.forum.password.detail" = "這個論壇在這台裝置上的登入狀態會清掉，為它存的密碼也會從這台裝置的鑰匙圈刪掉。只有密碼不會回來：下次要再打一次。需要登入才能讀的版塊，要再登入才讀得到。這台裝置為它存的圖片、表情名稱和文章都還在，你選的版塊也在。";
+"account.signout.ask.mastodon.unwritten.line" = "登入會交還給這個來源，但 store 裡為它留著的東西暫時還在。";
+"account.signout.ask.mastodon.unwritten.detail" = "這台裝置會忘掉這次登入，並請這個來源結束它。你的首頁和列表不會再讀，也不能再從 Fediqo 發文、回覆、轉發、收藏或加書籤。這次 Fediqo 沒有帶著能寫入的 store 開啟，所以這次登出不會改動 store：它的貼文上你收藏、轉發、加書籤的標記，還有它告訴你的事，會留在這台裝置上，直到 Fediqo 下次帶著 store 開啟。";
+"account.signout.ask.forum.unwritten.line" = "這台裝置會登出這個論壇；為它留著的東西都還在。";
+"account.signout.ask.forum.unwritten.detail" = "這個論壇在這台裝置上的登入狀態會清掉。需要登入才能讀的版塊，要再登入才讀得到。這台裝置為它存的圖片、表情名稱和文章都還在，你選的版塊也在。這次 Fediqo 沒有帶著能寫入的 store 開啟；登出論壇不受這件事影響。";
+"account.signout.ask.forum.password.unwritten.line" = "你會登出，密碼也會刪掉；為它留著的東西都還在。";
+"account.signout.ask.forum.password.unwritten.detail" = "這個論壇在這台裝置上的登入狀態會清掉，為它存的密碼也會從這台裝置的鑰匙圈刪掉。只有密碼不會回來：下次要再打一次。需要登入才能讀的版塊，要再登入才讀得到。這台裝置為它存的圖片、表情名稱和文章都還在，你選的版塊也在。這次 Fediqo 沒有帶著能寫入的 store 開啟；登出論壇不受這件事影響。";
 
 "account.source.boards"          = "%1$d 個版塊：%2$@";
 "account.source.unread"          = "讀不到它的自我介紹。";

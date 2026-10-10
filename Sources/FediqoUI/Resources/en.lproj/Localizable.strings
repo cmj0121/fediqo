@@ -793,6 +793,12 @@
 "account.signout.ask.forum.detail" = "The forum's session on this device goes. Boards that need a sign-in are not read until you sign in again. The pictures, emoji names and posts held from it stay, and so do the boards you picked.";
 "account.signout.ask.forum.password.line" = "You are signed out, and the password saved for it is deleted.";
 "account.signout.ask.forum.password.detail" = "The forum's session on this device goes, and the password saved for it is deleted from this device's Keychain. Only the password does not come back: you type it again next time. Boards that need a sign-in are not read until you sign in again. The pictures, emoji names and posts held from it stay, and so do the boards you picked.";
+"account.signout.ask.mastodon.unwritten.line" = "The sign-in is handed back; what the store holds of it stays for now.";
+"account.signout.ask.mastodon.unwritten.detail" = "This device forgets the sign-in and asks the server to end it. Your Home and your lists are no longer read, and you can no longer post, reply, boost, favourite or bookmark from Fediqo. Fediqo opened without a store it can write this time, so signing out changes nothing in the store this time: the marks for what you favourited, boosted and bookmarked on its posts, and what it told you, stay on this device until Fediqo next opens with its store.";
+"account.signout.ask.forum.unwritten.line" = "You are signed out; what this device holds of the forum stays.";
+"account.signout.ask.forum.unwritten.detail" = "The forum's session on this device goes. Boards that need a sign-in are not read until you sign in again. The pictures, emoji names and posts held from it stay, and so do the boards you picked. Fediqo opened without a store it can write this time; that changes nothing about signing out of a forum.";
+"account.signout.ask.forum.password.unwritten.line" = "You are signed out, the password deleted; what the device holds stays.";
+"account.signout.ask.forum.password.unwritten.detail" = "The forum's session on this device goes, and the password saved for it is deleted from this device's Keychain. Only the password does not come back: you type it again next time. Boards that need a sign-in are not read until you sign in again. The pictures, emoji names and posts held from it stay, and so do the boards you picked. Fediqo opened without a store it can write this time; that changes nothing about signing out of a forum.";
 
 "account.source.boards"          = "%1$d boards: %2$@";
 "account.source.unread"          = "Its description could not be read.";

@@ -268,11 +268,20 @@ enum ShellQuestion {
     /// **Keyed and not destructive, as Clear is and for its reason**: signing in again brings
     /// the sign-in back. **Except where a saved password goes**: that does not come back, so
     /// that sign-out is a loss, drawn and chorded as one.
+    ///
+    /// **Where this run has no store it can write** (`storeWritable` false — it did not open,
+    /// is a newer build's, or a read back is unsettled) the question says so (#344). A
+    /// Mastodon's sign-out then changes nothing in the store: the marks and notices it would
+    /// have taken stay until a run that has one. A forum's never wrote the store, and says
+    /// what stays as it always does. A whole sentence of its own for each kind, never a
+    /// clause joined on.
     static func signOut(
-        host: String, mastodon: Bool, hasPassword: Bool = false, language: DummyLanguage? = nil
+        host: String, mastodon: Bool, hasPassword: Bool = false, storeWritable: Bool = true,
+        language: DummyLanguage? = nil
     ) -> ShellConfirmation {
-        let key = mastodon ? "account.signout.ask.mastodon"
+        let kind = mastodon ? "account.signout.ask.mastodon"
             : hasPassword ? "account.signout.ask.forum.password" : "account.signout.ask.forum"
+        let key = storeWritable ? kind : kind + ".unwritten"
         return ShellConfirmation(
             symbol: "key", title: String(format: L10n.t("account.signout.ask.title", language: language), host),
             line: L10n.t(key + ".line", language: language),

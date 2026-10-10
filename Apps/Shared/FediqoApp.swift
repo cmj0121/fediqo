@@ -439,6 +439,7 @@ private struct Live: View {
                 }
             },
             carrier: launch.carrier,
+            storeWritable: launch.file != nil,
             nearby: NWNearbyLink(), deviceName: Launch.deviceName
         )
         .onChange(of: scenePhase) { _, phase in

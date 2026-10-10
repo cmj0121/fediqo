@@ -129,6 +129,7 @@ public struct FediqoRootView: View {
         storeTrouble: StoreTrouble? = nil,
         storeTroubleAnswered: (@MainActor (StoreTroubleAnswer) -> Void)? = nil,
         carrier: (any StoreCarrier)? = nil,
+        storeWritable: Bool = true,
         nearby: (any NearbyLink)? = nil,
         deviceName: String = "",
         staged: ShellStaged? = nil
@@ -143,6 +144,7 @@ public struct FediqoRootView: View {
         session.persistUnsent = persistUnsent
         session.savesLanded = savesLanded
         session.carrier = carrier
+        session.storeWritable = storeWritable
         session.nearbyLink = nearby
         session.deviceName = deviceName
         session.measureStore = measureStore
