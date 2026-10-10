@@ -42,6 +42,49 @@ struct LimitAccountTests {
         #expect(first.cache.count() == 1, "clearing the account touched the copies")
     }
 
+    @Test("Lines that are there and will not be read are not taken for none: nothing is written over them, and they are read when they can be")
+    func linesThatWillNotBeRead() async throws {
+        let dir = LimitRoom.scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let earlier = [LimitAct(limit: .room, at: origin, posts: 2, copies: 3, sources: [beta.host])]
+        let file = try LimitAccountFile(directory: dir)
+        try file.write(earlier)
+        // As a locked device refuses it: the file is there, and reading it is not allowed.
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.url.path)
+        let session = ShellSession(http: FixtureHTTP(), store: ItemStore(sources: [], notes: []))
+        session.limitStore = file
+        let line = LimitAct(limit: .months, at: origin.addingTimeInterval(60), posts: 1, sources: [alpha.host])
+        await session.record(line)
+        #expect(session.limitAccount == [line], "kept for the run")
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.url.path)
+        #expect(try file.read() == earlier, "a write in place would have replaced the earlier lines with this one")
+        // The next line reads the account first, now that it can, and both are written.
+        let next = LimitAct(limit: .months, at: origin.addingTimeInterval(120), posts: 4, sources: [alpha.host])
+        await session.record(next)
+        #expect(session.limitAccount == [next, line] + earlier)
+        #expect(try file.read() == [next, line] + earlier)
+    }
+
+    @Test("A clear asked while the lines could not be read is owed, and done when they can be: they do not come back")
+    func aClearThatCouldNotBeWritten() async throws {
+        let dir = LimitRoom.scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let earlier = [LimitAct(limit: .room, at: origin, posts: 2, copies: 3, sources: [beta.host])]
+        let file = try LimitAccountFile(directory: dir)
+        try file.write(earlier)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.url.path)
+        let session = ShellSession(http: FixtureHTTP(), store: ItemStore(sources: [], notes: []))
+        session.limitStore = file
+        await session.clearLimitAccount()
+        #expect(session.limitAccount.isEmpty)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.url.path)
+        #expect(try file.read() == earlier, "nothing was written over what could not be read")
+        let line = LimitAct(limit: .months, at: origin.addingTimeInterval(60), posts: 1, sources: [alpha.host])
+        await session.record(line)
+        #expect(session.limitAccount == [line], "the cleared lines did not come back")
+        #expect(try file.read() == [line])
+    }
+
     @Test("After a read back the package's lines are the account, and this device's old lines are not written over them")
     func readBackReplacesTheLines() async throws {
         let dir = LimitRoom.scratch()

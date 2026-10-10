@@ -9,8 +9,10 @@ import Foundation
 /// excluded from backup. One small file rather than a table, because nothing ever queries it: it
 /// is read whole once a launch and written whole each time a limit acts.
 ///
-/// A file that cannot be read — none yet, or one a newer build wrote in a shape this one does
-/// not know — reads as no lines; the next write replaces it.
+/// No file yet, or one a newer build wrote in a shape this one does not know, reads as no lines
+/// and the next write replaces it. **One that is there and will not be read is neither** (#344):
+/// reading throws, and the lines a locked device holds are not written over by a run that
+/// took them for none.
 public struct LimitAccountFile: LimitAccountStore {
     let url: URL
 
@@ -21,9 +23,9 @@ public struct LimitAccountFile: LimitAccountStore {
         url = directory.appendingPathComponent(Self.name)
     }
 
-    public func read() -> [LimitAct] {
-        guard let data = try? Data(contentsOf: url) else { return [] }
-        return LimitAccount.lines(from: data)
+    public func read() throws -> [LimitAct] {
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        return LimitAccount.lines(from: try Data(contentsOf: url))
     }
 
     public func write(_ lines: [LimitAct]) throws {

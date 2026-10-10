@@ -252,24 +252,108 @@ public struct StoreFile: Sendable {
     /// **A read back left unsettled opens nothing** (#292): see `StorePackager.settleHalfCommits`.
     ///
     /// The decision lives here rather than in the app so it can be tested against a real file.
-    public static func open(at directory: URL, now: Date = Date(), busyWait: TimeInterval = StoreFile.busyWait) -> Opened {
-        open(at: directory, now: now) { try StoreFile(at: $0, busyWait: busyWait) }
+    public static func open(
+        at directory: URL, now: Date = Date(), busyWait: TimeInterval = StoreFile.busyWait,
+        protected: ProtectedData = .always, unlocked: Bool = false
+    ) -> Opened {
+        open(at: directory, now: now, protected: protected, unlocked: unlocked) { try StoreFile(at: $0, busyWait: busyWait) }
     }
 
-    /// `open(at:now:busyWait:)`, with the opening itself handed in: the one failure a test
-    /// cannot make a real file give — a disk with no room — is made here instead.
-    static func open(at directory: URL, now: Date, opening: (URL) throws -> StoreFile) -> Opened {
+    /// What `open` reads, in order, each of which may be what fails.
+    private enum Reading: Comparable {
+        case opening, items, unsent, notices
+    }
+
+    /// `open(at:now:busyWait:protected:unlocked:)`, with the opening itself handed in: the
+    /// failures a test cannot make a real file give — a disk with no room, a device that
+    /// locks between two reads — are made here instead.
+    ///
+    /// **A locked device is never read as a damaged store** (#344). No code decides that: a
+    /// lock may report anything, and the system's own flag cannot change while this runs. The
+    /// canary decides — a closed file of the index's class beside it, opened afresh each time:
+    ///
+    /// - **Nothing is classed as damage, and nothing is put aside, unless the canary read
+    ///   before the attempt, read again after the failure, and the read that failed, tried a
+    ///   second time, failed the same way between two good canary reads.**
+    /// - **A canary that refuses is the lock**, and the only thing that is: the answer is
+    ///   `.locked`, nothing is moved, and the launch waits for the unlock (`StoreGate`).
+    /// - **The second try is the read that failed and what follows it, on a connection opened
+    ///   afresh** — refused, then, by what refuses the canary. It never repeats a rebuild, a
+    ///   rename or a put-aside. One that succeeds *is* the open. One that fails another way
+    ///   is said by its own cause, and is never damage.
+    /// - **With no canary** — none could be made, or (`unlocked`) one refuses on a device a
+    ///   person is known to have unlocked — nothing can tell a lock from anything else: the
+    ///   store is opened, and a failure of any kind is one that could not be opened for the
+    ///   moment. Nothing is put aside in such a launch.
+    static func open(
+        at directory: URL, now: Date, protected: ProtectedData = .always, unlocked: Bool = false,
+        opening: (URL) throws -> StoreFile
+    ) -> Opened {
+        let canary: Bool
+        switch protected.canary() {
+        case .reads: canary = true
+        case .none: canary = false
+        case .refused, .closed:
+            guard unlocked else { return Opened(file: nil, trouble: .unreachable(.locked)) }
+            canary = false
+        }
+        /// What a failure is where it may not be called damage: the lock, where the canary
+        /// refuses now; else its own cause, and where that would be damage, out of reach.
+        func notDamage(_ error: any Error) -> Opened {
+            if !unlocked, protected.canary() == .refused { return Opened(file: nil, trouble: .unreachable(.locked)) }
+            if case .unreachable(let why) = cause(of: error) { return Opened(file: nil, trouble: .unreachable(why)) }
+            return Opened(file: nil, trouble: .unreachable(.outOfReach))
+        }
         // A read back's old index is aside here, neither replaced nor put back (#292): the store
         // this device held is that one, and no index is opened or made beside it. The run reads
-        // nothing and saves nothing, and the next launch tries to settle it again.
-        if let unsettled = StorePackager.unsettledReadBack(in: directory) {
-            return Opened(file: nil, trouble: unsettled)
+        // nothing and saves nothing, and the next launch tries to settle it again. Where a
+        // marker will not be read, whether there is one is not known — and nothing is opened.
+        do {
+            if let unsettled = try StorePackager.unsettledReadBack(in: directory) {
+                return Opened(file: nil, trouble: unsettled)
+            }
+        } catch {
+            return notDamage(error)
+        }
+        var file: StoreFile?
+        var snapshot: (sources: [Source], notes: [Note], said: [SourceProfile]) = ([], [], [])
+        var unsent: [Unsent] = []
+        var notices: [NoticeReach] = []
+        var reading = Reading.opening
+        /// Reads from `first` on, over a connection opened afresh.
+        func read(from first: Reading) throws {
+            reading = .opening
+            let opened = try opening(directory)
+            file = opened
+            if first <= .items {
+                reading = .items
+                snapshot = try opened.load()
+            }
+            if first <= .unsent {
+                reading = .unsent
+                unsent = try opened.loadUnsent()
+            }
+            reading = .notices
+            notices = try opened.loadNotices(of: snapshot.sources)
         }
         do {
-            let file = try opening(directory)
-            let snapshot = try file.load()
-            let unsent = try file.loadUnsent()
-            let notices = try file.loadNotices(of: snapshot.sources)
+            do {
+                try read(from: .opening)
+            } catch is Newer {
+                return Opened(file: nil, storeIsNewer: true)
+            } catch let first {
+                guard canary, protected.canary() == .reads else { return notDamage(first) }
+                let failed = reading
+                do {
+                    try read(from: failed)
+                } catch is Newer {
+                    return Opened(file: nil, storeIsNewer: true)
+                } catch let second {
+                    guard protected.canary() == .reads, Self.sameFailure(first, second) else { return notDamage(second) }
+                    throw second
+                }
+            }
+            guard let file else { return Opened(file: nil, trouble: .unreachable(.outOfReach)) }
             // Read, and so not about to be set aside: only now is it rewritten (#292).
             file.scrub()
             // One put aside by a launch that was quit before it could say so is said now — and
@@ -283,21 +367,39 @@ public struct StoreFile: Sendable {
                 unsent: unsent, notices: notices,
                 trouble: untold.isEmpty ? nil : .damaged(replacedBy: restored ? .otherStore : .empty)
             )
-        } catch is Newer {
-            return Opened(file: nil, storeIsNewer: true)
         } catch {
+            // The same failure twice, between good canary reads: what it is, it is.
             switch cause(of: error) {
             case .unreachable(let why):
                 return Opened(file: nil, trouble: .unreachable(why))
             case .damaged:
+                // Nothing holds the damaged index open while it is moved.
+                file = nil
+                // The store the person chose of two (`StorePackager.choose`) is the one that
+                // turned out damaged: the other, kept only until this one had opened and saved,
+                // is the store again. Asked before anything is moved: where its marker will not
+                // be read nothing is, and nothing is made in the damaged one's place — an empty
+                // store made there would, at its first save, take the other with it.
+                let other: URL?
+                do {
+                    other = try StorePackager.displaced(in: directory)
+                } catch {
+                    return notDamage(error)
+                }
+                // Asked once more, directly before anything is moved.
+                guard protected.canary() == .reads else { return notDamage(error) }
                 guard let aside = try? setAside(in: directory, now: now) else {
                     return Opened(file: nil, trouble: .unreachable(.outOfReach))
                 }
-                // The store the person chose of two (`StorePackager.choose`) is the one that
-                // turned out damaged: the other, kept only until this one had opened and saved,
-                // is the store again. Nothing is made in the damaged one's place — the next
-                // launch puts the other back there.
-                if StorePackager.reinstateDisplaced(in: directory) {
+                // Nothing is made in the damaged one's place — the next launch puts the other
+                // back there.
+                if let other {
+                    // **No store is ever made while the other one is kept and still says it
+                    // was chosen against**: the first save of a fresh one would remove it
+                    // (`dropWhatWasReplaced`), and it is the one good store there is.
+                    guard StorePackager.reinstate(other) else {
+                        return Opened(file: nil, setAside: aside, trouble: .unreachable(.putAsideOnly))
+                    }
                     // Written down beside the damaged one, so that the launch that comes to say
                     // it was damaged says what took its place.
                     let base = aside.deletingPathExtension().lastPathComponent
@@ -312,9 +414,22 @@ public struct StoreFile: Sendable {
         }
     }
 
+    /// Whether two failures of one read are the same failure: the same code from SQLite, the
+    /// same kind of row that will not decode, the same error from the system.
+    static func sameFailure(_ first: any Error, _ second: any Error) -> Bool {
+        if let first = first as? DatabaseError, let second = second as? DatabaseError {
+            return first.extendedResultCode == second.extendedResultCode
+        }
+        if first is DatabaseError || second is DatabaseError { return false }
+        let decoding: (any Error) -> Bool = { $0 is DecodingError || $0 is RowDecodingError }
+        if decoding(first) || decoding(second) { return decoding(first) && decoding(second) }
+        let (one, other) = (first as NSError, second as NSError)
+        return one.domain == other.domain && one.code == other.code
+    }
+
     /// `open(at:now:)` on the index this app keeps in Application Support.
-    public static func openApplicationSupport() -> Opened {
-        open(at: applicationSupportDirectory)
+    public static func openApplicationSupport(protected: ProtectedData = .always, unlocked: Bool = false) -> Opened {
+        open(at: applicationSupportDirectory, protected: protected, unlocked: unlocked)
     }
 
     /// Where the index this app keeps lives, and what sits beside it (the limits' account, #251).
@@ -490,7 +605,8 @@ public struct StoreFile: Sendable {
         for name in (try? manager.contentsOfDirectory(atPath: folder.path)) ?? []
         where name.hasPrefix(Self.readBackAsidePrefix) {
             let kept = folder.appendingPathComponent(name)
-            if StorePackager.wasReplaced(kept, in: folder) || StorePackager.wasDisplaced(kept) {
+            // One whose marker will not be read is kept: nothing is known of it.
+            if (try? StorePackager.wasReplaced(kept, in: folder)) == true || (try? StorePackager.wasDisplaced(kept)) == true {
                 try? manager.removeItem(at: kept)
             }
         }

@@ -248,13 +248,16 @@ struct LeftBehindTests {
         // A quit sweeps; a backgrounding drops only the cache, so a sign-in stepped away from
         // survives it; a launch sweeps what an earlier run left, before a sign-in reads it.
         // A Mac's quit, an iPhone's end where the system says so, and its last scene let go.
-        #expect(code.components(separatedBy: "await Launch.shared.end()").count - 1 == 2)
+        // Through the run where there is one (#344): a quit before the store was opened finds
+        // none, and saves and sweeps nothing — it must not be what opens the store.
+        #expect(code.components(separatedBy: "await Launch.shared?.end()").count - 1 == 2)
+        #expect(!code.contains("Launch.shared."), "nothing reaches the run as though it were always there")
         #expect(code.components(separatedBy: "self.endOnce()").count - 1 == 1, "a last scene let go")
         #expect(code.contains("guard ending == nil else { return }"), "the end runs once")
         #expect(code.contains("func applicationWillTerminate(_ application: UIApplication)"))
         #expect(code.contains("UIScene.didDisconnectNotification"))
-        #expect(code.components(separatedBy: "await Launch.shared.pause()").count - 1 == 1)
-        #expect(!code.contains("Launch.shared.saver.flush()"))
+        #expect(code.components(separatedBy: "await Launch.shared?.pause()").count - 1 == 1)
+        #expect(!code.contains("saver.flush()") || code.components(separatedBy: "saver.flush()").count - 1 == 2, "only inside the run's own end and pause")
         let sweep = try #require(code.range(of: "forums.sweepAtLaunch("))
         let signIn = try #require(code.range(of: "forums.signInAgain("))
         #expect(sweep.lowerBound < signIn.lowerBound)

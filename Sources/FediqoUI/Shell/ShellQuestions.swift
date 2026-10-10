@@ -548,7 +548,9 @@ enum ShellQuestion {
             let key = switch why {
             case .inUse: "store.unreachable.inUse"
             case .noRoom: "store.unreachable.noRoom"
-            case .outOfReach: "store.unreachable.outOfReach"
+            // `.locked` is never shown: the launch waits it out. Were it ever to reach here it
+            // is a store that would not open for the moment, and is said as one.
+            case .outOfReach, .locked: "store.unreachable.outOfReach"
             case .readBackInterrupted: "store.unreachable.readBack"
             case .putAsideOnly: "store.unreachable.putAside"
             case .otherComesBack: "store.unreachable.otherBack"

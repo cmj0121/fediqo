@@ -604,6 +604,9 @@ final class ShellSession {
     /// The account has been read from `limitStore` this run; until it has, a line recorded is
     /// written after the read rather than over it.
     @ObservationIgnored var limitAccountLoaded = false
+    /// The person cleared the account while it could not be read (#344): the lines on disk are
+    /// still there, and go when it can be.
+    @ObservationIgnored var limitAccountClearOwed = false
 
     /// The limits' account (#251), newest first: each time a limit acted, which, when, how many
     /// posts and picture copies went, and from which sources. Read from `limitStore` at launch.

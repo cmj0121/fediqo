@@ -237,21 +237,59 @@ public enum Guarded {
         try makeCanary(in: folder, on: .this)
     }
 
-    package static func makeCanary(in folder: URL, on device: Device) throws {
+    package static func makeCanary(in folder: URL, anew: Bool = false, on device: Device) throws {
         let url = folder.appendingPathComponent(canaryName)
         // Only the process's own: a device a test made by hand says where its canary is itself.
         defer { if device.isProcess { state.withLock { $0.canary = url } } }
-        // Where no class is asked for, none is read either, and one that is there stands.
-        if FileManager.default.fileExists(atPath: url.path), device.asks.map({ device.heldNow(url) == $0 }) ?? true { return }
-        // Never asked of itself: it is not there to have taken anything until this has returned.
+        // Where no class is asked for, none is read either, and one that is there stands. So
+        // does one that reads back as no class at all: see below.
+        if !anew, FileManager.default.fileExists(atPath: url.path) {
+            guard let asks = device.asks else { return }
+            let held = device.heldNow(url)
+            if held == asks || held == nil { return }
+        }
+        // Made as the simulator makes anything: written, and what class came of it looked at
+        // here rather than thrown for — there are three answers, and only one is a refusal.
         var alone = device
-        alone.canaryTook = { true }
+        alone.simulated = true
+        alone.count = {}
+        // A file of its own beside it, then one rename over it: whole or not at all, with no
+        // moment in which there is no canary — and nothing of the old one kept, its mode
+        // among what a write in place would carry over.
+        let fresh = folder.appendingPathComponent(canaryName + "-new")
         do {
-            try write(Data([1]), to: url, atomic: true, on: alone)
-        } catch let refused as Refused {
-            // Whether or not one was there before: what was there was at a lesser class too.
-            try? FileManager.default.removeItem(at: url)
-            throw refused
+            try write(Data([1]), to: fresh, atomic: false, on: alone)
+            if let asks = device.asks, !device.simulated {
+                switch device.heldNow(fresh) {
+                case asks:
+                    break
+                case nil:
+                    // **Written, and it reads back as no class at all**: a volume that keeps
+                    // none. Nothing on it is ever closed by a lock, so its canary stands as
+                    // the simulator's does, and is counted. Not what a locked device gives:
+                    // there the class still reads back — seen on a locked Mac, of files at
+                    // either class — and it is the write or the read that is refused.
+                    device.count()
+                default:
+                    // Another, real class: it would read while the index is closed.
+                    throw Refused(name: canaryName)
+                }
+            } else if device.asks != nil, device.heldNow(fresh) != device.asks {
+                device.count()
+            }
+            guard rename(fresh.path, url.path) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            // Held to the class under its own name too: it is the canary that must be at it.
+            if !device.simulated, let asks = device.asks, let held = device.heldNow(url), held != asks {
+                throw Refused(name: canaryName)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: fresh)
+            // A canary left at a lesser class, whether or not this put it there, is worse
+            // than none.
+            if error is Refused, let asks = device.asks, let held = device.heldNow(url), held != asks {
+                try? FileManager.default.removeItem(at: url)
+            }
+            throw error
         }
     }
 
@@ -261,6 +299,87 @@ public enum Guarded {
         let url = folder.appendingPathComponent(canaryName)
         guard FileManager.default.fileExists(atPath: url.path) else { return false }
         return device.asks.map { device.heldNow(url) == $0 } ?? true
+    }
+
+    // MARK: - The probe
+
+    /// What a fresh look at the canary in `folder` finds (`ProtectedData.Canary`).
+    ///
+    /// **The read is the probe.** The canary is a closed file opened afresh, and a closed file
+    /// cannot be opened under lock at either class. Where the class is complete — a phone —
+    /// a scratch file is also made and unlinked beside it, and either refusal is a refusal: at
+    /// complete nothing new can be made under lock either. At unless-open a new file is made
+    /// while locked and says nothing, so a Mac is not asked that.
+    ///
+    /// **Made where there is none, and written anew where it is at another class** — whole, by
+    /// an atomic write over what was there, never removed first: a writer that looked between
+    /// the two would find no canary and take the volume for one that keeps no class. `anew`
+    /// writes it again whatever is there: what is tried once where it will not read on a
+    /// device known to be unlocked.
+    public static func probeCanary(in folder: URL, anew: Bool = false) -> ProtectedData.Canary {
+        probeCanary(in: folder, anew: anew, on: .this)
+    }
+
+    package static func probeCanary(
+        in folder: URL, anew: Bool = false, on device: Device,
+        reading: (URL) throws -> Void = { _ = try Data(contentsOf: $0, options: [.uncached]) }
+    ) -> ProtectedData.Canary {
+        let url = folder.appendingPathComponent(canaryName)
+        var written = false
+        do {
+            // Its folder with it, where this is the first launch there has been: "no folder"
+            // is then one that could not be made, and not one nobody had made yet.
+            try makeFolder(folder, excludedFromBackup: false, on: device)
+            try makeCanary(in: folder, anew: anew, on: device)
+            written = anew
+            // A fresh URL and a fresh descriptor: nothing a run has open is asked.
+            try reading(URL(fileURLWithPath: url.path))
+            if device.phone, let asks = device.asks {
+                let scratch = folder.appendingPathComponent(canaryName + "-probe")
+                defer { try? FileManager.default.removeItem(at: scratch) }
+                try Data([1]).write(to: scratch, options: option(for: asks))
+            }
+            return .reads
+        } catch {
+            // **Written anew a moment ago, and now not to be read**: no fault of a volume or
+            // of a permission lets a write through and then refuses the read of what was
+            // written. It is a locked screen at a class that takes new files — a Mac's.
+            if written, isRefusal(error) { return .closed }
+            return isNothingToWaitFor(error) ? .none : .refused
+        }
+    }
+
+    /// Whether `error` is the system saying no — to a class, or to a file it will not open or
+    /// make.
+    package static func isRefusal(_ error: any Error) -> Bool {
+        if error is Refused { return true }
+        let said = error as NSError
+        return posix(said).map { [EPERM, EACCES].contains($0) }
+            ?? (said.domain == NSCocoaErrorDomain
+                && [CocoaError.fileReadNoPermission.rawValue, CocoaError.fileWriteNoPermission.rawValue].contains(said.code))
+    }
+
+    /// Whether `error` is one of the few things that are plainly not a lock and that no unlock
+    /// will change: no room, no folder to be had, a volume that takes no writes, a quota.
+    /// **A named list, and everything off it is taken for a refusal** — an error nobody here
+    /// knows is waited on, never opened past: with a person in front of an unlocked device a
+    /// refusal reaches the same road anyway, so nothing is stranded by erring this way.
+    package static func isNothingToWaitFor(_ error: any Error) -> Bool {
+        let said = error as NSError
+        if let code = posix(said) { return [ENOSPC, EDQUOT, EROFS, ENOENT, ENOTDIR, EEXIST].contains(code) }
+        let named: [CocoaError.Code] = [
+            .fileWriteOutOfSpace, .fileWriteVolumeReadOnly, .fileNoSuchFile, .fileReadNoSuchFile, .fileWriteFileExists,
+        ]
+        return said.domain == NSCocoaErrorDomain && named.map(\.rawValue).contains(said.code)
+    }
+
+    /// The system's own number for `error`, where it or what lies under it carries one.
+    private static func posix(_ said: NSError) -> Int32? {
+        if said.domain == NSPOSIXErrorDomain { return Int32(said.code) }
+        if let under = said.userInfo[NSUnderlyingErrorKey] as? NSError, under.domain == NSPOSIXErrorDomain {
+            return Int32(under.code)
+        }
+        return nil
     }
 
     // MARK: - A class not taken

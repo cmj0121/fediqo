@@ -119,7 +119,7 @@ struct ReadBackKilledMidwayTests {
         let before = try names(in: dir)
         #expect(!before.contains("index.sqlite"), "the premise: no index where the old one was")
         let aside = try #require(before.first { $0.hasPrefix("incoming-aside-") })
-        #expect(!StorePackager.wasReplaced(dir.appendingPathComponent(aside), in: dir), "the premise: the marker does not say replaced")
+        #expect(try !StorePackager.wasReplaced(dir.appendingPathComponent(aside), in: dir), "the premise: the marker does not say replaced")
 
         let opened = launch(in: dir)
         let file = try #require(opened.file)
@@ -137,7 +137,7 @@ struct ReadBackKilledMidwayTests {
         defer { cleanup() }
         let dir = try #require(copies[.replaced])
         let aside = try #require(try names(in: dir).first { $0.hasPrefix("incoming-aside-") })
-        #expect(StorePackager.wasReplaced(dir.appendingPathComponent(aside), in: dir), "the premise: the marker says replaced")
+        #expect(try StorePackager.wasReplaced(dir.appendingPathComponent(aside), in: dir), "the premise: the marker says replaced")
 
         let opened = launch(in: dir)
         #expect(bodies(opened) == Self.new)
@@ -154,7 +154,7 @@ struct ReadBackKilledMidwayTests {
         let aside = dir.appendingPathComponent(try #require(try names(in: dir).first { $0.hasPrefix("incoming-aside-") }))
         #expect(try Data(contentsOf: aside.appendingPathComponent(StorePackager.committingMarker)) == StorePackager.replacingMark, "the premise")
         #expect(StoreFile.holdsNothing(indexAt: dir.appendingPathComponent("index.sqlite").path) == false, "the premise: the package's index, rows and all")
-        #expect(!StorePackager.wasReplaced(aside, in: dir))
+        #expect(try !StorePackager.wasReplaced(aside, in: dir))
 
         #expect(StorePackager.settleHalfCommits(in: dir) == (putBack: 1, unsettled: 0))
         let opened = launch(in: dir)
@@ -190,7 +190,7 @@ struct ReadBackKilledMidwayTests {
         defer { cleanup() }
         let dir = try #require(copies[.movedAside])
         let before = try names(in: dir)
-        #expect(StorePackager.hasUnsettledReadBack(in: dir))
+        #expect(try StorePackager.hasUnsettledReadBack(in: dir))
 
         // No sweep first: what any path that opened without settling would meet.
         let opened = StoreFile.open(at: dir)
@@ -198,7 +198,7 @@ struct ReadBackKilledMidwayTests {
         #expect(try names(in: dir) == before, "an index was made in the gap")
 
         #expect(bodies(launch(in: dir)) == Self.old)
-        #expect(!StorePackager.hasUnsettledReadBack(in: dir))
+        #expect(try !StorePackager.hasUnsettledReadBack(in: dir))
     }
 
     @Test("An old index that cannot be moved back stays aside with its marker, the run has no index at all, and a launch that can move it finishes")
@@ -303,7 +303,7 @@ struct ReadBackKilledMidwayTests {
         let aside = dir.appendingPathComponent(try asideName(in: dir))
         #expect(try Data(contentsOf: aside.appendingPathComponent(StorePackager.committingMarker)) == StorePackager.undoingMark, "the premise")
         #expect(StoreFile.holdsNothing(indexAt: dir.appendingPathComponent("index.sqlite").path) == false, "the premise: the package's index, rows and all")
-        #expect(!StorePackager.wasReplaced(aside, in: dir))
+        #expect(try !StorePackager.wasReplaced(aside, in: dir))
 
         #expect(bodies(launch(in: dir)) == Self.old)
         #expect(try names(in: dir) == ["index.sqlite", LimitAccountFile.name])
@@ -378,8 +378,8 @@ struct ReadBackKilledMidwayTests {
         try FileManager.default.removeItem(at: dir.appendingPathComponent("index.sqlite"))
         let aside = dir.appendingPathComponent(try asideName(in: dir))
         #expect(try Data(contentsOf: aside.appendingPathComponent(StorePackager.committingMarker)) == StorePackager.replacedMark, "the premise")
-        #expect(!StorePackager.wasReplaced(aside, in: dir))
-        #expect(StorePackager.hasUnsettledReadBack(in: dir))
+        #expect(try !StorePackager.wasReplaced(aside, in: dir))
+        #expect(try StorePackager.hasUnsettledReadBack(in: dir))
         #expect(StoreFile.open(at: dir).file == nil, "an index was made beside the only store there is")
 
         #expect(bodies(launch(in: dir)) == Self.old)

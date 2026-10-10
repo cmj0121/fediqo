@@ -164,12 +164,21 @@ extension ShellSession {
     /// run: a line recorded before this ran is kept ahead of what was read.
     func loadLimitAccount() async {
         guard !limitAccountLoaded else { return }
+        guard let limitStore else {
+            limitAccountLoaded = true
+            return
+        }
+        // There and not to be read — a device that locked — is not "no lines" (#344): the
+        // account stays unread, nothing is written over it (`writeLimitAccount`), and it is
+        // asked again the next time a line is recorded.
+        guard let read = await Task.detached(operation: { try? limitStore.read() }).value else { return }
         limitAccountLoaded = true
-        guard let limitStore else { return }
-        let read = await Task.detached { limitStore.read() }.value
         let recorded = limitAccount
-        limitAccount = Array((recorded + read).prefix(LimitAccount.capacity))
-        if !recorded.isEmpty { await writeLimitAccount() }
+        // Cleared while it could not be read: what was on disk then is what was cleared.
+        let cleared = limitAccountClearOwed
+        limitAccountClearOwed = false
+        limitAccount = Array((recorded + (cleared ? [] : read)).prefix(LimitAccount.capacity))
+        if !recorded.isEmpty || cleared { await writeLimitAccount() }
     }
 
     /// The account as it now is on disk, in place of what this run held (#251): after a read
@@ -186,6 +195,8 @@ extension ShellSession {
     func clearLimitAccount() async {
         await loadLimitAccount()
         limitAccount = []
+        // Not read, so not written over — and the clear is owed until it can be.
+        if !limitAccountLoaded { limitAccountClearOwed = true }
         await writeLimitAccount()
     }
 
@@ -198,7 +209,7 @@ extension ShellSession {
     }
 
     private func writeLimitAccount() async {
-        guard let limitStore else { return }
+        guard limitAccountLoaded, let limitStore else { return }
         let lines = limitAccount
         await Task.detached { try? limitStore.write(lines) }.value
     }

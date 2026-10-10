@@ -249,8 +249,9 @@ struct StoreTroubleTests {
         var asked = 0
         let opened = StoreFile.open(at: dir, now: Date()) { folder in
             asked += 1
-            // The damaged one, and then the one that would have taken its place.
-            if asked == 1 { return try StoreFile(at: folder, busyWait: 0.05) }
+            // The damaged one — asked twice, the second time on a connection opened afresh
+            // (#344) — and then the one that would have taken its place.
+            if asked <= 2 { return try StoreFile(at: folder, busyWait: 0.05) }
             throw DatabaseError(resultCode: .SQLITE_FULL)
         }
         #expect(opened.trouble == .unreachable(.putAsideOnly), "\(String(describing: opened.trouble))")
@@ -445,7 +446,7 @@ struct StoreTroubleTests {
         let other = try Data(contentsOf: aside.appendingPathComponent(index))
 
         StorePackager.choose(.keepInPlace, in: dir)
-        #expect(StorePackager.wasDisplaced(aside))
+        #expect(try StorePackager.wasDisplaced(aside))
         #expect(try Data(contentsOf: aside.appendingPathComponent(index)) == other, "choosing deleted the store not chosen")
 
         sweep(dir)
@@ -468,7 +469,7 @@ struct StoreTroubleTests {
         let kept = try names(dir).filter { $0.hasPrefix("incoming-aside-") }
         #expect(kept.count == 1, "the old aside is settled, and one holds what stood in its place: \(kept)")
         let displaced = dir.appendingPathComponent(try #require(kept.first))
-        #expect(StorePackager.wasDisplaced(displaced))
+        #expect(try StorePackager.wasDisplaced(displaced))
         #expect(try Data(contentsOf: displaced.appendingPathComponent(index)) == standing)
 
         sweep(dir)

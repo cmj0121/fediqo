@@ -504,6 +504,93 @@ struct GuardedNoClassTests {
         #expect(Guarded.Device.real.asks == Guarded.platformClass, "and the real device is still to hand")
     }
 
+    @Test("The probe makes the canary and its folder where there are none, and reads it afresh each time it is asked")
+    func theProbe() throws {
+        let folder = try scratch().appendingPathComponent("Application Support/Fediqo", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder.deletingLastPathComponent().deletingLastPathComponent()) }
+        let canary = folder.appendingPathComponent(Guarded.canaryName)
+        #expect(Guarded.probeCanary(in: folder) == .reads)
+        #expect(try !Data(contentsOf: canary).isEmpty)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path) == [Guarded.canaryName], "nothing left beside it")
+        // There, and not to be read — which is what a lock gives: refused, and not "none".
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: canary.path)
+        #expect(Guarded.probeCanary(in: folder) == .refused)
+        #expect(Guarded.probeCanary(in: folder) == .refused, "asked again, the same: nothing was written over it")
+        // Written anew — a file of its own, moved over the old one whole — it reads.
+        #expect(Guarded.probeCanary(in: folder, anew: true) == .reads)
+        #expect(Guarded.probeCanary(in: folder) == .reads)
+    }
+
+    @Test("Where no canary can be made for a reason that is no refusal, the probe says none — and never refused")
+    func theProbeFindsNone() throws {
+        let root = try scratch()
+        defer { try? FileManager.default.removeItem(at: root) }
+        // No folder, and none to be had: a file stands where it would be.
+        let blocked = root.appendingPathComponent("a-file")
+        try Data("x".utf8).write(to: blocked)
+        #expect(Guarded.probeCanary(in: blocked.appendingPathComponent("Fediqo", isDirectory: true)) == .none)
+        #expect(!Guarded.isRefusal(CocoaError(.fileWriteOutOfSpace)) && !Guarded.isRefusal(CocoaError(.fileNoSuchFile)))
+        #expect(Guarded.isRefusal(Guarded.Refused(name: "x")))
+        #expect(Guarded.isRefusal(CocoaError(.fileReadNoPermission)) && Guarded.isRefusal(CocoaError(.fileWriteNoPermission)))
+        #expect(Guarded.isRefusal(POSIXError(.EPERM)) && Guarded.isRefusal(POSIXError(.EACCES)) && !Guarded.isRefusal(POSIXError(.ENOSPC)))
+        // A folder that takes no new file — which is also what a locked phone gives — refuses.
+        let closed = root.appendingPathComponent("closed", isDirectory: true)
+        try FileManager.default.createDirectory(at: closed, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: closed.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: closed.path) }
+        #expect(Guarded.probeCanary(in: closed) == .refused)
+    }
+
+    @Test("On a volume that keeps no class the canary stands and reads: nothing there is ever closed by a lock")
+    func aVolumeThatKeepsNoClass() throws {
+        let folder = try scratch()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let seen = GuardedGround.Seen()
+        // Every write succeeds, and whatever class is asked reads back as none at all. (The
+        // class asked here is the one a file has anyway, so nothing turns on this machine's lock.)
+        let device = Guarded.Device(
+            asks: .completeUntilFirstUserAuthentication, held: { _ in nil }, canaryTook: { false }, count: { seen.count() }
+        )
+        try Guarded.makeCanary(in: folder, on: device)
+        #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent(Guarded.canaryName).path))
+        #expect(seen.counted == 1, "counted, as a class not taken")
+        #expect(Guarded.probeCanary(in: folder, on: device) == .reads)
+        #expect(seen.counted == 2, "its folder counted too — and the canary left alone once it is there")
+        #expect(Guarded.probeCanary(in: folder, on: device) == .reads)
+        #expect(seen.counted == 3, "asked again: the folder again, and the canary still not rewritten")
+        #expect(!Guarded.canaryTook(in: folder, on: device), "never said to have taken a class it did not")
+        // Another, real class is still a refusal: that canary would read while the index is closed.
+        let other = try scratch()
+        defer { try? FileManager.default.removeItem(at: other) }
+        let lesser = Guarded.Device(asks: .complete, held: { _ in .completeUntilFirstUserAuthentication }, canaryTook: { false }, count: {})
+        var asksNothingReal = lesser
+        asksNothingReal.asking = { throw CocoaError(.featureUnsupported) }
+        #expect(throws: Guarded.Refused(name: Guarded.canaryName)) { try Guarded.makeCanary(in: other, on: asksNothingReal) }
+        #expect(!FileManager.default.fileExists(atPath: other.appendingPathComponent(Guarded.canaryName).path))
+        #expect(Guarded.probeCanary(in: other, on: asksNothingReal) == .refused)
+    }
+
+    @Test("Only what is plainly no lock is 'none'; an error nobody knows is a refusal; written and then not to be read is the lock itself")
+    func whatTheProbeMakesOfAFailure() throws {
+        let folder = try scratch()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let device = Guarded.Device(asks: nil, held: { _ in nil }, canaryTook: { false }, count: {})
+        func probe(anew: Bool = false, _ error: any Error) -> ProtectedData.Canary {
+            Guarded.probeCanary(in: folder, anew: anew, on: device) { _ in throw error }
+        }
+        #expect(probe(POSIXError(.EPERM)) == .refused)
+        #expect(probe(CocoaError(.fileReadNoPermission)) == .refused)
+        #expect(probe(POSIXError(.EIO)) == .refused, "not on the list of what is plainly no lock")
+        #expect(probe(CocoaError(.fileReadCorruptFile)) == .refused)
+        #expect(probe(POSIXError(.ENOSPC)) == .none && probe(POSIXError(.EROFS)) == .none && probe(POSIXError(.EDQUOT)) == .none)
+        #expect(probe(CocoaError(.fileWriteOutOfSpace)) == .none && probe(CocoaError(.fileReadNoSuchFile)) == .none)
+        // Written anew a moment ago — the write went through — and the read of it is refused.
+        #expect(probe(anew: true, POSIXError(.EPERM)) == .closed)
+        #expect(probe(anew: true, CocoaError(.fileReadNoPermission)) == .closed)
+        #expect(probe(anew: true, POSIXError(.ENOSPC)) == .none, "only a refusal is that signature")
+        #expect(Guarded.probeCanary(in: folder, anew: true, on: device) == .reads)
+    }
+
     @Test("Everything is made as the system makes it, and nothing is read back, thrown or counted")
     func plain() throws {
         let folder = try scratch()
@@ -746,7 +833,7 @@ struct GuardedSourceTests {
         let first = try #require(app.range(of: "ProtectedFolders.first()"))
         let rest = try #require(app.range(of: "Task.detached(priority: .utility) { ProtectedFolders.rest() }"))
         let caches = try #require(app.range(of: "MediaCache.caches()"))
-        let opened = try #require(app.range(of: "StoreFile.openApplicationSupport()"))
+        let opened = try #require(app.range(of: "StoreFile.openApplicationSupport(protected: protected, unlocked: unlocked)"))
         #expect(first.lowerBound < caches.lowerBound, "before the first folder of the app's own is made")
         #expect(first.lowerBound < opened.lowerBound)
         #expect(first.lowerBound < rest.lowerBound)

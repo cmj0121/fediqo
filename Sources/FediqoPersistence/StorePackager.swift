@@ -105,9 +105,16 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// temporary directory, a read back's staging under the store's folder, and the copies put
     /// aside while a package's were moved in. Each holds a plaintext index or the pictures, and
     /// none is anything a later run reads. Asked at launch, before the first frame.
+    ///
+    /// **Only where the canary reads** (#344): on a locked device a marker cannot be read and a
+    /// staging cannot be told from the only copy of a store, and in a launch with no canary
+    /// nothing can tell a lock from anything else — so nothing is settled and nothing swept,
+    /// and the next launch that can read does it.
     public static func sweepLeftovers(
-        directory: URL, media: URL?, temporary: URL = FileManager.default.temporaryDirectory
+        directory: URL, media: URL?, temporary: URL = FileManager.default.temporaryDirectory,
+        protected: ProtectedData = .always
     ) {
+        guard protected.canary() == .reads else { return }
         let manager = FileManager.default
         func sweep(_ folder: URL, prefix: String) {
             let names = (try? manager.contentsOfDirectory(atPath: folder.path)) ?? []
@@ -154,9 +161,18 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// (`StoreFile.dropWhatWasReplaced`).
     static let displacedMark = Data("displaced".utf8)
 
+    /// What the marker in `aside` says, or nil where there is no marker. **Throws where it is
+    /// there and will not be read** (#344): a locked device's refusal is not "says nothing",
+    /// and a marker that says nothing is one a launch acts on.
+    static func word(in aside: URL) throws -> Data? {
+        let marker = aside.appendingPathComponent(committingMarker)
+        guard FileManager.default.fileExists(atPath: marker.path) else { return nil }
+        return try Data(contentsOf: marker)
+    }
+
     /// Whether `aside` holds a store the person chose against.
-    static func wasDisplaced(_ aside: URL) -> Bool {
-        (try? Data(contentsOf: aside.appendingPathComponent(committingMarker))) == displacedMark
+    static func wasDisplaced(_ aside: URL) throws -> Bool {
+        try word(in: aside) == displacedMark
     }
 
     /// Whether the old index in `aside` was replaced — the package's index is in its place —
@@ -167,9 +183,18 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// whose new index has gone again, and the aside is then the only store there is. And an
     /// index found in place is not enough without the marker: any run that opened this folder
     /// in between would have made one.
-    static func wasReplaced(_ aside: URL, in directory: URL) -> Bool {
-        (try? Data(contentsOf: aside.appendingPathComponent(committingMarker))) == replacedMark
+    static func wasReplaced(_ aside: URL, in directory: URL) throws -> Bool {
+        try word(in: aside) == replacedMark
             && FileManager.default.fileExists(atPath: directory.appendingPathComponent(indexName).path)
+    }
+
+    /// The folders in `directory` a read back put a store aside in, in a stated order. Throws
+    /// where the folder is there and cannot be listed: "none" is then not known.
+    private static func asides(in directory: URL) throws -> [URL] {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted()
+            .filter { $0.hasPrefix(StoreFile.readBackAsidePrefix) }
+            .map { directory.appendingPathComponent($0) }
     }
 
     /// Whether `directory` holds a read back's old index that is neither replaced nor put back:
@@ -177,35 +202,24 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// could not. **While there is one, no index is opened or made here** (`StoreFile.open`):
     /// the store this device held is aside, and a fresh index made beside it would collect what
     /// a run reads only to be thrown away, or stand in the old one's way, the day it is put back.
-    static func hasUnsettledReadBack(in directory: URL) -> Bool {
-        let manager = FileManager.default
-        let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
-        return names.contains { name in
-            guard name.hasPrefix(StoreFile.readBackAsidePrefix) else { return false }
-            let aside = directory.appendingPathComponent(name)
-            return manager.fileExists(atPath: aside.appendingPathComponent(committingMarker).path)
-                && !wasReplaced(aside, in: directory) && !wasDisplaced(aside)
-        }
+    static func hasUnsettledReadBack(in directory: URL) throws -> Bool {
+        try unsettledAside(in: directory) != nil
     }
 
     /// The first aside in `directory` that is neither replaced, displaced nor put back.
-    private static func unsettledAside(in directory: URL) -> URL? {
-        let manager = FileManager.default
-        let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
-        return names.sorted().lazy.filter { $0.hasPrefix(StoreFile.readBackAsidePrefix) }
-            .map { directory.appendingPathComponent($0) }
-            .first { aside in
-                manager.fileExists(atPath: aside.appendingPathComponent(committingMarker).path)
-                    && !wasReplaced(aside, in: directory) && !wasDisplaced(aside)
-            }
+    private static func unsettledAside(in directory: URL) throws -> URL? {
+        try asides(in: directory).first { aside in
+            try word(in: aside) != nil && !wasReplaced(aside, in: directory) && !wasDisplaced(aside)
+        }
     }
 
     /// What an unsettled read back in `directory` is to the person (#295), or nothing where
     /// there is none: two stores to choose between, where an index stands in the old one's
     /// place — with what can be said of each without opening it to write — and otherwise a
-    /// store that could not be put back.
-    static func unsettledReadBack(in directory: URL) -> StoreTrouble? {
-        guard let aside = unsettledAside(in: directory) else { return nil }
+    /// store that could not be put back. **Throws where a marker will not be read**: whether
+    /// there is one is then not known, and no index is opened on a guess.
+    static func unsettledReadBack(in directory: URL) throws -> StoreTrouble? {
+        guard let aside = try unsettledAside(in: directory) else { return nil }
         let inPlace = directory.appendingPathComponent(indexName)
         guard FileManager.default.fileExists(atPath: inPlace.path) else { return .unreachable(.readBackInterrupted) }
         return .twoStores(
@@ -238,7 +252,8 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     ///   in its place now. A step that fails leaves a state a launch settles or asks about again.
     public static func choose(_ choice: Choice, in directory: URL) {
         let manager = FileManager.default
-        guard let aside = unsettledAside(in: directory) else { return }
+        // A marker that will not be read chooses nothing: the question is asked again.
+        guard let aside = try? unsettledAside(in: directory) else { return }
         switch choice {
         case .keepInPlace:
             try? Guarded.write(displacedMark, to: aside.appendingPathComponent(committingMarker))
@@ -263,16 +278,23 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     /// one: its marker goes back to saying only that it was moved out of the way. Asked when the
     /// store they chose instead proves damaged, before anything is made in its place. Whether
     /// there was one.
-    static func reinstateDisplaced(in directory: URL) -> Bool {
-        let manager = FileManager.default
-        let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
-        for name in names.sorted() where name.hasPrefix(StoreFile.readBackAsidePrefix) {
-            let aside = directory.appendingPathComponent(name)
-            guard wasDisplaced(aside), manager.fileExists(atPath: aside.appendingPathComponent(indexName).path) else { continue }
-            guard (try? Guarded.write(Data(), to: aside.appendingPathComponent(committingMarker))) != nil else { continue }
-            return true
+    static func reinstateDisplaced(in directory: URL) throws -> Bool {
+        guard let aside = try displaced(in: directory) else { return false }
+        return reinstate(aside)
+    }
+
+    /// The store the person chose against, where one is kept: its aside. **Reads only, and
+    /// throws where a marker will not be read** — asked before a damaged store is moved, so
+    /// that a refusal moves nothing and makes nothing (#344).
+    static func displaced(in directory: URL) throws -> URL? {
+        try asides(in: directory).first { aside in
+            try wasDisplaced(aside) && FileManager.default.fileExists(atPath: aside.appendingPathComponent(indexName).path)
         }
-        return false
+    }
+
+    /// `aside`, a store chosen against, made the store to put back: whether its marker was written.
+    static func reinstate(_ aside: URL) -> Bool {
+        (try? Guarded.write(Data(), to: aside.appendingPathComponent(committingMarker))) != nil
     }
 
     /// Settles every read back a run was killed in the middle of (#247, #292), before any index
@@ -326,11 +348,17 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             let aside = directory.appendingPathComponent(name)
             let marker = aside.appendingPathComponent(committingMarker)
             guard manager.fileExists(atPath: marker.path) else { continue }
-            if wasReplaced(aside, in: directory) {
+            // A marker that will not be read settles nothing (#344): refused is not "says
+            // nothing", which would put the old index back over the package's.
+            guard let word = try? Data(contentsOf: marker) else {
+                unsettled += 1
+                continue
+            }
+            if word == replacedMark, manager.fileExists(atPath: target.path) {
                 try? manager.removeItem(at: aside)
                 continue
             }
-            if wasDisplaced(aside) {
+            if word == displacedMark {
                 // A store the person chose against (#295): kept, untouched, until the one they
                 // chose has opened and saved. One that never came to hold its index — a choice
                 // cut short while the index in place was being moved in — hands back what it
@@ -355,7 +383,6 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             }
             // Whether the marker says whose the index in place is: the package's, on its way in
             // or on its way out.
-            let word = try? Data(contentsOf: marker)
             let thePackages = word == replacingMark || word == undoingMark
             if manager.fileExists(atPath: target.path), !thePackages, StoreFile.holdsNothing(indexAt: target.path) != true {
                 unsettled += 1
@@ -521,7 +548,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             Piece(.store, name: Self.indexName, file: index, bytes: indexBytes),
             Piece(.settings, name: "settings", data: try settingsPlist()),
             Piece(.secrets, name: "secrets", data: try secretsJSON(sources: sources)),
-            Piece(.limits, name: Self.limitsName, data: limitsJSON()),
+            Piece(.limits, name: Self.limitsName, data: try limitsJSON()),
         ]
         // What each source last said about itself (#188), one entry a host, so a build that
         // keeps them elsewhere than the index still finds them.
@@ -731,8 +758,14 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
 
     /// The limits' account beside the index (#251) as it is, or an empty account where there is
     /// none: it rides with the store it is about, so the lines still say what went from it.
-    private func limitsJSON() -> Data {
-        (try? Data(contentsOf: directory.appendingPathComponent(LimitAccountFile.name))) ?? Data("[]".utf8)
+    ///
+    /// **Throws where it is there and will not be read** (#344): a package made behind a locked
+    /// screen would otherwise carry an empty account, and lay it over the lines wherever it is
+    /// read back.
+    private func limitsJSON() throws -> Data {
+        let file = directory.appendingPathComponent(LimitAccountFile.name)
+        guard FileManager.default.fileExists(atPath: file.path) else { return Data("[]".utf8) }
+        return try Data(contentsOf: file)
     }
 
     /// The account replaced by the package's, with what was there read first and put back on
@@ -741,7 +774,9 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     private func commitLimits(_ staged: Staged, into undo: inout [Undo]) throws {
         guard let data = staged.limits else { return }
         let target = directory.appendingPathComponent(LimitAccountFile.name)
-        let previous = try? Data(contentsOf: target)
+        // Read, not guessed (#344): taken for none where it would not be read, the undo below
+        // would remove the lines a locked device still holds.
+        let previous = FileManager.default.fileExists(atPath: target.path) ? try Data(contentsOf: target) : nil
         try Guarded.write(data, to: target)
         undo.append(Undo(name: "limits") {
             if let previous { try Guarded.write(previous, to: target) } else { try? FileManager.default.removeItem(at: target) }
