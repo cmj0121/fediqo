@@ -285,6 +285,16 @@ asking = Doorkeeper::Application.find_or_create_by!(name: "fediqo-servers-notice
   record.scopes = sign_ins["dismissing"]["scopes"]
 end
 
+# And this app as it would register itself for every part a sign-in may be asked for, for the
+# checks of how a sign-in is widened through the server's own pages (#347) — made here for the
+# same reason, so those checks register nothing. A token a run of them left live is revoked: a
+# page is shown only where no token of the words asked for lives, and a check looks for the page.
+widening = Doorkeeper::Application.find_or_create_by!(name: "fediqo-servers-signin-ask") do |record|
+  record.redirect_uri = "fediqo://oauth"
+  record.scopes = "#{sign_ins["dismissing"]["scopes"]} read:follows write:follows read:mutes write:mutes"
+end
+Doorkeeper::AccessToken.where(application: widening, revoked_at: nil).update_all(revoked_at: Time.now.utc)
+
 # What the checks of what a Mastodon says of a person need (#310, #311): people who are each
 # one thing a page has to say — somebody with a name, words and fields of their own, a locked
 # account, one that hides who it follows, one that moved, one suspended, one limited, a bot
@@ -448,6 +458,7 @@ File.write(more, JSON.generate(tokens.merge(
     "spare" => spared.call(spares).map { |notice| notice.target_status.id.to_s },
     "held" => waiting.call.map { |request| { "by" => request.from_account.username, "post" => request.last_status_id.to_s } }
   ),
+  "signIn" => { "id" => widening.uid, "secret" => widening.secret, "scopes" => widening.scopes.to_s },
   "people" => people_sign_ins.merge(
     "person" => named.call(shown), "locked" => named.call(locked), "hidden" => named.call(hidden).merge(people_sign_ins["hidden"]),
     "moved" => named.call(moved), "gone" => named.call(gone), "limited" => named.call(limited),

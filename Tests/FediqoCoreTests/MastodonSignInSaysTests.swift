@@ -11,9 +11,11 @@ import Testing
 /// **Passed over where the servers are not up**: the same trait, and `requireHealthy()` is the
 /// first line of every check.
 ///
-/// **Asked gently.** One registration a run, made through this app's `register` and shared by
-/// both checks: this server takes five in ten minutes from anywhere. Every token made here is
-/// revoked before its check ends, so a second run starts where the first did.
+/// **Asked gently.** No registration: this server takes five in ten minutes from anywhere, so
+/// the one every sign-in here starts on is the seed's — made in the server, which holds it to
+/// the scopes it knows as it does one made through its API. Every token made here is revoked
+/// when its check ends, **however it ends** (`revokingWhatItMade`): a page is shown only where
+/// no token of the words asked lives, so one left live would fail the next run.
 @MainActor
 @Suite("What a Mastodon says of widening a sign-in", .enabled(if: LocalServers.requested), .serialized)
 struct MastodonSignInSaysTests {
@@ -22,27 +24,41 @@ struct MastodonSignInSaysTests {
     private static let host = LocalServers.mastodon
     private static let refusedWords = "\(Captures.narrow) read:mutes write:mutes"
 
-    /// The one registration of a run, for every scope a sign-in here asks a part of.
-    private actor Registration {
-        static let shared = Registration()
-        private var made: MastodonApp?
-
-        func app(_ oauth: MastodonOAuth) async throws -> MastodonApp {
-            if let made { return made }
-            let app = try await oauth.register(scopes: Captures.registered)
-            made = app
-            return app
-        }
-    }
-
     private func signer() throws -> MastodonOAuth {
         MastodonOAuth(host: Self.host, sender: try LocalHTTP.client())
     }
 
-    /// The run's registration, asked for `scopes` of what it was registered for.
-    private func app(asking scopes: String) async throws -> MastodonApp {
-        let registered = try await Registration.shared.app(try signer())
-        return MastodonApp(host: Self.host, clientID: registered.clientID, clientSecret: registered.clientSecret, scopes: scopes)
+    /// The seed's registration, asked for `scopes` of what it was registered for.
+    private func app(asking scopes: String) throws -> MastodonApp {
+        let registered = try #require(
+            try LocalServers.seeded().signIn,
+            "servers/.run/mastodon-tokens.json was seeded before this registration was: run `make servers` again"
+        )
+        return MastodonApp(host: Self.host, clientID: registered.id, clientSecret: registered.secret, scopes: scopes)
+    }
+
+    /// The tokens a check made, so that each is revoked when the check ends.
+    private final class Made {
+        private(set) var tokens: [MastodonToken] = []
+
+        func keep(_ token: MastodonToken) -> MastodonToken {
+            tokens.append(token)
+            return token
+        }
+    }
+
+    /// `check`, and then every token it made revoked — whether it returned or threw.
+    private func revokingWhatItMade(_ oauth: MastodonOAuth, _ check: (Made) async throws -> Void) async throws {
+        let made = Made()
+        let thrown: (any Error)?
+        do {
+            try await check(made)
+            thrown = nil
+        } catch {
+            thrown = error
+        }
+        for token in made.tokens { await oauth.revoke(token) }
+        if let thrown { throw thrown }
     }
 
     /// One answer, whole: its status and its body as JSON where it is JSON.
@@ -84,55 +100,56 @@ struct MastodonSignInSaysTests {
         try await LocalServers.requireHealthy()
         let oauth = try signer()
         let pages = Pages(host: Self.host, browser: try LocalHTTP.browser())
+        #expect(Self.words(try #require(try LocalServers.seeded().signIn).scopes) == Self.words(Captures.registered))
         #expect(Self.words(Captures.registered).isSuperset(of: Self.words(Captures.wide)))
+        try await revokingWhatItMade(oauth) { made in
+            // Nobody signed in yet: the page sends them to the door.
+            let closed = try await pages.open(try #require(oauth.authorizeURL(clientID: try app(asking: Captures.narrow).clientID, challenge: "x", state: "s")))
+            #expect(closed.status == 302 && closed.header("Location") == "https://\(Self.host)/auth/sign_in")
+            try await pages.signIn()
 
-        // Nobody signed in yet: the page sends them to the door.
-        let closed = try await pages.open(try #require(oauth.authorizeURL(clientID: try await app(asking: Captures.narrow).clientID, challenge: "x", state: "s")))
-        #expect(closed.status == 302 && closed.header("Location") == "https://\(Self.host)/auth/sign_in")
-        try await pages.signIn()
+            // Less than the registration holds.
+            let narrow = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages))
+            #expect(pages.shown == [Captures.narrow], "the page was shown, asking for the four")
+            #expect(narrow.scopes == Captures.narrow && narrow.asked == Captures.narrow)
+            #expect(try await held(narrow) == Self.words(Captures.narrow))
 
-        // Less than the registration holds.
-        let narrow = try await oauth.signIn(as: try await app(asking: Captures.narrow), through: pages)
-        #expect(pages.shown == [Captures.narrow], "the page was shown, asking for the four")
-        #expect(narrow.scopes == Captures.narrow && narrow.asked == Captures.narrow)
-        #expect(try await held(narrow) == Self.words(Captures.narrow))
+            // Wider, while the narrower lives.
+            let wide = made.keep(try await oauth.signIn(as: try app(asking: Captures.wide), through: pages))
+            #expect(pages.shown == [Captures.narrow, Captures.wide], "shown again for the wider one")
+            #expect(wide.accessToken != narrow.accessToken && wide.scopes == Captures.wide)
+            #expect(try await held(wide) == Self.words(Captures.wide))
+            #expect(try await ask(narrow.accessToken, Self.check).status == 200)
+            #expect(try await ask(wide.accessToken, Self.check).status == 200)
+            let refused = try await ask(narrow.accessToken, Self.standing)
+            #expect(refused.status == 403 && refused.header("WWW-Authenticate")?.contains("read:follows") == true)
+            #expect(try await ask(wide.accessToken, Self.standing).status == 200)
 
-        // Wider, while the narrower lives.
-        let wide = try await oauth.signIn(as: try await app(asking: Captures.wide), through: pages)
-        #expect(pages.shown == [Captures.narrow, Captures.wide], "shown again for the wider one")
-        #expect(wide.accessToken != narrow.accessToken && wide.scopes == Captures.wide)
-        #expect(try await held(wide) == Self.words(Captures.wide))
-        #expect(try await ask(narrow.accessToken, Self.check).status == 200)
-        #expect(try await ask(wide.accessToken, Self.check).status == 200)
-        let refused = try await ask(narrow.accessToken, Self.standing)
-        #expect(refused.status == 403 && refused.header("WWW-Authenticate")?.contains("read:follows") == true)
-        #expect(try await ask(wide.accessToken, Self.standing).status == 200)
+            // The same words again, and in another order: no page, and the same token.
+            let again = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages))
+            let turned = Captures.narrow.split(separator: " ").reversed().joined(separator: " ")
+            let reordered = made.keep(try await oauth.signIn(as: try app(asking: turned), through: pages))
+            #expect(pages.shown == [Captures.narrow, Captures.wide], "sent straight on both times")
+            #expect(again.accessToken == narrow.accessToken && reordered.accessToken == narrow.accessToken)
 
-        // The same words again, and in another order: no page, and the same token.
-        let again = try await oauth.signIn(as: try await app(asking: Captures.narrow), through: pages)
-        let turned = Captures.narrow.split(separator: " ").reversed().joined(separator: " ")
-        let reordered = try await oauth.signIn(as: try await app(asking: turned), through: pages)
-        #expect(pages.shown == [Captures.narrow, Captures.wide], "sent straight on both times")
-        #expect(again.accessToken == narrow.accessToken && reordered.accessToken == narrow.accessToken)
+            // Revoking the wider one takes the wider one.
+            await oauth.revoke(wide)
+            let gone = try await ask(wide.accessToken, Self.check)
+            #expect(gone.status == 401 && gone.error == "The access token was revoked")
+            #expect(gone.header("WWW-Authenticate") == Captures.afterRevokeHeader)
+            #expect(try await ask(narrow.accessToken, Self.check).status == 200)
 
-        // Revoking the wider one takes the wider one.
-        await oauth.revoke(wide)
-        let gone = try await ask(wide.accessToken, Self.check)
-        #expect(gone.status == 401 && gone.error == "The access token was revoked")
-        #expect(gone.header("WWW-Authenticate") == Captures.afterRevokeHeader)
-        #expect(try await ask(narrow.accessToken, Self.check).status == 200)
+            // A wrong secret revokes nothing.
+            await oauth.revoke(MastodonToken(host: Self.host, accessToken: narrow.accessToken, clientID: narrow.clientID, clientSecret: "wrong"))
+            #expect(try await ask(narrow.accessToken, Self.check).status == 200)
 
-        // A wrong secret revokes nothing.
-        await oauth.revoke(MastodonToken(host: Self.host, accessToken: narrow.accessToken, clientID: narrow.clientID, clientSecret: "wrong"))
-        #expect(try await ask(narrow.accessToken, Self.check).status == 200)
-
-        // Revoking the narrower one signs out every holder of that string.
-        await oauth.revoke(narrow)
-        #expect(try await ask(again.accessToken, Self.check).status == 401)
-        let afresh = try await oauth.signIn(as: try await app(asking: Captures.narrow), through: pages)
-        #expect(pages.shown == [Captures.narrow, Captures.wide, Captures.narrow], "no token of those words: the page again")
-        #expect(afresh.accessToken != narrow.accessToken)
-        await oauth.revoke(afresh)
+            // Revoking the narrower one signs out every holder of that string.
+            await oauth.revoke(narrow)
+            #expect(try await ask(again.accessToken, Self.check).status == 401)
+            let afresh = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages))
+            #expect(pages.shown == [Captures.narrow, Captures.wide, Captures.narrow], "no token of those words: the page again")
+            #expect(afresh.accessToken != narrow.accessToken)
+        }
     }
 
     // MARK: - 2. Refused, and outside the registration
@@ -143,27 +160,28 @@ struct MastodonSignInSaysTests {
         let oauth = try signer()
         let pages = Pages(host: Self.host, browser: try LocalHTTP.browser())
         try await pages.signIn()
-        let kept = try await oauth.signIn(as: try await app(asking: Captures.narrow), through: pages)
+        try await revokingWhatItMade(oauth) { made in
+            let kept = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages))
 
-        let refusing = Pages(host: Self.host, browser: pages.browser, answer: .deny)
-        await #expect(throws: MastodonSignInError.denied) {
-            _ = try await oauth.signIn(as: try await app(asking: Self.refusedWords), through: refusing)
-        }
-        #expect(refusing.shown == [Self.refusedWords])
-        let callback = try #require(refusing.callbacks.last)
-        let said = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        #expect(callback.scheme == MastodonOAuth.callbackScheme && said.first { $0.name == "error" }?.value == "access_denied")
-        #expect(said.contains { $0.name == "state" && $0.value?.isEmpty == false } && !said.contains { $0.name == "code" })
-        #expect(try await ask(kept.accessToken, Self.check).status == 200)
+            let refusing = Pages(host: Self.host, browser: pages.browser, answer: .deny)
+            await #expect(throws: MastodonSignInError.denied) {
+                _ = try await oauth.signIn(as: try app(asking: Self.refusedWords), through: refusing)
+            }
+            #expect(refusing.shown == [Self.refusedWords])
+            let callback = try #require(refusing.callbacks.last)
+            let said = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            #expect(callback.scheme == MastodonOAuth.callbackScheme && said.first { $0.name == "error" }?.value == "access_denied")
+            #expect(said.contains { $0.name == "state" && $0.value?.isEmpty == false } && !said.contains { $0.name == "code" })
+            #expect(try await ask(kept.accessToken, Self.check).status == 200)
 
-        let clientID = try await app(asking: Captures.narrow).clientID
-        for scopes in ["\(Captures.narrow) read:blocks", "read", ""] {
-            let page = try await pages.open(try #require(oauth.authorizeURL(clientID: clientID, challenge: "x", state: "s", scopes: scopes)))
-            #expect(page.status == 400 && page.header("Location") == nil, "\(scopes): \(page.status)")
-            #expect(String(decoding: page.body, as: UTF8.self).contains(Captures.outsideScope), "\(scopes)")
+            let clientID = try app(asking: Captures.narrow).clientID
+            for scopes in ["\(Captures.narrow) read:blocks", "read", ""] {
+                let page = try await pages.open(try #require(oauth.authorizeURL(clientID: clientID, challenge: "x", state: "s", scopes: scopes)))
+                #expect(page.status == 400 && page.header("Location") == nil, "\(scopes): \(page.status)")
+                #expect(String(decoding: page.body, as: UTF8.self).contains(Captures.outsideScope), "\(scopes)")
+            }
+            #expect(try await ask(kept.accessToken, Self.check).status == 200)
         }
-        #expect(try await ask(kept.accessToken, Self.check).status == 200)
-        await oauth.revoke(kept)
     }
 
     /// The server's own pages, used as the writer uses them at a browser: signed in with the

@@ -152,6 +152,17 @@ enum LocalServers {
             /// Two of `elsewhere.example`, the second holding its lists hidden.
             let far: Named
             let farHidden: Named
+            /// What `person` wrote that anyone is given, oldest first: five posts, one in public,
+            /// an answer to the first, and a boost.
+            let posts: [String]
+            /// And what only some may see: one for their followers, one for nobody.
+            struct Kept: Decodable {
+                let `private`: String
+                let direct: String
+            }
+            let kept: Kept
+            /// The three posts of `far` this server holds.
+            let farPosts: [String]
         }
         let writer: String
         let other: String
@@ -161,6 +172,9 @@ enum LocalServers {
         let notices: Notices?
         /// Nothing in a file a seed older than #309 wrote.
         let people: People?
+        /// This app as it would register itself for every part a sign-in may be asked for,
+        /// registered by the seed (#347). Nothing in a file an older seed wrote.
+        let signIn: Notices.App?
     }
 
     static func seeded() throws -> Seeded {
