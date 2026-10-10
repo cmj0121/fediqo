@@ -36,7 +36,7 @@ struct TouchTests {
     @Test("Every key the guide names outside App can be done without one")
     func everyTimelineKeyHasATouchPath() {
         let timeline = DummyShortcut.all.filter { $0.group != .app }
-        #expect(timeline.count == 22)
+        #expect(timeline.count == 23)
         let short = timeline.filter { $0.touch == .keysOnly || $0.touch == .partly }.map(\.name)
         #expect(short.isEmpty, "no touch path for: \(short.joined(separator: ", "))")
     }
@@ -215,6 +215,11 @@ struct TouchTests {
             // A list of people is asked again only where its source is one to ask (#311): with
             // nobody said to be, as here, neither mark has anything to do.
             case .people:
+                #expect(!searchable)
+                #expect(!reloadable)
+            // A page of what is rising is asked again only where a source has one (#320): with
+            // none said to, as here, neither mark has anything to do.
+            case .rising:
                 #expect(!searchable)
                 #expect(!reloadable)
             // A page read out of a post is somebody else's page: the search is under it, and it

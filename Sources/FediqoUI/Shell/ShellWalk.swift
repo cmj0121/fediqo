@@ -37,6 +37,10 @@ enum ShellStep: Hashable, Sendable {
     /// from where the source counts them. A row of it opens that person, and leaving their page
     /// gives the row back: both are the walk's own.
     case people(PeopleList)
+    /// The hashtags, or the links, rising on the sources (#320), opened from the head of the
+    /// timeline that reads what is rising. A hashtag's row opens that hashtag's page, and
+    /// leaving it gives the row back: both are the walk's own.
+    case rising(RisingWhich)
 }
 
 /// How far the reader has walked from the stream, and what each step is owed when it is left.

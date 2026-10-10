@@ -216,6 +216,9 @@ final class ShellPersonPages {
     /// asked the same way, numbered on the same count, and let go with the same reader. It
     /// holds the one keeper of what this run knows each host has (`ShellHostsKnown`).
     let more: ShellSourceMore
+    /// The hashtags and the links rising on the sources (#320): pages asked the same way,
+    /// numbered on the same count, and let go with the same reader.
+    let rising: ShellRising
 
     init() {
         let count = PageErrands(), looks = PageReaders()
@@ -223,11 +226,15 @@ final class ShellPersonPages {
         readers = looks
         let lists = ShellPeoplePages(errands: count, readers: looks)
         self.lists = lists
-        let more = ShellSourceMore(errands: count, readers: looks, hosts: ShellHostsKnown(errands: count))
+        let hosts = ShellHostsKnown(errands: count)
+        let more = ShellSourceMore(errands: count, readers: looks, hosts: hosts)
         self.more = more
+        let rising = ShellRising(errands: count, readers: looks, hosts: hosts)
+        self.rising = rising
         looks.whenChanged { [weak self] host in self?.letGo(at: host) }
         looks.whenChanged { [weak lists] host in lists?.letGo(at: host) }
         looks.whenChanged { [weak more] host in more?.letGo(at: host) }
+        looks.whenChanged { [weak rising] host in rising?.letGo(at: host) }
     }
 
     /// A page opening, as its pane's task is named: who they are **and who asks**, so a page

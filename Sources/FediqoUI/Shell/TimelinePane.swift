@@ -77,6 +77,12 @@ struct TimelinePane: View {
     /// A figure on somebody's page that counts a list of people, pressed (#311), answered by
     /// the root: the list is one more step of the walk, and its figure is lit to come back to.
     var onOpenPeople: (PeopleList) -> Void = { _ in }
+    /// One of the two ways at the head of the timeline that reads what is rising, pressed
+    /// (#320), answered by the root: the page of rising hashtags or links is a step of the walk.
+    var onOpenRising: (RisingWhich) -> Void = { _ in }
+    /// A row of such a page opened, answered by the root: a hashtag's page, or a link through
+    /// the door a post's link goes through.
+    var onOpenRisingRow: (RisingRow) -> Void = { _ in }
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
     /// again. Per host and not one counter for the pane: see `waitForCatalogues`.
     @State private var settledHosts: Set<String> = []
@@ -228,6 +234,24 @@ struct TimelinePane: View {
                     // **The ask is the page opening**, once a list a run: its first stretch, of
                     // the source that keeps it and nobody else. Nothing reads on unpressed.
                     .task(id: ShellPeoplePages.opening(list, in: session)) { await people.lists.opened(list, in: session) }
+                } else {
+                    underneath
+                }
+            case .rising(let which):
+                // No source with such a page — the last one removed since — draws the stream.
+                if let rising = people?.rising, let said = rising.said(which, in: session) {
+                    RisingPane(
+                        said: said,
+                        selectedID: $selectedID,
+                        onOpen: onOpenRisingRow,
+                        onAskAgain: { host in Task { await rising.again(which, at: host, in: session) } },
+                        jumpToTop: jumpToTop,
+                        onBack: onBack
+                    )
+                    .id(which)
+                    // **The ask is the page opening**, once a run for each source: one stretch
+                    // of what is rising there, of that source and nobody else.
+                    .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
                 } else {
                     underneath
                 }
@@ -518,7 +542,7 @@ struct TimelinePane: View {
     /// opened over it, or a page read out of a post, which is somebody's own.
     static func page(_ standing: ShellStep?) -> TimelineSwipe.Page {
         switch standing {
-        case .person, .tag, .people, .thread: .opened
+        case .person, .tag, .people, .rising, .thread: .opened
         case .link: .link
         case nil: .timeline
         }
@@ -531,6 +555,7 @@ struct TimelinePane: View {
         case .person(let person): "person:" + person.id
         case .tag(let tag): "tag:" + String(describing: tag)
         case .people(let list): "people:" + list.id
+        case .rising(let which): "rising:" + which.rawValue
         case .link, nil: nil
         }
     }
@@ -553,6 +578,22 @@ struct TimelinePane: View {
     /// miss are the bottom toast, and the distinctions inside empty live on `EmptyNotice`.
     @ViewBuilder
     private var underneath: some View {
+        // The ways to the hashtags and the links rising (#320) stand at the head of the
+        // timeline that reads what is rising, over its posts or over there being none — and
+        // nowhere else: every other timeline is drawn exactly as it was.
+        if people?.rising.offered(on: timeline, searching: searching, in: session) == true {
+            VStack(alignment: .leading, spacing: 0) {
+                RisingLine(onOpen: onOpenRising)
+                ShellRule()
+                stream
+            }
+        } else {
+            stream
+        }
+    }
+
+    @ViewBuilder
+    private var stream: some View {
         // Bound once: the list, each row's rule under it and the jump to the top all read the
         // same rows, and each read of `items` used to ask the session for them again.
         let items = items

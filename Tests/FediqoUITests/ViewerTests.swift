@@ -13,9 +13,9 @@ import Testing
 struct ViewerTests {
     // MARK: The layer order
 
-    @Test("The order is viewer, shortcuts, person, tag, people, thread, link, search, selection")
+    @Test("The order is viewer, shortcuts, person, tag, people, rising, thread, link, search, selection")
     func theOrderIsTheOrder() {
-        #expect(DummyLayer.allCases == [.viewer, .shortcuts, .person, .tag, .people, .thread, .link, .search, .selection])
+        #expect(DummyLayer.allCases == [.viewer, .shortcuts, .person, .tag, .people, .rising, .thread, .link, .search, .selection])
     }
 
     @Test("A dismissing press closes the outermost thing that is open, and only that")
@@ -765,6 +765,7 @@ struct ViewerTests {
             case .person: personOpen != nil
             case .tag: walk.openedTag != nil
             case .people: walk.openedPeople != nil
+            case .rising: walk.openedRising != nil
             case .thread: threadOpen
             case .link: walk.openedLink != nil
             case .search: searchOpen
@@ -881,7 +882,7 @@ struct ViewerTests {
                 // A face is left by both keys, exactly as a conversation is: the page is
                 // something the reader opened, and both `q` and `Escape` take it away. One step
                 // back, whichever kind of step it was — the walk says which (#122).
-                case .person, .tag, .people, .thread, .link:
+                case .person, .tag, .people, .rising, .thread, .link:
                     guard let left = walk.back() else { return false }
                     selected = left.lamp
                     return true

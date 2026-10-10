@@ -81,7 +81,7 @@
 "shortcut.pages" = "輪換左側的地方";
 "shortcut.posts" = "在這份清單裡移動";
 "shortcut.top" = "到這串的頂端";
-"shortcut.expand" = "打開討論串；在「通知」則是打開你所在這則通知說的貼文或人";
+"shortcut.expand" = "打開你所在的那一列；在「通知」則是這則通知說的貼文或人";
 "shortcut.view" = "用整個畫面打開附件";
 "shortcut.play" = "播放附件，或讓它停下來";
 "shortcut.turn" = "換到下一個附件";
@@ -1599,3 +1599,18 @@
 "source.more.newPeople" = "新加入";
 "source.more.unsaid" = "沒有說";
 "source.more.week.spoken" = "起於 %1$@ 的那一週：貼文 %2$@、登入 %3$@、新加入 %4$@。";
+"work.purpose.rising" = "讀取來源上正在竄升的內容";
+"rising.title.tags" = "竄升的主題標籤";
+"rising.title.links" = "竄升的連結";
+"rising.line" = "每個來源自己說的竄升內容。Fediqo 不排名，也不合併。";
+"rising.asking" = "正在詢問 %@…";
+"rising.none.tags" = "%@ 沒有給出任何竄升的主題標籤。";
+"rising.none.links" = "%@ 沒有給出任何竄升的連結。";
+"rising.failed.tags" = "無法向 %@ 詢問竄升的主題標籤。";
+"rising.failed.links" = "無法向 %@ 詢問竄升的連結。";
+"rising.stopped" = "向 %@ 的詢問沒有問完。";
+"rising.use.two" = "兩天內：貼文 %1$@、人數 %2$@。";
+"rising.use.one" = "今天：貼文 %1$@、人數 %2$@。";
+"rising.unsaid" = "沒有說";
+"rising.link.leads" = "通往 %@";
+"shortcut.rising" = "在「趨勢」打開各來源上竄升的主題標籤";

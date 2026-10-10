@@ -81,7 +81,7 @@
 "shortcut.pages" = "Rotate the places";
 "shortcut.posts" = "Move in this list";
 "shortcut.top" = "Top of this thread";
-"shortcut.expand" = "Open the thread; on Notices, open what the notice you are on is about";
+"shortcut.expand" = "Open the row you are on; on Notices, what the notice you are on is about";
 "shortcut.view" = "Open what is attached, at the size of the app";
 "shortcut.play" = "Play what is attached, or stop it";
 "shortcut.turn" = "Turn to the next attachment";
@@ -1643,3 +1643,18 @@
 "source.more.newPeople" = "New people";
 "source.more.unsaid" = "not said";
 "source.more.week.spoken" = "Week of %1$@: posts %2$@, sign-ins %3$@, new people %4$@.";
+"work.purpose.rising" = "Reading what is rising on a source";
+"rising.title.tags" = "Rising hashtags";
+"rising.title.links" = "Rising links";
+"rising.line" = "What each source says is rising on it. Fediqo ranks nothing and merges nothing.";
+"rising.asking" = "Asking %@…";
+"rising.none.tags" = "%@ gave no rising hashtags.";
+"rising.none.links" = "%@ gave no rising links.";
+"rising.failed.tags" = "Could not ask %@ for its rising hashtags.";
+"rising.failed.links" = "Could not ask %@ for its rising links.";
+"rising.stopped" = "%@ was not asked to the end.";
+"rising.use.two" = "Posts %1$@, people %2$@, over two days.";
+"rising.use.one" = "Posts %1$@, people %2$@, today.";
+"rising.unsaid" = "not said";
+"rising.link.leads" = "leads to %@";
+"shortcut.rising" = "On Trends, open the hashtags rising on your sources";

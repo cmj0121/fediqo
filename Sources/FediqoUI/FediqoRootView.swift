@@ -624,7 +624,7 @@ public struct FediqoRootView: View {
             // One step back, whichever kind of step it was. The two lines used to be two
             // methods over two pieces of state; they are one walk now, and unwinding it in the
             // order the reader walked is the whole of what a press to leave does (#122).
-            case .person, .tag, .people, .thread, .link: return leaveWalk()
+            case .person, .tag, .people, .rising, .thread, .link: return leaveWalk()
             case .search, .shortcuts, .selection, nil: return false
             }
         case .reload:
@@ -660,6 +660,8 @@ public struct FediqoRootView: View {
             return openTagFocused()
         case .openQuote:
             return onFocusedItem { openQuote(of: $0) }
+        case .openRising:
+            return openRisingByKey()
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -700,7 +702,7 @@ public struct FediqoRootView: View {
             case .shortcuts:
                 showingShortcuts = false
                 return true
-            case .person, .tag, .people, .thread, .link: return leaveWalk()
+            case .person, .tag, .people, .rising, .thread, .link: return leaveWalk()
             case .search:
                 closeSearch()
                 return true
@@ -717,7 +719,7 @@ public struct FediqoRootView: View {
     /// drawn only there, so on Usage or Preferences they are open but not on screen, and a press
     /// that unwound them there would change nothing the reader can see (#239).
     static func escapeSees(_ open: Set<DummyLayer>, place: ShellPlace) -> Set<DummyLayer> {
-        place == .timeline ? open : open.subtracting([.person, .tag, .people, .thread, .link, .search])
+        place == .timeline ? open : open.subtracting([.person, .tag, .people, .rising, .thread, .link, .search])
     }
 
     /// What is open, in the order a press to leave takes it away. See `DummyLayer`.
@@ -745,6 +747,7 @@ public struct FediqoRootView: View {
         // most one of them, and `DummyCommand.canWalk` asks about the pair rather than either.
         case .person: walk.openedPerson != nil
         case .people: walk.openedPeople != nil
+        case .rising: walk.openedRising != nil
         case .tag: walk.openedTag != nil
         case .thread: walk.openedThread != nil
         case .link: walk.openedLink != nil
@@ -1131,6 +1134,9 @@ public struct FediqoRootView: View {
         // (`currentListIDs`), and no mark of a post acts on one.
         case .people:
             return []
+        // Nor has a page of what is rising: its rows are hashtags and links.
+        case .rising:
+            return []
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems }
             return session.conversations.conversation(around: item).inOrder
@@ -1147,6 +1153,7 @@ public struct FediqoRootView: View {
         // On a list of people the rows are the people the source gave, as the page draws them;
         // on somebody's page the figures that open such a list stand over their posts (#311).
         let ids = walk.openedPeople.map { people.lists.walked($0, in: session) }
+            ?? walk.openedRising.map { people.rising.walked($0, in: session) }
             ?? walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }
             ?? currentListItems.map(\.id)
         return ids.isEmpty ? nil : ids
@@ -1185,7 +1192,7 @@ public struct FediqoRootView: View {
         // A page read out of a post is somebody else's page, and its top is its own business.
         case .link:
             return false
-        case .person, .tag, .people, .thread, nil:
+        case .person, .tag, .people, .rising, .thread, nil:
             guard let first = rows?.first else { return false }
             selected = first
         }
@@ -1422,6 +1429,11 @@ public struct FediqoRootView: View {
     /// lamp moves only where the open is allowed, for `openViewer`'s reason: a press that can
     /// open nothing must not move anything either.
     private func openThread(_ id: String) -> Bool {
+        // On a page of what is rising the row the lamp is on is a hashtag or a link (#320).
+        if let which = walk.openedRising {
+            guard let row = people.rising.row(id, of: which, in: session) else { return false }
+            return openRisingRow(row)
+        }
         // On a list of people the row the lamp is on is somebody (#311): Return opens them.
         if let list = walk.openedPeople {
             guard let person = people.lists.person(id, on: list, in: session) else { return false }
@@ -1481,7 +1493,8 @@ public struct FediqoRootView: View {
         // are**: what is drawn there is what this device already holds. Where their source says
         // who they are (#310) the page is its word, and `r` asks it again.
         // And a list of people is its source's word too (#311): `r` asks it from the top.
-        case .person, .people: return personAsked
+        // And a page of what is rising is its sources' word (#320): `r` asks them again.
+        case .person, .people, .rising: return personAsked
         // A tag's page asks for itself as it opens, and says so there with a way to ask again.
         case .tag: return false
         // A page read out of a post is not a timeline; there is nothing of ours on it to ask for.
@@ -1493,6 +1506,7 @@ public struct FediqoRootView: View {
     /// Whether the page in front is somebody's whose source says who people are.
     private var personAsked: Bool {
         if let list = walk.openedPeople { return people.lists.canAskAgain(list, in: session) }
+        if let which = walk.openedRising { return people.rising.canAskAgain(which, in: session) }
         return walk.openedPerson.map { people.canAskAgain($0, in: session) } ?? false
     }
 
@@ -1516,6 +1530,11 @@ public struct FediqoRootView: View {
         // On a list of people `r` asks the source for it again, from the top (#311).
         if DummyCommand.outermost(of: openLayers) == .people, let list = walk.openedPeople {
             Task { await people.lists.again(list, in: session) }
+            return true
+        }
+        // On a page of what is rising `r` asks every source of it again (#320).
+        if DummyCommand.outermost(of: openLayers) == .rising, let which = walk.openedRising {
+            Task { await people.rising.again(which, in: session) }
             return true
         }
         // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
@@ -1793,6 +1812,40 @@ public struct FediqoRootView: View {
         guard Self.canWalk(place: place, open: openLayers) else { return false }
         selectedItemID = person.id
         return walk.walk(to: .person(DummyPerson(person)), from: person.id)
+    }
+
+    // MARK: - What is rising — #320
+
+    /// One of the two ways at the head of the timeline that reads what is rising, pressed: the
+    /// page of rising hashtags or links, one more step of the walk. The lamp is not moved: the
+    /// line is not a row, and the walk keeps the row to hand back.
+    private func openRising(_ which: RisingWhich) -> Bool {
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        return walk.walk(to: .rising(which), from: selectedItemID)
+    }
+
+    /// `h`: the rising hashtags, where the stream they are offered over is in front.
+    private func openRisingByKey() -> Bool {
+        guard people.rising.opensByKey(place: place, open: openLayers, timeline: session.currentTimeline, in: session)
+        else { return false }
+        return openRising(.tags)
+    }
+
+    /// A row of such a page opened. **The lamp and the step in one turn**, as a post's row
+    /// opens: a hashtag is the page a hashtag pressed in a post's words opens, and a link goes
+    /// through the door a post's link goes through, listed under the source that named it.
+    private func openRisingRow(_ row: RisingRow) -> Bool {
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        // Lit first, so the step taken remembers this row — and put back where nothing opened.
+        let before = selectedItemID
+        selectedItemID = row.id
+        let opened: Bool
+        switch row {
+        case .tag(let tag, _): opened = openTag(tag.tag, from: row.id)
+        case .link(let link, let source): opened = linkReader.open(link.link.url, from: source)
+        }
+        selectedItemID = ShellRising.lamp(after: opened, of: row, before: before)
+        return opened
     }
 
     /// "Your page there" on Account, and "Signed in as …" on a source's page: the signed-in
@@ -2149,7 +2202,9 @@ public struct FediqoRootView: View {
                 search: search,
                 people: people,
                 onOpenListed: { _ = openListed($0) },
-                onOpenPeople: { _ = openPeople($0) }
+                onOpenPeople: { _ = openPeople($0) },
+                onOpenRising: { _ = openRising($0) },
+                onOpenRisingRow: { _ = openRisingRow($0) }
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if search.isOpen {

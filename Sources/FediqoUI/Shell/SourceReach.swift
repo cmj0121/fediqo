@@ -158,6 +158,13 @@ struct SourceReach {
         MastodonHostMore(http: wire(Self.smallAtItsHost(http), for: purpose, within: limit), host: host)
     }
 
+    /// The hashtags and the links rising on a host (#320), with no token: anyone is given
+    /// them. Listed as `purpose`, ended within `limit`, under the small body's ceiling, and of
+    /// that host alone.
+    func unsignedRising(_ host: String, for purpose: SourceWork.Purpose, within limit: Duration) -> MastodonRising {
+        MastodonRising(http: wire(Self.smallAtItsHost(http), for: purpose, within: limit), host: host)
+    }
+
     /// What is under a tag, as the reader, through `door`.
     func tag(_ door: MastodonAuthorized) -> MastodonTag {
         MastodonTag(door: door)

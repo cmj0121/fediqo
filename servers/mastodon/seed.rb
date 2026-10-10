@@ -117,6 +117,34 @@ trend = StatusTrend.find_or_initialize_by(status_id: edited.id)
 trend.assign_attributes(account_id: edited.account_id, score: 5.0, rank: 1, allowed: true, language: edited.language)
 trend.save!
 
+# What the checks of the hashtags and the links rising need (#320): one hashtag and one link
+# made to be rising, as the post above is. A server ranks neither by itself here — it runs no
+# worker, and nothing on a new one was used by enough people — so a row is written for each,
+# beside the uses a server would have counted: twelve people today and three yesterday for the
+# hashtag, twenty today for the link. The link leads to a host this server has only heard of,
+# and its title carries the marks a page's title may. Counted once, however often this runs.
+rising_at = Time.now.utc
+rising_tag = Tag.find_or_create_by_names(["FediqoRising"]).first
+rising_tag.update!(trendable: true, usable: true, listable: true)
+if rising_tag.history.get(rising_at).accounts.zero?
+  (1..12).each { |i| rising_tag.history.add(1000 + i, rising_at) }
+  (1..3).each { |i| rising_tag.history.add(2000 + i, rising_at - 1.day) }
+end
+tag_trend = TagTrend.find_or_initialize_by(tag_id: rising_tag.id)
+tag_trend.assign_attributes(score: 9.0, rank: 1, allowed: true, language: "")
+tag_trend.save!
+rising_card = PreviewCard.find_or_initialize_by(url: "https://elsewhere.example/stories/rising")
+rising_card.assign_attributes(
+  title: "A story <b>rising</b> & more", description: "What the page says of itself.", type: :link,
+  provider_name: "Elsewhere", provider_url: "https://elsewhere.example", author_name: "Somebody",
+  author_url: "https://elsewhere.example/somebody", trendable: true, language: "en"
+)
+rising_card.save!
+(1..20).each { |i| rising_card.history.add(3000 + i, rising_at) } if rising_card.history.get(rising_at).accounts.zero?
+card_trend = PreviewCardTrend.find_or_initialize_by(preview_card_id: rising_card.id)
+card_trend.assign_attributes(score: 7.0, rank: 1, allowed: true, language: "en")
+card_trend.save!
+
 # What the checks of what a Mastodon says of notices need (#323): the writer told of each kind
 # of thing this seed can make happen to them, a line the server cuts at a page's edge, notices
 # to spare for the checks that dismiss one, and notices held back from people the writer does

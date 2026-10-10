@@ -80,6 +80,9 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// `Return` already opens the post itself, and one key meaning two posts on a quoting post
     /// would leave the reader guessing which of the two a press is about.
     case openQuote
+    /// `h` — the hashtags rising on the sources (#320), from the timeline that reads what is
+    /// rising: the press a finger makes on the line at its head. `h` for hashtag, and free.
+    case openRising
     case showShortcuts
     /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
     case search
@@ -138,6 +141,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "p": return .openAuthor
         case "t": return .openTag
         case "o": return .openQuote
+        case "h": return .openRising
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
@@ -208,7 +212,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     public static func canEditTimeline(whenOpen open: Set<DummyLayer>) -> Bool {
         switch outermost(of: open) {
         case .selection, nil: true
-        case .viewer, .shortcuts, .person, .tag, .people, .thread, .link, .search: false
+        case .viewer, .shortcuts, .person, .tag, .people, .rising, .thread, .link, .search: false
         }
     }
 
@@ -278,7 +282,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// `ShellWalk` holds them in one stack and only its innermost step is open. Their order
     /// relative to each other in `allCases` is therefore never asked — which of them is in front
     /// is what the reader walked, not what this list says.
-    public static let walk: Set<DummyLayer> = [.person, .tag, .people, .thread, .link]
+    public static let walk: Set<DummyLayer> = [.person, .tag, .people, .rising, .thread, .link]
 
     /// Whether the reader may walk one step further out from where they are now.
     ///
@@ -390,6 +394,10 @@ public enum DummyLayer: Hashable, Sendable, CaseIterable {
     /// A list of people a source keeps (#311). One walk with `.person`: a row of it opens a
     /// person, and it is opened from one.
     case people
+    /// The hashtags or the links rising on the sources (#320). One walk with `.person`: a row
+    /// of it opens a hashtag's page or a page read out of a link, and it is opened from the
+    /// stream.
+    case rising
     /// The conversation opened over whatever it was opened from: the stream, a search's results,
     /// another conversation, or somebody's page. One walk with `.person` — see there.
     case thread
@@ -557,6 +565,9 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // pressed for the list of them all (#304).
         DummyShortcut(group: .move, keys: ["Tab", "⇧Tab"], name: "tabs",
                       commands: [.nextTab, .previousTab], touch: .press, gestures: [.swipe, .name, .pill]),
+        // The line at the head of the timeline that reads what is rising, pressed (#320): a
+        // way from that timeline to a page beside it, as the pills above are ways between them.
+        DummyShortcut(group: .move, keys: ["h"], name: "rising", commands: [.openRising], touch: .press),
         // The rail on a Mac, the tab bar on a phone.
         DummyShortcut(group: .move, keys: ["⌃Tab", "⌃⇧Tab"], name: "pages",
                       commands: [.nextPage, .previousPage], touch: .press),

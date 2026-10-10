@@ -276,7 +276,7 @@ struct DummyCommandTests {
     func theGuideIsGroupedByPurpose() {
         #expect(DummyShortcutGroup.allCases == [.move, .read, .act, .app])
         let names = { (group: DummyShortcutGroup) in DummyShortcut.lines(in: group).map(\.name) }
-        #expect(names(.move) == ["posts", "top", "tabs", "pages", "back"])
+        #expect(names(.move) == ["posts", "top", "tabs", "rising", "pages", "back"])
         #expect(names(.read) == ["expand", "reveal", "view", "play", "turn", "person", "tag", "quote", "search", "reload"])
         #expect(names(.act) == ["boost", "favourite", "keep", "answer", "withdraw", "compose", "edit"])
         #expect(names(.app) == ["list", "dismiss", "landing"])
@@ -285,8 +285,8 @@ struct DummyCommandTests {
         #expect(Set(every) == Set(DummyShortcut.all.map(\.name)))
         #expect(Set(every).count == every.count)
         // The 22 lines the guide listed before #152, still listed, `t` since #124, `o` since
-        // #214, and `y` since #284.
-        #expect(DummyShortcut.all.count == 25)
+        // #214, `y` since #284, and `h` since #320.
+        #expect(DummyShortcut.all.count == 26)
     }
 
     @Test("Tab and shift-Tab rotate the guide's four tabs, wrapping")
