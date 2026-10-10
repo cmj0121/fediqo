@@ -989,11 +989,10 @@ public struct FediqoRootView: View {
     /// a row with no cover — the press moves nothing and says so.
     private func onFocusedItem(_ act: (DummyItem) -> Bool) -> Bool {
         guard place == .timeline else { return false }
-        switch DummyCommand.focused(in: currentListItems, selected: selectedItemID) {
+        switch Self.focused(in: currentListItems, selected: selectedItemID, open: openLayers) {
         case .nothing:
             return false
         case .first(let id):
-            guard DummyCommand.canOpen(.selection, whenOpen: openLayers) else { return false }
             selectedItemID = id
             return true
         case .post(let item):
@@ -1001,10 +1000,25 @@ public struct FediqoRootView: View {
         }
     }
 
+    /// Where a key that acts on a post lands, under what is open: `DummyCommand.focused`, and
+    /// nothing where its answer is to light a first row that may not be lit — the lamp entering
+    /// under a layer in front. Static so a test presses the rule the root does, as `moved` is.
+    ///
+    /// **So a mark's key does nothing with the lamp on a row that is no post** — a figure on
+    /// somebody's page that opens a list (#311): the lamp is lit, so it is not entering, and
+    /// it is not moved off the figure onto a post the reader did not choose.
+    static func focused(in items: [DummyItem], selected: String?, open: Set<DummyLayer>) -> DummyFocus {
+        let focus = DummyCommand.focused(in: items, selected: selected)
+        if case .first = focus, !DummyCommand.canOpen(.selection, whenOpen: open) { return .nothing }
+        return focus
+    }
+
     /// j/k and the arrows walk whichever list is in front: the stream, or the open conversation.
     private func moveInList(by step: Int) -> Bool {
         guard place == .timeline,
-              let next = Self.moved(in: currentListIDs, from: selectedItemID, by: step, open: openLayers)
+              let next = Self.moved(
+                  in: currentListIDs, from: selectedItemID, by: step, open: openLayers, entry: currentListEntry
+              )
         else { return false }
         selectedItemID = next
         return true
@@ -1019,9 +1033,17 @@ public struct FediqoRootView: View {
     /// With a thread or the viewer open the selection is always already on, so in practice
     /// this only ever refuses a first press under the guide — or under a search, which is why
     /// Return lights the first result rather than leaving `j` to.
-    static func moved(in ids: [String]?, from selected: String?, by step: Int, open: Set<DummyLayer>) -> String? {
+    ///
+    /// **`entry` is where a lamp that is on none of the rows comes down to**, where the list
+    /// has rows over the one reading starts at — the figures over somebody's posts (#311): `j`
+    /// lands on their first post, as it did before anything stood above it, and `k` from there
+    /// climbs to the figures. A lamp already on a row steps from that row, whichever it is.
+    static func moved(
+        in ids: [String]?, from selected: String?, by step: Int, open: Set<DummyLayer>, entry: String? = nil
+    ) -> String? {
         guard let ids else { return nil }
         if selected == nil, !DummyCommand.canOpen(.selection, whenOpen: open) { return nil }
+        if let entry, step > 0, ids.contains(entry), selected.map(ids.contains) != true { return entry }
         return DummyCommand.stepped(ids, from: selected, by: step)
     }
 
@@ -1120,9 +1142,18 @@ public struct FediqoRootView: View {
     }
 
     private var currentListIDs: [String]? {
-        // On a list of people the rows are the people the source gave, as the page draws them.
-        let ids = walk.openedPeople.map { people.lists.walked($0, in: session) } ?? currentListItems.map(\.id)
+        // On a list of people the rows are the people the source gave, as the page draws them;
+        // on somebody's page the figures that open such a list stand over their posts (#311).
+        let ids = walk.openedPeople.map { people.lists.walked($0, in: session) }
+            ?? walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }
+            ?? currentListItems.map(\.id)
         return ids.isEmpty ? nil : ids
+    }
+
+    /// Where the lamp lands when `j` first brings it onto somebody's page: their first post,
+    /// under the figures (`ShellPersonPages.entry`). Nothing anywhere else.
+    private var currentListEntry: String? {
+        walk.openedPerson.flatMap { people.entry(of: $0, in: session) }
     }
 
     private func jumpListOrThreadToTop() -> Bool {
@@ -1393,6 +1424,10 @@ public struct FediqoRootView: View {
         if let list = walk.openedPeople {
             guard let person = people.lists.person(id, on: list, in: session) else { return false }
             return openListed(person)
+        }
+        // On somebody's page the lamp may be on a figure that counts a list (#311): Return opens it.
+        if let person = walk.openedPerson, let list = people.list(id, of: person, in: session) {
+            return openPeople(list)
         }
         // A post read for somebody's page is no item until it is opened (#310): opening holds
         // it, and then opens it as any held post opens. One the store will not take opens nothing.
@@ -1743,10 +1778,10 @@ public struct FediqoRootView: View {
     }
 
     /// A list of people opened from where a source counts them (#311): one more step of the
-    /// walk, from the row the lamp is on, so leaving it gives that row back.
+    /// walk, with its figure lit, so leaving the list gives the figure back (`ShellWalk.open`).
     private func openPeople(_ list: PeopleList) -> Bool {
         guard Self.canWalk(place: place, open: openLayers) else { return false }
-        return walk.walk(to: .people(list), from: selectedItemID)
+        return walk.open(list, lamp: &selectedItemID)
     }
 
     /// A row of such a list opened: that person's page. **The lamp and the step in one turn**,
@@ -2111,7 +2146,8 @@ public struct FediqoRootView: View {
                 ),
                 search: search,
                 people: people,
-                onOpenListed: { _ = openListed($0) }
+                onOpenListed: { _ = openListed($0) },
+                onOpenPeople: { _ = openPeople($0) }
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if search.isOpen {

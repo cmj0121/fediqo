@@ -154,6 +154,31 @@ struct PersonSaid: Equatable {
         return lines
     }
 
+    /// One thing the source counts of them, as the page says it: the figure in its sentence, and
+    /// the list it counts where it counts one.
+    struct Count: Equatable, Identifiable {
+        let words: String
+        /// The list this line opens (#311): whom they follow, or who follows them. Nothing for
+        /// their posts, which are the page itself — that figure is words and no press.
+        var opens: PeopleList?
+
+        /// What the lamp stands on where it stands on this line: the list it opens, by its own name.
+        var id: String { opens?.id ?? "posts" }
+
+        /// What a listener is read of a line that opens: the figure, and what pressing it does.
+        func spoken(language: DummyLanguage? = nil) -> String {
+            opens == nil ? words : String(format: L10n.t("person.count.opens", language: language), words)
+        }
+
+        /// Whether the line is drawn, given whether a press on it is `answered`. A line that
+        /// says a figure is words worth reading with or without a press; one that only names
+        /// its list is nothing but the way to it, and with nobody to answer leads nowhere.
+        func isDrawn(answered: Bool) -> Bool {
+            guard let opens else { return true }
+            return answered || opens.counted != nil
+        }
+    }
+
     /// What the source counts of them, each figure it said and none it did not. **Its figures,
     /// and never a promise of rows**: it counts posts this reader is not given, and people a
     /// list leaves out.
@@ -163,6 +188,27 @@ struct PersonSaid: Equatable {
             tally.following.map { figure("person.count.following", $0, language: language) },
             tally.followers.map { figure("person.count.followers", $0, language: language) },
         ].compactMap { $0 }
+    }
+
+    /// The lines of what the source counts, in the order they are drawn: their posts, whom they
+    /// follow, who follows them.
+    ///
+    /// **Both lists open whatever was counted** (#311): a figure of nothing, and a list the
+    /// account hides, are still a press — what the source gives of it, and why that may be
+    /// nobody, is the list's own page to say. Where the source said no figure for a list, the
+    /// line names the list and says none: nothing is counted on its behalf.
+    ///
+    /// **A suspended account has neither line.** Its page has said the account is gone, and
+    /// the source names it and gives nothing else: each press would lead to nobody.
+    static func counts(of person: Person, language: DummyLanguage? = nil) -> [Count] {
+        let said = counts(of: Person.Tally(posts: person.tally.posts), language: language).map { Count(words: $0) }
+        if person.suspended { return said }
+        return said + PeopleList.Which.allCases.map { which in
+            let list = PeopleList(which, of: person)
+            let key = "person.count.\(which.rawValue)"
+            let words = list.counted.map { figure(key, $0, language: language) } ?? L10n.t(key + ".unsaid", language: language)
+            return Count(words: words, opens: list)
+        }
     }
 
     /// A sentence about one figure, with the figure written whole and its thousands apart
@@ -202,6 +248,11 @@ struct PersonSaidBlock: View {
     /// The press beside "They moved to …": that account's page, through this same source.
     /// Nothing where the block is drawn with nobody to answer, and then the line is words alone.
     var onOpenMoved: ((Person.Moved) -> Void)?
+    /// The line the lamp is on, where it is on one of the counts that open a list.
+    var lit: String?
+    /// A count that opens a list, pressed (#311): that list's page. Nothing where the block is
+    /// drawn with nobody to answer, and then every count is words alone.
+    var onOpenList: ((PeopleList) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     @ShellMetric(relativeTo: .body) private var bandHeight: CGFloat = 96
@@ -256,21 +307,25 @@ struct PersonSaidBlock: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !person.fields.isEmpty { fields }
-            let counts = PersonSaid.counts(of: person.tally)
+            let counts = PersonSaid.counts(of: person).filter { $0.isDrawn(answered: onOpenList != nil) }
             if !counts.isEmpty {
-                // Each figure whole, wrapped to the next line where they do not fit on one.
+                // Each figure whole, wrapped to the next line where they do not fit on one — and
+                // each a thing of its own to a listener: two of them open, and say so.
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: ShellSpace.room) { ForEach(counts, id: \.self) { Text($0).fixedSize() } }
-                    VStack(alignment: .leading, spacing: ShellSpace.tight) { ForEach(counts, id: \.self) { Text($0) } }
+                    HStack(spacing: ShellSpace.room) { ForEach(counts) { count($0).fixedSize() } }
+                    VStack(alignment: .leading, spacing: ShellSpace.tight) { ForEach(counts) { count($0) } }
                 }
                 .shellFont(.reading)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .accessibilityElement(children: .combine)
             }
         }
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.step)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func count(_ count: PersonSaid.Count) -> some View {
+        PersonCountLine(count: count, lit: count.opens != nil && count.id == lit, onOpen: onOpenList)
+            .id(count.id)
     }
 
     private func movedPress(_ moved: Person.Moved, _ open: @escaping (Person.Moved) -> Void) -> some View {
@@ -312,6 +367,55 @@ struct PersonSaidBlock: View {
                 }
                 .accessibilityElement(children: .combine)
             }
+        }
+    }
+}
+
+/// One figure the source counts, on the line of them: words where it is their posts, and a
+/// press where it is a list of people (#311) — the figure, and the mark that says it leads on.
+///
+/// **One press opens**, by pointer or finger: it is a way to another page, as "Open their new
+/// page" is, and not a row to light first. The lamp reaches it by the keys, and then it is drawn
+/// on the lamp's wash in full ink.
+struct PersonCountLine: View {
+    let count: PersonSaid.Count
+    var lit = false
+    var onOpen: ((PeopleList) -> Void)?
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if let list = count.opens, let onOpen {
+            Button {
+                onOpen(list)
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                    Text(count.words)
+                    Image(systemName: "chevron.right")
+                        .shellFont(.mark)
+                        .accessibilityHidden(true)
+                }
+                .padding(.vertical, ShellSpace.tight)
+                .padding(.horizontal, ShellSpace.snug)
+                .background(
+                    lit ? ShellChrome.floatFill(colorScheme) : .clear,
+                    in: RoundedRectangle(cornerRadius: DummyItemRow.Box.plate)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(lit ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme))
+            // The wash reaches past the words; the words stand where the plain figure does.
+            .padding(.horizontal, -ShellSpace.snug)
+            .animation(.easeInOut(duration: 0.18), value: lit)
+            .help(PeopleSaid.title(list))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(count.spoken())
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAddTraits(lit ? .isSelected : [])
+        } else if count.isDrawn(answered: false) {
+            Text(count.words)
+                .padding(.vertical, ShellSpace.tight)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
         }
     }
 }

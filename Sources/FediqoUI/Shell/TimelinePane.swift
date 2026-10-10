@@ -74,6 +74,9 @@ struct TimelinePane: View {
     /// A row of a list of people opened (#311), answered by the root: it lights the row and
     /// takes the step together, so leaving that person's page gives the row back.
     var onOpenListed: (Person) -> Void = { _ in }
+    /// A figure on somebody's page that counts a list of people, pressed (#311), answered by
+    /// the root: the list is one more step of the walk, and its figure is lit to come back to.
+    var onOpenPeople: (PeopleList) -> Void = { _ in }
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
     /// again. Per host and not one counter for the pane: see `waitForCatalogues`.
     @State private var settledHosts: Set<String> = []
@@ -167,7 +170,8 @@ struct TimelinePane: View {
                     // asked of it by that name, and "not heard of" is a state of that page.
                     onOpenMoved: { moved in
                         if let there = DummyPerson(handle: moved.handle, host: person.host) { onOpenPerson(there) }
-                    }
+                    },
+                    onOpenList: onOpenPeople
                 )
                 // One pane per person, so opening a second face from inside one draws afresh.
                 .id(person.id)

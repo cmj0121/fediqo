@@ -330,6 +330,34 @@ final class ShellPersonPages {
         said(of: who, in: session)?.posts ?? session.heldPosts(of: who)
     }
 
+    // MARK: - The lists the page opens
+
+    /// The lists the page of `who` opens (#311), in the order their figures are drawn — whom
+    /// they follow, who follows them — **as the page stands for whoever would ask now**: none
+    /// until the source has said who they are, and none on a page handed nothing.
+    func lists(of who: DummyPerson, in session: ShellSession) -> [PeopleList] {
+        guard let person = said(of: who, in: session)?.person else { return [] }
+        return PersonSaid.counts(of: person).compactMap(\.opens)
+    }
+
+    /// The list the line `id` of the page of `who` opens, where `id` is such a line: what
+    /// Return opens with the lamp on it.
+    func list(_ id: String, of who: DummyPerson, in session: ShellSession) -> PeopleList? {
+        lists(of: who, in: session).first { $0.id == id }
+    }
+
+    /// Every row `j` and `k` walk on the page of `who`, top to bottom as it is drawn: the
+    /// figures that open a list, and under them their posts.
+    func walkedIDs(of who: DummyPerson, in session: ShellSession) -> [String] {
+        lists(of: who, in: session).map(\.id) + walked(of: who, in: session).map(\.id)
+    }
+
+    /// Where the lamp lands when it is first brought down onto the page of `who`: their first
+    /// post, as before there was anything above it. The figures stand over it, a `k` away.
+    func entry(of who: DummyPerson, in session: ShellSession) -> String? {
+        walked(of: who, in: session).first?.id
+    }
+
     /// Whether `rowID` is a post on the page of `who` that this device does not hold.
     func isOnlyOnPage(_ rowID: String, of who: DummyPerson, in session: ShellSession) -> Bool {
         session.heldNote(rowID) == nil && pages[who.id]?.read.posts.contains { $0.key.rowID == rowID } == true

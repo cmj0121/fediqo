@@ -78,6 +78,19 @@ struct PeopleList: Hashable, Sendable, Identifiable {
     }
 }
 
+extension ShellWalk {
+    /// A list opened from the figure that counts it, on somebody's page (#311): one more step
+    /// of the walk. **The lamp and the step in one turn**, as a row opens: the figure is lit
+    /// and is what the walk remembers, so leaving the list gives it back — pressed by a pointer
+    /// or a finger too, where the lamp was elsewhere or nowhere. A step that is not taken
+    /// moves nothing.
+    mutating func open(_ list: PeopleList, lamp: inout String?) -> Bool {
+        guard walk(to: .people(list), from: list.id) else { return false }
+        lamp = list.id
+        return true
+    }
+}
+
 /// Every list of people opened this run, by which list it is.
 ///
 /// Held by `ShellPersonPages`, on its count of asks, and handed the session at each ask: the

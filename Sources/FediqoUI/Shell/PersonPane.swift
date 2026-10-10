@@ -66,6 +66,9 @@ struct PersonPane: View {
     /// The press beside "They moved to …": the page of the account the source says they went
     /// to, asked of that same source.
     var onOpenMoved: ((Person.Moved) -> Void)?
+    /// A figure that counts a list of people, pressed (#311): that list's page, answered by
+    /// the root as one more step of the walk.
+    var onOpenList: ((PeopleList) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
@@ -242,12 +245,16 @@ struct PersonPane: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    Color.clear.frame(height: 0).id(Self.head).accessibilityHidden(true)
                     if let line = said.stateLine(of: person.handle ?? person.name) {
                         stateLine(line, said: said)
                         ShellRule()
                     }
                     if let subject = said.person {
-                        PersonSaidBlock(person: subject, source: said.source, onOpenMoved: onOpenMoved)
+                        PersonSaidBlock(
+                            person: subject, source: said.source, onOpenMoved: onOpenMoved,
+                            lit: selectedID, onOpenList: onOpenList
+                        )
                         ShellRule()
                     }
                     if let sentence = Self.emptyLine(said, held: items.count) {
@@ -270,12 +277,16 @@ struct PersonPane: View {
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
             }
+            // The top of the page is what the source says of them, and the first row the keys
+            // walk is there (#311): `g` brings that back, and not their first post alone.
             .onChange(of: jumpToTop) { _, _ in
-                guard let first = shown.first else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(first.id, anchor: .top) }
+                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(Self.head, anchor: .top) }
             }
         }
     }
+
+    /// The head of the list a page handed the source's word scrolls: what `g` scrolls back to.
+    private static let head = "person.head"
 
     /// Where the asking stands, and beside a failure the press that asks again.
     private func stateLine(_ line: String, said: PersonSaid) -> some View {

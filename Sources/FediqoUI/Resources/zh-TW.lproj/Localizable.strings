@@ -1526,6 +1526,9 @@
 "person.count.posts" = "%@ 則貼文";
 "person.count.following" = "跟隨 %@ 人";
 "person.count.followers" = "%@ 位跟隨者";
+"person.count.following.unsaid" = "他們跟隨的人";
+"person.count.followers.unsaid" = "跟隨他們的人";
+"person.count.opens" = "%@，打開清單";
 "person.posts.none" = "%@ 沒有給出他們的貼文。";
 "person.posts.noneOf" = "%1$@ 算有他們的 %2$@ 則貼文，在這裡一則也沒給。";
 "person.field.checked" = "%@ 確認過這個網址有指回他們";

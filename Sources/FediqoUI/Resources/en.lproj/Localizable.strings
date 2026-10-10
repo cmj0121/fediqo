@@ -1569,6 +1569,9 @@
 "person.count.following" = "Follows %@";
 "person.count.followers" = "%@ followers";
 "person.count.followers.one" = "%@ follower";
+"person.count.following.unsaid" = "Who they follow";
+"person.count.followers.unsaid" = "Who follows them";
+"person.count.opens" = "%@, opens the list";
 "person.posts.none" = "%@ gave no posts of theirs.";
 "person.posts.noneOf" = "%1$@ counts %2$@ posts of theirs and gave none of them here.";
 "person.posts.noneOf.one" = "%1$@ counts %2$@ post of theirs and did not give it here.";
