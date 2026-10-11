@@ -70,16 +70,46 @@ struct MastodonPartStandingTests {
         #expect(MastodonParts.believed([], asked: "a") == "")
     }
 
-    @Test("What a source says a sign-in holds is believed only where it reads: every word of reading, or the source's one word for every read — and nothing, a list that only writes, and reading short of a word are not")
+    @Test("What a source says a sign-in holds is believed only where it reads, word for word: every word of reading. Nothing, a list that only writes, reading short of a word, and the source's one word for every read — which no page of this app can ask for again — are not")
     func whatReads() {
         #expect(MastodonParts.reads(Self.reading))
         #expect(MastodonParts.reads("write:statuses read:accounts read:lists read:statuses"))
-        #expect(MastodonParts.reads("read write"))
+        #expect(!MastodonParts.reads("read write"), "a sign-in whose reading no page can carry was read as one to ask in place")
+        #expect(!MastodonParts.reads("read read:statuses read:lists"))
         #expect(!MastodonParts.reads(nil))
         #expect(!MastodonParts.reads(""))
         #expect(!MastodonParts.reads("write write:statuses read:search"))
         #expect(!MastodonParts.reads("read:statuses read:lists"))
         #expect(!MastodonParts.reads("read:statuses read:lists read:accountsx reader"))
+    }
+
+    @Test("A sign-in reads exactly where a page that widens it still reads: whatever is held, the page built over it carries every word of reading where the sign-in is said to read, and where it is not said to, a page for another part alone does not",
+          arguments: [
+              "read:statuses read:lists read:accounts", "read:accounts read:lists read:statuses write:statuses",
+              "read", "read write", "read write follow push", "read:statuses read:lists", "read read:statuses",
+              "write:statuses write:favourites", "", "read:statuses read:lists read:accounts read push",
+          ])
+    func readingAndThePageAgree(_ held: String) {
+        let literal: Set<String> = ["read:statuses", "read:lists", "read:accounts"]
+        for tick in MastodonPart.allCases where tick != .reading {
+            let page = Set(MastodonParts.page(held: held, ticked: [tick]).split(separator: " ").map(String.init))
+            let carries: Bool = literal.isSubset(of: page)
+            #expect(MastodonParts.reads(held) == carries, "held \(held): said to read, and its page for \(tick.rawValue) does not agree")
+        }
+    }
+
+    @Test("A page that brings acting and another part together asks for that part's act too, and the act is named by the part it belongs to: dismissing, where the page adds it to what is held — and none where it is held already, or is not on the page")
+    func whatAPageAsksBeside() {
+        let acts = Self.reading + " write:statuses write:favourites"
+        let notified = Self.reading + " read:notifications"
+        let both = acts + " read:notifications write:notifications"
+        #expect(MastodonParts.page(held: notified, ticked: [.acting]) == both)
+        #expect(MastodonParts.beside(on: both, than: notified) == [.notices])
+        #expect(MastodonParts.beside(on: both, than: acts) == [.notices])
+        #expect(MastodonParts.beside(on: both, than: both).isEmpty)
+        #expect(MastodonParts.beside(on: acts + " write:bookmarks", than: acts).isEmpty)
+        #expect(MastodonParts.beside(on: notified, than: Self.reading).isEmpty)
+        #expect(MastodonParts.beside(on: both, than: nil) == [.notices])
     }
 
     /// One answer for whatever is sent, and what was sent.

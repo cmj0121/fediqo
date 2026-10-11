@@ -309,12 +309,12 @@ struct MastodonLeftTests {
     @Test("Narrowing ends the wider sign-in at once, and every one left that may do what the new one may not; one left that may do no more stays left")
     func narrowing() async throws {
         let made = try await widened()
-        #expect(await made.sessions.signIn(host: host, through: LeftPage(), writing: true, notices: true) == nil)
+        #expect(await made.sessions.signIn(host: host, through: LeftPage(), writing: true) == nil)
         #expect(try states(made) == [.left, .left])
         #expect(try held(made) == "tok-3")
         #expect(await made.source.revoked.isEmpty)
 
-        #expect(await made.sessions.signIn(host: host, through: LeftPage(), notices: false) == nil)
+        #expect(await made.sessions.signIn(host: host, through: LeftPage()) == nil)
         #expect(try held(made) == "tok-4")
         #expect(await made.source.revoked == ["tok-3", "tok-2"], "a sign-in that may act is still live after reading alone was chosen")
         let left = try made.tokens.left(host: host)
@@ -336,7 +336,7 @@ struct MastodonLeftTests {
     func anotherAccount() async throws {
         let made = try await widened()
         await made.source.name("tok-3", account: "2")
-        #expect(await made.sessions.signIn(host: host, through: LeftPage(), writing: true, notices: true) == nil)
+        #expect(await made.sessions.signIn(host: host, through: LeftPage(), writing: true) == nil)
         #expect(try held(made) == "tok-3")
         #expect(await made.source.revoked == ["tok-2", "tok-1"])
         #expect(try states(made).isEmpty)
@@ -346,8 +346,8 @@ struct MastodonLeftTests {
     func anotherAccountInPlace() async throws {
         let made = try await widened()
         await made.source.name("tok-3", account: "2")
-        let failure = await made.sessions.signIn(host: host, through: LeftPage(), writing: true, notices: true, inPlace: true)
-        #expect(failure == .unreadable)
+        let answer = await made.sessions.ask([.notices], host: host, through: LeftPage())
+        #expect(answer == .another)
         #expect(try held(made) == "tok-2")
         #expect(try states(made) == [.left])
         #expect(await made.source.revoked == ["tok-3"])
@@ -364,22 +364,22 @@ struct MastodonLeftTests {
         #expect(made.sessions.leftTold.isEmpty, "told after a question that had said it first")
     }
 
-    @Test("Asked for more where it stands, a sign-in nobody could show to be the same account's is ended as before — and, no question having said so first, the person is told")
-    func anUnknownAccountInPlaceIsTold() async throws {
+    @Test("Asked for more where it stands, a sign-in nobody could show to be the same account's is not asked at all: no page opens, nothing is ended, and there is nothing to tell")
+    func anUnknownAccountIsNotAskedInPlace() async throws {
         let made = fresh()
         try made.tokens.save(token("tok-old", id: nil))
         made.sessions.refresh()
-        #expect(await made.sessions.signIn(host: host, through: LeftPage(), writing: true, inPlace: true) == nil)
-        #expect(await made.source.revoked == ["tok-old"])
-        let unknown = MastodonSessions.LeftTold(kind: .unknown, host: host)
-        #expect(made.sessions.leftTold == [unknown])
-        let told = ShellQuestion.left(unknown, language: .english)
-        #expect(told.line == "Fediqo could not confirm that the sign-in this device had at \(host) was the same account's, so it was ended there. Any other device carrying it is signed out too.")
-        #expect(told.choices.isEmpty)
+        await made.source.check("tok-old", answers: 200, saying: "{}")
+        let page = LeftPage()
+        #expect(await made.sessions.ask([.notices], host: host, through: page) == .unconfirmed)
+        #expect(try held(made) == "tok-old")
+        #expect(await made.source.revoked.isEmpty)
+        #expect(made.sessions.leftTold.isEmpty)
 
         // One shown to be the same account's is left, and nothing is told.
         let same = try await widened()
-        #expect(await same.sessions.signIn(host: host, through: LeftPage(), writing: true, notices: true, inPlace: true) == nil)
+        #expect(await same.sessions.ask([.notices], host: host, through: LeftPage()) == .allowed)
+        #expect(await same.source.revoked.isEmpty)
         #expect(same.sessions.leftTold.isEmpty)
     }
 
@@ -404,7 +404,7 @@ struct MastodonLeftTests {
     func theCheckFails(status: Int) async throws {
         let made = try await widened()
         await made.source.check("tok-3", answers: status)
-        #expect(await made.sessions.signIn(host: host, through: LeftPage(), writing: true, notices: true) != nil)
+        #expect(await made.sessions.signIn(host: host, through: LeftPage(), writing: true) != nil)
         #expect(await made.source.revoked == ["tok-3"])
         #expect(try held(made) == "tok-2")
         #expect(try states(made) == [.left])
@@ -426,7 +426,7 @@ struct MastodonLeftTests {
         let made = try await widened()
         await made.source.handBack("tok-elsewhere", dated: true)
         await made.source.check("tok-elsewhere", answers: 500)
-        #expect(await made.sessions.signIn(host: host, through: LeftPage(), writing: true, notices: true) != nil)
+        #expect(await made.sessions.signIn(host: host, through: LeftPage(), writing: true) != nil)
         #expect(await made.source.revoked.isEmpty)
         let noted = await made.source.sent.last { $0.path == LeftSource.check }?.left
         #expect(noted == [.left], "a token made elsewhere was written down as this sign-in's to end")
@@ -438,8 +438,8 @@ struct MastodonLeftTests {
         let made = try await widened()
         await made.source.handBack("tok-theirs", dated: true)
         await made.source.name("tok-theirs", account: "2")
-        let failure = await made.sessions.signIn(host: host, through: LeftPage(), writing: true, notices: true, inPlace: true)
-        #expect(failure == .unreadable)
+        let answer = await made.sessions.ask([.notices], host: host, through: LeftPage())
+        #expect(answer == .another)
         #expect(await made.source.revoked.isEmpty)
         #expect(try held(made) == "tok-2")
         #expect(try states(made) == [.left])
@@ -450,7 +450,7 @@ struct MastodonLeftTests {
         let made = try await widened()
         let gate = Gate()
         let page = LeftPage(gate: gate)
-        let pressing = Task { await made.sessions.signIn(host: host, through: page, writing: true, notices: true) }
+        let pressing = Task { await made.sessions.signIn(host: host, through: page, writing: true) }
         defer { Task { await gate.open() } }
         #expect(await spun { page.opened == 1 })
         await made.sessions.signOut(host: host)
@@ -505,7 +505,7 @@ struct MastodonLeftTests {
         let made = try await widened()
         // The note of the fresh token is taken; the one after it, of the token it replaces, is not.
         made.tokens.refuse(.leaving, after: 1)
-        #expect(await made.sessions.signIn(host: host, through: LeftPage(), writing: true, notices: true) == .keychain)
+        #expect(await made.sessions.signIn(host: host, through: LeftPage(), writing: true) == .keychain)
         #expect(try held(made) == "tok-2")
         #expect(await made.source.revoked == ["tok-3"])
         let left = try made.tokens.left(host: host)
@@ -977,7 +977,7 @@ struct MastodonLeftTests {
         let made = try await widened()
         let gate = Gate()
         await made.source.hold(LeftSource.check, at: gate)
-        let pressing = Task { await made.sessions.signIn(host: host, through: LeftPage(), writing: true, notices: true) }
+        let pressing = Task { await made.sessions.signIn(host: host, through: LeftPage(), writing: true) }
         defer { Task { await gate.open() } }
         // Not caught, the ask this waits for was never sent, and the next one would wait at the
         // gate with nobody left to open it: opened here, so the check fails and does not park.
@@ -1003,7 +1003,7 @@ struct MastodonLeftTests {
         let made = try await widened()
         let gate = Gate()
         await made.source.hold(LeftSource.check, at: gate)
-        let pressing = Task { await made.sessions.signIn(host: host, through: LeftPage(), writing: true, notices: true) }
+        let pressing = Task { await made.sessions.signIn(host: host, through: LeftPage(), writing: true) }
         defer { Task { await gate.open() } }
         // Not caught, the ask this waits for was never sent, and the next one would wait at the
         // gate with nobody left to open it: opened here, so the check fails and does not park.
@@ -1318,7 +1318,6 @@ struct MastodonLeftTests {
             "account.signin.ask.ends.another", "account.mastodon.ended.left", "account.left.owed",
             "account.signout.unconfirmed.title", "account.signout.unconfirmed.line", "account.left.refused.title",
             "account.left.refused.line", "account.left.others.title", "account.left.others.line",
-            "account.left.unknown.title", "account.left.unknown.line",
         ]
         for key in keys {
             let english = L10n.t(key, language: .english)

@@ -145,7 +145,7 @@ enum NoticeActs {
         let key: String
         switch (said.act, said.why) {
         case (_, .locked): key = "notices.source.locked"
-        case (.ask, _): key = "notices.ask.failed"
+        case (.ask, _): key = said.key ?? "notices.ask.failed"
         case (let act, .refused): key = "notices.act.\(act).refused"
         case (let act, .unreachable): key = "notices.act.\(act).failed"
         case (let act, .declined): key = "notices.act.\(act).declined"

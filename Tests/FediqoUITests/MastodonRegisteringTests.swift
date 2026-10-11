@@ -241,19 +241,18 @@ struct MastodonRegisteringTests {
         #expect(await server.listAsks == 1)
     }
 
-    @Test("A host whose list has none of what was pressed for is registered with for nothing, and no page opens")
+    @Test("A host whose list has none of what a sign-in cannot do without is registered with for nothing, and no page opens")
     func theListHasNoneOfIt() async throws {
-        let server = RegisteringHost(list: .words(Self.words.filter { !$0.contains("notifications") }))
+        let server = RegisteringHost(list: .words(Self.words.filter { $0 != "write:statuses" }))
         let (mastodon, tokens) = sessions(server)
         let (held, app) = try earlier(tokens, scopes: Self.reading)
         mastodon.refresh()
         let page = RegisteredPage()
 
-        #expect(await mastodon.signIn(host: host, through: page, writing: false, notices: true) == .invalidScope)
+        #expect(await mastodon.signIn(host: host, through: page, writing: true) == .invalidScope)
 
         #expect(await server.paths == [RegisteringHost.listPath])
         #expect(page.scopes.isEmpty)
-        #expect(mastodon.notices(host: host) == .unavailable, "it is said to have none")
         #expect(try tokens.token(host: host) == held)
         #expect(try tokens.app(host: host) == app)
     }
@@ -428,17 +427,17 @@ struct MastodonRegisteringTests {
 
     @Test("No registration narrower than the sign-in held is made: where the host refuses what is asked, the sign-in held stays as it was")
     func nothingNarrowerThanHeld() async throws {
-        // Held with search, on a registration that cannot ask for notices; the host has no notices.
-        let server = RegisteringHost(unknown: "read:notifications")
+        // Held with search, on a registration that cannot ask to act; the host has no acting.
+        let server = RegisteringHost(unknown: "write:statuses")
         let (mastodon, tokens) = sessions(server)
         let (held, app) = try earlier(tokens, scopes: Self.reading)
         mastodon.refresh()
         let page = RegisteredPage()
 
-        #expect(await mastodon.signIn(host: host, through: page, writing: false, notices: true) == .invalidScope)
+        #expect(await mastodon.signIn(host: host, through: page, writing: true) == .invalidScope)
 
-        // Everything, then what was pressed for — and not the same without search.
-        #expect(await server.registered == [Self.whole, MastodonOAuth.scopes(writing: false, notices: true)])
+        // Everything, then what was chosen, then that without bookmarks — and not without search.
+        #expect(await server.registered == [Self.whole, Self.acting, Self.actingLessBookmarks])
         #expect(page.scopes.isEmpty)
         #expect(try tokens.token(host: host) == held)
         #expect(try tokens.app(host: host) == app)
@@ -504,7 +503,6 @@ struct MastodonRegisteringTests {
         let third = RegisteredPage()
         #expect(await mastodon.signIn(host: host, through: third, writing: true) == .invalidScope)
         #expect(await mastodon.signIn(host: host, through: third, writing: false) == .invalidScope)
-        #expect(await mastodon.signIn(host: host, through: third, writing: true, notices: true) == .invalidScope)
         #expect(await server.paths.count == asked && third.scopes.isEmpty)
         #expect(try tokens.token(host: host) == nil)
         #expect(await server.revoked.isEmpty)
@@ -644,23 +642,23 @@ struct MastodonRegisteringTests {
         // A host with no list that names nothing back: its registration is one nothing confirmed.
         let server = RegisteringHost(echoes: false)
         let (mastodon, tokens) = sessions(server)
-        #expect(await mastodon.signIn(host: host, through: RegisteredPage(), writing: true) == nil)
+        #expect(await mastodon.signIn(host: host, through: RegisteredPage(), writing: false) == nil)
         let held = try #require(try tokens.token(host: host))
-        #expect(held.scopes == Self.acting)
+        #expect(held.scopes == Self.reading)
 
         // Later, pressed for more, and the page closed.
-        #expect(await mastodon.signIn(host: host, through: RegisteredPage(.close), writing: true, notices: true) == nil)
+        #expect(await mastodon.signIn(host: host, through: RegisteredPage(.close), writing: true) == nil)
         #expect(try tokens.token(host: host) == held)
 
         // The next press, approved: everything is registered for again, and the page is the whole of what was asked.
-        let wide = MastodonOAuth.scopes(writing: true, notices: true)
+        let wide = Self.acting
         let page = RegisteredPage()
-        #expect(await mastodon.signIn(host: host, through: page, writing: true, notices: true) == nil)
+        #expect(await mastodon.signIn(host: host, through: page, writing: true) == nil)
 
         #expect(await server.registered == [Self.whole, Self.whole], "a page closed under a working registration was taken for one with no way back")
         #expect(page.scopes == [wide])
         #expect(try tokens.token(host: host)?.scopes == wide, "a sign-in held came out with fewer words than it went in with")
-        #expect(mastodon.bookmarks(host: host) == .allowed && mastodon.notices(host: host) == .allowed)
+        #expect(mastodon.bookmarks(host: host) == .allowed)
         // The same account's, and holding no more than the one kept: left live, and written down.
         #expect(await server.revoked.isEmpty)
         #expect(try tokens.left(host: host).map(\.state) == [.left])
@@ -675,7 +673,7 @@ struct MastodonRegisteringTests {
         let (held, _) = try earlier(tokens, scopes: Self.acting)
         mastodon.refresh()
 
-        #expect(await mastodon.signIn(host: host, through: RegisteredPage(), writing: true, notices: true) == .unreadable)
+        #expect(await mastodon.signIn(host: host, through: RegisteredPage(), writing: true) == .unreadable)
 
         #expect(try tokens.token(host: host) == held, "a server talked this device out of a sign-in it holds")
         #expect(await server.revoked == ["tok-1"], "the sign-in not kept was left live, or the one held was ended")

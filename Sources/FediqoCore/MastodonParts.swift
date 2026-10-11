@@ -165,6 +165,14 @@ public enum MastodonParts {
         return page.split(separator: " ").map(String.init).filter { !has.contains($0) }
     }
 
+    /// The parts whose act beside acting `page` asks for and `held` has not: what a page
+    /// brings in by bringing a part and acting together, which its question names with the
+    /// part ticked. In the table's order.
+    public static func beside(on page: String, than held: String?) -> [MastodonPart] {
+        let brought = Set(more(on: page, than: held))
+        return MastodonPart.allCases.filter { !brought.isDisjoint(with: $0.wordsBesideActing) }
+    }
+
     /// How a sign-in stands to `part`, by what is written beside it — the one reading every
     /// place that offers the part's acts goes by.
     public static func standing(_ part: MastodonPart, of held: MastodonHeld) -> MastodonPartStanding {
@@ -201,11 +209,16 @@ public enum MastodonParts {
         words(scopes).contains("read")
     }
 
-    /// Whether a scope string is one a sign-in reads by: every word of reading, or the source's
-    /// one word for every read. **A source's account of a sign-in that does not read is no
-    /// account of one** — every sign-in this app holds was asked to — and is believed of none.
+    /// Whether a scope string is one a sign-in reads by: every word of reading, word for
+    /// word. **A source's account of a sign-in that does not read is no account of one** —
+    /// every sign-in this app holds was asked to — and is believed of none.
+    ///
+    /// **The source's one word for every read is not reading here**, because `page` leaves it
+    /// out: a page built over such a sign-in would carry what was ticked and no reading at
+    /// all, and the sign-in that came back could not read Home. So such a sign-in is not
+    /// asked where it stands; it is signed in again, choosing what to allow.
     public static func reads(_ scopes: String?) -> Bool {
-        holds(.reading, in: scopes) || holdsEveryRead(in: scopes)
+        holds(.reading, in: scopes)
     }
 
     /// Whether a word lets something be changed at the source, by the source's own spelling.

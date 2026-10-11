@@ -5,7 +5,7 @@ import Testing
 
 /// A Mastodon answering what an ask in place sends it, by path, and remembering each request.
 /// Every answer can be changed, and any path held at a gate, so a test acts between two steps.
-private actor PartServer: HTTPSender {
+actor PartServer: HTTPSender {
     static let check = "/api/v1/accounts/verify_credentials"
     static let info = "/oauth/token/info"
     static let list = "/.well-known/oauth-authorization-server"
@@ -28,6 +28,8 @@ private actor PartServer: HTTPSender {
     private var listed: [String]?
     /// Whether a registration's answer names the words it was made for.
     private var echoes = true
+    /// Words this host registers for none of, with no list of its own to say so.
+    private var unregistered: Set<String> = []
     /// The words a trade says it granted, where it says other than it was asked.
     private var grants: String?
     private var issued = 0
@@ -46,6 +48,7 @@ private actor PartServer: HTTPSender {
     func holdCheck(of token: String, at gate: Gate) { heldCheck = (token, gate) }
     func name(_ token: String, as account: String?) { accounts[token] = .some(account) }
     func lists(_ words: [String]?) { listed = words }
+    func registersNone(of words: [String]) { unregistered = Set(words) }
     func echoesNothing() { echoes = false }
     func grant(_ words: String?) { grants = words }
     func forget() { requests = [] }
@@ -97,7 +100,8 @@ private actor PartServer: HTTPSender {
             return answered(#"{"scopes_supported":[\#(listed.map { "\"\($0)\"" }.joined(separator: ","))]}"#)
         case Self.apps:
             let asked = (Self.field("scopes", of: request) ?? "").split(separator: " ").map(String.init)
-            if let listed, !Set(asked).isSubset(of: listed) {
+            let known = listed.map(Set(asked).isSubset) ?? true
+            if !known || !unregistered.isDisjoint(with: asked) {
                 return answered(#"{"error":"Validation failed: Scopes doesn't match those configured on the server."}"#, 422)
             }
             let named = echoes ? #","scopes":[\#(asked.map { "\"\($0)\"" }.joined(separator: ","))]"# : ""
@@ -118,7 +122,7 @@ private actor PartServer: HTTPSender {
 
 /// The source's own page, answered by the test.
 @MainActor
-private final class PartPage: OAuthBrowser {
+final class PartPage: OAuthBrowser {
     enum Answer {
         case allow, close, refuse, refuseForged
         /// The page came back saying something went wrong, in the source's own word for it.
@@ -247,7 +251,7 @@ struct PartAskTests {
         #expect(session.askToBookmark(row))
         let ask = try #require(session.partAsks.open)
         #expect(await server.paths.isEmpty, "the press itself asked the source something")
-        #expect(ShellQuestion.part(ask) == ShellQuestion.bookmarks(host: host))
+        #expect(ShellQuestion.part(ask) == ShellQuestion.bookmarks(host: host).inPlace(at: host))
 
         let page = PartPage()
         session.partAsks.answer(ask, through: page, in: session)
@@ -308,7 +312,9 @@ struct PartAskTests {
         let page = PartPage()
         #expect(session.askBookmarks(host: host))
         let first = try #require(session.partAsks.open)
-        #expect(ShellQuestion.part(first) == ShellQuestion.bookmarks(host: host, notices: true))
+        // Filed as reading notices and not as dismissing them: the words that say the page
+        // asks to dismiss are not this page's, and the plain ones are said.
+        #expect(ShellQuestion.part(first) == ShellQuestion.bookmarks(host: host).inPlace(at: host))
 
         session.partAsks.answer(first, through: page, in: session)
         await session.partAsks.landed(host: host)
@@ -317,8 +323,11 @@ struct PartAskTests {
         // and the question again, drawn from what the source says.
         #expect(page.opened == 0, "a page opened on a question drawn from what the source does not say")
         #expect(try tokens.token(host: host)?.scopes == Self.acting)
-        let again = try #require(session.partAsks.open)
-        #expect(ShellQuestion.part(again) == ShellQuestion.bookmarks(host: host))
+        var again = try #require(session.partAsks.open)
+        #expect(again.again, "a question put again did not say it was")
+        again.again = false
+        #expect(ShellQuestion.part(again) == ShellQuestion.bookmarks(host: host).inPlace(at: host))
+        again.again = true
         #expect(session.toast == nil)
         #expect(session.rowRefusal == nil)
 
@@ -523,7 +532,8 @@ struct PartAskTests {
         let ask = try #require(session.partAsks.open)
         #expect(ask.givesUp == ["push"])
         let told = String(format: L10n.t("part.ask.givesUp", language: .english), "push", host)
-        #expect(ShellQuestion.part(ask, language: .english).help?.hasSuffix(told) == true)
+        let help = try #require(ShellQuestion.part(ask, language: .english).help)
+        #expect(help.contains(told) && !help.contains("stays live"), "the sign-in before was said to stay live where asking ends it")
         #expect(told == "This sign-in also has push, which this version of Fediqo does not use. Asking gives that up, and the sign-in this device had is ended at social.example.")
 
         // Never without its question: nobody was told.
@@ -592,6 +602,14 @@ struct PartAskTests {
         session.partAsks.answer(ask, through: page, in: session)
         await session.partAsks.landed(host: host)
 
+        // Reading is what a page is built over, so a sign-in without its words is one no page
+        // can widen: it is told to sign in again, and nothing is put in its place (#347).
+        guard part != .reading else {
+            #expect(page.opened == 0)
+            #expect(session.toast?.text == "This sign-in at social.example cannot be added to where it stands. Sign out and sign in again, choosing what to allow.")
+            #expect(try tokens.token(host: host)?.accessToken == "held-1")
+            return
+        }
         #expect(page.scopes == [ask.said], "the page asked for other than its question was drawn for")
         #expect(page.scopes == [MastodonParts.page(held: MastodonParts.page(held: nil, ticked: others), ticked: [part])])
         #expect(session.mastodon.standing(part, host: host) == .held)
@@ -620,8 +638,10 @@ struct PartAskTests {
             #expect(question.line.contains(line), "the question's line says nothing of \(part)")
             #expect(help.contains(detail), "the question's detail says nothing of \(part)")
         }
-        #expect(PartWords.said(.hasNone, of: [.bookmarks, .notices]) == "part.ask.none")
-        #expect(PartWords.said(.failed(.unreachable), of: [.bookmarks, .notices]) == "part.ask.failed")
+        #expect(PartWords.said(.hasNone, of: [.acting, .search]) == "part.ask.none")
+        #expect(PartWords.said(.failed(.unreachable), of: [.acting, .search]) == "part.ask.failed")
+        // Notices asked with the bookmarks their question was worded to name are notices' own.
+        #expect(PartWords.said(.failed(.unreachable), of: [.bookmarks, .notices]) == "notices.ask.failed")
     }
 
     @Test("The file an ask is put and said in names one part, where it keeps the words bookmarks were asked in before")
@@ -677,6 +697,7 @@ struct PartAskTests {
         // No second question, and no second page, while this one is out. Not waited for
         // here: an ask that did go out would wait where the first one waits.
         #expect(!session.askBookmarks(host: host))
+        #expect(session.toast?.text == String(format: L10n.t("part.ask.asking"), host), "a press while the source is being asked did nothing and said nothing")
         let second = Task { await session.mastodon.ask([.bookmarks], host: self.host, through: page) }
 
         let other = MastodonToken(host: host, accessToken: "other-1", clientID: "cid", clientSecret: "csecret", scopes: Self.reading)
@@ -761,6 +782,8 @@ struct PartAskTests {
         session.mastodon.refresh()
         let page = PartPage()
 
+        // Answered as its card answers it: put down, then handed over.
+        session.partAsks.putDown()
         await session.allow(ask, through: page)
 
         #expect(page.opened == 0, "a page asked for a word the person was never told of")
@@ -771,9 +794,109 @@ struct PartAskTests {
         #expect(again.said == Self.acting + " read:notifications write:notifications")
     }
 
+    // MARK: - Whose the sign-in held is, where nothing written says
+
+    /// A sign-in an earlier build filed, whose id this device cannot write beside it: who it
+    /// is, is known for this run alone.
+    private func unnamedShell() async throws -> (ShellSession, PartServer, MemoryMastodonTokens) {
+        let (session, server, tokens) = try await shell(holding: nil)
+        try tokens.fileUnstamped(MastodonToken(
+            host: host, accessToken: "held-1", clientID: "cid", clientSecret: "csecret", scopes: Self.reading, asked: Self.reading
+        ))
+        session.mastodon.refresh()
+        tokens.refuse(.changing, times: 100)
+        return (session, server, tokens)
+    }
+
+    /// What this run learnt of the sign-in held is let go of, the sign-in itself staying: the
+    /// first note this device can write beside it marks it, and the next look takes that for
+    /// a sign-in nobody has asked about.
+    private func forgetWho(_ session: ShellSession, _ tokens: MemoryMastodonTokens) throws {
+        tokens.refuse(.changing, times: 0)
+        _ = try tokens.update(MastodonToken(
+            host: host, accessToken: "held-1", clientID: "cid", clientSecret: "csecret", asked: Self.reading
+        ))
+        session.mastodon.refresh()
+    }
+
+    @Test("Asked in place, the sign-in held is the account its ask confirmed: where its id was never written beside it and what this run learnt of it was let go of while the page was up, the wider sign-in still leaves it live and written down as left, and its reader is the one who was here")
+    func theOwnerIsTheOneTheAskConfirmed() async throws {
+        let (session, server, tokens) = try await unnamedShell()
+        let gate = Gate()
+        defer { Task { await gate.open() } }
+        let page = PartPage(gate: gate)
+        let asking = Task { await session.mastodon.ask([.notices], host: self.host, through: page) }
+        #expect(await spun { page.opened == 1 }, "the ask never reached its page")
+        #expect(try tokens.token(host: host)?.accountID == nil)
+        try forgetWho(session, tokens)
+        _ = session.mastodon.takeReadersChanged()
+
+        await gate.open()
+        #expect(await asking.value == .allowed)
+        await session.mastodon.leftSettled()
+
+        #expect(try tokens.token(host: host)?.accessToken == "new-1")
+        let ended: [String] = await server.revoked
+        #expect(ended.isEmpty, "the sign-in the person had was ended, nobody having been told")
+        #expect(try tokens.left(host: host).map(\.state) == [.left])
+        #expect(try tokens.left(host: host).map(\.accountID) == ["1"])
+        #expect(session.mastodon.readersChangedWaiting.isEmpty, "the same reader was taken for another")
+        #expect(session.mastodon.leftTold.isEmpty)
+    }
+
+    /// Everything an ask in place can come to once it has begun.
+    enum InPlace: String, CaseIterable, Sendable {
+        case allowed, notGiven, closed, refused, another, unnamed, less, tradeFails, checkFails, notKept, hasNone
+    }
+
+    @Test("Whatever an ask in place comes to, it ends no sign-in for want of knowing whose it is: with the id written nowhere and what this run learnt let go of while the page was up, the sign-in the person had is still held, or is left live and written down", arguments: InPlace.allCases)
+    func noOutcomeEndsASignInNobodyCanName(_ outcome: InPlace) async throws {
+        let (session, server, tokens) = try await unnamedShell()
+        let gate = Gate()
+        defer { Task { await gate.open() } }
+        var answer = PartPage.Answer.allow
+        switch outcome {
+        case .closed: answer = .close
+        case .refused: answer = .refuse
+        case .another: await server.name("new-1", as: "2")
+        case .unnamed: await server.name("new-1", as: nil)
+        case .less: await server.grant("read:statuses read:lists read:notifications")
+        case .notGiven: await server.grant(Self.reading)
+        case .tradeFails: await server.answer(S.trade, .body("{}", 500))
+        case .hasNone: await server.lists(MastodonParts.everything.split(separator: " ").map(String.init).filter { $0 != "read:notifications" })
+        case .allowed, .checkFails, .notKept: break
+        }
+        let page = PartPage(answer, gate: gate)
+        let asking = Task { await session.mastodon.ask([.notices], host: self.host, through: page) }
+        let paged = await spun { page.opened == 1 }
+        let pages = outcome != .hasNone
+        #expect(paged == pages)
+        if paged {
+            try forgetWho(session, tokens)
+            if outcome == .checkFails { await server.answer(S.check, .body("{}", 500)) }
+            if outcome == .notKept { tokens.refuse(.changing, times: 100) }
+        }
+
+        await gate.open()
+        let came = await asking.value
+        await session.mastodon.leftSettled()
+
+        let ended: [String] = await server.revoked
+        #expect(!ended.contains("held-1"), "\(outcome.rawValue) ended the sign-in the person had, nobody having been told")
+        let kept = [InPlace.allowed, .notGiven].contains(outcome)
+        let widened = came == .allowed || came == .notGiven
+        #expect(widened == kept, "\(outcome.rawValue) came to \(came)")
+        let held = try tokens.token(host: host)?.accessToken
+        let holds = kept ? "new-1" : "held-1"
+        #expect(held == holds)
+        let left: [MastodonLeft.State] = kept ? [.left] : []
+        #expect(try tokens.left(host: host).map(\.state) == left)
+        #expect(session.mastodon.leftTold.isEmpty)
+    }
+
     // MARK: - What the question was drawn from, and what is held at its yes
 
-    @Test("A sign-in from an earlier build, marked by this one's first note while its question stood open, is not a yes that comes to nothing: the question is put again, and its yes opens the page")
+    @Test("A sign-in from an earlier build, marked by this one's first note while its question stood open, is the sign-in the question was about: the question stands, and its one yes opens the page — nothing held differs, and nothing is asked twice")
     func anOlderSignInMarkedMeanwhile() async throws {
         let (session, _, tokens) = try await shell(holding: nil)
         try tokens.fileUnstamped(MastodonToken(
@@ -783,20 +906,117 @@ struct PartAskTests {
         #expect(session.askBookmarks(host: host))
         let ask = try #require(session.partAsks.open)
         #expect(ask.stamp == nil)
-        session.partAsks.putDown()
         await session.mastodon.learnWho(host: host)
         #expect(try tokens.token(host: host)?.stamp != nil)
+        #expect(session.partAsks.open == ask, "a question was taken from under the person for a mark this device made itself")
+        let page = PartPage()
+
+        session.partAsks.answer(ask, through: page, in: session)
+        await session.partAsks.landed(host: host)
+
+        #expect(page.scopes == [Self.wider], "a second yes was asked for where nothing held had changed")
+        #expect(session.partAsks.open == nil)
+    }
+
+    @Test("A sign-in from an earlier build that this one has named — at launch, as every sign-in is — is asked by one question: the press reads the mark that note gave it, and its yes opens the page")
+    func anOlderSignInNamedBeforeThePress() async throws {
+        let (session, _, tokens) = try await shell(holding: nil)
+        try tokens.fileUnstamped(MastodonToken(
+            host: host, accessToken: "held-1", clientID: "cid", clientSecret: "csecret", scopes: Self.acting, asked: Self.acting
+        ))
+        session.mastodon.refresh()
+        await session.mastodon.learnWho(host: host)
+        #expect(session.askBookmarks(host: host))
+        let ask = try #require(session.partAsks.open)
+        #expect(ask.stamp != nil, "a question was drawn from what rode beside the sign-in before this device marked it")
+        let page = PartPage()
+
+        session.partAsks.answer(ask, through: page, in: session)
+        await session.partAsks.landed(host: host)
+
+        #expect(page.scopes == [Self.wider])
+        #expect(session.partAsks.open == nil)
+    }
+
+    @Test("A question about a sign-in an earlier build filed is not one about another held since: its yes opens no page and puts no question, nobody having pressed about that one")
+    func anOlderSignInReplacedMeanwhile() async throws {
+        let (session, server, tokens) = try await shell(holding: nil)
+        try tokens.fileUnstamped(MastodonToken(
+            host: host, accessToken: "held-1", clientID: "cid", clientSecret: "csecret", scopes: Self.acting, asked: Self.acting
+        ))
+        session.mastodon.refresh()
+        #expect(session.askBookmarks(host: host))
+        let ask = try #require(session.partAsks.open)
+        #expect(ask.stamp == nil)
+        session.partAsks.putDown()
+        try tokens.save(MastodonToken(host: host, accessToken: "other-1", clientID: "cid", clientSecret: "csecret", scopes: Self.acting))
+        session.mastodon.refresh()
         let page = PartPage()
 
         await session.allow(ask, through: page)
 
-        #expect(page.opened == 0)
-        let again = try #require(session.partAsks.open)
-        #expect(again.stamp != nil)
-        #expect(again.said == ask.said)
-        session.partAsks.answer(again, through: page, in: session)
+        #expect(page.opened == 0, "a page opened about a sign-in the question was never about")
+        #expect(session.partAsks.open == nil, "a question nobody pressed for was put")
+        #expect(await server.paths.isEmpty)
+        #expect(try tokens.token(host: host)?.accessToken == "other-1")
+    }
+
+    @Test("A question raised about a sign-in goes with it — signed out of, removed, or replaced: no sign-in filed at that source later brings it back, nobody having pressed", arguments: [0, 1, 2])
+    func aQuestionGoesWithItsSignIn(_ how: Int) async throws {
+        let (session, _, tokens) = try await shell(holding: nil)
+        try tokens.fileUnstamped(MastodonToken(
+            host: host, accessToken: "held-1", clientID: "cid", clientSecret: "csecret", scopes: Self.acting, asked: Self.acting
+        ))
+        session.mastodon.refresh()
+        #expect(session.askBookmarks(host: host))
+        #expect(session.partAsks.open?.stamp == .some(nil))
+        switch how {
+        case 0: await session.signOut(host: host)
+        case 1: await session.mastodon.signOut(host: host, forgettingApp: true)
+        default:
+            try tokens.save(MastodonToken(host: host, accessToken: "other-1", clientID: "cid", clientSecret: "csecret", scopes: Self.acting))
+            session.mastodon.refresh()
+        }
+        #expect(session.partAsks.open == nil, "a question stood open about a sign-in that is gone")
+        // Another that an earlier build filed, as a store carried over from one holds it.
+        try tokens.fileUnstamped(MastodonToken(
+            host: host, accessToken: "other-2", clientID: "cid", clientSecret: "csecret", scopes: Self.acting, asked: Self.acting
+        ))
+        session.mastodon.refresh()
+        #expect(session.partAsks.open == nil, "a question nobody pressed for came back with a later sign-in")
+    }
+
+    @Test("A question put again lands seconds after its yes, and takes the place of no question the person has opened since about another source: that one stands, nothing is said over it, and the place goes on offering its press")
+    func aQuestionPutAgainTakesNoOthersPlace() async throws {
+        let (session, server, tokens) = try await shell(holding: Self.acting + " read:notifications")
+        let elsewhere = "other.example"
+        try tokens.save(MastodonToken(
+            host: elsewhere, accessToken: "there-1", clientID: "cid", clientSecret: "csecret", scopes: Self.acting, asked: Self.acting
+        ))
+        session.mastodon.refresh()
+        // Filed as holding notices, which its source says it does not: its yes opens no page.
+        await server.answer(S.info, .body(PartAskFixture.info(Self.acting)))
+        let gate = Gate()
+        defer { Task { await gate.open() } }
+        await server.hold(S.info, at: gate)
+        #expect(session.askBookmarks(host: host))
+        let first = try #require(session.partAsks.open)
+        let page = PartPage()
+        session.partAsks.answer(first, through: page, in: session)
+        #expect(await spun { await server.waiting.contains(S.info) }, "the ask never reached the source's account of the token")
+        #expect(session.askBookmarks(host: elsewhere))
+        let other = try #require(session.partAsks.open)
+
+        await gate.open()
         await session.partAsks.landed(host: host)
-        #expect(page.scopes == [Self.wider])
+
+        #expect(page.opened == 0)
+        #expect(session.partAsks.open == other, "a question the person had open was replaced under their hand")
+        #expect(session.toast == nil)
+        #expect(session.rowRefusal == nil)
+        session.partAsks.putDown()
+        #expect(session.askBookmarks(host: host), "the place stopped offering to ask again")
+        #expect(session.partAsks.open?.host == host)
     }
 
     @Test("A word this build does not use, which only the source's own account of the sign-in shows, is not given up on a question that never said so: the question is put again, saying it")
@@ -846,7 +1066,14 @@ struct PartAskTests {
         return named
     }
 
-    @Test("No page carries a word its question, as drawn, did not name — whatever the sign-in is filed as holding and whatever its source then says it holds; where the two differ no page opens on that question, and the one put again is held to the same", arguments: MastodonPart.allCases)
+    /// Whether a question's words say its page asks to dismiss notices — and not that it does
+    /// not, which the question of a sign-in that only reads says in as many words.
+    private static func saysDismissing(_ question: ShellConfirmation) -> Bool {
+        let text = question.line + " " + (question.help ?? "")
+        return text.contains("to dismiss") && !text.contains("not asked to dismiss")
+    }
+
+    @Test("No page carries a word its question, as drawn, did not name — whatever the sign-in is filed as holding and whatever its source then says it holds; where the two differ no page opens on that question, and the one put again is held to the same. And an act a page brings in beside acting is said by its question in words, whichever part was pressed", arguments: MastodonPart.allCases)
     func thePageIsItsQuestions(_ tick: MastodonPart) async throws {
         let reads = "read:statuses read:lists read:accounts"
         let finds = reads + " read:search"
@@ -885,6 +1112,16 @@ struct PartAskTests {
                 guard page.opened == 0, let ask = session.partAsks.open else { break }
                 let named = Self.wordsNamed(held: drawn, tick: tick)
                 #expect(Self.split(ask.said) == named, "a question was drawn for other than what is held and ticked")
+                // Dismissing, where this page is what adds it: said in the question's words.
+                let had: Bool = Self.split(drawn).contains("write:notifications")
+                let brings: Bool = named.contains("write:notifications") && !had
+                let question = ShellQuestion.part(ask, language: .english)
+                if brings {
+                    #expect(Self.saysDismissing(question), "ticking \(tick.rawValue) over \(drawn): the page asks to dismiss notices and its question does not say so")
+                } else {
+                    let text = question.line + " " + (question.help ?? "")
+                    #expect(!text.contains("also asks to dismiss"), "a question said its page asks to dismiss notices, and it does not")
+                }
                 session.partAsks.answer(ask, through: page, in: session)
                 await session.partAsks.landed(host: host)
                 let paged = Self.split(page.scopes.joined(separator: " "))
@@ -923,7 +1160,7 @@ struct PartAskTests {
         #expect(session.mastodon.bookmarks(host: host) == .unasked, "it may be asked again later")
     }
 
-    @Test("A believable account of a token is a list of words that reads: every word of reading, or the source's one word for every read. Such a list is written over what was filed even where it is shorter — and a sign-in holding only the one word is asked in place all the same")
+    @Test("A believable account of a token is a list of words that reads, word for word: such a list is written over what was filed even where it is shorter — and a sign-in holding only the source's one word for every read is put no page, which could carry no reading")
     func anAccountBelieved() async throws {
         let (session, server, tokens) = try await shell()
         await server.answer(S.info, .body(PartAskFixture.info(Self.reading)))
@@ -938,7 +1175,7 @@ struct PartAskTests {
         #expect(ask.givesUp == ["read", "write"])
         let wide = PartPage()
         await coarse.allow(ask, through: wide)
-        #expect(wide.scopes == ["read:notifications"])
+        #expect(wide.opened == 0, "a page of \(wide.scopes) took the place of a sign-in that reads")
     }
 
     // MARK: - What is said of an answer
@@ -969,7 +1206,9 @@ struct PartAskTests {
         await source.grant(Self.reading)
         let answer = await other.mastodon.ask([.notices], host: host, through: PartPage())
         #expect(answer != .allowed)
-        #expect(PartWords.said(answer, of: [.notices]) == "part.ask.none")
+        // Notices have a line of their own for it, on their page.
+        #expect(PartWords.said(answer, of: [.notices]) == "notices.source.refused")
+        #expect(PartWords.said(answer, of: [.acting]) == "part.ask.none")
         #expect(try held.token(host: host)?.accessToken == "new-1")
     }
 
@@ -1015,7 +1254,7 @@ struct PartAskTests {
         #expect(help.contains("This sign-in also has \(shown), which"))
         #expect(!help.contains("crypto"))
 
-        let plain = try #require(ShellQuestion.bookmarks(host: host, language: .english).help)
+        let plain = try #require(ShellQuestion.bookmarks(host: host, language: .english).inPlace(at: host, language: .english).help)
         let most = (100..<228).map { String(long.dropLast(3)) + String($0) }
         let full = PartAsk(host: host, ticked: [.bookmarks], said: Self.wider, givesUp: most, stamp: nil)
         let longest = try #require(ShellQuestion.part(full, language: .english).help)
@@ -1055,8 +1294,6 @@ struct PartAskTests {
             "part.ask.refused.said": "This was refused on %@'s page.",
             "part.ask.unnamed": "%@'s page was allowed, but Fediqo could not confirm whose account it signed in, so nothing was changed. Try again later, or sign out and sign in again, choosing what to allow.",
             "part.ask.givesUp.more": "%1$@ and %2$d more",
-            "part.ask.title": "Ask %@ to allow more?",
-            "part.ask.detail": "%@'s own sign-in page opens and asks again for what this sign-in already has. Nothing is signed out first: close the page and everything stays as it is.",
         ]
         let chinese = [
             "part.ask.refused": "這一項在 %@ 的頁面上被拒絕了。再問一次",
@@ -1070,8 +1307,6 @@ struct PartAskTests {
             "part.ask.refused.said": "這一項在 %@ 的頁面上被拒絕了。",
             "part.ask.unnamed": "%@ 的頁面已經允許了，但 Fediqo 無法確認登入的是哪個帳號，所以什麼都沒有改變。請稍後再試，或登出後重新登入，並選擇要允許的項目。",
             "part.ask.givesUp.more": "%1$@ 等，另外還有 %2$d 項",
-            "part.ask.title": "請 %@ 允許更多？",
-            "part.ask.detail": "%@ 自己的登入頁面會打開，再問一次這個登入已經有的。不會先登出：關掉那一頁，一切都和原來一樣。",
         ]
         func specifiers(_ text: String) -> [String] {
             let pattern = try! NSRegularExpression(pattern: "%(\\d\\$)?[@d]")

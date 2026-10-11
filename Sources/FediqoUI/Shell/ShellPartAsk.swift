@@ -27,6 +27,18 @@ struct PartAsk: Equatable {
     /// Which sign-in the question is about: the mark of its filing. Another held by the time
     /// of the yes, and nothing is asked.
     let stamp: String?
+    /// The parts whose act beside acting the page asks for with the rest, because it brings
+    /// the two together (`MastodonParts.beside`): each is named by the question.
+    var beside: [MastodonPart] = []
+    /// Whether this question is put again in the place of one whose yes opened no page: what
+    /// the sign-in holds turned out other than that one was drawn from, and it says so.
+    var again = false
+    /// The parts of `ticked` nobody pressed for: ticked with the one that was, because its
+    /// question names them. A source with none of these has not said so of what was pressed.
+    var with: Set<MastodonPart> = []
+    /// Whether it is put again for want of a part the one before named, of which the source
+    /// has none — which is then what it says, and not that the sign-in holds otherwise.
+    var without = false
 }
 
 /// The question open about a part, and the asks on their way — **an object of the session's,
@@ -35,8 +47,21 @@ struct PartAsk: Equatable {
 @MainActor
 @Observable
 final class ShellPartAsks {
-    /// The question open, where one is. One at a time: a second raised over it takes its place.
-    private(set) var open: PartAsk?
+    /// The question raised last and not yet answered or put down. One at a time: a second
+    /// raised over it takes its place.
+    private var raised: PartAsk?
+
+    /// Whose sign-ins the question raised is about.
+    @ObservationIgnored private weak var sessions: MastodonSessions?
+
+    /// The question open, where one is — **only while the sign-in it was raised about is the
+    /// one held** (`MastodonSessions.isSame`): signed out of, removed, ended by its source, or
+    /// replaced by another (a sign-in, a package read back), its question is down with it
+    /// (`putDown(host:)`) and nobody is left looking at a yes that could ask nothing.
+    var open: PartAsk? {
+        guard let raised, let sessions, let held = sessions.heldParts[raised.host] else { return nil }
+        return sessions.isSame(raised.stamp, as: held.stamp, host: raised.host) ? raised : nil
+    }
 
     /// The asks started by a yes and not yet landed, a source each.
     @ObservationIgnored private var running: [String: Task<Void, Never>] = [:]
@@ -44,22 +69,39 @@ final class ShellPartAsks {
     /// The press on a locked act: raises the question about `host`'s sign-in and `ticked`.
     /// Sends nothing. Returns whether a question was raised — none where no part of `ticked`
     /// may be asked of that sign-in, and none while an ask of that source is on its way.
+    ///
+    /// `with` are parts ticked beside those pressed for (`PartAsk.with`): asked only with
+    /// them, and never by themselves. `again` is a question put in the place of one whose
+    /// yes opened no page — `without` a part that one named, where that is why.
     @discardableResult
-    func raise(_ ticked: Set<MastodonPart>, host raw: String, in session: ShellSession) -> Bool {
+    func raise(
+        _ ticked: Set<MastodonPart>, with beside: Set<MastodonPart> = [], host raw: String, in session: ShellSession,
+        again: Bool = false, without: Bool = false
+    ) -> Bool {
         let host = raw.lowercased()
         let mastodon = session.mastodon
-        let asked = ticked.filter { mastodon.mayAsk($0, host: host) }
-        guard !asked.isEmpty, !mastodon.asking.contains(host), let held = mastodon.heldParts[host] else { return false }
-        open = PartAsk(
-            host: host, ticked: asked, said: MastodonParts.page(held: held.scopes, ticked: asked),
-            givesUp: MastodonParts.unknown(in: held.scopes), stamp: held.stamp
+        let asked = ticked.union(beside).filter { mastodon.mayAsk($0, host: host) }
+        let pressed = asked.subtracting(beside)
+        guard !pressed.isEmpty, !mastodon.asking.contains(host), let held = mastodon.heldParts[host] else { return false }
+        let page = MastodonParts.page(held: held.scopes, ticked: asked)
+        sessions = mastodon
+        raised = PartAsk(
+            host: host, ticked: asked, said: page, givesUp: MastodonParts.unknown(in: held.scopes),
+            stamp: held.stamp, beside: MastodonParts.beside(on: page, than: held.scopes), again: again,
+            with: asked.subtracting(pressed), without: without
         )
         return true
     }
 
     /// The question answered no, dismissed, or overtaken: everything stays as it was.
     func putDown() {
-        open = nil
+        raised = nil
+    }
+
+    /// The sign-in held at `host` has become another, or none: a question raised about the
+    /// one before goes with it, and no sign-in filed there later brings it back.
+    func putDown(host: String) {
+        if raised?.host == host { raised = nil }
     }
 
     /// The question answered yes: the ask it starts is kept here until it lands, behind any
@@ -67,7 +109,7 @@ final class ShellPartAsks {
     /// hands the answer over, so what makes a yes stale is looked for where the ask begins —
     /// the sign-in the question was about must still be the one held (`MastodonSessions.ask`).
     func answer(_ ask: PartAsk, through browser: any OAuthBrowser, in session: ShellSession) {
-        if open == ask { open = nil }
+        if raised == ask { raised = nil }
         let before = running[ask.host]
         running[ask.host] = Task { [weak session] in
             await before?.value
@@ -93,57 +135,138 @@ extension ShellSession {
     /// is offered there, and is the person's to press.
     ///
     /// **A yes is never left to come to nothing**: where what is held was not what the
-    /// question was drawn from, the question is put again, drawn from what is held now.
+    /// question was drawn from, or the source has none of a part ticked beside the one
+    /// pressed for, the question is put again, drawn from what is held now and saying why
+    /// it is back — and where that leaves nothing to ask, or there was nothing left by the
+    /// yes, how the sign-in stands to the part is said instead.
+    ///
+    /// **It is put again only where no question stands open**: this lands seconds after
+    /// the yes, and one the person has opened since — about another source — is not taken
+    /// from under their hand. The place then goes on offering its press, and nothing is said.
+    ///
+    /// **A part with a place of its own is told there** (`PartWords.Earlier.says`): notices,
+    /// on the notices page, where the press for them is. Every other, under the row.
     func allow(_ ask: PartAsk, through browser: any OAuthBrowser) async {
         let host = ask.host
+        let own = PartWords.own(ask.ticked)
         if rowRefusal?.host == host { rowRefusal = nil }
+        own?.says?(self, host, nil)
         let answer = await mastodon.ask(ask.ticked, host: host, through: browser, answering: ask)
         await forgetReaderMarksDue()
         if case .failed(let failure) = answer {
             NetLog.auth.notice("\(NetLog.line("part", host: host, error: failure), privacy: .public)")
         }
-        if let key = PartWords.said(answer, of: ask.ticked) {
-            if isAdded(host), PartWords.staysUnderRow(answer) { rowRefusal = (host: host, key: key) }
-            showToast(String(format: L10n.t(key), host))
+        var key = PartWords.said(answer, of: ask.ticked)
+        let pressed = ask.ticked.subtracting(ask.with)
+        let back = answer == .changed || answer == .hasNoneOfSome
+        let waits = back && partAsks.open != nil
+        let again = back && !waits && partAsks.raise(
+            pressed, with: ask.with, host: host, in: self, again: true, without: answer == .hasNoneOfSome
+        )
+        if answer == .nothingLeft || (back && !waits && !again) { key = settled(ask.ticked, host: host) }
+        if let key {
+            if let says = own?.says {
+                says(self, host, key)
+            } else {
+                if isAdded(host), PartWords.staysUnderRow(answer) { rowRefusal = (host: host, key: key) }
+                showToast(String(format: L10n.t(key), host))
+            }
         }
-        if answer == .changed { partAsks.raise(ask.ticked, host: host, in: self) }
-        if answer == .allowed || answer == .notGiven, mastodon.isSignedIn(host: host) { await readAsYou(host: host) }
+        guard answer == .allowed || answer == .notGiven, mastodon.isSignedIn(host: host) else { return }
+        await own?.allowed?(self, host)
+        await readAsYou(host: host)
+    }
+
+    /// What is said where a yes found nothing left of `ticked` to ask for at `host`: how the
+    /// sign-in stands to the first part of them that has anything to say. Nothing, where the
+    /// sign-in is gone.
+    ///
+    /// **Where what rides beside the sign-in still says the part may be asked, the sign-in
+    /// itself is believed**: it holds the part, that is said, and what rides beside it is
+    /// read again so the place stops offering.
+    private func settled(_ ticked: Set<MastodonPart>, host: String) -> String? {
+        for part in PartWords.named(ticked) {
+            switch mastodon.standing(part, host: host) {
+            case .held?: return "part.ask.held"
+            case .notGiven?: return PartWords.earlier[part]?.none ?? "part.ask.none"
+            // One that may not be asked though it never was: it adds to acting, and this
+            // sign-in only reads.
+            case .unasked?, .refused?:
+                guard mastodon.mayAsk(part, host: host) else { return "part.ask.reads" }
+                mastodon.refresh()
+                return "part.ask.held"
+            case .partly?, nil: continue
+            }
+        }
+        return nil
+    }
+
+    /// The press on a locked act or on a line that asks: raises the question about `ticked`
+    /// at `host`. Sends nothing. Returns whether a question was raised.
+    ///
+    /// **While that source is being asked for anything, no second question is raised** — one
+    /// ask a source at a time — **and the press says so** in place of doing nothing.
+    ///
+    /// `with` are parts ticked beside those pressed for, because the question names them.
+    @discardableResult
+    func askFor(_ ticked: Set<MastodonPart>, with beside: Set<MastodonPart> = [], host raw: String) -> Bool {
+        let host = raw.lowercased()
+        if partAsks.raise(ticked, with: beside, host: host, in: self) { return true }
+        if mastodon.asking.contains(host) { showToast(String(format: L10n.t("part.ask.asking"), host)) }
+        return false
     }
 }
 
 /// The words an ask in place is put and answered in.
 ///
-/// **A part's own are found by its name**: `part.<name>.ask.title`, `.line` and `.detail`, and
-/// a question about several parts says each one's. A part asked before there was a table
-/// keeps the sentences it had where it is asked alone (`earlier`), and where a part has none
-/// of its own for an outcome, the outcome's own sentence is said.
+/// **A part's own are found by its name**: `part.<name>.ask.title`, `.line` and `.detail`,
+/// `part.<name>.ask.beside` for the act it gains beside acting, and `part.<name>.unasked`
+/// for its lock. A question about several parts says each one's. A part asked before there
+/// was a table keeps the sentences it had (`earlier`), and where a part has none of its own
+/// for an outcome, the outcome's own sentence is said.
 @MainActor
 enum PartWords {
     /// The sentences a part was asked in before every part went one way.
     struct Earlier {
-        /// Its question, as it was worded.
-        let question: @MainActor (PartAsk, DummyLanguage?) -> ShellConfirmation
+        /// Its question, as it was worded — or nothing where those words would not be true
+        /// of this page, and the table's are said.
+        let question: @MainActor (PartAsk, DummyLanguage?) -> ShellConfirmation?
         let failed: String
-        let hasNone: String
+        /// What is said of a source with none of it.
+        let none: String
+        /// The line of its lock where the sign-in was never asked for it.
+        let unasked: String
+        /// The parts its question was worded to ask for with it, where they are ticked too.
+        var with: Set<MastodonPart> = []
+        /// Where what an ask came to is said, for a part with a place of its own: the key of
+        /// the sentence, or nothing to take the last one down. Without one, under the row.
+        var says: (@MainActor (ShellSession, String, String?) -> Void)?
+        /// What its place does once the sign-in holds it.
+        var allowed: (@MainActor (ShellSession, String) async -> Void)?
     }
 
     static let earlier: [MastodonPart: Earlier] = [
         .bookmarks: Earlier(
             // Worded for the notices too, where the page carries the ones the sign-in holds.
-            question: { ShellQuestion.bookmarks(host: $0.host, notices: MastodonOAuth.notices($0.said), language: $1) },
-            failed: "account.bookmarks.failed", hasNone: "account.bookmarks.unavailable"
+            // Only where it carries both of them: those words say the page asks to dismiss.
+            question: { ShellQuestion.bookmarks(host: $0.host, notices: MastodonOAuth.dismisses($0.said), language: $1) },
+            failed: "account.bookmarks.failed", none: "account.bookmarks.unavailable",
+            unasked: "account.source.permission"
         ),
-    ]
+    ].merging(noticed) { own, _ in own }
 
     /// The parts a question about `ticked` words, every one, in the table's order.
     static func named(_ ticked: Set<MastodonPart>) -> [MastodonPart] {
         MastodonPart.allCases.filter(ticked.contains)
     }
 
-    /// The sentences `ticked` was asked in before, where it is the one part that has any: a
-    /// question about several is worded by the table for each.
+    /// The sentences `ticked` was asked in before, where one part of it has any that cover
+    /// every part ticked: asked alone, or with the parts its question was worded to name. A
+    /// question about any other several is worded by the table for each.
     static func own(_ ticked: Set<MastodonPart>) -> Earlier? {
-        ticked.count == 1 ? ticked.first.flatMap { earlier[$0] } : nil
+        named(ticked).lazy.compactMap { part in
+            earlier[part].flatMap { ticked.subtracting([part]).isSubset(of: $0.with) ? $0 : nil }
+        }.first
     }
 
     /// The most words a question names as given up, and the most of each: they are whatever
@@ -160,18 +283,56 @@ enum PartWords {
         return String(format: L10n.t("part.ask.givesUp.more", language: language), listed, words.count - few.count)
     }
 
+    /// What a place draws where a part's act would be, for one standing of the sign-in.
+    struct Place: Equatable {
+        enum Kind: Equatable {
+            /// Never asked: a lock whose press asks.
+            case unasked
+            /// Refused on the source's own page: the line is the press, and asks again.
+            case refused
+            /// The source has none to allow, or gave none: said, and not offered.
+            case none
+            /// The source is being asked for something now: nothing more until that lands.
+            case asking
+        }
+
+        let kind: Kind
+        /// The key of its line, with the source for its one argument.
+        let key: String
+        /// Whether pressing the line asks.
+        var asks: Bool { kind == .unasked || kind == .refused }
+    }
+
+    /// What is drawn where `part`'s act would be, for a sign-in that stands to it so — **the
+    /// one reading of a standing every place draws from**. Nothing where the act itself is
+    /// offered: held, and held in part, where what is held is offered and the rest is not
+    /// asked for.
+    ///
+    /// `asking` is whether that source is being asked for something now: a line that would
+    /// ask then says so, and cannot be pressed.
+    static func place(_ standing: MastodonPartStanding, of part: MastodonPart, asking: Bool = false) -> Place? {
+        switch standing {
+        case .held, .partly: nil
+        case .unasked where asking, .refused where asking: Place(kind: .asking, key: "part.ask.asking")
+        case .unasked: Place(kind: .unasked, key: earlier[part]?.unasked ?? "part.\(part.rawValue).unasked")
+        case .refused: Place(kind: .refused, key: "part.ask.refused")
+        case .notGiven: Place(kind: .none, key: earlier[part]?.none ?? "part.ask.none")
+        }
+    }
+
     /// The key of the sentence that says what `answer` came to, with the source for its one
     /// argument — or nothing where there is nothing to say.
     static func said(_ answer: MastodonSessions.PartAnswer, of ticked: Set<MastodonPart>) -> String? {
         let before = own(ticked)
         switch answer {
-        case .allowed, .putDown, .busy, .changed: return nil
+        case .allowed, .putDown, .busy, .changed, .nothingLeft, .hasNoneOfSome: return nil
         // With no press in it: the press is the place's own line (`part.ask.refused`).
         case .refused: return "part.ask.refused.said"
-        case .hasNone, .notGiven: return before?.hasNone ?? "part.ask.none"
+        case .hasNone, .notGiven: return before?.none ?? "part.ask.none"
         case .another: return "part.ask.another"
         case .less: return "part.ask.less"
         case .unconfirmed: return "part.ask.unconfirmed"
+        case .coarse: return "part.ask.coarse"
         case .unnamed: return "part.ask.unnamed"
         case .stranded: return "part.ask.stranded"
         case .failed: return before?.failed ?? "part.ask.failed"
@@ -183,8 +344,8 @@ enum PartWords {
     /// none — is said once and left to the place.
     static func staysUnderRow(_ answer: MastodonSessions.PartAnswer) -> Bool {
         switch answer {
-        case .refused, .hasNone, .notGiven, .allowed, .putDown, .busy, .changed: false
-        case .another, .less, .unconfirmed, .unnamed, .stranded, .failed: true
+        case .refused, .hasNone, .hasNoneOfSome, .notGiven, .allowed, .putDown, .busy, .changed, .nothingLeft: false
+        case .another, .less, .unconfirmed, .coarse, .unnamed, .stranded, .failed: true
         }
     }
 }
@@ -194,34 +355,54 @@ extension ShellQuestion {
     /// what the page will ask beyond what is held, that nothing is signed out to ask it, and —
     /// where the sign-in holds a word this build does not use — that asking gives it up and
     /// ends the sign-in this device had at the source. One yes, and Cancel.
+    ///
+    /// **Every word the page asks beyond what is held is named**: each part ticked, and each
+    /// act the page brings in beside acting (`PartAsk.beside`) where the part's own words do
+    /// not already say it. **And every question ends on the same two things**: that the
+    /// sign-in this device had stays live at the source until the person signs out here —
+    /// or, where asking gives a word up, that it is ended — and that a source already
+    /// holding a sign-in for exactly this asks nothing more.
     static func part(_ ask: PartAsk, language: DummyLanguage? = nil) -> ShellConfirmation {
         let parts = PartWords.named(ask.ticked)
         // Each part's own sentence of one kind, in the table's order.
-        func worded(_ what: String) -> [String] {
-            parts.map { L10n.t("part.\($0.rawValue).ask.\(what)", language: language) }
+        func worded(_ what: String, of parts: [MastodonPart]) -> [String] {
+            parts.map { String(format: L10n.t("part.\($0.rawValue).ask.\(what)", language: language), ask.host) }
         }
         func joined(_ sentences: [String]) -> String {
             sentences.dropFirst().reduce(sentences.first ?? "") {
                 String(format: L10n.t("question.join", language: language), $0, $1)
             }
         }
+        func said(_ key: String) -> String {
+            String(format: L10n.t(key, language: language), ask.host)
+        }
         // One part is asked under its own title; several, under one that is nobody's.
-        let title = parts.count == 1 ? worded("title")[0] : L10n.t("part.ask.title", language: language)
-        let details = worded("detail") + [L10n.t("part.ask.detail", language: language)]
-        var question = PartWords.own(ask.ticked)?.question(ask, language) ?? ShellConfirmation(
-            symbol: SourceRow.permissionSymbol,
-            title: String(format: title, ask.host),
-            line: joined(worded("line")),
-            help: joined(details.map { String(format: $0, ask.host) }),
-            choices: [.init(yes, L10n.t("item.bookmark.ask.confirm", language: language), role: .keyed)],
-            cancel: L10n.t("board.choose.cancel", language: language)
-        )
+        let title = parts.count == 1 ? worded("title", of: parts)[0] : said("part.several.ask.title")
+        var question: ShellConfirmation
+        if let before = PartWords.own(ask.ticked)?.question(ask, language) {
+            question = before
+        } else {
+            question = ShellConfirmation(
+                symbol: SourceRow.permissionSymbol, title: title, line: joined(worded("line", of: parts)),
+                help: joined(worded("detail", of: parts)),
+                choices: [.init(yes, L10n.t("item.bookmark.ask.confirm", language: language), role: .keyed)],
+                cancel: L10n.t("board.choose.cancel", language: language)
+            )
+            for sentence in worded("beside", of: ask.beside) {
+                (question.line, question.help) = saying(sentence, line: question.line, help: question.help, language: language)
+            }
+        }
+        if ask.again {
+            let why = ask.without ? said("part.ask.again.without") : L10n.t("part.ask.again", language: language)
+            (question.line, question.help) = saying(why, line: question.line, help: question.help, language: language)
+        }
+        var after = [said("part.ask.stays"), said("part.ask.same")]
         if !ask.givesUp.isEmpty {
             let words = PartWords.shown(ask.givesUp, language: language)
-            let given = String(format: L10n.t("part.ask.givesUp", language: language), words, ask.host)
-            // Behind the (?) with the rest of what the page does, and never left off for length.
-            question.help = question.help.map { joined([$0, given]) } ?? given
+            after[0] = String(format: L10n.t("part.ask.givesUp", language: language), words, ask.host)
         }
+        // Behind the (?) with the rest of what the page does, and never left off for length.
+        question.help = joined([question.help].compactMap { $0 } + after)
         return question
     }
 }

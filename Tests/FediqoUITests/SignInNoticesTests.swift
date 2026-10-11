@@ -298,34 +298,10 @@ struct SignInNoticesTests {
         }
     }
 
-    @Test("Asked for notices, a sign-in that reads may read them; one that acts may dismiss them too, and keeps everything it had")
-    func askedInPlace() async throws {
-        for (held, writing) in [(Self.reading, false), (Self.acting, true)] {
-            // The registration the held sign-in was made on cannot ask for notices.
-            let (mastodon, server, tokens) = try sessions(holding: .some(held), asked: held, app: held)
-            let page = NoticePage()
-
-            #expect(await mastodon.signIn(host: host, through: page, writing: writing, notices: true) == nil)
-
-            let asked = MastodonOAuth.scopes(writing: writing, notices: true)
-            #expect(page.scopes == [asked], "the page did not name notices")
-            #expect(await server.registered == [Self.whole], "a registration that cannot ask for notices was reused")
-            #expect(try tokens.app(host: host)?.scopes == Self.whole)
-            #expect(try tokens.token(host: host)?.scopes == asked)
-            #expect(try tokens.token(host: host)?.asked == asked)
-            #expect(await server.revoked == ["tok-old"], "the sign-in it replaced is still live at the server")
-            #expect(mastodon.notices(host: host) == .allowed)
-            #expect(mastodon.dismisses(host: host) == writing, "dismissing is an act")
-            #expect(mastodon.grants == [host: writing ? .writing : .reading])
-            #expect(mastodon.writing(host: host, kind: .mastodon) == (writing ? .writes : .reads))
-            #expect(mastodon.bookmarks(host: host) == (writing ? .allowed : .unavailable))
-        }
-    }
-
     @Test("Once allowed, a later sign-in on that source carries notices; a sign-out forgets them, and the next sign-in asks for none")
     func carriedWhileHeldAndForgottenWithASignOut() async throws {
-        let (mastodon, server, tokens) = try sessions(holding: .some(Self.reading), asked: Self.reading)
-        #expect(await mastodon.signIn(host: host, through: NoticePage(), writing: false, notices: true) == nil)
+        let allowed = MastodonOAuth.scopes(writing: false, notices: true)
+        let (mastodon, server, tokens) = try sessions(holding: .some(allowed), asked: allowed)
 
         // Adding the acting part does not take notices away, and adds dismissing.
         let adding = NoticePage()
@@ -334,13 +310,13 @@ struct SignInNoticesTests {
         #expect(mastodon.notices(host: host) == .allowed && mastodon.dismisses(host: host))
         #expect(mastodon.grants == [host: .writing])
 
-        // Said outright, a sign-in may leave them out.
+        // Said by the question before it to carry none, a sign-in leaves them out.
+        let (other, _, _) = try sessions(holding: .some(allowed), asked: allowed)
         let narrowing = NoticePage()
-        #expect(await mastodon.signIn(host: host, through: narrowing, writing: true, notices: false) == nil)
+        #expect(await other.signIn(host: host, through: narrowing, writing: true, noticesSaid: false) == nil)
         #expect(narrowing.scopes == [Self.acting])
-        #expect(mastodon.notices(host: host) == .unasked && !mastodon.dismisses(host: host))
+        #expect(other.notices(host: host) == .unasked && !other.dismisses(host: host))
 
-        #expect(await mastodon.signIn(host: host, through: NoticePage(), writing: true, notices: true) == nil)
         await mastodon.signOut(host: host)
         #expect(mastodon.notices(host: host) == .unavailable)
         #expect(mastodon.noticeHosts.isEmpty && mastodon.dismissHosts.isEmpty)
@@ -353,81 +329,17 @@ struct SignInNoticesTests {
         #expect(mastodon.notices(host: host) == .unasked)
     }
 
-    /// The registration the held sign-in was made on, as a test can tell it from one made since.
+    /// The registration the held sign-in was made on, as a test can tell it from one made
+    /// since: for reading alone, so a press for more makes another.
     private var heldApp: MastodonApp {
-        MastodonApp(host: host, clientID: "cid-held", clientSecret: "csecret-held", scopes: Self.acting)
+        MastodonApp(host: host, clientID: "cid-held", clientSecret: "csecret-held", scopes: Self.reading)
     }
 
-    @Test("A page closed leaves the sign-in held as it was, and it may be asked again on the registration made for it")
-    func aClosedPageTakesNothing() async throws {
-        let (mastodon, server, tokens) = try sessions(holding: .some(Self.acting), asked: Self.acting)
-        try tokens.save(heldApp)
-        let page = NoticePage(closes: true)
-
-        #expect(await mastodon.signIn(host: host, through: page, writing: true, notices: true) == nil)
-
-        #expect(page.scopes == [MastodonOAuth.scopes(writing: true, notices: true)])
-        #expect(try tokens.token(host: host)?.accessToken == "tok-old")
-        #expect(try tokens.token(host: host)?.scopes == Self.acting)
-        #expect(await server.revoked.isEmpty)
-        #expect(await server.registered == [Self.whole])
-        #expect(try tokens.app(host: host)?.scopes == Self.whole, "the registration made for the press was thrown away")
-        #expect(mastodon.notices(host: host) == .unasked, "a page closed is not the source's answer")
-        #expect(mastodon.grants == [host: .writing])
-        #expect(mastodon.writing(host: host, kind: .mastodon) == .writes)
-        #expect(mastodon.bookmarks(host: host) == .allowed)
-
-        // And the next sign-in, ordinary or for notices, registers nothing.
-        let again = NoticePage()
-        #expect(await mastodon.signIn(host: host, through: again, writing: true) == nil)
-        #expect(again.scopes == [Self.acting], "a registration that holds notices put them on a page nobody pressed for")
-        #expect(await mastodon.signIn(host: host, through: NoticePage(), writing: true, notices: true) == nil)
-        #expect(await server.registered == [Self.whole])
-    }
-
-    @Test("A server that knows no such scope leaves the sign-in held as it was, opens no page, is said to have none, and is not asked again")
-    func aServerWithoutNotices() async throws {
-        let (mastodon, server, tokens) = try sessions(
-            holding: .some(Self.acting), asked: Self.acting, server: NoticeServer(refuses: MastodonOAuth.noticing)
-        )
-        try tokens.save(heldApp)
-        let page = NoticePage()
-
-        #expect(await mastodon.signIn(host: host, through: page, writing: true, notices: true) == .invalidScope)
-
-        // Everything, which is what was pressed for — and nothing that would leave the sign-in
-        // held with less than it has.
-        #expect(await server.registered == [Self.whole])
-        #expect(page.scopes.isEmpty)
-        #expect(try tokens.token(host: host)?.accessToken == "tok-old")
-        #expect(try tokens.token(host: host)?.scopes == Self.acting)
-        #expect(await server.revoked.isEmpty)
-        #expect(try tokens.app(host: host) == heldApp)
-        #expect(mastodon.grants == [host: .writing])
-        #expect(mastodon.writing(host: host, kind: .mastodon) == .writes)
-        #expect(mastodon.bookmarks(host: host) == .allowed)
-        #expect(mastodon.notices(host: host) == .unavailable)
-
-        // A second press sends nothing: no registration, no page.
-        let asked = await server.paths.count
-        #expect(await mastodon.signIn(host: host, through: page, writing: true, notices: true) == .invalidScope)
-        #expect(await server.paths.count == asked, "a source that has answered was asked again")
-        #expect(page.scopes.isEmpty)
-        #expect(try tokens.app(host: host) == heldApp)
-
-        // An ordinary sign-in is a fresh answer, asks for no notices, and they may be asked again.
-        let again = NoticePage()
-        #expect(await mastodon.signIn(host: host, through: again, writing: true) == nil)
-        #expect(again.scopes == [Self.acting])
-        #expect(mastodon.notices(host: host) == .unasked)
-    }
-
-    @Test("A sign-out clears a refused ask with everything else of the sign-in")
-    func aSignOutForgetsARefusedAsk() async throws {
-        let (mastodon, _, _) = try sessions(
-            holding: .some(Self.reading), asked: Self.reading, server: NoticeServer(refuses: MastodonOAuth.noticing)
-        )
-        #expect(await mastodon.signIn(host: host, through: NoticePage(), writing: false, notices: true) == .invalidScope)
+    @Test("A sign-out clears a read turned away with everything else of the sign-in")
+    func aSignOutForgetsAReadTurnedAway() async throws {
+        let allowed = MastodonOAuth.scopes(writing: false, notices: true)
+        let (mastodon, _, tokens) = try sessions(holding: .some(allowed), asked: allowed)
+        mastodon.refusedNotices(host: host, sentWith: try #require(try tokens.token(host: host)))
         #expect(mastodon.noticesTurnedAway == [host])
         await mastodon.signOut(host: host)
         #expect(mastodon.noticesTurnedAway.isEmpty)
@@ -435,17 +347,11 @@ struct SignInNoticesTests {
 
     @Test("A sign-in whose notices were refused carries none into the next ordinary sign-in, and the refusal goes with the sign-in it answered")
     func aRefusalIsNotCarried() async throws {
-        let (mastodon, server, tokens) = try sessions(
-            holding: .some(Self.acting), asked: Self.acting, server: NoticeServer(granting: Self.acting)
+        // Asked for notices, and given everything but them.
+        let (mastodon, _, tokens) = try sessions(
+            holding: .some(Self.acting), asked: MastodonOAuth.scopes(writing: true, notices: true)
         )
-        #expect(await mastodon.signIn(host: host, through: NoticePage(), writing: true, notices: true) == nil)
         #expect(mastodon.notices(host: host) == .unavailable)
-
-        // While that sign-in is held, a press sends nothing.
-        let asked = await server.paths.count
-        let pressed = NoticePage()
-        #expect(await mastodon.signIn(host: host, through: pressed, writing: true, notices: true) == .invalidScope)
-        #expect(await server.paths.count == asked && pressed.scopes.isEmpty)
 
         // The next ordinary sign-in asks for what the reader agreed to and no more.
         let page = NoticePage()
@@ -479,16 +385,16 @@ struct SignInNoticesTests {
         #expect(mastodon.grants == [host: .reading])
     }
 
-    @Test("Another sign-in finishing while the notices page is open goes through the registration that press made, and closing the page takes neither")
+    @Test("Another sign-in finishing while a page for more is open goes through the registration that press made, and closing the page takes neither")
     func anotherSignInsRegistrationIsLeft() async throws {
-        let (mastodon, server, tokens) = try sessions(holding: .some(Self.acting), asked: Self.acting)
+        let (mastodon, server, tokens) = try sessions(holding: .some(Self.reading), asked: Self.reading)
         try tokens.save(heldApp)
         let gate = Gate()
         let page = NoticePage(closes: true, gate: gate)
 
-        let pressing = Task { await mastodon.signIn(host: host, through: page, writing: true, notices: true) }
+        let pressing = Task { await mastodon.signIn(host: host, through: page, writing: true) }
         #expect(await spun { page.scopes.count == 1 })
-        // The notices page is up; an ordinary sign-in on the same source finishes meanwhile.
+        // That page is up; another sign-in on the same source finishes meanwhile.
         #expect(await mastodon.signIn(host: host, through: NoticePage(), writing: true) == nil)
         let made = try #require(try tokens.app(host: host))
         #expect(made.scopes == Self.whole && made != heldApp)
@@ -507,20 +413,20 @@ struct SignInNoticesTests {
         let held = MemoryMastodonTokens()
         try held.save(MastodonToken(
             host: host, accessToken: "tok-old", clientID: "cid-held", clientSecret: "csecret-held",
-            scopes: Self.acting, asked: Self.acting
+            scopes: Self.reading, asked: Self.reading
         ))
         try held.save(heldApp)
         let server = NoticeServer()
         let mastodon = MastodonSessions(tokens: WatchedTokens(held, failing: 1), sender: server)
 
-        #expect(await mastodon.signIn(host: host, through: NoticePage(), writing: true, notices: true) == .keychain)
+        #expect(await mastodon.signIn(host: host, through: NoticePage(), writing: true) == .keychain)
 
         #expect(try held.token(host: host)?.accessToken == "tok-old")
         #expect(try held.token(host: host)?.clientID == "cid-held", "the sign-in put back carries the registration it was made on")
         #expect(try held.app(host: host)?.scopes == Self.whole)
         #expect(await server.revoked == ["tok-1"])
         #expect(mastodon.notices(host: host) == .unasked, "a Keychain that failed is not the source's answer")
-        #expect(mastodon.grants == [host: .writing] && mastodon.bookmarks(host: host) == .allowed)
+        #expect(mastodon.grants == [host: .reading])
     }
 
     @Test("An ordinary sign-in reads no token before the server's page opens, where the look at notices could be had")
@@ -571,7 +477,7 @@ struct SignInNoticesTests {
         let (mastodon, _, tokens) = try sessions(holding: .some(allowed), asked: allowed, server: server)
 
         // The reader leaves notices out; the new sign-in is kept, and the old one's revoke is out.
-        let narrowing = Task { await mastodon.signIn(host: host, through: NoticePage(), writing: true, notices: false) }
+        let narrowing = Task { await mastodon.signIn(host: host, through: NoticePage(), writing: true, noticesSaid: false) }
         #expect(await spun { await server.holding })
         #expect(try tokens.token(host: host)?.scopes == Self.acting)
 
@@ -623,13 +529,11 @@ struct SignInNoticesTests {
         #expect(refused.notices(host: host) == .unavailable && !refused.carriesNotices(host: host))
     }
 
-    @Test("A server that grants the sign-in and leaves notices out of its answer is not asked again, across a relaunch; everything else it granted stands")
+    @Test("A sign-in asked for notices and given everything but them is not asked again, across a relaunch; everything else it was granted stands")
     func aServerGrantingLess() async throws {
         let (mastodon, _, tokens) = try sessions(
-            holding: .some(Self.acting), asked: Self.acting, server: NoticeServer(granting: Self.acting)
+            holding: .some(Self.acting), asked: MastodonOAuth.scopes(writing: true, notices: true)
         )
-        #expect(await mastodon.signIn(host: host, through: NoticePage(), writing: true, notices: true) == nil)
-        #expect(try tokens.token(host: host)?.scopes == Self.acting)
         #expect(mastodon.notices(host: host) == .unavailable)
         #expect(!mastodon.dismisses(host: host))
         #expect(mastodon.grants == [host: .writing] && mastodon.bookmarks(host: host) == .allowed)

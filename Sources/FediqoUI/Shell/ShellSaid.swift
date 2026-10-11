@@ -260,7 +260,7 @@ extension ShellSession {
     var raisesOverPages: Bool {
         answering != nil || signingIn != nil || editing != nil || withdrawing != nil || rowAsk != nil
             || editingUnsent != nil || discardingUnsent != nil || resendingUnsent != nil
-            || partAsks.open != nil || noticeAsk != nil || signOutAsk != nil || !mastodon.ended.isEmpty
+            || partAsks.open != nil || signOutAsk != nil || !mastodon.ended.isEmpty
             || !mastodon.leftTold.isEmpty
     }
 }

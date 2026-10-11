@@ -5,64 +5,72 @@ import SwiftUI
 
 /// Notices are asked of a sign-in only when the person presses for them on the notices page
 /// (#323) — every sign-in alike, one made before notices existed and one made yesterday — and
-/// **nobody is signed out to ask**: #285's shape, as bookmarks are asked (`ShellBookmark`).
+/// **nobody is signed out to ask**.
 ///
-/// The press raises a question that says what the source's own page is about to ask for. Only
-/// its yes opens that page, through the ordinary sign-in with notices added
-/// (`MastodonSessions.signIn(host:through:writing:notices:noticesSaid:)`), which replaces the
-/// token held only where a new one is issued: a page closed, a no on it, or any failure leaves
-/// the sign-in the person had, doing everything it did.
+/// They are asked as every part is (`ShellPartAsk`, #347): the press raises a question that
+/// says what the source's own page is about to ask for, and only its yes opens that page, for
+/// what the sign-in holds and notices. A page closed, a no on it, or any failure leaves the
+/// sign-in the person had, doing everything it did; allowed, the wider sign-in takes its place
+/// here and the one it had stays live at the source until the person signs out.
 extension ShellSession {
-    /// The press beside a source the notices page names as not asked: raises the question.
-    /// Sends nothing. Returns whether a question was raised.
+    /// The press beside a source the notices page names as not asked, or as refused on its
+    /// page: raises the question. Sends nothing. Returns whether a question was raised.
+    ///
+    /// **A sign-in that acts and was never asked for bookmarks is asked for them with the
+    /// notices** (#285): the one part ticked beside the one pressed for, because the question
+    /// names it, in the words it always had. One that was refused bookmarks, or whose source
+    /// has none, is asked for notices alone — **and a source found to have none of them at
+    /// that yes has said nothing of notices**, which are asked for again alone, at once.
     @discardableResult
     func askForNotices(host raw: String) -> Bool {
         let host = raw.lowercased()
         guard mastodon.notices(host: host) == .unasked else { return false }
-        noticeAsk = host
-        return true
+        let bookmarks = mastodon.bookmarks(host: host) == .unasked && mastodon.standing(.bookmarks, host: host) == .unasked
+        return askFor([.notices], with: bookmarks ? [.bookmarks] : [], host: host)
     }
+}
 
-    /// The question answered no: everything stays as it was.
-    func cancelNoticeAsk() {
-        noticeAsk = nil
-    }
-
-    /// The question answered yes: the source's own page, asking for what the sign-in held
-    /// already has and for notices — reading them, and dismissing them where it acts.
-    ///
-    /// `writing` is the answer of a sign-in made before any was asked what it may do
-    /// (`MastodonGrant.unasked`), whose question is the read-or-act one with notices in both
-    /// answers; every other sign-in keeps the part it has, and the argument is not read.
-    ///
-    /// **Only while that sign-in is still one to ask.** A question left open over a source
-    /// that was signed out or already answered asks nothing.
-    ///
-    /// **What it says afterwards is what is true.** The sign-in held is still held, so a
-    /// failure is "notices were not allowed", never "the sign-in failed"; a source with none
-    /// to give is named by the page as having given none, and is not asked again; a page
-    /// closed says nothing, as any sign-in's does. Where notices were allowed, the page reads.
-    func allowNotices(host raw: String, through browser: any OAuthBrowser, writing chosen: Bool? = nil) async {
-        noticeAsk = nil
-        let host = raw.lowercased()
-        guard mastodon.notices(host: host) == .unasked, let grant = mastodon.grants[host] else { return }
-        let writing = grant == .unasked ? chosen ?? false : grant == .writing
-        noticeList.acts.say(nil, host: host)
-        let failure = await mastodon.signIn(
-            host: host, through: browser, writing: writing, notices: true, inPlace: true
-        )
-        await forgetReaderMarksDue()
-        if let failure {
-            NetLog.auth.notice("\(NetLog.line("notices", host: host, error: failure), privacy: .public)")
-            // A source that has none is said to have none by its own line on the page.
-            if mastodon.notices(host: host) != .unavailable {
-                noticeList.acts.say(.init(act: .ask, why: .unreachable), host: host)
+extension PartWords {
+    /// The words notices were asked in before every part went one way (#323), and their
+    /// place: what asking for them came to is said on the notices page, where the press is —
+    /// never under the source's row, as a sign-in that failed would be.
+    static let noticed: [MastodonPart: Earlier] = [
+        .notices: Earlier(
+            question: noticesQuestion,
+            failed: "notices.ask.failed", none: "notices.source.refused", unasked: "notices.source.unasked",
+            with: [.bookmarks],
+            says: { session, host, key in
+                // A no on the source's page, and a source with none, are each a line the page
+                // draws about that source: nothing says them twice.
+                let drawn = key == "part.ask.refused.said" || key == "notices.source.refused"
+                let said = key.flatMap { drawn ? nil : ShellNoticeActs.Said(act: .ask, why: .unreachable, key: $0) }
+                session.noticeList.acts.say(said, host: host)
+            },
+            allowed: { session, host in
+                guard session.mastodon.notices(host: host) == .allowed else { return }
+                await session.noticeList.acts.readPage(in: session)
             }
-            return
+        ),
+    ]
+
+    /// The notices question in the words it had, **where they are true of the page**: they
+    /// name what a sign-in that only reads has, or one that acts and bookmarks, and say
+    /// whether dismissing is asked. Of any other page — a sign-in that acts without
+    /// bookmarks, one whose words nobody has confirmed — nothing: the table's words are
+    /// said, which name what that page asks and no more.
+    static func noticesQuestion(_ ask: PartAsk, language: DummyLanguage?) -> ShellConfirmation? {
+        let page = ask.said
+        guard MastodonParts.reads(page), MastodonOAuth.notices(page) else { return nil }
+        let acts = MastodonParts.holds(.acting, in: page)
+        let dismisses = MastodonOAuth.dismisses(page)
+        let bookmarks = MastodonOAuth.bookmarks(page)
+        let asksBookmarks = ask.ticked.count > 1
+        if acts, dismisses, bookmarks {
+            return ShellQuestion.notices(host: ask.host, grant: .writing, bookmarks: asksBookmarks, language: language)
         }
-        guard mastodon.notices(host: host) == .allowed else { return }
-        await noticeList.acts.readPage(in: self)
-        if mastodon.isSignedIn(host: host) { await readAsYou(host: host) }
+        let onlyReads = page.split(separator: " ").allSatisfy { $0.hasPrefix("read:") }
+        guard onlyReads, !asksBookmarks else { return nil }
+        return ShellQuestion.notices(host: ask.host, grant: .reading, language: language)
     }
 }
 
@@ -113,33 +121,5 @@ extension ShellSession {
     func putDownSignInChoice() {
         if let signInChoice { noticesSaid[signInChoice.lowercased()] = nil }
         signInChoice = nil
-    }
-}
-
-/// Notices, asked of a source already signed in to — a modifier, so the root's chain gains one
-/// plain call and no presenter closure of its own, beside `BookmarkQuestion`.
-struct NoticeQuestion: ViewModifier {
-    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
-    let session: ShellSession
-
-    func body(content: Content) -> some View {
-        content.shellConfirm(asked, question: question, onChoice: answered)
-    }
-
-    private func question(_ host: String) -> ShellConfirmation {
-        ShellQuestion.notices(
-            host: host, grant: session.mastodon.grants[host], bookmarks: session.mastodon.bookmarks(host: host) == .unasked
-        )
-    }
-
-    private func answered(_ host: String, _ id: String) {
-        let browser = WebAuthBrowser(session: webAuthenticationSession)
-        Task {
-            await session.allowNotices(host: host, through: browser, writing: ShellQuestion.noticesChose(id))
-        }
-    }
-
-    private var asked: Binding<String?> {
-        Binding(get: { session.noticeAsk }, set: { if $0 == nil { session.cancelNoticeAsk() } })
     }
 }

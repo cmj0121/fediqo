@@ -43,7 +43,6 @@ extension ShellQuestion {
         case .unconfirmed: ("exclamationmark.triangle", "account.signout.unconfirmed")
         case .refused: ("exclamationmark.triangle", "account.left.refused")
         case .others: ("person.crop.circle.badge.xmark", "account.left.others")
-        case .unknown: ("person.crop.circle.badge.xmark", "account.left.unknown")
         }
         return ShellConfirmation(
             symbol: symbol, title: L10n.t(key + ".title", language: language),

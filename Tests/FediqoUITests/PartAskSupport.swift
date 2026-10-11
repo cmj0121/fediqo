@@ -11,6 +11,29 @@ extension ShellSession {
         partAsks.putDown()
         await allow(ask, through: browser)
     }
+
+    /// The press beside a source on the notices page and the yes to its question, in one.
+    /// Nothing, where no question is raised.
+    func allowNotices(host: String, through browser: any OAuthBrowser) async {
+        guard askForNotices(host: host), let ask = partAsks.open else { return }
+        partAsks.putDown()
+        await allow(ask, through: browser)
+    }
+}
+
+extension ShellConfirmation {
+    /// This question as an ask in place puts it: ended on what every one of them says — that
+    /// the sign-in this device had stays live at `host`, and that a source already holding
+    /// one for exactly this asks nothing more.
+    func inPlace(at host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        var question = self
+        let join = L10n.t("question.join", language: language)
+        for key in ["part.ask.stays", "part.ask.same"] {
+            let sentence = String(format: L10n.t(key, language: language), host)
+            question.help = question.help.map { String(format: join, $0, sentence) } ?? sentence
+        }
+        return question
+    }
 }
 
 enum PartAskFixture {

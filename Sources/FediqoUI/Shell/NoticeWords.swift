@@ -287,6 +287,10 @@ enum NoticesLine: Equatable, Identifiable {
     case unasked(host: String)
     /// Asked for notices, and gave none.
     case refused(host: String)
+    /// Asked for notices, and the person said no on its own page. It may be asked again.
+    case declined(host: String)
+    /// Its sign-in is being asked for something now: nothing more is asked until that lands.
+    case asking(host: String)
     /// May be asked, and was not: its sign-in could not be read off this device.
     case locked(host: String)
     /// May be asked, and has not answered or failed: the read was stopped before it did.
@@ -304,6 +308,8 @@ enum NoticesLine: Equatable, Identifiable {
         case .failed(let host, _, _): "failed:" + host
         case .unasked(let host): "unasked:" + host
         case .refused(let host): "refused:" + host
+        case .declined(let host): "declined:" + host
+        case .asking(let host): "asking:" + host
         }
     }
 
@@ -312,10 +318,14 @@ enum NoticesLine: Equatable, Identifiable {
     ///
     /// **A source named as failed is not also named as refused**: one whose read was turned
     /// away is both, and says so once, as the failure it was.
+    ///
+    /// `places` is what each source's sign-in draws where its notices would be
+    /// (`PartWords.place`): refused on its own page, and being asked for something now, are
+    /// each a line of their own in the place of "not asked", which is what both still are.
     static func lines(
         reading: [String], failures: [(host: String, why: ShellNoticeList.Absence)], askable: Set<String>,
         hosts: [(host: String, notices: NoticeStanding)], locked: Set<String> = [], unread: [String] = [],
-        full: [String] = []
+        full: [String] = [], places: [String: PartWords.Place.Kind] = [:]
     ) -> [NoticesLine] {
         let failed = Set(failures.map(\.host))
         var lines: [NoticesLine] = reading.isEmpty ? [] : [.reading(reading)]
@@ -325,6 +335,9 @@ enum NoticesLine: Equatable, Identifiable {
         lines += unread.map { .unread(host: $0) }
         for (host, notices) in hosts where !failed.contains(host) {
             switch notices {
+            // One ask a source at a time: while it is out, the line that would ask says so.
+            case .unasked where places[host] == .asking: lines.append(.asking(host: host))
+            case .unasked where places[host] == .refused: lines.append(.declined(host: host))
             case .unasked: lines.append(.unasked(host: host))
             case .unavailable: lines.append(.refused(host: host))
             case .allowed: break
@@ -348,6 +361,10 @@ enum NoticesLine: Equatable, Identifiable {
             String(format: L10n.t("notices.source.unasked", language: language), host)
         case .refused(let host):
             String(format: L10n.t("notices.source.refused", language: language), host)
+        case .declined(let host):
+            String(format: L10n.t("part.ask.refused", language: language), host)
+        case .asking(let host):
+            String(format: L10n.t("part.ask.asking", language: language), host)
         case .locked(let host):
             String(format: L10n.t("notices.source.locked", language: language), host)
         case .full(let host):

@@ -21,11 +21,12 @@ extension ShellSession {
     }
 
     /// The bookmark question about `host`, from a post's row and from Account alike. Nothing
-    /// where that sign-in is not one to ask.
+    /// where that sign-in is not one to ask — and where its source is being asked for
+    /// something already, the press says so (`askFor`).
     @discardableResult
     func askBookmarks(host: String) -> Bool {
         guard mastodon.bookmarks(host: host) == .unasked else { return false }
-        return partAsks.raise([.bookmarks], host: host, in: self)
+        return askFor([.bookmarks], host: host)
     }
 
     /// The source whose sign-in is being asked to allow bookmarks, where one is (#285).

@@ -186,9 +186,6 @@ final class ShellSession {
     /// drawn until it is answered or put down (`ShellNoticeAsk`). Not observed: it is read by
     /// the question being drawn, and must not draw it again.
     @ObservationIgnored var noticesSaid: [String: Bool] = [:]
-    /// The source whose sign-in is being asked to allow notices, where one is (#323). Observed,
-    /// and the question is presented from it; the press on the notices page writes it.
-    var noticeAsk: String?
     /// Whether the rows of every source nobody is signed in to have been checked once this run
     /// for what an earlier reader left on them (`forgetReaderMarksDue`).
     @ObservationIgnored var readerMarksSwept = false
@@ -859,6 +856,8 @@ final class ShellSession {
         }
         // What the notices page draws is what the store holds (#323).
         noticeList.store = store
+        // A question about a sign-in goes with it, however it went.
+        mastodon.onBecameAnother = { [weak self] host in self?.partAsks.putDown(host: host) }
         // A source that ends a sign-in itself answers a sign-out still being asked about it.
         mastodon.onEnded = { [weak self] host in
             self?.dropSignOutAsk(host: host)
@@ -3225,7 +3224,8 @@ final class ShellSession {
         }
         NetLog.auth.notice("\(NetLog.line("sign-in", host: host, error: failure), privacy: .public)")
         guard isAdded(host) else { return }
-        rowRefusal = (host: host, key: Self.signInFailureKey(failure))
+        // A source that cannot be asked again this run is said to be that, not to have failed.
+        rowRefusal = (host: host, key: mastodon.stranded(host: host) ? "part.ask.stranded" : Self.signInFailureKey(failure))
     }
 
     /// Home and the lists this source reads, read as the reader (#25) — right after a sign-in.
