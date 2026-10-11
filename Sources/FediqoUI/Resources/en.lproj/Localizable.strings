@@ -858,6 +858,35 @@
 "account.left.unknown.title" = "Earlier sign-in ended";
 "account.left.unknown.line" = "Fediqo could not confirm that the sign-in this device had at %@ was the same account's, so it was ended there. Any other device carrying it is signed out too.";
 
+"part.ask.refused" = "This was refused on %@'s page. Ask again";
+"part.ask.none" = "%@ has none to allow.";
+"part.ask.another" = "%@ signed in a different account. Nothing was changed. To use that account, sign out of this one first.";
+"part.ask.less" = "%@ answered with less than this sign-in already has. Nothing was changed; ask again later.";
+"part.ask.unconfirmed" = "Fediqo could not confirm whose sign-in this is at %@, so it was not asked. Try again later, or sign out and sign in again, choosing what to allow.";
+"part.ask.givesUp" = "This sign-in also has %1$@, which this version of Fediqo does not use. Asking gives that up, and the sign-in this device had is ended at %2$@.";
+"part.ask.stranded" = "%@ could not be asked for this in this run.";
+"part.ask.failed" = "%@ could not be asked for this just now. The sign-in you have goes on as it is.";
+"part.ask.refused.said" = "This was refused on %@'s page.";
+"part.ask.unnamed" = "%@'s page was allowed, but Fediqo could not confirm whose account it signed in, so nothing was changed. Try again later, or sign out and sign in again, choosing what to allow.";
+"part.ask.givesUp.more" = "%1$@ and %2$d more";
+"part.ask.title" = "Ask %@ to allow more?";
+"part.ask.detail" = "%@'s own sign-in page opens and asks again for what this sign-in already has. Nothing is signed out first: close the page and everything stays as it is.";
+"part.reading.ask.title" = "Ask %@ to allow reading?";
+"part.reading.ask.line" = "Its page asks for your Home, your lists and who you are there.";
+"part.reading.ask.detail" = "Reading brings in your Home and your lists on %@, and tells Fediqo which account is yours there.";
+"part.search.ask.title" = "Ask %@ to allow finding posts?";
+"part.search.ask.line" = "Its page asks for searching as you.";
+"part.search.ask.detail" = "Finding a post again by its address goes through search on %@. The same permission lets this sign-in search for people and hashtags there.";
+"part.acting.ask.title" = "Ask %@ to allow writing?";
+"part.acting.ask.line" = "Its page asks for posting and favouriting as you.";
+"part.acting.ask.detail" = "Writing lets you post, reply, boost and favourite on %@ from Fediqo, and take any of them back.";
+"part.bookmarks.ask.title" = "Ask %@ to allow bookmarks?";
+"part.bookmarks.ask.line" = "Its page asks for bookmarks.";
+"part.bookmarks.ask.detail" = "Bookmarks let you put a bookmark on a post on %@, and take it off again.";
+"part.notices.ask.title" = "Ask %@ for your notices?";
+"part.notices.ask.line" = "Its page asks for reading your notices.";
+"part.notices.ask.detail" = "Notices are what %@ says happened to you there. Where this sign-in also writes, its page asks for dismissing them too.";
+
 /* #25 — Home and your lists, read as you, and choosing which lists. */
 "account.mastodon.home.progress"      = "Reading your Home on %@…";
 "account.mastodon.read.partial"       = "Some of your Home and lists on %@ could not be read just now.";

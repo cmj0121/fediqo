@@ -23,6 +23,12 @@ actor NoticeActServer: HTTPSender {
     private let refuses: String?
     private(set) var asked: [String] = []
     private var issued = 0
+    /// The sign-ins this server gives its own account of, where it is asked for one.
+    private var held: MemoryMastodonTokens?
+
+    func tells(of held: MemoryMastodonTokens) {
+        self.held = held
+    }
 
     init(_ routes: [String: Outcome] = [:], refuses: String? = nil) {
         self.routes = routes
@@ -76,6 +82,9 @@ actor NoticeActServer: HTTPSender {
             return answer(#"{"id":"1","acct":"me"}"#)
         case "/oauth/revoke":
             return answer("{}")
+        case "/oauth/token/info":
+            let token = (try? held?.token(host: url.host ?? "")) ?? nil
+            return answer(PartAskFixture.info(token?.scopes))
         default:
             throw FixtureHTTPError.unmapped
         }
@@ -176,6 +185,7 @@ enum NoticeActFixture {
         let tokens = MemoryMastodonTokens()
         for (host, scopes) in hosts { try tokens.save(token(host, scopes: scopes)) }
         let server = NoticeActServer(routes, refuses: refuses)
+        await server.tells(of: tokens)
         let store = ItemStore(sources: hosts.keys.sorted().map { Source(host: $0, kind: .mastodon) }, notes: [])
         let session = ShellSession(
             http: FixtureHTTP(), store: store, mastodon: MastodonSessions(tokens: tokens, sender: server)
@@ -332,11 +342,14 @@ struct NoticeActsTests {
         for host in [Self.b, "d.example", "nobody.example"] {
             #expect(!session.mastodon.carriesNotices(host: host))
             #expect(session.signInQuestion(host: host) == put(session, host))
-            #expect(session.bookmarkQuestion(host: host) == ShellQuestion.bookmarks(host: host))
+            #expect(!session.askBookmarks(host: host), "a sign-in with no bookmarks to be asked for was put the question")
         }
         // The bookmark question, which a post's row and Account both put.
         #expect(session.mastodon.bookmarks(host: "c.example") == .unasked)
-        #expect(session.bookmarkQuestion(host: "c.example") == ShellQuestion.bookmarks(host: "c.example", notices: true))
+        #expect(session.askBookmarks(host: "c.example"))
+        let raised = try #require(session.partAsks.open)
+        #expect(ShellQuestion.part(raised) == ShellQuestion.bookmarks(host: "c.example", notices: true))
+        session.partAsks.putDown()
 
         // What the question said is what the page is asked for, whichever answer is given.
         for (writing, wanted) in [(false, F.reads), (true, F.acts)] {
@@ -390,14 +403,25 @@ struct NoticeActsTests {
         // The bookmark question, the same way.
         let beforeBookmarks = MastodonOAuth.scopes(writing: true, bookmarks: false)
         try allow(Self.b, beforeBookmarks)
-        session.bookmarkAsk = Self.b
-        let bookmark = session.signInAsked(host: Self.b)
-        #expect(!bookmark.notices && session.bookmarkQuestion(host: Self.b) == ShellQuestion.bookmarks(host: Self.b))
+        #expect(session.askBookmarks(host: Self.b))
+        let bookmark = try #require(session.partAsks.open)
+        #expect(ShellQuestion.part(bookmark) == ShellQuestion.bookmarks(host: Self.b))
         try allow(Self.b, MastodonOAuth.scopes(writing: true, bookmarks: false, notices: true))
         #expect(session.mastodon.carriesNotices(host: Self.b) && session.mastodon.bookmarks(host: Self.b) == .unasked)
+        #expect(session.partAsks.open == bookmark, "a card drawn again came to say something else")
         let marks = NoticeActPage()
-        await session.allowBookmarks(host: Self.b, through: marks, noticesSaid: bookmark.notices)
-        #expect(marks.scopes == [F.plainActing], "the page asked for notices the question never named")
+        session.partAsks.answer(bookmark, through: marks, in: session)
+        await session.partAsks.landed(host: Self.b)
+        // **Changed with #347, on purpose.** The page used to drop the notices the sign-in had
+        // come to hold, because its question had not named them — which ended that sign-in for
+        // a narrower one. Now no page opens on a question that did not name them: the question
+        // is put again, naming them, and its yes asks for what is held and for bookmarks.
+        #expect(marks.scopes.isEmpty, "a page carried the notices its question never named")
+        let named = try #require(session.partAsks.open)
+        #expect(ShellQuestion.part(named) == ShellQuestion.bookmarks(host: Self.b, notices: true))
+        session.partAsks.answer(named, through: marks, in: session)
+        await session.partAsks.landed(host: Self.b)
+        #expect(marks.scopes == [F.acts], "the page asked a word more than bookmarks, or gave up one that was held")
         #expect(session.bookmarkAsk == nil && session.noticesSaid.isEmpty)
     }
 

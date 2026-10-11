@@ -23,6 +23,8 @@ private actor MastodonServer: HTTPSender {
         /// A server that does not know a word and says so as a 4.6 does: a registration that
         /// names it is refused whole with a 422, and any other is made.
         case refusesApps(naming: String)
+        /// The source's own account of the token held for the host: the words it was filed with.
+        case tellsWords
     }
 
     /// A registration's answer naming back the words `request` asked for.
@@ -58,6 +60,7 @@ private actor MastodonServer: HTTPSender {
             "/api/v1/accounts/verify_credentials": .json(#"{"id":"1"}"#),
             "/oauth/revoke": .json("{}"),
             "/api/v1/timelines/home": .json("[]"),
+            "/oauth/token/info": .tellsWords,
         ].merging(overrides) { $1 }
     }
 
@@ -80,6 +83,9 @@ private actor MastodonServer: HTTPSender {
             )
         case .registers:
             return (Data(Self.registered(request).utf8), Self.answered(url, 200))
+        case .tellsWords:
+            let held = (try? tokens.token(host: host)) ?? nil
+            return (Data(PartAskFixture.info(held?.scopes).utf8), Self.answered(url, 200))
         case .refusesBookmarkApps, .refusesApps:
             var unknown = "write%3Abookmarks"
             if case .refusesApps(let word) = outcome { unknown = word.replacingOccurrences(of: ":", with: "%3A") }
@@ -998,7 +1004,7 @@ struct MastodonSignInTests {
         #expect(await server.paths.isEmpty, "the server heard about a question nobody has answered")
 
         // Answered no, or the server's page closed: everything is as it was.
-        session.cancelBookmarkAsk()
+        session.partAsks.putDown()
         #expect(session.bookmarkAsk == nil)
         await session.allowBookmarks(host: host, through: Page(.close))
         #expect(try tokens.token(host: host)?.accessToken == "tok-old")
@@ -1007,13 +1013,16 @@ struct MastodonSignInTests {
         #expect(await server.revoked.isEmpty)
 
         // Answered yes: a page that names bookmarks, on a registration made for them; the new
-        // sign-in replaces the old one here and revokes it there.
+        // sign-in replaces the old one here. **Changed with #347, on purpose**: the old one
+        // was revoked there, which signed out every other device carrying it; it is now
+        // left live, and written down to be ended when the person signs out here.
         let page = Page()
         await session.allowBookmarks(host: host, through: page)
         #expect(page.scopes == [Self.before + " write:bookmarks"])
         #expect(try tokens.app(host: host)?.scopes == MastodonRegistration.superset())
         #expect(try tokens.token(host: host)?.accessToken == "tok-123")
-        #expect(await server.revoked == ["tok-old"])
+        #expect(await server.revoked.isEmpty)
+        #expect(try tokens.left(host: host).map(\.state) == [.left])
         #expect(session.mastodon.grants[host] == .writing)
         #expect(session.mastodon.bookmarks(host: host) == .allowed)
         acts = session.acts(on: row)
@@ -1150,7 +1159,11 @@ struct MastodonSignInTests {
 
             #expect(session.rowRefusal?.key == "account.bookmarks.failed")
             if restorable {
-                #expect(try held.token(host: host) == old, "a press that signs nobody out signed the reader out")
+                // **Changed with #347, on purpose**: the sign-in is the same string with the
+                // same words, and now carries whose it is — the ask's own check named it.
+                let kept = try held.token(host: host)
+                #expect(kept?.accessToken == old.accessToken, "a press that signs nobody out signed the reader out")
+                #expect(kept?.scopes == old.scopes && kept?.accountID == "1")
                 #expect(session.isSignedIn(host: host))
                 #expect(row(session, host).writing == .writes)
                 #expect(await server.revoked == ["tok-123"], "only the token that could not be kept is revoked")
@@ -1226,10 +1239,14 @@ struct MastodonSignInTests {
                 try tokens.save(MastodonToken(host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret", scopes: scopes))
             }
             session.mastodon.refresh()
-            session.bookmarkAsk = host
+            // A question put while the sign-in was one to ask, and answered once it is not.
+            let stale = PartAsk(
+                host: host, ticked: [.bookmarks], said: Self.before + " write:bookmarks", givesUp: [],
+                stamp: try tokens.token(host: host)?.stamp
+            )
             let page = Page()
 
-            await session.allowBookmarks(host: host, through: page)
+            await session.allow(stale, through: page)
 
             #expect(page.opened == 0, "a page was opened for \(scopes ?? "no sign-in")")
             #expect(await server.paths.isEmpty)
@@ -1252,7 +1269,7 @@ struct MastodonSignInTests {
         #expect(row(session, host).owed == .asking)
         AccountPane(session: session).askAgain(row(session, host))
         #expect(session.bookmarkAsk == host && session.signInChoice == nil)
-        session.bookmarkAsk = nil
+        session.partAsks.putDown()
 
         AccountPane(session: session).askBookmarks(host)
 
@@ -1537,6 +1554,8 @@ private final class TestTokens: MastodonTokenStore, @unchecked Sendable {
         try held.forget(host: host)
         if failing.contains(.readingOnceForgotten) { failing.insert(.reading) }
     }
+    func parts() throws -> [String: MastodonHeld] { try held.parts() }
+    func update(_ token: MastodonToken) throws -> Bool { try held.update(token) }
     func left(host: String) throws -> [MastodonLeft] { try held.left(host: host) }
     func leftHosts() throws -> Set<String> { try held.leftHosts() }
     func journal(_ entry: MastodonLeft) throws { try held.journal(entry) }
@@ -1593,6 +1612,8 @@ private final class FailingSaveTokens: MastodonTokenStore, @unchecked Sendable {
         try held.forget(host: token.host)
         throw ForumCredentialError.keychain(-25_308)
     }
+    func parts() throws -> [String: MastodonHeld] { try held.parts() }
+    func update(_ token: MastodonToken) throws -> Bool { try held.update(token) }
     func left(host: String) throws -> [MastodonLeft] { try held.left(host: host) }
     func leftHosts() throws -> Set<String> { try held.leftHosts() }
     func journal(_ entry: MastodonLeft) throws { try held.journal(entry) }

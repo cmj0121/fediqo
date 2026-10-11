@@ -342,7 +342,7 @@ public struct FediqoRootView: View {
             // Taking back what the reader wrote (#109): the one act that asks first. A modifier of
             // its own rather than the dialog spelled here — see `WithdrawQuestion`.
             .modifier(WithdrawQuestion(session: session))
-            .modifier(BookmarkQuestion(session: session))
+            .modifier(PartQuestion(session: session))
             .modifier(NoticeQuestion(session: session))
             .modifier(UnsentPresenters(session: session))
             // An answer, over the conversation it belongs to (#108). Driven by the session's one

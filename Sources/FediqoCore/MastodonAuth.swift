@@ -426,8 +426,13 @@ public struct MastodonOAuth: Sendable {
         // able to open this app's callback could end a sign-in the person is in the middle of,
         // and have its registration dropped.
         guard value("state") == state else { throw MastodonSignInError.stateMismatch }
-        if let error = value("error") {
-            throw error == "invalid_scope" ? MastodonSignInError.invalidScope : MastodonSignInError.denied
+        // Only `access_denied` is the person's no (RFC 6749 §4.1.2.1). Anything else the source
+        // says went wrong — `server_error`, `temporarily_unavailable` — is a failure of its own.
+        switch value("error") {
+        case "invalid_scope"?: throw MastodonSignInError.invalidScope
+        case "access_denied"?: throw MastodonSignInError.denied
+        case .some: throw MastodonSignInError.unreadable
+        case nil: break
         }
         guard let code = value("code"), !code.isEmpty else { throw MastodonSignInError.unreadable }
         return code
@@ -474,6 +479,33 @@ public struct MastodonOAuth: Sendable {
             throw MastodonSignInError.http(response.statusCode)
         }
         return MastodonWho.said(body, at: host)
+    }
+
+    /// Where a source gives its own account of a token (#347). Fixed on the host, as every
+    /// address here is.
+    static let tokenInfoPath = "/oauth/token/info"
+    /// The most words a source's account of a token is read for.
+    static let tokenInfoWords = 128
+
+    /// The words `token` holds **as its source says** (#347) — what a sign-in this device did
+    /// not make itself is believed to hold, and nothing a package wrote beside it. Nothing,
+    /// where the source answered and named no list of them.
+    ///
+    /// Read as a stranger's: from the token's own host, bounded, and for the list alone.
+    public func words(of token: MastodonToken) async throws -> [String]? {
+        guard let url = Host.httpsURL(host: host, path: Self.tokenInfoPath) else { throw MastodonSignInError.unreadable }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
+        let (body, response) = try await send(request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw MastodonSignInError.http(response.statusCode)
+        }
+        guard let said = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let entries = said["scope"] as? [Any], entries.count <= Self.tokenInfoWords
+        else { return nil }
+        let words = entries.compactMap { $0 as? String }
+        guard words.count == entries.count, words.allSatisfy(MastodonRegistration.isWord) else { return nil }
+        return words
     }
 
     /// Asks the server to end a sign-in, and says what it answered. Best effort: signing out

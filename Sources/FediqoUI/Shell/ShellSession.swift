@@ -179,9 +179,9 @@ final class ShellSession {
         guard let asked = signOutAsk else { return }
         if host == nil || asked.host.lowercased() == host?.lowercased() { signOutAsk = nil }
     }
-    /// The source whose sign-in is being asked to allow bookmarks, where one is (#285). Observed,
-    /// and the question is presented from it; a press on a row's mark writes it.
-    var bookmarkAsk: String?
+    /// The question open about asking a sign-in for more where it stands, and the asks on
+    /// their way (#347, `ShellPartAsk`): what a press on a locked act raises.
+    let partAsks = ShellPartAsks()
     /// What the sign-in question open about a host said of notices, kept from when it was first
     /// drawn until it is answered or put down (`ShellNoticeAsk`). Not observed: it is read by
     /// the question being drawn, and must not draw it again.

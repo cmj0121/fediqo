@@ -44,7 +44,7 @@ public enum MastodonRegistration {
     }
 
     /// RFC 6749 §3.3: one or more printable characters, no space, quote or backslash.
-    private static func isWord(_ entry: String) -> Bool {
+    static func isWord(_ entry: String) -> Bool {
         guard !entry.isEmpty, entry.utf8.count <= wordLength else { return false }
         return entry.utf8.allSatisfy { $0 == 0x21 || (0x23...0x5B).contains($0) || (0x5D...0x7E).contains($0) }
     }

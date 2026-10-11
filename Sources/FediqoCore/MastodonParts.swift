@@ -52,6 +52,15 @@ public enum MastodonPart: String, CaseIterable, Sendable {
         case .reading, .acting, .notices: false
         }
     }
+
+    /// Whether the part only adds to acting, and is asked of no sign-in that does not act:
+    /// such a sign-in has nothing to add it to, and its row already says to sign in to act.
+    public var needsActing: Bool {
+        switch self {
+        case .bookmarks: true
+        case .reading, .search, .acting, .notices: false
+        }
+    }
 }
 
 /// What is read off the table of parts.
@@ -112,6 +121,61 @@ public enum MastodonParts {
         return left.isEmpty ? nil : spelt(left)
     }
 
+    /// The held words this table does not know, in the order held: what no page of this build
+    /// can ask for again, so a sign-in asked for more gives them up — and is told so first.
+    public static func unknown(in scopes: String?) -> [String] {
+        let known = Set(MastodonPart.allCases.flatMap { $0.words + $0.wordsBesideActing })
+        var seen = Set<String>()
+        return (scopes ?? "").split(separator: " ").map(String.init)
+            .filter { !known.contains($0) && seen.insert($0).inserted }
+    }
+
+    /// Every word of `lists`, each once and in the order met: what a sign-in has been asked
+    /// for across every page that asked it. Nothing, where there is no word.
+    public static func union(_ lists: String?...) -> String? {
+        var seen = Set<String>()
+        let all = lists.flatMap { ($0 ?? "").split(separator: " ").map(String.init) }
+            .filter { seen.insert($0).inserted }
+        return all.isEmpty ? nil : spelt(all)
+    }
+
+    /// The words of `parts`, in the table's order — those `kept` keeps, where only some are
+    /// meant: what a page refused was refused for, and what a source said it has none of.
+    public static func words(of parts: Set<MastodonPart>, where kept: (String) -> Bool = { _ in true }) -> String {
+        spelt(MastodonPart.allCases.filter(parts.contains).flatMap(\.words).filter(kept))
+    }
+
+    /// What a sign-in is believed to hold where its source says it holds `listed`: those
+    /// words — and, where what this device asked of it is known, only the ones it asked for.
+    /// A source naming a word nobody was shown cannot make this device think it holds it.
+    public static func believed(_ listed: [String], asked: String?) -> String {
+        guard let asked else { return spelt(listed) }
+        return spelt(listed.filter(words(asked).contains))
+    }
+
+    /// Whether two scope strings hold the same words, in whatever order.
+    public static func same(_ one: String?, _ other: String?) -> Bool {
+        words(one) == words(other)
+    }
+
+    /// The words of `page` that `held` has none of, in the page's order: what a page asks
+    /// for beyond what a sign-in holds.
+    public static func more(on page: String, than held: String?) -> [String] {
+        let has = words(held)
+        return page.split(separator: " ").map(String.init).filter { !has.contains($0) }
+    }
+
+    /// How a sign-in stands to `part`, by what is written beside it — the one reading every
+    /// place that offers the part's acts goes by.
+    public static func standing(_ part: MastodonPart, of held: MastodonHeld) -> MastodonPartStanding {
+        let has = words(held.scopes)
+        let missing = part.words.filter { !has.contains($0) }
+        if missing.isEmpty { return .held }
+        if !words(held.refused).isDisjoint(with: missing) { return .refused }
+        if missing.count < part.words.count { return .partly }
+        return words(held.asked).isDisjoint(with: missing) ? .unasked : .notGiven
+    }
+
     /// Words as the one string a source reads them in.
     private static func spelt(_ words: [String]) -> String {
         words.joined(separator: " ")
@@ -137,6 +201,13 @@ public enum MastodonParts {
         words(scopes).contains("read")
     }
 
+    /// Whether a scope string is one a sign-in reads by: every word of reading, or the source's
+    /// one word for every read. **A source's account of a sign-in that does not read is no
+    /// account of one** — every sign-in this app holds was asked to — and is believed of none.
+    public static func reads(_ scopes: String?) -> Bool {
+        holds(.reading, in: scopes) || holdsEveryRead(in: scopes)
+    }
+
     /// Whether a word lets something be changed at the source, by the source's own spelling.
     /// "Read only" drops by this prefix alone: a later part with an acting word outside it
     /// must be marked in the table.
@@ -147,4 +218,19 @@ public enum MastodonParts {
     private static func words(_ scopes: String?) -> Set<String> {
         Set((scopes ?? "").split(separator: " ").map(String.init))
     }
+}
+
+/// How a sign-in stands to one part (#347).
+public enum MastodonPartStanding: Sendable, Equatable, CaseIterable {
+    /// Every word of it is held.
+    case held
+    /// Some of its words are held: what those allow is offered, and the rest is not asked.
+    case partly
+    /// No page has asked this sign-in for it. Asking is what changes it.
+    case unasked
+    /// The person refused it on the source's own page. It may be asked again.
+    case refused
+    /// Asked, and the source gave none of it — or has none to give. Asking again would get
+    /// the same answer.
+    case notGiven
 }

@@ -472,7 +472,44 @@ struct MastodonSignInSaysTests {
         }
     }
 
-    // MARK: - 8. The person's own list of authorised apps
+    // MARK: - 8. Asked for a part where it stands
+
+    @Test("A reading sign-in asked where it stands for bookmarks — a page of the same registration for the words its source says it holds and that one part — comes back wider and as the same account, while the one it had goes on answering; and the source's own account of each, as this app reads it, is the words each was made with")
+    func aReadingSignInAskedInPlace() async throws {
+        try await LocalServers.requireHealthy()
+        let oauth = try signer()
+        let pages = Pages(host: Self.host, browser: try LocalHTTP.browser())
+        try await pages.signIn()
+        try await revokingWhatItMade(oauth) { made in
+            let reading = MastodonOAuth.reading
+            let first = try await oauth.signIn(as: try app(asking: reading), through: pages)
+            let held = made.keep(first.token)
+            #expect(first.failed == nil && !first.handedBack)
+
+            // What the page is built from: the source's own account of the token held.
+            let said = try #require(try await oauth.words(of: held))
+            #expect(said == Self.list(reading))
+            let page = MastodonParts.page(held: MastodonParts.believed(said, asked: held.asked), ticked: [.bookmarks])
+            #expect(page == reading + " write:bookmarks")
+
+            let second = try await oauth.signIn(as: try app(asking: page), through: pages)
+            let wider = made.keep(second.token)
+            #expect(second.failed == nil && !second.handedBack)
+            #expect(pages.shown == [reading, page], "each was a page of its own, for exactly the words asked")
+            let another: Bool = wider.accessToken != held.accessToken
+            let sameAccount: Bool = first.accountID != nil && first.accountID == second.accountID
+            #expect(another && sameAccount, "a second sign-in of the one account, by id")
+            #expect(wider.clientID == held.clientID, "the same registration served both")
+            #expect(wider.scopes == page)
+            #expect(try await oauth.words(of: wider) == Self.list(page))
+
+            // Nothing ended the one it had: another device carrying it reads on.
+            #expect(try await ask(held.accessToken, Self.check).status == 200)
+            #expect(try await ask(wider.accessToken, Self.check).status == 200)
+        }
+    }
+
+    // MARK: - 9. The person's own list of authorised apps
 
     @Test("Two sign-ins of one registration are one entry on the person's list of authorised apps, which says what the registration was made for and not what either holds; removing it ends both at once and no other registration's, the source's own account of each then answering as for a token that never was; and the registration goes on opening its page")
     func removingTheEntryEndsEveryTokenOfIt() async throws {

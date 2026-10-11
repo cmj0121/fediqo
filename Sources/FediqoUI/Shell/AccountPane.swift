@@ -795,8 +795,7 @@ struct AccountPane: View {
     /// the one a post's row puts, and nobody is signed out to put it. Nothing where that sign-in is no
     /// longer one to ask.
     func askBookmarks(_ host: String) {
-        guard session.mastodon.bookmarks(host: host) == .unasked else { return }
-        session.bookmarkAsk = host.lowercased()
+        session.askBookmarks(host: host)
     }
 
     /// The reader answered the scope question: sign in on the server's page, asking for what they

@@ -87,6 +87,23 @@ public final class MastodonSessions {
     /// a sign-out clears it.
     private(set) var noticesTurnedAway: Set<String> = []
 
+    /// What each sign-in is known to hold, by what rides beside it (#347) — read with `grants`
+    /// and never off a token: what a place draws a part's standing from (`standing`).
+    private(set) var heldParts: [String: MastodonHeld] = [:]
+
+    /// The parts each host was asked for in place this run and has none of (#347): its
+    /// registration was refused for them. Never written down; a sign-in or a sign-out clears it.
+    private(set) var gaveNone: [String: Set<MastodonPart>] = [:]
+
+    /// Hosts with an ask in place on its way (#347): one at a time, claimed before anything
+    /// is awaited, so a second press opens no second page.
+    private(set) var asking: Set<String> = []
+
+    /// The sign-in at each host whose words this device has had from its source this run
+    /// (#347), by its token string: made here, or asked about (`MastodonOAuth.words(of:)`).
+    /// What is written beside any other is somebody's word for it — a package's, most often.
+    @ObservationIgnored private var wordsConfirmed: [String: String] = [:]
+
     /// Hosts whose signed-in reader is no longer the one their rows were read as (#285): signed
     /// out, ended by the server, cleared, or signed in to as somebody not shown to be the same.
     /// The session takes them (`takeReadersChanged`) and lets go of what the source had said that
@@ -346,8 +363,9 @@ public final class MastodonSessions {
     /// reads as for one that acts: the id and the handle are written with the sign-in in the
     /// one write that keeps it, and the source is asked nothing more for them.
     ///
-    /// **`inPlace` is a sign-in asked for more where it stands** — bookmarks, notices. It may
-    /// not change who is signed in: one that comes back as another account is not kept.
+    /// **`inPlace` is the notices page's press**, which asks a sign-in for more where it
+    /// stands by this door still. It may not change who is signed in: one that comes back as
+    /// another account is not kept. Every other part is asked by `ask`.
     ///
     /// **Notices are asked for only where the reader pressed for them** (#323): `notices` is
     /// `true` from the notices page's press and from nowhere else. Left out, the sign-in
@@ -377,16 +395,9 @@ public final class MastodonSessions {
         notices wanted: Bool? = nil, noticesSaid said: Bool? = nil, inPlace: Bool = false
     ) async -> MastodonSignInError? {
         let host = raw.lowercased()
-        signingIn[host, default: 0] += 1
-        defer { signingIn[host] = signingIn[host].flatMap { $0 > 1 ? $0 - 1 : nil } }
         let pressed = wanted == true
         if pressed, noticesGaveNone(host) { return .invalidScope }
-        if registering.stranded(host) { return .invalidScope }
         let notices = wanted ?? (said != false && carriesNotices(host: host))
-        let before = signOuts[host, default: 0]
-        // Whether the reader still wants this sign-in: not signed out, cleared or removed since.
-        var stillWanted: Bool { signOuts[host, default: 0] == before }
-        let oauth = MastodonOAuth(host: host, sender: WatchedHTTP(sender: sender, for: .signIn, in: work))
         // What the reader's answer asks, and the same with less, a part a sign-in is whole
         // without at a time: without bookmarks, then without search as well — the least.
         let chosen = MastodonOAuth.scopes(writing: writing, notices: notices)
@@ -394,23 +405,95 @@ public final class MastodonSessions {
             MastodonOAuth.scopes(writing: writing, bookmarks: false, notices: notices),
             MastodonOAuth.scopes(search: false, writing: writing, bookmarks: false, notices: notices),
         ]
+        let signed = await sign(
+            host: host, through: browser, for: chosen, orLess: narrower, noticesPressed: pressed, inPlace: inPlace
+        )
+        return switch signed {
+        case .kept, .unsaid, .refusedOnPage: nil
+        case .hasNone, .stranded: .invalidScope
+        case .another, .less, .unnamed: .unreadable
+        case .failed(let error): error
+        }
+    }
+
+    /// What one page, and the keeping of what came back from it, came to.
+    private enum Signed {
+        /// The sign-in that came back is the one held.
+        case kept
+        /// Nothing to say: the page was closed, or the person let go of the source meanwhile.
+        case unsaid
+        /// The person said no on the source's page to a sign-in asked for more where it stood.
+        case refusedOnPage
+        /// The source would register for none of what was asked.
+        case hasNone
+        /// The source cannot be asked again this run (`stranded(host:)`).
+        case stranded
+        /// The page came back as another account's than the one held. Not kept.
+        case another
+        /// The source answered with less than the sign-in held has. Not kept.
+        case less
+        /// The source did not say whose the sign-in that came back is. Not kept.
+        case unnamed
+        case failed(MastodonSignInError)
+    }
+
+    /// The sign-in an ask in place widens (#347), as it stood when its page was decided on.
+    private struct Place {
+        /// The token string held. Anything else held by the time a page comes back, and
+        /// what came back is not kept.
+        let held: String
+        /// Whose it is, as its source said this run.
+        let account: String
+        /// The parts the page asks for beyond what is held.
+        let ticked: Set<MastodonPart>
+    }
+
+    /// The body of every sign-in: the registration, the source's page for exactly `chosen`,
+    /// the trade, the check, and the keeping — `signIn`'s rules, to the letter.
+    ///
+    /// **`place` is a sign-in asked for more where it stands** (`ask`). Its page is `chosen`
+    /// and nothing less; a no on it is written beside the sign-in held and touches nothing
+    /// else; and what comes back is kept only over the very sign-in the ask began with, for
+    /// the account that sign-in was confirmed to be.
+    private func sign(
+        host: String, through browser: any OAuthBrowser, for chosen: String, orLess narrower: [String],
+        noticesPressed pressed: Bool = false, inPlace: Bool = false, place: Place? = nil
+    ) async -> Signed {
+        signingIn[host, default: 0] += 1
+        defer { signingIn[host] = signingIn[host].flatMap { $0 > 1 ? $0 - 1 : nil } }
+        if registering.stranded(host) { return .stranded }
+        let before = signOuts[host, default: 0]
+        // Whether the reader still wants this sign-in: not signed out, cleared or removed since.
+        var stillWanted: Bool { signOuts[host, default: 0] == before }
+        // Whether the sign-in an ask in place began with is still the one held.
+        var stillPlaced: Bool { place.map { self.token(host: host)?.accessToken == $0.held } ?? true }
+        let oauth = MastodonOAuth(host: host, sender: WatchedHTTP(sender: sender, for: .signIn, in: work))
         let made: Registration
         do {
-            guard let found = try await registration(host: host, for: chosen, orLess: narrower, since: before)
-            else { return nil }
+            guard let found = try await registration(
+                host: host, for: chosen, orLess: narrower, since: before, exactly: place != nil
+            ) else { return .unsaid }
             made = found
         } catch let error as MastodonSignInError {
             // The press for notices itself, and the server would register for none of them.
             // Never a sign-in that only carried them, whose refusal may be about anything.
             if error == .invalidScope, pressed, stillWanted { noticesTurnedAway.insert(host) }
-            return error == .cancelled ? nil : error
+            // Asked in place, a host that has none of a word the sign-in **holds** has not
+            // said it has none of what was pressed for.
+            if error == .invalidScope, let place, lacksHeld(of: chosen, beyond: place.ticked, at: host) {
+                return .failed(error)
+            }
+            if error == .invalidScope { return .hasNone }
+            return error == .cancelled ? .unsaid : .failed(error)
         } catch {
-            return .unreachable
+            return .failed(.unreachable)
         }
+        // Replaced while the registration was asked for: no page opens about another sign-in.
+        guard stillPlaced else { return .unsaid }
         // A part left off a page for want of proof that the host has it was not asked; one the
         // host itself said it has none of was, and the row stops offering it.
         let asked = MastodonRegistration.asked(chosen, on: made.page) { registering.hasNone(of: $0, at: host) }
-        let token: MastodonToken
+        var token: MastodonToken
         // Whose sign-in it is, as its own check said: the account's id, and its handle where
         // the source gave it one of its own.
         let account: String?
@@ -446,18 +529,24 @@ public final class MastodonSessions {
             // Cleared or removed while the page was up: nothing is concluded about a source
             // the reader has let go of, and nothing said under a row that is gone.
             let unsaid = error == .cancelled || error == .denied
-            guard stillWanted else { return strand || unsaid ? nil : error }
+            guard stillWanted else { return strand || unsaid ? .unsaid : .failed(error) }
             if strand { registering.strand(host) }
             if error == .invalidScope, pressed { noticesTurnedAway.insert(host) }
-            if strand, registering.stranded(host) { return .invalidScope }
-            return unsaid ? nil : error
+            if strand, registering.stranded(host) { return .stranded }
+            // The state was checked before the no was read (`MastodonOAuth.code`): it is this
+            // page's own answer, and no token was made by it.
+            if let place, error == .denied {
+                noteRefused(place, asked: made.page, host: host)
+                return .refusedOnPage
+            }
+            return unsaid ? .unsaid : .failed(error)
         } catch {
-            return .unreachable
+            return .failed(.unreachable)
         }
         let fresh = MastodonLeft(token, as: .pending, accountID: account)
         guard stillWanted else {
             await discard(fresh, handedBack)
-            return nil
+            return .unsaid
         }
         // The sign-in held, which this one takes the place of. **Nothing is awaited between
         // this look and the swap below**, and the swap keeps nothing where another thread
@@ -468,14 +557,35 @@ public final class MastodonSessions {
         } catch {
             // What is held cannot be seen, so nothing can be put in its place — or ended.
             await discard(fresh, handedBack)
-            return .keychain
+            return .failed(.keychain)
+        }
+        if let place {
+            // Signed out and in again, replaced or read back while the page was up: what came
+            // back was asked of another sign-in, and is not put over this one.
+            guard held?.accessToken == place.held else {
+                await discard(fresh, handedBack)
+                return .unsaid
+            }
+            // The source's page signs in afresh each time, so it may come back as somebody
+            // else — or as nobody its check names. Only the same account's is kept.
+            guard let account else {
+                await discard(fresh, handedBack)
+                return .unnamed
+            }
+            guard account == place.account else {
+                await discard(fresh, handedBack)
+                return .another
+            }
         }
         // A server cannot talk this device out of a sign-in it holds: one that answers with
         // fewer of the words asked than the sign-in held has is not kept.
         if let held, !MastodonRegistration.keeps(held.scopes, asking: chosen, in: token.scopes) {
             await discard(fresh, handedBack)
-            return .unreadable
+            return .less
         }
+        // Asked in place, what the sign-in has been asked is every page's words, this one's
+        // among them: the callback came back, so the page was shown.
+        if place != nil { token = token.recorded(asked: MastodonParts.union(held?.asked, token.asked)) }
         // The token this one replaces — nothing, where the source handed the held one back.
         let replaced = held.flatMap { fresh.isToken($0) ? nil : $0 }
         // Whose each is, by the id its own check named, and by nothing else. Not known on
@@ -486,7 +596,7 @@ public final class MastodonSessions {
         let reader = held.flatMap { accountID(of: $0) }
         if inPlace, let owner, let account, owner != account {
             await discard(fresh, handedBack)
-            return .unreadable
+            return .another
         }
         // Left live only where it is the same account's and can do nothing the new one cannot.
         let widening = sameAccount && replaced.map { !MastodonLeft($0, as: .left).holdsMore(than: token.scopes) } == true
@@ -497,7 +607,7 @@ public final class MastodonSessions {
                 try tokens.journal(MastodonLeft(replaced, as: .left, accountID: owner))
             } catch {
                 await discard(fresh, handedBack)
-                return .keychain
+                return .failed(.keychain)
             }
             unended.removeAll { $0.isToken(replaced) }
         }
@@ -524,7 +634,7 @@ public final class MastodonSessions {
             noteLeft(host)
             await discard(fresh, handedBack)
             if let unkeepable { await end(unkeepable, why: .leftBehind) }
-            return .keychain
+            return .failed(.keychain)
         }
         // Held, it is nothing this device let go of — whatever a sign-out before left unended.
         unended.removeAll { $0.isToken(filed) }
@@ -539,6 +649,8 @@ public final class MastodonSessions {
         // **and only where that look found this very sign-in**: one filed from another thread
         // since the swap is nobody until its own source says (`noteFilings`).
         if self.token(host: host)?.accessToken == token.accessToken {
+            // Its words are the ones its own trade named, to this device and nobody else.
+            wordsConfirmed[host] = token.accessToken
             readers[host] = account.map { Reader(id: $0, handle: handle, accessToken: token.accessToken) }
             handles[host] = handle
             unlearned.remove(host)
@@ -569,13 +681,38 @@ public final class MastodonSessions {
         writeRefused.remove(host)
         bookmarkTurnedAway.remove(host)
         noticesTurnedAway.remove(host)
+        gaveNone[host] = nil
         registering.signedIn(host)
         refresh()
         // **Not shown to be the reader who was here before** (#285): another account, or one
         // nobody could name on either side — by the id, never by a handle. What the source
         // said that reader had done to its posts is not this one's to be told.
         if reader == nil || reader != account { readersChanged.insert(host) }
-        return nil
+        return .kept
+    }
+
+    /// Writes down beside the sign-in held that `place`'s parts were refused on the source's
+    /// own page, and that the page asked what it asked — **in place, and only while the
+    /// sign-in held is still the one the page was about** (`MastodonTokenStore.update`). Never
+    /// a save: a no on the page must not be able to cost the sign-in it promised to leave. A
+    /// note the Keychain refuses changes nothing, and the part reads as never asked.
+    private func noteRefused(_ place: Place, asked page: String, host: String) {
+        guard let held = token(host: host), held.accessToken == place.held else { return }
+        let note = MastodonToken(
+            host: host, accessToken: place.held, clientID: held.clientID, clientSecret: held.clientSecret,
+            asked: MastodonParts.union(held.asked, page),
+            refused: MastodonParts.union(held.refused, MastodonParts.words(of: place.ticked))
+        )
+        _ = try? tokens.update(note)
+        refresh()
+    }
+
+    /// Whether `host` has itself said it has none of a word of `page` that is no part of
+    /// `ticked`: a word the sign-in asked in place already holds.
+    private func lacksHeld(of page: String, beyond ticked: Set<MastodonPart>, at host: String) -> Bool {
+        let pressed = Set(ticked.flatMap { $0.words + $0.wordsBesideActing })
+        return page.split(separator: " ").map(String.init)
+            .contains { !pressed.contains($0) && registering.hasNone(of: $0, at: host) }
     }
 
     /// A registration to sign in through, and what its page asks.
@@ -607,8 +744,12 @@ public final class MastodonSessions {
     /// kept only where the one stored is still the one this looked at: a sign-out, a Clear, a
     /// Remove or another sign-in meanwhile is not written over. One this press could not keep
     /// still serves its own page.
+    ///
+    /// **`exactly` is a page that must ask every word of `chosen`** — a sign-in asked for a
+    /// part where it stands: a registration that would carry it only with a word left off
+    /// does not serve, since the word left off is the one pressed for.
     private func registration(
-        host: String, for chosen: String, orLess narrower: [String], since before: Int
+        host: String, for chosen: String, orLess narrower: [String], since before: Int, exactly: Bool = false
     ) async throws -> Registration? {
         var stillWanted: Bool { signOuts[host, default: 0] == before }
         // The sign-in held, as its attributes say it: no token is read before a page opens, and
@@ -616,15 +757,22 @@ public final class MastodonSessions {
         let held = ((try? tokens.parts()) ?? [:])[host]
         // Whether a page asking `words` leaves the sign-in held every word of it this one asks.
         func keeps(_ words: String) -> Bool { MastodonRegistration.keeps(held?.scopes, asking: chosen, in: words) }
+        // The page a registration made for `registered` serves, or nothing where it cannot
+        // carry it — or would leave the sign-in held less: such a page's token is one this
+        // device then refuses to keep, at every press.
+        func paged(_ registered: String?) -> String? {
+            let page = exactly
+                ? (MastodonRegistration.holds(chosen, on: registered) ? chosen : nil)
+                : MastodonRegistration.page(chosen, on: registered)
+            return page.flatMap { keeps($0) ? $0 : nil }
+        }
         // What is stored now, and the page it serves: where it holds all of `chosen`, was made
         // for exactly `words`, or — everything being no longer tried here — carries a page
         // that takes nothing from the sign-in held.
         func kept(for words: String? = nil) -> (stored: MastodonApp?, page: String?) {
             let stored = (try? tokens.app(host: host)) ?? nil
-            guard let stored, let scopes = stored.scopes,
-                  let page = MastodonRegistration.page(chosen, on: scopes)
-            else { return (stored, nil) }
-            let carries = !registering.mayTryWhole(host) && keeps(page)
+            guard let stored, let scopes = stored.scopes, let page = paged(scopes) else { return (stored, nil) }
+            let carries = !registering.mayTryWhole(host)
             return (stored, page == chosen || scopes == words || carries ? page : nil)
         }
         var seen = kept()
@@ -638,8 +786,10 @@ public final class MastodonSessions {
             let whole = MastodonRegistration.superset(listed: listed)
             // The host's own list has none of something this sign-in cannot do without: it is
             // not registered with to be told so again.
-            guard MastodonRegistration.page(chosen, on: whole) != nil else { throw MastodonSignInError.invalidScope }
-            tries.append(whole)
+            let carries = exactly
+                ? MastodonRegistration.holds(chosen, on: whole) : MastodonRegistration.page(chosen, on: whole) != nil
+            guard carries else { throw MastodonSignInError.invalidScope }
+            if paged(whole) != nil { tries.append(whole) }
         }
         let everything = tries.first
         // After a page with no way back, one try: what is asked, to the word, where a sign-in
@@ -656,7 +806,7 @@ public final class MastodonSessions {
                 guard stillWanted else { return nil }
                 // What the page asks is read off what the server says it registered, which may
                 // be less than it was asked — and too little for this sign-in at all.
-                guard let page = MastodonRegistration.page(chosen, on: answer.app.scopes) else {
+                guard let page = paged(answer.app.scopes) else {
                     throw MastodonSignInError.invalidScope
                 }
                 // What the host has none of, where it said: by naming what it registered, or
@@ -825,8 +975,205 @@ public final class MastodonSessions {
         let host = raw.lowercased()
         if bookmarkTurnedAway.contains(host) { return .unavailable }
         if bookmarkHosts.contains(host) { return .allowed }
-        guard grants[host] == .writing, !bookmarksRefused.contains(host) else { return .unavailable }
-        return .unasked
+        return mayAsk(.bookmarks, host: host) ? .unasked : .unavailable
+    }
+
+    /// How the sign-in at `host` stands to `part` (#347), or nothing where none is held —
+    /// **the one answer** a place goes by to offer the part's acts, lock them, or leave them
+    /// out. Read off what rides beside the sign-in, never off a token.
+    func standing(_ part: MastodonPart, host raw: String) -> MastodonPartStanding? {
+        let host = raw.lowercased()
+        guard let held = heldParts[host] else { return nil }
+        return standing(part, of: held, host: host)
+    }
+
+    private func standing(_ part: MastodonPart, of held: MastodonHeld, host: String) -> MastodonPartStanding {
+        let standing = MastodonParts.standing(part, of: held)
+        let asked = standing == .unasked || standing == .refused
+        return asked && gaveNone[host]?.contains(part) == true ? .notGiven : standing
+    }
+
+    /// Whether the sign-in at `host` may be asked for `part` where it stands: never asked, or
+    /// refused on the source's page — and, for a part that only adds to acting, one that acts.
+    func mayAsk(_ part: MastodonPart, host raw: String) -> Bool {
+        let host = raw.lowercased()
+        guard let held = heldParts[host] else { return false }
+        return mayAsk(part, of: held, host: host)
+    }
+
+    private func mayAsk(_ part: MastodonPart, of held: MastodonHeld, host: String) -> Bool {
+        if part.needsActing, !MastodonParts.holds(.acting, in: held.scopes) { return false }
+        let standing = standing(part, of: held, host: host)
+        return standing == .unasked || standing == .refused
+    }
+
+    /// What asking a sign-in for more, where it stands, came to (#347).
+    enum PartAnswer: Equatable {
+        /// The source's page allowed it, and the wider sign-in is the one held.
+        case allowed
+        /// The page was allowed and the sign-in that came back is the one held — without the
+        /// part: the source gave everything else and not that.
+        case notGiven
+        /// What is held is not what the question was drawn from. No page was opened, and the
+        /// question is to be put again, from what is held now.
+        case changed
+        /// Nothing was asked of the person's sign-in and there is nothing to say: the page
+        /// was closed, the sign-in is no longer the one the question was about, or it has
+        /// nothing left to be asked for.
+        case putDown
+        /// Another ask of this source is on its way; this one opened nothing.
+        case busy
+        /// The person said no on the source's page. Written beside the sign-in.
+        case refused
+        /// The source has none of it to allow.
+        case hasNone
+        /// The page signed in another account. Not kept.
+        case another
+        /// The source answered with less than the sign-in held has. Not kept.
+        case less
+        /// Whose sign-in this is could not be confirmed, so no page was opened.
+        case unconfirmed
+        /// The page was allowed, and the sign-in that came back named nobody. Not kept.
+        case unnamed
+        /// The source cannot be asked for this in this run.
+        case stranded
+        case failed(MastodonSignInError)
+    }
+
+    /// Asks the sign-in held at `host` for `ticked`, **where it stands**: the source's own
+    /// page for what the sign-in holds and those parts (`MastodonParts.page`), and nothing
+    /// signed out, ended or forgotten to ask it. **The one way a held sign-in comes to hold a
+    /// further part** (#347).
+    ///
+    /// **Whatever this answers but `allowed` and `notGiven`, the sign-in held is exactly the
+    /// one it was.**
+    ///
+    /// **Before any page:**
+    /// - the sign-in is read as its value says it, not as what rides beside it;
+    /// - its account check must have answered with an id through this very token, this run —
+    ///   asked now where it has not. The source's page signs in afresh, so only an id tells a
+    ///   sign-in that comes back as the same account's from one that is somebody else's;
+    /// - its words must be ones this device had from the source this run. Those of a sign-in
+    ///   it did not make this run — a package's, an earlier run's — are read from the
+    ///   source's own account of the token, and written over what was filed; no such
+    ///   account, no page. **An account is believed only where it reads**
+    ///   (`MastodonParts.reads`): an empty list, or one without the words every sign-in is
+    ///   asked for, is written over nothing;
+    /// - each part must still be one to ask (`mayAsk`), and the page must ask a word more
+    ///   than is held.
+    ///
+    /// **`question` is the question the person said yes to**, where one was put: the page
+    /// opens only for the sign-in that question was about, and only where it is, word for
+    /// word, the page the question was drawn for and gives up exactly what the question said
+    /// (`MastodonParts.unknown`). Held otherwise than the question was drawn from, no page
+    /// opens and the answer is `changed`. With none put, a sign-in holding a word this build
+    /// does not know is not asked.
+    ///
+    /// **What is held is read again after every wait**, and what comes back is kept only by
+    /// a swap over the token string the ask began with (`sign`).
+    func ask(
+        _ ticked: Set<MastodonPart>, host raw: String, through browser: any OAuthBrowser,
+        answering question: PartAsk? = nil
+    ) async -> PartAnswer {
+        let host = raw.lowercased()
+        guard asking.insert(host).inserted else { return .busy }
+        defer { asking.remove(host) }
+        let began: MastodonToken
+        do {
+            guard let held = try tokens.token(host: host) else { return .putDown }
+            began = held
+        } catch {
+            return .failed(.keychain)
+        }
+        // Another sign-in than the question was about — or the same one, from an earlier
+        // build, marked by this build's first note beside it since: that one is asked again.
+        if let question, question.stamp != began.stamp {
+            guard question.stamp == nil else { return .putDown }
+            // What rides beside it is looked at again, so the question put again carries the mark.
+            refresh()
+            return .changed
+        }
+        // Nothing of it left to ask, as the sign-in is filed: no source is asked to find so.
+        guard ticked.contains(where: { mayAsk($0, of: began.held, host: host) }) else { return .putDown }
+        if registering.stranded(host) { return .stranded }
+        let string = began.accessToken
+        var stillHeld: Bool { token(host: host)?.accessToken == string }
+        // Whose it is, as its source said through this token this run.
+        var confirmed: String? { readers[host].flatMap { $0.accessToken == string ? $0.id : nil } }
+        if confirmed == nil {
+            await learnWho(host: host)
+            guard stillHeld else { return .putDown }
+        }
+        guard let account = confirmed else { return .unconfirmed }
+        if wordsConfirmed[host] != string {
+            let watched = WatchedHTTP(sender: SourceReach.wordList(sender), for: .signInCheck, in: work)
+            let listed = try? await MastodonOAuth(host: host, sender: watched).words(of: began)
+            guard let filed = token(host: host), filed.accessToken == string else { return .putDown }
+            guard let listed else { return .unconfirmed }
+            let words = MastodonParts.believed(listed, asked: filed.asked)
+            // A server cannot talk this device out of what a sign-in holds with a list that
+            // is no account of one: nothing is written, and nothing asked.
+            guard MastodonParts.reads(words) else { return .unconfirmed }
+            if filed.scopes == nil || !MastodonParts.same(words, filed.scopes) {
+                let note = MastodonToken(
+                    host: host, accessToken: string, clientID: filed.clientID, clientSecret: filed.clientSecret,
+                    scopes: words
+                )
+                do {
+                    guard try tokens.update(note) else { return .putDown }
+                } catch {
+                    return .failed(.keychain)
+                }
+                refresh()
+            }
+            wordsConfirmed[host] = string
+        }
+        guard let held = token(host: host), held.accessToken == string else { return .putDown }
+        let wanted = ticked.filter { mayAsk($0, of: held.held, host: host) }
+        let page = MastodonParts.page(held: held.scopes, ticked: wanted)
+        let more = MastodonParts.more(on: page, than: held.scopes)
+        let givesUp = Set(MastodonParts.unknown(in: held.scopes))
+        // The page the question was drawn for and no other, whatever the sign-in has turned
+        // out to hold: not a word more, not a word the question said it has that it has not.
+        if let question {
+            guard MastodonParts.same(page, question.said), givesUp == Set(question.givesUp) else { return .changed }
+        }
+        guard !wanted.isEmpty, !more.isEmpty, question != nil || givesUp.isEmpty else { return .putDown }
+        let place = Place(held: string, account: account, ticked: wanted)
+        switch await sign(host: host, through: browser, for: page, orLess: [], place: place) {
+        case .kept:
+            // Kept for holding everything held before — which is not the part pressed for.
+            // This answer's fact, and not the host's: nothing is noted of the source.
+            let now = token(host: host)?.scopes
+            return wanted.allSatisfy { MastodonParts.holds($0, in: now) } ? .allowed : .notGiven
+        case .unsaid: return .putDown
+        case .refusedOnPage: return .refused
+        case .hasNone:
+            noteNone(of: wanted, at: host, held: string)
+            return .hasNone
+        case .stranded: return .stranded
+        case .another: return .another
+        case .less: return .less
+        case .unnamed: return .unnamed
+        case .failed(let error): return .failed(error)
+        }
+    }
+
+    /// A source that would register for none of `parts`: not asked for them again this run,
+    /// and — where the source itself said which words it lacks — written beside the sign-in
+    /// as asked, in place and only over the token string the ask was about, so the place
+    /// stops offering across a relaunch as a sign-in's own answer does.
+    private func noteNone(of parts: Set<MastodonPart>, at host: String, held string: String) {
+        guard let held = token(host: host), held.accessToken == string else { return }
+        gaveNone[host, default: []].formUnion(parts)
+        let lacking = MastodonParts.words(of: parts) { registering.hasNone(of: $0, at: host) }
+        guard !lacking.isEmpty else { return }
+        let note = MastodonToken(
+            host: host, accessToken: string, clientID: held.clientID, clientSecret: held.clientSecret,
+            asked: MastodonParts.union(held.asked, lacking)
+        )
+        _ = try? tokens.update(note)
+        refresh()
     }
 
     /// Whether the sign-in on one source may read notices (#323) — beside `bookmarks(host:)`,
@@ -921,6 +1268,7 @@ public final class MastodonSessions {
         writeRefused.remove(host)
         bookmarkTurnedAway.remove(host)
         noticesTurnedAway.remove(host)
+        gaveNone[host] = nil
         handles[host] = nil
         _ = endings.takeSaid(host)
         refresh()
@@ -1452,6 +1800,8 @@ public final class MastodonSessions {
         if grants != self.grants { self.grants = grants }
         if read != nil, let parts = try? tokens.parts() {
             noteFilings(Dictionary(uniqueKeysWithValues: grants.keys.map { ($0, parts[$0]?.stamp ?? "") }))
+            let held = parts.filter { grants[$0.key] != nil }
+            if held != heldParts { heldParts = held }
         }
         let bookmarking = ((try? tokens.bookmarking()) ?? []).intersection(grants.keys)
         if bookmarking != bookmarkHosts { bookmarkHosts = bookmarking }

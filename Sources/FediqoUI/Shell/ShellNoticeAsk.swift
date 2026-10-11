@@ -87,7 +87,7 @@ extension ShellSession {
         let host = raw.lowercased()
         if let said = noticesSaid[host] { return SignInAsked(host: raw, notices: said) }
         let carries = mastodon.carriesNotices(host: host)
-        if signInChoice?.lowercased() == host || bookmarkAsk?.lowercased() == host { noticesSaid[host] = carries }
+        if signInChoice?.lowercased() == host { noticesSaid[host] = carries }
         return SignInAsked(host: raw, notices: carries)
     }
 
@@ -107,12 +107,6 @@ extension ShellSession {
             )
         }
         return question
-    }
-
-    /// The bookmark question about `host`, naming notices where its sign-in carries them: what
-    /// `BookmarkQuestion` puts.
-    func bookmarkQuestion(host: String) -> ShellConfirmation {
-        ShellQuestion.bookmarks(host: host, notices: signInAsked(host: host).notices)
     }
 
     /// The read-or-act question put down, answered or not: the next one reads afresh.

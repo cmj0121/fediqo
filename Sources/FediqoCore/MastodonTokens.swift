@@ -174,13 +174,13 @@ public struct MastodonHeld: Equatable, Sendable {
     /// Whether it may bookmark (#285). Nothing written down says nothing, and nothing is no.
     public var bookmarks: Bool { MastodonOAuth.bookmarks(scopes) }
     /// Whether it asked for bookmarks and was not given them (#285).
-    public var bookmarksRefused: Bool { MastodonOAuth.bookmarks(asked) && !bookmarks }
+    public var bookmarksRefused: Bool { MastodonParts.standing(.bookmarks, of: self) == .notGiven }
     /// Whether it may read notices (#323).
     public var notices: Bool { MastodonOAuth.notices(scopes) }
     /// Whether it may dismiss notices (#323).
     public var dismisses: Bool { MastodonOAuth.dismisses(scopes) }
     /// Whether it asked for notices and was not given them (#323).
-    public var noticesRefused: Bool { MastodonOAuth.notices(asked) && !notices }
+    public var noticesRefused: Bool { MastodonParts.standing(.notices, of: self) == .notGiven }
 }
 
 /// This app's registration on one server, kept so a second sign-in does not register again.

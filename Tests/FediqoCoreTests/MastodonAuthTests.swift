@@ -208,6 +208,12 @@ struct MastodonAuthTests {
                 from: URL(string: "fediqo://oauth?error=invalid_scope&state=st")!, state: "st"
             )
         }
+        // Only the person's own no is one: anything else the source says went wrong is a failure.
+        for error in ["server_error", "temporarily_unavailable", ""] {
+            #expect(throws: MastodonSignInError.unreadable) {
+                try MastodonOAuth.code(from: URL(string: "fediqo://oauth?error=\(error)&state=st")!, state: "st")
+            }
+        }
         #expect(throws: MastodonSignInError.unreadable) {
             try MastodonOAuth.code(from: URL(string: "fediqo://oauth?state=st")!, state: "st")
         }
