@@ -115,10 +115,14 @@ public final class MastodonSessions {
     /// Who the reader is on each signed-in host, as `@user@host`, **as that source said this run**
     /// (#109) — what tells a post the reader wrote from one they did not.
     ///
-    /// **Asked, never kept.** It is learnt from the account check at launch and after a sign-in,
-    /// and dropped with the sign-in, so a second account signed in on the same host is never
-    /// handed the first one's posts to take back. A host not yet answered has no entry, and
-    /// then nothing there is offered for taking back — the safe side of not knowing.
+    /// **What the sign-in's own check said, for every sign-in** (#347): off the check a sign-in
+    /// makes as it is kept, and off the account check at launch — a sign-in that only reads is
+    /// named as one that acts is. It goes with the sign-in it was said through: dropped at a
+    /// sign-out, and at the first look that finds another sign-in held there (`refresh`), so a
+    /// second account on the same host is never handed the first one's posts to take back. A
+    /// host not yet answered has no entry — nor has one whose source gave the account no name
+    /// of its own there (`MastodonWho.ownHandle`) — and then nothing there is offered for
+    /// taking back, and there is no page of the reader's own: the safe side of not knowing.
     private(set) var handles: [String: String] = [:]
 
     /// An account as its source named it, and the sign-in the answer came through.
@@ -128,23 +132,26 @@ public final class MastodonSessions {
     /// of that source carries, and never drawn as sent (`shown`).
     struct Reader: Equatable {
         let id: String
-        let handle: String
+        /// Nothing where the source gave the account no name of its own there.
+        let handle: String?
         fileprivate let accessToken: String
 
         /// `handle`, made fit to stand in a sentence of ours: no control or format character,
         /// no line break, and no longer than a name may run (`LineText.oneLine`).
-        var shown: String { LineText.oneLine(handle) }
+        var shown: String? { handle.map { LineText.oneLine($0) } }
     }
 
-    /// Who each sign-in is, by the id its source gives the account, as the account check said
-    /// through that very sign-in.
+    /// Who each sign-in is, by the id its source gives the account, as its own check said as
+    /// it was kept, or the account check said through that very sign-in — **this run**: what
+    /// tells a sign-in this device has asked about from one it has only been handed.
     @ObservationIgnored private var readers: [String: Reader] = [:]
     /// Moved when `readers` is, so a page drawn from `reader(host:)` is drawn again.
     private var readersLearnt = 0
 
     /// Who is signed in at `host`, where its source has said — **through the sign-in held
-    /// now**. Read off the sign-in itself, where it was written down with it (`learnWho`), so it
-    /// is known with no network; and otherwise what this run was told through that very token.
+    /// now**. Read off the sign-in itself, where it was written down with it (`signIn`, `name`),
+    /// so it is known with no network; and otherwise what this run was told through that very
+    /// token.
     /// A sign-in replaced under this object's feet, by a read back or another device's
     /// package, is somebody nobody has asked about yet, and this answers nothing for it: what
     /// was learnt of the sign-in before is never laid on the one that took its place.
@@ -152,7 +159,9 @@ public final class MastodonSessions {
         _ = readersLearnt
         let host = raw.lowercased()
         guard let held = token(host: host) else { return nil }
-        if let id = held.accountID, let handle = held.handle {
+        if let id = held.accountID {
+            // By today's rule: a build before it wrote whatever handle its source sent.
+            let handle = held.handle.flatMap { MastodonWho.kept($0, at: host) }
             return Reader(id: id, handle: handle, accessToken: held.accessToken)
         }
         guard let reader = readers[host], held.accessToken == reader.accessToken else { return nil }
@@ -162,10 +171,6 @@ public final class MastodonSessions {
     /// How many sign-ins are on their way at each host: a sign-in made and not yet kept is
     /// that sign-in's own to keep or end, and nothing else ends it meanwhile.
     @ObservationIgnored private var signingIn: [String: Int] = [:]
-
-    /// Whose sign-in a token kept this run is, as its own check named the account — until
-    /// that is written down with the sign-in. `host` → the token string and the id.
-    @ObservationIgnored private var checked: [String: (accessToken: String, id: String)] = [:]
 
     /// Sign-ins a source was asked to end and did not say it had, after everything of them
     /// left this device (#347). **In memory and nowhere else**: asked again while the app
@@ -251,6 +256,20 @@ public final class MastodonSessions {
     /// unknown until a relaunch. `learnWhoAgain(among:)` is that second ask.
     @ObservationIgnored private var unlearned: Set<String> = []
 
+    /// How many times the sign-in held at each host has become another, as this object's
+    /// looks found it (#347): kept, widened, narrowed, replaced from outside, ended, signed
+    /// out. Never moved by the same sign-in written again.
+    ///
+    /// **A signal to draw again, and nothing else.** A page drawn for one reader reads it to
+    /// know it may no longer be drawn (`ShellPersonPages`); what is let go, asked, kept or
+    /// ended is decided by the sign-in itself, looked at where that is done.
+    private(set) var changes: [String: Int] = [:]
+
+    /// The mark of the filing of each host's sign-in (`MastodonToken.stamp`) as the last look
+    /// that could be had found it — the empty string for one an earlier build filed with
+    /// none. Nothing until a look could be had. Read beside the sign-ins, never off a token.
+    @ObservationIgnored private var filings: [String: String]?
+
     public init(
         tokens: any MastodonTokenStore = KeychainMastodonTokens(),
         sender: any HTTPSender = URLSessionClient.signedIn()
@@ -323,6 +342,10 @@ public final class MastodonSessions {
     /// before it is checked, and put where the held one was only while that one is still the
     /// one held; a note that cannot be taken is a sign-in not kept.
     ///
+    /// **Who the reader is comes off the sign-in's own check** (#347), for a sign-in that only
+    /// reads as for one that acts: the id and the handle are written with the sign-in in the
+    /// one write that keeps it, and the source is asked nothing more for them.
+    ///
     /// **`inPlace` is a sign-in asked for more where it stands** — bookmarks, notices. It may
     /// not change who is signed in: one that comes back as another account is not kept.
     ///
@@ -388,8 +411,10 @@ public final class MastodonSessions {
         // host itself said it has none of was, and the row stops offering it.
         let asked = MastodonRegistration.asked(chosen, on: made.page) { registering.hasNone(of: $0, at: host) }
         let token: MastodonToken
-        // Whose sign-in it is, as its own check said.
+        // Whose sign-in it is, as its own check said: the account's id, and its handle where
+        // the source gave it one of its own.
         let account: String?
+        let handle: String?
         // Whether the source handed back a token made before this sign-in: somebody's working
         // sign-in, on this device or another, and never ended for not being kept here.
         let handedBack: Bool
@@ -404,8 +429,12 @@ public final class MastodonSessions {
                 if !signed.handedBack { await end(MastodonLeft(signed.token, as: .pending), why: .notKept) }
                 throw failed
             }
-            token = signed.token.recorded(asked: asked)
+            // Named as its own check named it, so who it is is written as it is kept: in the
+            // one write that keeps it, and only over the sign-in that write expects.
+            let issued = signed.token.recorded(asked: asked)
+            token = signed.accountID.map { issued.named(accountID: $0, handle: signed.handle) } ?? issued
             account = signed.accountID
+            handle = signed.handle
             handedBack = signed.handedBack
         } catch let error as MastodonSignInError {
             // No server's page sends `invalid_scope` back; one that did has said what a page
@@ -453,6 +482,8 @@ public final class MastodonSessions {
         // either side, they are not shown to be one account.
         let owner = replaced.flatMap { accountID(of: $0) }
         let sameAccount = owner != nil && owner == account
+        // Who read this source before, the sign-in handed back as it was included.
+        let reader = held.flatMap { accountID(of: $0) }
         if inPlace, let owner, let account, owner != account {
             await discard(fresh, handedBack)
             return .unreadable
@@ -498,11 +529,21 @@ public final class MastodonSessions {
         // Held, it is nothing this device let go of — whatever a sign-out before left unended.
         unended.removeAll { $0.isToken(filed) }
         _ = endings.takeSaid(host)
-        checked[host] = account.map { (token.accessToken, $0) }
         // What is held is read again **before the wait below** (#323): a second sign-in started
         // while the server is being asked to forget the old token carries what this one holds,
         // not what the one it replaced did.
         refresh()
+        // **Who the reader is, off the check this sign-in has already made** (#347): no ask of
+        // its own, whatever the sign-in may do, and no moment after it in which nobody is
+        // named. After the look, which lets go of what was known of the sign-in before —
+        // **and only where that look found this very sign-in**: one filed from another thread
+        // since the swap is nobody until its own source says (`noteFilings`).
+        if self.token(host: host)?.accessToken == token.accessToken {
+            readers[host] = account.map { Reader(id: $0, handle: handle, accessToken: token.accessToken) }
+            handles[host] = handle
+            unlearned.remove(host)
+            readersLearnt += 1
+        }
         // **After the new one is safely kept**, and never a token with the same string (`end`).
         if let replaced, !widening {
             // The read-or-act question says this first (`signInEnds`); a sign-in asked for
@@ -529,16 +570,11 @@ public final class MastodonSessions {
         bookmarkTurnedAway.remove(host)
         noticesTurnedAway.remove(host)
         registering.signedIn(host)
-        let reader = handles[host]
-        handles[host] = nil
         refresh()
-        // Who the reader is matters only to taking back what they wrote, which needs the writing
-        // part — so a sign-in that did not buy it asks nothing more than it always did.
-        if grants[host] == .writing { await learnWho(host: host) }
         // **Not shown to be the reader who was here before** (#285): another account, or one
-        // nobody could name on either side. What the source said that reader had done to its
-        // posts is not this one's to be told.
-        if reader == nil || handles[host] != reader { readersChanged.insert(host) }
+        // nobody could name on either side — by the id, never by a handle. What the source
+        // said that reader had done to its posts is not this one's to be told.
+        if reader == nil || reader != account { readersChanged.insert(host) }
         return nil
     }
 
@@ -697,29 +733,52 @@ public final class MastodonSessions {
 
     /// Asks the source who the reader is on it (#109). Silent on any failure: not knowing offers
     /// nothing for taking back, which is the one safe answer, and a 401 is told as `verifyAll`
-    /// tells it.
+    /// tells it. **A source that refuses the check** — a sign-in without the word that reads
+    /// the account is answered 403 — **names nobody**: the sign-in stays, unnamed.
     func learnWho(host raw: String, within limit: Duration? = nil) async {
         let host = raw.lowercased()
         unlearned.remove(host)
         guard let door = authorized(host: host, within: limit, for: .signInCheck) else { return }
         do {
-            let who = try await door.who()
-            if isSignedIn(host: host) {
-                handles[host] = who.handle
-                readers[host] = who.id.map { Reader(id: $0, handle: who.handle, accessToken: door.token.accessToken) }
-                // Written down with the sign-in it was said through, where that is still the
-                // one held: the next run knows whose it is before any source answers.
-                if let id = who.id, let held = token(host: host), held.accessToken == door.token.accessToken,
-                   held.accountID != id || held.handle != who.handle {
-                    try? tokens.save(held.named(accountID: id, handle: who.handle))
-                }
-                readersLearnt += 1
-            }
+            name(door.token, as: try await door.who())
         } catch MastodonAuthError.signedOut {
             endedByServer(host: host)
         } catch where DarkNetwork.caused(error) {
             if isSignedIn(host: host) { unlearned.insert(host) }
         } catch {}
+    }
+
+    /// Lays what the account check said through `asked` on the sign-in held — **only where
+    /// that is still the very sign-in it was asked through** (#347). Looked at after the wait:
+    /// a sign-out, a Remove, another sign-in or a package read back meanwhile leaves the
+    /// answer on nobody, and what took that sign-in's place is named by its own check.
+    ///
+    /// **Written beside the sign-in in place** (`MastodonTokenStore.update`), which writes
+    /// only over the token string it is handed and cannot lose the sign-in it is a note on;
+    /// never a save. Only the id and the handle are named, so everything else held stays as
+    /// it is — **and the handle goes with the id**: a check that names the account and no
+    /// handle of its own unwrites the one written before. A note the Keychain refuses changes
+    /// nothing held, and the reader is still known for this run, by the token the answer came
+    /// through.
+    private func name(_ asked: MastodonToken, as who: MastodonWho) {
+        let host = asked.host
+        guard let held = token(host: host), held.accessToken == asked.accessToken else { return }
+        if let id = who.id, held.accountID != id || held.handle != who.handle {
+            let note = MastodonToken(
+                host: host, accessToken: asked.accessToken, clientID: asked.clientID, clientSecret: asked.clientSecret
+            ).named(accountID: id, handle: who.handle)
+            // Not written over another string: replaced between the look above and the write.
+            if (try? tokens.update(note)) == false { return }
+            // A sign-in an earlier build filed is marked by this build's first write beside
+            // it: the same sign-in still, and not to be taken for another at the next look.
+            if held.stamp == nil, filings?[host] == "", let marked = token(host: host),
+               marked.accessToken == asked.accessToken {
+                filings?[host] = marked.stamp ?? ""
+            }
+        }
+        if who.handle != handles[host] { handles[host] = who.handle }
+        readers[host] = who.id.map { Reader(id: $0, handle: who.handle, accessToken: asked.accessToken) }
+        readersLearnt += 1
     }
 
     /// Asks who the reader is again on each of `hosts` whose last account check the network was
@@ -863,7 +922,6 @@ public final class MastodonSessions {
         bookmarkTurnedAway.remove(host)
         noticesTurnedAway.remove(host)
         handles[host] = nil
-        checked[host] = nil
         _ = endings.takeSaid(host)
         refresh()
         noteLeft(host)
@@ -1062,11 +1120,10 @@ public final class MastodonSessions {
     }
 
     /// Whose sign-in `token` is, by the id its source gives the account: as written down
-    /// with it, or as its own check or the account check said through that very token this
-    /// run. Nothing where nobody has said.
+    /// with it, or as the account check said through that very token this run. Nothing where
+    /// nobody has said.
     private func accountID(of token: MastodonToken) -> String? {
         if let id = token.accountID { return id }
-        if let known = checked[token.host], known.accessToken == token.accessToken { return known.id }
         if let reader = readers[token.host], reader.accessToken == token.accessToken { return reader.id }
         return nil
     }
@@ -1253,7 +1310,7 @@ public final class MastodonSessions {
         let host = raw.lowercased()
         guard grants[host] != nil else { return nil }
         let words = ((try? tokens.parts()) ?? [:])[host]?.scopes
-        guard let words, checked[host] != nil || readers[host] != nil else { return .either }
+        guard let words, readers[host] != nil else { return .either }
         let read = MastodonRegistration.holds(words, on: MastodonOAuth.scopes(writing: false, notices: notices))
         let act = MastodonRegistration.holds(words, on: MastodonOAuth.scopes(writing: true, notices: notices))
         return act ? (read ? .another : .reading) : .either
@@ -1357,6 +1414,29 @@ public final class MastodonSessions {
         endedLeft = []
     }
 
+    /// Sets the filings a look has just found against the ones the look before found, and
+    /// counts each host whose sign-in has become another (`changes`): one filed, one gone, or
+    /// one under another mark — the mark is made when a token string is first filed and
+    /// carried through every later write of that string, so this turns on the string and no
+    /// token is read for it.
+    ///
+    /// **What was known of the sign-in before is not laid on the next**: the reader's handle
+    /// goes. Where one sign-in took another's place the source is asked who reads it now by
+    /// the first read that reaches it (`learnWhoAgain`) — a sign-in made here has said
+    /// already, and takes itself off that list.
+    ///
+    /// The first look only notes: nothing was drawn before it.
+    private func noteFilings(_ found: [String: String]) {
+        defer { filings = found }
+        guard let before = filings else { return }
+        for host in Set(before.keys).union(found.keys) where before[host] != found[host] {
+            changes[host, default: 0] += 1
+            handles[host] = nil
+            readers[host] = nil
+            if before[host] != nil, found[host] != nil { unlearned.insert(host) }
+        }
+    }
+
     /// Reads who is signed in again. Also asked when the app comes to the front: a Keychain read
     /// at launch on a locked device finds nothing, and that is not a sign-out.
     func refresh() {
@@ -1370,6 +1450,9 @@ public final class MastodonSessions {
         // the look itself could be had.
         if read != nil { readersChanged.formUnion(Set(self.grants.keys).subtracting(grants.keys)) }
         if grants != self.grants { self.grants = grants }
+        if read != nil, let parts = try? tokens.parts() {
+            noteFilings(Dictionary(uniqueKeysWithValues: grants.keys.map { ($0, parts[$0]?.stamp ?? "") }))
+        }
         let bookmarking = ((try? tokens.bookmarking()) ?? []).intersection(grants.keys)
         if bookmarking != bookmarkHosts { bookmarkHosts = bookmarking }
         let refused = ((try? tokens.bookmarksRefused()) ?? []).intersection(grants.keys)
@@ -1385,7 +1468,9 @@ public final class MastodonSessions {
         if dismissing != dismissHosts { dismissHosts = dismissing }
         let unnoticed = (noticed.refused ?? []).intersection(grants.keys)
         if unnoticed != noticesRefused { noticesRefused = unnoticed }
-        // Who the reader is goes with the sign-in it was learnt through.
+        // Who the reader is goes with the sign-in it was learnt through — where the look could
+        // be had: one a locked device refused is not a sign-out, and lets go of nobody.
+        guard read != nil else { return }
         let kept = handles.filter { grants[$0.key] != nil }
         if kept != handles { handles = kept }
     }

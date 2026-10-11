@@ -75,7 +75,7 @@ public struct MastodonToken: Sendable, Equatable, CustomStringConvertible,
     }
 
     /// This token, written down as the sign-in of the account its source named through it.
-    public func named(accountID: String, handle: String) -> MastodonToken {
+    public func named(accountID: String, handle: String?) -> MastodonToken {
         with(asked: asked, refused: refused, accountID: accountID, handle: handle)
     }
 
@@ -107,11 +107,13 @@ public struct MastodonToken: Sendable, Equatable, CustomStringConvertible,
     /// This token with each fact it leaves out taken from `held`, the same string as the
     /// device holds it: what an update in place writes, which writes down and never unwrites.
     /// **Nothing for `refused` keeps what is held; the empty string is what clears it.**
+    /// **Who it is, is one fact**: a token that names the account carries that account's
+    /// handle, none included, and the handle held is kept only where it names nobody.
     func over(_ held: MastodonToken) -> MastodonToken {
         MastodonToken(
             host: host, accessToken: accessToken, clientID: clientID, clientSecret: clientSecret,
             scopes: scopes ?? held.scopes, asked: asked ?? held.asked, refused: refused ?? held.refused,
-            accountID: accountID ?? held.accountID, handle: handle ?? held.handle
+            accountID: accountID ?? held.accountID, handle: accountID == nil ? handle ?? held.handle : handle
         )
     }
 
@@ -278,6 +280,8 @@ public protocol MastodonTokenStore: Sendable {
     ///
     /// So nothing for `refused` leaves the refusals held as they are, other parts' included,
     /// and **only the empty string clears them**; words written replace the words held.
+    /// Who the sign-in is, is written whole: an id named with no handle takes away the handle
+    /// held.
     ///
     /// **Never `save`**, which deletes before it adds: a write that only notes something — a
     /// refusal, who the reader is — must not be able to lose the sign-in it is a note on. One
@@ -1160,6 +1164,13 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
 
     private var filing: TokenFiling {
         TokenFiling(items: items, lock: writing, betweenReadAndWrite: betweenReadAndWrite)
+    }
+
+    /// Files `token` as a build from before the stamp left one: with no mark of its filing.
+    /// For tests.
+    func fileUnstamped(_ token: MastodonToken) throws {
+        try items.delete(host: token.host)
+        try items.add(token.stamped(nil))
     }
 
     /// Makes the keychain underneath refuse the next `times` of one call, as a locked device's

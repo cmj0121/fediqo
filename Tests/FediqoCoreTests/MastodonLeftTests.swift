@@ -487,8 +487,8 @@ struct MastodonLeftTests {
         ]
         for (body, expected) in answers {
             let server = MastodonFixture.server(verify: .json(body))
-            let id = try await MastodonOAuth(host: Self.host, sender: server).verify(MastodonFixture.token)
-            #expect(id == expected)
+            let who = try await MastodonOAuth(host: Self.host, sender: server).verify(MastodonFixture.token)
+            #expect(who.id == expected)
         }
     }
 }

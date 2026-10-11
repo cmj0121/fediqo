@@ -570,7 +570,8 @@ private actor WhoServer: HTTPSender {
         guard let url = request.url else { throw FixtureHTTPError.unmapped }
         let body: String
         switch url.path {
-        case "/api/v1/accounts/verify_credentials": body = #"{"acct":"\#(acct)"}"#
+        // An account is told by its id (#347), as a Mastodon names every account it signs in.
+        case "/api/v1/accounts/verify_credentials": body = #"{"id":"id-\#(acct)","acct":"\#(acct)"}"#
         case "/api/v1/apps": body = #"{"client_id":"cid","client_secret":"csecret"}"#
         case "/oauth/token": body = #"{"access_token":"tok-\#(acct)"}"#
         case "/oauth/revoke": body = "{}"

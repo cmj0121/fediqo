@@ -611,6 +611,47 @@ struct PersonSaidTests {
         #expect(pages.said(of: Self.ada, in: session)?.posts?.count == 3)
     }
 
+    @Test("A page in front when another sign-in takes its source, with nothing pressed, is not drawn for the new reader: at the next look at who is signed in it reads as asking, its opening is another so the pane asks again by itself, and that ask lets the old page go and reads afresh as the new reader — while the same sign-in written again leaves the page as it stands")
+    func anOpenPageIsNotDrawnForTheNextReader() async throws {
+        let (session, server, _) = await session(Self.served([
+            "/api/v1/accounts/verify_credentials": PageServer.Answer(body: "{}"),
+        ]))
+        let pages = ShellPersonPages()
+        try signIn(session, as: "first")
+        await pages.opened(Self.ada, in: session)
+        #expect(pages.said(of: Self.ada, in: session)?.posts?.count == 3)
+        let first = ShellPersonPages.opening(Self.ada, in: session)
+
+        // The same sign-in, written again and looked at again: the page stands, and its opening is the same.
+        let held = try #require(try session.mastodon.tokens.token(host: Self.host))
+        #expect(try session.mastodon.tokens.update(held.recorded(refused: "write:bookmarks")))
+        await session.mastodon.learnWho(host: Self.host)
+        session.mastodon.refresh()
+        #expect(pages.said(of: Self.ada, in: session)?.posts?.count == 3)
+        #expect(ShellPersonPages.opening(Self.ada, in: session) == first)
+
+        // Another sign-in is filed from outside — a package read back — and nothing is pressed.
+        try session.mastodon.tokens.save(MastodonToken(host: Self.host, accessToken: "second", clientID: "c", clientSecret: "s"))
+        session.mastodon.refresh()
+        #expect(ShellPersonPages.askedAs(at: Self.host, in: session) == .reader(nil), "no handle tells them apart")
+        #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking), "the first reader's page is drawn for the second")
+        #expect(ShellPersonPages.opening(Self.ada, in: session) != first, "nothing would ask the page again")
+        #expect(pages.lists(of: Self.ada, in: session).isEmpty)
+        #expect(pages.walked(of: Self.ada, in: session).isEmpty)
+        let asked = await server.asked.filter { $0 != "/api/v1/accounts/verify_credentials" }
+        #expect(asked == [Self.lookup, Self.statuses], "drawing asks nobody")
+
+        // The pane's own opening: the sign-in's mark lets the old page go, and it is asked as the second.
+        await server.answer(Self.statuses, Self.stretch([5, 4]))
+        await pages.opened(Self.ada, in: session)
+        #expect(await server.bearers.suffix(2) == ["Bearer second", "Bearer second"])
+        #expect(pages.said(of: Self.ada, in: session)?.posts?.map(\.statusID) == ["5", "4"])
+        let second = ShellPersonPages.opening(Self.ada, in: session)
+        await pages.opened(Self.ada, in: session)
+        #expect(ShellPersonPages.opening(Self.ada, in: session) == second)
+        #expect(await server.asked.filter { $0 == Self.lookup }.count == 2, "asked once as each reader")
+    }
+
     @Test("Signing out lets the reader's pages go and calls their asks off: the ask still out is walked away from, and the page is asked afresh as nobody")
     func signingOutCallsOff() async throws {
         let server = PageServer(Self.served())

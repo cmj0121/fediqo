@@ -32,19 +32,20 @@ import Observation
 // followers among them. So each page remembers who it was asked as, and is not there for
 // anybody else: a sign-in that ends, begins or changes asks afresh.
 //
-// **Told by the sign-in itself, and then by name.** A reader the source has not named — every
-// sign-in that only reads, and any in its first moment — is not told from another by a handle.
+// **Told by the sign-in itself, and then by name.** A reader the source has not named — one it
+// gave no handle of its own, one a package brought until its check answers — is not told from
+// another by a handle.
 // So at every press that reads a page (`opened`, `again`, `readOn`, `holding`) the sign-in held
 // now is looked at once, and where it is not the one the pages of that host were last read
 // through, every page of that host is let go and its ask called off before anything else is
 // done (`PageReaders`). The handle stays the second check, and the one a page is drawn by.
 //
-// **What that leaves, for the unit that owns the sign-in.** Drawing looks at no sign-in: a
-// Keychain read a frame is not paid. So a sign-in replaced by another unnamed one, while a page
-// stays where it can be drawn and nothing is pressed, is drawn that page until the next press
-// or the next time it opens — at most the frame before its pane's own opening asks. Closing
-// that needs a count kept where the sign-in code already notes that a host's reader may have
-// changed, bumped there and compared here in `standing`; these files do not own that code.
+// **And between presses, by a count.** Drawing looks at no sign-in: a Keychain read a frame is
+// not paid. So the sign-in code counts each time the sign-in held at a host becomes another
+// (`MastodonSessions.changes`), and a page remembers the count it was asked under: where the
+// two differ the page is not drawn (`standing`), and its opening is another, so the pane asks
+// again by itself — and that ask's look at the sign-in is what lets the page go, or keeps it.
+// **The count only stops a page being drawn.** It lets nothing go and asks nothing.
 //
 // **Only where the source says who people are** (`SourceOffers.people`), and only for somebody
 // with a handle: a forum's author is a name on a host, and is asked of nobody.
@@ -173,6 +174,8 @@ final class ShellPersonPages {
         var notPaging = false
         /// The number of the ask or the reading-on whose answer this page awaits.
         var awaits = 0
+        /// How often the sign-in at its host had become another when it was last asked.
+        var under = 0
 
         /// Whether the page's two asks came to something: that they are not known, a failure,
         /// or who they are **and** an answer about their posts. A page that is not settled and
@@ -256,13 +259,22 @@ final class ShellPersonPages {
 
     /// A page opening, as its pane's task is named: who they are **and who asks**, so a page
     /// in front whose reader ends, begins or changes opens again by itself, and is asked.
+    /// `under` is the count of that host's sign-ins, for a reader no handle tells from the
+    /// one before.
     struct Opening: Hashable {
         let id: String
         let askedAs: AskedAs
+        var under = 0
     }
 
     static func opening(_ who: DummyPerson, in session: ShellSession) -> Opening {
-        Opening(id: who.id, askedAs: askedAs(at: who.host, in: session))
+        Opening(id: who.id, askedAs: askedAs(at: who.host, in: session), under: signIns(at: who.host, in: session))
+    }
+
+    /// How often the sign-in held at `host` has become another, as the session last looked:
+    /// read to draw, and to nothing else.
+    private static func signIns(at host: String, in session: ShellSession) -> Int {
+        session.mastodon.changes[host, default: 0]
     }
 
     /// Every page of `host` let go, and its ask called off: its reader is no longer who they
@@ -302,10 +314,9 @@ final class ShellPersonPages {
     /// signed in to it, or it has not yet said who the reader is there. **By the handle the
     /// source gave them**, so it is the very page a row of their own opens.
     ///
-    /// **A sign-in that only reads has no such page, and no entry to one.** Who the reader is at
-    /// a source is learnt only for a sign-in that may write (`MastodonSessions.signedIn`), so a
-    /// reading one has no handle here to open a page by. Offering it means learning who every
-    /// sign-in is, which is the sign-in's own unit to do.
+    /// **Every sign-in has one, a sign-in that only reads included**: who the reader is at a
+    /// source is what the sign-in's own check said (`MastodonSessions.handles`). None where
+    /// the source gave the account no handle of its own there.
     static func own(at host: String, in session: ShellSession) -> DummyPerson? {
         guard session.mastodon.signedInHosts.contains(host), let handle = session.mastodon.handles[host],
               let me = DummyPerson(handle: handle, host: host), source(of: me, in: session) != nil
@@ -321,7 +332,10 @@ final class ShellPersonPages {
     /// The page of `who` as it stands **for whoever would ask now**, or nothing: none was
     /// opened, or it was asked as somebody else.
     private func standing(of who: DummyPerson, at source: Source, in session: ShellSession) -> Page? {
-        pages[who.id].flatMap { $0.askedAs.isTheSame(as: Self.askedAs(at: source.host, in: session)) ? $0 : nil }
+        pages[who.id].flatMap { page in
+            page.under == Self.signIns(at: source.host, in: session)
+                && page.askedAs.isTheSame(as: Self.askedAs(at: source.host, in: session)) ? page : nil
+        }
     }
 
     /// What the page of `who` is handed, or nothing where their source is not asked who people
@@ -472,6 +486,8 @@ final class ShellPersonPages {
             built[id] = nil
         }
         named(id, as: askedAs)
+        // Asked through the sign-in the press has just looked at: the count is where it stands.
+        pages[id]?.under = Self.signIns(at: source.host, in: session)
         keep(id)
         let errand = errands.next()
         pages[id]?.awaits = errand

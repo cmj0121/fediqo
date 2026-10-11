@@ -237,12 +237,15 @@ public struct MastodonOAuth: Sendable {
     /// **Not a token shown to be handed back** (`handedBack`): it was made by an earlier
     /// sign-in, here or on another device, and is not this one's to end.
     ///
-    /// **`accountID` is whose sign-in the check said it is**, off the answer the check
-    /// already asks for; nothing where the check failed or named nobody.
+    /// **`accountID` and `handle` are whose sign-in the check said it is**, off the answer
+    /// the check already asks for — so a sign-in is named with no ask of its own, whatever it
+    /// may do. Nothing where the check failed or named nobody (`MastodonWho.said`).
     public func signIn(
         as app: MastodonApp, asking page: String? = nil, through browser: any OAuthBrowser,
         pending: (@Sendable (MastodonToken) async throws -> Void)? = nil
-    ) async throws -> (token: MastodonToken, failed: MastodonSignInError?, accountID: String?, handedBack: Bool) {
+    ) async throws -> (
+        token: MastodonToken, failed: MastodonSignInError?, accountID: String?, handle: String?, handedBack: Bool
+    ) {
         if let page, !MastodonRegistration.holds(page, on: app.scopes) {
             throw MastodonSignInError.unreadable
         }
@@ -284,12 +287,13 @@ public struct MastodonOAuth: Sendable {
         do {
             if !handedBack { try await pending?(token) }
         } catch {
-            return (token, .keychain, nil, handedBack)
+            return (token, .keychain, nil, nil, handedBack)
         }
         do {
-            return (token, nil, try await verify(token), handedBack)
+            let who = try await verify(token)
+            return (token, nil, who.id, who.handle, handedBack)
         } catch {
-            return (token, error as? MastodonSignInError ?? .unreachable, nil, handedBack)
+            return (token, error as? MastodonSignInError ?? .unreachable, nil, nil, handedBack)
         }
     }
 
@@ -457,12 +461,10 @@ public struct MastodonOAuth: Sendable {
         return (answer.access_token, answer.scope, handedBack)
     }
 
-    /// Checks that the source honours `token`, and hands back the id it gives the account
-    /// the token signs in — nothing where its answer names none, or names one longer than
-    /// an id may run (`clientBytes`).
+    /// Checks that the source honours `token`, and hands back who its answer says the token
+    /// signs in (`MastodonWho.said`): nobody, where it names none.
     @discardableResult
-    func verify(_ token: MastodonToken) async throws -> String? {
-        struct Me: Decodable { let id: String? }
+    func verify(_ token: MastodonToken) async throws -> MastodonWho {
         guard let url = Host.httpsURL(host: host, path: "/api/v1/accounts/verify_credentials")
         else { throw MastodonSignInError.unreadable }
         var request = URLRequest(url: url)
@@ -471,10 +473,7 @@ public struct MastodonOAuth: Sendable {
         guard (200..<300).contains(response.statusCode) else {
             throw MastodonSignInError.http(response.statusCode)
         }
-        guard let id = (try? JSONDecoder().decode(Me.self, from: body))?.id,
-              !id.isEmpty, id.utf8.count <= Self.clientBytes
-        else { return nil }
-        return id
+        return MastodonWho.said(body, at: host)
     }
 
     /// Asks the server to end a sign-in, and says what it answered. Best effort: signing out
@@ -754,18 +753,19 @@ public struct MastodonAuthorized: Sendable {
     /// (`MastodonToken.accountID` and `handle`, in the sign-in's Keychain item) — never apart
     /// from one, which would be this device deciding whose posts are whose.
     public func handle() async throws -> String {
-        try await who().handle
+        guard let handle = try await who().handle else { throw MastodonWriteError.unreadable }
+        return handle
     }
 
-    /// `handle()`, and beside it the id this source gives the account, where it says one: what
-    /// names the account whatever it is renamed to, and what its own posts are read by.
-    public func who() async throws -> (id: String?, handle: String) {
-        struct Me: Decodable { let id: String?; let acct: String }
+    /// Who the reader is on this source, as its account check says through this sign-in
+    /// (`MastodonWho.said`): the id it gives the account, which names it whatever it is
+    /// renamed to, and a handle only where it is this source's own.
+    public func who() async throws -> MastodonWho {
         let data = try await get(path: Self.accountCheck)
-        guard let me = try? MastodonJSON.decoder.decode(Me.self, from: data) else {
+        guard (try? JSONSerialization.jsonObject(with: data)) is [String: Any] else {
             throw MastodonWriteError.unreadable
         }
-        return (me.id, StatusDTO.handle(me.acct, host: token.host))
+        return MastodonWho.said(data, at: token.host)
     }
 
     /// A DELETE through the same door (#109): taking back what the reader wrote.

@@ -89,7 +89,7 @@ public enum PersonAddress: Hashable, Sendable {
     /// Whether `name` is spelled as a person's name at a server is: letters, digits, and the
     /// three marks a name may carry. Anything else — a slash, a colon — is part of some other
     /// address, and makes this none.
-    private static func isName(_ name: String) -> Bool {
+    static func isName(_ name: String) -> Bool {
         !name.isEmpty && name.unicodeScalars.allSatisfy {
             $0.properties.isAlphabetic || $0.properties.numericType != nil || $0 == "_" || $0 == "." || $0 == "-"
         }

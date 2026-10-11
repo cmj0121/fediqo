@@ -207,9 +207,10 @@ struct MastodonSignInTests {
         let page = Page()
         await session.signIn(host: host, through: page)
         #expect(page.opened == 1)
-        // What it was given, and what it asked for (#285), written down beside it.
-        #expect(try tokens.token(host: host)
-            == token(host, scopes: MastodonOAuth.reading).recorded(asked: MastodonOAuth.reading))
+        // What it was given, and what it asked for (#285), written down beside it — and whose
+        // it is, as its own check said (#347).
+        let kept = token(host, scopes: MastodonOAuth.reading).recorded(asked: MastodonOAuth.reading)
+        #expect(try tokens.token(host: host) == kept.named(accountID: "1", handle: nil))
         #expect(session.isSignedIn(host: host))
         #expect(session.mastodon.signedInHosts == [host])
         #expect(await server.paths == [
