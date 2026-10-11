@@ -41,6 +41,10 @@ enum ShellStep: Hashable, Sendable {
     /// timeline that reads what is rising. A hashtag's row opens that hashtag's page, and
     /// leaving it gives the row back: both are the walk's own.
     case rising(RisingWhich)
+    /// All the hashtags one source found for a search's words (#319), opened from the press
+    /// under its band. A hashtag's row opens that hashtag's page, and leaving it gives the row
+    /// back: both are the walk's own.
+    case foundTags(FoundTags)
 }
 
 /// How far the reader has walked from the stream, and what each step is owed when it is left.

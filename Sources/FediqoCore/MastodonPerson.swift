@@ -113,7 +113,7 @@ public struct MastodonPerson: Sendable {
     }
 
     /// How long a handle may be to be asked for: a name and a host's name, with room to spare.
-    static let handleLength = 320
+    public static let handleLength = 320
 
     /// What a handle is asked for as: the name alone where it names `host`, `name@theirs`
     /// otherwise. Nothing — and so nothing asked — for a handle with no name, with more than a

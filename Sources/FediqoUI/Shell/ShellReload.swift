@@ -30,6 +30,9 @@ import SwiftUI
 // in front that can be searched for posts matching its words. What they send is held as items
 // (#296) — through no category, standing in All from then on — and the search, which reads the
 // store and nothing else, renews as it lands. A new search ends the last one's ask; closing the search ends it too.
+// The same answer carries the people and the hashtags a source found (#319): they are handed to
+// whoever keeps them (`ShellSearchFound`) as each source answers, under the number that keeper
+// gave this Return — and whatever ends the search's ask here ends the wait for them there.
 //
 // **The fifth is a hashtag's** (#124): a tag pressed asks the sources of the timeline in front that
 // keep tags — a Mastodon, a Discourse with tagging on (#197) — for their posts under it, held
@@ -285,11 +288,18 @@ final class ShellReload {
     /// once and what a source finds joins it (#176). Ends the last search's ask first: the reader
     /// has moved on from it. Nothing asked where the pattern has no words or no source can be
     /// searched, and the reach still says which were not asked.
-    func search(_ pattern: String, timeline query: TimelineQuery, in session: ShellSession) async {
+    ///
+    /// **`keeper` is handed the people and the hashtags each source's answer carries** (#319),
+    /// by this same ask and no other. It is told as the ask goes out, and told when the ask
+    /// ends; what a source answers after that it is not handed.
+    func search(
+        _ pattern: String, timeline query: TimelineQuery, found keeper: ShellSearchFound? = nil, in session: ShellSession
+    ) async {
         // The same search still on its way — a Return that waited for the index, lighting its
         // first result — is let run rather than asked again.
         if asking.contains(.search), searchedFor == SearchedFor(pattern: pattern, query: query) { return }
         endSearch()
+        searchFound = keeper
         searchedFor = SearchedFor(pattern: pattern, query: query)
         guard let words = MastodonSearch.words(of: pattern) else { return }
         let asks = CompiledTimeline(query.definition(among: session.written), sources: session.sources)
@@ -297,11 +307,17 @@ final class ShellReload {
         let reach = SearchReach.of(asks, in: session)
         self.reach = reach
         guard !reach.asked.isEmpty else { return }
+        // Taken before anything waits: the number this Return's answers land under, and who asks.
+        let sent = keeper?.sending(words, to: reach.asked, in: session)
         await run(.search) {
             var came: [String: Found] = [:]
             await withTaskGroup(of: (String, Found).self) { group in
                 for host in reach.asked {
-                    group.addTask { (host, await self.onSource(host) { await self.found(words, on: host, in: session) }) }
+                    group.addTask {
+                        (host, await self.onSource(host) {
+                            await self.found(words, on: host, handing: keeper, sent: sent, in: session)
+                        })
+                    }
                 }
                 for await (host, answer) in group {
                     came[host] = answer
@@ -331,7 +347,7 @@ final class ShellReload {
             endSearch()
             return
         }
-        await search(last.pattern, timeline: query, in: session)
+        await search(last.pattern, timeline: query, found: searchFound, in: session)
     }
 
     /// The sources the last search asked whose token may not search — issued before `read:search`
@@ -346,6 +362,9 @@ final class ShellReload {
 
     /// What the search on its way was sent for.
     @ObservationIgnored private var searchedFor: SearchedFor?
+    /// Who keeps the people and the hashtags the last search's answers carried (#319): told
+    /// when that search's ask ends, however it ends.
+    @ObservationIgnored private weak var searchFound: ShellSearchFound?
 
     private struct SearchedFor: Equatable {
         let pattern: String
@@ -510,29 +529,39 @@ final class ShellReload {
     /// The search closed, or another sent: its ask ends where it is, and what it said goes.
     func endSearch() {
         end(.search)
+        searchFound?.ended()
         failures[.search] = nil
         searchRefused = []
         reach = nil
     }
 
     /// One source searched for `words`, what it found held, each an item. Whether it answered.
-    private func found(_ words: String, on host: String, in session: ShellSession) async -> Found {
+    ///
+    /// **One ask**: the posts are held as they always were, and the people and the hashtags
+    /// the same answer carries are handed to `keeper` first — which takes them only where
+    /// `sent` is still the Return it awaits.
+    private func found(
+        _ words: String, on host: String, handing keeper: ShellSearchFound?, sent: ShellSearchFound.Sent?,
+        in session: ShellSession
+    ) async -> Found {
         guard let source = session.sources.first(where: { $0.host == host }),
               let door = session.mastodon.authorized(host: host, within: deadline, for: .search)
         else { return .missed }
         let stamp = Source(host: host, kind: source.kind)
         do {
             let search = session.reach.search(door)
-            let notes = try await asReader(host) {
-                try await search.statuses(matching: words, source: stamp)
+            let finds = try await asReader(host) {
+                try await search.everything(matching: words, source: stamp)
             }
             try Task.checkCancellation()
-            await session.store.ingest(notes, ifSourceHere: host)
+            if let sent { keeper?.landed(finds, at: host, of: sent, in: session) }
+            await session.store.ingest(finds.posts, ifSourceHere: host)
             return .answered
         } catch MastodonAuthError.signedOut {
             session.mastodon.endedByServer(host: host)
             return .missed
-        } catch MastodonAuthError.http(403) {
+        } catch MastodonScopeError.outside {
+            if let sent { keeper?.refused(at: host, of: sent, in: session) }
             return .refused
         } catch {
             return Cancellation.happened(error) ? .answered : .missed

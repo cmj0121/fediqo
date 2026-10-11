@@ -67,7 +67,7 @@ struct PeopleSaid: Equatable {
     static func title(_ list: PeopleList, language: DummyLanguage? = nil) -> String {
         String(
             format: L10n.t("people.title.\(list.which.rawValue)", language: language),
-            list.isDirectory ? list.host : list.lineHandle
+            list.readByCount ? list.host : list.lineHandle
         )
     }
 
@@ -104,7 +104,9 @@ struct PeopleSaid: Equatable {
 
     /// What the source counts in the list, where it said: its figure, said as its figure.
     static func counts(_ list: PeopleList, language: DummyLanguage? = nil) -> String? {
-        list.counted.map {
+        // The people a search found are counted by nobody: the line says what was asked.
+        if list.which == .found { return String(format: L10n.t("search.found.line", language: language), list.lineWords) }
+        return list.counted.map {
             String(format: L10n.t("people.counts", language: language), list.host, L10n.grouped($0, language: language))
         }
     }
@@ -112,7 +114,7 @@ struct PeopleSaid: Equatable {
     /// What is said above the rows: that the list is being asked for, that it could not be —
     /// or, once the source has given it, what asking again came to.
     func stateLine(language: DummyLanguage? = nil) -> String? {
-        let asked = list.isDirectory ? "people.directory" : "people"
+        let asked = list.isDirectory ? "people.directory" : list.which == .found ? "people.found" : "people"
         return switch reading {
         case .asking: String(format: L10n.t("\(asked).asking", language: language), source)
         case .failed: String(format: L10n.t("\(asked).failed", language: language), source)
@@ -154,7 +156,7 @@ struct PeopleSaid: Equatable {
         case .stopped: return String(format: L10n.t("people.foot.stopped", language: language), source)
         case .farthest:
             return String(
-                format: L10n.t("people.directory.foot.farthest", language: language),
+                format: L10n.t(list.which == .found ? "people.found.foot.farthest" : "people.directory.foot.farthest", language: language),
                 L10n.grouped(people.count, language: language), source
             )
         case .end:
@@ -185,6 +187,9 @@ struct PeopleSaid: Equatable {
         // which answers that its address is not there.
         if let sorting {
             return String(format: L10n.t(sorting.localOnly ? "people.directory.none.local" : "people.directory.none", language: language), source)
+        }
+        if list.which == .found {
+            return String(format: L10n.t("people.found.none", language: language), source)
         }
         if list.hidden, !own {
             return String(format: L10n.t("people.hidden", language: language), list.lineHandle)

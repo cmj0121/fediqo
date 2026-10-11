@@ -83,6 +83,11 @@ struct TimelinePane: View {
     /// A row of such a page opened, answered by the root: a hashtag's page, or a link through
     /// the door a post's link goes through.
     var onOpenRisingRow: (RisingRow) -> Void = { _ in }
+    /// A row of what a search found at a source opened (#319), answered by the root: somebody's
+    /// page, a hashtag's, or the page of all of one kind.
+    var onOpenFound: (SearchFoundRow) -> Void = { _ in }
+    /// The press about looking somebody up through a source, answered by the root.
+    var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
     /// again. Per host and not one counter for the pane: see `waitForCatalogues`.
     @State private var settledHosts: Set<String> = []
@@ -109,6 +114,13 @@ struct TimelinePane: View {
     /// A search is open over this timeline. `search` is never nil in the product — the root holds
     /// one for the life of the window — so whether one is open is this, and not `search == nil`.
     private var searching: Bool { search?.isOpen == true }
+
+    /// The people and the hashtags the sources found for the search's words (#319): drawn over
+    /// its posts, and none with no search open.
+    private var foundBands: [SearchBands] {
+        guard searching, let search, search.isSearching, let people else { return [] }
+        return people.found.said(for: search.pattern, in: session)
+    }
 
     private var items: [DummyItem] {
         search.flatMap { session.searched($0, latest: prefs.latestDate) }
@@ -171,6 +183,8 @@ struct TimelinePane: View {
                     // anybody else, and then this is the page it always was.
                     said: people?.said(of: person, in: session),
                     onAskAgain: { Task { await people?.again(person, in: session) } },
+                    lookUp: people.flatMap { $0.found.line(of: person, said: $0.said(of: person, in: session), in: session) },
+                    onLookUp: onLookUp,
                     onReadOn: { Task { await people?.readOn(person, in: session) } },
                     // Where they moved to is somebody this same source names: their page is
                     // asked of it by that name, and "not heard of" is a state of that page.
@@ -253,6 +267,14 @@ struct TimelinePane: View {
                     // **The ask is the page opening**, once a run for each source: one stretch
                     // of what is rising there, of that source and nobody else.
                     .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
+                } else {
+                    underneath
+                }
+            case .foundTags(let page):
+                // An answer no longer held — another Return, the search closed — draws the stream.
+                if let said = people?.found.said(of: page, in: session) {
+                    FoundTagsPane(said: said, selectedID: $selectedID, onOpen: onOpenFound, jumpToTop: jumpToTop, onBack: onBack)
+                        .id(page.id)
                 } else {
                     underneath
                 }
@@ -543,7 +565,7 @@ struct TimelinePane: View {
     /// opened over it, or a page read out of a post, which is somebody's own.
     static func page(_ standing: ShellStep?) -> TimelineSwipe.Page {
         switch standing {
-        case .person, .tag, .people, .rising, .thread: .opened
+        case .person, .tag, .people, .rising, .foundTags, .thread: .opened
         case .link: .link
         case nil: .timeline
         }
@@ -557,6 +579,7 @@ struct TimelinePane: View {
         case .tag(let tag): "tag:" + String(describing: tag)
         case .people(let list): "people:" + list.id
         case .rising(let which): "rising:" + which.rawValue
+        case .foundTags(let page): "found:" + page.id
         case .link, nil: nil
         }
     }
@@ -598,14 +621,16 @@ struct TimelinePane: View {
         // Bound once: the list, each row's rule under it and the jump to the top all read the
         // same rows, and each read of `items` used to ask the session for them again.
         let items = items
-        if items.isEmpty {
+        let bands = foundBands
+        // With no post found, what the sources found still stands, over the line that says so.
+        if items.isEmpty, bands.isEmpty {
             empty
         } else {
-            list(items)
+            list(items, under: bands)
         }
     }
 
-    private func list(_ items: [DummyItem]) -> some View {
+    private func list(_ items: [DummyItem], under bands: [SearchBands] = []) -> some View {
         let last = items.count - 1
         // Where the timeline in front is not whole, said at its place (#201). A search's results
         // are not a timeline, and say nothing of the kind.
@@ -613,6 +638,19 @@ struct TimelinePane: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    // What the sources found beside posts (#319): short bands over the posts,
+                    // which begin under them exactly as they always did.
+                    if !bands.isEmpty {
+                        SearchBandsView(
+                            bands: bands, timeline: session.name(of: timeline), selectedID: $selectedID, onOpen: onOpenFound
+                        )
+                        if items.isEmpty {
+                            Text(String(format: L10n.t("search.empty.title"), session.name(of: timeline)))
+                                .shellFont(.meta)
+                                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                                .padding(ShellSpace.pad)
+                        }
+                    }
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         let isLast = index == last
                         // **One view a post, the rule under it included** (#303). The list

@@ -61,6 +61,10 @@ struct PersonPane: View {
     var said: PersonSaid?
     /// "Try again", where the source could not be asked who they are.
     var onAskAgain: () -> Void = {}
+    /// Where their source has not heard of them and they live elsewhere (#319): the press that
+    /// asks that source to look them up, where the asking stands, or why there is none.
+    var lookUp: SearchLookUpLine?
+    var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     /// The foot's press: the stretch of their posts older than what is drawn.
     var onReadOn: () -> Void = {}
     /// The press beside "They moved to …": the page of the account the source says they went
@@ -248,6 +252,12 @@ struct PersonPane: View {
                     Color.clear.frame(height: 0).id(Self.head).accessibilityHidden(true)
                     if let line = said.stateLine(of: person.handle ?? person.name) {
                         stateLine(line, said: said)
+                        ShellRule()
+                    }
+                    if let lookUp {
+                        SearchLookUpView(line: lookUp, onPress: onLookUp)
+                            .padding(.horizontal, ShellSpace.pad)
+                            .padding(.vertical, ShellSpace.snug)
                         ShellRule()
                     }
                     if let subject = said.person {

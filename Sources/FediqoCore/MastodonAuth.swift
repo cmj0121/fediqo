@@ -56,6 +56,31 @@ public enum MastodonAuthError: Error, Equatable, Sendable {
     case http(Int)
 }
 
+/// A request made with a token, refused for want of a scope the token was not issued with.
+public enum MastodonScopeError: Error, Equatable, Sendable {
+    case outside
+}
+
+/// A refusal for want of a scope, told from every other 403 by what the server said (#319) —
+/// asked of a real one (`MastodonSearchCaptures`): a suspended login and a proxy's own rule
+/// are 403 too, and neither is mended by signing in again for more.
+public enum MastodonScopeRefusal {
+    /// The server's sentence, as a Mastodon writes it in English.
+    static let sentence = "this action is outside the authorized scopes"
+    /// How much of an answer is looked at: the sentence is short, and a page is not read.
+    static let bodyLength = 4_096
+
+    /// Whether an answer refuses for want of a scope: a 403 whose `WWW-Authenticate` names the
+    /// error RFC 6750 has for it, or whose body is the server's own sentence for it. The
+    /// header is looked at first, since the sentence is written in the reader's language.
+    public static func isOne(status: Int, body: Data, authenticate: String?) -> Bool {
+        guard status == 403 else { return false }
+        if authenticate?.contains("insufficient_scope") == true { return true }
+        guard body.count <= bodyLength, let said = try? JSONSerialization.jsonObject(with: body) else { return false }
+        return ((said as? [String: Any])?["error"] as? String)?.lowercased() == sentence
+    }
+}
+
 /// A PKCE pair (RFC 7636): a random verifier and its S256 challenge.
 struct PKCE: Equatable {
     let verifier: String
@@ -206,6 +231,14 @@ public struct MastodonOAuth: Sendable {
     public static func dismisses(_ scopes: String?) -> Bool {
         guard let scopes else { return false }
         return scopes.split(separator: " ").contains(Substring(dismissing))
+    }
+
+    /// Whether a scope string bought searching (#319): `read:search` itself, or the whole of
+    /// reading, which holds it — as the server names the two when it refuses for want of them.
+    public static func searches(_ scopes: String?) -> Bool {
+        guard let scopes else { return false }
+        let granted = scopes.split(separator: " ")
+        return granted.contains("read:search") || granted.contains("read")
     }
 
     /// Whether a scope string bought bookmarking — read scope by scope, as `writes(_:)` is.
@@ -517,6 +550,17 @@ public struct MastodonAuthorized: Sendable {
         return try await finish(result, path: path)
     }
 
+    /// As `get`, with a refusal for want of a scope told from every other 403 (#319): throws
+    /// `MastodonScopeError.outside` where the server says the token was not issued with what
+    /// the ask needs (`MastodonScopeRefusal`), and what `get` throws for any other refusal.
+    public func getInScope(path: String, query: [URLQueryItem] = []) async throws -> Data {
+        let result = try await send(path: path, query: query)
+        if MastodonScopeRefusal.isOne(status: result.status, body: result.body, authenticate: result.authenticate) {
+            throw MastodonScopeError.outside
+        }
+        return try await finish(result, path: path)
+    }
+
     public func post(path: String, form: [(String, String)]) async throws -> Data {
         try await post(path: path, form: form, headers: [:])
     }
@@ -554,12 +598,13 @@ public struct MastodonAuthorized: Sendable {
         try await finish(try await send(path: path, method: "DELETE"), path: path)
     }
 
-    /// What one request was answered: its body, its status, and its `Link` header where it
-    /// sent one.
+    /// What one request was answered: its body, its status, and its `Link` and
+    /// `WWW-Authenticate` headers where it sent them.
     private struct Answered {
         let body: Data
         let status: Int
         let link: String?
+        let authenticate: String?
     }
 
     private func finish(_ result: Answered, path: String) async throws -> Data {
@@ -597,6 +642,9 @@ public struct MastodonAuthorized: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let form { request.setForm(form) }
         let (body, response) = try await sender.send(request)
-        return Answered(body: body, status: response.statusCode, link: response.value(forHTTPHeaderField: "Link"))
+        return Answered(
+            body: body, status: response.statusCode, link: response.value(forHTTPHeaderField: "Link"),
+            authenticate: response.value(forHTTPHeaderField: "WWW-Authenticate")
+        )
     }
 }

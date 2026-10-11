@@ -95,7 +95,8 @@ struct SearchSourcesTests {
         #expect(await server.asked == [Self.one], "only the source that can be searched")
         let query = try #require(await server.queries.first)
         #expect(query.contains(URLQueryItem(name: "q", value: "cats")))
-        #expect(query.contains(URLQueryItem(name: "type", value: "statuses")))
+        #expect(!query.contains { $0.name == "type" }, "one ask, of no kind alone: its answer carries what else the source found")
+        #expect(query.contains(URLQueryItem(name: "resolve", value: "false")))
 
         #expect(found(search, in: session) == [Self.local.key.rowID, Self.foundKey.rowID])
         #expect(await session.store.note(Self.foundKey)?.categories.isEmpty == true, "the store's answer, through no category")
@@ -421,7 +422,7 @@ struct SearchSourcesTests {
 }
 
 /// A signed-in door answering `/api/v2/search` per host, remembering who was asked and with what.
-/// `failing` hosts answer 500, `refusing` ones 403; `holding` parks every search until the gate opens.
+/// `failing` hosts answer 500, `refusing` ones the 403 of a sign-in made without search; `holding` parks every search until the gate opens.
 private actor Searchable: HTTPSender {
     private let bodies: [String: String]
     private let failing: Set<String>
@@ -448,6 +449,8 @@ private actor Searchable: HTTPSender {
         queries.append(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
         if holding { await gate.wait() }
         let status = refusing.contains(host) ? 403 : failing.contains(host) ? 500 : 200
-        return (Data(body.utf8), HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!)
+        // A refusal for want of search, as a real server words it.
+        let said = refusing.contains(host) ? #"{"error":"This action is outside the authorized scopes"}"# : body
+        return (Data(said.utf8), HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!)
     }
 }

@@ -747,7 +747,8 @@ public struct FediqoRootView: View {
         // most one of them, and `DummyCommand.canWalk` asks about the pair rather than either.
         case .person: walk.openedPerson != nil
         case .people: walk.openedPeople != nil
-        case .rising: walk.openedRising != nil
+        // The page of the hashtags a search found is a page of hashtags too (#319).
+        case .rising: walk.openedRising != nil || walk.openedFoundTags != nil
         case .tag: walk.openedTag != nil
         case .thread: walk.openedThread != nil
         case .link: walk.openedLink != nil
@@ -1021,6 +1022,9 @@ public struct FediqoRootView: View {
         guard place == .timeline,
               let next = Self.moved(
                   in: currentListIDs, from: selectedItemID, by: step, open: openLayers, entry: currentListEntry
+              ) ?? ShellSearchFound.firstLit(
+                  foundRowIDs, firstPost: streamItems.first?.id, selected: selectedItemID,
+                  fieldFocused: search.fieldFocused, open: openLayers
               )
         else { return false }
         selectedItemID = next
@@ -1085,16 +1089,18 @@ public struct FediqoRootView: View {
         } else {
             search.open(from: selectedItemID, over: session.notes)
             selectedItemID = nil
+            people.found.opened(in: session)
         }
         return true
     }
 
     /// The timeline back as it was, with the post that was selected before the search. Its ask
-    /// of the sources ends with it (#176).
+    /// of the sources ends with it (#176), and so does what they found beside posts (#319).
     private func closeSearch() {
         clearWalk()
         selectedItemID = search.close()
         session.reload.endSearch()
+        people.found.closed()
     }
 
     /// Return in the field: the first result lit, and the pattern asked of the sources of the
@@ -1104,12 +1110,14 @@ public struct FediqoRootView: View {
         selectedItemID = streamItems.first?.id
         let pattern = search.pattern
         let timeline = session.currentTimeline
-        Task { await session.reload.search(pattern, timeline: timeline, in: session) }
+        let found = people.found
+        Task { await session.reload.search(pattern, timeline: timeline, found: found, in: session) }
     }
 
     /// The field emptied: the timeline is back, so the post selected before the search is too.
     private func searchCleared() {
         session.reload.endSearch()
+        people.found.closed()
         search.cleared { selection in
             clearWalk()
             selectedItemID = selection
@@ -1137,6 +1145,9 @@ public struct FediqoRootView: View {
         // Nor has a page of what is rising: its rows are hashtags and links.
         case .rising:
             return []
+        // Nor has the page of the hashtags a search found.
+        case .foundTags:
+            return []
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems }
             return session.conversations.conversation(around: item).inOrder
@@ -1152,17 +1163,28 @@ public struct FediqoRootView: View {
     private var currentListIDs: [String]? {
         // On a list of people the rows are the people the source gave, as the page draws them;
         // on somebody's page the figures that open such a list stand over their posts (#311).
-        let ids = walk.openedPeople.map { people.lists.walked($0, in: session) }
-            ?? walk.openedRising.map { people.rising.walked($0, in: session) }
-            ?? walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }
-            ?? currentListItems.map(\.id)
+        let listed = walk.openedPeople.map { people.lists.walked($0, in: session) }
+        let rising = walk.openedRising.map { people.rising.walked($0, in: session) }
+        let foundTags = walk.openedFoundTags.map { people.found.walked($0, in: session) }
+        let person = walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }
+        let opened = listed ?? rising ?? foundTags ?? person
+        // Over a search's posts stand the rows of what the sources found (#319).
+        let ids = opened ?? (foundRowIDs + currentListItems.map(\.id))
         return ids.isEmpty ? nil : ids
     }
 
+    /// The rows of what the sources found for the search in front, where its results are what
+    /// the reader is looking at: none with no search, and none on a page opened over it.
+    private var foundRowIDs: [String] {
+        walk.isEmpty && search.isSearching ? people.found.walked(for: search.pattern, in: session) : []
+    }
+
     /// Where the lamp lands when `j` first brings it onto somebody's page: their first post,
-    /// under the figures (`ShellPersonPages.entry`). Nothing anywhere else.
+    /// under the figures (`ShellPersonPages.entry`) — and among a search's results the first
+    /// post, under what the sources found. Nothing anywhere else.
     private var currentListEntry: String? {
         walk.openedPerson.flatMap { people.entry(of: $0, in: session) }
+            ?? (foundRowIDs.isEmpty ? nil : streamItems.first?.id)
     }
 
     private func jumpListOrThreadToTop() -> Bool {
@@ -1192,7 +1214,7 @@ public struct FediqoRootView: View {
         // A page read out of a post is somebody else's page, and its top is its own business.
         case .link:
             return false
-        case .person, .tag, .people, .rising, .thread, nil:
+        case .person, .tag, .people, .rising, .foundTags, .thread, nil:
             guard let first = rows?.first else { return false }
             selected = first
         }
@@ -1433,6 +1455,15 @@ public struct FediqoRootView: View {
         if let which = walk.openedRising {
             guard let row = people.rising.row(id, of: which, in: session) else { return false }
             return openRisingRow(row)
+        }
+        // Over a search's posts, and on the page of the hashtags it found, the row the lamp is
+        // on may be what a source found (#319): Return opens it.
+        if let page = walk.openedFoundTags {
+            guard let row = people.found.row(id, of: page, in: session) else { return false }
+            return openFound(row)
+        }
+        if walk.isEmpty, search.isSearching, let row = people.found.row(id, for: search.pattern, in: session) {
+            return openFound(row)
         }
         // On a list of people the row the lamp is on is somebody (#311): Return opens them.
         if let list = walk.openedPeople {
@@ -1848,6 +1879,48 @@ public struct FediqoRootView: View {
         return opened
     }
 
+    // MARK: - What a search found at the sources — #319
+
+    /// A row of what a source found, opened. **The lamp and the step in one turn**, as every
+    /// row opens: somebody's page, a hashtag's page, the list of all the people found, or the
+    /// page of all the hashtags.
+    private func openFound(_ row: SearchFoundRow) -> Bool {
+        switch row {
+        case .person(let person):
+            return openListed(person)
+        case .tag(let tag, _):
+            guard Self.canWalk(place: place, open: openLayers) else { return false }
+            let before = selectedItemID
+            selectedItemID = row.id
+            let opened = openTag(tag.tag, from: row.id)
+            if !opened { selectedItemID = before }
+            return opened
+        case .allPeople(let list, _):
+            return openPeople(list)
+        case .allTags(let page, _):
+            guard Self.canWalk(place: place, open: openLayers), walk.walk(to: .foundTags(page), from: row.id) else { return false }
+            selectedItemID = row.id
+            return true
+        }
+    }
+
+    /// The press about looking somebody up through a source: the source asked, or the page of
+    /// whoever it found opened — asked again where that is the page already in front.
+    private func lookUpPressed(_ press: SearchLookUpLine.Press) {
+        switch press {
+        case .lookUp(let address, let host):
+            let found = people.found
+            Task { await found.lookUp(address, through: host, in: session) }
+        case .open(let person):
+            let who = DummyPerson(person)
+            if let standing = walk.openedPerson, ShellSearchFound.isThePage(standing, of: person) {
+                Task { await people.again(standing, in: session) }
+            } else {
+                _ = openPerson(who)
+            }
+        }
+    }
+
     /// "Your page there" on Account, and "Signed in as …" on a source's page: the signed-in
     /// reader's own page at that source — anybody's page, opened for their own account (#310).
     ///
@@ -2217,7 +2290,9 @@ public struct FediqoRootView: View {
                 onOpenListed: { _ = openListed($0) },
                 onOpenPeople: { _ = openPeople($0) },
                 onOpenRising: { _ = openRising($0) },
-                onOpenRisingRow: { _ = openRisingRow($0) }
+                onOpenRisingRow: { _ = openRisingRow($0) },
+                onOpenFound: { _ = openFound($0) },
+                onLookUp: lookUpPressed
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if search.isOpen {
@@ -2226,6 +2301,8 @@ public struct FediqoRootView: View {
                         timeline: session.name(of: session.currentTimeline),
                         found: search.isIndexed ? searchItems?.count : nil,
                         reach: session.reload.reach?.sentence,
+                        lookUp: people.found.line(typed: search.text, in: session),
+                        onLookUp: lookUpPressed,
                         onSubmit: searchSubmitted,
                         onCleared: searchCleared,
                         onClose: closeSearch

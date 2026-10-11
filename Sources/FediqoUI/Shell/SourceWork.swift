@@ -104,6 +104,10 @@ final class SourceWork {
         /// What the person set at a source for the posts they write there, read as them
         /// because they opened that source's page (#321). Nothing read under it is held.
         case ownSettings
+        /// One source asked to look somebody up by their address, because the person pressed
+        /// for that (#319): the one ask that lets a source reach a server on the person's word.
+        /// Listed under the source asked — where it goes from there is the source's own doing.
+        case lookUp
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -116,7 +120,7 @@ final class SourceWork {
         /// Everything else reaches wherever a post, a page or a directory points.
         var isOfTheSource: Bool {
             switch self {
-            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings: true
+            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings, .lookUp: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
                  .nearbyMove:

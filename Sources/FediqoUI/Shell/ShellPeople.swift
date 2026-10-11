@@ -51,6 +51,8 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case followers
         /// The people in the source's own directory (#315): nobody's list.
         case directory
+        /// The people the source found for a search's words (#319): nobody's list either.
+        case found
 
         /// The two lists that are somebody's, in the order their page counts them.
         static let ofSomebody: [Which] = [.following, .followers]
@@ -68,9 +70,16 @@ struct PeopleList: Hashable, Sendable, Identifiable {
     /// Whether the account says it hides its lists — the one thing that tells a hidden list
     /// from an empty one.
     let hidden: Bool
+    /// The words a source was asked to find people for, as they were sent: nothing on any
+    /// other list.
+    var words = ""
 
     /// The list itself: two openings of one list are one page, whatever was counted each time.
-    var id: String { "\(host)\u{1e}\(which.rawValue)\u{1e}\(accountID)" }
+    /// The people found for other words are another list.
+    var id: String { "\(host)\u{1e}\(which.rawValue)\u{1e}\(accountID)" + (which == .found ? "\u{1e}" + words : "") }
+
+    /// The words as a line of ours says them.
+    var lineWords: String { LineText.oneLine(words, limit: SearchBands.wordsShown) }
 
     var lineHandle: String { LineText.oneLine(handle) }
 
@@ -84,9 +93,21 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .following: counted = person.tally.following
         case .followers: counted = person.tally.followers
         // Not somebody's: a directory is made by `init(directoryAt:)`, and counts nobody.
-        case .directory: counted = nil
+        case .directory, .found: counted = nil
         }
         hidden = person.hidesLists
+    }
+
+    /// The people the source at `host` found for `words` (#319): of no account, counted by
+    /// nobody, and hidden by nobody.
+    init(foundAt host: String, words: String) {
+        which = .found
+        self.host = host
+        accountID = ""
+        handle = ""
+        counted = nil
+        hidden = false
+        self.words = words
     }
 
     /// The directory of the source at `host` (#315): of no account, counted by nobody, and
@@ -109,9 +130,13 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         switch which {
         case .following: .following(of: accountID)
         case .followers: .followers(of: accountID)
-        case .directory: nil
+        case .directory, .found: nil
         }
     }
+
+    /// Whether the list is read on by how many people were passed over, and so only as far
+    /// as such a list is read: a directory, and the people a search found.
+    var readByCount: Bool { which == .directory || which == .found }
 }
 
 /// How a source's directory is asked for: in which order, and whether only of the people who
@@ -396,7 +421,7 @@ final class ShellPeoplePages {
             pages[id]?.notPaging = false
             pages[id]?.absent = false
             pages[id]?.choice = choice
-            pages[id]?.farthest = list.isDirectory && first.next == nil && !first.people.isEmpty
+            pages[id]?.farthest = list.readByCount && first.next == nil && !first.people.isEmpty
         } catch {
             guard pages[id]?.awaits == errand else { return }
             if Self.saysNoSuchAddress(error) {
@@ -472,7 +497,7 @@ final class ShellPeoplePages {
             // Read first and written after: the two are not one access.
             let further = try held.readingOn(came)
             pages[id]?.read = further
-            pages[id]?.farthest = list.isDirectory && came.next == nil && !came.people.isEmpty
+            pages[id]?.farthest = list.readByCount && came.next == nil && !came.people.isEmpty
         } catch {
             guard pages[id]?.awaits == errand else { return }
             if error is PagingError {
@@ -497,6 +522,20 @@ final class ShellPeoplePages {
         in session: ShellSession
     ) -> Stretches {
         let length = Self.stretchLength
+        if list.which == .found {
+            // A search is answered only to somebody signed in: with no sign-in there is no way to it.
+            guard let held else { return { _ in throw MastodonAuthError.http(401) } }
+            let search = session.reach.search(session.mastodon.authorized(token: held, within: deadline, for: .search))
+            let words = list.words
+            return { next in
+                var passed = 0
+                if let next {
+                    guard let count = MastodonSearch.passed(next) else { throw PagingError.notPaging }
+                    passed = count
+                }
+                return try await search.people(matching: words, source: source, after: passed)
+            }
+        }
         guard let asked = list.asked else {
             let directory = reachingDirectory?(source)
                 ?? held.map { session.reach.directory(session.mastodon.authorized(token: $0, within: deadline, for: .people)) }

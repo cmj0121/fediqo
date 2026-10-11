@@ -16,6 +16,10 @@ struct SearchBar: View {
     var found: Int?
     /// Which sources the last Return asked, and which it could not (#176), or nothing before one.
     var reach: String? = nil
+    /// The line about looking what was typed up through a source (#319), where it is an
+    /// address of a person: the press, where the asking stands, or why there is none.
+    var lookUp: SearchLookUpLine? = nil
+    var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     /// Return: the keys go back to the list, on its first result. Called once the pattern has
     /// been settled to what the field says, so the first result is one for the whole pattern.
     var onSubmit: () -> Void
@@ -59,6 +63,13 @@ struct SearchBar: View {
             // corner — the narrow arrangement's compose button (#112). Nothing, elsewhere.
             .padding(.trailing, floatingCorner.width)
             .padding(.vertical, ShellSpace.snug)
+            // An address typed: the one press that asks a source to look it up, under the field.
+            if let lookUp {
+                SearchLookUpView(line: lookUp, onPress: onLookUp)
+                    .padding(.horizontal, ShellSpace.pad)
+                    .padding(.trailing, floatingCorner.width)
+                    .padding(.bottom, ShellSpace.snug)
+            }
             // Where the results came from, under the field it answers: this device, and the
             // sources named here. Wraps rather than truncates, since the names are the point.
             if let reach {

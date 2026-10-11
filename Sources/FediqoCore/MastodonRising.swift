@@ -109,18 +109,29 @@ public struct MastodonRising: Sendable {
     /// The hashtags rising, in the source's order. **Entry by entry**: one that is no hashtag
     /// is that one not listed. A hashtag given twice, however it is written, is listed once.
     public func tags() async throws -> [RisingTag] {
-        struct Wire: Decodable, Sendable {
-            let name: String
-            let history: StatusDTO.Lenient<[StatusDTO.Lenient<Day>]>?
-        }
         let body = try await get(Self.tagsPath)
-        guard let wire = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<Wire>].self, from: body) else {
+        guard let wire = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<TagSaid>].self, from: body) else {
             throw MastodonHostMoreError.unreadable
         }
+        return Self.listed(wire, most: Self.stretch)
+    }
+
+    /// One hashtag as a Mastodon sends it, wherever it lists hashtags: its name without the
+    /// mark, and how much it was used, a day at a time.
+    struct TagSaid: Decodable, Sendable {
+        let name: String
+        let history: StatusDTO.Lenient<[StatusDTO.Lenient<Day>]>?
+    }
+
+    /// The hashtags a source listed, in its order and `most` at most — **the one reader of a
+    /// list of hashtags**, for what is rising and for what a search found (#319). Entry by
+    /// entry: one that is no hashtag is that one not listed, and a hashtag given twice,
+    /// however it is written, is listed once.
+    static func listed(_ wire: [StatusDTO.Lenient<TagSaid>], most: Int) -> [RisingTag] {
         var seen: Set<String> = []
         var listed: [RisingTag] = []
-        for entry in wire.prefix(Self.stretch * 4) {
-            guard listed.count < Self.stretch, let said = entry.value, said.name.unicodeScalars.count <= Self.nameLength,
+        for entry in wire.prefix(most * 4) {
+            guard listed.count < most, let said = entry.value, said.name.unicodeScalars.count <= Self.nameLength,
                   let tag = PostTag("#" + said.name), seen.insert(Self.folded(tag)).inserted
             else { continue }
             listed.append(RisingTag(tag: tag, use: Day.use(said.history?.value)))

@@ -187,6 +187,8 @@ struct AccountDTO: Decodable, Sendable {
     let acct: String
     let username: Lenient<String>?
     let displayName: Lenient<String>?
+    /// The address of the page their own server keeps for them.
+    let url: Lenient<String>?
     let note: Lenient<String>?
     let avatar: Lenient<String>?
     let header: Lenient<String>?

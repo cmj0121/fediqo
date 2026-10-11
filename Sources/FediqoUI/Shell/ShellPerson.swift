@@ -223,6 +223,9 @@ final class ShellPersonPages {
     /// page (#321): asked the same way, numbered on the same count, and let go with the same
     /// reader.
     let you: ShellYouThere
+    /// The people and the hashtags a search found at the sources, and an address looked up
+    /// through one (#319): numbered on the same count, and let go with the same reader.
+    let found: ShellSearchFound
 
     init() {
         let count = PageErrands(), looks = PageReaders()
@@ -237,6 +240,9 @@ final class ShellPersonPages {
         self.rising = rising
         let you = ShellYouThere(errands: count, readers: looks)
         self.you = you
+        let found = ShellSearchFound(errands: count, readers: looks)
+        self.found = found
+        looks.whenChanged { [weak found] host in found?.letGo(at: host) }
         looks.whenChanged { [weak self] host in self?.letGo(at: host) }
         looks.whenChanged { [weak lists] host in lists?.letGo(at: host) }
         looks.whenChanged { [weak more] host in more?.letGo(at: host) }
