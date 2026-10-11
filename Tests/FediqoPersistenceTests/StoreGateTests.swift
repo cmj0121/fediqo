@@ -403,6 +403,52 @@ struct StoreGateTests {
         #expect(code.contains("saver = StoreSaver(\n            store: store, file: opened.file, protected: protected,\n            holding: opened.setAside == nil ? (opened.sources, opened.notes) : nil\n        )"))
     }
 
+    /// **Held to the source**, as the test above is. What signs the person in is in the
+    /// Keychain, which a locked device closes as it closes the store: the one object that reads
+    /// it and asks each source about it at launch (#347) is made by the run, and the run by the
+    /// gate. And the app's own view — with every question and page it may put in front — is
+    /// made of a run, so none of them is there while the launch waits.
+    @Test("Who is signed in is read, and asked of each source, by the run alone — which the gate makes; and nothing of the app is on the screen, to put anything in front, until there is a run")
+    func theAppsSignIns() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        var code = ""
+        for name in try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Apps/Shared").path).sorted()
+        where name.hasSuffix(".swift") {
+            let text = try String(contentsOf: root.appendingPathComponent("Apps/Shared/\(name)"), encoding: .utf8)
+            code += text.split(separator: "\n", omittingEmptySubsequences: false)
+                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
+        }
+        func count(_ needle: String) -> Int { code.components(separatedBy: needle).count - 1 }
+        let run = try #require(code.range(of: "private init(_ opened: StoreFile.Opened) {"))
+        // The Keychain's sign-ins are reached for inside the run's making, and nowhere before.
+        let keychain = try #require(code.range(of: "KeychainMastodonTokens("))
+        #expect(run.upperBound < keychain.lowerBound)
+        #expect(count("KeychainMastodonTokens(") == 2, "the run's sessions, and what takes its store away")
+        let sessions = try #require(code.range(of: "mastodon = MastodonSessions(tokens: KeychainMastodonTokens())"))
+        let asked = try #require(code.range(of: "Task { [mastodon] in await mastodon.verifyAll() }"))
+        #expect(run.upperBound < sessions.lowerBound)
+        #expect(sessions.upperBound < asked.lowerBound)
+        #expect(count(".verifyAll()") == 1)
+        // The other is a launch staged for a picture, which holds its sign-in in memory.
+        #expect(count("MastodonSessions(") == 2)
+        #expect(count("mastodon: MastodonSessions(tokens: tokens, sender: StagedHTTP())") == 1)
+        // The app's view is made of a run, in one place; the other is the staged one.
+        let waiting = try #require(code.range(of: "private struct Waiting: View {"))
+        let live = try #require(code.range(of: "private struct Live: View {\n    let launch: Launch"))
+        let view = try #require(code.range(of: "        FediqoRootView(\n            store: launch.store,"))
+        #expect(live.upperBound < view.lowerBound)
+        #expect(count("FediqoRootView(") == 2)
+        #expect(count("Live(launch:") == 1)
+        #expect(code.contains("if let launch {\n            Live(launch: launch)\n        } else {\n            Waiting { launch = $0 }\n        }"))
+        // And the launch ground puts nothing in front of itself.
+        #expect(waiting.upperBound < live.lowerBound)
+        let ground = String(code[waiting.upperBound..<live.lowerBound])
+        for presenter in [".sheet(", ".alert(", ".modifier(", ".confirmationDialog(", ".fullScreenCover(", ".popover(", "shellConfirm", "FediqoRootView"] {
+            #expect(!ground.contains(presenter), "the launch ground reaches for \(presenter)")
+        }
+    }
+
     // MARK: - The platform's signals
 
     @Test("Every event listened for wakes the wait, and all are subscribed to before the stream is handed over")

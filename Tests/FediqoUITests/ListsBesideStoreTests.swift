@@ -114,6 +114,84 @@ struct ListsBesideStoreTests {
         #expect(again.off == [.directory] && again.own == now.own)
     }
 
+    // MARK: - An entry a later build added
+
+    @Test("The entry for a person's own server is kept as the others are: on until it is switched off, written at the act to the file beside the store and under no key, and read back as it was left")
+    func personHomeKept() throws {
+        let place = try Place()
+        let work = SourceWork()
+        let first = book(place, work: work)
+        #expect(first.isOn(.personHome))
+        #expect(work.allowances.contains { $0.id == .personHome })
+        #expect(place.names.isEmpty, "the premise: nothing decided, nothing kept")
+        first.set(.personHome, on: false)
+        #expect(place.keys.isEmpty)
+        #expect(place.names == ["allowances.json"])
+        #expect(!work.allowances.contains { $0.id == .personHome })
+        let written = try #require(place.onDisk("allowances.json"))
+        #expect(String(decoding: written, as: UTF8.self).contains("\"personHome\""))
+
+        let later = SourceWork()
+        let again = book(place, work: later)
+        #expect(again.off == [.personHome])
+        #expect(!again.isOn(.personHome))
+        #expect(!later.allowances.contains { $0.id == .personHome })
+        again.set(.personHome, on: true)
+        #expect(place.keys.isEmpty)
+        let back = book(place)
+        #expect(back.off.isEmpty)
+        #expect(back.isOn(.personHome))
+    }
+
+    @Test("A file written before there was such an entry reads it as on, with what was decided then as it was; and one an earlier build kept under the key with it off is moved to the file with it off")
+    func personHomeInAnOlderFile() throws {
+        let place = try Place()
+        let older = Data(#"{"off":["directory"],"own":[{"host":"cdn.example","source":"forum.example"}]}"#.utf8)
+        #expect(place.lists.allowances.write(older))
+        let work = SourceWork()
+        let now = book(place, work: work)
+        #expect(!now.unread)
+        #expect(now.off == [.directory])
+        #expect(now.own.map(\.hosts[0].host) == ["cdn.example"])
+        #expect(now.isOn(.personHome))
+        let entry = try #require(work.allowances.first { $0.id == .personHome })
+        #expect(entry.when == .pressed)
+        // Reading it wrote nothing: the file is the older one still.
+        #expect(place.onDisk("allowances.json") == older)
+
+        let moved = try Place()
+        let earlier = AllowanceBook(defaults: moved.defaults, work: SourceWork())
+        earlier.set(.personHome, on: false)
+        #expect(moved.keys == [AllowanceBook.key], "the premise: as a build before the file left it")
+        #expect(moved.names.isEmpty)
+        let after = book(moved)
+        #expect(after.off == [.personHome])
+        #expect(moved.keys.isEmpty)
+        #expect(moved.names == ["allowances.json"])
+    }
+
+    @Test("While the list will not be read a press reaches no server nobody added: the one entry that would let it through is not known to be on; read again, a press is let through once more")
+    func personHomeNotRead() throws {
+        let home = "elsewhere.example"
+        let place = try Place()
+        book(place).set(.directory, on: false)
+        place.close(true)
+        let work = SourceWork()
+        let unread = book(place, work: work)
+        #expect(unread.unread)
+        #expect(!unread.isOn(.personHome))
+        let refused = work.press(for: home)
+        #expect(work.admission(reached: home, source: nil, for: .personHome) == nil)
+        work.end(refused)
+        unread.set(.personHome, on: false)
+        place.close(false)
+        unread.reread()
+        #expect(unread.off == [.directory], "a switch pressed while the list was not known decided nothing")
+        let press = work.press(for: home)
+        #expect(work.admission(reached: home, source: nil, for: .personHome) == .allowed(.personHome))
+        work.end(press)
+    }
+
     @Test("With no decision ever made no file is made — not at launch, not as sources come and go; the first decision makes it")
     func noDecisions() throws {
         let place = try Place()
