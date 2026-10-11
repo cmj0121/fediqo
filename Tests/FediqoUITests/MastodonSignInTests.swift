@@ -699,9 +699,7 @@ struct MastodonSignInTests {
         let page = Page(.refusesSearch)
         await session.signIn(host: host, through: page, writing: true)
         #expect(page.opened == 2)
-        let narrow = MastodonOAuth.scopes(
-            reading: MastodonOAuth.readingWithoutSearch, writing: true
-        )
+        let narrow = MastodonOAuth.scopes(search: false, writing: true)
         #expect(page.scopes == [MastodonOAuth.scopes(writing: true), narrow])
         #expect(try tokens.app(host: host)?.scopes == narrow)
         #expect(try tokens.token(host: host)?.grant == .writing)

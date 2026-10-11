@@ -316,7 +316,7 @@ struct MastodonNoticesSaysTests {
     func aSignInAskingForNotices() async throws {
         try await LocalServers.requireHealthy()
         let asked = MastodonOAuth.scopes(writing: true, notices: true)
-        #expect(asked.hasSuffix(" \(MastodonOAuth.noticing) \(MastodonOAuth.dismissing)"))
+        #expect(asked.hasSuffix(" \(MastodonOAuth.noticing) write:notifications"))
 
         // This app's own sign-in, with the server's page approved as the writer approves it
         // at a browser, started on a registration **the seed made, in the server, and not this

@@ -25,7 +25,7 @@ struct SignInNoticesScopeTests {
     @Test("Without notices every string is what it was; with them, reading them comes last, and dismissing after it only where the sign-in acts")
     func theStringsInTheirOrder() {
         #expect(MastodonOAuth.noticing == "read:notifications")
-        #expect(MastodonOAuth.dismissing == "write:notifications")
+        #expect(MastodonPart.notices.wordsBesideActing == ["write:notifications"])
 
         // Not asked: byte for byte what a sign-in asked before this.
         #expect(MastodonOAuth.scopes(writing: false) == Self.reading)
@@ -39,7 +39,7 @@ struct SignInNoticesScopeTests {
             == "\(Self.reading) \(Self.writing) write:bookmarks read:notifications write:notifications")
         #expect(MastodonOAuth.scopes(writing: true, bookmarks: false, notices: true)
             == "\(Self.reading) \(Self.writing) read:notifications write:notifications")
-        #expect(MastodonOAuth.scopes(reading: Self.readingWithoutSearch, writing: false, notices: true)
+        #expect(MastodonOAuth.scopes(search: false, writing: false, notices: true)
             == "\(Self.readingWithoutSearch) read:notifications")
 
         // Dismissing is an act: never asked of a sign-in that only reads.

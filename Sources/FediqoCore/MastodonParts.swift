@@ -54,11 +54,23 @@ public enum MastodonParts {
     /// makes holds it, and a page naming a word outside its registration is answered with a
     /// page of the server's own and nothing sent back.
     ///
+    /// **The source's one word for every read, or for every write, is such a word** — `read`,
+    /// `write`, as a sign-in made by something else may hold them. It is left out and never
+    /// spelt out into the words it covers: those would be words on the page that no question
+    /// named. A page widening such a sign-in asks for what was ticked and nothing held.
+    ///
+    /// `readOnly` is the answer "read only" to whether a sign-in reads or reads and acts: no
+    /// word that acts is asked, held or ticked, and every word held to read is.
+    ///
     /// The words stand in the table's order whichever of the two brought them, so one choice is
     /// one string however it was reached.
-    public static func page(held: String?, ticked: Set<MastodonPart>) -> String {
-        let had = Set((held ?? "").split(separator: " ").map(String.init))
-        let own = Set(ticked.flatMap(\.words))
+    public static func page(held: String?, ticked: Set<MastodonPart>, readOnly: Bool = false) -> String {
+        var had = words(held)
+        var own = Set(ticked.flatMap(\.words))
+        if readOnly {
+            had = had.filter { !acts($0) }
+            own = own.filter { !acts($0) }
+        }
         let will = had.union(own)
         let actingHeld = MastodonPart.acting.words.allSatisfy(will.contains)
         var words: [String] = []
@@ -72,5 +84,34 @@ public enum MastodonParts {
             words += beside.filter { had.contains($0) || (pressed && whole && actingHeld) }
         }
         return words.joined(separator: " ")
+    }
+
+    /// Whether a scope string holds `part`: every word of it, **word by word and never as a
+    /// substring**, so words handed back in another order still hold it and a word that merely
+    /// contains one does not. Nothing written down holds nothing.
+    public static func holds(_ part: MastodonPart, in scopes: String?) -> Bool {
+        part.words.allSatisfy(words(scopes).contains)
+    }
+
+    /// Whether a scope string holds the act `part` is asked for beside acting, read as
+    /// `holds(_:in:)` is. A part with no such act holds none.
+    public static func holdsBesideActing(_ part: MastodonPart, in scopes: String?) -> Bool {
+        let beside = part.wordsBesideActing
+        return !beside.isEmpty && beside.allSatisfy(words(scopes).contains)
+    }
+
+    /// Whether a scope string holds the source's one word for every read there is — which no
+    /// page of this app asks for, and a sign-in made by something else may hold.
+    public static func holdsEveryRead(in scopes: String?) -> Bool {
+        words(scopes).contains("read")
+    }
+
+    /// Whether a word lets something be changed at the source, by the source's own spelling.
+    private static func acts(_ word: String) -> Bool {
+        word.hasPrefix("write:")
+    }
+
+    private static func words(_ scopes: String?) -> Set<String> {
+        Set((scopes ?? "").split(separator: " ").map(String.init))
     }
 }

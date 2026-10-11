@@ -15,7 +15,7 @@ struct WritingTests {
     func readingIsUnchanged() {
         #expect(MastodonOAuth.reading == "read:statuses read:lists read:accounts read:search")
         #expect(MastodonOAuth.scopes(writing: false) == MastodonOAuth.reading)
-        #expect(MastodonOAuth.scopes(reading: MastodonOAuth.readingWithoutSearch, writing: false)
+        #expect(MastodonOAuth.scopes(search: false, writing: false)
             == MastodonOAuth.readingWithoutSearch)
         #expect(!MastodonOAuth.scopes(writing: false).contains("write"))
     }

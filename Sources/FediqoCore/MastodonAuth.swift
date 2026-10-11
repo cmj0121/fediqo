@@ -117,10 +117,10 @@ public struct MastodonOAuth: Sendable {
     public static let redirect = "fediqo://oauth"
     /// Decision 8: what Home, lists, the account check and finding a post again by its address
     /// (#29) need, and no more. A token issued before `read:search` was asked for lacks it.
-    public static let reading = "read:statuses read:lists read:accounts read:search"
+    public static let reading = scopes(writing: false)
     /// Decision 32: what is asked of a server that refuses `read:search` (`invalid_scope`), once.
     /// Everything but finding an old post again works; that says to sign in again.
-    public static let readingWithoutSearch = "read:statuses read:lists read:accounts"
+    public static let readingWithoutSearch = scopes(search: false, writing: false)
     /// What writing needs (#69), and no more: `write:statuses` is a post, a boost, a reply and
     /// taking any of them back; `write:favourites` is a favourite. **Nothing here follows anybody,
     /// changes a profile or touches a filter** — those are other `write:` scopes and this app asks
@@ -129,7 +129,7 @@ public struct MastodonOAuth: Sendable {
     /// **Asked for only where the reader said so.** It is never part of the reading pair above, so
     /// a sign-in that refuses the writing part is byte-for-byte the sign-in this app made before
     /// this existed.
-    public static let writing = "write:statuses write:favourites"
+    public static let writing = MastodonParts.page(held: nil, ticked: [.acting])
     /// What bookmarking needs (#285), and no more: a bookmark put on a post at its source, and
     /// taken off it. **Apart from `writing` and not a third word in it**, because `writes(_:)`
     /// asks for every word of that, and a sign-in made before this existed — which posts, boosts
@@ -137,7 +137,7 @@ public struct MastodonOAuth: Sendable {
     ///
     /// Asked for with the writing part and never without it: reading alone asks for what it
     /// always asked.
-    public static let bookmarking = "write:bookmarks"
+    public static let bookmarking = MastodonParts.page(held: nil, ticked: [.bookmarks])
     /// What reading notices needs (#323), and no more: what the source says happened to the
     /// reader. **Apart from `reading` and not a fifth word in it**, for `bookmarking`'s reason
     /// turned the other way: every sign-in made before this asked for `reading` to the letter,
@@ -145,11 +145,11 @@ public struct MastodonOAuth: Sendable {
     ///
     /// **Asked for only where the reader pressed for it on the notices page** — no sign-in asks
     /// for it unasked, so one that never wanted notices is byte-for-byte what it was.
-    public static let noticing = "read:notifications"
-    /// What dismissing a notice needs (#323) — and letting through or letting go one the source
-    /// held back. An act, so it is asked for with `noticing` only where the writing part is
-    /// asked for too, and never a word in `writing`: `writes(_:)` asks for every word of that.
-    public static let dismissing = "write:notifications"
+    ///
+    /// Dismissing a notice — and letting through or letting go one the source held back — is an
+    /// act, so its word is asked for beside this only where the writing part is asked for too
+    /// (`MastodonPart.wordsBesideActing`), and is never a word in `writing`.
+    public static let noticing = MastodonParts.page(held: nil, ticked: [.notices])
 
     /// The whole of what one sign-in asks for: reading, and the writing part after it where the
     /// reader agreed to it — with bookmarking after that, unless `bookmarks` is false, which is
@@ -160,16 +160,20 @@ public struct MastodonOAuth: Sendable {
     /// **Reading first, writing next, then bookmarking, noticing and dismissing, always in this
     /// order**, because the string is also what a registration records and what `known(writing:)`
     /// compares against — two spellings of one ask would register twice for one choice.
+    ///
+    /// **The words and their order are the table's** (`MastodonParts.page`): this says which
+    /// parts a choice ticks, and spells none of them. `search` is false on the rung a server
+    /// that refuses to be searched is asked on (decision 32).
     public static func scopes(
-        reading: String = reading, writing wanted: Bool, bookmarks: Bool = true,
+        search: Bool = true, writing wanted: Bool, bookmarks: Bool = true,
         notices: Bool = false
     ) -> String {
-        var asked = [reading]
-        if wanted { asked.append(Self.writing) }
-        if wanted, bookmarks { asked.append(bookmarking) }
-        if notices { asked.append(noticing) }
-        if notices, wanted { asked.append(dismissing) }
-        return asked.joined(separator: " ")
+        var ticked: Set<MastodonPart> = [.reading]
+        if search { ticked.insert(.search) }
+        if wanted { ticked.insert(.acting) }
+        if wanted, bookmarks { ticked.insert(.bookmarks) }
+        if notices { ticked.insert(.notices) }
+        return MastodonParts.page(held: nil, ticked: ticked)
     }
 
     /// The ladder one answer is asked on, widest first: what a sign-in registers for, and what it
@@ -191,12 +195,12 @@ public struct MastodonOAuth: Sendable {
     /// the sign-in the reader already has, and a server with no such scope fails the ask and
     /// takes nothing.
     public static func ladder(writing wanted: Bool, notices: Bool = false) -> [String] {
-        let readings = [reading, readingWithoutSearch]
+        let searches = [true, false]
         guard wanted else {
-            return readings.map { scopes(reading: $0, writing: false, notices: notices) }
+            return searches.map { scopes(search: $0, writing: false, notices: notices) }
         }
-        return readings.map { scopes(reading: $0, writing: true, notices: notices) }
-            + readings.map { scopes(reading: $0, writing: true, bookmarks: false, notices: notices) }
+        return searches.map { scopes(search: $0, writing: true, notices: notices) }
+            + searches.map { scopes(search: $0, writing: true, bookmarks: false, notices: notices) }
     }
 
     /// The registrations this build may start a sign-in on that wants `writing`, or not: the
@@ -223,28 +227,23 @@ public struct MastodonOAuth: Sendable {
     /// Whether a scope string bought reading notices (#323) — read scope by scope, as
     /// `writes(_:)` is.
     public static func notices(_ scopes: String?) -> Bool {
-        guard let scopes else { return false }
-        return scopes.split(separator: " ").contains(Substring(noticing))
+        MastodonParts.holds(.notices, in: scopes)
     }
 
     /// Whether a scope string bought dismissing notices (#323), read the same way.
     public static func dismisses(_ scopes: String?) -> Bool {
-        guard let scopes else { return false }
-        return scopes.split(separator: " ").contains(Substring(dismissing))
+        MastodonParts.holdsBesideActing(.notices, in: scopes)
     }
 
     /// Whether a scope string bought searching (#319): `read:search` itself, or the whole of
     /// reading, which holds it — as the server names the two when it refuses for want of them.
     public static func searches(_ scopes: String?) -> Bool {
-        guard let scopes else { return false }
-        let granted = scopes.split(separator: " ")
-        return granted.contains("read:search") || granted.contains("read")
+        MastodonParts.holds(.search, in: scopes) || MastodonParts.holdsEveryRead(in: scopes)
     }
 
     /// Whether a scope string bought bookmarking — read scope by scope, as `writes(_:)` is.
     public static func bookmarks(_ scopes: String?) -> Bool {
-        guard let scopes else { return false }
-        return scopes.split(separator: " ").contains(Substring(bookmarking))
+        MastodonParts.holds(.bookmarks, in: scopes)
     }
 
     /// Whether a scope string bought the writing part.
@@ -253,14 +252,8 @@ public struct MastodonOAuth: Sendable {
     /// scopes in another order still reads as writing, and a scope that merely contains one of
     /// these words does not.
     public static func writes(_ scopes: String?) -> Bool {
-        guard let scopes else { return false }
-        let granted = Set(scopes.split(separator: " "))
-        return writingScopes.allSatisfy(granted.contains)
+        MastodonParts.holds(.acting, in: scopes)
     }
-
-    /// `writing`, split once. This is asked of every held token at launch and again whenever the
-    /// app comes to the front, so the constant is split once rather than once per item.
-    private static let writingScopes: [Substring] = writing.split(separator: " ")
 
     let host: String
     private let sender: any HTTPSender
