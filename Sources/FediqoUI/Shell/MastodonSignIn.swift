@@ -309,7 +309,13 @@ public final class MastodonSessions {
                         }
                         app = registered
                     }
-                    issued = try await oauth.signIn(as: registered, through: browser)
+                    let signed = try await oauth.signIn(as: registered, through: browser)
+                    // A token that failed its check is no sign-in — and may be the one held.
+                    if let failed = signed.failed {
+                        await end(signed.token, why: .notKept)
+                        throw failed
+                    }
+                    issued = signed.token
                 } catch MastodonSignInError.invalidScope where rung + 1 < ladder.count {
                     try? tokens.forgetApp(host: host)
                     mine = nil
@@ -340,7 +346,7 @@ public final class MastodonSessions {
             return .unreachable
         }
         guard stillWanted else {
-            await oauth.revoke(token)
+            await end(token, why: .notKept)
             return nil
         }
         // The token this one supersedes, read before `save` deletes it.
@@ -355,26 +361,23 @@ public final class MastodonSessions {
             // during that wait would find nothing to forget or revoke, and the token put back
             // after it would sign the reader in again behind their sign-out. Where it cannot be
             // put back either, it is revoked, so nothing is live there that this device has lost.
+            // Where it was put back and the new token is that very string, nothing is revoked.
             var lost: MastodonToken?
             if let superseded, ((try? tokens.token(host: host)) ?? nil) == nil {
                 do { try tokens.save(superseded) } catch { lost = superseded }
             }
             putBack()
             refresh()
-            await oauth.revoke(token)
-            if let lost { await oauth.revoke(lost) }
+            await end(token, why: .notKept)
+            if let lost { await end(lost, why: .notKept) }
             return .keychain
         }
         // What is held is read again **before the wait below** (#323): a second sign-in started
         // while the server is being asked to forget the old token carries what this one holds,
         // not what the one it replaced did.
         refresh()
-        // **After the new one is safely kept, and never a token with the same string**: what is
-        // held now is what a write will use, and revoking it would sign the reader out of a
-        // sign-in the row says they have.
-        if let superseded, superseded.accessToken != token.accessToken {
-            await oauth.revoke(superseded)
-        }
+        // **After the new one is safely kept**, and never a token with the same string (`end`).
+        if let superseded { await end(superseded, why: .notKept) }
         // A fresh sign-in is a fresh answer from the server about what this device may do, so
         // whatever it turned away before this is spent.
         writeRefused.remove(host)
@@ -555,10 +558,44 @@ public final class MastodonSessions {
         noticesTurnedAway.remove(host)
         handles[host] = nil
         refresh()
-        if let token {
-            await MastodonOAuth(host: host, sender: WatchedHTTP(sender: sender, for: .signOut, in: work))
-                .revoke(token)
+        if let token { await end(token, why: .signedOut) }
+    }
+
+    /// Why a source is asked to end a sign-in.
+    private enum Ending {
+        /// A token a sign-in made and did not keep, or one it replaced: ended only where it is
+        /// not the one held.
+        case notKept
+        /// The person asked for this very sign-in to end — a sign-out, Clear or Remove.
+        case signedOut
+    }
+
+    /// Asks a source to end a sign-in — **the one place that does** (#347).
+    ///
+    /// **A token the person did not ask to end is never ended while it is the one held.** A
+    /// server answers the same words on the same registration with the token it already
+    /// issued, so a token a sign-in could not keep may be, string for string, the one the row
+    /// says the person has: ending it would sign them out behind a row that reads signed in.
+    /// What is held is read here, with nothing awaited between the look and the send, so a
+    /// token put back or kept a moment ago is seen. Where the Keychain cannot be read nothing
+    /// is sent: that can leave a token nobody kept live at the source, which is rare and
+    /// better than ending one that is held.
+    ///
+    /// **The sign-in the person signed out of is ended whatever this device still holds**
+    /// (#221): it was read before it was forgotten, and a Keychain that would not delete it, or
+    /// cannot be read now, is no reason to leave it live at the source.
+    private func end(_ token: MastodonToken, why ending: Ending) async {
+        if ending == .notKept {
+            do {
+                guard try tokens.token(host: token.host)?.accessToken != token.accessToken else { return }
+            } catch {
+                NetLog.auth.error("\(NetLog.line("end", host: token.host, error: error), privacy: .public)")
+                return
+            }
         }
+        let purpose: SourceWork.Purpose = ending == .signedOut ? .signOut : .signIn
+        await MastodonOAuth(host: token.host, sender: WatchedHTTP(sender: sender, for: purpose, in: work))
+            .revoke(token)
     }
 
     /// The door a signed-in request goes through, or nothing where no token can be read.

@@ -330,7 +330,7 @@ struct MastodonNoticesSaysTests {
         #expect(registered.scopes == asked, "the seed's registration asks what this app asks")
         let oauth = MastodonOAuth(host: Self.host, sender: try LocalHTTP.client())
         let app = MastodonApp(host: Self.host, clientID: registered.id, clientSecret: registered.secret, scopes: asked)
-        let token = try await oauth.signIn(as: app, through: Approving(host: Self.host, browser: try LocalHTTP.browser()))
+        let token = try await oauth.signIn(as: app, through: Approving(host: Self.host, browser: try LocalHTTP.browser())).token
         #expect(token.scopes == asked && token.asked == asked)
         #expect(MastodonOAuth.notices(token.scopes) && MastodonOAuth.dismisses(token.scopes))
         #expect(MastodonOAuth.writes(token.scopes) && MastodonOAuth.bookmarks(token.scopes), "and it is no lesser a sign-in for it")

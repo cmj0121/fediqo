@@ -1136,7 +1136,12 @@ struct MastodonSignInTests {
         session.sources = await session.store.sources()
 
         let pressing = Task { await session.allowBookmarks(host: host, through: Page()) }
-        #expect(await spun { await server.holding })
+        defer { Task { await gate.open() } }
+        // Not caught, the first revoke would be the sign-out's own below, held with nobody left
+        // to open the gate: opened here, so the check fails and does not park.
+        let caught = await spun { await server.holding }
+        if !caught { await gate.open() }
+        #expect(caught, "no revoke of the token that could not be kept went out")
         // The new token's revoke is on the wire; the reader signs out meanwhile.
         #expect(session.isSignedIn(host: host), "the earlier sign-in was not put back before the wait")
         await session.signOut(host: host)
@@ -1239,6 +1244,249 @@ struct MastodonSignInTests {
         }
     }
 
+    // MARK: - Signing in again for what is already held (#347)
+
+    /// A sign-in for `held` — nothing where `held` is nil — with the store, the server, and what
+    /// the server's page is opened by.
+    private func signedIn(
+        as held: String?, _ overrides: [String: MastodonServer.Outcome] = [:], failing: TestTokens.Failing = []
+    ) throws -> (MastodonSessions, MastodonServer, TestTokens) {
+        let tokens = TestTokens(failing: failing)
+        if let held {
+            try tokens.held.save(MastodonToken(host: host, accessToken: held, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.reading))
+        }
+        let server = MastodonServer(tokens: tokens.held, overrides)
+        return (MastodonSessions(tokens: tokens, sender: server), server, tokens)
+    }
+
+    /// Whether the sign-in for `string` is still the one held, shown, and able to ask.
+    private func stillWorks(_ string: String, _ sessions: MastodonSessions, _ tokens: TestTokens) -> Bool {
+        let kept = ((try? tokens.held.token(host: host)) ?? nil)?.accessToken == string
+        let door = sessions.authorized(host: host, for: .signInCheck)?.token.accessToken == string
+        return kept && door && sessions.isSignedIn(host: host)
+    }
+
+    /// The server hands `tok-123` to every first exchange: held already, it is the same string
+    /// again, as a real server answers the same words on the same registration.
+    @Test("The same token handed back and its check failing ends nothing: the sign-in held goes on working; a fresh one that fails its check is ended, and the held one is not", arguments: [401, 500, 0])
+    func theCheckFailing(status: Int) async throws {
+        let check = ["/api/v1/accounts/verify_credentials": status == 0 ? MastodonServer.Outcome.fail : .json("{}", status: status)]
+        let (same, sameServer, sameTokens) = try signedIn(as: "tok-123", check)
+        #expect(await same.signIn(host: host, through: Page()) != nil, "a failed check passed for a sign-in")
+        #expect(await sameServer.revoked.isEmpty, "the sign-in the row shows was ended at its source")
+        #expect(stillWorks("tok-123", same, sameTokens))
+
+        let (other, otherServer, otherTokens) = try signedIn(as: "tok-old", check)
+        #expect(await other.signIn(host: host, through: Page()) != nil)
+        #expect(await otherServer.revoked == ["tok-123"], "only the token nobody kept is ended")
+        #expect(stillWorks("tok-old", other, otherTokens))
+    }
+
+    /// **Only the sign-out itself ends a token still held** (#221, #347): the Keychain would not
+    /// delete it, the person asked for it to end, and the source is asked once. The sign-in that
+    /// comes back meanwhile is not a reason: the same string again sends nothing more, and a
+    /// fresh one ends only itself.
+    @Test("A sign-out the Keychain refused while the page was up: the sign-out ends the token still held, and the sign-in coming back ends only a token that is not it")
+    func signedOutMeanwhileAndStillHeld() async throws {
+        for (held, ended) in [("tok-123", ["tok-123"]), ("tok-old", ["tok-old", "tok-123"])] {
+            let (sessions, server, _) = try signedIn(as: held, failing: .forgetting)
+            let gate = Gate()
+            let page = Page(gate: gate)
+            let pressing = Task { await sessions.signIn(host: host, through: page) }
+            defer { Task { await gate.open() } }
+            #expect(await spun { page.opened == 1 })
+            await sessions.signOut(host: host)
+            #expect(await server.revoked == [held], "the sign-out did not end what the person asked to end")
+            await gate.open()
+            _ = await pressing.value
+
+            #expect(await server.revoked == ended, "held \(held)")
+            #expect(sessions.isSignedIn(host: host), "claimed signed out while the token is still kept")
+        }
+    }
+
+    @Test("Clear with a Keychain that will not delete the token still asks the source to end it, and forgets the registration")
+    func clearWithAStuckKeychain() async throws {
+        let tokens = TestTokens(failing: .forgetting)
+        try tokens.held.save(token(host))
+        try tokens.held.save(app)
+        let server = MastodonServer(tokens: tokens.held)
+        let session = ShellSession(
+            http: FixtureHTTP(), store: ItemStore(), mastodon: MastodonSessions(tokens: tokens, sender: server)
+        )
+        await session.store.add(Source(host: host, kind: .mastodon))
+        session.sources = await session.store.sources()
+
+        await session.clear(host: host)
+        #expect(await server.revoked == ["tok-123"])
+        #expect(try tokens.held.app(host: host) == nil)
+    }
+
+    @Test("A sign-out whose Keychain cannot be read once the token is gone still ends the token it read first")
+    func signedOutAndUnreadable() async throws {
+        let (sessions, server, tokens) = try signedIn(as: "tok-123", failing: .readingOnceForgotten)
+        await sessions.signOut(host: host)
+        #expect(try tokens.held.token(host: host) == nil)
+        #expect(await server.revoked == ["tok-123"])
+    }
+
+    @Test("A check that fails after a sign-out while the page was up ends the token that came back, which nobody holds")
+    func theCheckFailingAfterASignOut() async throws {
+        let (sessions, server, tokens) = try signedIn(
+            as: "tok-old", ["/api/v1/accounts/verify_credentials": .json("{}", status: 500)]
+        )
+        let gate = Gate()
+        let page = Page(gate: gate)
+        let pressing = Task { await sessions.signIn(host: host, through: page) }
+        defer { Task { await gate.open() } }
+        #expect(await spun { page.opened == 1 })
+        await sessions.signOut(host: host)
+        await gate.open()
+        _ = await pressing.value
+
+        #expect(await server.revoked == ["tok-old", "tok-123"])
+        #expect(try tokens.held.token(host: host) == nil)
+        #expect(!sessions.isSignedIn(host: host))
+    }
+
+    /// **Pinned as it is today, not as it should be**: the string the person held is ended,
+    /// twice over, and the row shows no sign-in. Keeping it as lost and saying so is F2a's (its
+    /// journal); this unit only puts the site through the gate.
+    @Test("The same token handed back, not kept, and the one held not put back either: the string is ended and nobody is signed in — as before this unit")
+    func neitherKeptNorPutBack() async throws {
+        let (sessions, server, tokens) = try signedIn(as: "tok-123", failing: .savingTwice)
+        #expect(await sessions.signIn(host: host, through: Page()) == .keychain)
+        #expect(await server.revoked == ["tok-123", "tok-123"])
+        #expect(try tokens.held.token(host: host) == nil)
+        #expect(!sessions.isSignedIn(host: host))
+    }
+
+    @Test("A sign-out while the page was up ends the token that came back, which nobody holds")
+    func signedOutMeanwhile() async throws {
+        let (sessions, server, tokens) = try signedIn(as: "tok-old")
+        let gate = Gate()
+        let page = Page(gate: gate)
+        let pressing = Task { await sessions.signIn(host: host, through: page) }
+        defer { Task { await gate.open() } }
+        #expect(await spun { page.opened == 1 })
+        await sessions.signOut(host: host)
+        await gate.open()
+        _ = await pressing.value
+
+        #expect(await server.revoked == ["tok-old", "tok-123"])
+        #expect(try tokens.held.token(host: host) == nil)
+        #expect(!sessions.isSignedIn(host: host))
+    }
+
+    @Test("The same token handed back and the Keychain refusing to keep it ends nothing: the sign-in put back goes on working; a fresh one that cannot be kept is ended, and the held one is not")
+    func keepingRefused() async throws {
+        for (held, ended) in [("tok-123", [String]()), ("tok-old", ["tok-123"])] {
+            let (sessions, server, tokens) = try signedIn(as: held, failing: .savingOnce)
+            #expect(await sessions.signIn(host: host, through: Page()) == .keychain)
+            #expect(await server.revoked == ended, "held \(held)")
+            #expect(stillWorks(held, sessions, tokens), "held \(held)")
+        }
+    }
+
+    @Test("Signing in again for what is held, with nothing failing, ends nothing")
+    func theSameAgain() async throws {
+        let (sessions, server, tokens) = try signedIn(as: "tok-123")
+        #expect(await sessions.signIn(host: host, through: Page()) == nil)
+        #expect(await server.revoked.isEmpty)
+        #expect(stillWorks("tok-123", sessions, tokens))
+    }
+
+    /// Accepted (#347): this can leave a token nobody kept live at the source — rare, and better
+    /// than ending one that is held and cannot be seen to be.
+    @Test("Where the Keychain cannot be read, the source is asked to end nothing")
+    func nothingEndedUnseen() async throws {
+        let (sessions, server, _) = try signedIn(
+            as: "tok-old", ["/api/v1/accounts/verify_credentials": .json("{}", status: 500)], failing: .reading
+        )
+        #expect(await sessions.signIn(host: host, through: Page()) != nil)
+        #expect(await server.paths.last == "/api/v1/accounts/verify_credentials")
+        #expect(await server.revoked.isEmpty)
+    }
+
+    @Test("One place alone asks a source to end a sign-in")
+    func oneCallSite() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        while root.pathComponents.count > 1, !FileManager.default.fileExists(atPath: root.appending(path: "Package.swift").path) {
+            root.deleteLastPathComponent()
+        }
+        let sources = root.appending(path: "Sources")
+        var sites: [String] = []
+        var paths = 0
+        let files = try #require(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+        for case let file as URL in files where file.pathExtension == "swift" {
+            let lines = try String(contentsOf: file, encoding: .utf8).split(separator: "\n", omittingEmptySubsequences: false)
+            for (number, line) in lines.enumerated() where line.contains("revoke(") && !line.contains("func revoke(") {
+                sites.append("\(file.lastPathComponent):\(number + 1)")
+            }
+            paths += lines.count { $0.contains("/oauth/revoke") }
+        }
+        #expect(sites.count == 1, "\(sites)")
+        #expect(paths == 1, "the path a sign-in is ended at is written in \(paths) lines")
+        #expect(sites.first?.hasPrefix("MastodonSignIn.swift:") == true, "\(sites)")
+        let gate = try String(contentsOf: sources.appending(path: "FediqoUI/Shell/MastodonSignIn.swift"), encoding: .utf8)
+        let body = try #require(gate.components(separatedBy: "private func end(_ token: MastodonToken").dropFirst().first)
+        #expect(body.components(separatedBy: "\n    }\n").first?.contains("revoke(") == true, "the one call is not inside the gate")
+    }
+
+}
+
+/// A token store over a memory one whose Keychain can be made to refuse: to delete by host, to
+/// add at a save of a token (after deleting, as the Keychain's delete-then-add does), or to be
+/// read.
+private final class TestTokens: MastodonTokenStore, @unchecked Sendable {
+    struct Failing: OptionSet {
+        let rawValue: Int
+        static let forgetting = Failing(rawValue: 1)
+        static let savingOnce = Failing(rawValue: 2)
+        static let reading = Failing(rawValue: 4)
+        /// The first save and the one after it: the new token, and the old one being put back.
+        static let savingTwice = Failing(rawValue: 8)
+        /// Every read once a token has been deleted by host.
+        static let readingOnceForgotten = Failing(rawValue: 16)
+    }
+
+    let held = MemoryMastodonTokens()
+    private var failing: Failing
+    private static let refused = ForumCredentialError.keychain(-25_308)
+
+    init(failing: Failing) {
+        self.failing = failing
+    }
+
+    func token(host: String) throws -> MastodonToken? {
+        if failing.contains(.reading) { throw Self.refused }
+        return try held.token(host: host)
+    }
+    func save(_ token: MastodonToken) throws {
+        if failing.contains(.savingTwice) {
+            failing.remove(.savingTwice)
+            failing.insert(.savingOnce)
+        } else if failing.contains(.savingOnce) {
+            failing.remove(.savingOnce)
+        } else {
+            return try held.save(token)
+        }
+        try held.forget(host: token.host)
+        throw Self.refused
+    }
+    func forget(host: String) throws {
+        if failing.contains(.forgetting) { throw Self.refused }
+        try held.forget(host: host)
+        if failing.contains(.readingOnceForgotten) { failing.insert(.reading) }
+    }
+    func forget(_ token: MastodonToken) throws -> Bool { try held.forget(token) }
+    func grants() throws -> [String: MastodonGrant] {
+        if failing.contains(.reading) { throw Self.refused }
+        return try held.grants()
+    }
+    func app(host: String) throws -> MastodonApp? { try held.app(host: host) }
+    func save(_ app: MastodonApp) throws { try held.save(app) }
+    func forgetApp(host: String) throws { try held.forgetApp(host: host) }
 }
 
 /// A token store whose Keychain will not delete a token by host.

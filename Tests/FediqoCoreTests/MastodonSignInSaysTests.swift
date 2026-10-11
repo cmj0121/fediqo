@@ -109,13 +109,13 @@ struct MastodonSignInSaysTests {
             try await pages.signIn()
 
             // Less than the registration holds.
-            let narrow = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages))
+            let narrow = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages).token)
             #expect(pages.shown == [Captures.narrow], "the page was shown, asking for the four")
             #expect(narrow.scopes == Captures.narrow && narrow.asked == Captures.narrow)
             #expect(try await held(narrow) == Self.words(Captures.narrow))
 
             // Wider, while the narrower lives.
-            let wide = made.keep(try await oauth.signIn(as: try app(asking: Captures.wide), through: pages))
+            let wide = made.keep(try await oauth.signIn(as: try app(asking: Captures.wide), through: pages).token)
             #expect(pages.shown == [Captures.narrow, Captures.wide], "shown again for the wider one")
             #expect(wide.accessToken != narrow.accessToken && wide.scopes == Captures.wide)
             #expect(try await held(wide) == Self.words(Captures.wide))
@@ -126,9 +126,9 @@ struct MastodonSignInSaysTests {
             #expect(try await ask(wide.accessToken, Self.standing).status == 200)
 
             // The same words again, and in another order: no page, and the same token.
-            let again = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages))
+            let again = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages).token)
             let turned = Captures.narrow.split(separator: " ").reversed().joined(separator: " ")
-            let reordered = made.keep(try await oauth.signIn(as: try app(asking: turned), through: pages))
+            let reordered = made.keep(try await oauth.signIn(as: try app(asking: turned), through: pages).token)
             #expect(pages.shown == [Captures.narrow, Captures.wide], "sent straight on both times")
             #expect(again.accessToken == narrow.accessToken && reordered.accessToken == narrow.accessToken)
 
@@ -146,7 +146,7 @@ struct MastodonSignInSaysTests {
             // Revoking the narrower one signs out every holder of that string.
             await oauth.revoke(narrow)
             #expect(try await ask(again.accessToken, Self.check).status == 401)
-            let afresh = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages))
+            let afresh = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages).token)
             #expect(pages.shown == [Captures.narrow, Captures.wide, Captures.narrow], "no token of those words: the page again")
             #expect(afresh.accessToken != narrow.accessToken)
         }
@@ -161,7 +161,7 @@ struct MastodonSignInSaysTests {
         let pages = Pages(host: Self.host, browser: try LocalHTTP.browser())
         try await pages.signIn()
         try await revokingWhatItMade(oauth) { made in
-            let kept = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages))
+            let kept = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages).token)
 
             let refusing = Pages(host: Self.host, browser: pages.browser, answer: .deny)
             await #expect(throws: MastodonSignInError.denied) {
@@ -181,6 +181,54 @@ struct MastodonSignInSaysTests {
                 #expect(String(decoding: page.body, as: UTF8.self).contains(Captures.outsideScope), "\(scopes)")
             }
             #expect(try await ask(kept.accessToken, Self.check).status == 200)
+        }
+    }
+
+    // MARK: - 3. The same words again, and the check of it failing
+
+    /// #347: what stood behind a live fault. Signing in again for the words a sign-in already
+    /// has is answered with that sign-in's own token, so a check of it that fails — a timeout
+    /// or a 5xx as much as a refusal — must end nothing: the token in hand is the one held.
+    @Test("The same words asked again by a sign-in whose check then fails: no page, the very same token handed back beside the failure, the server asked to end nothing — and the token held still answers")
+    func theSameAgainWithTheCheckFailing() async throws {
+        try await LocalServers.requireHealthy()
+        let oauth = try signer()
+        let pages = Pages(host: Self.host, browser: try LocalHTTP.browser())
+        try await pages.signIn()
+        try await revokingWhatItMade(oauth) { made in
+            let first = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages).token)
+            #expect(pages.shown == [Captures.narrow])
+
+            let failing = FailedCheck(try LocalHTTP.client(), at: Self.check)
+            let again = try await MastodonOAuth(host: Self.host, sender: failing)
+                .signIn(as: try app(asking: Captures.narrow), through: pages)
+            _ = made.keep(again.token)
+            #expect(pages.shown == [Captures.narrow], "sent straight on")
+            #expect(again.token.accessToken == first.accessToken, "the very same token")
+            #expect(again.failed == .http(503))
+            #expect(await failing.asked == ["/oauth/token", Self.check], "nothing asked the server to end it")
+            #expect(try await ask(first.accessToken, Self.check).status == 200)
+        }
+    }
+
+    /// The real server, but for the account check: that one is answered 503 here and never sent.
+    private actor FailedCheck: HTTPSender {
+        private let server: any HTTPSender
+        private let check: String
+        private(set) var asked: [String] = []
+
+        init(_ server: any HTTPSender, at check: String) {
+            self.server = server
+            self.check = check
+        }
+
+        func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+            let path = request.url?.path ?? ""
+            asked.append(path)
+            guard path == check, let url = request.url,
+                  let unavailable = HTTPURLResponse(url: url, statusCode: 503, httpVersion: "HTTP/1.1", headerFields: nil)
+            else { return try await server.send(request) }
+            return (Data(), unavailable)
         }
     }
 

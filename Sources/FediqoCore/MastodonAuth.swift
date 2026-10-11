@@ -271,10 +271,15 @@ public struct MastodonOAuth: Sendable {
     }
 
     /// Opens the server's page for `app`, checks the answer, trades the code for a token and
-    /// proves the token works. Nothing is saved here. A token that fails the check is revoked
-    /// before the failure is reported, so no working token is left behind on the server.
+    /// checks that the token works. Nothing is saved here, **and nothing is revoked here**: the
+    /// token is handed back with why its check failed, or nothing where it passed.
+    ///
+    /// A server answers the same words on the same registration with the token it already
+    /// issued, so the one in hand may be the sign-in this device holds — and a check fails for a
+    /// timeout or a 5xx as for a refusal. Whether to ask the server to end it is for whoever
+    /// knows what is held.
     public func signIn(as app: MastodonApp, through browser: any OAuthBrowser) async throws
-        -> MastodonToken
+        -> (token: MastodonToken, failed: MastodonSignInError?)
     {
         let pkce = PKCE.make()
         let state = PKCE.random(bytes: 16)
@@ -313,10 +318,9 @@ public struct MastodonOAuth: Sendable {
         do {
             try await verify(token)
         } catch {
-            await revoke(token)
-            throw error
+            return (token, error as? MastodonSignInError ?? .unreachable)
         }
-        return token
+        return (token, nil)
     }
 
     /// What a sign-in that asked for `asked` is written down as holding, from the server's own

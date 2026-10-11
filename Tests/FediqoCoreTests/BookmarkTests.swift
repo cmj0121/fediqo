@@ -242,7 +242,7 @@ struct BookmarkTests {
         let wide = MastodonOAuth.reading + " write:statuses write:favourites write:bookmarks"
         let server = MastodonFixture.server(issued: #"{"access_token":"tok-123","scope":"\#(wide)"}"#)
         let token = try await MastodonOAuth(host: host, sender: server)
-            .signIn(as: MastodonFixture.app, through: await FixtureBrowser.approving())
+            .signIn(as: MastodonFixture.app, through: await FixtureBrowser.approving()).token
         #expect(token.scopes == MastodonOAuth.reading)
         #expect(token.asked == MastodonOAuth.reading)
         #expect(token.grant == .reading && !MastodonOAuth.bookmarks(token.scopes))
