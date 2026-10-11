@@ -54,6 +54,23 @@ import Foundation
 /// | **the person's list of authorised apps** (`/oauth/authorized_applications`, signed in at a browser) with a narrow and a wider token of one registration live | **one entry for the registration, not one a token**, under the registration's name. What it lists is **what the registration was made for, not what either token holds**: `entryPermissions`, for two sign-ins that between them held the four reading words and the two for follows |
 /// | **that entry removed** — the page's own Revoke: `POST /oauth/authorized_applications/<id>` with `_method=delete` and the page's own token | 302 back to the list. **Both tokens are ended at once**: each answers 401 "The access token was revoked". A token of another registration, the same person's, goes on answering 200. The entry is gone from the list; the registration is not — its page opens again for the same words and trades for a new string |
 ///
+/// ## Follows, asked of a sign-in that only reads (#347, #313) — asked 2026-10-11
+///
+/// Of the same image as the seed left it, **asking in English**: first with `curl` and the
+/// seed's own sign-ins, then by `MastodonSignInSaysTests` through the server's pages on the
+/// seed's registration. Whoever is followed is the seed's `followable_313`, whom nobody
+/// follows; they were unfollowed again each time.
+///
+/// | Asked | Answered |
+/// | ----- | -------- |
+/// | **how the reader stands to somebody** (`GET /api/v1/accounts/relationships?id[]=…`) with the reading words alone | **403**, `standingRefusedHeader`: the whole of `read`, or `read:follows` |
+/// | the same with the reading words and `read:follows` | 200: a list of one, the sixteen things of `standingNames`; `following` false, `followed_by` false |
+/// | **following somebody** (`POST /api/v1/accounts/:id/follow`) with the reading words, with those and `read:follows`, and with the reading and acting words | **403**, `followRefusedHeader`, each: the word that posts does not follow, and the word that reads how the reader stands does not |
+/// | **a reading sign-in asked where it stands for follows**: a page of the seed's registration for its four words and `read:follows write:follows`, while the reading one lives | the page is shown, for those six. Approved: a second, different token of the same registration and the same account, whose words are the six in the order asked. **The reading one goes on answering 200** — and is still refused how the reader stands to anybody, and following |
+/// | following with the wider one | 200: the same sixteen things, `following` true and `showing_reblogs` true — an account that is not locked is followed at once. `relationships` then says the same |
+/// | **posting with the wider one** (`POST /api/v1/statuses`), which holds `write:follows` and not `write:statuses` | **403**, `postRefusedHeader` — as the reading words alone are. Nothing is posted: holding follows is not writing |
+/// | unfollowing with the wider one | 200: `following` false, `showing_reblogs` false. Unfollowing somebody not followed is answered the same 200 |
+///
 /// **Not asked here** — the fixture is 4.6.6 alone: what a Mastodon from before the list of
 /// words was published answers at that address, and whether such a host echoes `scopes` at a
 /// registration at all; whether any host refuses a registration for some of its words and not
@@ -136,6 +153,21 @@ enum MastodonSignInCaptures {
 
     /// The account check asked with `read:statuses` alone: 403, and this header.
     static let checkRefusedHeader = #"Bearer realm="Doorkeeper", error="insufficient_scope", error_description="Access to this resource requires scope _profile read read:accounts_.""#
+
+    // MARK: - Follows — asked 2026-10-11
+
+    /// How the reader stands to somebody, asked with the reading words alone: 403, and this header.
+    static let standingRefusedHeader = #"Bearer realm="Doorkeeper", error="insufficient_scope", error_description="Access to this resource requires scope _read read:follows_.""#
+    /// Following somebody without `write:follows`: 403, and this header.
+    static let followRefusedHeader = #"Bearer realm="Doorkeeper", error="insufficient_scope", error_description="Access to this resource requires scope _follow write write:follows_.""#
+    /// Posting without `write:statuses`, whatever else is held: 403, and this header.
+    static let postRefusedHeader = #"Bearer realm="Doorkeeper", error="insufficient_scope", error_description="Access to this resource requires scope _write write:statuses_.""#
+    /// What the server says of how the reader stands to one person, and nothing else — in
+    /// `relationships`' list of one, and as the whole answer to a follow or an unfollow.
+    static let standingNames: Set<String> = [
+        "id", "following", "showing_reblogs", "notifying", "languages", "followed_by", "blocking", "blocked_by", "muting",
+        "muting_notifications", "muting_expires_at", "requested", "requested_by", "domain_blocking", "endorsed", "note",
+    ]
 
     /// What the entry on the list of authorised apps said the seed's registration (`registered`)
     /// may do, as the page's own words in the order it lists them, while the only sign-ins of

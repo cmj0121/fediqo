@@ -69,6 +69,11 @@ struct PartHoldsTests {
         #expect(says(Self.reads + " write:bookmarks") == "This sign-in allows reading as you, searching as you, bookmarks.")
         #expect(says(Self.acts) == "This sign-in allows reading as you, searching as you, writing as you.")
         #expect(says(Self.acts + " write:bookmarks") == "This sign-in allows reading as you, searching as you, writing as you, bookmarks.")
+        // Follows stands by itself too: beside a sign-in that only reads, whole and in part.
+        #expect(says(Self.reads + " read:follows write:follows") == "This sign-in allows reading as you, searching as you, who you follow.")
+        #expect(says(Self.reads + " read:follows") == "This sign-in allows reading as you, searching as you, who you follow (in part).")
+        #expect(says(Self.acts + " read:notifications read:follows write:follows") == "This sign-in allows reading as you, searching as you, writing as you, your notices, who you follow.")
+        #expect(PartWords.holds(Self.reads + " read:follows write:follows", language: .taiwanese) == "這個登入允許：以你的身分讀取、以你的身分搜尋、你追蹤的對象。")
         // Spelt out, and not the table's own list of everything: a part added later is none of these.
         let whole = "read:statuses read:lists read:accounts read:search write:statuses write:favourites write:bookmarks read:notifications write:notifications"
         #expect(says(whole) == "This sign-in allows reading as you, searching as you, writing as you, bookmarks, your notices, dismissing your notices.")

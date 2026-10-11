@@ -415,6 +415,11 @@ wrote.call(blocker, "fediqo309seed blocker")
 follows.call(fans.first, blocker)
 blocker.block!(writer_account) unless blocker.blocking?(writer_account)
 
+# One the writer does not follow and nobody else does, for the check that follows and
+# unfollows somebody (#313): no other check counts who follows them, and none lists them —
+# named unlike the rest, so that no search for the seed's people finds one more.
+followable = person.call("followable_313")
+
 # How the writer stands to people: they mute one and block another.
 writer_account.mute!(fans[4]) unless writer_account.muting?(fans[4])
 writer_account.block!(fans[3]) unless writer_account.blocking?(fans[3])
@@ -508,7 +513,7 @@ File.write(more, JSON.generate(tokens.merge(
   "people" => people_sign_ins.merge(
     "person" => named.call(shown), "locked" => named.call(locked), "hidden" => named.call(hidden).merge(people_sign_ins["hidden"]),
     "moved" => named.call(moved), "gone" => named.call(gone), "limited" => named.call(limited),
-    "robot" => named.call(robot), "blocker" => named.call(blocker),
+    "robot" => named.call(robot), "blocker" => named.call(blocker), "followable" => named.call(followable),
     "muted" => named.call(fans[4]), "blocked" => named.call(fans[3]),
     "far" => named.call(far), "farHidden" => named.call(far_hidden),
     "fans" => fans.map { |fan| named.call(fan) },

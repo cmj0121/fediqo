@@ -1,8 +1,8 @@
 import Foundation
 
 /// One thing a Mastodon sign-in may be asked for (#347): a part, and the scope words it is made
-/// of. **Adding a part is one case here** and its entry in the `switch` below, which has no
-/// `default:` so that a case without an entry does not build.
+/// of. **Adding a part is one case here** and its entry in each `switch` below, none of which
+/// has a `default:`, so that a case without an entry does not build.
 ///
 /// **In the order a page names them.** The order of the cases, and of each part's words, is the
 /// order of every scope string this app sends — which is also what a registration records — so
@@ -22,6 +22,10 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     case bookmarks
     /// What the source says happened to the reader — and dismissing it, beside `acting`.
     case notices
+    /// How the reader stands to someone, and following: people and hashtags followed and
+    /// unfollowed, requests to follow answered, a follower removed. **Stands without
+    /// `acting`**: a sign-in that only reads may be asked for it (#347).
+    case follows
 
     /// The words a page asks for this part.
     public var words: [String] {
@@ -31,6 +35,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
         case .acting: ["write:statuses", "write:favourites"]
         case .bookmarks: ["write:bookmarks"]
         case .notices: ["read:notifications"]
+        case .follows: ["read:follows", "write:follows"]
         }
     }
 
@@ -39,7 +44,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var wordsBesideActing: [String] {
         switch self {
         case .notices: ["write:notifications"]
-        case .reading, .search, .acting, .bookmarks: []
+        case .reading, .search, .acting, .bookmarks, .follows: []
         }
     }
 
@@ -49,7 +54,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var rider: Bool {
         switch self {
         case .search, .bookmarks: true
-        case .reading, .acting, .notices: false
+        case .reading, .acting, .notices, .follows: false
         }
     }
 
@@ -58,7 +63,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var needsActing: Bool {
         switch self {
         case .bookmarks: true
-        case .reading, .search, .acting, .notices: false
+        case .reading, .search, .acting, .notices, .follows: false
         }
     }
 }

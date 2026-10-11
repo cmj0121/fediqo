@@ -895,6 +895,10 @@
 "part.notices.ask.line" = "Its page asks for what you allowed, and for your notices.";
 "part.notices.ask.detail" = "%1$@'s own sign-in page opens. It asks for what this sign-in already has, and for one thing more — your notices: to read what %1$@ says happened to you there, and what it is holding back. Nothing is signed out first, on this device or another: close the page, or refuse on it, and the sign-in you have goes on as it is.";
 "part.notices.ask.beside" = "Because this sign-in will then both write as you and read your notices, its page also asks to dismiss them, and to let through or let go the ones held back.";
+"part.follows.ask.title" = "Ask %@ to allow following?";
+"part.follows.ask.line" = "Its page asks for what you allowed, and for who you follow.";
+"part.follows.ask.detail" = "%1$@'s own sign-in page opens. It asks for what this sign-in already has, and for one thing more — who you follow: to see how you and someone stand, to follow and unfollow people and hashtags, to answer requests to follow you, and to remove a follower. Nothing is signed out first, on this device or another: close the page, or refuse on it, and the sign-in you have goes on as it is.";
+"part.follows.unasked" = "This sign-in was not asked how you stand to people. Update permission";
 /* What a sign-in holds, part by part (#347): its row and its source's page. */
 "part.held.line" = "This sign-in allows %@.";
 "part.held.partly" = "%@ (in part)";
@@ -905,6 +909,7 @@
 "part.bookmarks.name" = "bookmarks";
 "part.notices.name" = "your notices";
 "part.notices.name.beside" = "dismissing your notices";
+"part.follows.name" = "who you follow";
 
 /* #25 — Home and your lists, read as you, and choosing which lists. */
 "account.mastodon.home.progress"      = "Reading your Home on %@…";

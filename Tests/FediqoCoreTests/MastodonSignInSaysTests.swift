@@ -74,11 +74,17 @@ struct MastodonSignInSaysTests {
         func header(_ name: String) -> String? { response.value(forHTTPHeaderField: name) }
     }
 
-    /// `path` asked with `token`, or as nobody where there is none.
-    private func ask(_ token: String?, _ path: String) async throws -> Answer {
+    /// `path` asked with `token`, or as nobody where there is none — read, unless `method`
+    /// says otherwise, when `form` is what is sent.
+    private func ask(_ token: String?, _ path: String, _ method: String = "GET", form: String = "") async throws -> Answer {
         guard let url = URL(string: "https://\(Self.host)\(path)") else { throw LocalHTTPError.invalidURL }
         var request = URLRequest(url: url)
         request.setValue("en", forHTTPHeaderField: "Accept-Language")
+        if method != "GET" {
+            request.httpMethod = method
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data(form.utf8)
+        }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         let (body, response) = try await LocalHTTP.client().send(request)
         return Answer(status: response.statusCode, response: response, body: body)
@@ -509,7 +515,109 @@ struct MastodonSignInSaysTests {
         }
     }
 
-    // MARK: - 9. The person's own list of authorised apps
+    // MARK: - 9. Follows, asked of a sign-in that only reads
+
+    /// How the reader stands to one person, as `relationships` answers it: a list of one.
+    private static func relation(in answer: Answer) -> [String: Any] {
+        let said = try? JSONSerialization.jsonObject(with: answer.body)
+        return (said as? [[String: Any]])?.first ?? [:]
+    }
+
+    /// #347, #313: a part stands by itself. A sign-in that only reads, asked where it stands
+    /// for follows, comes back able to follow and still unable to post.
+    @Test("A reading sign-in asked where it stands for follows — a page of the same registration for what its source says it holds and the two words of follows — comes back holding both beside what it had, as the same account, while the one it had goes on answering and is still refused how the reader stands to anybody; with it the source says how the reader stands to somebody, follows them and unfollows them, and still refuses a post for want of the word to write one")
+    func aReadingSignInAskedForFollows() async throws {
+        try await LocalServers.requireHealthy()
+        let oauth = try signer()
+        let pages = Pages(host: Self.host, browser: try LocalHTTP.browser())
+        try await pages.signIn()
+        let seeded = try LocalServers.seeded()
+        let other = try #require(
+            seeded.people?.followable,
+            "servers/.run/mastodon-tokens.json was seeded before this person was: run `make servers` again"
+        )
+        let account = "/api/v1/accounts/\(other.id)"
+        let stands = "/api/v1/accounts/relationships?id[]=\(other.id)"
+        try await revokingWhatItMade(oauth) { made in
+            let reading = MastodonOAuth.reading
+            let first = try await oauth.signIn(as: try app(asking: reading), through: pages)
+            let narrow = made.keep(first.token)
+            #expect(first.failed == nil)
+            #expect(!first.handedBack)
+            let unread = try await ask(narrow.accessToken, stands)
+            #expect(unread.status == 403)
+            #expect(unread.header("WWW-Authenticate") == Captures.standingRefusedHeader)
+
+            // The page: what the source says the sign-in holds, and follows — nothing else.
+            let said = try #require(try await oauth.words(of: narrow))
+            let page = MastodonParts.page(held: MastodonParts.believed(said, asked: narrow.asked), ticked: [.follows])
+            #expect(page == "read:statuses read:lists read:accounts read:search read:follows write:follows")
+            let second = try await oauth.signIn(as: try app(asking: page), through: pages)
+            let wider = made.keep(second.token)
+            #expect(second.failed == nil)
+            #expect(!second.handedBack)
+            #expect(pages.shown == [reading, page], "each was a page of its own, for exactly the words asked")
+            let another: Bool = wider.accessToken != narrow.accessToken
+            #expect(another, "a second sign-in, not the first handed back")
+            let named: Bool = first.accountID != nil
+            let sameAccount: Bool = first.accountID == second.accountID
+            #expect(named)
+            #expect(sameAccount, "the one account, by id")
+            let oneRegistration: Bool = wider.clientID == narrow.clientID
+            #expect(oneRegistration, "the same registration served both")
+            #expect(wider.scopes == page)
+            #expect(try await oauth.words(of: wider) == Self.list(page))
+
+            // Nothing ended the one it had, and it holds no more than it did.
+            #expect(try await ask(narrow.accessToken, Self.check).status == 200)
+            #expect(try await ask(narrow.accessToken, stands).status == 403)
+            #expect(try await ask(wider.accessToken, Self.check).status == 200)
+
+            let stood = try await ask(wider.accessToken, stands)
+            #expect(stood.status == 200)
+            let isThem: Bool = Self.relation(in: stood)["id"] as? String == other.id
+            #expect(isThem, "one entry, for the person asked about")
+            #expect(Set(Self.relation(in: stood).keys) == Captures.standingNames)
+            #expect(Self.relation(in: stood)["following"] as? Bool == false)
+
+            // Followed, then unfollowed — **and unfollowed however this ends**, by the
+            // sign-in itself or, where that fails, by the writer's own for everything.
+            let thrown: (any Error)?
+            do {
+                // The sign-in it took the place of may still not follow.
+                let refused = try await ask(narrow.accessToken, account + "/follow", "POST")
+                #expect(refused.status == 403)
+                #expect(refused.header("WWW-Authenticate") == Captures.followRefusedHeader)
+
+                let followed = try await ask(wider.accessToken, account + "/follow", "POST")
+                #expect(followed.status == 200)
+                #expect(followed.object["following"] as? Bool == true)
+                #expect(Set(followed.object.keys) == Captures.standingNames)
+                let now = try await ask(wider.accessToken, stands)
+                #expect(Self.relation(in: now)["following"] as? Bool == true)
+
+                // Holding follows is not writing: no post, for want of its own word.
+                let post = try await ask(wider.accessToken, "/api/v1/statuses", "POST", form: "status=fediqo347+never+posted")
+                #expect(post.status == 403)
+                #expect(post.header("WWW-Authenticate") == Captures.postRefusedHeader)
+                if let posted = post.object["id"] as? String {
+                    _ = try? await ask(seeded.writer, "/api/v1/statuses/\(posted)", "DELETE")
+                }
+                thrown = nil
+            } catch {
+                thrown = error
+            }
+            let unfollowed = try? await ask(wider.accessToken, account + "/unfollow", "POST")
+            if unfollowed?.status != 200 { _ = try? await ask(seeded.writer, account + "/unfollow", "POST") }
+            if let thrown { throw thrown }
+            #expect(unfollowed?.status == 200)
+            #expect(unfollowed?.object["following"] as? Bool == false)
+            let after = try await ask(wider.accessToken, stands)
+            #expect(Self.relation(in: after)["following"] as? Bool == false)
+        }
+    }
+
+    // MARK: - 10. The person's own list of authorised apps
 
     @Test("Two sign-ins of one registration are one entry on the person's list of authorised apps, which says what the registration was made for and not what either holds; removing it ends both at once and no other registration's, the source's own account of each then answering as for a token that never was; and the registration goes on opening its page")
     func removingTheEntryEndsEveryTokenOfIt() async throws {

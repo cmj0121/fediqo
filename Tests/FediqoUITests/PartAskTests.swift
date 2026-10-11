@@ -1049,6 +1049,7 @@ struct PartAskTests {
         .acting: ["write:statuses", "write:favourites"],
         .bookmarks: ["write:bookmarks"],
         .notices: ["read:notifications"],
+        .follows: ["read:follows", "write:follows"],
     ]
 
     private static func split(_ scopes: String) -> Set<String> {
@@ -1079,6 +1080,7 @@ struct PartAskTests {
         let finds = reads + " read:search"
         let acts = finds + " write:statuses write:favourites"
         let notified = " read:notifications"
+        let follows = " read:follows write:follows"
         let all = acts + " write:bookmarks read:notifications write:notifications"
         // What is filed as held, what is filed as asked, and what the source says is held —
         // never a word outside what was asked, which is believed of no source.
@@ -1089,6 +1091,15 @@ struct PartAskTests {
             (acts + notified, acts + notified, acts + notified),
             (acts + " write:bookmarks", acts + " write:bookmarks", acts + " write:bookmarks"),
             (all, all, all),
+            // Follows, beside a sign-in that only reads and one that does everything: whole,
+            // and held in part.
+            (finds + follows, finds + follows, finds + follows),
+            (reads + " read:follows", reads + " read:follows", reads + " read:follows"),
+            (all + follows, all + follows, all + follows),
+            (acts + notified + " write:follows", acts + notified + " write:follows", acts + notified + " write:follows"),
+            // Filed without follows, which its source says it holds; and the other way.
+            (finds, finds + follows, finds + follows),
+            (acts + follows, acts + follows, acts),
             // A word this build does not use.
             (acts + " push", acts + " push", acts + " push"),
             // Filed as holding less than its source says.

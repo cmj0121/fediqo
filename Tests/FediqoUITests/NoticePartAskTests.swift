@@ -371,7 +371,7 @@ struct NoticePartAskTests {
         #expect(page.scopes == [ask.said])
     }
 
-    @Test("Every question about a part with no earlier words of its own is the approved one with only the clause naming the part changed: it says nothing is signed out here or elsewhere, that the sign-in this device had stays live until a sign-out here, and that a source already holding one for exactly this asks nothing more — in both languages, under keys that are the part's own", arguments: [MastodonPart.reading, .search, .acting, .bookmarks, .notices])
+    @Test("Every question about a part with no earlier words of its own is the approved one with only the clause naming the part changed: it says nothing is signed out here or elsewhere, that the sign-in this device had stays live until a sign-out here, and that a source already holding one for exactly this asks nothing more — in both languages, under keys that are the part's own", arguments: [MastodonPart.reading, .search, .acting, .bookmarks, .notices, .follows])
     func everyDetailCarriesWhatIsOwed(_ part: MastodonPart) async throws {
         let ask = PartAsk(host: host, ticked: [part], said: "x", givesUp: [], stamp: nil)
         guard PartWords.own(ask.ticked)?.question(ask, .english) == nil else { return }

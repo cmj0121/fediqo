@@ -146,6 +146,9 @@ enum LocalServers {
             let robot: Named
             /// Blocks the writer; has a post and a follower.
             let blocker: Named
+            /// Followed by nobody, the writer least of all: who the check of following and
+            /// unfollowing follows (#313). Nothing in a file a seed older than that wrote.
+            let followable: Named?
             /// Followers of `person` the writer mutes and blocks.
             let muted: Named
             let blocked: Named

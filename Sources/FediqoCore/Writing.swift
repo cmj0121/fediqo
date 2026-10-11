@@ -21,6 +21,11 @@ public enum MastodonGrant: Sendable, Equatable, CaseIterable {
     case writing
 
     /// What a token's recorded scopes say it is.
+    ///
+    /// **By the writing part alone, and never by a word that happens to write** (#347): a part
+    /// stands by itself, so a sign-in that only reads may come to hold one that changes
+    /// something at its source — follows — and is still `reading` here. It posts, boosts,
+    /// favourites and bookmarks nothing, and everything that offers those reads this.
     public static func of(scopes: String?) -> MastodonGrant {
         guard scopes != nil else { return .unasked }
         return MastodonOAuth.writes(scopes) ? .writing : .reading

@@ -371,11 +371,13 @@ struct SignInNoticesTests {
         #expect(mastodon.notices(host: host) == .allowed)
         let page = NoticePage()
 
-        // Adding the acting part, on a server that will not have it: refused whole, which is what
-        // was chosen, and without bookmarks — and never without the search the sign-in held has.
+        // Adding the acting part, on a server that will not have it: refused whole, then for
+        // what was chosen, and without bookmarks — and never without the search the sign-in held has.
         #expect(await mastodon.signIn(host: host, through: page, writing: true) == .invalidScope)
 
-        #expect(await server.registered == [Self.whole, MastodonOAuth.scopes(writing: true, bookmarks: false, notices: true)])
+        #expect(await server.registered == [
+            Self.whole, MastodonOAuth.scopes(writing: true, notices: true), MastodonOAuth.scopes(writing: true, bookmarks: false, notices: true),
+        ])
         #expect(page.scopes.isEmpty)
         #expect(try tokens.token(host: host)?.accessToken == "tok-old")
         #expect(try tokens.token(host: host)?.scopes == reads)
