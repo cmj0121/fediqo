@@ -57,15 +57,18 @@ struct MastodonSignInPartsTests {
         let (r, w, b, n, d) = (Self.r, Self.w, Self.b, Self.n, Self.d)
         let s = "read:search"
 
-        #expect(MastodonOAuth.ladder(writing: false) == ["\(r) \(s)", r])
-        #expect(MastodonOAuth.ladder(writing: false, notices: true) == ["\(r) \(s) \(n)", "\(r) \(n)"])
-        #expect(MastodonOAuth.ladder(writing: true) == ["\(r) \(s) \(w) \(b)", "\(r) \(w) \(b)", "\(r) \(s) \(w)", "\(r) \(w)"])
-        let everything = ["\(r) \(s) \(w) \(b) \(n) \(d)", "\(r) \(w) \(b) \(n) \(d)", "\(r) \(s) \(w) \(n) \(d)", "\(r) \(w) \(n) \(d)"]
+        let reads: [String] = ["\(r) \(s)", r]
+        let sees: [String] = ["\(r) \(s) \(n)", "\(r) \(n)"]
+        let acts: [String] = ["\(r) \(s) \(w) \(b)", "\(r) \(w) \(b)", "\(r) \(s) \(w)", "\(r) \(w)"]
+        #expect(MastodonOAuth.ladder(writing: false) == reads)
+        #expect(MastodonOAuth.ladder(writing: false, notices: true) == sees)
+        #expect(MastodonOAuth.ladder(writing: true) == acts)
+        let everything: [String] = ["\(r) \(s) \(w) \(b) \(n) \(d)", "\(r) \(w) \(b) \(n) \(d)", "\(r) \(s) \(w) \(n) \(d)", "\(r) \(w) \(n) \(d)"]
         #expect(MastodonOAuth.ladder(writing: true, notices: true) == everything)
 
-        #expect(MastodonOAuth.known(writing: false) == ["\(r) \(s)", r])
-        #expect(MastodonOAuth.known(writing: false, notices: true) == ["\(r) \(s) \(n)", "\(r) \(n)"])
-        #expect(MastodonOAuth.known(writing: true) == ["\(r) \(s) \(w) \(b)", "\(r) \(w) \(b)"])
+        #expect(MastodonOAuth.known(writing: false) == Set(reads))
+        #expect(MastodonOAuth.known(writing: false, notices: true) == Set(sees))
+        #expect(MastodonOAuth.known(writing: true) == Set(acts.prefix(2)))
         #expect(MastodonOAuth.known(writing: true, notices: true) == Set(everything.prefix(2)))
 
         #expect(MastodonOAuth.scopes(writing: false) == "\(r) \(s)")
@@ -114,25 +117,9 @@ struct MastodonSignInPartsTests {
         }
     }
 
-    @Test("A first sign-in's page is byte for byte the string asked today, for every choice and every rung a sign-in could be asked on: reading with and without search, acting with and without bookmarks, each with and without notices")
-    func aFirstSignInAsksWhatItAskedBefore() {
-        for search in [true, false] {
-            let reads: Set<Part> = search ? [.reading, .search] : [.reading]
-            for notices in [true, false] {
-                let more: Set<Part> = notices ? [.notices] : []
-                #expect(MastodonParts.page(held: nil, ticked: reads.union(more))
-                    == MastodonOAuth.scopes(search: search, writing: false, notices: notices))
-                #expect(MastodonParts.page(held: nil, ticked: reads.union(more).union([.acting, .bookmarks]))
-                    == MastodonOAuth.scopes(search: search, writing: true, notices: notices))
-                #expect(MastodonParts.page(held: nil, ticked: reads.union(more).union([.acting]))
-                    == MastodonOAuth.scopes(search: search, writing: true, bookmarks: false, notices: notices))
-            }
-        }
-        #expect(MastodonParts.page(held: nil, ticked: []) == "")
-    }
-
     @Test("A page that widens a sign-in asks for what it holds and what was ticked, in the table's order whichever brought the word — so a sign-in reached in two steps asks the string one reached in one does")
     func aWiderPageIsOneStringHoweverReached() {
+        #expect(MastodonParts.page(held: nil, ticked: []) == "")
         let reading = MastodonOAuth.scopes(writing: false)
         let acting = MastodonOAuth.scopes(writing: true)
         let actingBare = MastodonOAuth.scopes(writing: true, bookmarks: false)

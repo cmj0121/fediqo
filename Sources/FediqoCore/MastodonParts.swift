@@ -83,7 +83,21 @@ public enum MastodonParts {
             let beside = part.wordsBesideActing
             words += beside.filter { had.contains($0) || (pressed && whole && actingHeld) }
         }
-        return words.joined(separator: " ")
+        return spelt(words)
+    }
+
+    /// What is still refused of `refused`, each list in turn, once a sign-in holds `given`:
+    /// every word but those given, once each and in the order met. Nothing, where none is left.
+    static func refused(_ refused: [String?], given: String?) -> String? {
+        var seen = words(given)
+        let left = refused.flatMap { ($0 ?? "").split(separator: " ").map(String.init) }
+            .filter { seen.insert($0).inserted }
+        return left.isEmpty ? nil : spelt(left)
+    }
+
+    /// Words as the one string a source reads them in.
+    private static func spelt(_ words: [String]) -> String {
+        words.joined(separator: " ")
     }
 
     /// Whether a scope string holds `part`: every word of it, **word by word and never as a
@@ -107,6 +121,8 @@ public enum MastodonParts {
     }
 
     /// Whether a word lets something be changed at the source, by the source's own spelling.
+    /// "Read only" drops by this prefix alone: a later part with an acting word outside it
+    /// must be marked in the table.
     private static func acts(_ word: String) -> Bool {
         word.hasPrefix("write:")
     }
