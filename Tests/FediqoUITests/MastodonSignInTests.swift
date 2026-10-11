@@ -18,6 +18,29 @@ private actor MastodonServer: HTTPSender {
         /// (#285): a 422 naming the scopes for a registration that asks for it, and a
         /// registration for any other.
         case refusesBookmarkApps
+        /// A registration answered as a Mastodon 4.6 answers one: the words asked, named back.
+        case registers
+        /// A server that does not know a word and says so as a 4.6 does: a registration that
+        /// names it is refused whole with a 422, and any other is made.
+        case refusesApps(naming: String)
+    }
+
+    /// A registration's answer naming back the words `request` asked for.
+    static func registered(_ request: URLRequest) -> String {
+        let form = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+        let field = form.split(separator: "&").first { $0.hasPrefix("scopes=") }
+        let asked = String(field?.dropFirst("scopes=".count) ?? "").removingPercentEncoding ?? ""
+        let named = asked.split(separator: " ").map { "\"\($0)\"" }.joined(separator: ",")
+        return #"{"client_id":"cid","client_secret":"csecret","redirect_uri":"fediqo://oauth","scopes":[\#(named)]}"#
+    }
+
+    /// The scopes each registration was made for, in order.
+    var registered: [String] {
+        requests.filter { $0.url?.path == "/api/v1/apps" }.map {
+            let form = String(decoding: $0.httpBody ?? Data(), as: UTF8.self)
+            let field = form.split(separator: "&").first { $0.hasPrefix("scopes=") }
+            return String(field?.dropFirst("scopes=".count) ?? "").removingPercentEncoding ?? ""
+        }
     }
 
     private let routes: [String: Outcome]
@@ -30,7 +53,7 @@ private actor MastodonServer: HTTPSender {
     init(tokens: MemoryMastodonTokens, _ overrides: [String: Outcome] = [:]) {
         self.tokens = tokens
         self.routes = [
-            "/api/v1/apps": .json(#"{"client_id":"cid","client_secret":"csecret"}"#),
+            "/api/v1/apps": .registers,
             "/oauth/token": .issuesToken,
             "/api/v1/accounts/verify_credentials": .json(#"{"id":"1"}"#),
             "/oauth/revoke": .json("{}"),
@@ -55,10 +78,14 @@ private actor MastodonServer: HTTPSender {
             return (
                 Data(#"{"access_token":"tok-\#(122 + issued)"}"#.utf8), Self.answered(url, 200)
             )
-        case .refusesBookmarkApps:
+        case .registers:
+            return (Data(Self.registered(request).utf8), Self.answered(url, 200))
+        case .refusesBookmarkApps, .refusesApps:
+            var unknown = "write%3Abookmarks"
+            if case .refusesApps(let word) = outcome { unknown = word.replacingOccurrences(of: ":", with: "%3A") }
             let form = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
-            guard form.contains("write%3Abookmarks") else {
-                return (Data(#"{"client_id":"cid","client_secret":"csecret"}"#.utf8), Self.answered(url, 200))
+            guard form.contains(unknown) else {
+                return (Data(Self.registered(request).utf8), Self.answered(url, 200))
             }
             return (
                 Data(#"{"error":"Validation failed: Scopes doesn't match those configured on the server."}"#.utf8),
@@ -138,10 +165,14 @@ struct MastodonSignInTests {
         )
     }
 
-    /// A registration made for the scopes this build asks for.
+    /// The registration this build makes: for every word a sign-in may be asked for.
     private var app: MastodonApp {
-        MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonOAuth.reading)
+        MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: MastodonRegistration.superset())
     }
+
+    /// Where a host's own list of words is asked for: no stub here has one, and each answers
+    /// that ask with nothing.
+    private let list = "/.well-known/oauth-authorization-server"
 
     private func shell(
         _ overrides: [String: MastodonServer.Outcome] = [:],
@@ -182,7 +213,7 @@ struct MastodonSignInTests {
         #expect(session.isSignedIn(host: host))
         #expect(session.mastodon.signedInHosts == [host])
         #expect(await server.paths == [
-            "/api/v1/apps", "/oauth/token", "/api/v1/accounts/verify_credentials",
+            list, "/api/v1/apps", "/oauth/token", "/api/v1/accounts/verify_credentials",
             "/api/v1/timelines/home",
         ])
         #expect(session.rowRefusal == nil)
@@ -219,7 +250,7 @@ struct MastodonSignInTests {
         let (session, server, tokens) = await shell()
         try tokens.save(MastodonApp(host: host, clientID: "old", clientSecret: "old", scopes: scopes))
         await session.signIn(host: host, through: Page())
-        #expect(await server.paths.first == "/api/v1/apps")
+        #expect(await server.paths.prefix(2) == [list, "/api/v1/apps"])
         #expect(try tokens.app(host: host) == app)
         #expect(session.isSignedIn(host: host))
     }
@@ -235,40 +266,41 @@ struct MastodonSignInTests {
         #expect(await !server.paths.contains("/oauth/token"))
     }
 
-    @Test("A server refusing read:search: registered once more without it, the reduced scopes kept, and signed in")
+    @Test("A server with no read:search: registered for what was chosen, then without it, on one page, the reduced registration kept, and signed in")
     func refusesSearch() async throws {
-        let (session, server, tokens) = await shell()
-        let page = Page(.refusesSearch)
+        let (session, server, tokens) = await shell(["/api/v1/apps": .refusesApps(naming: "read:search")])
+        let page = Page()
         await session.signIn(host: host, through: page)
-        #expect(page.opened == 2)
+        #expect(page.opened == 1, "a page was opened to find out what the registration already said")
+        #expect(page.scopes == [MastodonOAuth.readingWithoutSearch])
         #expect(await server.paths == [
-            "/api/v1/apps", "/api/v1/apps", "/oauth/token", "/api/v1/accounts/verify_credentials",
+            list, "/api/v1/apps", "/api/v1/apps", "/api/v1/apps", "/oauth/token", "/api/v1/accounts/verify_credentials",
             "/api/v1/timelines/home",
         ])
-        let registered = await server.requests.filter { $0.url?.path == "/api/v1/apps" }
-            .map { String(decoding: $0.httpBody ?? Data(), as: UTF8.self) }
-        #expect(registered.first?.contains("search") == true)
-        #expect(registered.last?.contains("search") == false, "the second registration leaves search out")
+        #expect(await server.registered == [
+            MastodonRegistration.superset(), MastodonOAuth.reading, MastodonOAuth.readingWithoutSearch,
+        ])
         #expect(try tokens.app(host: host)?.scopes == MastodonOAuth.readingWithoutSearch)
         #expect(session.isSignedIn(host: host))
         #expect(session.rowRefusal == nil)
 
-        // Signing in again reuses the reduced registration: no app piles up per attempt.
+        // Signing in again reuses the reduced registration, and the host is not asked again for
+        // what it refused: no app piles up per attempt.
         await session.signOut(host: host)
-        let again = Page(.refusesSearch)
+        let again = Page()
         await session.signIn(host: host, through: again)
         #expect(again.opened == 1)
-        #expect(await server.paths.filter { $0 == "/api/v1/apps" }.count == 2)
+        #expect(await server.registered.count == 3)
         #expect(session.isSignedIn(host: host))
     }
 
-    @Test("A server refusing even the reduced scopes: two registrations at most, none kept, and a sentence")
+    @Test("A page answering invalid_scope opens no second page: one registration, none kept, and a sentence")
     func refusesEveryScope() async throws {
         let (session, server, tokens) = await shell()
         let page = Page(.invalidScope)
         await session.signIn(host: host, through: page)
-        #expect(page.opened == 2)
-        #expect(await server.paths == ["/api/v1/apps", "/api/v1/apps"])
+        #expect(page.opened == 1)
+        #expect(await server.paths == [list, "/api/v1/apps"])
         #expect(try tokens.app(host: host) == nil)
         #expect(!session.isSignedIn(host: host))
         #expect(session.rowRefusal?.key == "account.mastodon.failed")
@@ -293,7 +325,7 @@ struct MastodonSignInTests {
         #expect(try tokens.signedInHosts().isEmpty)
         #expect(!session.isSignedIn(host: host))
         #expect(session.rowRefusal == nil)
-        #expect(await server.paths == ["/api/v1/apps"])
+        #expect(await server.paths == [list, "/api/v1/apps"])
     }
 
     @Test("A server that cannot be reached is one sentence under its row")
@@ -635,17 +667,19 @@ struct MastodonSignInTests {
     }
 
     /// **Refusing the writing part leaves reading exactly as it was**, and this is where that is
-    /// proved rather than promised: the page, the exchange and the registration all ask for the
-    /// reading string and no request in the whole sign-in carries the word.
+    /// proved rather than promised: the page and the exchange ask for the reading string, and
+    /// no request but the registration — which is for every part, once, whatever is chosen
+    /// (#347) — carries the word.
     @Test("Signing in to read asks for the reading scopes and nothing else")
     func signsInToRead() async throws {
         let (session, server, tokens) = await shell()
         let page = Page()
         await session.signIn(host: host, through: page, writing: false)
         #expect(page.scopes == [MastodonOAuth.reading])
-        #expect(try tokens.app(host: host)?.scopes == MastodonOAuth.reading)
+        #expect(try tokens.app(host: host)?.scopes == MastodonRegistration.superset())
+        #expect(try tokens.token(host: host)?.scopes == MastodonOAuth.reading)
         #expect(try tokens.token(host: host)?.grant == .reading)
-        for request in await server.requests {
+        for request in await server.requests where request.url?.path != "/api/v1/apps" {
             let body = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
             #expect(!body.contains("write"), "a read-only sign-in asked to write")
         }
@@ -659,7 +693,7 @@ struct MastodonSignInTests {
         let page = Page()
         await session.signIn(host: host, through: page, writing: true)
         #expect(page.scopes == [MastodonOAuth.scopes(writing: true)])
-        #expect(try tokens.app(host: host)?.scopes == MastodonOAuth.scopes(writing: true))
+        #expect(try tokens.app(host: host) == app)
         #expect(try tokens.token(host: host)?.grant == .writing)
         // The registration and the exchange say the same thing the page did — read off the
         // forms, so a page that asked for one thing and a token issued for another fails here.
@@ -676,31 +710,33 @@ struct MastodonSignInTests {
         #expect(SourceRow.spoken(row).contains(L10n.t("account.source.writing.write")))
     }
 
-    /// A registration made for the other answer cannot carry this one's page — the server would
-    /// answer `invalid_scope` — so the choice changing means registering again.
-    @Test("Changing the answer registers again rather than reusing the other one")
-    func changingTheAnswerRegistersAgain() async throws {
+    /// One registration carries both answers (#347): the choice changing is another page, and
+    /// never another app on the reader's account.
+    @Test("Changing the answer registers nothing more: the one registration carries both pages")
+    func changingTheAnswerRegistersNothingMore() async throws {
         let (session, server, tokens) = await shell()
-        await session.signIn(host: host, through: Page(), writing: false)
+        let reads = Page()
+        await session.signIn(host: host, through: reads, writing: false)
         await session.signOut(host: host)
-        #expect(try tokens.app(host: host)?.scopes == MastodonOAuth.reading)
+        #expect(try tokens.app(host: host) == app)
 
-        await session.signIn(host: host, through: Page(), writing: true)
-        #expect(await server.paths.filter { $0 == "/api/v1/apps" }.count == 2)
-        #expect(try tokens.app(host: host)?.scopes == MastodonOAuth.scopes(writing: true))
+        let writes = Page()
+        await session.signIn(host: host, through: writes, writing: true)
+        #expect(await server.registered == [MastodonRegistration.superset()])
+        #expect(reads.scopes == [MastodonOAuth.reading] && writes.scopes == [MastodonOAuth.scopes(writing: true)])
+        #expect(try tokens.app(host: host) == app)
         #expect(try tokens.token(host: host)?.grant == .writing)
     }
 
-    /// Decision 32's fallback is per answer: a host that will not grant `read:search` still grants
-    /// the writing part, and the reader keeps what they asked for.
-    @Test("A server refusing read:search keeps the writing part in the narrower registration")
+    /// Decision 32's fallback is per answer: a host that has no `read:search` still grants the
+    /// writing part, and the reader keeps what they asked for.
+    @Test("A server with no read:search keeps the writing part in the narrower registration, on one page")
     func refusesSearchWhileWriting() async throws {
-        let (session, _, tokens) = await shell()
-        let page = Page(.refusesSearch)
+        let (session, _, tokens) = await shell(["/api/v1/apps": .refusesApps(naming: "read:search")])
+        let page = Page()
         await session.signIn(host: host, through: page, writing: true)
-        #expect(page.opened == 2)
-        let narrow = MastodonOAuth.scopes(search: false, writing: true)
-        #expect(page.scopes == [MastodonOAuth.scopes(writing: true), narrow])
+        let narrow = MastodonOAuth.scopes(search: false, writing: true, bookmarks: false)
+        #expect(page.scopes == [narrow])
         #expect(try tokens.app(host: host)?.scopes == narrow)
         #expect(try tokens.token(host: host)?.grant == .writing)
         #expect(row(session, host).writing == .writes)
@@ -972,7 +1008,7 @@ struct MastodonSignInTests {
         let page = Page()
         await session.allowBookmarks(host: host, through: page)
         #expect(page.scopes == [Self.before + " write:bookmarks"])
-        #expect(try tokens.app(host: host)?.scopes == Self.before + " write:bookmarks")
+        #expect(try tokens.app(host: host)?.scopes == MastodonRegistration.superset())
         #expect(try tokens.token(host: host)?.accessToken == "tok-123")
         #expect(await server.revoked == ["tok-old"])
         #expect(session.mastodon.grants[host] == .writing)
@@ -1004,12 +1040,11 @@ struct MastodonSignInTests {
 
     @Test("A server with no bookmark scope leaves a working read-and-write sign-in, and the row stops asking")
     func aServerWithoutBookmarks() async throws {
-        let (session, _, tokens) = await shell()
-        let page = Page(.refusesBookmarks)
+        let (session, _, tokens) = await shell(["/api/v1/apps": .refusesBookmarkApps])
+        let page = Page()
         await session.signIn(host: host, through: page, writing: true)
 
-        let without = "read:statuses read:lists read:accounts write:statuses write:favourites"
-        #expect(page.scopes == [Self.before + " write:bookmarks", without + " write:bookmarks", Self.before])
+        #expect(page.scopes == [Self.before], "one page, for the sign-in to act without bookmarks: its search is not lost with them")
         #expect(try tokens.token(host: host)?.scopes == Self.before)
         #expect(try tokens.app(host: host)?.scopes == Self.before)
         #expect(session.mastodon.grants[host] == .writing)
@@ -1026,14 +1061,14 @@ struct MastodonSignInTests {
         #expect(session.mastodon.bookmarksRefused.isEmpty)
     }
 
-    @Test("A server that refuses the registration itself for the bookmark scope still signs in to read and write, on one page")
+    @Test("A server that refuses the registration itself for the bookmark scope still signs in to read and write, on one page and three registrations")
     func aServerRefusingTheRegistration() async throws {
         let (session, server, tokens) = await shell(["/api/v1/apps": .refusesBookmarkApps])
         let page = Page()
         await session.signIn(host: host, through: page, writing: true)
 
         #expect(page.scopes == [Self.before], "a page was opened for a registration the server refused")
-        #expect(await server.paths.filter { $0 == "/api/v1/apps" }.count == 3)
+        #expect(await server.registered == [MastodonRegistration.superset(), Self.before + " write:bookmarks", Self.before])
         #expect(session.rowRefusal == nil, "read and write failed outright where it worked before")
         #expect(try tokens.token(host: host)?.scopes == Self.before)
         #expect(row(session, host).writing == .writes)
@@ -1042,14 +1077,14 @@ struct MastodonSignInTests {
         // A server that is merely failing is not refusing a scope: nothing falls, and it says so.
         let (failing, down, _) = await shell(["/api/v1/apps": .json("{}", status: 503)])
         await failing.signIn(host: host, through: Page(), writing: true)
-        #expect(await down.paths == ["/api/v1/apps"])
+        #expect(await down.paths == [list, "/api/v1/apps"])
         #expect(failing.rowRefusal?.key == "account.mastodon.failed.unreachable")
     }
 
     @Test("Asked and not given is written down beside the sign-in: after a relaunch the row and Account still do not offer to ask, and a later sign-in may")
     func askedAndRefusedOutlivesARelaunch() async throws {
-        let (session, server, tokens) = await shell()
-        await session.signIn(host: host, through: Page(.refusesBookmarks), writing: true)
+        let (session, server, tokens) = await shell(["/api/v1/apps": .refusesBookmarkApps])
+        await session.signIn(host: host, through: Page(), writing: true)
         #expect(try tokens.token(host: host)?.asked == Self.before + " write:bookmarks")
         #expect(try tokens.token(host: host)?.scopes == Self.before)
 
@@ -1068,8 +1103,13 @@ struct MastodonSignInTests {
         #expect(await server.paths.count == before, "a source that has answered was asked again")
 
         // An ordinary sign-in is a new question, and a server that has since learnt the scope says yes.
-        await relaunched.signIn(host: host, through: Page(), writing: true)
-        #expect(relaunched.mastodon.bookmarks(host: host) == .allowed)
+        let learnt = ShellSession(
+            http: FixtureHTTP(), store: session.store,
+            mastodon: MastodonSessions(tokens: tokens, sender: MastodonServer(tokens: tokens))
+        )
+        learnt.sources = await learnt.store.sources()
+        await learnt.signIn(host: host, through: Page(), writing: true)
+        #expect(learnt.mastodon.bookmarks(host: host) == .allowed)
     }
 
     @Test("A source cleared while its page is up is not registered with again, and no further page opens")

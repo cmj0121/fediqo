@@ -171,6 +171,20 @@ struct SourceReach {
         (http as? URLSessionClient)?.capped(to: limit).stayingOnOrigin() ?? SmallBody(http, limit: limit)
     }
 
+    /// How much body a host's own list of the words a sign-in may ask it for may bring: a real
+    /// server's is 1,620 bytes.
+    static let wordListBody = 64 << 10
+
+    /// What a host is asked through for that list (#347): `sender` under `wordListBody` and
+    /// kept to the host it is asked at — held to both as the body arrives where it is the live
+    /// client, and refused what it brought past the ceiling where it is any other.
+    ///
+    /// **Handed the plain client, before it is listed or bounded**, for `small`'s reason.
+    static func wordList(_ sender: any HTTPSender) -> any HTTPSender {
+        (sender as? URLSessionClient)?.capped(to: Self.wordListBody).stayingOnOrigin()
+            ?? SmallAnswer(sender, limit: Self.wordListBody)
+    }
+
     /// How much body the list of servers a host knows may bring: a large host names tens of
     /// thousands, which is past what a small ask may bring and still a list of names.
     static let serversBody = 8 << 20
@@ -275,6 +289,23 @@ private struct SmallBody: HTTPClient {
 
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         let answer = try await inner.data(from: url)
+        guard answer.0.count <= limit else { throw URLError(.dataLengthExceedsMaximum) }
+        return answer
+    }
+}
+
+/// `SmallBody`, for a client that is sent a request.
+private struct SmallAnswer: HTTPSender {
+    private let inner: any HTTPSender
+    private let limit: Int
+
+    init(_ inner: any HTTPSender, limit: Int) {
+        self.inner = inner
+        self.limit = limit
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let answer = try await inner.send(request)
         guard answer.0.count <= limit else { throw URLError(.dataLengthExceedsMaximum) }
         return answer
     }

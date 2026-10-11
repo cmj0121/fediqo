@@ -25,6 +25,10 @@ public final class MastodonSessions {
     /// a question about that sign-in can put it down.
     @ObservationIgnored var onEnded: ((String) -> Void)?
 
+    /// What this run has learnt of registering at each host (#347): its own list of words, a
+    /// registration it refused, a page suspected of stranding. Never written down.
+    @ObservationIgnored private var registering = MastodonRegistering()
+
     /// What each signed-in host's sign-in bought (#69) — **and, by its keys, who is signed in at
     /// all.**
     ///
@@ -176,48 +180,49 @@ public final class MastodonSessions {
     /// Signs in on the server's own page and keeps the token. Nothing where it worked, or where the
     /// reader closed the page or said no there; otherwise why it did not.
     ///
-    /// **One registration per host.** The app is registered the first time and the registration
-    /// kept, so signing out and in again does not leave a trail of apps on the reader's account.
-    /// It is dropped — and the next attempt registers afresh — where the server rejects it at
-    /// the token exchange or its page answers `invalid_scope`, where it was made for other scopes
-    /// than this build asks for, or where a sign-in through it ends with the page closed: a server that
-    /// no longer knows the client shows an error page with no way back, and closing it is the
-    /// only thing the reader can do there.
+    /// **One registration per host, made for every word a sign-in may come to be asked for**
+    /// (#347, `registration`), and kept, so signing out and in again — or asking for more —
+    /// does not leave a trail of apps on the reader's account. **The page asks for less than
+    /// that**: what the reader's answer asks, and no word more.
     ///
-    /// **A server that refuses `read:search`** (Decision 32) is asked once more, on a
-    /// registration made without it and kept with the scopes it was made for, so each later
-    /// sign-in reuses it rather than registering again. Only finding an old post again needs
-    /// search; the thread says so and asks for a sign-in again.
+    /// **One page a press, whatever the server answers.** A word a server does not know is
+    /// found where the app is registered, before any page; no page is opened to find it.
+    ///
+    /// **A registration an earlier build made is left as it is**, and used wherever it holds
+    /// what this sign-in asks; it is made again only at a press that asks for a word it lacks.
+    /// A sign-in held was made with its own registration, which it carries, so making another
+    /// takes nothing from it.
+    ///
+    /// The registration is dropped — and the next attempt registers afresh — where the server
+    /// rejects it at the token exchange or answers `invalid_scope`, or where a sign-in through
+    /// one kept from before ends with the page closed: a server that no longer knows the client
+    /// shows an error page with no way back, and closing it is the only thing the reader can do
+    /// there.
+    ///
+    /// **A page closed on a registration nothing confirmed is suspected of the same**
+    /// (`MastodonRegistering.strand`): the next press registers for exactly what it asks
+    /// where a sign-in is held, and for the least a sign-in can be where none is; where that
+    /// page ends the same way the source is not asked again this run — `stranded(host:)` says
+    /// so, and every later press is answered without asking it. **A sign-in that came back
+    /// through a registration confirms it**: a page closed under it later is a page closed.
+    ///
+    /// **A sign-in held never comes out of a press with fewer of the words that press asked**:
+    /// no registration is made, and none kept from before is used, whose page would leave it
+    /// less, and a server that answers with less has its token ended and the one held stays.
+    /// Reading alone, chosen over a sign-in that acts, asks for less and is kept.
     ///
     /// **`writing` is the reader's own answer and is never assumed** (#69). It decides what the
-    /// server's page asks for and what the registration is made for, and it is written down with
-    /// the token. `false` asks for exactly the scopes this app asked for before it could write at
-    /// all, so refusing the writing part leaves reading as it was, down to the string.
+    /// server's page asks for, and it is written down with the token. `false` asks for exactly
+    /// the scopes this app asked for before it could write at all, so refusing the writing part
+    /// leaves reading as it was, down to the string. A server that has no writing part to give
+    /// fails the sign-in and says so — it is **never** quietly made one for reading alone,
+    /// because a reader who asked to write and was handed a read-only sign-in without being
+    /// told has been answered for.
     ///
-    /// **A registration made for the other answer is not reused**: a page asking to write on a
-    /// registration made for reading is `invalid_scope`, so the choice changing means registering
-    /// again. A server that refuses the writing part outright fails the sign-in and says so —
-    /// it is **never** quietly retried for reading alone, because a reader who asked to write
-    /// and was handed a read-only sign-in without being told has been answered for.
-    ///
-    /// **A registration the server refuses for its scopes falls a rung too**, exactly as its page
-    /// answering `invalid_scope` does — a server that does not know the bookmark scope may say so
-    /// there and never open a page at all.
-    ///
-    /// **What that reader actually sees, said plainly:** a server that refuses the writing part
-    /// answers `invalid_scope`, which is indistinguishable here from a server that refuses
-    /// `read:search` or bookmarks, so every rung of the ladder is tried first — the reader is sent
-    /// to the server's page again for each, and is refused on the last before the sign-in fails
-    /// and says so. Four pages for one refusal, where it was two before bookmarks were asked for;
-    /// a server that refuses bookmarks alone is three, and then signed in. Telling the refusals
-    /// apart needs something the callback does not carry.
-    ///
-    /// **A sign-in to read and act asks for bookmarks too** (#285), and a server that refuses that
-    /// one word leaves the reader with the read-and-write sign-in they asked for: the ladder's
-    /// later rungs are that sign-in without it, tried after `read:search`'s. Reading alone asks
-    /// for exactly what it asked before. A registration made for acting without bookmarks —
-    /// every one an earlier build made — is not started on (`MastodonOAuth.known`), so asking
-    /// again is asked on a page that names bookmarks.
+    /// **A sign-in to read and act asks for bookmarks too** (#285), and a server that has none,
+    /// or no search (Decision 32), leaves the reader with the sign-in they asked for without
+    /// it. What the server itself has none of is still written down as asked, so the row
+    /// stops offering it; what was only left off a page is not, and stays a lock at its place.
     ///
     /// **A sign-in made while a token is already held replaces it here and revokes it there**
     /// (#69). `tokens.save` is delete-then-add, so the superseded token would otherwise stay live
@@ -227,9 +232,8 @@ public final class MastodonSessions {
     /// **Notices are asked for only where the reader pressed for them** (#323): `notices` is
     /// `true` from the notices page's press and from nowhere else. Left out, the sign-in
     /// **carries what the one held has** — so adding the writing part or bookmarks never takes
-    /// notices away, and a sign-in with nothing held, or after a sign-out, asks for none. Asked
-    /// for, they ride on every rung and add none (`MastodonOAuth.ladder`): a server with no such
-    /// scope fails the ask, and the sign-in held is still held.
+    /// notices away, and a sign-in with nothing held, or after a sign-out, asks for none. A
+    /// server with no such scope fails the ask, and the sign-in held is still held.
     ///
     /// **What is carried is what the last look said the sign-in held has** — and only where that
     /// look could not be had, the held token's own scopes, read here — so a look at the Keychain
@@ -240,15 +244,9 @@ public final class MastodonSessions {
     ///
     /// **A source that has answered the ask is not asked again**: where it refused the scope
     /// outright, or granted the sign-in without it, a second press sends nothing and is told the
-    /// same thing, until a sign-in or a sign-out. Each ask of a server that knows no such scope
-    /// is a registration per rung, and a server allows few of those. **Only the press itself is
-    /// read that way**: a sign-in that merely carried notices and was refused — for the writing
-    /// part, say — says nothing about notices, and the sign-in held goes on reading them.
-    ///
-    /// **An ask that ends with no sign-in kept puts back the registration it set aside** — while
-    /// what is stored is still this ask's own, or nothing: a registration another sign-in made
-    /// meanwhile is not written over. The sign-in held was made on the one set aside, and a
-    /// reader who only closed the page is left exactly as they were.
+    /// same thing, until a sign-in or a sign-out. **Only the press itself is read that way**: a
+    /// sign-in that merely carried notices and was refused — for the writing part, say — says
+    /// nothing about notices, and the sign-in held goes on reading them.
     ///
     /// **`noticesSaid` is what the question this answers said of notices**, where one was put:
     /// said to carry none, the sign-in asks for none, whatever the sign-in held has come to
@@ -261,88 +259,62 @@ public final class MastodonSessions {
         let host = raw.lowercased()
         let pressed = wanted == true
         if pressed, noticesGaveNone(host) { return .invalidScope }
+        if registering.stranded(host) { return .invalidScope }
         let notices = wanted ?? (said != false && carriesNotices(host: host))
         let before = signOuts[host, default: 0]
         // Whether the reader still wants this sign-in: not signed out, cleared or removed since.
         var stillWanted: Bool { signOuts[host, default: 0] == before }
         let oauth = MastodonOAuth(host: host, sender: WatchedHTTP(sender: sender, for: .signIn, in: work))
-        var kept = (try? tokens.app(host: host)) ?? nil
-        // The registration the notices ask sets aside, put back where the ask ends with no
-        // sign-in kept — and the one this ask has stored in its place, if any, which is what
-        // tells its own from one another sign-in made meanwhile.
-        var setAside: MastodonApp?
-        var mine: MastodonApp?
-        // A registration made for scopes this sign-in does not ask for is made again: the server
-        // would refuse the page with `invalid_scope`.
-        let asked = MastodonOAuth.known(writing: writing, notices: notices)
-        if let app = kept, !asked.contains(app.scopes ?? "") {
-            if pressed { setAside = app }
-            try? tokens.forgetApp(host: host)
-            kept = nil
+        // What the reader's answer asks, and the same with less, a part a sign-in is whole
+        // without at a time: without bookmarks, then without search as well — the least.
+        let chosen = MastodonOAuth.scopes(writing: writing, notices: notices)
+        let narrower = [
+            MastodonOAuth.scopes(writing: writing, bookmarks: false, notices: notices),
+            MastodonOAuth.scopes(search: false, writing: writing, bookmarks: false, notices: notices),
+        ]
+        let made: Registration
+        do {
+            guard let found = try await registration(host: host, for: chosen, orLess: narrower, since: before)
+            else { return nil }
+            made = found
+        } catch let error as MastodonSignInError {
+            // The press for notices itself, and the server would register for none of them.
+            // Never a sign-in that only carried them, whose refusal may be about anything.
+            if error == .invalidScope, pressed, stillWanted { noticesTurnedAway.insert(host) }
+            return error == .cancelled ? nil : error
+        } catch {
+            return .unreachable
         }
-        func putBack() {
-            guard let setAside, stillWanted else { return }
-            // A store that cannot be read is not shown to hold this ask's own: left alone.
-            guard let stored = try? tokens.app(host: host) as MastodonApp??, stored == mine else { return }
-            try? tokens.save(setAside)
-        }
-        // The one ladder, from the one place that owns it: what this answer registers for, and
-        // what it falls back to, a rung at a time, where the server answers `invalid_scope`.
-        let ladder = MastodonOAuth.ladder(writing: writing, notices: notices)
-        var rung = kept.flatMap { app in ladder.firstIndex(of: app.scopes ?? "") } ?? 0
-        // What this sign-in asks for at its widest, written down with the token it ends in.
-        let widest = ladder[rung]
+        // A part left off a page for want of proof that the host has it was not asked; one the
+        // host itself said it has none of was, and the row stops offering it.
+        let asked = MastodonRegistration.asked(chosen, on: made.page) { registering.hasNone(of: $0, at: host) }
         var token: MastodonToken
         do {
-            var app = kept
-            var issued: MastodonToken?
-            while issued == nil {
-                do {
-                    let registered: MastodonApp
-                    if let app {
-                        registered = app
-                    } else {
-                        registered = try await oauth.register(scopes: ladder[rung])
-                        if stillWanted {
-                            try? tokens.save(registered)
-                            mine = registered
-                        }
-                        app = registered
-                    }
-                    let signed = try await oauth.signIn(as: registered, through: browser)
-                    // A token that failed its check is no sign-in — and may be the one held.
-                    if let failed = signed.failed {
-                        await end(signed.token, why: .notKept)
-                        throw failed
-                    }
-                    issued = signed.token
-                } catch MastodonSignInError.invalidScope where rung + 1 < ladder.count {
-                    try? tokens.forgetApp(host: host)
-                    mine = nil
-                    kept = nil
-                    app = nil
-                    // Cleared or removed while the page was up: no further rung is registered
-                    // for, and no further page opened, on a source the reader has let go of.
-                    guard stillWanted else { return nil }
-                    rung += 1
-                }
+            let signed = try await oauth.signIn(as: made.app, asking: made.page, through: browser)
+            // The page came back and its code was traded: the host knows this registration.
+            registering.made(at: host, confirmed: true)
+            // A token that failed its check is no sign-in — and may be the one held.
+            if let failed = signed.failed {
+                await end(signed.token, why: .notKept)
+                throw failed
             }
-            guard let issued else { return .unreadable }
-            token = issued.recorded(asked: widest)
+            token = signed.token.recorded(asked: asked)
         } catch let error as MastodonSignInError {
-            if error == .clientRejected || error == .invalidScope || (kept != nil && error == .cancelled) {
-                try? tokens.forgetApp(host: host)
-                mine = nil
+            // No server's page sends `invalid_scope` back; one that did has said what a page
+            // of its own, closed, says of a registration nothing confirmed.
+            let strand = error == .invalidScope || (error == .cancelled && registering.isUnconfirmed(host))
+            if error == .clientRejected || strand || (made.wasKept && error == .cancelled) {
+                drop(made.app)
             }
-            putBack()
-            // The press for notices itself, refused on every rung: the server would have none of
-            // them. Never a sign-in that only carried them, whose refusal may be about anything.
-            if error == .invalidScope, pressed, stillWanted {
-                noticesTurnedAway.insert(host)
-            }
-            return error == .cancelled || error == .denied ? nil : error
+            // Cleared or removed while the page was up: nothing is concluded about a source
+            // the reader has let go of, and nothing said under a row that is gone.
+            let unsaid = error == .cancelled || error == .denied
+            guard stillWanted else { return strand || unsaid ? nil : error }
+            if strand { registering.strand(host) }
+            if error == .invalidScope, pressed { noticesTurnedAway.insert(host) }
+            if strand, registering.stranded(host) { return .invalidScope }
+            return unsaid ? nil : error
         } catch {
-            putBack()
             return .unreachable
         }
         guard stillWanted else {
@@ -351,6 +323,12 @@ public final class MastodonSessions {
         }
         // The token this one supersedes, read before `save` deletes it.
         let superseded = (try? tokens.token(host: host)) ?? nil
+        // A server cannot talk this device out of a sign-in it holds: one that answers with
+        // fewer of the words asked than the sign-in held has is not kept.
+        if let superseded, !MastodonRegistration.keeps(superseded.scopes, asking: chosen, in: token.scopes) {
+            await end(token, why: .notKept)
+            return .unreadable
+        }
         do {
             try tokens.save(token)
         } catch {
@@ -366,7 +344,6 @@ public final class MastodonSessions {
             if let superseded, ((try? tokens.token(host: host)) ?? nil) == nil {
                 do { try tokens.save(superseded) } catch { lost = superseded }
             }
-            putBack()
             refresh()
             await end(token, why: .notKept)
             if let lost { await end(lost, why: .notKept) }
@@ -383,6 +360,7 @@ public final class MastodonSessions {
         writeRefused.remove(host)
         bookmarkTurnedAway.remove(host)
         noticesTurnedAway.remove(host)
+        registering.signedIn(host)
         let reader = handles[host]
         handles[host] = nil
         refresh()
@@ -394,6 +372,134 @@ public final class MastodonSessions {
         // posts is not this one's to be told.
         if reader == nil || handles[host] != reader { readersChanged.insert(host) }
         return nil
+    }
+
+    /// A registration to sign in through, and what its page asks.
+    private struct Registration {
+        let app: MastodonApp
+        let page: String
+        /// Whether it was kept from before this press, and not made by it.
+        let wasKept: Bool
+    }
+
+    /// The registration a sign-in asking for `chosen` goes through, and what its page asks —
+    /// the one kept where that holds every word of `chosen`, and otherwise one made here.
+    /// Nothing, where the reader let go of the source meanwhile.
+    ///
+    /// **Made for everything, less what the host's own list lacks** — asked for here, once a
+    /// run, and only ever taking away. **Refused, one kept from before that can carry the page
+    /// serves**; with none, it is made for exactly `chosen`, and then for each of `narrower`
+    /// in turn. Every refusal is remembered for the run: a host is never asked twice for a
+    /// registration it refused, so a first sign-in costs it one more registration than
+    /// `narrower` has, at most, and a later press none.
+    ///
+    /// **Nothing here takes a word from a sign-in held**: a registration whose page would
+    /// leave it fewer of the words `chosen` asks is neither made nor used.
+    ///
+    /// **After a page with no way back** (`MastodonRegistering.strand`) one registration is
+    /// made: for exactly `chosen` where a sign-in is held, and for the least where none is.
+    ///
+    /// **What is stored is looked at again after every wait**, and a registration made here is
+    /// kept only where the one stored is still the one this looked at: a sign-out, a Clear, a
+    /// Remove or another sign-in meanwhile is not written over. One this press could not keep
+    /// still serves its own page.
+    private func registration(
+        host: String, for chosen: String, orLess narrower: [String], since before: Int
+    ) async throws -> Registration? {
+        var stillWanted: Bool { signOuts[host, default: 0] == before }
+        // The sign-in held, as its attributes say it: no token is read before a page opens, and
+        // what the token itself says is looked at once its answer is in (`signIn`).
+        let held = ((try? tokens.parts()) ?? [:])[host]
+        // Whether a page asking `words` leaves the sign-in held every word of it this one asks.
+        func keeps(_ words: String) -> Bool { MastodonRegistration.keeps(held?.scopes, asking: chosen, in: words) }
+        // What is stored now, and the page it serves: where it holds all of `chosen`, was made
+        // for exactly `words`, or — everything being no longer tried here — carries a page
+        // that takes nothing from the sign-in held.
+        func kept(for words: String? = nil) -> (stored: MastodonApp?, page: String?) {
+            let stored = (try? tokens.app(host: host)) ?? nil
+            guard let stored, let scopes = stored.scopes,
+                  let page = MastodonRegistration.page(chosen, on: scopes)
+            else { return (stored, nil) }
+            let carries = !registering.mayTryWhole(host) && keeps(page)
+            return (stored, page == chosen || scopes == words || carries ? page : nil)
+        }
+        var seen = kept()
+        if let app = seen.stored, let page = seen.page { return Registration(app: app, page: page, wasKept: true) }
+
+        let oauth = MastodonOAuth(host: host, sender: WatchedHTTP(sender: sender, for: .signIn, in: work))
+        var tries: [String] = []
+        if registering.mayTryWhole(host) {
+            let listed = await listedWords(host: host)
+            guard stillWanted else { return nil }
+            let whole = MastodonRegistration.superset(listed: listed)
+            // The host's own list has none of something this sign-in cannot do without: it is
+            // not registered with to be told so again.
+            guard MastodonRegistration.page(chosen, on: whole) != nil else { throw MastodonSignInError.invalidScope }
+            tries.append(whole)
+        }
+        let everything = tries.first
+        // After a page with no way back, one try: what is asked, to the word, where a sign-in
+        // is held — and the least, where none is, so that no one part can strand both tries.
+        let after = held == nil ? Array(narrower.suffix(1)) : [chosen]
+        let less = registering.suspected(host) ? after : [chosen] + narrower
+        for words in less where !tries.contains(words) && keeps(words) { tries.append(words) }
+
+        for (step, words) in tries.enumerated() where !registering.refused(words, at: host) {
+            seen = kept(for: words)
+            if let app = seen.stored, let page = seen.page { return Registration(app: app, page: page, wasKept: true) }
+            do {
+                let answer = try await oauth.registered(for: words)
+                guard stillWanted else { return nil }
+                // What the page asks is read off what the server says it registered, which may
+                // be less than it was asked — and too little for this sign-in at all.
+                guard let page = MastodonRegistration.page(chosen, on: answer.app.scopes) else {
+                    throw MastodonSignInError.invalidScope
+                }
+                // What the host has none of, where it said: by naming what it registered, or
+                // by refusing the try before this one for a single word more.
+                if answer.echoed { registering.named(answer.app.scopes, of: words, at: host) }
+                if step > 0 { registering.made(words, after: tries[step - 1], at: host) }
+                registering.made(at: host, confirmed: answer.echoed || registering.list(host) != nil)
+                let stored = try? tokens.app(host: host) as MastodonApp??
+                if let stored, stored == seen.stored { try? tokens.save(answer.app) }
+                return Registration(app: answer.app, page: page, wasKept: false)
+            } catch MastodonSignInError.invalidScope {
+                if words == everything { registering.refusedWhole(host) }
+                registering.refuse(words, at: host)
+                guard stillWanted else { return nil }
+            }
+        }
+        throw MastodonSignInError.invalidScope
+    }
+
+    /// How long a host's own list of words is waited for before the registration is asked
+    /// without it.
+    @ObservationIgnored var wordListWait: Duration = .seconds(8)
+
+    /// The host's own list of the scope words it knows, asked once a run and with no sign-in;
+    /// nothing where it gave none in time (`MastodonOAuth.listedWords`). Listed among the
+    /// run's requests as part of signing in.
+    private func listedWords(host: String) async -> Set<String>? {
+        if let known = registering.list(host) { return known }
+        let watched = WatchedHTTP(sender: SourceReach.wordList(sender), for: .signIn, in: work)
+        let asked = MastodonOAuth(host: host, sender: Deadline(watched as any HTTPSender, within: wordListWait))
+        guard let listed = await asked.listedWords() else { return nil }
+        registering.learnt(listed, of: host)
+        return listed
+    }
+
+    /// Forgets a registration a sign-in went through — where it is still the one stored, so
+    /// one another sign-in made meanwhile is left.
+    private func drop(_ app: MastodonApp) {
+        guard let stored = try? tokens.app(host: app.host), stored == app else { return }
+        try? tokens.forgetApp(host: app.host)
+    }
+
+    /// Whether `host` cannot be asked to sign in again this run: two pages there ended with
+    /// nothing sent back. Every press is then answered as a refusal, and sends nothing, until
+    /// the source is cleared or removed.
+    func stranded(host raw: String) -> Bool {
+        registering.stranded(raw.lowercased())
     }
 
     /// A bookmark this source turned away with a 403 (#285), **remembered for this run and written
@@ -536,7 +642,8 @@ public final class MastodonSessions {
     /// this sign-in outlives it either.
     ///
     /// `forgettingApp` drops the app registration too — Clear and Remove, after which nothing of
-    /// this source's sign-in is left on the device. A plain sign-out keeps it for next time: it names
+    /// this source's sign-in is left on the device, nor anything this run learnt of registering
+    /// there. A plain sign-out keeps it for next time: it names
     /// this app to the server and signs nobody in without the reader on the server's own page
     /// (#221), and one made afresh at every sign-in would pile up on a server that has no way to
     /// drop one.
@@ -552,7 +659,10 @@ public final class MastodonSessions {
             // still asked to forget it.
             NetLog.auth.error("\(NetLog.line("sign-out", host: host, error: error), privacy: .public)")
         }
-        if forgettingApp { try? tokens.forgetApp(host: host) }
+        if forgettingApp {
+            try? tokens.forgetApp(host: host)
+            registering.forget(host)
+        }
         writeRefused.remove(host)
         bookmarkTurnedAway.remove(host)
         noticesTurnedAway.remove(host)

@@ -190,8 +190,8 @@ public struct MastodonApp: Sendable, Equatable, CustomStringConvertible,
     public let clientID: String
     public let clientSecret: String
     /// The scopes it was registered for, or nothing for one kept before they were recorded. A
-    /// registration made for scopes the sign-in in hand does not ask for — including the other
-    /// answer to #69's writing question — is registered again; see `MastodonOAuth.known(writing:)`.
+    /// page asks for some or all of them (#347); a registration that lacks a word the sign-in
+    /// in hand asks for is made again — see `MastodonRegistration`.
     public let scopes: String?
 
     public init(host: String, clientID: String, clientSecret: String, scopes: String? = nil) {

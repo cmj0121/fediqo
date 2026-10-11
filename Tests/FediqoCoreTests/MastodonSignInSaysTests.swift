@@ -11,8 +11,9 @@ import Testing
 /// **Passed over where the servers are not up**: the same trait, and `requireHealthy()` is the
 /// first line of every check.
 ///
-/// **Asked gently.** One registration a run, in the one check that asks what a registration
-/// echoes: this server takes five in ten minutes from anywhere, and the other suites make two.
+/// **Asked gently.** Two registrations a run — one in the check that asks what a registration
+/// echoes, one in the check of the registration this app itself makes: this server takes five
+/// in ten minutes from anywhere, and the other suites make two.
 /// The one every sign-in here starts on is the seed's — made in the server, which holds it to
 /// the scopes it knows as it does one made through its API. Every token made here is revoked
 /// when its check ends, **however it ends** (`revokingWhatItMade`): a page is shown only where
@@ -282,6 +283,35 @@ struct MastodonSignInSaysTests {
         #expect(callbacks == [MastodonOAuth.redirect])
         let captured = (try? JSONSerialization.jsonObject(with: Data(Captures.widestRegistration.utf8))) as? [String: Any] ?? [:]
         #expect(Set(said.keys) == Set(captured.keys), "the same things as it answered once")
+    }
+
+    @Test("The registration this app makes — every word of its parts, less what the host's own list lacks, read and asked as the app reads and asks — is taken whole and named back; a page of it for the reading words is shown asking for those alone, and the sign-in it gives reads as the reader and holds no word more")
+    func theRegistrationThisAppMakes() async throws {
+        try await LocalServers.requireHealthy()
+        let oauth = try signer()
+        let listed = try #require(await oauth.listedWords(), "the host's own list, as this app reads it")
+        #expect(listed.count == 47)
+        let whole = MastodonRegistration.superset(listed: listed)
+        #expect(whole == MastodonParts.everything, "a 4.6 lacks none of them")
+        let registered = try await oauth.registered(for: whole)
+        #expect(registered.echoed && registered.app.scopes == whole)
+
+        let reading = MastodonOAuth.reading
+        let page = try #require(MastodonRegistration.page(reading, on: registered.app.scopes))
+        let pages = Pages(host: Self.host, browser: try LocalHTTP.browser())
+        try await revokingWhatItMade(oauth) { made in
+            try await pages.signIn()
+            let signed = try await oauth.signIn(as: registered.app, asking: page, through: pages)
+            let token = made.keep(signed.token)
+            #expect(signed.failed == nil, "its own check of the token")
+            #expect(pages.shown == [reading], "the registration is wider; the page is not")
+            #expect(token.scopes == reading && token.asked == reading)
+            #expect(try await held(token) == Self.words(reading))
+            #expect(try await ask(token.accessToken, Self.check).status == 200)
+            #expect(try await ask(token.accessToken, "/api/v1/timelines/home").status == 200)
+            // A word the registration holds and the page did not ask is not the sign-in's.
+            #expect(try await ask(token.accessToken, "/api/v1/notifications").status == 403)
+        }
     }
 
     // MARK: - 5. The source's own account of a token, and of whose it is

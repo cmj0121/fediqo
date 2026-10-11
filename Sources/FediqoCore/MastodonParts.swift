@@ -42,6 +42,16 @@ public enum MastodonPart: String, CaseIterable, Sendable {
         case .reading, .search, .acting, .bookmarks: []
         }
     }
+
+    /// Whether the part only rides on the question of reading, or reading and acting, and a
+    /// sign-in is whole without it: a source that has none of it is signed in to all the same,
+    /// and the part stays a lock at its own place.
+    public var rider: Bool {
+        switch self {
+        case .search, .bookmarks: true
+        case .reading, .acting, .notices: false
+        }
+    }
 }
 
 /// What is read off the table of parts.
@@ -85,6 +95,13 @@ public enum MastodonParts {
         }
         return spelt(words)
     }
+
+    /// Every word of every part, in the table's order: what this app is registered for at a
+    /// source, so that a page for any part is one its registration holds.
+    public static let everything = page(held: nil, ticked: Set(MastodonPart.allCases))
+
+    /// The words of the parts a sign-in is whole without (`MastodonPart.rider`).
+    static let riderWords = Set(MastodonPart.allCases.filter(\.rider).flatMap(\.words))
 
     /// What is still refused of `refused`, each list in turn, once a sign-in holds `given`:
     /// every word but those given, once each and in the order met. Nothing, where none is left.

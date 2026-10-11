@@ -4,8 +4,8 @@ import Testing
 @testable import FediqoCore
 
 /// A bookmark is kept at the source (#285), in the half of it Core holds: what a sign-in asks
-/// for and what an earlier one still is, the ladder a server that has no bookmark scope is asked
-/// on, what a post offers, the source's word carried on the note, and the act itself.
+/// for and what an earlier one still is, what a server that has no bookmark scope is asked,
+/// what a post offers, the source's word carried on the note, and the act itself.
 @Suite("A bookmark kept at the source")
 struct BookmarkTests {
     private let host = MastodonFixture.host
@@ -72,17 +72,23 @@ struct BookmarkTests {
         #expect(!MastodonOAuth.bookmarks(MastodonOAuth.reading))
     }
 
-    @Test("The ladder falls from bookmarks to the sign-in without them, after read:search's rung; reading's is as it was")
-    func theLadder() {
-        #expect(MastodonOAuth.ladder(writing: false) == [MastodonOAuth.reading, MastodonOAuth.readingWithoutSearch])
+    @Test("A source with no bookmarks, or no search, leaves the sign-in to act without them, on one page; reading's is as it was")
+    func whatIsAskedWithoutThem() {
         let without = "read:statuses read:lists read:accounts write:statuses write:favourites"
-        #expect(MastodonOAuth.ladder(writing: true) == [
-            Self.before + " write:bookmarks", without + " write:bookmarks", Self.before, without,
-        ])
-        #expect(MastodonOAuth.ladder(writing: true).allSatisfy(MastodonOAuth.writes), "every rung still writes")
-        // A sign-in is never started on a registration that leaves bookmarks out.
-        #expect(MastodonOAuth.known(writing: true) == [Self.before + " write:bookmarks", without + " write:bookmarks"])
-        #expect(!MastodonOAuth.known(writing: true).contains(Self.before))
+        let chosen = MastodonOAuth.scopes(writing: true)
+        #expect(chosen == Self.before + " write:bookmarks")
+        // What the page asks on a registration that holds neither, either, and both.
+        #expect(MastodonRegistration.page(chosen, on: without) == without)
+        #expect(MastodonRegistration.page(chosen, on: Self.before) == Self.before)
+        #expect(MastodonRegistration.page(chosen, on: without + " write:bookmarks") == without + " write:bookmarks")
+        #expect(MastodonRegistration.page(chosen, on: MastodonRegistration.superset()) == chosen)
+        #expect(MastodonOAuth.scopes(search: false, writing: true, bookmarks: false) == without, "the least a sign-in to act can be")
+        #expect(MastodonOAuth.writes(without), "it still writes")
+        // Nothing but those two is ever left off: a registration that cannot act carries no page that asks to.
+        #expect(MastodonRegistration.page(chosen, on: MastodonOAuth.reading) == nil)
+        let reads = MastodonOAuth.scopes(writing: false)
+        #expect(MastodonRegistration.page(reads, on: MastodonOAuth.readingWithoutSearch) == MastodonOAuth.readingWithoutSearch)
+        #expect(MastodonOAuth.scopes(search: false, writing: false, bookmarks: false) == MastodonOAuth.readingWithoutSearch)
     }
 
     @Test("What a held token may do is read off its attributes: bookmarking only where the scope is written down")

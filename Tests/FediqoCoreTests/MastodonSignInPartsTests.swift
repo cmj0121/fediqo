@@ -52,7 +52,7 @@ struct MastodonSignInPartsTests {
     private static let n = "read:notifications"
     private static let d = "write:notifications"
 
-    @Test("What is asked of a server for each of the sign-in choices is the string it was, to the byte: every rung of every ladder, the registrations a sign-in may start on, and each choice by itself")
+    @Test("What a page asks of a server for each of the sign-in choices is the string it was, to the byte: each choice, the same without search, without bookmarks and without either, and each part by itself")
     func whatIsAskedIsWhatWasAsked() {
         let (r, w, b, n, d) = (Self.r, Self.w, Self.b, Self.n, Self.d)
         let s = "read:search"
@@ -60,16 +60,17 @@ struct MastodonSignInPartsTests {
         let reads: [String] = ["\(r) \(s)", r]
         let sees: [String] = ["\(r) \(s) \(n)", "\(r) \(n)"]
         let acts: [String] = ["\(r) \(s) \(w) \(b)", "\(r) \(w) \(b)", "\(r) \(s) \(w)", "\(r) \(w)"]
-        #expect(MastodonOAuth.ladder(writing: false) == reads)
-        #expect(MastodonOAuth.ladder(writing: false, notices: true) == sees)
-        #expect(MastodonOAuth.ladder(writing: true) == acts)
+        // Each choice, and the same without search, without bookmarks, and without either.
+        func every(_ writing: Bool, _ notices: Bool) -> [String] {
+            [(true, true), (false, true), (true, false), (false, false)].map {
+                MastodonOAuth.scopes(search: $0.0, writing: writing, bookmarks: $0.1, notices: notices)
+            }
+        }
+        #expect(every(false, false) == reads + reads)
+        #expect(every(false, true) == sees + sees)
+        #expect(every(true, false) == acts)
         let everything: [String] = ["\(r) \(s) \(w) \(b) \(n) \(d)", "\(r) \(w) \(b) \(n) \(d)", "\(r) \(s) \(w) \(n) \(d)", "\(r) \(w) \(n) \(d)"]
-        #expect(MastodonOAuth.ladder(writing: true, notices: true) == everything)
-
-        #expect(MastodonOAuth.known(writing: false) == Set(reads))
-        #expect(MastodonOAuth.known(writing: false, notices: true) == Set(sees))
-        #expect(MastodonOAuth.known(writing: true) == Set(acts.prefix(2)))
-        #expect(MastodonOAuth.known(writing: true, notices: true) == Set(everything.prefix(2)))
+        #expect(every(true, true) == everything)
 
         #expect(MastodonOAuth.scopes(writing: false) == "\(r) \(s)")
         #expect(MastodonOAuth.scopes(writing: false, bookmarks: false) == "\(r) \(s)")
@@ -337,9 +338,14 @@ struct MastodonSignInPartsTests {
         for name in ["MastodonTokens.swift", "Writing.swift", "MastodonSignIn.swift"] {
             #expect(joins[name] == nil, "\(name) joins words")
         }
+        // What is registered for, and what a page asks on a registration, are each the table's
+        // words with some taken away: by the host's own list, and by what the registration holds.
+        let registration = try String(contentsOf: sources.appending(path: "FediqoCore/MastodonRegistration.swift"), encoding: .utf8)
+        let joining = registration.split(separator: "\n").filter { $0.contains(#"joined(separator: " ")"#) }
+        #expect(joining.count == 2 && joining.allSatisfy { $0.contains(".filter(") }, "a registration's words are made, not narrowed")
 
         let auth = try String(contentsOf: sources.appending(path: "FediqoCore/MastodonAuth.swift"), encoding: .utf8)
-        let narrowing = try #require(auth.components(separatedBy: "static func granted(").dropFirst().first)
+        let narrowing = try #require(auth.components(separatedBy: "static func named(").dropFirst().first)
         #expect(narrowing.components(separatedBy: "\n    }\n").first?.contains(#"joined(separator: " ")"#) == true, "the one join is not the narrowing")
         let choice = try #require(auth.components(separatedBy: "public static func scopes(").dropFirst().first)
         #expect(choice.components(separatedBy: "\n    }\n").first?.contains("MastodonParts.page(") == true, "a choice's words are not the page's")

@@ -298,8 +298,10 @@ struct MastodonSearchTests {
         #expect(MastodonOAuth.searches(MastodonOAuth.scopes(writing: true, notices: true)))
         #expect(!MastodonOAuth.searches(MastodonOAuth.readingWithoutSearch) && !MastodonOAuth.searches("read:statuses"))
         #expect(!MastodonOAuth.searches(nil) && !MastodonOAuth.searches("") && !MastodonOAuth.searches("read:searching"))
-        for rung in MastodonOAuth.ladder(writing: true) + MastodonOAuth.ladder(writing: false) {
-            #expect(MastodonOAuth.searches(rung) == rung.contains("read:search"), "\(rung)")
+        for writing in [true, false] {
+            for search in [true, false] {
+                #expect(MastodonOAuth.searches(MastodonOAuth.scopes(search: search, writing: writing)) == search)
+            }
         }
     }
 }

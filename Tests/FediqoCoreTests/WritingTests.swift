@@ -52,31 +52,23 @@ struct WritingTests {
         #expect(!MastodonOAuth.writes("read:statuses write:statuses-ish"))
     }
 
-    /// **One registration per answer, two rungs inside it.** A registration made for reading alone
-    /// cannot carry a page that asks to write, so the two answers' sets must not overlap — and
-    /// decision 32's narrower rung must stay reusable inside each.
-    @Test("The registrations a sign-in may reuse are the two rungs of its own answer")
-    func knownRegistrations() {
-        let reads = MastodonOAuth.known(writing: false)
-        let writes = MastodonOAuth.known(writing: true)
-        // The set is the ladder `signIn` climbs, so the two must name the same two strings.
-        for wanted in [true, false] {
-            let ladder = MastodonOAuth.ladder(writing: wanted)
-            let (wide, narrow) = (ladder[0], ladder[1])
-            #expect(MastodonOAuth.known(writing: wanted) == [wide, narrow])
-            #expect(wide.contains("read:search"))
-            #expect(!narrow.contains("read:search"))
-            #expect(MastodonOAuth.writes(wide) == wanted)
-            #expect(MastodonOAuth.writes(narrow) == wanted)
-        }
-        #expect(reads == [MastodonOAuth.reading, MastodonOAuth.readingWithoutSearch])
-        #expect(writes.count == 2)
-        #expect(reads.isDisjoint(with: writes), """
-            A registration made for one answer is reusable for the other, so a reader changing \
-            their mind would meet invalid_scope on a page this app asked for.
+    /// **One registration for every answer** (#347). A registration made for reading alone
+    /// cannot carry a page that asks to write — a server answers one with a page of its own —
+    /// so it is the registration, and not the answer, that says what a page may ask.
+    @Test("A registration carries a page only where it holds every word of it; the one made for everything carries both answers")
+    func whatARegistrationCarries() {
+        let reads = MastodonOAuth.scopes(writing: false)
+        let writes = MastodonOAuth.scopes(writing: true)
+        let whole = MastodonRegistration.superset()
+        #expect(MastodonRegistration.holds(reads, on: whole) && MastodonRegistration.holds(writes, on: whole))
+        #expect(MastodonRegistration.holds(reads, on: reads) && MastodonRegistration.holds(reads, on: writes))
+        #expect(!MastodonRegistration.holds(writes, on: reads), """
+            A registration made for reading carries a page that asks to write, so a reader \
+            changing their mind would meet the server's own error page.
             """)
-        #expect(writes.allSatisfy(MastodonOAuth.writes))
-        #expect(!reads.contains(where: MastodonOAuth.writes))
+        #expect(MastodonRegistration.page(writes, on: reads) == nil)
+        #expect(!MastodonRegistration.holds(reads, on: nil) && !MastodonRegistration.holds(reads, on: ""))
+        #expect(!MastodonRegistration.holds(reads, on: "read write"), "the source's one word for every read is not its finer ones")
     }
 
     // MARK: - What a sign-in bought
