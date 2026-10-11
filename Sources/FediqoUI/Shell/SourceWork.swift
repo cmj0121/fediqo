@@ -108,6 +108,11 @@ final class SourceWork {
         /// for that (#319): the one ask that lets a source reach a server on the person's word.
         /// Listed under the source asked — where it goes from there is the source's own doing.
         case lookUp
+        /// The server somebody lives on asked what it says of them, because the person pressed
+        /// for that on their page (#310): the one ask this device itself makes of a host nobody
+        /// added. With no sign-in, let through by an entry of `Allowance` for that one press,
+        /// and listed under the server asked. Nothing read under it is held.
+        case personHome
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -123,7 +128,7 @@ final class SourceWork {
             case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings, .lookUp: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
-                 .nearbyMove:
+                 .nearbyMove, .personHome:
                 false
             }
         }
@@ -220,6 +225,9 @@ final class SourceWork {
         /// What reaches beyond a source now (#226): the person's list, as `AllowanceBook` hands it
         /// in; what the app starts with until it does.
         var allowances: [Allowance] = Allowance.standing
+        /// The presses standing now, each with the one host it named (#310): what an entry
+        /// that applies only `.pressed` lets through, one request a press.
+        var presses: [Int: String] = [:]
     }
 
     @ObservationIgnored private nonisolated let held = OSAllocatedUnfairLock(initialState: Held())
@@ -371,6 +379,42 @@ final class SourceWork {
         }
     }
 
+    /// A press that names `host` as the one server it reaches (#310): until it is spent or
+    /// ended, an entry that applies only `.pressed` lets one request of that host through.
+    struct Press: Hashable, Sendable {
+        fileprivate let id: Int
+    }
+
+    /// The person pressed for `host` to be asked. Ended with `end(_:)` on every way out of
+    /// the ask, so a press whose request never left lets nothing through later.
+    nonisolated func press(for host: String) -> Press {
+        let folded = Self.fold(host)
+        return held.withLock { held in
+            held.next += 1
+            held.presses[held.next] = folded
+            return Press(id: held.next)
+        }
+    }
+
+    nonisolated func end(_ press: Press) {
+        held.withLock { _ = $0.presses.removeValue(forKey: press.id) }
+    }
+
+    /// Takes what `admission` let a request to `host` through by, as it leaves. **A press is
+    /// spent by the one request it lets through**: false where none stands for that host any
+    /// more, and then the request does not leave. Everything else is let through as it was.
+    nonisolated func spend(_ admission: Admission, at host: String) -> Bool {
+        let folded = Self.fold(host)
+        return held.withLock { held in
+            guard case .allowed(let id) = admission,
+                  held.allowances.contains(where: { $0.id == id && $0.when == .pressed })
+            else { return true }
+            guard let press = held.presses.first(where: { $0.value == folded }) else { return false }
+            held.presses[press.key] = nil
+            return true
+        }
+    }
+
     /// The person named `host` to add: what is asked of it before it is a source is theirs.
     nonisolated func named(_ host: String) {
         let folded = Self.fold(host)
@@ -408,11 +452,11 @@ final class SourceWork {
         reached: String, source: String?, for purpose: Purpose? = nil
     ) -> Admission? {
         let owner = Self.fold(SourceAct.attributed(reached: reached, pointedBy: source))
-        let (ours, adding, list) = held.withLock { held -> (Bool, Bool, [Allowance]) in
-            let adding = !held.adding.isEmpty
-            guard let added = held.added else { return (true, adding, held.allowances) }
+        let (ours, adding, pressed, list) = held.withLock { held -> (Bool, Bool, Bool, [Allowance]) in
+            let adding = !held.adding.isEmpty, pressed = held.presses.values.contains(owner)
+            guard let added = held.added else { return (true, adding, pressed, held.allowances) }
             let ours = !owner.isEmpty && (added.contains(owner) || held.named.contains(owner))
-            return (ours, adding, held.allowances)
+            return (ours, adding, pressed, held.allowances)
         }
         if ours {
             guard source != nil, let there = URL(string: "https://\(reached.lowercased())/"),
@@ -421,10 +465,12 @@ final class SourceWork {
             return .allowed(own.id)
         }
         // A request an entry names by its purpose, to one of its hosts, asked of nobody's pointing
-        // — and only while the entry applies: `.adding` while an add sheet is browsing.
+        // — and only while the entry applies: `.adding` while an add sheet is browsing, and
+        // `.pressed` to the one host a press standing now named, which is the only host it has.
         guard let purpose, source == nil, let url = URL(string: "https://\(owner)/") else { return nil }
         let entry = list.first {
-            $0.reach == .request(purpose) && $0.allows(url) && ($0.when != .adding || adding)
+            $0.reach == .request(purpose) && ($0.when == .pressed ? pressed : $0.allows(url))
+                && ($0.when != .adding || adding)
         }
         return entry.map { .allowed($0.id) }
     }
@@ -651,9 +697,13 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
         let host = url.host() ?? ""
         // **The gate** (#220): an act that belongs to no source the person added never leaves,
         // and is not written to the record as though it had.
-        guard let admission = work.admission(reached: host, source: source, for: purpose) else {
+        guard let admission = work.admission(reached: host, source: source, for: purpose),
+              work.spend(admission, at: host)
+        else {
+            // A server nobody added is not named in the log: whom the person asked after is theirs.
+            let named = purpose == .personHome ? NetLog.unnamed : host
             NetLog.network.notice(
-                "\(NetLog.line("refused", host: host, error: OutwardRefusal.noSource), privacy: .public)"
+                "\(NetLog.line("refused", host: named, error: OutwardRefusal.noSource), privacy: .public)"
             )
             throw OutwardRefusal.noSource
         }

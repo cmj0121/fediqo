@@ -66,6 +66,7 @@ extension SourceWork.Purpose {
         case .rising: "chart.line.uptrend.xyaxis"
         case .ownSettings: "person.crop.square.filled.and.at.rectangle"
         case .lookUp: "person.crop.circle.badge.questionmark"
+        case .personHome: "house"
         }
     }
 }

@@ -65,6 +65,12 @@ struct PersonPane: View {
     /// asks that source to look them up, where the asking stands, or why there is none.
     var lookUp: SearchLookUpLine?
     var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
+    /// The line about the server they live on (#310): the press that asks it, where the
+    /// asking stands, what it came to, or the way back. Nothing where there is nobody to ask.
+    var home: PersonHomeLine?
+    /// What that server said of them, while it is what the page draws in place of the source's.
+    var homeSaid: PersonHomeSaid?
+    var onHome: (PersonHomeLine.Press) -> Void = { _ in }
     /// The foot's press: the stretch of their posts older than what is drawn.
     var onReadOn: () -> Void = {}
     /// The press beside "They moved to …": the page of the account the source says they went
@@ -112,7 +118,7 @@ struct PersonPane: View {
     /// page is this" — a handle is only a name once you know where — and naming it is exactly as
     /// far as a person page may go towards a source without becoming one.
     private var heading: some View {
-        let named = Self.named(person, said: said)
+        let named = Self.named(person, said: said, home: homeSaid)
         return HStack(alignment: .center, spacing: ShellSpace.step) {
             face
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
@@ -125,7 +131,7 @@ struct PersonPane: View {
                     EmojiText(named.name, emojis: named.emojis, host: person.host, role: .name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .lineLimit(1)
-                    if said?.person?.locked == true {
+                    if (homeSaid?.person ?? said?.person)?.locked == true {
                         Image(systemName: "lock")
                             .shellFont(.mark)
                             .foregroundStyle(ShellChrome.inkDim(colorScheme))
@@ -140,7 +146,7 @@ struct PersonPane: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                Text(Self.viewLine(of: person, said: said))
+                Text(Self.viewLine(of: person, said: said, home: homeSaid))
                     .shellFont(.mark)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                     .lineLimit(said == nil ? 1 : 2)
@@ -175,8 +181,14 @@ struct PersonPane: View {
 
     /// The heading's third line: the host this device read them through, or — on a page handed
     /// what a source says — whose view the page is.
-    static func viewLine(of person: DummyPerson, said: PersonSaid?, language: DummyLanguage? = nil) -> String {
-        said.map { PersonSaid.whoseView($0.source, person: $0.person, language: language) }
+    ///
+    /// **While what their own server said is drawn, the line names that server and when it was
+    /// asked**: whose word the page is must be said where the page says who they are.
+    static func viewLine(
+        of person: DummyPerson, said: PersonSaid?, home: PersonHomeSaid? = nil, language: DummyLanguage? = nil
+    ) -> String {
+        if let home { return home.whoseView(language: language) }
+        return said.map { PersonSaid.whoseView($0.source, person: $0.person, language: language) }
             ?? String(format: L10n.t("person.through", language: language), person.host)
     }
 
@@ -207,7 +219,13 @@ struct PersonPane: View {
     /// Who the heading names: the source's word once it has said who they are — the name and
     /// the handle made fit for a line, and the pictures the name is written in — and what their
     /// row carried until then.
-    static func named(_ person: DummyPerson, said: PersonSaid?) -> (name: String, handle: String?, emojis: [CustomEmoji]) {
+    ///
+    /// **Their own server's word while that is what the page draws** — and then in letters
+    /// alone: no picture is taken from a server nobody added.
+    static func named(
+        _ person: DummyPerson, said: PersonSaid?, home: PersonHomeSaid? = nil
+    ) -> (name: String, handle: String?, emojis: [CustomEmoji]) {
+        if let subject = home?.person { return (subject.lineName, subject.lineHandle, []) }
         guard let subject = said?.person else { return (person.name, person.handle, person.emojis) }
         return (subject.lineName, subject.lineHandle, subject.emojis)
     }
@@ -250,22 +268,14 @@ struct PersonPane: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     Color.clear.frame(height: 0).id(Self.head).accessibilityHidden(true)
-                    if let line = said.stateLine(of: person.handle ?? person.name) {
-                        stateLine(line, said: said)
+                    if let homeSaid {
+                        // Their own server's word in place of the source's, with nothing in it
+                        // to press but the way back under it.
+                        PersonSaidBlock(person: homeSaid.person, source: homeSaid.home, linked: false)
+                        if let home { PersonHomeLineView(line: home, onPress: onHome) }
                         ShellRule()
-                    }
-                    if let lookUp {
-                        SearchLookUpView(line: lookUp, onPress: onLookUp)
-                            .padding(.horizontal, ShellSpace.pad)
-                            .padding(.vertical, ShellSpace.snug)
-                        ShellRule()
-                    }
-                    if let subject = said.person {
-                        PersonSaidBlock(
-                            person: subject, source: said.source, onOpenMoved: onOpenMoved,
-                            lit: selectedID, onOpenList: onOpenList
-                        )
-                        ShellRule()
+                    } else {
+                        sourceSaid(said)
                     }
                     if let sentence = Self.emptyLine(said, held: items.count) {
                         quiet(sentence)
@@ -292,6 +302,34 @@ struct PersonPane: View {
             .onChange(of: jumpToTop) { _, _ in
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(Self.head, anchor: .top) }
             }
+        }
+    }
+
+    /// What the source says, as the page always drew it: where the asking stands, the press
+    /// that asks the source to look them up, what it says of them — and under that the line
+    /// about the server they live on, where there is one to ask.
+    @ViewBuilder
+    private func sourceSaid(_ said: PersonSaid) -> some View {
+        if let line = said.stateLine(of: person.handle ?? person.name) {
+            stateLine(line, said: said)
+            ShellRule()
+        }
+        if let lookUp {
+            SearchLookUpView(line: lookUp, onPress: onLookUp)
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.vertical, ShellSpace.snug)
+            ShellRule()
+        }
+        if let subject = said.person {
+            PersonSaidBlock(
+                person: subject, source: said.source, onOpenMoved: onOpenMoved,
+                lit: selectedID, onOpenList: onOpenList
+            )
+            if home == nil { ShellRule() }
+        }
+        if let home {
+            PersonHomeLineView(line: home, onPress: onHome)
+            ShellRule()
         }
     }
 

@@ -35,6 +35,9 @@ public struct URLSessionClient: HTTPClient, Sendable {
     /// Whether a request that did not come through the gate is refused (#220): see `Outward`. On
     /// for every client the app builds; a test that drives this client by itself turns it off.
     let watchedOnly: Bool
+    /// Whether the log names the host asked. Off for a server nobody added (`forAStranger`):
+    /// whom the person asked after is theirs, and the log is read by more than this app.
+    let namesHost: Bool
 
     /// The session every client is built on unless one is handed in: **nothing of it is written
     /// to disk** (#219). `URLSession.shared` keeps an on-disk `URLCache` — every response filed
@@ -51,30 +54,64 @@ public struct URLSessionClient: HTTPClient, Sendable {
         return configuration
     }
 
+    /// The session an ask of a server nobody added goes out on: as `memoryOnly`, and **no
+    /// cookie is kept from an answer or sent with an ask** — on `memoryOnly` what such a server
+    /// set would ride back to it on every later ask of that host for the rest of the run.
+    public static let stranger: URLSession = URLSession(configuration: strangerConfiguration())
+
+    /// What `stranger` is built from.
+    public static func strangerConfiguration() -> URLSessionConfiguration {
+        let configuration = memoryOnlyConfiguration()
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        return configuration
+    }
+
     public init(
         session: URLSession = URLSessionClient.memoryOnly,
         byteLimit: Int = URLSessionClient.defaultByteLimit,
         sameOriginOnly: Bool = false,
-        watchedOnly: Bool = true
+        watchedOnly: Bool = true,
+        namesHost: Bool = true
     ) {
         self.session = session
         self.byteLimit = byteLimit
         self.sameOriginOnly = sameOriginOnly
         self.watchedOnly = watchedOnly
+        self.namesHost = namesHost
     }
 
     /// This client taking no body over `bytes`, and otherwise as it is: the same session, the
     /// same rules. For an ask whose answer is known to be small. Never raises a ceiling.
     public func capped(to bytes: Int) -> URLSessionClient {
         URLSessionClient(
-            session: session, byteLimit: min(byteLimit, bytes), sameOriginOnly: sameOriginOnly, watchedOnly: watchedOnly
+            session: session, byteLimit: min(byteLimit, bytes), sameOriginOnly: sameOriginOnly, watchedOnly: watchedOnly,
+            namesHost: namesHost
         )
     }
 
     /// This client refusing every redirect off the origin it was asked at, and otherwise as it
     /// is. For an ask that is of one host and of nowhere that host may point to.
     public func stayingOnOrigin() -> URLSessionClient {
-        URLSessionClient(session: session, byteLimit: byteLimit, sameOriginOnly: true, watchedOnly: watchedOnly)
+        URLSessionClient(
+            session: session, byteLimit: byteLimit, sameOriginOnly: true, watchedOnly: watchedOnly, namesHost: namesHost
+        )
+    }
+
+    /// This client for a server nobody added, and otherwise as it is — the same ceiling, the
+    /// same rules: on `stranger`, so no cookie of that server's is kept or sent back, and with
+    /// its name left out of the log.
+    public func forAStranger() -> URLSessionClient {
+        URLSessionClient(
+            session: URLSessionClient.stranger, byteLimit: byteLimit, sameOriginOnly: sameOriginOnly,
+            watchedOnly: watchedOnly, namesHost: false
+        )
+    }
+
+    /// What the log calls the host of `url`: its name, or a word that names nobody.
+    func logged(_ url: URL) -> String {
+        namesHost ? url.host() ?? "" : NetLog.unnamed
     }
 
     public func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
@@ -91,7 +128,7 @@ public struct URLSessionClient: HTTPClient, Sendable {
         }
         guard !watchedOnly || Outward.admitted else {
             NetLog.network.fault(
-                "\(NetLog.line("unwatched", host: url.host() ?? "", error: OutwardRefusal.unwatched), privacy: .public)"
+                "\(NetLog.line("unwatched", host: logged(url), error: OutwardRefusal.unwatched), privacy: .public)"
             )
             throw OutwardRefusal.unwatched
         }
@@ -114,7 +151,7 @@ public struct URLSessionClient: HTTPClient, Sendable {
                 throw URLError(.cancelled)
             }
             NetLog.network.error(
-                "\(NetLog.line("request", host: url.host() ?? "", error: error), privacy: .public)"
+                "\(NetLog.line("request", host: logged(url), error: error), privacy: .public)"
             )
             throw error
         }
@@ -123,7 +160,7 @@ public struct URLSessionClient: HTTPClient, Sendable {
         }
         if http.statusCode >= 400 {
             NetLog.network.notice(
-                "\(NetLog.line("request", host: url.host() ?? "", status: http.statusCode), privacy: .public)"
+                "\(NetLog.line("request", host: logged(url), status: http.statusCode), privacy: .public)"
             )
         }
         return (body, http)

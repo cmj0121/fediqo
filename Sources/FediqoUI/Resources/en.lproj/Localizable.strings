@@ -1715,3 +1715,17 @@
 "search.lookup.signedOut" = "Nobody is signed in to a source here, so no source can be asked to look %@ up.";
 "search.lookup.signedOut.there" = "%1$@ can be asked to look %2$@ up only by somebody signed in to it.";
 "work.purpose.lookUp" = "Asking a source to look somebody up";
+"work.purpose.personHome" = "Asking the server someone lives on about them";
+"person.home.ask" = "Ask %@";
+"person.home.asking" = "Asking %@…";
+"person.home.said" = "As %1$@ says, asked at %2$@.";
+"person.home.noAccount" = "%1$@ gave no account of them: it is not a Mastodon, or it refused. What %2$@ says stands.";
+"person.home.nobody" = "%1$@ knows nobody of that name. What %2$@ says stands.";
+"person.home.unread" = "%1$@ could not be read. What %2$@ says stands.";
+"person.home.back" = "Back to what %@ says";
+"person.home.posts" = "The posts below are what %@ gave.";
+"allow.personHome.title" = "A person's own server";
+"allow.personHome.what" = "One question, with no sign-in, to the server a person lives on: what it says of them";
+"allow.personHome.why" = "A source you added knows only part of someone who lives on another server. Their own server is asked only when you press for it on their page; it learns this device's address and whom you asked about, and nothing it sends is kept.";
+"allow.when.pressed" = "Only at your press on a person's page, once for each press";
+"allow.hosts.pressed" = "The server named on the press";

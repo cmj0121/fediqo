@@ -226,6 +226,9 @@ final class ShellPersonPages {
     /// The people and the hashtags a search found at the sources, and an address looked up
     /// through one (#319): numbered on the same count, and let go with the same reader.
     let found: ShellSearchFound
+    /// The server somebody lives on, asked what it says of them at their page's press (#310):
+    /// numbered on the same count. Asked with no sign-in, so no reader's change lets it go.
+    let home: ShellPersonHome
 
     init() {
         let count = PageErrands(), looks = PageReaders()
@@ -242,6 +245,7 @@ final class ShellPersonPages {
         self.you = you
         let found = ShellSearchFound(errands: count, readers: looks)
         self.found = found
+        home = ShellPersonHome(errands: count)
         looks.whenChanged { [weak found] host in found?.letGo(at: host) }
         looks.whenChanged { [weak self] host in self?.letGo(at: host) }
         looks.whenChanged { [weak lists] host in lists?.letGo(at: host) }
@@ -370,7 +374,9 @@ final class ShellPersonPages {
     /// they follow, who follows them — **as the page stands for whoever would ask now**: none
     /// until the source has said who they are, and none on a page handed nothing.
     func lists(of who: DummyPerson, in session: ShellSession) -> [PeopleList] {
-        guard let person = said(of: who, in: session)?.person else { return [] }
+        let said = said(of: who, in: session)
+        // While the page draws what their own server says, the source's figures are not on it.
+        guard let person = said?.person, home.said(of: who, beside: said, in: session) == nil else { return [] }
         return PersonSaid.counts(of: person).compactMap(\.opens)
     }
 
@@ -400,6 +406,26 @@ final class ShellPersonPages {
     /// Whether the page of `who` has anybody to ask again — what `r` and its mark go by.
     func canAskAgain(_ who: DummyPerson, in session: ShellSession) -> Bool {
         Self.source(of: who, in: session) != nil
+    }
+
+    // MARK: - Their own server (#310)
+
+    /// What the server `who` lives on said of them, where the press on this page brought it.
+    func homeSaid(of who: DummyPerson, in session: ShellSession) -> PersonHomeSaid? {
+        home.said(of: who, beside: said(of: who, in: session), in: session)
+    }
+
+    /// The line on the page of `who` about asking the server they live on.
+    func homeLine(of who: DummyPerson, in session: ShellSession) -> PersonHomeLine? {
+        home.line(of: who, beside: said(of: who, in: session), in: session)
+    }
+
+    /// The line's press: that server asked, or the way back to what the source says.
+    func homePressed(_ press: PersonHomeLine.Press, on who: DummyPerson, in session: ShellSession) async {
+        switch press {
+        case .ask: await home.ask(who, beside: said(of: who, in: session), in: session)
+        case .back: home.letGo(of: who)
+        }
     }
 
     // MARK: - Asking

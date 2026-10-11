@@ -240,6 +240,70 @@ struct PersonSaid: Equatable {
     }
 }
 
+/// What the server somebody lives on said of them, where the person pressed to ask it (#310):
+/// drawn in place of what the added source says, until they go back.
+///
+/// **Words and figures, and nothing that is fetched or pressed.** It carries no picture, its
+/// figures open no list and the addresses in its words are letters: that server was asked one
+/// thing, once, and drawing its answer asks it nothing more.
+struct PersonHomeSaid: Equatable {
+    /// The server asked: the one their handle names.
+    let home: String
+    let person: Person
+    /// When it answered.
+    let at: Date
+
+    /// Whose view the heading says the page is while this is drawn, and when it was asked: so
+    /// it is not taken for the added source's, nor for newer than it is.
+    func whoseView(language: DummyLanguage? = nil) -> String {
+        let time = at.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(L10n.locale(language)))
+        return String(format: L10n.t("person.home.said", language: language), home, time)
+    }
+}
+
+/// The one line on somebody's page about the server they live on: the press that asks it,
+/// where the asking stands, what it came to, or the way back to what the source says.
+struct PersonHomeLine: Equatable {
+    enum Press: Equatable {
+        /// Ask their own server, once.
+        case ask
+        /// Back to what the added source says.
+        case back
+    }
+
+    /// A sentence, or nothing where the press says it all.
+    var words: String?
+    var press: Press?
+    var pressWords: String?
+    /// Whether the sentence is about an ask that came to nothing, and so in full ink.
+    var failed = false
+}
+
+/// The line about somebody's own server, drawn: its sentence, and the press beside or under it.
+struct PersonHomeLineView: View {
+    let line: PersonHomeLine
+    var onPress: (PersonHomeLine.Press) -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        WordsThenPress(
+            words: Group {
+                if let said = line.words {
+                    Text(said)
+                        .shellFont(.meta)
+                        .foregroundStyle(line.failed ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme))
+                }
+            },
+            press: Group {
+                if let act = line.press, let said = line.pressWords {
+                    ShellLinkButton(said) { onPress(act) }
+                        .multilineTextAlignment(.leading)
+                }
+            }
+        )
+    }
+}
+
 /// What the source says of somebody, drawn as the first rows of their page's list: so it
 /// scrolls away with their posts, and the heading above stays a face and three lines.
 struct PersonSaidBlock: View {
@@ -253,6 +317,9 @@ struct PersonSaidBlock: View {
     /// A count that opens a list, pressed (#311): that list's page. Nothing where the block is
     /// drawn with nobody to answer, and then every count is words alone.
     var onOpenList: ((PeopleList) -> Void)?
+    /// Whether an address or a hashtag in their words is a press. Not where the block is the
+    /// word of a server nobody added (`PersonHomeSaid`): there they are letters.
+    var linked = true
 
     @Environment(\.colorScheme) private var colorScheme
     @ShellMetric(relativeTo: .body) private var bandHeight: CGFloat = 96
@@ -302,7 +369,7 @@ struct PersonSaidBlock: View {
                 .accessibilityHidden(true)
             }
             if !person.words.isEmpty {
-                EmojiText(prose: person.words, emojis: person.emojis, host: source)
+                EmojiText.words(person.words, emojis: person.emojis, host: source, covered: !linked)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }

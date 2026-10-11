@@ -1671,3 +1671,17 @@
 "search.lookup.signedOut" = "這裡沒有任何已登入的來源，所以無法請來源查找 %@。";
 "search.lookup.signedOut.there" = "只有登入 %1$@ 的人，才能請它查找 %2$@。";
 "work.purpose.lookUp" = "請來源查找某個人";
+"work.purpose.personHome" = "向某個人所在的站台詢問他們";
+"person.home.ask" = "詢問 %@";
+"person.home.asking" = "正在詢問 %@…";
+"person.home.said" = "依 %1$@ 的說法，於 %2$@ 詢問。";
+"person.home.noAccount" = "%1$@ 沒有給出這個人的資料：它不是 Mastodon，或是拒絕了。%2$@ 的說法維持不變。";
+"person.home.nobody" = "%1$@ 沒有這個名字的人。%2$@ 的說法維持不變。";
+"person.home.unread" = "無法讀取 %1$@。%2$@ 的說法維持不變。";
+"person.home.back" = "回到 %@ 的說法";
+"person.home.posts" = "下面的貼文是 %@ 給的。";
+"allow.personHome.title" = "某個人自己的站台";
+"allow.personHome.what" = "向某個人所在的站台提出一次不帶登入的詢問：它對這個人的說法";
+"allow.personHome.why" = "對住在其他站台的人，你加入的來源只知道一部分。只有你在對方的頁面上按下時才會詢問對方的站台；那個站台會知道這台裝置的位址以及你問的是誰，它送來的東西都不會保存。";
+"allow.when.pressed" = "只在你於某個人的頁面上按下時，每按一次詢問一次";
+"allow.hosts.pressed" = "按鈕上寫明的那個站台";

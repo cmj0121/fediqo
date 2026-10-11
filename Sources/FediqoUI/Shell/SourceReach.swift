@@ -98,6 +98,16 @@ struct SourceReach {
         MastodonPerson(http: wire(small(), for: purpose, within: limit), host: host)
     }
 
+    /// The server somebody lives on, asked what it says of them (#310) — a host nobody added,
+    /// reached because the person pressed for it. **With no token, and there is no other way
+    /// to build this**: nothing here takes a sign-in. Listed as `personHome` and as nothing
+    /// else, ended within `limit`, under the small body's ceiling — put on the plain client
+    /// before it is listed and bounded — and of that host alone: a redirect off it is refused.
+    /// **No cookie of that server's is kept or sent back**, and the log does not name it.
+    func personHome(_ host: String, within limit: Duration) -> MastodonPersonHome {
+        MastodonPersonHome(http: wire(Self.ofAStranger(http), for: .personHome, within: limit), host: host)
+    }
+
     /// A list of people a source keeps, as the reader, through `door`.
     func people(_ door: MastodonAuthorized) -> MastodonPeople {
         MastodonPeople(door: door)
@@ -146,6 +156,14 @@ struct SourceReach {
     /// A test's client, which follows nothing, is `small` and no more.
     static func smallAtItsHost(_ http: any HTTPClient) -> any HTTPClient {
         atItsHost(http, under: Self.smallBody)
+    }
+
+    /// `smallAtItsHost`, for a server nobody added: keeping and sending no cookie, and unnamed
+    /// in the log (`URLSessionClient.forAStranger`). A test's client, which keeps none and logs
+    /// nothing, is `small` and no more.
+    static func ofAStranger(_ http: any HTTPClient) -> any HTTPClient {
+        (http as? URLSessionClient)?.capped(to: Self.smallBody).stayingOnOrigin().forAStranger()
+            ?? SmallBody(http, limit: Self.smallBody)
     }
 
     /// `http` taking no body over `limit` and kept to the host it is asked at.

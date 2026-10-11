@@ -185,6 +185,10 @@ struct TimelinePane: View {
                     onAskAgain: { Task { await people?.again(person, in: session) } },
                     lookUp: people.flatMap { $0.found.line(of: person, said: $0.said(of: person, in: session), in: session) },
                     onLookUp: onLookUp,
+                    // Their own server, asked only at this line's press and as nobody (#310).
+                    home: people?.homeLine(of: person, in: session),
+                    homeSaid: people?.homeSaid(of: person, in: session),
+                    onHome: { press in Task { await people?.homePressed(press, on: person, in: session) } },
                     onReadOn: { Task { await people?.readOn(person, in: session) } },
                     // Where they moved to is somebody this same source names: their page is
                     // asked of it by that name, and "not heard of" is a state of that page.
@@ -200,6 +204,8 @@ struct TimelinePane: View {
                 // And who asks is part of which opening it is: a reader who ends, begins or
                 // changes while the page is in front opens it again, and it is asked as them.
                 .task(id: ShellPersonPages.opening(person, in: session)) { await people?.opened(person, in: session) }
+                // What their own server said is held only while this page is in front (#310).
+                .onDisappear { people?.home.letGo(of: person) }
             case .tag(let tag):
                 TagPane(
                     tag: tag,
