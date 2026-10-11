@@ -263,7 +263,7 @@ final class SourceWork {
 
     nonisolated func begin(
         host: String, for purpose: Purpose, name: Name? = nil, source: String? = nil,
-        allowedBy: Allowance.ID? = nil
+        allowedBy: Allowance.ID? = nil, sent: Int? = nil
     ) -> Token {
         let now = Date()
         let entry = Running(
@@ -272,7 +272,9 @@ final class SourceWork {
         let (token, publish) = held.withLock { held -> (Token, Bool) in
             held.next += 1
             held.running[held.next] = entry
-            Self.write(&held, reached: host, source: source, purpose: purpose, at: now, allowedBy: allowedBy)
+            Self.write(
+                &held, reached: host, source: source, purpose: purpose, at: now, allowedBy: allowedBy, sent: sent
+            )
             return (Token(id: held.next), Self.claim(&held))
         }
         if publish { schedule() }
@@ -450,12 +452,12 @@ final class SourceWork {
     /// written.
     private nonisolated static func write(
         _ held: inout Held, reached: String, source: String?, purpose: Purpose, at: Date,
-        allowedBy: Allowance.ID?
+        allowedBy: Allowance.ID?, sent: Int? = nil
     ) {
         guard !reached.isEmpty else { return }
         held.pending.append(SourceAct(
             id: held.next, reached: reached, pointedBy: source, purpose: purpose, at: at,
-            allowedBy: allowedBy
+            allowedBy: allowedBy, sent: sent
         ))
     }
 
@@ -592,7 +594,8 @@ struct SourceWorkRow: Identifiable, Equatable {
 
 /// An `HTTPClient` — and a sender — that puts each request on `SourceWork` while it runs: its
 /// host, and the purpose — and the name, where it reads one timeline or board — that the caller
-/// that built it knows. Nothing else of the request is read.
+/// that built it knows. Nothing else of the request is read but how many bytes its body is,
+/// where it carries one out (#312): the size, and nothing of what is in it.
 ///
 /// The entry is ended on the way out of every path: an answer, a failure, and a cancellation,
 /// which throws like any failure does.
@@ -639,11 +642,11 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         guard let sender, let url = request.url else { throw URLError(.unsupportedURL) }
-        return try await watched(url) { try await sender.send(request) }
+        return try await watched(url, sent: request.httpBody?.count) { try await sender.send(request) }
     }
 
     private func watched(
-        _ url: URL, _ body: @Sendable () async throws -> (Data, HTTPURLResponse)
+        _ url: URL, sent: Int? = nil, _ body: @Sendable () async throws -> (Data, HTTPURLResponse)
     ) async throws -> (Data, HTTPURLResponse) {
         let host = url.host() ?? ""
         // **The gate** (#220): an act that belongs to no source the person added never leaves,
@@ -656,7 +659,7 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
         }
         // Synchronous both ways, and so never behind the main actor: see `SourceWork`.
         let token = work.begin(
-            host: host, for: purpose, name: name, source: source, allowedBy: admission.allowedBy
+            host: host, for: purpose, name: name, source: source, allowedBy: admission.allowedBy, sent: sent
         )
         defer { work.end(token) }
         let answer = try await Outward.$admitted.withValue(true) { try await body() }
@@ -676,7 +679,8 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
 /// One outward act of this run, as the activity page lists it (#218): the source it was for, what
 /// for, and when it left. **Built from a host and a word from a fixed list, never from an
 /// address**, so nothing past a host — no path, no query, no body, no header, no token — can
-/// reach the page through here: the rule `NetLog` holds, for its reason.
+/// reach the page through here: the rule `NetLog` holds, for its reason. Of a body it carried
+/// out it holds a count of bytes (#312), which says how much left and nothing of what.
 ///
 /// **Who it is listed under.** A source's own traffic goes to the source's own host. A picture, an
 /// emoji or a page a source pointed to may be kept somewhere else — a media server, another
@@ -694,10 +698,12 @@ struct SourceAct: Identifiable, Equatable, Sendable {
     let at: Date
     /// The entry of `Allowance` that let it through, where it was not a source's own (#220).
     let allowedBy: Allowance.ID?
+    /// How many bytes of body it carried out; nil where it carried none.
+    let sent: Int?
 
     init(
         id: Int, reached: String, pointedBy: String? = nil, purpose: SourceWork.Purpose, at: Date,
-        allowedBy: Allowance.ID? = nil
+        allowedBy: Allowance.ID? = nil, sent: Int? = nil
     ) {
         self.id = id
         self.reached = SourceWork.foldKey(reached)
@@ -705,6 +711,7 @@ struct SourceAct: Identifiable, Equatable, Sendable {
         self.purpose = purpose
         self.at = at
         self.allowedBy = allowedBy
+        self.sent = sent
     }
 
     /// A source as the record draws it: a host as itself, the one key that is no host —
@@ -717,7 +724,9 @@ struct SourceAct: Identifiable, Equatable, Sendable {
 
     /// The same act, listed under `source` instead.
     func renamed(to source: String) -> SourceAct {
-        SourceAct(id: id, reached: source, pointedBy: nil, purpose: purpose, at: at, allowedBy: allowedBy)
+        SourceAct(
+            id: id, reached: source, pointedBy: nil, purpose: purpose, at: at, allowedBy: allowedBy, sent: sent
+        )
     }
 
     /// The source an act is listed under: the one that pointed to it where one did, and

@@ -49,10 +49,11 @@ struct ActivityTests {
                 #expect(!said.contains(leak), "\(leak) reached a line in \(language)")
             }
         }
-        // What an act holds is a host, a host, a word, a time and which fixed entry let it
-        // through (#220): no field could carry more.
+        // What an act holds is a host, a host, a word, a time, which fixed entry let it
+        // through (#220) and a count of the bytes it carried out (#312): no field could carry
+        // more.
         let held = Mirror(reflecting: act).children.map { "\($0.label ?? "")" }
-        #expect(held == ["id", "source", "reached", "purpose", "at", "allowedBy"])
+        #expect(held == ["id", "source", "reached", "purpose", "at", "allowedBy", "sent"])
     }
 
     @Test("A request that fails, or is sent rather than fetched, is recorded all the same")
@@ -65,6 +66,38 @@ struct ActivityTests {
         #expect(Self.record(work) == [
             "one.example one.example search", "two.example two.example write",
         ])
+    }
+
+    @Test("A file and fields sent through the signed-in door are one line of the record, holding exactly how many bytes the source was sent and nothing of what they were")
+    func aBodyOfSeveralParts() async throws {
+        let work = SourceWork()
+        let token = MastodonToken(host: "two.example", accessToken: "s3cret", clientID: "x", clientSecret: "x")
+        let source = KeepingSender()
+        let door = MastodonAuthorized(
+            token: token, sender: WatchedHTTP(sender: source, for: .write, in: work),
+            store: MemoryMastodonTokens()
+        )
+        let parts = [
+            MultipartPart.field("note", "typed-by-hand"),
+            MultipartPart.file("avatar", named: "holiday.png", type: "image/png", Data([1, 2, 3])),
+        ]
+        _ = try await door.patch(path: "/api/v1/accounts/update_credentials", parts: parts)
+        let bodies = await source.bodies
+        #expect(bodies.count == 1)
+        let received = try #require(bodies.first ?? nil)
+        #expect(received.count > 3)
+        #expect(Self.record(work) == ["two.example two.example write"])
+        let act = try #require(work.record.first)
+        #expect(act.sent == received.count)
+        let said = ActivityDetail.facts(act, language: .english).map(\.value).joined(separator: " ")
+        for leak in ["typed-by-hand", "holiday", "s3cret", "update_credentials"] {
+            #expect(!said.contains(leak), "\(leak) reached a line")
+        }
+
+        // A read carries nothing out, and says so by holding no count.
+        let reading = WatchedHTTP(FixtureHTTP(["https://two.example/x": .text("[]")]), for: .timeline, in: work)
+        _ = try await reading.data(from: URL(string: "https://two.example/x")!)
+        #expect(work.record.last?.sent == nil)
     }
 
     @Test("What the page draws follows the record as it grows")
@@ -346,6 +379,16 @@ struct ActivityTests {
 }
 
 /// A sender that answers every request with a refusal.
+/// A source that keeps the body of everything it is sent, and answers `{}`.
+private actor KeepingSender: HTTPSender {
+    private(set) var bodies: [Data?] = []
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        bodies.append(request.httpBody)
+        return (Data("{}".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
+    }
+}
+
 private struct RefusingSender: HTTPSender {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         (Data(), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: "HTTP/1.1", headerFields: nil)!)

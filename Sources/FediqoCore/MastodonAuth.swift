@@ -574,6 +574,20 @@ public struct MastodonAuthorized: Sendable {
         try await finish(try await send(path: path, method: "POST", form: form, headers: headers), path: path)
     }
 
+    /// A PATCH carrying a body of several parts through the same door (#312): a file's bytes
+    /// beside fields of text, with the token, the 401 rule, and never off this host.
+    ///
+    /// **The body is made before anything is sent** — every name checked, the whole of it
+    /// under `limit` — and one that will not do is thrown as a `MultipartError`, with nothing
+    /// asked of the source. `limit` is for a source that says it takes less: it only ever
+    /// lowers the bound, and one above `MultipartBody.byteLimit` is that.
+    public func patch(
+        path: String, parts: [MultipartPart], limit: Int = MultipartBody.byteLimit
+    ) async throws -> Data {
+        let body = try MultipartBody(parts, limit: min(limit, MultipartBody.byteLimit))
+        return try await finish(try await send(path: path, method: "PATCH", parts: body), path: path)
+    }
+
     /// Who the reader is on this source, as `@user@host` — the spelling `Note.handle` takes, so a
     /// post can be told to be theirs by comparing the two (#109).
     ///
@@ -633,6 +647,7 @@ public struct MastodonAuthorized: Sendable {
         method: String = "GET",
         query: [URLQueryItem] = [],
         form: [(String, String)]? = nil,
+        parts: MultipartBody? = nil,
         headers: [String: String] = [:]
     ) async throws -> Answered {
         guard let url = Host.httpsURL(host: token.host, path: path, query: query) else {
@@ -645,6 +660,10 @@ public struct MastodonAuthorized: Sendable {
         request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let form { request.setForm(form) }
+        if let parts {
+            request.setValue(parts.contentType, forHTTPHeaderField: "Content-Type")
+            request.httpBody = parts.data
+        }
         let (body, response) = try await sender.send(request)
         return Answered(
             body: body, status: response.statusCode, link: response.value(forHTTPHeaderField: "Link"),
