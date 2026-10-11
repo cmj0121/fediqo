@@ -747,7 +747,7 @@ public struct FediqoRootView: View {
         case .person: walk.openedPerson != nil
         case .people: walk.openedPeople != nil
         // The page of the hashtags a search found is a page of hashtags too (#319).
-        case .rising: walk.openedRising != nil || walk.openedFoundTags != nil
+        case .rising: walk.openedRising != nil || walk.openedFoundTags != nil || walk.openedFollowedTags != nil
         case .tag: walk.openedTag != nil
         case .thread: walk.openedThread != nil
         case .link: walk.openedLink != nil
@@ -1144,8 +1144,8 @@ public struct FediqoRootView: View {
         // Nor has a page of what is rising: its rows are hashtags and links.
         case .rising:
             return []
-        // Nor has the page of the hashtags a search found.
-        case .foundTags:
+        // Nor has the page of the hashtags a search found, or of the ones the reader follows.
+        case .foundTags, .followedTags:
             return []
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems }
@@ -1165,6 +1165,7 @@ public struct FediqoRootView: View {
         let listed = walk.openedPeople.map { people.lists.walked($0, in: session) }
         let rising = walk.openedRising.map { people.rising.walked($0, in: session) }
         let foundTags = walk.openedFoundTags.map { people.found.walked($0, in: session) }
+            ?? walk.openedFollowedTags.map { people.followed.walked($0, in: session) }
         let person = walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }
         let opened = listed ?? rising ?? foundTags ?? person
         // Over a search's posts stand the rows of what the sources found (#319).
@@ -1213,7 +1214,7 @@ public struct FediqoRootView: View {
         // A page read out of a post is somebody else's page, and its top is its own business.
         case .link:
             return false
-        case .person, .tag, .people, .rising, .foundTags, .thread, nil:
+        case .person, .tag, .people, .rising, .foundTags, .followedTags, .thread, nil:
             guard let first = rows?.first else { return false }
             selected = first
         }
@@ -1464,6 +1465,15 @@ public struct FediqoRootView: View {
         if walk.isEmpty, search.isSearching, let row = people.found.row(id, for: search.pattern, in: session) {
             return openFound(row)
         }
+        // On the list of the hashtags followed the row the lamp is on is a hashtag (#318), and
+        // on the reader's own page the lamp may be on the way to that list: Return opens each.
+        if let page = walk.openedFollowedTags {
+            guard let row = people.followed.row(id, of: page, in: session) else { return false }
+            return openRisingRow(row.listed)
+        }
+        if let person = walk.openedPerson, let entry = people.followedEntry(of: person, in: session), entry.id == id {
+            return followedPressed(entry)
+        }
         // On a list of people the row the lamp is on is somebody (#311): Return opens them.
         if let list = walk.openedPeople {
             guard let person = people.lists.person(id, on: list, in: session) else { return false }
@@ -1537,6 +1547,7 @@ public struct FediqoRootView: View {
     private var personAsked: Bool {
         if let list = walk.openedPeople { return people.lists.canAskAgain(list, in: session) }
         if let which = walk.openedRising { return people.rising.canAskAgain(which, in: session) }
+        if let page = walk.openedFollowedTags { return people.followed.canAskAgain(page, in: session) }
         return walk.openedPerson.map { people.canAskAgain($0, in: session) } ?? false
     }
 
@@ -1565,6 +1576,11 @@ public struct FediqoRootView: View {
         // On a page of what is rising `r` asks every source of it again (#320).
         if DummyCommand.outermost(of: openLayers) == .rising, let which = walk.openedRising {
             Task { await people.rising.again(which, in: session) }
+            return true
+        }
+        // On the list of the hashtags followed `r` asks its source for it again, from the top (#318).
+        if DummyCommand.outermost(of: openLayers) == .rising, let page = walk.openedFollowedTags {
+            Task { await people.followed.again(page, in: session) }
             return true
         }
         // The thread as `TimelinePane` draws it: one it cannot find draws the timeline instead.
@@ -1878,6 +1894,15 @@ public struct FediqoRootView: View {
         return opened
     }
 
+    /// The way to the hashtags the reader follows, pressed on their own page (#318): the list,
+    /// one more step of the walk with its line lit — or, where the line is a lock, the question
+    /// that asks the sign-in for who the reader follows, and no step.
+    private func followedPressed(_ entry: FollowedTagsEntry) -> Bool {
+        if entry.locked != nil { return entry.asks && session.askFor([.follows], host: entry.page.host) }
+        guard Self.canWalk(place: place, open: openLayers) else { return false }
+        return walk.open(entry.page, lamp: &selectedItemID)
+    }
+
     // MARK: - What a search found at the sources — #319
 
     /// A row of what a source found, opened. **The lamp and the step in one turn**, as every
@@ -1998,6 +2023,8 @@ public struct FediqoRootView: View {
         if case .link = left.step { linkReader.close() }
         // A tag's ask goes with its page (#124).
         if case .tag = left.step { session.reload.endTag() }
+        // What a list of the hashtags followed was told goes with its step (#318).
+        if case .followedTags(let page) = left.step { people.followed.closed(page) }
         selectedItemID = left.lamp
         returnFromErrand()
         return true
@@ -2022,12 +2049,14 @@ public struct FediqoRootView: View {
         // The list a notice's walk stood on is replaced: there is no step left to come back by.
         errand = nil
         let hadLink = walk.openedLink != nil
+        let lists = walk.followedTags
         guard let tag = Self.timelineSwitched(
             on: &walk, places: &session.timelinePlaces, from: left, to: arrived,
             shown: session.timelineItems(latest: prefs.latestDate).map(\.id),
             results: session.searched(search, latest: prefs.latestDate)?.map(\.id)
         ) else { return clearWalk() }
         if hadLink { linkReader.close() }
+        for page in lists { people.followed.closed(page) }
         if let lamp = selectedItemID,
            !session.heldPosts(under: tag, latest: prefs.latestDate).contains(where: { $0.id == lamp }) {
             selectedItemID = nil
@@ -2059,6 +2088,8 @@ public struct FediqoRootView: View {
     private func clearWalk() {
         if walk.openedLink != nil { linkReader.close() }
         session.reload.endTag()
+        // What each list of the hashtags followed was told goes with its step (#318).
+        for page in walk.followedTags { people.followed.closed(page) }
         walk.clear()
         errand = nil
     }
@@ -2291,6 +2322,7 @@ public struct FediqoRootView: View {
                 onOpenRising: { _ = openRising($0) },
                 onOpenRisingRow: { _ = openRisingRow($0) },
                 onOpenFound: { _ = openFound($0) },
+                onFollowed: { _ = followedPressed($0) },
                 onLookUp: lookUpPressed
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {

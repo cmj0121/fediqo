@@ -45,6 +45,10 @@ enum ShellStep: Hashable, Sendable {
     /// under its band. A hashtag's row opens that hashtag's page, and leaving it gives the row
     /// back: both are the walk's own.
     case foundTags(FoundTags)
+    /// The hashtags the reader follows at one source (#318), opened from its line on their own
+    /// page there. A hashtag's row opens that hashtag's page, and leaving it gives the row
+    /// back: both are the walk's own.
+    case followedTags(FollowedTags)
 }
 
 /// How far the reader has walked from the stream, and what each step is owed when it is left.
@@ -117,6 +121,15 @@ struct ShellWalk: Hashable, Sendable {
             if case .link = step.step { return false }
             return true
         }?.step
+    }
+
+    /// Every list of the hashtags followed among the steps (#318), in front or under another:
+    /// what a walk ended in one go lets go of, as leaving each would.
+    var followedTags: [FollowedTags] {
+        taken.compactMap { step in
+            if case .followedTags(let page) = step.step { return page }
+            return nil
+        }
     }
 
     var isEmpty: Bool { taken.isEmpty }

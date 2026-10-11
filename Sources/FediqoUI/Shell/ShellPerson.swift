@@ -235,6 +235,9 @@ final class ShellPersonPages {
     /// Whether the reader follows a hashtag at each source, for that hashtag's page (#318):
     /// numbered on the same count, and let go with the same reader.
     let tags: ShellTagFollow
+    /// The hashtags the reader follows at each source, as a list (#318): numbered on the same
+    /// count, let go with the same reader, and pressed through `tags`.
+    let followed: ShellFollowedTags
 
     init() {
         let count = PageErrands(), looks = PageReaders()
@@ -254,6 +257,9 @@ final class ShellPersonPages {
         home = ShellPersonHome(errands: count)
         let tags = ShellTagFollow(errands: count, readers: looks)
         self.tags = tags
+        let followed = ShellFollowedTags(errands: count, readers: looks, tags: tags)
+        self.followed = followed
+        looks.whenChanged { [weak followed] host in followed?.letGo(at: host) }
         looks.whenChanged { [weak found] host in found?.letGo(at: host) }
         looks.whenChanged { [weak self] host in self?.letGo(at: host) }
         looks.whenChanged { [weak lists] host in lists?.letGo(at: host) }
@@ -407,10 +413,21 @@ final class ShellPersonPages {
         lists(of: who, in: session).first { $0.id == id }
     }
 
+    /// The way to the hashtags the reader follows (#318), where the page of `who` is their own
+    /// — drawn under the figures, and so only where they are: none until the source has said
+    /// who they are, and none while the page draws what their own server says.
+    func followedEntry(of who: DummyPerson, in session: ShellSession) -> FollowedTagsEntry? {
+        let said = said(of: who, in: session)
+        guard said?.person != nil, home.said(of: who, beside: said, in: session) == nil else { return nil }
+        return followed.entry(on: who, in: session)
+    }
+
     /// Every row `j` and `k` walk on the page of `who`, top to bottom as it is drawn: the
-    /// figures that open a list, and under them their posts.
+    /// figures that open a list, the way to the hashtags followed where it is a press, and
+    /// under them their posts.
     func walkedIDs(of who: DummyPerson, in session: ShellSession) -> [String] {
-        lists(of: who, in: session).map(\.id) + walked(of: who, in: session).map(\.id)
+        let entry = followedEntry(of: who, in: session).flatMap { $0.presses ? [$0.id] : nil } ?? []
+        return lists(of: who, in: session).map(\.id) + entry + walked(of: who, in: session).map(\.id)
     }
 
     /// Where the lamp lands when it is first brought down onto the page of `who`: their first

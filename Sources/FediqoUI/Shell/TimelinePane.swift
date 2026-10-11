@@ -86,6 +86,8 @@ struct TimelinePane: View {
     /// A row of what a search found at a source opened (#319), answered by the root: somebody's
     /// page, a hashtag's, or the page of all of one kind.
     var onOpenFound: (SearchFoundRow) -> Void = { _ in }
+    /// The way to the hashtags followed, pressed on the reader's own page (#318).
+    var onFollowed: (FollowedTagsEntry) -> Void = { _ in }
     /// The press about looking somebody up through a source, answered by the root.
     var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
@@ -195,7 +197,9 @@ struct TimelinePane: View {
                     onOpenMoved: { moved in
                         if let there = DummyPerson(handle: moved.handle, host: person.host) { onOpenPerson(there) }
                     },
-                    onOpenList: onOpenPeople
+                    onOpenList: onOpenPeople,
+                    followed: people?.followedEntry(of: person, in: session),
+                    onFollowed: onFollowed
                 )
                 // One pane per person, so opening a second face from inside one draws afresh.
                 .id(person.id)
@@ -299,6 +303,29 @@ struct TimelinePane: View {
                 if let said = people?.found.said(of: page, in: session) {
                     FoundTagsPane(said: said, selectedID: $selectedID, onOpen: onOpenFound, jumpToTop: jumpToTop, onBack: onBack)
                         .id(page.id)
+                } else {
+                    underneath
+                }
+            case .followedTags(let page):
+                // No such list to draw — the sign-in ended, or sees who is followed no longer,
+                // or its source was removed — draws the stream instead.
+                if let followed = people?.followed, let said = followed.said(of: page, in: session) {
+                    FollowedTagsPane(
+                        said: said,
+                        selectedID: $selectedID,
+                        onOpen: onOpenRisingRow,
+                        onAskAgain: { Task { await followed.again(page, in: session) } },
+                        onReadOn: { Task { await followed.readOn(page, in: session) } },
+                        onAct: { row in Task { await followed.press(row.id, on: page, in: session) } },
+                        onAsk: { session.askFor([.follows], host: page.host) },
+                        jumpToTop: jumpToTop,
+                        onBack: onBack
+                    )
+                    .id(page.id)
+                    // **The ask is the page opening**, once a list a run: its first stretch, as
+                    // the reader. And who asks is part of which opening it is. Nothing reads on
+                    // unpressed.
+                    .task(id: followed.opening(page, in: session)) { await followed.opened(page, in: session) }
                 } else {
                     underneath
                 }
@@ -589,7 +616,7 @@ struct TimelinePane: View {
     /// opened over it, or a page read out of a post, which is somebody's own.
     static func page(_ standing: ShellStep?) -> TimelineSwipe.Page {
         switch standing {
-        case .person, .tag, .people, .rising, .foundTags, .thread: .opened
+        case .person, .tag, .people, .rising, .foundTags, .followedTags, .thread: .opened
         case .link: .link
         case nil: .timeline
         }
@@ -604,6 +631,7 @@ struct TimelinePane: View {
         case .people(let list): "people:" + list.id
         case .rising(let which): "rising:" + which.rawValue
         case .foundTags(let page): "found:" + page.id
+        case .followedTags(let page): "followed:" + page.id
         case .link, nil: nil
         }
     }

@@ -265,7 +265,22 @@ struct RisingRowView: View {
     var selected = false
     var onPress: (() -> Void)?
     var onOpen: (() -> Void)?
+    /// What the page it stands on says of it under its name, where that page has something
+    /// to say: how the reader stands to a hashtag they follow (#318).
+    var said: String?
+    /// A press on it that did not arrive, in full ink.
+    var missed: String?
+    /// The row's `…`, and what it is called, where the list it stands on has something to do
+    /// to a row. Nothing on a list that has not.
+    var menu: NoticeRow.Menu?
+    var menuLabel: String?
     @Environment(\.colorScheme) private var colorScheme
+
+    /// What a listener is read: the row, and then what the page says of it.
+    static func spoken(_ row: RisingRow, said: String?, missed: String?, language: DummyLanguage? = nil) -> String {
+        [RisingSaid.spoken(row, language: language), said, missed].compactMap { $0 }
+            .joined(separator: L10n.t("people.row.between", language: language))
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: ShellSpace.snug) {
@@ -274,12 +289,23 @@ struct RisingRowView: View {
                 case .tag(let tag, _): tagLines(tag)
                 case .link(let link, _): linkLines(link)
                 }
+                if let said { figures(said) }
+                if let missed {
+                    Text(missed)
+                        .shellFont(.meta)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Image(systemName: "chevron.right")
                 .shellFont(.mark)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .accessibilityHidden(true)
+            if let menu {
+                ShellMoreButton(label: menuLabel ?? ShellMore.label(), asks: menu.asks, more: menu.more)
+                    .fixedSize()
+            }
         }
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.step)
@@ -289,10 +315,15 @@ struct RisingRowView: View {
         .contentShape(Rectangle())
         .onTapGesture { onPress?() }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(RisingSaid.spoken(row))
+        .accessibilityLabel(Self.spoken(row, said: said, missed: missed))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityAddTraits(onOpen == nil ? [] : .isButton)
         .accessibilityAction(.default) { onOpen?() }
+        // Each item of its `…` is a named action on the row, as on a person's.
+        .accessibilityActions {
+            if let menu { NoticeMenuActions(more: menu.more, asks: menu.asks) }
+        }
+        .modifier(NoticeRowMenu(menu: menu))
     }
 
     /// Where the reader is: a post row's own lamp.

@@ -154,6 +154,9 @@ final class ShellTagFollow {
         let number: Int
         /// As the source last said, or nothing where it has not.
         var said: Bool?
+        /// Whether what stands in `said` was the list's word (`press(_:at:to:in:)`), written
+        /// down to be pressed over: the page coming in front asks all the same.
+        var seeded = false
         /// Whether the last read failed.
         var failed = false
         /// Whether the last read was answered that the source has no such hashtag.
@@ -191,6 +194,10 @@ final class ShellTagFollow {
     /// goes on answering a read that was called off, as a transfer already ended does. Nothing
     /// in the app.
     @ObservationIgnored var reaching: ((MastodonToken) -> MastodonTagFollows)?
+    /// Who else is told what a press was answered: the list of the hashtags followed, whose
+    /// row is as an act answered (`ShellFollowedTags`). Told for the reader who pressed and
+    /// nobody else, whether or not the page pressed on still stands.
+    @ObservationIgnored var whenAnswered: ((_ tag: PostTag, _ host: String, _ followed: Bool) -> Void)?
 
     /// The guard's key names a post's act, and a hashtag's follow is none of them: it is kept
     /// under the one that is a mark put at the source for the reader alone.
@@ -251,31 +258,34 @@ final class ShellTagFollow {
 
     /// The lines of the page of `tag`: none where no source has one.
     func lines(of tag: PostTag, in session: ShellSession) -> [TagFollowLine] {
-        guard Self.asks(about: tag) else { return [] }
-        return sources(in: session).compactMap { source in
-            let host = source.host
-            guard let stands = session.mastodon.standing(.follows, host: host) else { return nil }
-            guard stands == .held else {
-                // Held in part with the rest not to be asked for has no place of its own: said, unpressed.
-                let place = session.mastodon.place(.follows, host: host) ?? PartWords.Place(kind: .none, key: "part.ask.partly")
-                return TagFollowLine(host: host, tag: tag, standing: .locked(place))
-            }
-            let key = Self.key(tag, host)
-            if let to = acts.wanted(key, Self.mark), pressedUnder[key] == ShellPersonPages.signIns(at: host, in: session) {
-                return TagFollowLine(host: host, tag: tag, standing: .doing(to))
-            }
-            guard let page = self.standing(key, at: host, in: session) else {
-                return TagFollowLine(host: host, tag: tag, standing: .asking)
-            }
-            guard let said = page.said else {
-                if page.asking { return TagFollowLine(host: host, tag: tag, standing: .asking) }
-                if page.absent { return TagFollowLine(host: host, tag: tag, standing: .absent) }
-                return TagFollowLine(host: host, tag: tag, standing: page.failed ? .unknown : .asking)
-            }
-            let missed = acts.standing(of: key, Self.mark) == .failed
-                ? acts.misses.first { $0.key == ShellActKey(row: key, act: Self.mark) }?.wanted : nil
-            return TagFollowLine(host: host, tag: tag, standing: .said(said), missed: missed)
+        sources(in: session).compactMap { line(of: tag, at: $0, in: session) }
+    }
+
+    /// The one line of `tag` at `source` — a source that has a line, which whoever asks has
+    /// found once for all the hashtags it asks about — or nothing where the hashtag has none.
+    func line(of tag: PostTag, at source: Source, in session: ShellSession) -> TagFollowLine? {
+        let host = source.host
+        guard Self.asks(about: tag), let stands = session.mastodon.standing(.follows, host: host) else { return nil }
+        guard stands == .held else {
+            // Held in part with the rest not to be asked for has no place of its own: said, unpressed.
+            let place = session.mastodon.place(.follows, host: host) ?? PartWords.Place(kind: .none, key: "part.ask.partly")
+            return TagFollowLine(host: host, tag: tag, standing: .locked(place))
         }
+        let key = Self.key(tag, host)
+        if let to = acts.wanted(key, Self.mark), pressedUnder[key] == ShellPersonPages.signIns(at: host, in: session) {
+            return TagFollowLine(host: host, tag: tag, standing: .doing(to))
+        }
+        guard let page = self.standing(key, at: host, in: session) else {
+            return TagFollowLine(host: host, tag: tag, standing: .asking)
+        }
+        guard let said = page.said else {
+            if page.asking { return TagFollowLine(host: host, tag: tag, standing: .asking) }
+            if page.absent { return TagFollowLine(host: host, tag: tag, standing: .absent) }
+            return TagFollowLine(host: host, tag: tag, standing: page.failed ? .unknown : .asking)
+        }
+        let missed = acts.standing(of: key, Self.mark) == .failed
+            ? acts.misses.first { $0.key == ShellActKey(row: key, act: Self.mark) }?.wanted : nil
+        return TagFollowLine(host: host, tag: tag, standing: .said(said), missed: missed)
     }
 
     // MARK: - Letting go
@@ -300,6 +310,16 @@ final class ShellTagFollow {
         }
     }
 
+    /// The list of the hashtags followed at `host` left (`ShellFollowedTags.closed`): every
+    /// word it gave goes with it, and what was said under one of a press that did not arrive.
+    /// What a hashtag's own page was told is that page's, and stays.
+    func listClosed(at host: String) {
+        for (key, page) in pages where page.host == host && page.seeded {
+            drop(key)
+            if !acts.isOnItsWay(key, Self.mark) { acts.landed(key, Self.mark) }
+        }
+    }
+
     private func drop(_ key: String) {
         asks[key]?.cancel()
         asks[key] = nil
@@ -310,7 +330,8 @@ final class ShellTagFollow {
 
     /// The page of `tag` coming in front: each source whose sign-in holds follows is asked
     /// whether the reader follows it. Asked once: a source that answered or failed is drawn
-    /// from that; one being asked is waited on and asked nothing more.
+    /// from that; one being asked is waited on and asked nothing more. **The list's word is
+    /// no answer**: a page that holds only that is let go here, and asked as one never made.
     func opened(_ tag: PostTag, in session: ShellSession) async {
         guard Self.asks(about: tag) else { return }
         var waited: [Task<Void, Never>] = []
@@ -324,7 +345,11 @@ final class ShellTagFollow {
                     if let running = asks[key] { waited.append(running) }
                     continue
                 }
-                if page.said != nil || page.failed || page.absent { continue }
+                if page.seeded {
+                    drop(key)
+                } else if page.said != nil || page.failed || page.absent {
+                    continue
+                }
             }
             waited.append(begin(tag, at: source, with: held, in: session))
         }
@@ -432,6 +457,35 @@ final class ShellTagFollow {
         }.value
     }
 
+    /// A press on a row of the list of the hashtags followed (`ShellFollowedTags`): follows
+    /// the hashtag at `host`, or with `wanted` false stops.
+    ///
+    /// **The list is what said how the hashtag stands**, so its word is written down as the
+    /// source's last — over whatever this page read before, and never over a read that is
+    /// out — and the press is then the line's own: one guard, one request, one sentence.
+    /// **Marked as the list's** (`seeded`), so it stands in for no ask of the hashtag's own
+    /// page (`opened`) and goes when the list does (`listClosed`).
+    func press(_ tag: PostTag, at host: String, to wanted: Bool, in session: ShellSession) async {
+        guard Self.asks(about: tag), let source = sources(in: session).first(where: { $0.host == host }) else { return }
+        let looked = readers.look(at: source.host, in: session)
+        guard looked.held != nil, !looked.changed, Self.holds(at: source.host, in: session) else { return }
+        let key = Self.key(tag, source.host)
+        if let page = self.standing(key, at: source.host, in: session) {
+            if page.asking { return }
+            pages[key]?.said = !wanted
+            pages[key]?.seeded = true
+            pages[key]?.failed = false
+            pages[key]?.absent = false
+        } else {
+            pages[key] = Page(
+                host: source.host, askedAs: ShellPersonPages.askedAs(at: source.host, in: session),
+                under: ShellPersonPages.signIns(at: source.host, in: session), number: errands.next(), said: !wanted,
+                seeded: true
+            )
+        }
+        await press(tag, at: host, in: session)
+    }
+
     /// Sends the press and takes its answer, if it is still this press's to take.
     ///
     /// **A third copy of one sequence** — send, then "is the entry still mine?", then land or
@@ -456,6 +510,8 @@ final class ShellTagFollow {
         guard acts.flight(key, Self.mark) == flight else { return }
         pressedUnder[key] = nil
         let sameReader = session.mastodon.token(host: source.host)?.accessToken == held.accessToken
+        // The source's word to the reader who pressed, wherever the page pressed on has gone.
+        if sameReader, let answer { whenAnswered?(tag, source.host, answer) }
         guard sameReader, let page = self.standing(key, at: source.host, in: session), page.number == pressed.number else {
             // Not the page pressed on, or not its reader: the answer is written nowhere.
             acts.landed(key, Self.mark)

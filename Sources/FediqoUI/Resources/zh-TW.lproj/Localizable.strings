@@ -968,6 +968,18 @@
 "tag.follow.unfollow.spoken" = "在 %2$@ 取消追蹤 %1$@";
 "tag.follow.failed.follow" = "無法在 %2$@ 追蹤 %1$@。";
 "tag.follow.failed.unfollow" = "無法在 %2$@ 取消追蹤 %1$@。";
+"followed.tags.title" = "你追蹤的主題標籤";
+"followed.tags.shown" = "顯示 %@ 個";
+"followed.tags.asking" = "正在向 %@ 詢問你追蹤的主題標籤…";
+"followed.tags.failed" = "無法向 %@ 詢問你追蹤的主題標籤。";
+"followed.tags.again.failed" = "無法再向 %@ 詢問一次。它先前列出的仍然都在。";
+"followed.tags.none" = "%@ 沒有列出你追蹤的主題標籤。";
+"followed.tags.foot.more" = "還有更多主題標籤，按這裡就會讀取。";
+"followed.tags.foot.reading" = "正在讀取更多主題標籤…";
+"followed.tags.foot.end" = "沒有更多主題標籤了：%@ 把會給的都送來了。";
+"followed.tags.foot.failed" = "無法從 %@ 讀取更多主題標籤。按這裡再試一次。";
+"followed.tags.foot.stopped" = "%@ 不再依序給出主題標籤。清單到這裡為止。";
+"followed.tags.foot.farthest" = "Fediqo 只讀取你追蹤的前 %1$@ 個主題標籤，%2$@ 可能還列了更多。";
 "item.person.open" = "打開 %@";
 "item.open.thread" = "打開討論串";
 
@@ -1768,7 +1780,7 @@
 "search.lookup.signedOut.there" = "只有登入 %1$@ 的人，才能請它查找 %2$@。";
 "work.purpose.lookUp" = "請來源查找某個人";
 "work.purpose.personHome" = "向某個人所在的站台詢問他們";
-"work.purpose.followedTags" = "讀取你在來源是否追蹤某個主題標籤";
+"work.purpose.followedTags" = "讀取你在來源追蹤的主題標籤，或是否追蹤其中某一個";
 "person.home.ask" = "詢問 %@";
 "person.home.asking" = "正在詢問 %@…";
 "person.home.said" = "依 %1$@ 的說法，於 %2$@ 詢問。";

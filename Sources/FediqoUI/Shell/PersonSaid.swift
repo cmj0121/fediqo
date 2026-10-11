@@ -317,6 +317,9 @@ struct PersonSaidBlock: View {
     /// A count that opens a list, pressed (#311): that list's page. Nothing where the block is
     /// drawn with nobody to answer, and then every count is words alone.
     var onOpenList: ((PeopleList) -> Void)?
+    /// The way to the hashtags the reader follows, on their own page (#318), and its press.
+    var followed: FollowedTagsEntry?
+    var onFollowed: ((FollowedTagsEntry) -> Void)?
     /// Whether an address or a hashtag in their words is a press. Not where the block is the
     /// word of a server nobody added (`PersonHomeSaid`): there they are letters.
     var linked = true
@@ -383,6 +386,11 @@ struct PersonSaidBlock: View {
                     VStack(alignment: .leading, spacing: ShellSpace.tight) { ForEach(counts) { count($0) } }
                 }
                 .shellFont(.reading)
+            }
+            if let followed, let onFollowed {
+                FollowedTagsEntryLine(entry: followed, lit: followed.id == lit, onPress: onFollowed)
+                    .shellFont(.reading)
+                    .id(followed.id)
             }
         }
         .padding(.horizontal, ShellSpace.pad)

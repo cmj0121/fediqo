@@ -989,6 +989,18 @@
 "tag.follow.unfollow.spoken" = "Unfollow %1$@ at %2$@";
 "tag.follow.failed.follow" = "Could not follow %1$@ at %2$@.";
 "tag.follow.failed.unfollow" = "Could not unfollow %1$@ at %2$@.";
+"followed.tags.title" = "Hashtags you follow";
+"followed.tags.shown" = "%@ shown";
+"followed.tags.asking" = "Asking %@ for the hashtags you follow…";
+"followed.tags.failed" = "Could not ask %@ for the hashtags you follow.";
+"followed.tags.again.failed" = "Could not ask %@ again. What it listed before is still here.";
+"followed.tags.none" = "%@ lists no hashtags you follow.";
+"followed.tags.foot.more" = "More hashtags can be read. Press here to read them.";
+"followed.tags.foot.reading" = "Reading more hashtags…";
+"followed.tags.foot.end" = "No more hashtags: %@ has sent all it gives.";
+"followed.tags.foot.failed" = "Could not read more hashtags from %@. Press here to try again.";
+"followed.tags.foot.stopped" = "%@ stopped handing hashtags on in order. The list ends here.";
+"followed.tags.foot.farthest" = "Fediqo reads the first %1$@ hashtags you follow. %2$@ may list more.";
 "item.person.open" = "Open %@";
 "item.open.thread" = "Open the thread";
 
@@ -1813,7 +1825,7 @@
 "search.lookup.signedOut.there" = "%1$@ can be asked to look %2$@ up only by somebody signed in to it.";
 "work.purpose.lookUp" = "Asking a source to look somebody up";
 "work.purpose.personHome" = "Asking the server someone lives on about them";
-"work.purpose.followedTags" = "Reading whether you follow a hashtag at a source";
+"work.purpose.followedTags" = "Reading the hashtags you follow at a source, or whether you follow one";
 "person.home.ask" = "Ask %@";
 "person.home.asking" = "Asking %@…";
 "person.home.said" = "As %1$@ says, asked at %2$@.";

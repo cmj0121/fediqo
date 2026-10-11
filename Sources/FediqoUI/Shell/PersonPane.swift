@@ -79,6 +79,10 @@ struct PersonPane: View {
     /// A figure that counts a list of people, pressed (#311): that list's page, answered by
     /// the root as one more step of the walk.
     var onOpenList: ((PeopleList) -> Void)?
+    /// The way to the hashtags the reader follows, where this is their own page (#318), and
+    /// its press: the list's page, or the question its lock asks.
+    var followed: FollowedTagsEntry?
+    var onFollowed: ((FollowedTagsEntry) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
@@ -323,7 +327,7 @@ struct PersonPane: View {
         if let subject = said.person {
             PersonSaidBlock(
                 person: subject, source: said.source, onOpenMoved: onOpenMoved,
-                lit: selectedID, onOpenList: onOpenList
+                lit: selectedID, onOpenList: onOpenList, followed: followed, onFollowed: onFollowed
             )
             if home == nil { ShellRule() }
         }
