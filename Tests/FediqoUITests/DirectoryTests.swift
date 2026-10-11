@@ -440,7 +440,7 @@ struct DirectoryTests {
         #expect(SourceMoreSaid.directoryHint(language: .english) == "Closes this page and opens the directory.")
 
         var opened: [PeopleList] = []
-        let sheet = JoinSheet(session: session, onDirectory: { opened.append($0) })
+        let sheet = JoinSheet(session: session, onPeople: { opened.append($0) })
         #expect(JoinSheet(session: session).directoryPress(at: Self.host) == nil, "nobody to answer: no line")
         let press = try #require(sheet.directoryPress(at: Self.host))
         press()

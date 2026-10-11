@@ -400,9 +400,10 @@ struct JoinSheet: View {
     /// by the root once the sheet has come down. Nothing where nobody answers, and then the
     /// line that offers it is not drawn.
     var onOwnPage: ((DummyPerson) -> Void)?
-    /// Opens a joined source's directory of people (#315), answered by the root once the sheet
-    /// has come down. Nothing where nobody answers, and then the line that offers it is not drawn.
-    var onDirectory: ((PeopleList) -> Void)?
+    /// Opens a page of people of a joined source's (#315) — its directory, or the people it
+    /// suggests — answered by the root once the sheet has come down. Nothing where nobody
+    /// answers, and then the lines that offer them are not drawn.
+    var onPeople: ((PeopleList) -> Void)?
     /// What a joined source says of itself beyond its document (#321), asked and kept by the
     /// pages the root holds. Nothing where the sheet is drawn with none: nothing more is then
     /// asked of any source, or drawn.
@@ -610,7 +611,10 @@ struct JoinSheet: View {
                     SourcePreviewView(preview: preview, surface: .sheet, origin: origin)
                     if case .joined(let source) = origin, let you { YouThereBlock(host: source.host, you: you, session: session) }
                     if case .joined(let source) = origin, let more {
-                        SourceMoreBlock(host: source.host, more: more, session: session, onDirectory: directoryPress(at: source.host))
+                        SourceMoreBlock(
+                            host: source.host, more: more, session: session, onDirectory: directoryPress(at: source.host),
+                            onSuggested: suggestedPress(at: source.host)
+                        )
                     }
                 }
             }
@@ -640,10 +644,22 @@ struct JoinSheet: View {
     /// directory opens. **Which sources have such a line is not decided here**: the block that
     /// draws it is handed nothing for a source that does not say who people are.
     func directoryPress(at host: String) -> (() -> Void)? {
-        guard let onDirectory else { return nil }
+        guard let onPeople else { return nil }
         return {
             session.dismissStage()
-            onDirectory(PeopleList(directoryAt: host))
+            onPeople(PeopleList(directoryAt: host))
+        }
+    }
+
+    /// What the line "People it suggests" presses on a joined source's page, or nothing where
+    /// nobody answers: the sheet comes down, and they open as the directory does. **Which
+    /// sources have such a line, and for whom, is not decided here**: the block that draws it
+    /// is handed that.
+    func suggestedPress(at host: String) -> (() -> Void)? {
+        guard let onPeople else { return nil }
+        return {
+            session.dismissStage()
+            onPeople(PeopleList(suggestedAt: host))
         }
     }
 

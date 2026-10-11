@@ -33,6 +33,11 @@ import Observation
 // from nobody it may give to somebody. Each for the reason given where a person's page keeps
 // the same rule (`ShellPersonPages`). **Held nowhere**: for this run, in memory.
 //
+// **Two lines open a page of people, and ask nothing by being drawn** (#315): the source's
+// directory, offered to anyone, and the people it suggests, offered only to somebody signed in
+// there. Each is asked for by the page it opens, and is not offered where the host said, this
+// run, that its address is not there.
+//
 // **Only where the source is one that says who people are** — the one fact per kind there is,
 // read where a person's page reads it. A forum's page is handed nothing and asks nobody.
 
@@ -63,11 +68,15 @@ struct SourceMoreSaid: Equatable {
     /// Whether its directory of people is offered (#315): everywhere but where the host said,
     /// this run, that the directory's address is not there. Asked for by the page it opens.
     var directory = true
+    /// Whether the people it suggests are offered (#315): only to somebody signed in there —
+    /// a source suggests nobody anything unsigned — and not where the host said, this run, that
+    /// their address is not there. Asked for by the page it opens.
+    var suggested = false
 
-    /// Whether the host has none of the three, and no directory that this page can open: there
-    /// is then nothing to list, and one sentence says so.
+    /// Whether the host has none of the three, and no page of people that this page can open:
+    /// there is then nothing to list, and one sentence says so.
     func isAbsent(opensDirectory: Bool) -> Bool {
-        account == nil && servers == nil && weeks == nil && !(directory && opensDirectory)
+        account == nil && servers == nil && weeks == nil && !((directory || suggested) && opensDirectory)
     }
 }
 
@@ -152,7 +161,9 @@ final class ShellSourceMore {
         return SourceMoreSaid(
             source: source.host, account: told(.longerAccount, page?.account), servers: told(.knownServers, page?.servers),
             weeks: told(.activity, page?.weeks), asking: page?.asking ?? false, askingServers: page?.askingServers ?? false,
-            directory: hosts.has(.directory, at: source.host) != .absent
+            directory: hosts.has(.directory, at: source.host) != .absent,
+            suggested: ShellPersonPages.askedAs(at: source.host, in: session) != .nobody
+                && hosts.has(.suggestions, at: source.host) != .absent
         )
     }
 

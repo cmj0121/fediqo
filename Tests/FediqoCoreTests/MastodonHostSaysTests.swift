@@ -108,7 +108,10 @@ struct MastodonHostSaysTests {
         ]
         for (thing, path, refusal) in signed {
             let asWriter = try await ask(path, as: writer), asNobody = try await ask(path)
-            #expect(asWriter.status == 200 && asWriter.body == Data("[]".utf8), "\(thing): \(asWriter.status)")
+            // Nobody was suggested on a new server until the seed named a few people to suggest (#315).
+            let given: Int? = (asWriter.json as? [Any])?.count
+            let asSeeded: Bool = thing == .suggestions ? given == 5 : asWriter.body == Data("[]".utf8)
+            #expect(asWriter.status == 200 && asSeeded, "\(thing): \(asWriter.status)")
             #expect(asNobody.status == refusal && !asNobody.ofTheAddress, "\(thing) with no sign-in: \(asNobody.status)")
         }
         let weeks = try await ask("/api/v1/instance/activity")

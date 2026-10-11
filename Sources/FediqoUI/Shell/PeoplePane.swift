@@ -17,7 +17,7 @@ struct PeopleSaid: Equatable {
         case said
         /// The source refused, failed, or sent what could not be read.
         case failed
-        /// The source says it has no such list at all: its directory's address is not there.
+        /// The source says it has no such list at all: the list's own address is not there.
         case absent
     }
 
@@ -114,11 +114,17 @@ struct PeopleSaid: Equatable {
     /// What is said above the rows: that the list is being asked for, that it could not be —
     /// or, once the source has given it, what asking again came to.
     func stateLine(language: DummyLanguage? = nil) -> String? {
-        let asked = list.isDirectory ? "people.directory" : list.which == .found ? "people.found" : "people"
+        let asked = switch list.which {
+        case .directory: "people.directory"
+        case .found: "people.found"
+        case .suggested: "people.suggested"
+        case .following, .followers: "people"
+        }
         return switch reading {
         case .asking: String(format: L10n.t("\(asked).asking", language: language), source)
         case .failed: String(format: L10n.t("\(asked).failed", language: language), source)
-        case .absent: String(format: L10n.t("people.directory.absent", language: language), source)
+        // Only a list a host may not have is ever absent, and each says so in its own words.
+        case .absent: String(format: L10n.t("\(asked).absent", language: language), source)
         case .said: againFailed ? String(format: L10n.t("people.again.failed", language: language), source) : nil
         }
     }
@@ -155,10 +161,12 @@ struct PeopleSaid: Equatable {
         case .failed: return String(format: L10n.t("people.foot.failed", language: language), source)
         case .stopped: return String(format: L10n.t("people.foot.stopped", language: language), source)
         case .farthest:
-            return String(
-                format: L10n.t(list.which == .found ? "people.found.foot.farthest" : "people.directory.foot.farthest", language: language),
-                L10n.grouped(people.count, language: language), source
-            )
+            let key = switch list.which {
+            case .found: "people.found.foot.farthest"
+            case .suggested: "people.suggested.foot.farthest"
+            case .directory, .following, .followers: "people.directory.foot.farthest"
+            }
+            return String(format: L10n.t(key, language: language), L10n.grouped(people.count, language: language), source)
         case .end:
             guard short != nil, let counted = list.counted else {
                 return String(format: L10n.t("people.foot.end", language: language), source)
@@ -191,6 +199,9 @@ struct PeopleSaid: Equatable {
         if list.which == .found {
             return String(format: L10n.t("people.found.none", language: language), source)
         }
+        if list.which == .suggested {
+            return String(format: L10n.t("people.suggested.none", language: language), source)
+        }
         if list.hidden, !own {
             return String(format: L10n.t("people.hidden", language: language), list.lineHandle)
         }
@@ -198,6 +209,32 @@ struct PeopleSaid: Equatable {
             return String(format: L10n.t(signedIn ? "people.noneOf" : "people.noneOf.unsigned", language: language), source)
         }
         return String(format: L10n.t("people.none", language: language), source)
+    }
+
+    // MARK: - A row's menu
+
+    /// What telling the source not to suggest somebody is called.
+    static func dismissName(language: DummyLanguage? = nil) -> String {
+        L10n.t("people.suggested.dismiss", language: language)
+    }
+
+    /// Why that is dim: the word a source wants for it belongs to changing the reader's own
+    /// account there, which no sign-in is asked for yet.
+    static func dismissDim(_ source: String, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("people.suggested.dismiss.dim", language: language), source)
+    }
+
+    static let dismissSymbol = "person.crop.circle.badge.minus"
+
+    /// What the `…` of a row of this list holds, or nothing on a list with nothing to do to a
+    /// row. **On the people a source suggests, one line and it is dim**: a source takes "don't
+    /// suggest" only from a sign-in that may change the reader's account there, and no sign-in
+    /// here is asked for that — so the line says why at the menu's head, takes no press, and
+    /// nothing is sent.
+    func more(language: DummyLanguage? = nil) -> ShellMore? {
+        guard list.which == .suggested else { return nil }
+        let dismiss = ShellMark(Self.dismissSymbol, Self.dismissName(language: language), look: .dim(.askAgain))
+        return ShellMore.ending(in: .plain(dismiss, act: {}), dimFor: Self.dismissDim(source, language: language))
     }
 }
 
@@ -326,8 +363,15 @@ struct PeoplePane: View {
                 case .open: onOpen(person)
                 }
             },
-            onOpen: { onOpen(person) }
+            onOpen: { onOpen(person) },
+            menu: Self.menu(for: said)
         )
+    }
+
+    /// The `…` of a row of `said`, or nothing where its list has nothing to do to a row.
+    /// **No item here asks first**, so no question is ever put and none is hung.
+    static func menu(for said: PeopleSaid) -> NoticeRow.Menu? {
+        said.more().map { more in NoticeRow.Menu(more: { more }, asks: .constant(nil)) }
     }
 }
 

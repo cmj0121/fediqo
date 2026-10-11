@@ -153,6 +153,17 @@ extension SourceMoreSaid {
         L10n.t("source.more.directory.hint", language: language)
     }
 
+    /// What the line that opens the people the source suggests the reader is called (#315),
+    /// and what a listener is told the press does. It leads to a page of its own, as the
+    /// directory's line does, and wears the same mark.
+    static func suggestedLabel(language: DummyLanguage? = nil) -> String {
+        L10n.t("source.more.suggested", language: language)
+    }
+
+    static func suggestedHint(language: DummyLanguage? = nil) -> String {
+        L10n.t("source.more.suggested.hint", language: language)
+    }
+
     static func cutLine(language: DummyLanguage? = nil) -> String {
         String(format: L10n.t("source.more.account.cut", language: language), L10n.grouped(HostAccount.length, language: language))
     }
@@ -173,6 +184,9 @@ struct SourceMoreSection: View {
     /// The press on "Its directory of people" (#315): the directory opens as a page of its own.
     /// Nothing where no page can be opened from here, and then the line is not drawn.
     var onDirectory: (() -> Void)?
+    /// The press on "People it suggests" (#315): they open as a page of their own. Nothing
+    /// where no page can be opened from here, and then the line is not drawn.
+    var onSuggested: (() -> Void)?
 
     @State private var unfolded: Set<Part>
     @State private var shown = SourceMoreSaid.serversStep
@@ -181,12 +195,13 @@ struct SourceMoreSection: View {
     /// `unfolded` is what stands open when the block is first drawn: nothing, in the app.
     init(
         said: SourceMoreSaid, onAgain: @escaping () -> Void = {}, onServers: @escaping () -> Void = {},
-        onDirectory: (() -> Void)? = nil, unfolded: Set<Part> = []
+        onDirectory: (() -> Void)? = nil, onSuggested: (() -> Void)? = nil, unfolded: Set<Part> = []
     ) {
         self.said = said
         self.onAgain = onAgain
         self.onServers = onServers
         self.onDirectory = onDirectory
+        self.onSuggested = onSuggested
         _unfolded = State(initialValue: unfolded)
     }
 
@@ -195,11 +210,18 @@ struct SourceMoreSection: View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
             head
             if said.asking { ShellStatusLine(SourceMoreSaid.askingLine(said.source)) }
-            if said.isAbsent(opensDirectory: onDirectory != nil), !said.asking { sentence(SourceMoreSaid.offersNone(said.source)) }
+            if said.isAbsent(opensDirectory: onDirectory != nil || onSuggested != nil), !said.asking {
+                sentence(SourceMoreSaid.offersNone(said.source))
+            }
             account
             servers
             weeks
-            if said.directory, let onDirectory { directory(onDirectory) }
+            if said.suggested, let onSuggested {
+                leaving(SourceMoreSaid.suggestedLabel(), hint: SourceMoreSaid.suggestedHint(), press: onSuggested)
+            }
+            if said.directory, let onDirectory {
+                leaving(SourceMoreSaid.directoryLabel(), hint: SourceMoreSaid.directoryHint(), press: onDirectory)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(ShellSpace.pad)
@@ -307,13 +329,14 @@ struct SourceMoreSection: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    /// The line that opens the source's directory of people (#315). **It leaves this page**: the
-    /// sheet comes down and the directory is a page of its own, so its mark points away and
-    /// never turns, and a listener is told where the press leads. Nothing is asked by drawing it.
-    private func directory(_ press: @escaping () -> Void) -> some View {
+    /// A line that opens a page of people — the source's directory, the people it suggests
+    /// (#315). **It leaves this page**: the sheet comes down and what it names is a page of its
+    /// own, so its mark points away and never turns, and a listener is told where the press
+    /// leads. Nothing is asked by drawing it.
+    private func leaving(_ label: String, hint: String, press: @escaping () -> Void) -> some View {
         Button(action: press) {
             HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-                Text(SourceMoreSaid.directoryLabel())
+                Text(label)
                     .shellFont(.body)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                 Spacer(minLength: ShellSpace.snug)
@@ -327,8 +350,8 @@ struct SourceMoreSection: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(SourceMoreSaid.directoryLabel())
-        .accessibilityHint(SourceMoreSaid.directoryHint())
+        .accessibilityLabel(label)
+        .accessibilityHint(hint)
         .accessibilityAddTraits(.isButton)
     }
 
@@ -469,12 +492,15 @@ struct SourceMoreBlock: View {
     let session: ShellSession
     /// Opens the source's directory of people (#315), or nothing where nobody answers.
     var onDirectory: (() -> Void)?
+    /// Opens the people the source suggests (#315), or nothing where nobody answers.
+    var onSuggested: (() -> Void)?
 
     var body: some View {
         if let said = more.said(at: host, in: session) {
             SourceMoreSection(
                 said: said, onAgain: { Task { await more.again(host, in: session) } },
-                onServers: { Task { await more.servers(host, in: session) } }, onDirectory: onDirectory
+                onServers: { Task { await more.servers(host, in: session) } }, onDirectory: onDirectory,
+                onSuggested: onSuggested
             )
                 .task(id: ShellSourceMore.opening(host, in: session)) { await more.opened(host, in: session) }
         }

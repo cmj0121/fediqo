@@ -1733,6 +1733,14 @@
 "people.directory.none" = "%@ gave nobody from its directory.";
 "people.directory.none.local" = "%@ gave nobody who lives there from its directory.";
 "people.directory.foot.farthest" = "Fediqo reads the first %1$@ people of a directory. %2$@ may list more.";
+"people.title.suggested" = "People %@ suggests";
+"people.suggested.asking" = "Asking %@ for the people it suggests…";
+"people.suggested.failed" = "Could not ask %@ for the people it suggests.";
+"people.suggested.absent" = "%@ does not suggest people.";
+"people.suggested.none" = "%@ suggests nobody to this sign-in.";
+"people.suggested.foot.farthest" = "Fediqo reads the first %1$@ people a source suggests. %2$@ may suggest more.";
+"people.suggested.dismiss" = "Don't suggest";
+"people.suggested.dismiss.dim" = "Telling %@ to stop suggesting somebody changes your account there, and this version of Fediqo does not yet ask you to allow that.";
 "work.purpose.serverSays" = "Reading what a server says of itself";
 "source.more.title" = "More from %@";
 "source.more.line" = "Asked of it when this page opens.";
@@ -1769,6 +1777,8 @@
 "source.more.week.spoken" = "Week of %1$@: posts %2$@, sign-ins %3$@, new people %4$@.";
 "source.more.directory" = "Its directory of people";
 "source.more.directory.hint" = "Closes this page and opens the directory.";
+"source.more.suggested" = "People it suggests";
+"source.more.suggested.hint" = "Closes this page and opens the people it suggests.";
 "work.purpose.ownSettings" = "Reading what a source uses for your new posts";
 "source.you.title" = "You there";
 "source.you.line" = "What %@ uses for a new post of yours.";

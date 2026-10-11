@@ -470,6 +470,13 @@ counted.call(far_hidden, 77, 55, 33)
 # the ordinary way.
 [shown, far, gone, limited, *fans].each { |who| who.update_columns(discoverable: true) unless who.discoverable }
 
+# What the checks of the people a server suggests need (#315): somebody to suggest. A server
+# suggests whoever its staff named, and here nobody else — no worker ranks anybody — so the
+# people listed above are named, each of whom chose to be found. The writer is then suggested
+# five of them: not the two they block and mute, nor the one suspended, nor the one limited.
+suggested = [shown, far, gone, limited, *fans].map(&:acct).join(", ")
+Setting.bootstrap_timeline_accounts = suggested unless Setting.bootstrap_timeline_accounts == suggested
+
 # What the checks of what somebody set here need (#321): one person who set all three things a
 # new post starts from — the one who hides their lists, whom the checks already sign in as and
 # who writes nothing more. The writer sets nothing, and is answered what a server gives then.

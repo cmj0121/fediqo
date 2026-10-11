@@ -132,6 +132,12 @@ struct SourceReach {
         MastodonDirectory(http: wire(Self.smallAtItsHost(http), for: purpose, within: limit), host: host)
     }
 
+    /// The people a source suggests the reader (#315), as them, through `door`: a source
+    /// suggests nobody anything unsigned, so there is no other way to build this.
+    func suggestions(_ door: MastodonAuthorized) -> MastodonSuggestions {
+        MastodonSuggestions(door: door)
+    }
+
     /// How much body an ask known to be small may bring: what the signed-in door takes.
     static let smallBody = 1 << 20
 

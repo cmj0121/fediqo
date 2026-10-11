@@ -40,6 +40,16 @@ import Observation
 // there, the directory is absent**: written down for the run where every such answer is
 // (`ShellHostsKnown`), said on the page in one sentence, and not offered on the source's page
 // again until the host is asked afresh. An empty answer is a directory nobody is in.
+//
+// **The people a source suggests the reader are such a list too** (#315), and the reader's
+// alone: asked only as somebody signed in, through the signed-in door, since a source suggests
+// nobody anything unsigned. Read on by how many were passed over, as a directory is — but
+// **ended by a stretch shorter than was asked for**: a real server gives as many as it was asked
+// for while it has them, so a shorter one is all it had, and an ask after it would be answered
+// with nobody — or with a failure, where what it suggests grew shorter meanwhile. **The known
+// limit**: a host that gives fewer in a stretch than it was asked for is cut short there, and
+// that is called the end. Absent by the host's own address, as a directory is.
+// **Nothing here tells a source not to suggest somebody**: that needs a word no sign-in holds.
 
 /// A list of people a source keeps, as a step of the walk names it: which list, of whom, at
 /// which source — and what that source said of the account when the list was opened.
@@ -53,6 +63,8 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case directory
         /// The people the source found for a search's words (#319): nobody's list either.
         case found
+        /// The people the source suggests whoever is signed in (#315): nobody's list either.
+        case suggested
 
         /// The two lists that are somebody's, in the order their page counts them.
         static let ofSomebody: [Which] = [.following, .followers]
@@ -93,7 +105,7 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .following: counted = person.tally.following
         case .followers: counted = person.tally.followers
         // Not somebody's: a directory is made by `init(directoryAt:)`, and counts nobody.
-        case .directory, .found: counted = nil
+        case .directory, .found, .suggested: counted = nil
         }
         hidden = person.hidesLists
     }
@@ -121,6 +133,17 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         hidden = false
     }
 
+    /// The people the source at `host` suggests whoever is signed in there (#315): of no
+    /// account, counted by nobody, and hidden by nobody.
+    init(suggestedAt host: String) {
+        which = .suggested
+        self.host = host
+        accountID = ""
+        handle = ""
+        counted = nil
+        hidden = false
+    }
+
     /// Whether this is a source's directory, and not a list of somebody's.
     var isDirectory: Bool { which == .directory }
 
@@ -130,13 +153,23 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         switch which {
         case .following: .following(of: accountID)
         case .followers: .followers(of: accountID)
-        case .directory, .found: nil
+        case .directory, .found, .suggested: nil
         }
     }
 
     /// Whether the list is read on by how many people were passed over, and so only as far
-    /// as such a list is read: a directory, and the people a search found.
-    var readByCount: Bool { which == .directory || which == .found }
+    /// as such a list is read: a directory, the people a search found, and the people suggested.
+    var readByCount: Bool { which == .directory || which == .found || which == .suggested }
+
+    /// The thing of a host this list is, where a host may have it or not — and says which by
+    /// its own address (`ShellHostsKnown`). Nothing for a list every such host has.
+    var thing: MastodonHostThing? {
+        switch which {
+        case .directory: .directory
+        case .suggested: .suggestions
+        case .following, .followers, .found: nil
+        }
+    }
 }
 
 /// How a source's directory is asked for: in which order, and whether only of the people who
@@ -173,6 +206,9 @@ final class ShellPeoplePages {
         /// The host of the source asked: what its lists are let go by when its reader changes.
         let host: String
         var askedAs: AskedAs
+        /// The count of that host's sign-ins when the list was asked: what tells a reader no
+        /// handle tells from the one before, so a list given to one is not there for the next.
+        let under: Int
         var read = PeopleRead()
         /// Whether a first stretch has answered: what is drawn is then the source's word.
         var answered = false
@@ -225,6 +261,8 @@ final class ShellPeoplePages {
     @ObservationIgnored var reaching: ((Source) -> MastodonPeople)?
     /// The same, to a source's directory.
     @ObservationIgnored var reachingDirectory: ((Source) -> MastodonDirectory)?
+    /// The same, to the people a source suggests.
+    @ObservationIgnored var reachingSuggestions: ((Source) -> MastodonSuggestions)?
 
     /// One stretch of a list, by whichever reader its kind of list has: the first, or the one
     /// after the place the source named.
@@ -239,7 +277,10 @@ final class ShellPeoplePages {
     /// A list opening, as its pane's task is named: which list **and who asks**, so a list in
     /// front whose reader ends, begins or changes opens again by itself, and is asked.
     static func opening(_ list: PeopleList, in session: ShellSession) -> ShellPersonPages.Opening {
-        ShellPersonPages.Opening(id: list.id, askedAs: ShellPersonPages.askedAs(at: list.host, in: session))
+        ShellPersonPages.Opening(
+            id: list.id, askedAs: ShellPersonPages.askedAs(at: list.host, in: session),
+            under: ShellPersonPages.signIns(at: list.host, in: session)
+        )
     }
 
     /// Every list of `host` let go, and its ask called off — from the top or a reading-on: its
@@ -260,7 +301,8 @@ final class ShellPeoplePages {
     /// it was asked as somebody else.
     private func standing(_ list: PeopleList, at source: Source, in session: ShellSession) -> Page? {
         pages[list.id].flatMap {
-            $0.askedAs.isTheSame(as: ShellPersonPages.askedAs(at: source.host, in: session)) ? $0 : nil
+            $0.under == ShellPersonPages.signIns(at: source.host, in: session)
+                && $0.askedAs.isTheSame(as: ShellPersonPages.askedAs(at: source.host, in: session)) ? $0 : nil
         }
     }
 
@@ -273,14 +315,12 @@ final class ShellPeoplePages {
         // has not named — a sign-in that only reads — is not known to be looking at their own.
         var handed = PeopleSaid(list: list, signedIn: now != .nobody, own: now == .reader(list.handle))
         let page = self.standing(list, at: source, in: session)
-        if list.isDirectory {
-            handed.sorting = page.map { $0.wanted ?? $0.choice } ?? DirectoryChoice()
-            // The host's own word that it has no such address, as the run or this page heard it.
-            if page?.absent == true || hosts.has(.directory, at: source.host) == .absent {
-                handed.reading = .absent
-                handed.asking = page?.asking ?? false
-                return handed
-            }
+        if list.isDirectory { handed.sorting = page.map { $0.wanted ?? $0.choice } ?? DirectoryChoice() }
+        // The host's own word that it has no such address, as the run or this page heard it.
+        if let thing = list.thing, page?.absent == true || hosts.has(thing, at: source.host) == .absent {
+            handed.reading = .absent
+            handed.asking = page?.asking ?? false
+            return handed
         }
         guard let page else { return handed }
         handed.reading = page.answered ? .said : page.failed ? .failed : .asking
@@ -326,8 +366,8 @@ final class ShellPeoplePages {
     func opened(_ list: PeopleList, in session: ShellSession) async {
         guard let source = ShellPersonPages.source(at: list.host, in: session) else { return }
         let held = readers.look(at: source.host, in: session).held
-        // A directory the host said it has not is not asked for by being opened.
-        if list.isDirectory, hosts.has(.directory, at: source.host) == .absent { return }
+        // A thing the host said it has not is not asked for by being opened.
+        if let thing = list.thing, hosts.has(thing, at: source.host) == .absent { return }
         if let page = self.standing(list, at: source, in: session) {
             order.touch(list.id)
             named(list.id, as: ShellPersonPages.askedAs(at: source.host, in: session))
@@ -347,9 +387,9 @@ final class ShellPeoplePages {
         guard let source = ShellPersonPages.source(at: list.host, in: session) else { return }
         let held = readers.look(at: source.host, in: session).held
         if self.standing(list, at: source, in: session)?.asking == true { return }
-        // The person's own asking again of a directory the host said it has not: what the run
+        // The person's own asking again of a thing the host said it has not: what the run
         // knew of that host is let go, so nothing stays absent until the app is quit.
-        if list.isDirectory, hosts.has(.directory, at: source.host) == .absent { hosts.askAfresh(source.host) }
+        if let thing = list.thing, hosts.has(thing, at: source.host) == .absent { hosts.askAfresh(source.host) }
         await begin(list, at: source, with: held, in: session).value
     }
 
@@ -376,9 +416,9 @@ final class ShellPeoplePages {
     ) -> Task<Void, Never> {
         let id = list.id
         let askedAs = ShellPersonPages.askedAs(at: source.host, in: session)
-        if pages[id]?.askedAs.isTheSame(as: askedAs) != true {
+        if self.standing(list, at: source, in: session) == nil {
             // Nobody's list yet, or somebody else's: what was given to them is not given to this one.
-            pages[id] = Page(host: source.host, askedAs: askedAs)
+            pages[id] = Page(host: source.host, askedAs: askedAs, under: ShellPersonPages.signIns(at: source.host, in: session))
         }
         named(id, as: askedAs)
         keep(id)
@@ -421,7 +461,7 @@ final class ShellPeoplePages {
             pages[id]?.notPaging = false
             pages[id]?.absent = false
             pages[id]?.choice = choice
-            pages[id]?.farthest = list.readByCount && first.next == nil && !first.people.isEmpty
+            pages[id]?.farthest = Self.stoppedShortOfTheEnd(first, of: list, after: nil)
         } catch {
             guard pages[id]?.awaits == errand else { return }
             if Self.saysNoSuchAddress(error) {
@@ -437,15 +477,32 @@ final class ShellPeoplePages {
         pages[id]?.asking = false
     }
 
+    /// Whether `stretch`, asked for after `next` and which brought people and named no next, is
+    /// where the reading of `list` stopped and not where the list ends. A directory and the
+    /// people a search found end only at a stretch with nobody; the people a source suggests
+    /// end at a stretch shorter than was asked for, so theirs is the furthest read only where
+    /// what was asked for reached it — by the place asked from, since how many of a stretch
+    /// could be read says nothing of how many the source sent.
+    private static func stoppedShortOfTheEnd(_ stretch: PeopleStretch, of list: PeopleList, after next: String?) -> Bool {
+        guard stretch.next == nil, !stretch.people.isEmpty else { return false }
+        switch list.which {
+        case .directory, .found: return true
+        case .suggested:
+            let passed = next.flatMap(MastodonSuggestions.passed) ?? 0
+            return passed + stretchLength >= MastodonSuggestions.furthest
+        case .following, .followers: return false
+        }
+    }
+
     private static func saysNoSuchAddress(_ error: any Error) -> Bool {
         (error as? MastodonHostMoreError) == .noSuchAddress
     }
 
-    /// The host's own word that its directory's address is not there — **heard by the ask the
+    /// The host's own word that the list's address is not there — **heard by the ask the
     /// page still awaits, and by no other**: absent for the run, and nobody it gave before is
-    /// drawn as its directory.
+    /// drawn as that list.
     private func gone(_ list: PeopleList, at source: Source, round: Int) {
-        hosts.notFound(.directory, at: source.host, round: round)
+        if let thing = list.thing { hosts.notFound(thing, at: source.host, round: round) }
         pages[list.id]?.absent = true
         pages[list.id]?.answered = false
         pages[list.id]?.failed = false
@@ -497,7 +554,7 @@ final class ShellPeoplePages {
             // Read first and written after: the two are not one access.
             let further = try held.readingOn(came)
             pages[id]?.read = further
-            pages[id]?.farthest = list.readByCount && came.next == nil && !came.people.isEmpty
+            pages[id]?.farthest = Self.stoppedShortOfTheEnd(came, of: list, after: next)
         } catch {
             guard pages[id]?.awaits == errand else { return }
             if error is PagingError {
@@ -534,6 +591,25 @@ final class ShellPeoplePages {
                     passed = count
                 }
                 return try await search.people(matching: words, source: source, after: passed)
+            }
+        }
+        if list.which == .suggested {
+            // A source suggests nobody anything unsigned: with no sign-in there is no way to it.
+            let suggestions: MastodonSuggestions
+            if let reachingSuggestions {
+                suggestions = reachingSuggestions(source)
+            } else if let held {
+                suggestions = session.reach.suggestions(session.mastodon.authorized(token: held, within: deadline, for: .people))
+            } else {
+                return { _ in throw MastodonAuthError.http(401) }
+            }
+            return { next in
+                var passed = 0
+                if let next {
+                    guard let count = MastodonSuggestions.passed(next) else { throw PagingError.notPaging }
+                    passed = count
+                }
+                return try await suggestions.stretch(source: source, after: passed, limit: length)
             }
         }
         guard let asked = list.asked else {

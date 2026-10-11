@@ -80,6 +80,14 @@ struct SourceMoreTests {
         return said
     }
 
+    /// `said` as somebody signed in is handed it: with the line to the people the source
+    /// suggests, which nobody unsigned is offered (#315).
+    private static func signedIn(_ said: SourceMoreSaid) -> SourceMoreSaid {
+        var said = said
+        said.suggested = true
+        return said
+    }
+
     @Test("Opening a source's page asks the host for its longer account and its weeks — two asks, of that host alone, with no sign-in, listed in the run's record — and not for the servers it knows, nor its document; opened again, nobody is asked. The servers are asked for at their line's press: one ask, and a second press asks nothing")
     func openingAsksTwoAndThePressOne() async throws {
         let (session, server, work) = await session(Self.served())
@@ -235,7 +243,7 @@ struct SourceMoreTests {
         let unsigned = Task { await more.opened(Self.host, in: session) }
         await server.arrival(of: Self.account)
         try signIn(session)
-        #expect(more.said(at: Self.host, in: session) == SourceMoreSaid(source: Self.host), "nobody's answers are not the reader's")
+        #expect(more.said(at: Self.host, in: session) == Self.signedIn(SourceMoreSaid(source: Self.host)), "nobody's answers are not the reader's")
         let signed = Task { await more.opened(Self.host, in: session) }
         await server.arrival(of: Self.account, times: 2)
         await server.releaseOne(Self.account)
@@ -246,7 +254,7 @@ struct SourceMoreTests {
         await server.answer(Self.account, Self.served()[Self.account])
         await server.release(Self.account)
         await signed.value
-        #expect(more.said(at: Self.host, in: session) == Self.opened)
+        #expect(more.said(at: Self.host, in: session) == Self.signedIn(Self.opened))
 
         await server.hold(Self.servers)
         defer { Task { await server.release(Self.servers) } }
@@ -257,9 +265,9 @@ struct SourceMoreTests {
         #expect(more.said(at: Self.host, in: session)?.askingServers == false, "a sign-in change lets the ask go")
         await server.release(Self.servers)
         await press.value
-        #expect(more.said(at: Self.host, in: session) == Self.opened, "the first reader's list is not the second's")
+        #expect(more.said(at: Self.host, in: session) == Self.signedIn(Self.opened), "the first reader's list is not the second's")
         await more.servers(Self.host, in: session)
-        #expect(more.said(at: Self.host, in: session) == Self.whole)
+        #expect(more.said(at: Self.host, in: session) == Self.signedIn(Self.whole))
         #expect(await count(server, Self.servers) == 2)
     }
 
@@ -406,7 +414,7 @@ struct SourceMoreTests {
             guard line.hasPrefix("\"source.more.") || line.hasPrefix("\"work.purpose.serverSays\"") else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 36 && keys.contains("source.more.servers.kept") && keys.contains("work.purpose.serverSays"))
+        #expect(keys.count == 38 && keys.contains("source.more.servers.kept") && keys.contains("work.purpose.serverSays"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }
