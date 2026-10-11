@@ -30,6 +30,35 @@ import Foundation
 /// | a word the registration does not hold, the whole of `read`, or no `scope` at all | 400 and a page of the server's own: "The requested scope is invalid, unknown, or malformed." **Nothing is sent to the callback** |
 /// | the narrow page after every token of those words was revoked | 200: the page is shown again |
 /// | a code traded twice; a code traded with the wrong verifier | 400 `invalid_grant` (`codeRefused`), each; the token the first trade made goes on working |
+///
+/// ## What asking a sign-in for a part still had to know (#347) — asked 2026-10-11
+///
+/// Of the same 4.6.6 image, as `servers/mastodon/seed.rb` left it, with `curl`, **asking in
+/// English**; the server was then thrown away. One registration through `POST /api/v1/apps`
+/// for the twenty-four words of `everyPart`; the sign-ins on the seed's own registration,
+/// through the server's pages as above.
+///
+/// | Asked | Answered |
+/// | ----- | -------- |
+/// | **the host's own list of scope words** — `GET /.well-known/oauth-authorization-server`, with no sign-in, and signed in | 200 `application/json`, 1,620 bytes, the same either way (`wordList`): a flat object whose `scopes_supported` is a list of forty-seven words — the whole of `read`, `write`, `follow`, `push`, `profile`, every finer word under the first two, and the `admin:` ones. Every word of `everyPart` is in it. Beside the list it names where to authorise, trade, revoke and register — each on this host, at the paths this app already uses |
+/// | the same asked as OpenID names it (`/.well-known/openid-configuration`), and as a protected resource (`/.well-known/oauth-protected-resource`) | 404 and the server's own page, each: the one address above is the only one |
+/// | **a registration for every word of every part, those of later stories among them** (`everyPart`) | 200; `scopes` echoes all twenty-four as a list, **in the order asked** (`widestRegistration`). Four registrations were left of the five this server takes in ten minutes (`X-RateLimit-Remaining: 4`) |
+/// | **the same with one word the host does not know** (`read:nothing`), and that word alone | **422** `{"error":"Validation failed: Scopes doesn't match those configured on the server."}`, each — the registration is refused whole and **nothing is echoed**: no word says which one it was. Each refusal uses up one of the five. (`MastodonSaysTests` holds this sentence against the server) |
+/// | **the source's own account of a token** — `GET /oauth/token/info`, with a sign-in that may do everything | 200, five things and no other (`wholeInfo`): `resource_owner_id` — a number, **the server's own for the person and not the account's id** (1, where the account check names the same person `117420549943948497`); `scope`, a list, here `["read","write"]` — **the words as the sign-in was made with them, a whole `read` never spelt out into its finer words**; `expires_in`, `null`; `application.uid`, the registration's client id; `created_at` |
+/// | the same with this app's reading sign-in, its acting one, its acting and dismissing one, and one made for `read:statuses` alone | 200, `scope` the words each was made with, in that order — four, seven, nine, one. **No word is needed to ask it**: the one that may read posts and nothing else is answered as the rest |
+/// | the same with a token that is none, and with no token | **401** `invalidInfo`, the header `invalidInfoHeader` |
+/// | the same with a token **revoked** — through `/oauth/revoke`, or by its entry being removed (below) | **401, the very bytes a token that is none gets**: here it is "invalid", where every other signed-in path says of it "The access token was revoked" (`afterRevoke`). This address does not tell an ended sign-in from one that never was |
+/// | the same with a token of the registration's own, nobody's (`grant_type=client_credentials`) | 200, `resource_owner_id` `null` |
+/// | **the account check with the reading words alone** (`/api/v1/accounts/verify_credentials`) | 200: `id` a string, `acct` the name with no host. With `read:statuses` alone: 403, `checkRefusedHeader` — `read:accounts` is one of three words that would do |
+/// | **the same words asked again, three seconds on: is the token handed back dated anew?** | no. The first trade answered `created_at` 1791695432 under `Date: … 05:10:32 GMT` — the second it was made in; the second trade answered **the same string and the same `created_at`**, under `Date: … 05:10:35 GMT`. `/oauth/token/info` says the same `created_at`. A wider one made then says 1791695435 under `05:10:35`. So a token whose `created_at` is earlier than its own answer's `Date` was not made by this trade |
+/// | **the person's list of authorised apps** (`/oauth/authorized_applications`, signed in at a browser) with a narrow and a wider token of one registration live | **one entry for the registration, not one a token**, under the registration's name. What it lists is **what the registration was made for, not what either token holds**: `entryPermissions`, for two sign-ins that between them held the four reading words and the two for follows |
+/// | **that entry removed** — the page's own Revoke: `POST /oauth/authorized_applications/<id>` with `_method=delete` and the page's own token | 302 back to the list. **Both tokens are ended at once**: each answers 401 "The access token was revoked". A token of another registration, the same person's, goes on answering 200. The entry is gone from the list; the registration is not — its page opens again for the same words and trades for a new string |
+///
+/// **Not asked here** — the fixture is 4.6.6 alone: what a Mastodon from before the list of
+/// words was published answers at that address, and whether such a host echoes `scopes` at a
+/// registration at all; whether any host refuses a registration for some of its words and not
+/// others (this one is all or nothing); a reaction to an announcement with the acting words
+/// (there is no announcement in the seed: it is asked with the unit that reads them).
 enum MastodonSignInCaptures {
     /// What the registration asked for, and the two sign-ins made of it.
     static let registered = "read:statuses read:lists read:accounts read:search write:statuses write:favourites write:bookmarks "
@@ -72,4 +101,46 @@ enum MastodonSignInCaptures {
     static let outsideScope = "The requested scope is invalid, unknown, or malformed."
     /// A code traded a second time, or with the wrong verifier: 400, and this.
     static let codeRefused = #"{"error":"invalid_grant","error_description":"The provided authorization grant is invalid, expired, revoked, does not match the redirection URI used in the authorization request, or was issued to another client."}"#
+
+    // MARK: - Asked 2026-10-11
+
+    /// Every word of every part a sign-in may come to be asked for (#347), those of later
+    /// stories among them, in the order of the design's table: what one registration for all of
+    /// them asks.
+    static let everyPart = "read:statuses read:lists read:accounts read:search write:statuses write:favourites write:bookmarks "
+        + "read:notifications write:notifications read:follows write:follows read:mutes write:mutes read:blocks write:blocks "
+        + "write:accounts read:bookmarks read:favourites write:media write:lists read:filters write:filters write:reports "
+        + "write:conversations"
+
+    /// `GET /.well-known/oauth-authorization-server`: 200, whole.
+    static let wordList = #"{"issuer":"https://mastodon.localhost/","authorization_endpoint":"https://mastodon.localhost/oauth/authorize","token_endpoint":"https://mastodon.localhost/oauth/token","revocation_endpoint":"https://mastodon.localhost/oauth/revoke","userinfo_endpoint":"https://mastodon.localhost/oauth/userinfo","scopes_supported":["read","profile","write","write:accounts","write:blocks","write:bookmarks","write:collections","write:conversations","write:favourites","write:filters","write:follows","write:lists","write:media","write:mutes","write:notifications","write:reports","write:statuses","read:accounts","read:blocks","read:bookmarks","read:collections","read:favourites","read:filters","read:follows","read:lists","read:mutes","read:notifications","read:search","read:statuses","follow","push","admin:read","admin:read:accounts","admin:read:reports","admin:read:domain_allows","admin:read:domain_blocks","admin:read:ip_blocks","admin:read:email_domain_blocks","admin:read:canonical_email_blocks","admin:write","admin:write:accounts","admin:write:reports","admin:write:domain_allows","admin:write:domain_blocks","admin:write:ip_blocks","admin:write:email_domain_blocks","admin:write:canonical_email_blocks"],"response_types_supported":["code"],"response_modes_supported":["query","fragment","form_post"],"grant_types_supported":["authorization_code","client_credentials"],"token_endpoint_auth_methods_supported":["client_secret_basic","client_secret_post"],"code_challenge_methods_supported":["S256"],"service_documentation":"https://docs.joinmastodon.org/","app_registration_endpoint":"https://mastodon.localhost/api/v1/apps"}"#
+    /// The one address it is at, and the four it names beside the list — each a path this app
+    /// already uses on the host.
+    static let wordListPath = "/.well-known/oauth-authorization-server"
+    static let namedPaths = [
+        "authorization_endpoint": "/oauth/authorize", "token_endpoint": "/oauth/token",
+        "revocation_endpoint": "/oauth/revoke", "app_registration_endpoint": "/api/v1/apps",
+    ]
+
+    /// `POST /api/v1/apps` for `everyPart`: 200.
+    static let widestRegistration = #"{"id":"7","name":"Fediqo F2a","website":null,"scopes":["read:statuses","read:lists","read:accounts","read:search","write:statuses","write:favourites","write:bookmarks","read:notifications","write:notifications","read:follows","write:follows","read:mutes","write:mutes","read:blocks","write:blocks","write:accounts","read:bookmarks","read:favourites","write:media","write:lists","read:filters","write:filters","write:reports","write:conversations"],"redirect_uris":["fediqo://oauth"],"vapid_key":"<vapid_key>","redirect_uri":"fediqo://oauth","client_id":"<client_id>","client_secret":"<client_secret>","client_secret_expires_at":0}"#
+
+    /// `GET /oauth/token/info` with a sign-in made for the whole of `read` and `write`: 200.
+    static let wholeInfo = #"{"resource_owner_id":1,"scope":["read","write"],"expires_in":null,"application":{"uid":"<client_id>"},"created_at":1791695403}"#
+    /// What that answer holds, and nothing else.
+    static let infoNames: Set<String> = ["resource_owner_id", "scope", "expires_in", "application", "created_at"]
+    /// The same address with a token that is none, with no token, and with a revoked one: 401,
+    /// this, and the header beside it.
+    static let invalidInfo = #"{"error":"invalid_token","error_description":"The access token is invalid","state":"unauthorized"}"#
+    static let invalidInfoHeader = #"Bearer realm="Doorkeeper", error="invalid_token", error_description="The access token is invalid""#
+
+    /// The account check asked with `read:statuses` alone: 403, and this header.
+    static let checkRefusedHeader = #"Bearer realm="Doorkeeper", error="insufficient_scope", error_description="Access to this resource requires scope _profile read read:accounts_.""#
+
+    /// What the entry on the list of authorised apps said the seed's registration (`registered`)
+    /// may do, as the page's own words in the order it lists them, while the only sign-ins of
+    /// it held `wide` at most.
+    static let entryPermissions = "Posts Read and write access Lists Read-only access Accounts Read-only access Search Read-only access "
+        + "Favorites Write-only access Bookmarks Write-only access Notifications Read and write access Follows Read and write access "
+        + "Mutes Read and write access"
 }

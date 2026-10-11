@@ -11,8 +11,9 @@ import Testing
 /// **Passed over where the servers are not up**: the same trait, and `requireHealthy()` is the
 /// first line of every check.
 ///
-/// **Asked gently.** No registration: this server takes five in ten minutes from anywhere, so
-/// the one every sign-in here starts on is the seed's — made in the server, which holds it to
+/// **Asked gently.** One registration a run, in the one check that asks what a registration
+/// echoes: this server takes five in ten minutes from anywhere, and the other suites make two.
+/// The one every sign-in here starts on is the seed's — made in the server, which holds it to
 /// the scopes it knows as it does one made through its API. Every token made here is revoked
 /// when its check ends, **however it ends** (`revokingWhatItMade`): a page is shown only where
 /// no token of the words asked lives, so one left live would fail the next run.
@@ -72,21 +73,30 @@ struct MastodonSignInSaysTests {
         func header(_ name: String) -> String? { response.value(forHTTPHeaderField: name) }
     }
 
-    private func ask(_ token: String, _ path: String) async throws -> Answer {
+    /// `path` asked with `token`, or as nobody where there is none.
+    private func ask(_ token: String?, _ path: String) async throws -> Answer {
         guard let url = URL(string: "https://\(Self.host)\(path)") else { throw LocalHTTPError.invalidURL }
         var request = URLRequest(url: url)
         request.setValue("en", forHTTPHeaderField: "Accept-Language")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         let (body, response) = try await LocalHTTP.client().send(request)
         return Answer(status: response.statusCode, response: response, body: body)
     }
 
     private static let check = "/api/v1/accounts/verify_credentials"
     private static let standing = "/api/v1/accounts/relationships?id[]=1"
+    private static let info = "/oauth/token/info"
+    /// The name `servers/mastodon/seed.rb` gives the registration these sign-ins start on,
+    /// which is what the person's list of authorised apps shows it under.
+    private static let registrationName = "fediqo-servers-signin-ask"
 
     /// The scopes the server itself says a token holds.
     private func held(_ token: MastodonToken) async throws -> Set<String> {
-        Set(try await ask(token.accessToken, "/oauth/token/info").object["scope"] as? [String] ?? [])
+        Set(try await ask(token.accessToken, Self.info).object["scope"] as? [String] ?? [])
+    }
+
+    private static func list(_ scopes: String) -> [String] {
+        scopes.split(separator: " ").map(String.init)
     }
 
     private static func words(_ scopes: String) -> Set<String> {
@@ -232,10 +242,238 @@ struct MastodonSignInSaysTests {
         }
     }
 
+    // MARK: - 4. The host's own list of words, and a registration for all of them
+
+    @Test("The host says which words it knows at one address, to anybody: a list holding every word of every part this app asks for or will, and not the word it refuses a registration for; beside the list it names only addresses on itself, at the paths this app already uses; and it is at no other address")
+    func theHostsOwnListOfWords() async throws {
+        try await LocalServers.requireHealthy()
+        let said = try await ask(nil, Captures.wordListPath)
+        let json: Bool = said.header("Content-Type")?.hasPrefix("application/json") == true
+        #expect(said.status == 200 && json)
+        #expect(String(decoding: said.body, as: UTF8.self) == Captures.wordList)
+        let known = Set(try #require(said.object["scopes_supported"] as? [String], "a list of words"))
+        #expect(known.isSuperset(of: Self.words(Captures.everyPart)))
+        #expect(known.isSuperset(of: Self.words(MastodonOAuth.scopes(writing: true, notices: true))), "all a sign-in asks today")
+        #expect(!known.contains("write:nonsense"), "the word `MastodonSaysTests` is refused a registration for")
+        for (name, path) in Captures.namedPaths {
+            let named: String? = said.object[name] as? String
+            #expect(named == "https://\(Self.host)\(path)", "\(name)")
+        }
+        let signedIn = try await ask(try #require(try LocalServers.seeded().notices).reading.token, Captures.wordListPath)
+        #expect(signedIn.body == said.body, "the same to a sign-in")
+        for elsewhere in ["/.well-known/openid-configuration", "/.well-known/oauth-protected-resource"] {
+            #expect(try await ask(nil, elsewhere).status == 404, "\(elsewhere)")
+        }
+    }
+
+    @Test("A registration for every word of every part, those of later stories among them, is taken whole: its answer echoes the words as a list, in the order asked, with this app's callback and no other")
+    func oneRegistrationForEveryPart() async throws {
+        try await LocalServers.requireHealthy()
+        let heard = Heard(try LocalHTTP.client())
+        let app = try await MastodonOAuth(host: Self.host, sender: heard).register(scopes: Captures.everyPart)
+        let registered: Bool = !app.clientID.isEmpty && !app.clientSecret.isEmpty
+        #expect(registered && app.scopes == Captures.everyPart)
+        let answer = try #require(await heard.answers.last)
+        #expect(answer.path == "/api/v1/apps" && answer.status == 200)
+        let said = (try? JSONSerialization.jsonObject(with: answer.body)) as? [String: Any] ?? [:]
+        let echoed: [String]? = said["scopes"] as? [String]
+        let callbacks: [String]? = said["redirect_uris"] as? [String]
+        #expect(echoed == Self.list(Captures.everyPart))
+        #expect(callbacks == [MastodonOAuth.redirect])
+        let captured = (try? JSONSerialization.jsonObject(with: Data(Captures.widestRegistration.utf8))) as? [String: Any] ?? [:]
+        #expect(Set(said.keys) == Set(captured.keys), "the same things as it answered once")
+    }
+
+    // MARK: - 5. The source's own account of a token, and of whose it is
+
+    @Test("The source's own account of a token is given to any token that lives, whatever its words: the words it was made with as a list in that order — the whole of read never spelt out — beside a number of the server's own for the person, which is not the account's id; a token that is none, and no token, are answered 401")
+    func theSourcesOwnAccountOfAToken() async throws {
+        try await LocalServers.requireHealthy()
+        let seeded = try LocalServers.seeded()
+        let notices = try #require(seeded.notices)
+        let oneWord = try #require(seeded.people?.narrow, "servers/.run/mastodon-tokens.json was seeded before this was: run `make servers` again")
+
+        let whole = try await ask(seeded.writer, Self.info)
+        #expect(whole.status == 200)
+        #expect(Set(whole.object.keys) == Captures.infoNames)
+        let everything: [String]? = whole.object["scope"] as? [String]
+        #expect(everything == ["read", "write"])
+        let neverEnds: Bool = whole.object["expires_in"] is NSNull
+        let dated: Bool = whole.object["created_at"] is Int
+        #expect(neverEnds && dated)
+        // The registration is named by its client id, which is not printed.
+        let registration: String? = (whole.object["application"] as? [String: Any])?["uid"] as? String
+        let namesRegistration: Bool = registration?.isEmpty == false
+        #expect(namesRegistration)
+
+        let signIns: [(token: String, scopes: String)] = [
+            (notices.reading.token, notices.reading.scopes), (notices.acting.token, notices.acting.scopes),
+            (notices.dismissing.token, notices.dismissing.scopes), (oneWord.token, "read:statuses"),
+        ]
+        for signIn in signIns {
+            let said = try await ask(signIn.token, Self.info)
+            let listed: [String]? = said.object["scope"] as? [String]
+            #expect(said.status == 200, "\(signIn.scopes)")
+            #expect(listed == Self.list(signIn.scopes))
+        }
+
+        // The number is the server's own for the person: the account check names the account.
+        let owner = try #require(whole.object["resource_owner_id"] as? Int)
+        let account = try #require(try await ask(seeded.writer, Self.check).object["id"] as? String)
+        #expect(String(owner) != account)
+
+        for none in ["not-a-token", nil] {
+            let refused = try await ask(none, Self.info)
+            #expect(refused.status == 401 && refused.header("WWW-Authenticate") == Captures.invalidInfoHeader)
+            #expect(String(decoding: refused.body, as: UTF8.self) == Captures.invalidInfo)
+        }
+    }
+
+    @Test("The account check answers the reading words alone with the account's id and its name, which this app reads as who the sign-in is; a sign-in without the word for accounts is refused it with a 403 naming the words that would do")
+    func theAccountCheckWithTheReadingWords() async throws {
+        try await LocalServers.requireHealthy()
+        let seeded = try LocalServers.seeded()
+        let reading = try #require(seeded.notices).reading
+        #expect(reading.scopes == MastodonOAuth.reading)
+
+        let said = try await ask(reading.token, Self.check)
+        let id = try #require(said.object["id"] as? String)
+        let name = try #require(said.object["acct"] as? String)
+        let named: Bool = !id.isEmpty && !name.isEmpty
+        let bare: Bool = !name.contains("@")
+        #expect(said.status == 200 && named && bare, "an id, and a name with no host")
+
+        let tokens = MemoryMastodonTokens()
+        let token = MastodonToken(
+            host: Self.host, accessToken: reading.token, clientID: "x", clientSecret: "x", scopes: reading.scopes, asked: reading.scopes
+        )
+        try tokens.save(token)
+        let who = try await MastodonAuthorized(token: token, sender: try LocalHTTP.client(), store: tokens).who()
+        #expect(who.id == id)
+        #expect(who.handle == StatusDTO.handle(name, host: Self.host))
+
+        let oneWord = try #require(seeded.people?.narrow, "servers/.run/mastodon-tokens.json was seeded before this was: run `make servers` again")
+        let refused = try await ask(oneWord.token, Self.check)
+        #expect(refused.status == 403 && refused.header("WWW-Authenticate") == Captures.checkRefusedHeader)
+    }
+
+    // MARK: - 6. A token handed back says when it was first made
+
+    @Test("A token handed back for the same words keeps the moment it was first made: a fresh one is dated the second its own answer is, the same one handed back later is dated as before under a later answer, and the source's own account of it says the same moment")
+    func aTokenHandedBackSaysWhenItWasFirstMade() async throws {
+        try await LocalServers.requireHealthy()
+        let heard = Heard(try LocalHTTP.client())
+        let oauth = MastodonOAuth(host: Self.host, sender: heard)
+        let pages = Pages(host: Self.host, browser: try LocalHTTP.browser())
+        try await pages.signIn()
+        try await revokingWhatItMade(oauth) { made in
+            let first = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages).token)
+            let fresh = try #require(await heard.lastTrade(), "a trade dated by the token and by its answer")
+            let lag: Int = fresh.answered - fresh.made
+            #expect((0...1).contains(lag), "made as it was answered: \(lag)s")
+
+            // The server dates a token in whole seconds. This is the one pause here, and it waits
+            // for nothing: it lets that clock move on, so that a token made by the second trade
+            // could not be dated as the first was.
+            try await Task.sleep(for: .seconds(2))
+
+            let again = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages).token)
+            let handedBack = try #require(await heard.lastTrade())
+            let same: Bool = again.accessToken == first.accessToken
+            #expect(same && pages.shown == [Captures.narrow], "no page, and the same token")
+            #expect(handedBack.made == fresh.made, "dated as it first was")
+            let later: Int = handedBack.answered - handedBack.made
+            #expect(later >= 2, "under an answer dated \(later)s after it")
+            let account: Int? = try await ask(first.accessToken, Self.info).object["created_at"] as? Int
+            #expect(account == fresh.made, "and the source's own account of it says the same")
+        }
+    }
+
+    // MARK: - 7. The person's own list of authorised apps
+
+    @Test("Two sign-ins of one registration are one entry on the person's list of authorised apps, which says what the registration was made for and not what either holds; removing it ends both at once and no other registration's, the source's own account of each then answering as for a token that never was; and the registration goes on opening its page")
+    func removingTheEntryEndsEveryTokenOfIt() async throws {
+        try await LocalServers.requireHealthy()
+        let oauth = try signer()
+        let pages = Pages(host: Self.host, browser: try LocalHTTP.browser())
+        try await pages.signIn()
+        let seeded = try LocalServers.seeded()
+        #expect(Self.words(try #require(seeded.signIn).scopes) == Self.words(Captures.registered))
+        let another = try #require(seeded.notices).reading.token
+        try await revokingWhatItMade(oauth) { made in
+            let narrow = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages).token)
+            let wide = made.keep(try await oauth.signIn(as: try app(asking: Captures.wide), through: pages).token)
+
+            let entries = try await pages.entries(named: Self.registrationName)
+            #expect(entries.count == 1, "one entry, for two tokens")
+            let entry = try #require(entries.first)
+            #expect(entry.permissions == Captures.entryPermissions, "the registration's words, though neither token may post")
+
+            let removed = try await pages.remove(entry)
+            #expect(removed.status == 302 && removed.header("Location") == "https://\(Self.host)/oauth/authorized_applications")
+            for token in [narrow, wide] {
+                let gone = try await ask(token.accessToken, Self.check)
+                #expect(gone.status == 401 && gone.error == "The access token was revoked")
+                let account = try await ask(token.accessToken, Self.info)
+                #expect(account.status == 401 && account.header("WWW-Authenticate") == Captures.invalidInfoHeader)
+                #expect(String(decoding: account.body, as: UTF8.self) == Captures.invalidInfo, "invalid, not revoked")
+            }
+            let untouched = try await ask(another, Self.check)
+            #expect(untouched.status == 200, "another registration's sign-in, the same person's")
+            #expect(try await pages.entries(named: Self.registrationName).isEmpty)
+
+            let afresh = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages).token)
+            let renewed: Bool = afresh.accessToken != narrow.accessToken
+            #expect(renewed && pages.shown == [Captures.narrow, Captures.wide, Captures.narrow], "the page again, and a new token")
+        }
+    }
+
+    /// The real server, and what it answered to each ask — kept in memory for the check that
+    /// asked, and **never printed**: a trade's answer holds a token.
+    private actor Heard: HTTPSender {
+        struct Said {
+            let path: String
+            let status: Int
+            let body: Data
+            let date: String?
+        }
+
+        private let server: any HTTPSender
+        private(set) var answers: [Said] = []
+
+        init(_ server: any HTTPSender) {
+            self.server = server
+        }
+
+        func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+            let (body, response) = try await server.send(request)
+            answers.append(Said(
+                path: request.url?.path ?? "", status: response.statusCode, body: body,
+                date: response.value(forHTTPHeaderField: "Date")
+            ))
+            return (body, response)
+        }
+
+        /// Of the last code traded: when its token says it was made, and when the answer that
+        /// carried it is dated — both in seconds, and neither the token.
+        func lastTrade() -> (made: Int, answered: Int)? {
+            struct Issued: Decodable { let created_at: Int }
+            let dated = DateFormatter()
+            dated.locale = Locale(identifier: "en_US_POSIX")
+            dated.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+            guard let trade = answers.last(where: { $0.path == "/oauth/token" }),
+                  let issued = try? JSONDecoder().decode(Issued.self, from: trade.body),
+                  let answered = trade.date.flatMap(dated.date(from:))
+            else { return nil }
+            return (issued.created_at, Int(answered.timeIntervalSince1970))
+        }
+    }
+
     /// The server's own pages, used as the writer uses them at a browser: signed in with the
     /// seed's dummy password, shown the page a sign-in opens, and the page's own Authorize or
     /// Deny form sent back with every field it carried. It remembers which pages it was shown
-    /// — by the scopes each asked — and where each sign-in was sent.
+    /// — by the scopes each asked — and where each sign-in was sent. It also reads the person's
+    /// own list of authorised apps, and presses an entry's Revoke.
     private final class Pages: OAuthBrowser {
         enum Press: Sendable {
             case authorize, deny
@@ -302,6 +540,40 @@ struct MastodonSignInSaysTests {
             try #require(answered.1.statusCode == 302 && onward.scheme == callbackScheme)
             callbacks.append(onward)
             return onward
+        }
+
+        /// One registration on the person's list of authorised apps: the number the page
+        /// knows it by, what the page says it may do — each line's two phrases, in order — and
+        /// the page's own token, which its Revoke sends back.
+        struct Entry: Sendable {
+            let id: String
+            let permissions: String
+            fileprivate let pageToken: String
+        }
+
+        /// The entries of the list that carry `name`.
+        func entries(named name: String) async throws -> [Entry] {
+            let page = try await open(try #require(URL(string: "https://\(host)/oauth/authorized_applications")))
+            try #require(page.status == 200, "the list of authorised apps: \(page.status)")
+            let html = String(decoding: page.body, as: UTF8.self)
+            let pageToken = try #require(Self.matches(#"<meta name="csrf-token" content="([^"]*)""#, in: html).first, "the page's token")
+            // Each entry runs to where the next begins.
+            let pieces = html.components(separatedBy: #"<div class="applications-list__item" id="doorkeeper_application_"#).dropFirst()
+            return pieces.compactMap { piece in
+                guard let id = Self.matches(#"^(\d+)""#, in: piece).first,
+                      let title = Self.matches(#"<strong\b[^>]*>\s*(.*?)\s*</strong>"#, in: piece).first,
+                      Self.unescaped(title) == name
+                else { return nil }
+                let said = Self.matches(#"permissions-list__item__text__(?:title|type)">\s*(.*?)\s*</div>"#, in: piece)
+                return Entry(id: id, permissions: said.map(Self.unescaped).joined(separator: " "), pageToken: Self.unescaped(pageToken))
+            }
+        }
+
+        /// The entry's own Revoke, as the page sends it.
+        func remove(_ entry: Entry) async throws -> Opened {
+            let target = try #require(URL(string: "https://\(host)/oauth/authorized_applications/\(entry.id)"))
+            let answered = try await browser.send(Self.post(target, [("_method", "delete"), ("authenticity_token", entry.pageToken)]))
+            return Opened(status: answered.1.statusCode, response: answered.1, body: answered.0)
         }
 
         /// Every form on a page, as the fields it would send: each input's name and value.
