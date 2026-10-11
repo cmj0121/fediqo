@@ -21,7 +21,7 @@ extension PartWords {
     /// more there are.
     static func holds(_ scopes: String?, whole: Bool = false, language: DummyLanguage? = nil) -> String? {
         let holdings = MastodonParts.holdings(in: scopes)
-        let names = holdings.entries.map { name($0, language: language) }
+        let names = holdings.entries.map { name($0, in: scopes, language: language) }
         var sentences: [String] = []
         if !names.isEmpty {
             let listed = names.joined(separator: L10n.t("mark.dim.names", language: language))
@@ -39,15 +39,44 @@ extension PartWords {
         }
     }
 
-    /// What one thing held is called: the part's name, the name of the act it gains beside
-    /// acting, or — held in part — that it is part of it.
-    private static func name(_ entry: MastodonHoldings.Entry, language: DummyLanguage?) -> String {
+    /// What one thing held among `scopes` is called: the part's name, the name of the act it
+    /// gains beside acting, or — held in part — the half of it held, by that half's name
+    /// (`halfKey`), and where the part has no such halves, that it is part of it, in the
+    /// words of `partly`.
+    private static func name(
+        _ entry: MastodonHoldings.Entry, in scopes: String?, partly: String = "part.held.partly",
+        language: DummyLanguage?
+    ) -> String {
         switch entry {
         case .whole(let part): L10n.t(nameKey(part), language: language)
         case .beside(let part): L10n.t(nameKey(part) + ".beside", language: language)
         case .partly(let part):
-            String(format: L10n.t("part.held.partly", language: language), L10n.t(nameKey(part), language: language))
+            String(
+                format: L10n.t(MastodonParts.half(of: part, in: scopes).map(halfKey) ?? partly, language: language),
+                L10n.t(nameKey(part), language: language)
+            )
         }
+    }
+
+    /// The key of what a half of a part is called, with the part's name for its argument:
+    /// "seeing who you follow", "changing who you follow".
+    static func halfKey(_ half: MastodonHalf) -> String {
+        switch half {
+        case .seeing: "account.signin.ask.seeing"
+        case .changing: "account.signin.ask.givesUp.changing"
+        }
+    }
+
+    /// The parts `words` are words of, by name and as one list — a part only some of whose
+    /// words are among them by the half they are, or in the words of `partly` (`name`).
+    /// Nothing where none is a word of a part: a word the table does not know is not named
+    /// here.
+    static func listed(_ words: [String], partly: String, language: DummyLanguage? = nil) -> String? {
+        let scopes = words.joined(separator: " ")
+        let entries = MastodonParts.holdings(in: scopes).entries
+        guard !entries.isEmpty else { return nil }
+        return entries.map { name($0, in: scopes, partly: partly, language: language) }
+            .joined(separator: L10n.t("mark.dim.names", language: language))
     }
 
     /// The key of a part's name: the words its own question already asks for it in.

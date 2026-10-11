@@ -39,6 +39,9 @@ struct PartAsk: Equatable {
     /// Whether it is put again for want of a part the one before named, of which the source
     /// has none — which is then what it says, and not that the sign-in holds otherwise.
     var without = false
+    /// The parts of `ticked` the sign-in holds in part: the page adds only the words of them
+    /// it lacks, and the question says so.
+    var rest: Set<MastodonPart> = []
 }
 
 /// The question open about a part, and the asks on their way — **an object of the session's,
@@ -66,6 +69,37 @@ final class ShellPartAsks {
     /// The asks started by a yes and not yet landed, a source each.
     @ObservationIgnored private var running: [String: Task<Void, Never>] = [:]
 
+    /// What the read-or-act question open carries beside its two answers.
+    struct SignInTicks: Equatable {
+        /// The source it is about, folded: it is said of no other's question.
+        let host: String
+        /// The parts ticked with either answer: the question was raised from their lock,
+        /// where no sign-in is held (`ShellSession.askSignIn`).
+        var parts: Set<MastodonPart> = []
+        /// Whether it is put again in the place of one whose yes opened no page.
+        var again = false
+    }
+
+    /// That, for the one question open — **one record, whatever the source**: gone when a
+    /// question about any source is raised or put down, so it rides no later one.
+    private var signInTicked: SignInTicks?
+
+    /// What the question open about `host` carries, where it is the one this was kept for.
+    func signInTicks(host: String) -> SignInTicks? {
+        signInTicked.flatMap { $0.host == host ? $0 : nil }
+    }
+
+    /// The read-or-act question about `host` is raised with `parts` ticked.
+    func tickSignIn(_ parts: Set<MastodonPart>, host: String, again: Bool = false) {
+        signInTicked = SignInTicks(host: host, parts: parts, again: again)
+    }
+
+    /// A read-or-act question is raised with nothing ticked, or put down: the next one
+    /// reads afresh.
+    func putDownSignIn() {
+        signInTicked = nil
+    }
+
     /// The press on a locked act: raises the question about `host`'s sign-in and `ticked`.
     /// Sends nothing. Returns whether a question was raised — none where no part of `ticked`
     /// may be asked of that sign-in, and none while an ask of that source is on its way.
@@ -88,7 +122,8 @@ final class ShellPartAsks {
         raised = PartAsk(
             host: host, ticked: asked, said: page, givesUp: MastodonParts.unknown(in: held.scopes),
             stamp: held.stamp, beside: MastodonParts.beside(on: page, than: held.scopes), again: again,
-            with: asked.subtracting(pressed), without: without
+            with: asked.subtracting(pressed), without: without,
+            rest: asked.filter { mastodon.standing($0, host: host) == .partly }
         )
         return true
     }
@@ -195,7 +230,12 @@ extension ShellSession {
                 guard mastodon.mayAsk(part, host: host) else { return "part.ask.reads" }
                 mastodon.refresh()
                 return "part.ask.held"
-            case .partly?, nil: continue
+            // Held in part, and the rest is not to be asked for where the sign-in stands.
+            case .partly?:
+                guard mastodon.mayAsk(part, host: host) else { return "part.ask.partly" }
+                mastodon.refresh()
+                return "part.ask.held"
+            case nil: continue
             }
         }
         return nil
@@ -217,11 +257,27 @@ extension ShellSession {
     }
 }
 
+extension MastodonSessions {
+    /// What is drawn where `part`'s act would be at `host`, as its sign-in stands to it now
+    /// (`PartWords.place`) — nothing where the act itself is offered, or no sign-in is held.
+    func place(_ part: MastodonPart, host raw: String) -> PartWords.Place? {
+        let host = raw.lowercased()
+        let lacking = MastodonParts.half(of: part, in: heldParts[host]?.scopes)?.other
+        return standing(part, host: host).flatMap {
+            PartWords.place($0, of: part, asking: asking.contains(host), rest: mayAsk(part, host: host), lacking: lacking)
+        }
+    }
+}
+
 /// The words an ask in place is put and answered in.
 ///
 /// **A part's own are found by its name**: `part.<name>.ask.title`, `.line` and `.detail`,
-/// `part.<name>.ask.beside` for the act it gains beside acting, and `part.<name>.unasked`
-/// for its lock. A question about several parts says each one's. A part asked before there
+/// `part.<name>.ask.beside` for the act it gains beside acting, `part.<name>.unasked` for
+/// its lock, and `part.<name>.partly` for its lock where part of it is held — which only a
+/// part of more than one word can be — or, for a part with a half that sees and a half that
+/// changes, `part.<name>.partly.seeing` and `.changing`, by the half it lacks. And
+/// `part.<name>.readOnly` for what reading alone leaves of it, where that is not all of it
+/// (`ShellQuestion.signInSaid`). A question about several parts says each one's. A part asked before there
 /// was a table keeps the sentences it had (`earlier`), and where a part has none of its own
 /// for an outcome, the outcome's own sentence is said.
 @MainActor
@@ -310,13 +366,15 @@ enum PartWords {
             case none
             /// The source is being asked for something now: nothing more until that lands.
             case asking
+            /// Held in part, and never asked for the rest: a lock whose press asks for it.
+            case partly
         }
 
         let kind: Kind
         /// The key of its line, with the source for its one argument.
         let key: String
         /// Whether pressing the line asks.
-        var asks: Bool { kind == .unasked || kind == .refused }
+        var asks: Bool { kind == .unasked || kind == .refused || kind == .partly }
     }
 
     /// What is drawn where `part`'s act would be, for a sign-in that stands to it so — **the
@@ -324,10 +382,24 @@ enum PartWords {
     /// offered: held, and held in part, where what is held is offered and the rest is not
     /// asked for.
     ///
+    /// **`rest` is whether the rest of a part held in part may be asked for**
+    /// (`MastodonSessions.mayAsk`): then it has a line of its own, beside what is offered of
+    /// it, and the press asks for the words it lacks.
+    ///
+    /// **`lacking` is the half of it the sign-in was not asked for**, where the part has
+    /// halves (`MastodonParts.half`): the line is keyed by it, so it says what is missing
+    /// and never what is held.
+    ///
     /// `asking` is whether that source is being asked for something now: a line that would
     /// ask then says so, and cannot be pressed.
-    static func place(_ standing: MastodonPartStanding, of part: MastodonPart, asking: Bool = false) -> Place? {
-        switch standing {
+    static func place(
+        _ standing: MastodonPartStanding, of part: MastodonPart, asking: Bool = false, rest: Bool = false,
+        lacking: MastodonHalf? = nil
+    ) -> Place? {
+        let partly = "part.\(part.rawValue).partly" + (lacking.map { ".\($0.rawValue)" } ?? "")
+        return switch standing {
+        case .partly where rest && asking: Place(kind: .asking, key: "part.ask.asking")
+        case .partly where rest: Place(kind: .partly, key: partly)
         case .held, .partly: nil
         case .unasked where asking, .refused where asking: Place(kind: .asking, key: "part.ask.asking")
         case .unasked: Place(kind: .unasked, key: earlier[part]?.unasked ?? "part.\(part.rawValue).unasked")
@@ -407,6 +479,10 @@ extension ShellQuestion {
             for sentence in worded("beside", of: ask.beside) {
                 (question.line, question.help) = saying(sentence, line: question.line, help: question.help, language: language)
             }
+        }
+        if !ask.rest.isEmpty {
+            let rest = L10n.t("part.ask.rest", language: language)
+            (question.line, question.help) = saying(rest, line: question.line, help: question.help, language: language)
         }
         if ask.again {
             let why = ask.without ? said("part.ask.again.without") : L10n.t("part.ask.again", language: language)

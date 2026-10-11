@@ -137,7 +137,7 @@ struct AccountPane: View {
             // this page: the narrower act is never the one a reader reaches by reflex. Neither is
             // a loss; what each half buys is a sentence, behind the question's (?).
             .modifier(SignInChoiceQuestion(session: session) { ask, writing in
-                Task { await chose(host: ask.host, writing: writing, noticesSaid: ask.notices) }
+                Task { await chose(host: ask.host, writing: writing, noticesSaid: ask.notices, answering: ask.drawn) }
             })
             // The key pressed while signed in: the question, and only its yes signs out.
             .modifier(SignOutQuestion(session: session, signOut: signOutAnswered))
@@ -736,7 +736,7 @@ struct AccountPane: View {
         if session.isSignedIn(host: row.source.host) {
             session.askSignOut(host: row.source.host)
         } else if row.asksWriting {
-            session.signInChoice = row.source.host
+            session.askSignIn(host: row.source.host)
         } else {
             await session.signIn(
                 host: row.source.host, through: WebAuthBrowser(session: webAuthenticationSession)
@@ -769,7 +769,7 @@ struct AccountPane: View {
     /// somebody already agreed to is not done quietly: the control stands on the row of the
     /// source it is about until the reader answers.
     func askWriting(_ host: String) {
-        session.signInChoice = host
+        session.askSignIn(host: host)
     }
 
     /// The permission control's press: the question this row's sign-in is owed, and **nobody is
@@ -810,12 +810,13 @@ struct AccountPane: View {
     /// verifies is that this method hands the reader's own answer to that call. Named here rather
     /// than left to be discovered.
     ///
-    /// `noticesSaid` is what the question said of notices, handed over with its answer.
-    func chose(host: String, writing: Bool, noticesSaid: Bool? = nil) async {
+    /// `noticesSaid` is what the question said of notices, and `drawn` everything it was
+    /// drawn from (`SignInDrawn`), handed over with its answer.
+    func chose(host: String, writing: Bool, noticesSaid: Bool? = nil, answering drawn: SignInDrawn? = nil) async {
         session.putDownSignInChoice()
         await session.signIn(
             host: host, through: WebAuthBrowser(session: webAuthenticationSession),
-            writing: writing, noticesSaid: noticesSaid
+            writing: writing, noticesSaid: noticesSaid, answering: drawn
         )
     }
 
@@ -905,8 +906,17 @@ private struct SignOutQuestion: ViewModifier {
 /// Reading, or reading and writing, asked of a source being signed in to — a modifier, so the
 /// page's chain gains one plain call and no presenter closure of its own.
 private struct SignInChoiceQuestion: ViewModifier {
+    /// The question as its card is drawn: the source as it was raised, what it says of
+    /// notices, and what it was drawn from — the card's own, so its answer is handed what
+    /// that card said.
+    struct Put: Equatable {
+        let host: String
+        let notices: Bool
+        let drawn: SignInDrawn
+    }
+
     let session: ShellSession
-    let chose: @MainActor (SignInAsked, Bool) -> Void
+    let chose: @MainActor (Put, Bool) -> Void
 
     func body(content: Content) -> some View {
         content.shellConfirm(asked, question: question) { ask, id in
@@ -914,11 +924,15 @@ private struct SignInChoiceQuestion: ViewModifier {
         }
     }
 
-    private func question(_ ask: SignInAsked) -> ShellConfirmation {
-        session.signInQuestion(host: ask.host)
+    private func question(_ ask: Put) -> ShellConfirmation {
+        session.signInQuestion(ask.drawn, host: ask.host)
     }
 
-    private var asked: Binding<SignInAsked?> {
-        Binding(get: { session.signInChoice.map(session.signInAsked) }, set: { if $0 == nil { session.putDownSignInChoice() } })
+    private var asked: Binding<Put?> {
+        Binding(get: { session.signInChoice.map(put) }, set: { if $0 == nil { session.putDownSignInChoice() } })
+    }
+
+    private func put(_ host: String) -> Put {
+        Put(host: host, notices: session.signInAsked(host: host).notices, drawn: session.signInDrawn(host: host))
     }
 }

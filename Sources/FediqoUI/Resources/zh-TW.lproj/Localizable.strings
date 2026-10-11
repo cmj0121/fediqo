@@ -827,6 +827,14 @@
 "account.signin.ask.ends.read" = "選「登入來讀」會結束這台裝置在 %@ 的登入，改用另一個帳號登入也一樣。帶著這個登入的其他裝置也會一起登出。";
 "account.signin.ask.ends.either" = "兩種選擇都會結束這台裝置在 %@ 的登入。帶著這個登入的其他裝置也會一起登出。";
 "account.signin.ask.ends.another" = "改用另一個帳號登入，會結束這台裝置在 %@ 的登入。帶著這個登入的其他裝置也會一起登出。";
+"account.signin.ask.also.read" = "「登入來讀」還會問：%@。";
+"account.signin.ask.also.write" = "「登入來讀與寫」還會問：%@。";
+"account.signin.ask.givesUp.either" = "兩種選擇都會放棄：%@。";
+"account.signin.ask.givesUp.read" = "選「登入來讀」會放棄：%@。";
+"account.signin.ask.givesUp.changing" = "更改%@";
+"account.signin.ask.seeing" = "查看%@";
+"account.signin.ask.givesUp.other" = "這個登入有 %@，是這個版本的 Fediqo 不會問的，所以兩種選擇都會放棄它。";
+"account.signin.replaced" = "頁面開著的時候，這台裝置在 %@ 的登入已經變成另一個。什麼都沒有改變。";
 "account.mastodon.ended.left" = "帶著 %@ 上這個登入較早形式的其他裝置也會一起登出。";
 "account.left.owed" = "%2$@ 上還有 %1$d 個先前的登入尚未能結束。";
 "account.signout.unconfirmed.title" = "登出未獲確認";
@@ -855,6 +863,7 @@
 "part.ask.again.without" = "%@ 沒有剛才那個問題問的其中一項，所以去掉那一項再問一次。";
 "part.ask.held" = "%@ 已經允許這一項了。";
 "part.ask.reads" = "%@ 上的這個登入只能讀取，所以沒有詢問。要加上這一項，請先登入來讀與寫。";
+"part.ask.partly" = "%@ 上的這個登入已經有這一項的一部分，剩下的無法在原處再問。請登出後重新登入，並選擇要允許的項目。";
 "part.ask.asking" = "Fediqo 正在詢問 %@。";
 "part.reading.ask.title" = "請 %@ 允許讀取？";
 "part.reading.ask.line" = "它的頁面會問你已允許的，並加上以你的身分讀取。";
@@ -879,6 +888,11 @@
 "part.follows.ask.line" = "它的頁面會問你已允許的，並加上你追蹤的對象。";
 "part.follows.ask.detail" = "%1$@ 自己的登入頁面會打開，問這個登入已經有的，再多問一件事——你追蹤的對象：看你和某個人之間的關係、追蹤與取消追蹤人和主題標籤、回覆別人的追蹤請求，以及移除追蹤你的人。不會先登出，這台裝置和其他裝置都不會：關掉那一頁，或在上面拒絕，你原有的登入都照舊。";
 "part.follows.unasked" = "這個登入還沒被問過你和別人的關係。更新權限";
+"part.ask.rest" = "這個登入已經有這一項的一部分，那一頁只會加上剩下的。";
+"part.acting.partly" = "這個登入只被問過以你的身分寫入的一部分。更新權限";
+"part.follows.partly.seeing" = "這個登入還沒被問過查看你追蹤的對象。更新權限";
+"part.follows.partly.changing" = "這個登入還沒被問過追蹤與取消追蹤。更新權限";
+"part.follows.readOnly" = "選「登入來讀」，Fediqo 只能查看你追蹤的對象，不能追蹤或取消追蹤。";
 /* What a sign-in holds, part by part (#347): its row and its source's page. */
 "part.held.line" = "這個登入允許：%@。";
 "part.held.partly" = "%@（部分）";

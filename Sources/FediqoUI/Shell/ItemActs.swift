@@ -318,7 +318,7 @@ extension ItemActs {
         if let lock = acting.locks[act] {
             let line = lock.line(language: language)
             switch lock.place.kind {
-            case .unasked, .refused: return (.dim(.askAgain), line)
+            case .unasked, .refused, .partly: return (.dim(.askAgain), line)
             case .asking: return (.dim(.notNow), line)
             case .none: return (.dim(.never), line)
             }

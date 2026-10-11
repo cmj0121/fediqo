@@ -3206,7 +3206,8 @@ final class ShellSession {
     /// `noticesSaid` is what that question said of notices (`SignInAsked.notices`); nothing
     /// where none was put.
     func signIn(
-        host raw: String, through browser: any OAuthBrowser, writing: Bool = false, noticesSaid: Bool? = nil
+        host raw: String, through browser: any OAuthBrowser, writing: Bool = false, noticesSaid: Bool? = nil,
+        answering drawn: SignInDrawn? = nil
     ) async {
         guard let host = try? Host.parse(raw) else { return }
         guard kind(of: host) == .mastodon else {
@@ -3214,7 +3215,13 @@ final class ShellSession {
             return
         }
         if rowRefusal?.host == host { rowRefusal = nil }
-        let failure = await mastodon.signIn(host: host, through: browser, writing: writing, noticesSaid: noticesSaid)
+        let answer = await mastodon.signIn(host: host, through: browser, writing: writing, noticesSaid: noticesSaid, answering: drawn)
+        if answer == .changed { return askSignInAgain(drawn, host: raw) }
+        guard case .landed(let failure) = answer else {
+            // Not kept over a sign-in filed while the page was up, and nothing held ended.
+            if isAdded(host) { rowRefusal = (host: host, key: "account.signin.replaced") }
+            return
+        }
         // **Before the first read as whoever signed in** (#285): what the source said an earlier
         // reader did is let go of first, so what it now says of this one is not taken with it.
         await forgetReaderMarksDue()

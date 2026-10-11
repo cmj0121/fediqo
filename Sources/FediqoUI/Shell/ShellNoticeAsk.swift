@@ -105,13 +105,26 @@ extension ShellSession {
     ///
     /// **Where a sign-in is held, it says which answer ends it at the source** (#347) — and
     /// that any other device carrying it is then signed out too — before the page opens.
+    ///
+    /// **And what each answer's page asks beyond what that answer always asked, and what it
+    /// gives up** (`ShellQuestion.signInSaid`): a sign-in asked for more where it stood is
+    /// carried by reading and acting, and narrowed by reading alone; and a question raised
+    /// from a part's lock names the part it ticks (`signInDrawn`).
     func signInQuestion(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
-        let notices = signInAsked(host: host).notices
-        var question = ShellQuestion.signIn(host: host, notices: notices, language: language)
-        if let ends = mastodon.signInEnds(host: host, notices: notices) {
+        signInQuestion(signInDrawn(host: host), host: host, language: language)
+    }
+
+    /// The read-or-act question about `host`, in the words of what it is drawn from.
+    func signInQuestion(_ drawn: SignInDrawn, host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        var question = ShellQuestion.signIn(host: host, notices: drawn.notices, language: language)
+        var sentences = ShellQuestion.signInSaid(drawn, language: language)
+        // Put in the place of one whose yes opened no page, it says first why it is back.
+        if partAsks.signInTicks(host: host.lowercased())?.again == true {
+            sentences.insert(L10n.t("part.ask.again", language: language), at: 0)
+        }
+        for sentence in sentences {
             (question.line, question.help) = ShellQuestion.saying(
-                ShellQuestion.signInEnds(ends, host: host, language: language),
-                line: question.line, help: question.help, language: language
+                sentence, line: question.line, help: question.help, language: language
             )
         }
         return question
@@ -120,6 +133,7 @@ extension ShellSession {
     /// The read-or-act question put down, answered or not: the next one reads afresh.
     func putDownSignInChoice() {
         if let signInChoice { noticesSaid[signInChoice.lowercased()] = nil }
+        partAsks.putDownSignIn()
         signInChoice = nil
     }
 }

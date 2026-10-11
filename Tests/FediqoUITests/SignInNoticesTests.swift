@@ -431,7 +431,11 @@ struct SignInNoticesTests {
         #expect(mastodon.grants == [host: .reading])
     }
 
-    @Test("An ordinary sign-in reads no token before the server's page opens, where the look at notices could be had")
+    /// **Changed with #347, on purpose.** This used to hold the sign-in to reading no token
+    /// before its page. What a page asks is now built over what the sign-in held holds, and
+    /// that is a decision, read from the sign-in itself and not from what rides beside it
+    /// (`MastodonTokenStore.parts`): one look, and no more for notices.
+    @Test("An ordinary sign-in looks once at the sign-in held before the server's page opens — what its page is built over — and reads no token more, where the look at notices could be had")
     func noTokenIsReadBeforeThePage() async throws {
         for holding in [nil, Self.acting, MastodonOAuth.scopes(writing: true, notices: true)] as [String?] {
             let held = MemoryMastodonTokens()
@@ -447,7 +451,7 @@ struct SignInNoticesTests {
 
             let pressing = Task { await mastodon.signIn(host: host, through: page, writing: true) }
             #expect(await spun { page.scopes.count == 1 })
-            #expect(tokens.reads == 0, "a token was read before the page opened, holding \(holding ?? "nothing")")
+            #expect(tokens.reads == 1, "the sign-in held was read other than once before the page opened, holding \(holding ?? "nothing")")
             #expect(page.scopes == [MastodonOAuth.scopes(writing: true, notices: MastodonOAuth.notices(holding))])
             await gate.open()
             #expect(await pressing.value == nil)

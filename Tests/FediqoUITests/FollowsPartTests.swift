@@ -320,27 +320,52 @@ struct FollowsPartTests {
 
     // MARK: - The ordinary sign-in
 
-    /// What happens today, said plainly: the read-or-act sign-in asks what it always asked
-    /// (`MastodonOAuth.scopes`) and carries notices alone. That "read and act keeps
-    /// everything held" is not yet so of a part asked in place — it is the unit that first
-    /// presses for follows that makes this reachable, and its to settle with the question's
-    /// words.
-    @Test("Signing in again over a sign-in that holds follows asks exactly what a sign-in always asked, and not follows: the sign-in that comes back is without it, the one before is ended as any narrower one's is, and follows stands never asked — to be asked again where it stands", arguments: [false, true])
-    func theOrdinarySignInAsksNoFollows(_ writing: Bool) async throws {
+    /// **Re-pinned with the unit that first lets a person press for follows.** This used to
+    /// hold the read-or-act sign-in to what it always asked: follows was left off its page,
+    /// the sign-in that came back was without it, and the one before was ended — with no
+    /// word of it in the question. Now the sign-in held is carried (#347): reading and acting
+    /// keeps every word of it, and reading alone keeps the words that read.
+    @Test("Signing in again to read and act over a sign-in that holds follows asks for follows with the rest: the sign-in that comes back holds it, the one before is left live and nothing is ended — where both are shown to be one account; where nobody has said whose the sign-in held is, the page is the same and the one before is ended", arguments: [true, false])
+    func readingAndActingKeepsFollows(_ named: Bool) async throws {
         let (session, server, tokens) = try await shell(holding: "\(Self.reads) \(Self.f)", registered: "\(Self.before) \(Self.f)")
+        if named { await session.mastodon.learnWho(host: host) }
+        await server.forget()
         let page = PartPage()
 
-        await session.signIn(host: host, through: page, writing: writing)
+        await session.signIn(host: host, through: page, writing: true)
 
-        let chosen = writing ? "\(Self.reads) \(Self.w) \(Self.b)" : Self.reads
-        #expect(page.scopes == [chosen])
+        let wanted = "read:statuses read:lists read:accounts read:search write:statuses write:favourites write:bookmarks read:follows write:follows"
+        #expect(page.scopes == [wanted])
         let now = try #require(try tokens.token(host: host))
         #expect(now.accessToken == "new-1")
-        #expect(now.scopes == chosen)
+        #expect(now.scopes == wanted)
+        #expect(session.mastodon.standing(.follows, host: host) == .held)
+        let ended: [String] = named ? [] : ["held-1"]
+        let left: [MastodonLeft.State] = named ? [.left] : []
+        #expect(await server.revoked == ended)
+        #expect(try tokens.left(host: host).map(\.state) == left)
+    }
+
+    @Test("Signing in again to read only over a sign-in that holds follows asks for no word that acts, the one for following among them, and keeps the one that reads: the sign-in that comes back sees who the person follows and cannot follow, the one before is ended, and the rest of follows is asked for where the sign-in stands", arguments: [false, true])
+    func readingAloneKeepsWhatReads(_ acts: Bool) async throws {
+        let held = acts ? "\(Self.reads) \(Self.w) \(Self.b) \(Self.n) \(Self.d) \(Self.f)" : "\(Self.reads) \(Self.f)"
+        let (session, server, tokens) = try await shell(holding: held, registered: "\(Self.before) \(Self.f)")
+        await session.mastodon.learnWho(host: host)
+        let page = PartPage()
+
+        await session.signIn(host: host, through: page, writing: false)
+
+        let notices = acts ? " read:notifications" : ""
+        let wanted = "read:statuses read:lists read:accounts read:search\(notices) read:follows"
+        #expect(page.scopes == [wanted])
+        let now = try #require(try tokens.token(host: host))
+        #expect(now.accessToken == "new-1")
+        #expect(now.scopes == wanted)
         #expect(await server.revoked == ["held-1"])
         #expect(try tokens.left(host: host).isEmpty)
-        #expect(session.mastodon.standing(.follows, host: host) == .unasked)
-        #expect(session.mastodon.mayAsk(.follows, host: host))
+        #expect(session.mastodon.standing(.follows, host: host) == .partly)
+        #expect(session.mastodon.mayAsk(.follows, host: host), "the way back to following is not offered")
+        #expect(session.mastodon.grants[host] == .reading)
     }
 
     // MARK: - A registration kept from before follows was a part

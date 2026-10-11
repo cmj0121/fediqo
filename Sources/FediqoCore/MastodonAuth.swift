@@ -165,17 +165,28 @@ public struct MastodonOAuth: Sendable {
     /// **The words and their order are the table's** (`MastodonParts.page`): this says which
     /// parts a choice ticks, and spells none of them. `search` is false for a server that has
     /// no search to allow (decision 32).
+    ///
+    /// **`carried` is what the sign-in held brings to either answer** (#347,
+    /// `MastodonParts.carried`): the parts it was asked for where it stood. Reading and
+    /// acting keeps every word of them; reading alone keeps the ones that read and asks for
+    /// none that acts. `ticking` are parts ticked beside the answer — a first sign-in raised
+    /// from a part's lock — which ride the same way. With neither, a choice is the string it
+    /// always was.
     public static func scopes(
         search: Bool = true, writing wanted: Bool, bookmarks: Bool = true,
-        notices: Bool = false
+        notices: Bool = false, carried: String? = nil, ticking more: Set<MastodonPart> = []
     ) -> String {
-        var ticked: Set<MastodonPart> = [.reading]
+        var ticked: Set<MastodonPart> = more.union([.reading])
         if search { ticked.insert(.search) }
         if wanted { ticked.insert(.acting) }
         if wanted, bookmarks { ticked.insert(.bookmarks) }
         if notices { ticked.insert(.notices) }
-        return MastodonParts.page(held: nil, ticked: ticked)
+        return MastodonParts.page(held: carried, ticked: ticked, readOnly: !wanted)
     }
+
+    /// The parts the two answers and what a sign-in carries of notices decide between them:
+    /// never carried from the sign-in held by any other rule (`scopes`).
+    public static let chosen: Set<MastodonPart> = [.reading, .search, .acting, .bookmarks, .notices]
 
     /// Whether a scope string bought reading notices (#323) — read scope by scope, as
     /// `writes(_:)` is.

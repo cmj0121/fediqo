@@ -1073,6 +1073,7 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
         private var held: [String: MastodonToken] = [:]
         private var journals: [String: [MastodonLeft]] = [:]
         private var refusals: [Call: (after: Int, times: Int)] = [:]
+        private var garbled: Set<String> = []
 
         var all: [String: MastodonToken] { lock.withLock { held } }
         var journalled: Set<String> { lock.withLock { Set(journals.keys) } }
@@ -1092,10 +1093,14 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
             throw ForumCredentialError.keychain(errSecInteractionNotAllowed)
         }
 
+        func garble(host: String) {
+            _ = lock.withLock { garbled.insert(host.lowercased()) }
+        }
+
         func token(host: String) throws -> MastodonToken? {
             try lock.withLock {
                 try pass(.reading)
-                return held[host.lowercased()]
+                return garbled.contains(host.lowercased()) ? nil : held[host.lowercased()]
             }
         }
 
@@ -1103,6 +1108,7 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
             try lock.withLock {
                 try pass(.adding)
                 held[token.host] = token
+                garbled.remove(token.host)
             }
         }
 
@@ -1111,11 +1117,15 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
                 try pass(.changing)
                 guard held[token.host] != nil else { throw ForumCredentialError.keychain(errSecItemNotFound) }
                 held[token.host] = token
+                garbled.remove(token.host)
             }
         }
 
         func delete(host: String) throws {
-            lock.withLock { held[host.lowercased()] = nil }
+            lock.withLock {
+                held[host.lowercased()] = nil
+                garbled.remove(host.lowercased())
+            }
         }
 
         func left(host: String) throws -> [MastodonLeft] {
@@ -1178,6 +1188,13 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
     /// already let go of what was held.
     func refuse(_ call: Call, times: Int = 1, after: Int = 0) {
         items.refuse(call, times: times, after: after)
+    }
+
+    /// Makes the value held at `host` one that cannot be read as a sign-in, as a value this
+    /// build cannot decode reads: nothing, while what rides beside it still says signed in —
+    /// until something is written there. For tests.
+    func garble(host: String) {
+        items.garble(host: host)
     }
 
     public func token(host: String) throws -> MastodonToken? {

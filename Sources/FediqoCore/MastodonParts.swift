@@ -189,6 +189,36 @@ public enum MastodonParts {
         return words(held.asked).isDisjoint(with: missing) ? .unasked : .notGiven
     }
 
+    /// Whether a sign-in holding `part` in part may be asked for the rest of it where it
+    /// stands: no page has asked it for a word of the part it lacks — one asked and not given
+    /// would be answered the same again — and it reads by every word of reading, which is
+    /// what a page is built over (`reads`). **So reading itself, held in part, is never asked
+    /// for in place**: such a sign-in is signed in again.
+    public static func asksRest(_ part: MastodonPart, of held: MastodonHeld) -> Bool {
+        guard standing(part, of: held) == .partly, reads(held.scopes) else { return false }
+        let has = words(held.scopes)
+        return words(held.asked).isDisjoint(with: part.words.filter { !has.contains($0) })
+    }
+
+    /// What signing in again carries of the sign-in held, whichever answer is given: its
+    /// words that are no word of `choice` — those are the answer's to ask for or leave — and
+    /// that **this device itself asked that sign-in for**. A word only the record says is
+    /// held, as a package may bring it, is carried onto no page: nobody was shown it here.
+    /// In the order held; nothing, where nothing is held.
+    public static func carried(of held: MastodonHeld?, beside choice: Set<MastodonPart>) -> String? {
+        guard let held else { return nil }
+        let chosen = Set(choice.flatMap { $0.words + $0.wordsBesideActing })
+        let asked = words(held.asked)
+        return spelt((held.scopes ?? "").split(separator: " ").map(String.init)
+            .filter { !chosen.contains($0) && asked.contains($0) })
+    }
+
+    /// The words of `scopes` that `page` has none of, in the order held: what a sign-in
+    /// gives up by being replaced by one made on that page.
+    public static func lost(of scopes: String?, on page: String) -> [String] {
+        more(on: scopes ?? "", than: page)
+    }
+
     /// What a sign-in holds, part by part, by its scope string — **every word of it said
     /// once**: a part whole, a part held in part, the act a part gains beside acting, and a
     /// word this table does not know. Read off the table alone, so a part added to it is
@@ -209,6 +239,18 @@ public enum MastodonParts {
             if part.wordsBesideActing.contains(where: has.contains) { entries.append(.beside(part)) }
         }
         return MastodonHoldings(entries: entries, other: unknown(in: scopes))
+    }
+
+    /// The half of `part` that `scopes` holds, where it holds one and not the other: every
+    /// word of it that reads and none that acts, or the other way round. Nothing for a part
+    /// held whole, held not at all, or held in part some other way — and nothing for a part
+    /// with no such halves, all of whose words read or all of whose words act.
+    public static func half(of part: MastodonPart, in scopes: String?) -> MastodonHalf? {
+        let held = part.words.filter(words(scopes).contains)
+        let acting = part.words.filter(acts)
+        guard !acting.isEmpty, acting.count < part.words.count else { return nil }
+        if held == acting { return .changing }
+        return held == part.words.filter { !acts($0) } ? .seeing : nil
     }
 
     /// Words as the one string a source reads them in.
@@ -264,7 +306,8 @@ public enum MastodonParts {
 public enum MastodonPartStanding: Sendable, Equatable, CaseIterable {
     /// Every word of it is held.
     case held
-    /// Some of its words are held: what those allow is offered, and the rest is not asked.
+    /// Some of its words are held: what those allow is offered. The rest is asked for where
+    /// the sign-in stands only if no page asked for it before (`MastodonParts.asksRest`).
     case partly
     /// No page has asked this sign-in for it. Asking is what changes it.
     case unasked
@@ -273,6 +316,18 @@ public enum MastodonPartStanding: Sendable, Equatable, CaseIterable {
     /// Asked, and the source gave none of it — or has none to give. Asking again would get
     /// the same answer.
     case notGiven
+}
+
+/// One half of a part whose words both read and act (`MastodonParts.half`): named for what
+/// it lets be done, which is what a sentence about it is keyed by.
+public enum MastodonHalf: String, Sendable, Equatable {
+    /// The words that read.
+    case seeing
+    /// The words that act.
+    case changing
+
+    /// The half a sign-in holding this one lacks.
+    public var other: MastodonHalf { self == .seeing ? .changing : .seeing }
 }
 
 /// What a sign-in holds, part by part (`MastodonParts.holdings`).

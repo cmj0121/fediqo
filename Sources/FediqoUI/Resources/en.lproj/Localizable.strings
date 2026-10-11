@@ -846,6 +846,14 @@
 "account.signin.ask.ends.read" = "Sign in to read ends the sign-in this device has at %@, and so does signing in as another account. Any other device carrying this sign-in is signed out too.";
 "account.signin.ask.ends.either" = "Either answer ends the sign-in this device has at %@. Any other device carrying this sign-in is signed out too.";
 "account.signin.ask.ends.another" = "Signing in as another account ends the sign-in this device has at %@. Any other device carrying this sign-in is signed out too.";
+"account.signin.ask.also.read" = "Sign in to read also asks for %@.";
+"account.signin.ask.also.write" = "Sign in to read and write also asks for %@.";
+"account.signin.ask.givesUp.either" = "Either answer gives up %@.";
+"account.signin.ask.givesUp.read" = "Sign in to read gives up %@.";
+"account.signin.ask.givesUp.changing" = "changing %@";
+"account.signin.ask.seeing" = "seeing %@";
+"account.signin.ask.givesUp.other" = "This sign-in has %@, which this version of Fediqo does not ask for, so either answer gives it up.";
+"account.signin.replaced" = "The sign-in this device has at %@ became another while the page was open. Nothing was changed.";
 "account.mastodon.ended.left" = "Other devices carrying an earlier form of the sign-in at %@ are signed out too.";
 "account.left.owed" = "%1$d earlier sign-ins at %2$@ could not be ended yet.";
 "account.left.owed.one" = "%1$d earlier sign-in at %2$@ could not be ended yet.";
@@ -875,6 +883,7 @@
 "part.ask.again.without" = "%@ has none of something that question asked for, so here is the question again without it.";
 "part.ask.held" = "%@ already allows this.";
 "part.ask.reads" = "This sign-in at %@ only reads, so it was not asked. Sign in to read and write to add this.";
+"part.ask.partly" = "This sign-in at %@ has part of this, and the rest cannot be asked for where it stands. Sign out and sign in again, choosing what to allow.";
 "part.ask.asking" = "Fediqo is asking %@ now.";
 "part.reading.ask.title" = "Ask %@ to allow reading?";
 "part.reading.ask.line" = "Its page asks for what you allowed, and for reading as you.";
@@ -899,6 +908,11 @@
 "part.follows.ask.line" = "Its page asks for what you allowed, and for who you follow.";
 "part.follows.ask.detail" = "%1$@'s own sign-in page opens. It asks for what this sign-in already has, and for one thing more — who you follow: to see how you and someone stand, to follow and unfollow people and hashtags, to answer requests to follow you, and to remove a follower. Nothing is signed out first, on this device or another: close the page, or refuse on it, and the sign-in you have goes on as it is.";
 "part.follows.unasked" = "This sign-in was not asked how you stand to people. Update permission";
+"part.ask.rest" = "This sign-in already has part of this, and the page adds only the rest.";
+"part.acting.partly" = "This sign-in was asked for only part of writing as you. Update permission";
+"part.follows.partly.seeing" = "This sign-in was not asked to see who you follow. Update permission";
+"part.follows.partly.changing" = "This sign-in was not asked to follow or unfollow. Update permission";
+"part.follows.readOnly" = "With Sign in to read, Fediqo can see who you follow but cannot follow or unfollow.";
 /* What a sign-in holds, part by part (#347): its row and its source's page. */
 "part.held.line" = "This sign-in allows %@.";
 "part.held.partly" = "%@ (in part)";

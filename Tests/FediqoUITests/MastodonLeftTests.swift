@@ -1282,10 +1282,11 @@ struct MastodonLeftTests {
         #expect(await made.sessions.signIn(host: host, through: LeftPage(), writing: true) == nil)
         #expect(keys.filter(says) == ["account.signin.ask.ends.read"])
 
-        // After a quit nobody has yet said whose the sign-in is; and one kept with nothing written down.
+        // After a quit nobody has yet said whose the sign-in is, but it was written down with
+        // it, which is what the keeping goes by; and one kept with nothing written down.
         let quit = fresh(made.tokens)
         let later = await shell(quit)
-        #expect(quit.sessions.signInEnds(host: host, notices: false) == .either)
+        #expect(quit.sessions.signInEnds(host: host, notices: false) == .reading)
         try quit.tokens.save(MastodonToken(host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret"))
         quit.sessions.refresh()
         await quit.sessions.learnWho(host: host)

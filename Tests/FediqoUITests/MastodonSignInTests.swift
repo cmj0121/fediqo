@@ -1457,15 +1457,15 @@ struct MastodonSignInTests {
         #expect(stillWorks("tok-123", sessions, tokens))
     }
 
-    /// Accepted (#347): this can leave a token nobody kept live at the source — rare, and better
-    /// than ending one that is held and cannot be seen to be.
-    @Test("Where the Keychain cannot be read, the source is asked to end nothing")
+    /// What is held is read to build the page (#347): unseen, no page is built, so no token
+    /// is made that nobody could keep — and none is ended that is held and cannot be seen to be.
+    @Test("Where the Keychain cannot be read, no page opens, and the source is asked for nothing and to end nothing")
     func nothingEndedUnseen() async throws {
         let (sessions, server, _) = try signedIn(
             as: "tok-old", ["/api/v1/accounts/verify_credentials": .json("{}", status: 500)], failing: .reading
         )
-        #expect(await sessions.signIn(host: host, through: Page()) != nil)
-        #expect(await server.paths.last == "/api/v1/accounts/verify_credentials")
+        #expect(await sessions.signIn(host: host, through: Page()) == .keychain)
+        #expect(await server.paths.isEmpty)
         #expect(await server.revoked.isEmpty)
     }
 
