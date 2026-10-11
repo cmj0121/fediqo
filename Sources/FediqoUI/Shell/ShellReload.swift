@@ -1023,8 +1023,11 @@ final class ShellReload {
         let host = stamp.host
         let found: String?
         do {
-            found = try await post.id(of: held)
-        } catch MastodonAuthError.http(403) {
+            // Always looked up: this is `r`, or the thread opening — the reader's own act.
+            found = try await post.id(of: held, lookingItUp: true)
+        } catch MastodonScopeError.outside {
+            // Only where the server says it is the scope (#319): any other 403 is a read that
+            // failed, and signing in again would not mend it.
             return .unfindable(.cannotSearch(host: host))
         }
         guard let id = found else {

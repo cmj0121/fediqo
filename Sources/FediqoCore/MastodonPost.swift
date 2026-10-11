@@ -33,14 +33,19 @@ public struct MastodonPost: Sendable {
     /// in, the one search resolves its URI to — and only where what search found **is** that post,
     /// by its URI. Nothing where it cannot be known.
     ///
-    /// Throws `MastodonAuthError.http(403)` where the token cannot search: one issued before
-    /// `read:search` was asked for.
-    public func id(of note: Note) async throws -> String? {
+    /// **Looked up only where `lookingItUp` says so.** That search has the reader's server go and
+    /// fetch the post from the server it was written on, so it is for an act of the reader's —
+    /// opening the thread, asking again — and never for a read this device makes by itself: the
+    /// caller says which it is, each time, and without it only an id already held is given.
+    ///
+    /// Throws `MastodonScopeError.outside` where the token cannot search — one issued before
+    /// `read:search` was asked for — and what any other read throws for any other refusal.
+    public func id(of note: Note, lookingItUp: Bool) async throws -> String? {
         // A reblog is not a post to read again or to read around (#290): it names none.
         guard !note.isReblog else { return nil }
         if let held = note.statusID { return held }
-        guard case .signedIn = door else { return nil }
-        let data = try await get("/api/v2/search", query: [
+        guard lookingItUp, case .signedIn(let door) = door else { return nil }
+        let data = try await door.getInScope(path: "/api/v2/search", query: [
             URLQueryItem(name: "q", value: note.id),
             URLQueryItem(name: "resolve", value: "true"),
             URLQueryItem(name: "type", value: "statuses"),

@@ -159,6 +159,10 @@ final class ShellConversations {
     /// source's own order, this run — drawn above the place of a post the source would not
     /// show, where the references stop there (`Opened.beyond`). Never written down.
     @ObservationIgnored private var saidAbove: [String: [NoteKey]] = [:]
+    /// The id its source gave a post held without one, where a read the reader asked for looked
+    /// it up — kept for as long as the thread is, so the wait, which may not look it up
+    /// (`renew(_:in:)`), can go on renewing the thread by it. Never written down.
+    @ObservationIgnored private var lookedUp: [String: String] = [:]
     /// Which host each key was read from, so `forget(host:)` is a sweep and not a search.
     @ObservationIgnored private var hosts: [String: String] = [:]
     /// What is on the wire, so a redraw that asks again while the first ask is out waits for it
@@ -305,14 +309,14 @@ final class ShellConversations {
             await redraw(item, in: session)
             return
         }
-        await ask(item, in: session)
+        await ask(item, lookingItUp: true, in: session)
     }
 
     /// `r` on an open thread (#29): asked again, whatever it said last time. What is held stays
     /// drawn until the answer replaces it — a thread that blanks and refills under a reader who
     /// pressed reload is the reload showing them less than they had.
     func again(_ item: DummyItem, in session: ShellSession) async {
-        await ask(item, in: session)
+        await ask(item, lookingItUp: true, in: session)
     }
 
     /// The open thread asked again on this device's wait (#198) — `again(_:in:)`'s read, with what
@@ -320,6 +324,11 @@ final class ShellConversations {
     /// arrive. Only a thread that has been read: one still on its first ask, or being read further,
     /// is let be, and the next wait asks again. Cancelled — the thread left — nothing it brings
     /// lands, and the thread is as it was.
+    ///
+    /// **And only a thread whose post this device can already name at its source.** Looking a
+    /// post up has that source fetch it from another server, which is for an act of the reader's
+    /// and never for the wait: a post held without its id, and not looked up since its thread was
+    /// opened, is left exactly as it is drawn — nothing asked, and nothing said to have failed.
     func renew(_ item: DummyItem, in session: ShellSession) async {
         guard inFlight[item.id] == nil, furtherWork[item.id] == nil,
               // A source no longer here is not asked on the wait either (#250): `read` would
@@ -334,7 +343,8 @@ final class ShellConversations {
         case .absent(let absence) where absence.asksAgain: break
         case .coming, .absent: return
         }
-        let task = Task { @MainActor in await self.read(item, in: session) }
+        guard session.heldNote(item.id)?.statusID != nil || lookedUp[item.id] != nil else { return }
+        let task = Task { @MainActor in await self.read(item, lookingItUp: false, in: session) }
         inFlight[item.id] = task
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
         if inFlight[item.id] == task { inFlight[item.id] = nil }
@@ -497,6 +507,7 @@ final class ShellConversations {
             said[id] = nil
             saidAbove[id] = nil
             hosts[id] = nil
+            lookedUp[id] = nil
             inFlight[id]?.cancel()
             inFlight[id] = nil
             furtherWork[id]?.cancel()
@@ -525,18 +536,19 @@ final class ShellConversations {
         heldBack = []
         asksRunning = [:]
         hosts = [:]
+        lookedUp = [:]
     }
 
     /// One ask, deduplicated: a second while the first is out waits on it.
     ///
     /// **Not on one already cancelled**: `r` ends a renewal as it starts (#198), and waiting on
     /// that read would be the press answered by a read that lands nothing.
-    private func ask(_ item: DummyItem, in session: ShellSession) async {
+    private func ask(_ item: DummyItem, lookingItUp: Bool, in session: ShellSession) async {
         if let running = inFlight[item.id], !running.isCancelled {
             await running.value
             return
         }
-        let task = Task { @MainActor in await self.read(item, in: session) }
+        let task = Task { @MainActor in await self.read(item, lookingItUp: lookingItUp, in: session) }
         inFlight[item.id] = task
         await task.value
         // Only this ask's own record: a cancelled one ending late must not clear the next.
@@ -545,7 +557,10 @@ final class ShellConversations {
 
     /// The read itself. Cancelled — the reader closed the thread, or stopped the reload — it
     /// leaves the standing exactly as it found it: a thread half-read is not a thread that failed.
-    private func read(_ item: DummyItem, in session: ShellSession) async {
+    ///
+    /// `lookingItUp` is whether a post held without its id may be looked up at its source, which
+    /// has that source fetch it from another server: yes for the reader's own ask, no for the wait.
+    private func read(_ item: DummyItem, lookingItUp: Bool, in session: ShellSession) async {
         // **What is held around the post is drawn before anything is asked** (#293), and whether
         // or not anything can be: a post of a source since removed, or opened with the network
         // off, shows what it refers to and what refers to it all the same.
@@ -586,12 +601,25 @@ final class ShellConversations {
         let stamp = Source(host: host, kind: held.source.kind)
         do {
             let (post, signedIn) = session.conversationPost(host: host, within: deadline)
-            guard let id = try await post.id(of: held) else {
+            // What an earlier ask of the reader's looked up is used only where this one may not:
+            // their own ask looks it up afresh, as it always did.
+            let found = try await post.id(of: held, lookingItUp: lookingItUp)
+            guard let id = found ?? (lookingItUp ? nil : lookedUp[item.id]) else {
+                // The wait, and the id it began with gone meanwhile: as it was, and no failure.
+                guard lookingItUp else {
+                    standings[item.id] = before
+                    furthers[item.id] = furtherBefore
+                    return
+                }
+                // The reader asked and the source no longer names it: what an earlier ask found
+                // is not kept past that, or the wait would go on reading by an id gone stale.
+                lookedUp[item.id] = nil
                 // The rule every other failure keeps: a thread already drawn stays drawn.
                 await failed(item, held: held, before: before, why: .unfindable, in: session)
                 return
             }
             try Task.checkCancellation()
+            if held.statusID == nil { lookedUp[item.id] = id }
             let thread: MastodonThread
             do {
                 thread = try await post.conversation(id: id, source: stamp)
@@ -860,6 +888,8 @@ final class ShellConversations {
     /// answering, and none of them is helped by pressing again. A transport error, a timeout, or
     /// a status the server did not choose, is the one kind worth a second press.
     private static func absence(for error: any Error) -> Absence {
+        // A token that may not search, refused by the source as any other 403 is.
+        if error is MastodonScopeError { return .refused }
         if case .http(let status)? = error as? MastodonAuthError { return chosen(status) }
         if case .http(let status)? = error as? MastodonRequestError { return chosen(status) }
         return .unreachable
