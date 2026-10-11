@@ -48,7 +48,9 @@ extension ShellSession {
         guard mastodon.notices(host: host) == .unasked, let grant = mastodon.grants[host] else { return }
         let writing = grant == .unasked ? chosen ?? false : grant == .writing
         noticeList.acts.say(nil, host: host)
-        let failure = await mastodon.signIn(host: host, through: browser, writing: writing, notices: true)
+        let failure = await mastodon.signIn(
+            host: host, through: browser, writing: writing, notices: true, inPlace: true
+        )
         await forgetReaderMarksDue()
         if let failure {
             NetLog.auth.notice("\(NetLog.line("notices", host: host, error: failure), privacy: .public)")
@@ -92,8 +94,19 @@ extension ShellSession {
     /// The read-or-act question about `host`, with what this session holds for it read here:
     /// whether the sign-in it leads to carries notices, which the question then names. The one
     /// function every place that raises it asks (`SignInChoiceQuestion`), so none can leave them out.
-    func signInQuestion(host: String) -> ShellConfirmation {
-        ShellQuestion.signIn(host: host, notices: signInAsked(host: host).notices)
+    ///
+    /// **Where a sign-in is held, it says which answer ends it at the source** (#347) — and
+    /// that any other device carrying it is then signed out too — before the page opens.
+    func signInQuestion(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let notices = signInAsked(host: host).notices
+        var question = ShellQuestion.signIn(host: host, notices: notices, language: language)
+        if let ends = mastodon.signInEnds(host: host, notices: notices) {
+            (question.line, question.help) = ShellQuestion.saying(
+                ShellQuestion.signInEnds(ends, host: host, language: language),
+                line: question.line, help: question.help, language: language
+            )
+        }
+        return question
     }
 
     /// The bookmark question about `host`, naming notices where its sign-in carries them: what

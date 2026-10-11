@@ -561,7 +561,9 @@ struct MastodonSignInTests {
         let pane = AccountPane(session: session)
 
         await pane.press(row(session, host))
-        #expect(session.signOutAsk == SignOutAsk(host: host, question: session.signOutQuestion(host: host)))
+        #expect(session.signOutAsk == SignOutAsk(
+            host: host, question: session.sayingOthersSignedOut(session.signOutQuestion(host: host), host: host)
+        ))
         #expect(session.signInChoice == nil, "a signed-in key asked about signing in")
         #expect(session.isSignedIn(host: host), "the press signed the reader out before they answered")
         #expect(try tokens.signedInHosts() == [host])
@@ -1129,7 +1131,7 @@ struct MastodonSignInTests {
         #expect(session.rowRefusal == nil)
     }
 
-    @Test("A new token that cannot be kept leaves the sign-in the reader had: put back where the save took it, and revoked only where that fails too")
+    @Test("A new token that cannot be kept leaves the sign-in the reader had: put back where the keeping took it, and written down as lost — never ended — where that fails too")
     func aFailedSaveKeepsTheEarlierSignIn() async throws {
         let old = MastodonToken(host: host, accessToken: "tok-old", clientID: "cid", clientSecret: "csecret", scopes: Self.before)
         for restorable in [true, false] {
@@ -1154,7 +1156,9 @@ struct MastodonSignInTests {
             } else {
                 #expect(try held.token(host: host) == nil)
                 #expect(!session.isSignedIn(host: host))
-                #expect(await server.revoked == ["tok-123", "tok-old"], "a token this device lost is still live at the server")
+                #expect(await server.revoked == ["tok-123"], "the sign-in the person held was ended for not being kept")
+                #expect(try held.left(host: host).map(\.state) == [.lost])
+                #expect(session.mastodon.leftLine(host: host, language: .english) == "This device could not keep the sign-in for \(host).")
             }
         }
     }
@@ -1387,16 +1391,17 @@ struct MastodonSignInTests {
         #expect(!sessions.isSignedIn(host: host))
     }
 
-    /// **Pinned as it is today, not as it should be**: the string the person held is ended,
-    /// twice over, and the row shows no sign-in. Keeping it as lost and saying so is F2a's (its
-    /// journal); this unit only puts the site through the gate.
-    @Test("The same token handed back, not kept, and the one held not put back either: the string is ended and nobody is signed in — as before this unit")
+    /// The string the person held is their sign-in still: written down as lost, to be filed
+    /// again when it can be, and the source is asked to end nothing.
+    @Test("The same token handed back, not kept, and the one held not put back either: it is written down as lost, nothing is ended, and the row says it could not be kept")
     func neitherKeptNorPutBack() async throws {
         let (sessions, server, tokens) = try signedIn(as: "tok-123", failing: .savingTwice)
         #expect(await sessions.signIn(host: host, through: Page()) == .keychain)
-        #expect(await server.revoked == ["tok-123", "tok-123"])
+        #expect(await server.revoked.isEmpty)
         #expect(try tokens.held.token(host: host) == nil)
         #expect(!sessions.isSignedIn(host: host))
+        #expect(try tokens.held.left(host: host).map(\.state) == [.lost])
+        #expect(sessions.lost == [host])
     }
 
     @Test("A sign-out while the page was up ends the token that came back, which nobody holds")
@@ -1467,7 +1472,7 @@ struct MastodonSignInTests {
         #expect(paths == 1, "the path a sign-in is ended at is written in \(paths) lines")
         #expect(sites.first?.hasPrefix("MastodonSignIn.swift:") == true, "\(sites)")
         let gate = try String(contentsOf: sources.appending(path: "FediqoUI/Shell/MastodonSignIn.swift"), encoding: .utf8)
-        let body = try #require(gate.components(separatedBy: "private func end(_ token: MastodonToken").dropFirst().first)
+        let body = try #require(gate.components(separatedBy: "private func end(_ left: MastodonLeft").dropFirst().first)
         #expect(body.components(separatedBy: "\n    }\n").first?.contains("revoke(") == true, "the one call is not inside the gate")
     }
 
@@ -1512,11 +1517,32 @@ private final class TestTokens: MastodonTokenStore, @unchecked Sendable {
         try held.forget(host: token.host)
         throw Self.refused
     }
+    /// A keeping refused as a save is: what was held is gone from the Keychain with it.
+    func swap(expecting string: String?, with token: MastodonToken) throws -> Bool {
+        if failing.contains(.reading) { throw Self.refused }
+        if failing.contains(.savingTwice) {
+            failing.remove(.savingTwice)
+            failing.insert(.savingOnce)
+        } else if failing.contains(.savingOnce) {
+            failing.remove(.savingOnce)
+        } else {
+            return try held.swap(expecting: string, with: token)
+        }
+        try held.forget(host: token.host)
+        throw Self.refused
+    }
     func forget(host: String) throws {
         if failing.contains(.forgetting) { throw Self.refused }
         try held.forget(host: host)
         if failing.contains(.readingOnceForgotten) { failing.insert(.reading) }
     }
+    func left(host: String) throws -> [MastodonLeft] { try held.left(host: host) }
+    func leftHosts() throws -> Set<String> { try held.leftHosts() }
+    func journal(_ entry: MastodonLeft) throws { try held.journal(entry) }
+    func journalLost(_ token: MastodonToken, accountID: String?) throws { try held.journalLost(token, accountID: accountID) }
+    func unjournal(_ entry: MastodonLeft) throws { try held.unjournal(entry) }
+    func forgetLeft(host: String) throws { try held.forgetLeft(host: host) }
+    func restoreLost(host: String) throws -> Bool { try held.restoreLost(host: host) }
     func forget(_ token: MastodonToken) throws -> Bool { try held.forget(token) }
     func grants() throws -> [String: MastodonGrant] {
         if failing.contains(.reading) { throw Self.refused }
@@ -1559,6 +1585,20 @@ private final class FailingSaveTokens: MastodonTokenStore, @unchecked Sendable {
         try held.forget(host: token.host)
         throw ForumCredentialError.keychain(-25_308)
     }
+    /// A keeping refused as a save is: what was held is gone from the Keychain with it.
+    func swap(expecting string: String?, with token: MastodonToken) throws -> Bool {
+        guard failing > 0 else { return try held.swap(expecting: string, with: token) }
+        failing -= 1
+        try held.forget(host: token.host)
+        throw ForumCredentialError.keychain(-25_308)
+    }
+    func left(host: String) throws -> [MastodonLeft] { try held.left(host: host) }
+    func leftHosts() throws -> Set<String> { try held.leftHosts() }
+    func journal(_ entry: MastodonLeft) throws { try held.journal(entry) }
+    func journalLost(_ token: MastodonToken, accountID: String?) throws { try held.journalLost(token, accountID: accountID) }
+    func unjournal(_ entry: MastodonLeft) throws { try held.unjournal(entry) }
+    func forgetLeft(host: String) throws { try held.forgetLeft(host: host) }
+    func restoreLost(host: String) throws -> Bool { try held.restoreLost(host: host) }
     func forget(host: String) throws { try held.forget(host: host) }
     func forget(_ token: MastodonToken) throws -> Bool { try held.forget(token) }
     func grants() throws -> [String: MastodonGrant] { try held.grants() }

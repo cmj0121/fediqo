@@ -3139,7 +3139,7 @@ final class ShellSession {
 
     /// Puts the sign-out question about `host`, read as things stand now and held as read.
     func askSignOut(host: String) {
-        signOutAsk = SignOutAsk(host: host, question: signOutQuestion(host: host))
+        signOutAsk = SignOutAsk(host: host, question: sayingOthersSignedOut(signOutQuestion(host: host), host: host))
     }
 
     /// The question before `host` is signed out, with what this session holds for it read here:
@@ -3169,22 +3169,22 @@ final class ShellSession {
     ///
     /// **And how many texts wait to be sent to it**: a sign-out leaves them waiting, and a
     /// Remove lets them go, which is said before the yes.
-    func removeQuestion(host: String, postsStay: Bool) -> ShellConfirmation {
-        ShellQuestion.remove(
+    func removeQuestion(host: String, postsStay: Bool, language: DummyLanguage? = nil) -> ShellConfirmation {
+        sayingOthersSignedOut(ShellQuestion.remove(
             host: host, boards: Self.boards(of: host, in: sources), postsStay: postsStay,
-            kept: holdings.kept(host: host).posts, unsent: outbox.count(host: host)
-        )
+            kept: holdings.kept(host: host).posts, unsent: outbox.count(host: host), language: language
+        ), host: host, language: language)
     }
 
     /// The question before what `host` left here is cleared, with what this session holds for it
     /// read here: whether a saved password goes with it, and whether a sign-in does. One function
     /// for the two places Clear is offered — a source row's `…` on Account and the `…` of a
     /// source's detail on Usage — so the two ask one question.
-    func clearQuestion(host: String) -> ShellConfirmation {
-        ShellQuestion.clear(host: host, detailKey: SourceRow.clearDetailKey(
+    func clearQuestion(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        sayingOthersSignedOut(ShellQuestion.clear(host: host, detailKey: SourceRow.clearDetailKey(
             hasPassword: forums.hasPassword(host: host),
             reachedSignIn: isSignedIn(host: host)
-        ))
+        ), language: language), host: host, language: language)
     }
 
     /// Whether this device holds a sign-in for that source, whichever protocol it is.

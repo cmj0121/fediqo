@@ -614,7 +614,11 @@ struct MastodonTokenStoreTests {
             .components(separatedBy: "public final class MemoryMastodonTokens").first)
         #expect(real.contains("private static let writing = NSLock()"))
         #expect(real.contains("TokenFiling(items: Items(), lock: Self.writing)"))
-        for write in ["save(token)", "forget(host: host)", "forget(token)", "update(token)", "swap(expecting: held, with: token)"] {
+        for write in [
+            "save(token)", "forget(host: host)", "forget(token)", "forget(token, saidBySource: saidBySource)", "update(token)", "swap(expecting: held, with: token)",
+            "journal(entry)", "journalLost(held, accountID: accountID)", "unjournal(entry)", "forgetLeft(host: host)",
+            "restoreLost(host: host)",
+        ] {
             #expect(real.contains("try filing.\(write)"), "\(write) does not go through the one lock")
         }
         // The Keychain's own writes are called in one place each, below the rules.
@@ -624,7 +628,7 @@ struct MastodonTokenStoreTests {
         let filing = try #require(source.components(separatedBy: "struct TokenFiling").dropFirst().first?
             .components(separatedBy: "/// The real one.").first)
         let writes = filing.components(separatedBy: "\n    func ").dropFirst()
-        #expect(writes.count == 5)
+        #expect(writes.count == 11)
         for write in writes {
             #expect(write.contains("lock.withLock"), "a write takes no lock: \(write.prefix(40))")
         }

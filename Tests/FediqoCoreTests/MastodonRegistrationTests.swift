@@ -167,7 +167,7 @@ struct MastodonRegistrationTests {
         let app = try await oauth.register(scopes: MastodonRegistration.superset(listed: listed))
         let browser = await FixtureBrowser.approving()
         let signed = try await oauth.signIn(as: app, asking: MastodonOAuth.reading, through: browser)
-        await oauth.revoke(signed.token)
+        await oauth.revoke(MastodonLeft(signed.token, as: .left))
         let page = try #require(await browser.opened.first)
         #expect(page.host() == host && page.path == "/oauth/authorize")
         #expect(await server.requests.allSatisfy { $0.url?.host() == host && $0.url?.scheme == "https" })

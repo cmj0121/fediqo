@@ -343,7 +343,7 @@ struct MastodonNoticesSaysTests {
         #expect(page.gathered && !page.notices.isEmpty)
         // A gathered line that was never there is dismissed with a plain yes: nothing is lost.
         #expect(try await ask(token.accessToken, "POST", "\(MastodonNotices.gatheredPath)/favourite-1-1/dismiss").status == 200)
-        await oauth.revoke(token)
+        await oauth.revoke(MastodonLeft(token, as: .left))
     }
 
     // MARK: - 6. Dismissing

@@ -261,5 +261,6 @@ extension ShellSession {
         answering != nil || signingIn != nil || editing != nil || withdrawing != nil || rowAsk != nil
             || editingUnsent != nil || discardingUnsent != nil || resendingUnsent != nil
             || bookmarkAsk != nil || noticeAsk != nil || signOutAsk != nil || !mastodon.ended.isEmpty
+            || !mastodon.leftTold.isEmpty
     }
 }

@@ -59,7 +59,7 @@ struct MastodonSignInSaysTests {
         } catch {
             thrown = error
         }
-        for token in made.tokens { await oauth.revoke(token) }
+        for token in made.tokens { await oauth.revoke(MastodonLeft(token, as: .left)) }
         if let thrown { throw thrown }
     }
 
@@ -144,18 +144,20 @@ struct MastodonSignInSaysTests {
             #expect(again.accessToken == narrow.accessToken && reordered.accessToken == narrow.accessToken)
 
             // Revoking the wider one takes the wider one.
-            await oauth.revoke(wide)
+            await oauth.revoke(MastodonLeft(wide, as: .left))
             let gone = try await ask(wide.accessToken, Self.check)
             #expect(gone.status == 401 && gone.error == "The access token was revoked")
             #expect(gone.header("WWW-Authenticate") == Captures.afterRevokeHeader)
             #expect(try await ask(narrow.accessToken, Self.check).status == 200)
 
             // A wrong secret revokes nothing.
-            await oauth.revoke(MastodonToken(host: Self.host, accessToken: narrow.accessToken, clientID: narrow.clientID, clientSecret: "wrong"))
+            let wrong = MastodonToken(host: Self.host, accessToken: narrow.accessToken, clientID: narrow.clientID, clientSecret: "wrong")
+            let refusal = await oauth.revoke(MastodonLeft(wrong, as: .left))
+            #expect(refusal == .refused, "a refusal that asking again will not change")
             #expect(try await ask(narrow.accessToken, Self.check).status == 200)
 
             // Revoking the narrower one signs out every holder of that string.
-            await oauth.revoke(narrow)
+            await oauth.revoke(MastodonLeft(narrow, as: .left))
             #expect(try await ask(again.accessToken, Self.check).status == 401)
             let afresh = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages).token)
             #expect(pages.shown == [Captures.narrow, Captures.wide, Captures.narrow], "no token of those words: the page again")
@@ -407,7 +409,9 @@ struct MastodonSignInSaysTests {
             // could not be dated as the first was.
             try await Task.sleep(for: .seconds(2))
 
-            let again = made.keep(try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages).token)
+            let second = try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages)
+            let again = made.keep(second.token)
+            #expect(second.handedBack, "this app did not see that the token was made before this trade")
             let handedBack = try #require(await heard.lastTrade())
             let same: Bool = again.accessToken == first.accessToken
             #expect(same && pages.shown == [Captures.narrow], "no page, and the same token")
@@ -419,7 +423,56 @@ struct MastodonSignInSaysTests {
         }
     }
 
-    // MARK: - 7. The person's own list of authorised apps
+    // MARK: - 7. A sign-in a wider one took the place of, and signing out
+
+    @Test("A sign-in a wider one of the same registration took the place of goes on answering, written down as left, until the device signs out; signing out ends the one held and the one left, each confirmed, and both then answer as ended")
+    func aReplacedSignInLivesUntilTheSignOut() async throws {
+        try await LocalServers.requireHealthy()
+        let oauth = try signer()
+        let pages = Pages(host: Self.host, browser: try LocalHTTP.browser())
+        try await pages.signIn()
+        let store = MemoryMastodonTokens()
+        try await revokingWhatItMade(oauth) { made in
+            let first = try await oauth.signIn(as: try app(asking: Captures.narrow), through: pages)
+            let narrow = made.keep(first.token)
+            #expect(first.failed == nil && !first.handedBack)
+            #expect(try store.swap(expecting: nil, with: narrow))
+
+            // Asked for more: the fresh token is noted before its check, the one it replaces
+            // is written down as left, and only then is the wider one put in its place.
+            let second = try await oauth.signIn(as: try app(asking: Captures.wide), through: pages) { fresh in
+                try store.journal(MastodonLeft(fresh, as: .pending))
+            }
+            let wide = made.keep(second.token)
+            let sameAccount: Bool = first.accountID != nil && first.accountID == second.accountID
+            #expect(second.failed == nil && sameAccount, "both checks name the one account, by id")
+            try store.journal(MastodonLeft(narrow, as: .left, accountID: first.accountID))
+            #expect(try store.swap(expecting: narrow.accessToken, with: wide))
+            let left = try store.left(host: Self.host)
+            #expect(left.map(\.state) == [.left] && left.first?.isToken(narrow) == true)
+
+            // Nothing asked the source to end the narrower one: another device carrying it reads on.
+            #expect(try await ask(narrow.accessToken, Self.check).status == 200)
+            #expect(try await ask(wide.accessToken, Self.check).status == 200)
+
+            // Signing out: everything leaves the device, then the one held and each one left is ended.
+            let held = try #require(try store.token(host: Self.host))
+            try store.forget(host: Self.host)
+            try store.forgetLeft(host: Self.host)
+            let heldEnded = await oauth.revoke(MastodonLeft(held, as: .left))
+            #expect(heldEnded == .ended)
+            for entry in left {
+                let ended = await oauth.revoke(entry)
+                #expect(ended == .ended)
+            }
+            for token in [narrow, wide] {
+                let gone = try await ask(token.accessToken, Self.check)
+                #expect(gone.status == 401 && gone.error == "The access token was revoked")
+            }
+        }
+    }
+
+    // MARK: - 8. The person's own list of authorised apps
 
     @Test("Two sign-ins of one registration are one entry on the person's list of authorised apps, which says what the registration was made for and not what either holds; removing it ends both at once and no other registration's, the source's own account of each then answering as for a token that never was; and the registration goes on opening its page")
     func removingTheEntryEndsEveryTokenOfIt() async throws {

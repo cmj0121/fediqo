@@ -215,6 +215,23 @@ public protocol MastodonTokenStore: Sendable {
     /// Forgets `token` only while it is still the one held for its host, and says whether it was.
     /// A late 401 for a token the reader has since replaced must not take the new one with it.
     func forget(_ token: MastodonToken) throws -> Bool
+    /// Forgets `token` as a 401 from its source's account check does (#347) — only while it
+    /// is still the one held, nothing where it was not — **and, in the same step under the
+    /// store's one lock, deals with what was left for it**. Says how many left sign-ins it
+    /// took out of the journal.
+    ///
+    /// - `saidBySource`: the source said so in its own words. The journal is untouched:
+    ///   whoever goes through it next ends what was left, as the person was told.
+    /// - Not said by the source — a page, a password asked for by something in front of it:
+    ///   **every entry written down as left leaves the journal, unended**, before the
+    ///   token goes. No moment is left in which the device shows a journal and no sign-in
+    ///   for anything to end by, on a quit or in a pass already running.
+    ///
+    /// **Only what is left goes.** One owed an end, and one made and never kept, were to be
+    /// ended whatever this 401 means, and stay to be; one lost is the person's own sign-in,
+    /// which nothing ends but them. A journal that cannot be read or written stops it with
+    /// the sign-in still held.
+    func forget(_ token: MastodonToken, saidBySource: Bool) throws -> Int?
     /// What each held token's sign-in bought, **without reading one** (#69).
     ///
     /// **The scopes ride as an item attribute rather than inside the value, and that is the whole
@@ -283,6 +300,31 @@ public protocol MastodonTokenStore: Sendable {
     /// across with `MastodonToken.carrying(refusedFrom:)`, or they are gone.
     func swap(expecting held: String?, with token: MastodonToken) throws -> Bool
 
+    /// The sign-ins this device made at `host` and does not use (#347) — its journal: none,
+    /// where there is none. **A set by token string**: a sign-in is in it once, in one state,
+    /// and one that comes to be the sign-in held leaves it (`save`, `swap`).
+    ///
+    /// Kept apart from the sign-in held, in an item of its own, so a source ending that
+    /// sign-in — which takes its item — leaves these to be ended by.
+    func left(host: String) throws -> [MastodonLeft]
+    /// Which hosts have a journal, **without reading one**.
+    func leftHosts() throws -> Set<String>
+    /// Writes `entry` into its host's journal, in place of the same sign-in in another state
+    /// where it is there already. Under the lock every write of the store takes.
+    func journal(_ entry: MastodonLeft) throws
+    /// Writes `held` — the sign-in the person had, which could not be kept or put back —
+    /// into its host's journal as lost: **the one way a lost entry is made**, since a lost
+    /// one is filed again as the sign-in held (`restoreLost`). `accountID` is whose it is
+    /// where the token itself does not say.
+    func journalLost(_ held: MastodonToken, accountID: String?) throws
+    /// Takes `entry`'s sign-in out of its host's journal, whatever state it is in there.
+    func unjournal(_ entry: MastodonLeft) throws
+    /// Forgets everything journalled for `host`.
+    func forgetLeft(host: String) throws
+    /// Files the sign-in journalled as lost for `host` again as the one held, **only where
+    /// none is held**, and says whether it did. Kept, it leaves the journal.
+    func restoreLost(host: String) throws -> Bool
+
     func app(host: String) throws -> MastodonApp?
     func save(_ app: MastodonApp) throws
     func forgetApp(host: String) throws
@@ -330,6 +372,32 @@ extension MastodonTokenStore {
     public func swap(expecting held: String?, with token: MastodonToken) throws -> Bool {
         throw ForumCredentialError.keychain(errSecUnimplemented)
     }
+
+    /// A plain forgetting, for a store that keeps no journal to deal with.
+    public func forget(_ token: MastodonToken, saidBySource: Bool) throws -> Int? {
+        try forget(token) ? 0 : nil
+    }
+
+    /// No journal, for a store that does not say it keeps one.
+    public func left(host: String) throws -> [MastodonLeft] { [] }
+
+    public func leftHosts() throws -> Set<String> { [] }
+
+    /// Nothing written, for a store that keeps no journal — so a sign-in whose keeping
+    /// turns on a note being taken first is not kept by one.
+    public func journal(_ entry: MastodonLeft) throws {
+        throw ForumCredentialError.keychain(errSecUnimplemented)
+    }
+
+    public func journalLost(_ held: MastodonToken, accountID: String?) throws {
+        throw ForumCredentialError.keychain(errSecUnimplemented)
+    }
+
+    public func unjournal(_ entry: MastodonLeft) throws {}
+
+    public func forgetLeft(host: String) throws {}
+
+    public func restoreLost(host: String) throws -> Bool { false }
 
     /// The three asked one by one, each failing by itself.
     public func noticeGrants() -> MastodonNoticeGrants {
@@ -597,6 +665,15 @@ protocol TokenItems: Sendable {
     /// it has no fact for blanked — with no moment in which nothing is held.
     func change(_ token: MastodonToken) throws
     func delete(host: String) throws
+    /// The host's journal as it is kept: none, where there is no item.
+    func left(host: String) throws -> [MastodonLeft]
+    /// Callers add only where there is no journal: an add over one already there changes
+    /// nothing.
+    func add(left entries: [MastodonLeft], host: String) throws
+    /// Writes `entries` over the journal already there, whole and in place: one that fails
+    /// has left the journal as it was.
+    func change(left entries: [MastodonLeft], host: String) throws
+    func deleteLeft(host: String) throws
 }
 
 /// Every write of a sign-in, under the store's one lock (#347).
@@ -618,6 +695,7 @@ struct TokenFiling: Sendable {
             // what is held untouched: gone on as if nothing were held, it would file an
             // unchanged sign-in under a new stamp, and that reads as a sign-in replaced.
             try put(token, over: try items.token(host: token.host))
+            unjournal(held: token)
         }
     }
 
@@ -630,6 +708,22 @@ struct TokenFiling: Sendable {
             guard try items.token(host: token.host)?.accessToken == token.accessToken else { return false }
             try items.delete(host: token.host)
             return true
+        }
+    }
+
+    func forget(_ token: MastodonToken, saidBySource: Bool) throws -> Int? {
+        try lock.withLock {
+            guard try items.token(host: token.host)?.accessToken == token.accessToken else { return nil }
+            var dropped = 0
+            if !saidBySource {
+                // Before the token goes: a write that fails leaves the sign-in held.
+                let all = try items.left(host: token.host)
+                let kept = all.filter { $0.state != .left }
+                dropped = all.count - kept.count
+                if dropped > 0 { try write(left: kept, host: token.host) }
+            }
+            try items.delete(host: token.host)
+            return dropped
         }
     }
 
@@ -654,8 +748,72 @@ struct TokenFiling: Sendable {
             } else {
                 try put(token, over: nil)
             }
+            unjournal(held: token)
             return true
         }
+    }
+
+    func journal(_ entry: MastodonLeft) throws {
+        try lock.withLock { try note(entry) }
+    }
+
+    func journalLost(_ held: MastodonToken, accountID: String?) throws {
+        try lock.withLock { try note(.lost(held, accountID: accountID)) }
+    }
+
+    /// `entry` in its host's journal, in place of the same sign-in in another state. Called
+    /// under the lock.
+    private func note(_ entry: MastodonLeft) throws {
+        let others = try items.left(host: entry.host).filter { !$0.isSame(as: entry) }
+        try write(left: others + [entry], host: entry.host)
+    }
+
+    func unjournal(_ entry: MastodonLeft) throws {
+        try lock.withLock {
+            let all = try items.left(host: entry.host)
+            let others = all.filter { !$0.isSame(as: entry) }
+            if others.count != all.count { try write(left: others, host: entry.host) }
+        }
+    }
+
+    func forgetLeft(host: String) throws {
+        try lock.withLock { try write(left: [], host: host) }
+    }
+
+    /// Writes a host's journal whole — **over the one already there, in place**, and as a
+    /// new item only where there was none. Called under the lock. A write that fails has
+    /// left every entry written before it where it was, and whoever asked hears so: a
+    /// delete and then an add would lose them all to the add failing. None takes the item
+    /// away.
+    private func write(left entries: [MastodonLeft], host: String) throws {
+        guard !entries.isEmpty else { return try items.deleteLeft(host: host) }
+        do {
+            try items.change(left: entries, host: host)
+        } catch ForumCredentialError.keychain(errSecItemNotFound) {
+            try items.add(left: entries, host: host)
+        }
+    }
+
+    func restoreLost(host: String) throws -> Bool {
+        try lock.withLock {
+            guard try items.token(host: host) == nil,
+                  let lost = try items.left(host: host).first(where: { $0.state == .lost })
+            else { return false }
+            try put(lost.restored, over: nil)
+            unjournal(held: lost.restored)
+            return true
+        }
+    }
+
+    /// A sign-in that has come to be the one held leaves the journal: it is a set by token
+    /// string. Called under the lock, **after the sign-in is kept, so it does not fail the
+    /// keeping**: a write that fails has left the journal whole (`write`), the one that
+    /// could not be taken out stays, and is harmless there — nothing ends a sign-in while
+    /// it is the one held, and the next look at the journal takes it out.
+    private func unjournal(held token: MastodonToken) {
+        guard let all = try? items.left(host: token.host) else { return }
+        let others = all.filter { !$0.isToken(token) }
+        if others.count != all.count { try? write(left: others, host: token.host) }
     }
 
     /// Deletes, then adds — so no second item with stale attributes can exist.
@@ -703,12 +861,50 @@ public struct KeychainMastodonTokens: MastodonTokenStore {
         try filing.forget(token)
     }
 
+    public func forget(_ token: MastodonToken, saidBySource: Bool) throws -> Int? {
+        try filing.forget(token, saidBySource: saidBySource)
+    }
+
     public func update(_ token: MastodonToken) throws -> Bool {
         try filing.update(token)
     }
 
     public func swap(expecting held: String?, with token: MastodonToken) throws -> Bool {
         try filing.swap(expecting: held, with: token)
+    }
+
+    public func left(host: String) throws -> [MastodonLeft] {
+        try Items().left(host: host)
+    }
+
+    /// One query, attributes only: which hosts have a journal is read with no value.
+    public func leftHosts() throws -> Set<String> {
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(MastodonKeychain.allLeft() as CFDictionary, &item)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess else { throw ForumCredentialError.keychain(status) }
+        let rows = item as? [[String: Any]] ?? []
+        return Set(rows.compactMap { ($0[kSecAttrAccount as String] as? String)?.lowercased() })
+    }
+
+    public func journal(_ entry: MastodonLeft) throws {
+        try filing.journal(entry)
+    }
+
+    public func journalLost(_ held: MastodonToken, accountID: String?) throws {
+        try filing.journalLost(held, accountID: accountID)
+    }
+
+    public func unjournal(_ entry: MastodonLeft) throws {
+        try filing.unjournal(entry)
+    }
+
+    public func forgetLeft(host: String) throws {
+        try filing.forgetLeft(host: host)
+    }
+
+    public func restoreLost(host: String) throws -> Bool {
+        try filing.restoreLost(host: host)
     }
 
     /// **The one unproven step in the grant model, named here rather than left to be found.**
@@ -792,15 +988,37 @@ public struct KeychainMastodonTokens: MastodonTokenStore {
         }
 
         func change(_ token: MastodonToken) throws {
-            let status = SecItemUpdate(
-                MastodonKeychain.lookup(host: token.host) as CFDictionary,
-                MastodonKeychain.changes(for: token) as CFDictionary
-            )
-            guard status == errSecSuccess else { throw ForumCredentialError.keychain(status) }
+            try KeychainMastodonTokens.change(MastodonKeychain.lookup(host: token.host), MastodonKeychain.changes(for: token))
         }
 
         func delete(host: String) throws {
             try KeychainMastodonTokens.delete(MastodonKeychain.lookup(host: host))
+        }
+
+        /// **A value that is no journal is an error, not an empty one**: read as empty, the
+        /// next write would put a journal of one over sign-ins nobody had ended.
+        func left(host: String) throws -> [MastodonLeft] {
+            let lookup = MastodonKeychain.lookup(host: host, service: MastodonKeychain.leftService)
+            guard let data = try KeychainMastodonTokens.read(lookup) else { return [] }
+            guard let entries = MastodonKeychain.LeftWire.decode(data, host: host) else {
+                throw ForumCredentialError.keychain(errSecDecode)
+            }
+            return entries
+        }
+
+        func add(left entries: [MastodonLeft], host: String) throws {
+            try KeychainMastodonTokens.add(MastodonKeychain.attributes(forLeft: entries, host: host))
+        }
+
+        func change(left entries: [MastodonLeft], host: String) throws {
+            try KeychainMastodonTokens.change(
+                MastodonKeychain.lookup(host: host, service: MastodonKeychain.leftService),
+                MastodonKeychain.changes(forLeft: entries)
+            )
+        }
+
+        func deleteLeft(host: String) throws {
+            try KeychainMastodonTokens.delete(MastodonKeychain.lookup(host: host, service: MastodonKeychain.leftService))
         }
     }
 
@@ -821,6 +1039,12 @@ public struct KeychainMastodonTokens: MastodonTokenStore {
         guard status == errSecSuccess else { throw ForumCredentialError.keychain(status) }
     }
 
+    /// Writes `changes` over the item already there; one that is not there is said so.
+    private static func change(_ lookup: [String: Any], _ changes: [String: Any]) throws {
+        let status = SecItemUpdate(lookup as CFDictionary, changes as CFDictionary)
+        guard status == errSecSuccess else { throw ForumCredentialError.keychain(status) }
+    }
+
     private static func delete(_ lookup: [String: Any]) throws {
         let status = SecItemDelete(lookup as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
@@ -835,24 +1059,32 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
     /// A call the keychain underneath can be made to refuse. For tests.
     enum Call: Sendable {
         case reading, adding, changing
+        /// Reading a host's journal, and writing it — as a new item or over the one there.
+        case readingLeft, leaving
     }
 
     /// Its own lock is for the dictionary alone; the store's one lock is `writing`, outside it.
     private final class Items: TokenItems, @unchecked Sendable {
         private let lock = NSLock()
         private var held: [String: MastodonToken] = [:]
-        private var refusals: [Call: Int] = [:]
+        private var journals: [String: [MastodonLeft]] = [:]
+        private var refusals: [Call: (after: Int, times: Int)] = [:]
 
         var all: [String: MastodonToken] { lock.withLock { held } }
+        var journalled: Set<String> { lock.withLock { Set(journals.keys) } }
 
-        func refuse(_ call: Call, times: Int) {
-            lock.withLock { refusals[call] = times }
+        func refuse(_ call: Call, times: Int, after: Int) {
+            lock.withLock { refusals[call] = (after, times) }
         }
 
         /// As a locked device's Keychain refuses.
         private func pass(_ call: Call) throws {
-            guard let left = refusals[call], left > 0 else { return }
-            refusals[call] = left - 1
+            guard let due = refusals[call], due.times > 0 else { return }
+            guard due.after == 0 else {
+                refusals[call] = (due.after - 1, due.times)
+                return
+            }
+            refusals[call] = (0, due.times - 1)
             throw ForumCredentialError.keychain(errSecInteractionNotAllowed)
         }
 
@@ -881,6 +1113,34 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
         func delete(host: String) throws {
             lock.withLock { held[host.lowercased()] = nil }
         }
+
+        func left(host: String) throws -> [MastodonLeft] {
+            try lock.withLock {
+                try pass(.readingLeft)
+                return journals[host.lowercased()] ?? []
+            }
+        }
+
+        func add(left entries: [MastodonLeft], host: String) throws {
+            try lock.withLock {
+                try pass(.leaving)
+                journals[host.lowercased()] = entries
+            }
+        }
+
+        func change(left entries: [MastodonLeft], host: String) throws {
+            try lock.withLock {
+                guard journals[host.lowercased()] != nil else { throw ForumCredentialError.keychain(errSecItemNotFound) }
+                try pass(.leaving)
+                journals[host.lowercased()] = entries
+            }
+        }
+
+        /// Refused by nothing, as taking a sign-in's item away is: what a keychain refuses
+        /// of a journal is the writing of it.
+        func deleteLeft(host: String) throws {
+            lock.withLock { journals[host.lowercased()] = nil }
+        }
     }
 
     private let items = Items()
@@ -903,9 +1163,10 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
     }
 
     /// Makes the keychain underneath refuse the next `times` of one call, as a locked device's
-    /// does. A refused add is a `save` that has already let go of what was held.
-    func refuse(_ call: Call, times: Int = 1) {
-        items.refuse(call, times: times)
+    /// does — once it has let `after` of them through. A refused add is a `save` that has
+    /// already let go of what was held.
+    func refuse(_ call: Call, times: Int = 1, after: Int = 0) {
+        items.refuse(call, times: times, after: after)
     }
 
     public func token(host: String) throws -> MastodonToken? {
@@ -924,12 +1185,44 @@ public final class MemoryMastodonTokens: MastodonTokenStore, @unchecked Sendable
         try filing.forget(token)
     }
 
+    public func forget(_ token: MastodonToken, saidBySource: Bool) throws -> Int? {
+        try filing.forget(token, saidBySource: saidBySource)
+    }
+
     public func update(_ token: MastodonToken) throws -> Bool {
         try filing.update(token)
     }
 
     public func swap(expecting held: String?, with token: MastodonToken) throws -> Bool {
         try filing.swap(expecting: held, with: token)
+    }
+
+    public func left(host: String) throws -> [MastodonLeft] {
+        try items.left(host: host)
+    }
+
+    public func leftHosts() throws -> Set<String> {
+        items.journalled
+    }
+
+    public func journal(_ entry: MastodonLeft) throws {
+        try filing.journal(entry)
+    }
+
+    public func journalLost(_ held: MastodonToken, accountID: String?) throws {
+        try filing.journalLost(held, accountID: accountID)
+    }
+
+    public func unjournal(_ entry: MastodonLeft) throws {
+        try filing.unjournal(entry)
+    }
+
+    public func forgetLeft(host: String) throws {
+        try filing.forgetLeft(host: host)
+    }
+
+    public func restoreLost(host: String) throws -> Bool {
+        try filing.restoreLost(host: host)
     }
 
     public func grants() throws -> [String: MastodonGrant] {

@@ -466,7 +466,7 @@ public struct FediqoRootView: View {
                     wakeTheCaches()
                     // A Keychain read at launch on a locked device finds no token; the sign-in
                     // is read again once the reader is here.
-                    session.mastodon.refresh()
+                    session.mastodon.cameToFront()
                 } else if ShellSession.windowLeft(phase),
                           session.stage?.closesWhenTheWindowLeaves == true {
                     // **The selectors only**, and the stage is what says so. The editor and a new
@@ -2436,7 +2436,8 @@ private struct EndedSignInNotice: ViewModifier {
     let session: ShellSession
 
     func body(content: Content) -> some View {
-        content.shellConfirm(ended, question: { ShellQuestion.signedOut(hosts: $0) }) { _, _ in }
+        content.shellConfirm(ended, question: { ShellQuestion.signedOut(hosts: $0, left: session.mastodon.endedLeft) }) { _, _ in }
+            .modifier(LeftSignInsNotice(mastodon: session.mastodon))
     }
 
     private var ended: Binding<[String]?> {

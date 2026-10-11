@@ -369,12 +369,12 @@ struct MastodonAuthTests {
     @Test("Revoking sends the token with the app it was issued to, and never throws")
     func revokes() async {
         let server = MastodonFixture.server()
-        await MastodonOAuth(host: host, sender: server).revoke(MastodonFixture.token)
+        await MastodonOAuth(host: host, sender: server).revoke(MastodonLeft(MastodonFixture.token, as: .left))
         let form = await server.form("/oauth/revoke")
         #expect(form == ["client_id": "cid", "client_secret": "csecret", "token": "tok-123"])
 
         let offline = FixtureSender(["/oauth/revoke": .fail])
-        await MastodonOAuth(host: host, sender: offline).revoke(MastodonFixture.token)
+        await MastodonOAuth(host: host, sender: offline).revoke(MastodonLeft(MastodonFixture.token, as: .left))
     }
 
     // MARK: - The signed-in door

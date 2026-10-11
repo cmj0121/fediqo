@@ -661,7 +661,9 @@ struct MastodonRegisteringTests {
         #expect(page.scopes == [wide])
         #expect(try tokens.token(host: host)?.scopes == wide, "a sign-in held came out with fewer words than it went in with")
         #expect(mastodon.bookmarks(host: host) == .allowed && mastodon.notices(host: host) == .allowed)
-        #expect(await server.revoked == [held.accessToken])
+        // The same account's, and holding no more than the one kept: left live, and written down.
+        #expect(await server.revoked.isEmpty)
+        #expect(try tokens.left(host: host).map(\.state) == [.left])
         #expect(!mastodon.stranded(host: host))
     }
 

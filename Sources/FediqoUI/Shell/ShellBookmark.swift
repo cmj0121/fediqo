@@ -50,7 +50,9 @@ extension ShellSession {
         let host = raw.lowercased()
         guard mastodon.bookmarks(host: host) == .unasked else { return }
         if rowRefusal?.host == host { rowRefusal = nil }
-        let failure = await mastodon.signIn(host: host, through: browser, writing: true, noticesSaid: said)
+        let failure = await mastodon.signIn(
+            host: host, through: browser, writing: true, noticesSaid: said, inPlace: true
+        )
         await forgetReaderMarksDue()
         if let failure {
             NetLog.auth.notice("\(NetLog.line("bookmarks", host: host, error: failure), privacy: .public)")

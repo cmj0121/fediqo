@@ -159,6 +159,93 @@ public final class MastodonSessions {
         return reader
     }
 
+    /// How many sign-ins are on their way at each host: a sign-in made and not yet kept is
+    /// that sign-in's own to keep or end, and nothing else ends it meanwhile.
+    @ObservationIgnored private var signingIn: [String: Int] = [:]
+
+    /// Whose sign-in a token kept this run is, as its own check named the account — until
+    /// that is written down with the sign-in. `host` → the token string and the id.
+    @ObservationIgnored private var checked: [String: (accessToken: String, id: String)] = [:]
+
+    /// Sign-ins a source was asked to end and did not say it had, after everything of them
+    /// left this device (#347). **In memory and nowhere else**: asked again while the app
+    /// runs, and forgotten with it. **None of them is a sign-in held, or one written down
+    /// again**: a string the source hands back to a later sign-in leaves this as it is kept
+    /// or journalled, and is looked for again before each ask (`end`).
+    @ObservationIgnored private var unended: [MastodonLeft] = []
+
+    /// The most sign-ins asked again from memory: two sign-outs' worth, each a sign-in
+    /// held and all it may have left. Beyond it the oldest is let go of, and told.
+    static let mostUnended = 2 * (mostLeft + 1)
+
+    /// Whether the journals are being gone through, so that a launch and a coming to the
+    /// front that land together ask each source once.
+    @ObservationIgnored private var settlingLeft = false
+
+    /// Whether a going-through asked for by a coming to the front has yet to start: one
+    /// waits behind the one running, and a second is not lined up behind it.
+    @ObservationIgnored private var frontWaiting = false
+
+    /// The least time between two goings-through of what was left at one host, and between
+    /// two asks from memory of it: what a source is left alone for after a load of it failed
+    /// (`LoadLimits.backoff`). A Mac comes to the front at every click on its window.
+    static let leftPause = LoadLimits().backoff
+
+    /// When what was left at each host was last gone through, on `clock`.
+    @ObservationIgnored private var leftAsked: [String: TimeInterval] = [:]
+
+    /// Time as that pause is counted. A seam, so a test turns the hands itself.
+    @ObservationIgnored var clock: any PacerClock = SystemPacerClock()
+
+    /// Which hosts' sources said in their own words that the sign-in held there is over,
+    /// noted by the door that heard it (`authorized`).
+    @ObservationIgnored private let endings = MastodonEndings()
+
+    /// The ends started from a place that cannot wait for them, one after another.
+    @ObservationIgnored private var ending: Task<Void, Never>?
+
+    /// How many earlier sign-ins at each host the source has not yet said it ended — the
+    /// journal's owed ones, as this object last read or wrote them. Never read to draw.
+    private(set) var owed: [String: Int] = [:]
+
+    /// Hosts whose sign-in this device could not keep and has not been able to file again.
+    private(set) var lost: Set<String> = []
+
+    /// Hosts with a journal, as this object last read or wrote one. Never read to draw.
+    private(set) var journalled: Set<String> = []
+
+    /// Whether a sign-out, a Clear or a Remove at `host` ends a sign-in at its source: one
+    /// held, one this device could not keep, or any it left there.
+    func endsSignIns(host raw: String) -> Bool {
+        let host = raw.lowercased()
+        return grants[host] != nil || lost.contains(host) || journalled.contains(host)
+    }
+
+    /// Of the hosts in `ended`, those where this device had left earlier sign-ins, which
+    /// are ended with it: the notice says other devices are signed out too.
+    private(set) var endedLeft: Set<String> = []
+
+    /// What the person is yet to be told of sign-ins a source was asked to end.
+    private(set) var leftTold: [LeftTold] = []
+
+    /// One thing to tell of a source asked to end a sign-in.
+    struct LeftTold: Equatable {
+        enum Kind: Equatable {
+            /// Everything left this device, and the source did not say it ended it all.
+            case unconfirmed
+            /// The source refused to end an earlier sign-in while one is still held.
+            case refused
+            /// Earlier sign-ins were another account's than the one now held, and were ended.
+            case others
+            /// A sign-in asked for more where it stood took the place of one nobody could
+            /// show to be the same account's, which was ended.
+            case unknown
+        }
+
+        let kind: Kind
+        let host: String
+    }
+
     /// Hosts whose account check found the network dark (#222) — a launch with no network, most
     /// often — and so are asked again as soon as a read gets through to them, rather than going
     /// unknown until a relaunch. `learnWhoAgain(among:)` is that second ask.
@@ -224,10 +311,20 @@ public final class MastodonSessions {
     /// it. What the server itself has none of is still written down as asked, so the row
     /// stops offering it; what was only left off a page is not, and stays a lock at its place.
     ///
-    /// **A sign-in made while a token is already held replaces it here and revokes it there**
-    /// (#69). `tokens.save` is delete-then-add, so the superseded token would otherwise stay live
-    /// on the server — and a reader narrowing their answer from writing back to reading would
-    /// have left a write-capable grant behind, which is the opposite of what they just asked for.
+    /// **A sign-in made while a token is already held replaces it here, and ends it there
+    /// where the new one has less** (#69): a reader narrowing their answer from writing back
+    /// to reading who left a write-capable grant live at the server would have been given the
+    /// opposite of what they just asked for. So is one not shown to be the same account's.
+    ///
+    /// **A wider one of the same account leaves it live** (#347). One that holds every word
+    /// the token it replaces held, for the account whose id both checks named, leaves that
+    /// token live at the source and written down as left (`MastodonLeft`): another device
+    /// carrying it goes on working until the person signs out here. A token is noted as made
+    /// before it is checked, and put where the held one was only while that one is still the
+    /// one held; a note that cannot be taken is a sign-in not kept.
+    ///
+    /// **`inPlace` is a sign-in asked for more where it stands** — bookmarks, notices. It may
+    /// not change who is signed in: one that comes back as another account is not kept.
     ///
     /// **Notices are asked for only where the reader pressed for them** (#323): `notices` is
     /// `true` from the notices page's press and from nowhere else. Left out, the sign-in
@@ -254,9 +351,11 @@ public final class MastodonSessions {
     /// told. It only ever narrows: notices are carried where they were said and are still held.
     func signIn(
         host raw: String, through browser: any OAuthBrowser, writing: Bool = false,
-        notices wanted: Bool? = nil, noticesSaid said: Bool? = nil
+        notices wanted: Bool? = nil, noticesSaid said: Bool? = nil, inPlace: Bool = false
     ) async -> MastodonSignInError? {
         let host = raw.lowercased()
+        signingIn[host, default: 0] += 1
+        defer { signingIn[host] = signingIn[host].flatMap { $0 > 1 ? $0 - 1 : nil } }
         let pressed = wanted == true
         if pressed, noticesGaveNone(host) { return .invalidScope }
         if registering.stranded(host) { return .invalidScope }
@@ -288,17 +387,26 @@ public final class MastodonSessions {
         // A part left off a page for want of proof that the host has it was not asked; one the
         // host itself said it has none of was, and the row stops offering it.
         let asked = MastodonRegistration.asked(chosen, on: made.page) { registering.hasNone(of: $0, at: host) }
-        var token: MastodonToken
+        let token: MastodonToken
+        // Whose sign-in it is, as its own check said.
+        let account: String?
+        // Whether the source handed back a token made before this sign-in: somebody's working
+        // sign-in, on this device or another, and never ended for not being kept here.
+        let handedBack: Bool
         do {
-            let signed = try await oauth.signIn(as: made.app, asking: made.page, through: browser)
+            let signed = try await oauth.signIn(as: made.app, asking: made.page, through: browser) {
+                [weak self] issued in try await self?.pend(issued)
+            }
             // The page came back and its code was traded: the host knows this registration.
             registering.made(at: host, confirmed: true)
             // A token that failed its check is no sign-in — and may be the one held.
             if let failed = signed.failed {
-                await end(signed.token, why: .notKept)
+                if !signed.handedBack { await end(MastodonLeft(signed.token, as: .pending), why: .notKept) }
                 throw failed
             }
             token = signed.token.recorded(asked: asked)
+            account = signed.accountID
+            handedBack = signed.handedBack
         } catch let error as MastodonSignInError {
             // No server's page sends `invalid_scope` back; one that did has said what a page
             // of its own, closed, says of a registration nothing confirmed.
@@ -317,44 +425,104 @@ public final class MastodonSessions {
         } catch {
             return .unreachable
         }
+        let fresh = MastodonLeft(token, as: .pending, accountID: account)
         guard stillWanted else {
-            await end(token, why: .notKept)
+            await discard(fresh, handedBack)
             return nil
         }
-        // The token this one supersedes, read before `save` deletes it.
-        let superseded = (try? tokens.token(host: host)) ?? nil
-        // A server cannot talk this device out of a sign-in it holds: one that answers with
-        // fewer of the words asked than the sign-in held has is not kept.
-        if let superseded, !MastodonRegistration.keeps(superseded.scopes, asking: chosen, in: token.scopes) {
-            await end(token, why: .notKept)
-            return .unreadable
-        }
+        // The sign-in held, which this one takes the place of. **Nothing is awaited between
+        // this look and the swap below**, and the swap keeps nothing where another thread
+        // has filed a sign-in in between.
+        let held: MastodonToken?
         do {
-            try tokens.save(token)
+            held = try tokens.token(host: host)
         } catch {
-            // **The sign-in the reader had, put back before anything is awaited** (#285). `save`
-            // deletes before it adds, so an add that fails has taken the old token from this
-            // device with it still live at the server, on a press that promised nobody is signed
-            // out first. Put back here and not after the round trip below: a sign-out landing
-            // during that wait would find nothing to forget or revoke, and the token put back
-            // after it would sign the reader in again behind their sign-out. Where it cannot be
-            // put back either, it is revoked, so nothing is live there that this device has lost.
-            // Where it was put back and the new token is that very string, nothing is revoked.
-            var lost: MastodonToken?
-            if let superseded, ((try? tokens.token(host: host)) ?? nil) == nil {
-                do { try tokens.save(superseded) } catch { lost = superseded }
-            }
-            refresh()
-            await end(token, why: .notKept)
-            if let lost { await end(lost, why: .notKept) }
+            // What is held cannot be seen, so nothing can be put in its place — or ended.
+            await discard(fresh, handedBack)
             return .keychain
         }
+        // A server cannot talk this device out of a sign-in it holds: one that answers with
+        // fewer of the words asked than the sign-in held has is not kept.
+        if let held, !MastodonRegistration.keeps(held.scopes, asking: chosen, in: token.scopes) {
+            await discard(fresh, handedBack)
+            return .unreadable
+        }
+        // The token this one replaces — nothing, where the source handed the held one back.
+        let replaced = held.flatMap { fresh.isToken($0) ? nil : $0 }
+        // Whose each is, by the id its own check named, and by nothing else. Not known on
+        // either side, they are not shown to be one account.
+        let owner = replaced.flatMap { accountID(of: $0) }
+        let sameAccount = owner != nil && owner == account
+        if inPlace, let owner, let account, owner != account {
+            await discard(fresh, handedBack)
+            return .unreadable
+        }
+        // Left live only where it is the same account's and can do nothing the new one cannot.
+        let widening = sameAccount && replaced.map { !MastodonLeft($0, as: .left).holdsMore(than: token.scopes) } == true
+        if widening, let replaced {
+            // Written down before the new one is kept: a token left with no note of it is one
+            // no sign-out here would end.
+            do {
+                try tokens.journal(MastodonLeft(replaced, as: .left, accountID: owner))
+            } catch {
+                await discard(fresh, handedBack)
+                return .keychain
+            }
+            unended.removeAll { $0.isToken(replaced) }
+        }
+        // What the sign-in replaced was refused goes with the account it was refused for.
+        // — and stays with a sign-in handed back as it was.
+        let filed = sameAccount || replaced == nil ? held.map { token.carrying(refusedFrom: $0.held) } ?? token : token
+        var kept = false
+        var unkeepable: MastodonLeft?
+        do {
+            kept = try tokens.swap(expecting: held?.accessToken, with: filed)
+        } catch {
+            // **The sign-in the reader had, put back before anything is awaited** (#285): a
+            // sign-out landing during the wait below would otherwise find nothing to forget
+            // or end. A swap that fails has let go of nothing, so there is nothing to put
+            // back unless the Keychain lost it all the same.
+            if let held { unkeepable = fileAgain(held) }
+        }
+        guard kept else {
+            // Still held, the replaced token is not one left behind.
+            if widening, let replaced, MastodonLeft(replaced, as: .left).isToken(self.token(host: host)) {
+                try? tokens.unjournal(MastodonLeft(replaced, as: .left))
+            }
+            refresh()
+            noteLeft(host)
+            await discard(fresh, handedBack)
+            if let unkeepable { await end(unkeepable, why: .leftBehind) }
+            return .keychain
+        }
+        // Held, it is nothing this device let go of — whatever a sign-out before left unended.
+        unended.removeAll { $0.isToken(filed) }
+        _ = endings.takeSaid(host)
+        checked[host] = account.map { (token.accessToken, $0) }
         // What is held is read again **before the wait below** (#323): a second sign-in started
         // while the server is being asked to forget the old token carries what this one holds,
         // not what the one it replaced did.
         refresh()
         // **After the new one is safely kept**, and never a token with the same string (`end`).
-        if let superseded { await end(superseded, why: .notKept) }
+        if let replaced, !widening {
+            // The read-or-act question says this first (`signInEnds`); a sign-in asked for
+            // more where it stands is put no such question, so it is told.
+            if inPlace, !sameAccount { tell(.unknown, host: host) }
+            await end(MastodonLeft(replaced, as: .left, accountID: owner), why: .leftBehind)
+        }
+        await endLeft(host: host) { left in
+            // The one just asked about is not asked twice in one sign-in.
+            if let replaced, left.isToken(replaced) { return false }
+            return switch left.state {
+            // One made and never kept is this sign-in's own while it is on its way (`endLeft`).
+            case .pending, .owed: true
+            // Another account's, or one that may do what the sign-in now held may not.
+            case .left, .lost: left.accountID == nil || left.accountID != account || left.holdsMore(than: token.scopes)
+            }
+        }
+        leaveLost(host)
+        await endLeft(host: host, beyond: Self.mostLeft)
+        noteLeft(host)
         // A fresh sign-in is a fresh answer from the server about what this device may do, so
         // whatever it turned away before this is spent.
         writeRefused.remove(host)
@@ -565,6 +733,9 @@ public final class MastodonSessions {
         for host in due.sorted() {
             await learnWho(host: host, within: limit)
         }
+        // A host that has just answered a read is one to ask again to end what it left unended.
+        let waiting = Set(unended.map(\.host)).intersection(hosts.map { $0.lowercased() })
+        await retryUnended(among: dueAgain(among: waiting))
     }
 
     /// A write this source turned away (#69). The row says so and keeps saying it until the source
@@ -641,6 +812,17 @@ public final class MastodonSessions {
     /// in a session of its own that keeps nothing (`WebAuthBrowser`), so no website session of
     /// this sign-in outlives it either.
     ///
+    /// **Every earlier sign-in this device left there goes with it** (#347): the journal
+    /// leaves the Keychain with the token, at once, and the source is asked to end each —
+    /// the one held first, each whatever the one before was answered. So another device
+    /// carrying any of them is signed out too, which the question says first.
+    ///
+    /// **An end the source does not confirm is not kept to be asked again later.** It is
+    /// asked again from memory while the app runs (`retryUnended`), and the person is told
+    /// what was not confirmed and what to do about it (`leftTold`). **So is a journal that
+    /// cannot be read**: it leaves the device with the rest, nothing in it can be ended,
+    /// and that is not passed over in silence.
+    ///
     /// `forgettingApp` drops the app registration too — Clear and Remove, after which nothing of
     /// this source's sign-in is left on the device, nor anything this run learnt of registering
     /// there. A plain sign-out keeps it for next time: it names
@@ -651,6 +833,15 @@ public final class MastodonSessions {
         let host = raw.lowercased()
         signOuts[host, default: 0] += 1
         let token = (try? tokens.token(host: host)) ?? nil
+        // A sign-in still on its way is its own to end, once it sees the reader has gone.
+        var left: [MastodonLeft] = []
+        var unread = false
+        do {
+            left = try tokens.left(host: host).filter { $0.state != .pending || signingIn[host] == nil }
+        } catch {
+            unread = true
+            NetLog.auth.error("\(NetLog.line("sign-out, earlier sign-ins unread", host: host, error: error), privacy: .public)")
+        }
         do {
             try tokens.forget(host: host)
         } catch {
@@ -658,6 +849,11 @@ public final class MastodonSessions {
             // reads it back rather than claiming a sign-out that did not happen. The server is
             // still asked to forget it.
             NetLog.auth.error("\(NetLog.line("sign-out", host: host, error: error), privacy: .public)")
+        }
+        do {
+            try tokens.forgetLeft(host: host)
+        } catch {
+            NetLog.auth.error("\(NetLog.line("sign-out, earlier sign-ins", host: host, error: error), privacy: .public)")
         }
         if forgettingApp {
             try? tokens.forgetApp(host: host)
@@ -667,17 +863,29 @@ public final class MastodonSessions {
         bookmarkTurnedAway.remove(host)
         noticesTurnedAway.remove(host)
         handles[host] = nil
+        checked[host] = nil
+        _ = endings.takeSaid(host)
         refresh()
-        if let token { await end(token, why: .signedOut) }
+        noteLeft(host)
+        if unread { tell(.unconfirmed, host: host) }
+        if let token { await end(MastodonLeft(token, as: .left), why: .signedOut) }
+        for entry in left { await end(entry, why: .leftBehind, forgotten: true) }
     }
 
     /// Why a source is asked to end a sign-in.
     private enum Ending {
-        /// A token a sign-in made and did not keep, or one it replaced: ended only where it is
-        /// not the one held.
+        /// A token a sign-in made and did not keep: ended only where it is neither the one
+        /// held nor one written down as left or lost.
         case notKept
+        /// One this device no longer uses — replaced by a narrower sign-in or another
+        /// account's, left for a sign-in since ended, or owed an end: ended only where it
+        /// is not the one held.
+        case leftBehind
         /// The person asked for this very sign-in to end — a sign-out, Clear or Remove.
         case signedOut
+        /// One asked again from memory: ended only where it is neither the one held nor
+        /// written down again since it left this device.
+        case unended
     }
 
     /// Asks a source to end a sign-in — **the one place that does** (#347).
@@ -686,26 +894,369 @@ public final class MastodonSessions {
     /// server answers the same words on the same registration with the token it already
     /// issued, so a token a sign-in could not keep may be, string for string, the one the row
     /// says the person has: ending it would sign them out behind a row that reads signed in.
-    /// What is held is read here, with nothing awaited between the look and the send, so a
-    /// token put back or kept a moment ago is seen. Where the Keychain cannot be read nothing
-    /// is sent: that can leave a token nobody kept live at the source, which is rare and
-    /// better than ending one that is held.
+    /// **Nor is one not kept ended while it is written down as left or lost**: handed back
+    /// the same way, it is a sign-in another device may be carrying.
+    /// What is held and what is journalled are read here, with nothing awaited between the
+    /// look and the send, so a token put back or kept a moment ago is seen. Where the
+    /// Keychain cannot be read nothing is sent: that can leave a token nobody kept live at
+    /// the source, which is rare and better than ending one that is held.
     ///
     /// **The sign-in the person signed out of is ended whatever this device still holds**
     /// (#221): it was read before it was forgotten, and a Keychain that would not delete it, or
     /// cannot be read now, is no reason to leave it live at the source.
-    private func end(_ token: MastodonToken, why ending: Ending) async {
-        if ending == .notKept {
+    ///
+    /// **`forgotten` is an end that came of a sign-out**, as one asked again from memory
+    /// and the signed-out sign-in's own are, and as any is that a sign-out overtook while
+    /// the source was asked: whatever is answered, nothing of it is written down again.
+    ///
+    /// What the source answers is written down by `settle`, after the wait.
+    private func end(_ left: MastodonLeft, why ending: Ending, forgotten: Bool = false) async {
+        let host = left.host
+        if ending != .signedOut {
             do {
-                guard try tokens.token(host: token.host)?.accessToken != token.accessToken else { return }
+                if try left.isToken(tokens.token(host: host)) {
+                    // The journal is a set by token string: the one held is not in it.
+                    try? tokens.unjournal(left)
+                    unended.removeAll { $0.isSame(as: left) }
+                    return
+                }
+                if ending == .notKept, try tokens.left(host: host).contains(where: {
+                    $0.isSame(as: left) && ($0.state == .left || $0.state == .lost)
+                }) { return }
+                // Written down again, it is the journal's to end, and by the journal's rules.
+                if ending == .unended, try tokens.left(host: host).contains(where: left.isSame) {
+                    unended.removeAll { $0.isSame(as: left) }
+                    return
+                }
             } catch {
-                NetLog.auth.error("\(NetLog.line("end", host: token.host, error: error), privacy: .public)")
+                NetLog.auth.error("\(NetLog.line("end", host: host, error: error), privacy: .public)")
                 return
             }
         }
+        let since = signOuts[host, default: 0]
         let purpose: SourceWork.Purpose = ending == .signedOut ? .signOut : .signIn
-        await MastodonOAuth(host: token.host, sender: WatchedHTTP(sender: sender, for: purpose, in: work))
-            .revoke(token)
+        let answer = await MastodonOAuth(host: host, sender: WatchedHTTP(sender: sender, for: purpose, in: work))
+            .revoke(left)
+        let overtaken = signOuts[host, default: 0] != since
+        settle(left, answered: answer, forgotten: forgotten || overtaken || ending == .signedOut || ending == .unended)
+    }
+
+    /// What a source's answer to an end leaves of that sign-in on this device (#347).
+    ///
+    /// **Read after the wait**: whether a sign-in is held at that host now decides it, not
+    /// whether one was when the source was asked.
+    ///
+    /// - Ended: it leaves the journal.
+    /// - Refused for good: it leaves the journal, and the person is told — there is nothing
+    ///   more this device can ask.
+    /// - No answer, and a sign-in is held there: it stays, owed, and is asked again at the
+    ///   next launch and whenever the app comes to the front.
+    /// - No answer, and none is held: **nothing waits on a device that shows no sign-in**.
+    ///   It leaves the Keychain, is asked again from memory while the app runs, and the
+    ///   person is told once.
+    /// - No answer to an end that came of a sign-out (`forgotten`): **it never comes back
+    ///   to the Keychain**, whoever has signed in there since — the person was told this
+    ///   device has forgotten it. It is asked again from memory, as above.
+    private func settle(_ left: MastodonLeft, answered: MastodonEnd, forgotten: Bool) {
+        let host = left.host
+        let held: MastodonToken?
+        do {
+            held = try tokens.token(host: host)
+        } catch {
+            return
+        }
+        let waiting = unended.contains { $0.isSame(as: left) }
+        switch answered {
+        case .ended:
+            try? tokens.unjournal(left)
+            unended.removeAll { $0.isSame(as: left) }
+        case .refused:
+            try? tokens.unjournal(left)
+            unended.removeAll { $0.isSame(as: left) }
+            tell(held == nil ? .unconfirmed : .refused, host: host)
+        case .unanswered:
+            // Kept or put back meanwhile, it is the sign-in held and no leaving of this device's.
+            if left.isToken(held) {
+                unended.removeAll { $0.isSame(as: left) }
+            } else if held != nil, !forgotten {
+                try? tokens.journal(left.marked(.owed))
+                unended.removeAll { $0.isSame(as: left) }
+            } else if forgotten, (try? tokens.left(host: host))?.contains(where: left.isSame) == true {
+                // Written down again while the source was asked: the journal's, as it stands.
+                unended.removeAll { $0.isSame(as: left) }
+            } else {
+                if !forgotten { try? tokens.unjournal(left) }
+                if !waiting {
+                    remember(left)
+                    tell(.unconfirmed, host: host)
+                }
+            }
+        }
+        noteLeft(host)
+    }
+
+    /// Keeps `left` to be asked about again from memory — and no more than `mostUnended`
+    /// of them: the oldest beyond that is let go of unended, and told as not confirmed.
+    private func remember(_ left: MastodonLeft) {
+        unended.append(left)
+        while unended.count > Self.mostUnended {
+            tell(.unconfirmed, host: unended.removeFirst().host)
+        }
+    }
+
+    private func tell(_ kind: LeftTold.Kind, host: String) {
+        let told = LeftTold(kind: kind, host: host)
+        if !leftTold.contains(told) { leftTold.append(told) }
+    }
+
+    /// The first thing told has been seen.
+    func leftToldSeen() {
+        if !leftTold.isEmpty { leftTold.removeFirst() }
+    }
+
+    /// Lets go of a sign-in that is not kept: the source is asked to end it (`end`), unless
+    /// it was shown to be handed back — made before this sign-in, and somebody's to use.
+    private func discard(_ fresh: MastodonLeft, _ handedBack: Bool) async {
+        if !handedBack { await end(fresh, why: .notKept) }
+    }
+
+    /// Notes a sign-in just made, **before its check**, as one to end unless it comes to be
+    /// kept: a quit during the check leaves the note for the next launch. Nothing is noted
+    /// of a token handed back that is the one held, or one already written down.
+    ///
+    /// Throws where the note cannot be taken, and the sign-in is then not kept.
+    private func pend(_ made: MastodonToken) throws {
+        let entry = MastodonLeft(made, as: .pending)
+        if entry.isToken(token(host: made.host)) { return }
+        guard try !tokens.left(host: made.host).contains(where: entry.isSame) else { return }
+        try tokens.journal(entry)
+    }
+
+    /// Puts back the sign-in the person held, where a keeping that failed took it from the
+    /// Keychain. Where it cannot be put back it is written down as lost, to be filed again
+    /// when it can be and ended only when the person signs out; and where not even that
+    /// can be written, it is handed back to be ended — nothing stays live at a source that
+    /// this device has no way left to end.
+    private func fileAgain(_ held: MastodonToken) -> MastodonLeft? {
+        do {
+            guard try tokens.token(host: held.host) == nil else { return nil }
+        } catch {
+            return nil
+        }
+        if (try? tokens.swap(expecting: nil, with: held)) != nil { return nil }
+        let account = accountID(of: held)
+        do {
+            try tokens.journalLost(held, accountID: account)
+            return nil
+        } catch {
+            return MastodonLeft(held, as: .left, accountID: account)
+        }
+    }
+
+    /// A sign-in written down as lost, where another has just been kept for the same account
+    /// with everything it had: it is now one that sign-in took the place of, and left.
+    private func leaveLost(_ host: String) {
+        for left in (try? tokens.left(host: host)) ?? [] where left.state == .lost {
+            try? tokens.journal(left.marked(.left))
+        }
+    }
+
+    /// Whose sign-in `token` is, by the id its source gives the account: as written down
+    /// with it, or as its own check or the account check said through that very token this
+    /// run. Nothing where nobody has said.
+    private func accountID(of token: MastodonToken) -> String? {
+        if let id = token.accountID { return id }
+        if let known = checked[token.host], known.accessToken == token.accessToken { return known.id }
+        if let reader = readers[token.host], reader.accessToken == token.accessToken { return reader.id }
+        return nil
+    }
+
+    /// The most sign-ins left at one host: one a part, about, and a bound on what a device
+    /// may leave live at a source.
+    static let mostLeft = 16
+
+    /// Asks `host` to end each journalled sign-in `due` picks, one at a time. **The journal
+    /// is read again after every wait**, so one a sign-out or another sign-in dealt with
+    /// meanwhile is not asked about again, and each is asked whatever the one before was
+    /// answered. One made by a sign-in still on its way is that sign-in's own.
+    private func endLeft(host: String, _ due: (MastodonLeft) -> Bool) async {
+        var asked: [MastodonLeft] = []
+        while let next = ((try? tokens.left(host: host)) ?? []).first(where: { left in
+            due(left) && !(left.state == .pending && signingIn[host] != nil)
+                && !asked.contains { $0.isSame(as: left) }
+        }) {
+            asked.append(next)
+            await end(next, why: next.state == .pending ? .notKept : .leftBehind)
+        }
+    }
+
+    /// Ends the oldest sign-ins left at `host` beyond the `most` newest.
+    private func endLeft(host: String, beyond most: Int) async {
+        let left = ((try? tokens.left(host: host)) ?? []).filter { $0.state == .left }
+        let oldest = left.dropLast(most)
+        guard !oldest.isEmpty else { return }
+        await endLeft(host: host) { entry in oldest.contains { $0.isSame(as: entry) } }
+    }
+
+    /// Reads how many sign-ins at `host` are owed an end, and whether one is lost, for the
+    /// row to say. Called where this object has just read or written the journal, never to
+    /// draw.
+    private func noteLeft(_ host: String) {
+        guard let entries = try? tokens.left(host: host) else { return }
+        let count = entries.count { $0.state == .owed }
+        if owed[host, default: 0] != count { owed[host] = count == 0 ? nil : count }
+        let isLost = entries.contains { $0.state == .lost }
+        if isLost != lost.contains(host) {
+            if isLost { lost.insert(host) } else { lost.remove(host) }
+        }
+        if entries.isEmpty == journalled.contains(host) {
+            if entries.isEmpty { journalled.remove(host) } else { journalled.insert(host) }
+        }
+    }
+
+    /// Goes through what this device left at each source (#347): at launch, and whenever
+    /// the app comes to the front.
+    ///
+    /// **Only where the Keychain could be read.** A locked device ends nothing, restores
+    /// nothing and drops nothing: what it cannot read it cannot tell from what is held.
+    ///
+    /// For each host with a journal, each step whatever the one before came to:
+    /// - a sign-in written down as lost is filed again as the one held, where none is;
+    /// - with no sign-in held, everything else journalled is asked to end, once — and what
+    ///   the source does not confirm leaves the device and is told (`settle`);
+    /// - with one held, sign-ins left by another account are ended and said, one made and
+    ///   never kept is ended, and each one owed is asked again.
+    ///
+    /// What is owed in memory alone is asked again before any of it.
+    ///
+    /// **A host gone through is left alone for `leftPause`**, however often the app comes
+    /// to the front meanwhile.
+    func settleLeft() async {
+        guard !settlingLeft else { return }
+        settlingLeft = true
+        defer { settlingLeft = false }
+        refresh()
+        tellDropped()
+        guard grantsKnown, let hosts = try? tokens.leftHosts() else { return }
+        if journalled != hosts { journalled = hosts }
+        let due = dueAgain(among: hosts.union(unended.map(\.host)))
+        // First, so what this pass itself finds unconfirmed is not asked about twice in it.
+        await retryUnended(among: due)
+        for host in hosts.sorted() where due.contains(host) {
+            if (try? tokens.restoreLost(host: host)) == true { refresh() }
+            let held: MastodonToken?
+            do {
+                held = try tokens.token(host: host)
+            } catch {
+                // Not gone through, so not left alone for it.
+                leftAsked[host] = nil
+                continue
+            }
+            guard let held else {
+                await endLeft(host: host) { $0.state != .lost }
+                noteLeft(host)
+                continue
+            }
+            if let account = accountID(of: held) {
+                let others = ((try? tokens.left(host: host)) ?? []).contains { Self.isAnothers($0, than: account) }
+                await endLeft(host: host) { Self.isAnothers($0, than: account) }
+                if others { tell(.others, host: host) }
+            }
+            await endLeft(host: host) { $0.state == .pending || $0.state == .owed }
+            noteLeft(host)
+        }
+    }
+
+    /// Whether `left` is a sign-in left by an account other than `account`: only where it
+    /// says whose it was. Until a package says whose sign-in it brings, a chain that is not
+    /// the held account's is ended and never added to.
+    private static func isAnothers(_ left: MastodonLeft, than account: String) -> Bool {
+        left.state == .left && left.accountID != nil && left.accountID != account
+    }
+
+    /// Asks again to end what was not confirmed after it left this device, at `hosts`. One
+    /// that has since come to be the sign-in held is the person's again, and one written
+    /// down again is the journal's: `end` looks for both just before it asks, and asks
+    /// nothing about either.
+    private func retryUnended(among hosts: Set<String>) async {
+        for left in unended where hosts.contains(left.host) {
+            guard unended.contains(where: left.isSame) else { continue }
+            await end(left, why: .unended)
+        }
+    }
+
+    /// Those of `hosts` not gone through within `leftPause`, noted as gone through now.
+    private func dueAgain(among hosts: Set<String>) -> Set<String> {
+        let moment = clock.elapsed()
+        let due = hosts.filter { host in leftAsked[host].map { moment - $0 >= Self.leftPause } ?? true }
+        for host in due { leftAsked[host] = moment }
+        return due
+    }
+
+    /// The app has come to the front: who is signed in is read again — a Keychain read at
+    /// launch on a locked device finds nothing — and what was left at each source is gone
+    /// through, now that it can be read. **One going-through runs and one waits**: a
+    /// coming to the front while one already waits lines up nothing more.
+    func cameToFront() {
+        refresh()
+        guard !frontWaiting else { return }
+        frontWaiting = true
+        after {
+            $0.frontWaiting = false
+            await $0.settleLeft()
+        }
+    }
+
+    /// Runs `work` after whatever was started here before it, without being waited for.
+    private func after(_ work: @escaping @MainActor (MastodonSessions) async -> Void) {
+        let before = ending
+        ending = Task { [weak self] in
+            await before?.value
+            guard let self else { return }
+            await work(self)
+        }
+    }
+
+    /// Waits for every end started without being waited for.
+    func leftSettled() async {
+        await ending?.value
+    }
+
+    /// What Account says under a source's row of the sign-ins this device left there:
+    /// that the one it held could not be kept, or how many the source has not yet ended.
+    func leftLine(host raw: String, language: DummyLanguage? = nil) -> String? {
+        let host = raw.lowercased()
+        if lost.contains(host), grants[host] == nil {
+            return String(format: L10n.t("account.mastodon.failed.keychain", language: language), host)
+        }
+        guard let count = owed[host], grants[host] != nil else { return nil }
+        let one = L10n.t("account.left.owed.one", language: language)
+        let format = count == 1 && one != "account.left.owed.one" ? one : L10n.t("account.left.owed", language: language)
+        return String(format: format, count, host)
+    }
+
+    /// What answering the read-or-act question may end of the sign-in held.
+    enum SignInEnds: Equatable {
+        /// Reading alone asks for less than is held; so does another account.
+        case reading
+        /// Either answer: what is held, or whose it is, cannot be shown to be kept.
+        case either
+        /// Only signing in as another account.
+        case another
+    }
+
+    /// What the read-or-act question about `host` must say first of the sign-in held:
+    /// which answer ends it at the source, and with it every other device carrying it.
+    /// Nothing where none is held. **Read off what rides beside the sign-in and what this
+    /// run was told — no token is read to put a question.**
+    func signInEnds(host raw: String, notices: Bool) -> SignInEnds? {
+        let host = raw.lowercased()
+        guard grants[host] != nil else { return nil }
+        let words = ((try? tokens.parts()) ?? [:])[host]?.scopes
+        guard let words, checked[host] != nil || readers[host] != nil else { return .either }
+        let read = MastodonRegistration.holds(words, on: MastodonOAuth.scopes(writing: false, notices: notices))
+        let act = MastodonRegistration.holds(words, on: MastodonOAuth.scopes(writing: true, notices: notices))
+        return act ? (read ? .another : .reading) : .either
     }
 
     /// The door a signed-in request goes through, or nothing where no token can be read.
@@ -734,7 +1285,7 @@ public final class MastodonSessions {
     ) -> MastodonAuthorized {
         let watched = WatchedHTTP(sender: sender, for: purpose, name: name, in: work)
         let wire: any HTTPSender = limit.map { Deadline(watched as any HTTPSender, within: $0) } ?? watched
-        return MastodonAuthorized(token: token, sender: wire, store: tokens)
+        return MastodonAuthorized(token: token, sender: wire, store: tokens, endings: endings)
     }
 
     /// A request answered `.signedOut`: the token is already gone, so the row and the reader are
@@ -744,6 +1295,37 @@ public final class MastodonSessions {
         refresh()
         if !ended.contains(host) { ended.append(host) }
         onEnded?(host)
+        tellDropped()
+        endLeftOfEnded(host)
+    }
+
+    /// Tells of each host where a 401 that was not the source's own took the sign-ins left
+    /// there off this device unended (`MastodonTokenStore.forget(_:saidBySource:)`): done in
+    /// the store with the forgetting, so all that is left to do here is say so.
+    private func tellDropped() {
+        for host in endings.takeDropped().sorted() {
+            noteLeft(host)
+            tell(.unconfirmed, host: host)
+        }
+    }
+
+    /// The sign-ins this device left for one its source has ended are ended at once (#347):
+    /// nothing is kept, unseen, on a device that shows no sign-in. The notice says other
+    /// devices carrying an earlier form are signed out too. Never where a sign-in is held
+    /// there again, whose own keeping dealt with what was left.
+    ///
+    /// **Only where the source said so in its own words** (`MastodonEndings`). A 401 that
+    /// is anything else — a page, a password asked for by something in front of the source
+    /// — still takes the sign-in held off this device, as it always has, and **ends
+    /// nothing**: what was left went from the device unended in the store's own step, so
+    /// nothing that goes through the journal ends it either, and the person is told
+    /// (`tellDropped`).
+    private func endLeftOfEnded(_ host: String) {
+        guard endings.takeSaid(host), grantsKnown, grants[host] == nil,
+              let left = try? tokens.left(host: host), left.contains(where: { $0.state == .left })
+        else { return }
+        endedLeft.insert(host)
+        after { await $0.endLeft(host: host) { $0.state == .left || $0.state == .owed } }
     }
 
     /// At launch: asks each server whether it still honours its token. Only a 401 signs out; a
@@ -752,14 +1334,27 @@ public final class MastodonSessions {
     ///
     /// **The same answer says who the reader is there** (#109), so asking it is not a second
     /// request: `learnWho` reads the account check's own body.
+    ///
+    /// **The sign-ins held first, then what was left** (#347, `settleLeft`): a sign-in the
+    /// source has ended is known before anything left for it is gone through.
     public func verifyAll() async {
+        if grantsKnown {
+            for host in (try? tokens.leftHosts()) ?? [] where (try? tokens.restoreLost(host: host)) == true {
+                refresh()
+            }
+        }
         for host in grants.keys.sorted() {
             await learnWho(host: host)
         }
+        await leftSettled()
+        // The launch's own going-through waits on no pause: who is signed in was only now asked.
+        leftAsked = [:]
+        await settleLeft()
     }
 
     func endedSeen() {
         ended = []
+        endedLeft = []
     }
 
     /// Reads who is signed in again. Also asked when the app comes to the front: a Keychain read

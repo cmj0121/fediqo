@@ -115,6 +115,16 @@ private final class BlindToNotices: MastodonTokenStore, @unchecked Sendable {
         reads += 1
         return try held.token(host: host)
     }
+    func swap(expecting string: String?, with token: MastodonToken) throws -> Bool {
+        try held.swap(expecting: string, with: token)
+    }
+    func left(host: String) throws -> [MastodonLeft] { try held.left(host: host) }
+    func leftHosts() throws -> Set<String> { try held.leftHosts() }
+    func journal(_ entry: MastodonLeft) throws { try held.journal(entry) }
+    func journalLost(_ token: MastodonToken, accountID: String?) throws { try held.journalLost(token, accountID: accountID) }
+    func unjournal(_ entry: MastodonLeft) throws { try held.unjournal(entry) }
+    func forgetLeft(host: String) throws { try held.forgetLeft(host: host) }
+    func restoreLost(host: String) throws -> Bool { try held.restoreLost(host: host) }
     func save(_ token: MastodonToken) throws { try held.save(token) }
     func forget(host: String) throws { try held.forget(host: host) }
     func forget(_ token: MastodonToken) throws -> Bool { try held.forget(token) }
@@ -135,6 +145,16 @@ private final class BlindToGrants: MastodonTokenStore, @unchecked Sendable {
     init(_ held: MemoryMastodonTokens) { self.held = held }
 
     func token(host: String) throws -> MastodonToken? { try held.token(host: host) }
+    func swap(expecting string: String?, with token: MastodonToken) throws -> Bool {
+        try held.swap(expecting: string, with: token)
+    }
+    func left(host: String) throws -> [MastodonLeft] { try held.left(host: host) }
+    func leftHosts() throws -> Set<String> { try held.leftHosts() }
+    func journal(_ entry: MastodonLeft) throws { try held.journal(entry) }
+    func journalLost(_ token: MastodonToken, accountID: String?) throws { try held.journalLost(token, accountID: accountID) }
+    func unjournal(_ entry: MastodonLeft) throws { try held.unjournal(entry) }
+    func forgetLeft(host: String) throws { try held.forgetLeft(host: host) }
+    func restoreLost(host: String) throws -> Bool { try held.restoreLost(host: host) }
     func save(_ token: MastodonToken) throws { try held.save(token) }
     func forget(host: String) throws { try held.forget(host: host) }
     func forget(_ token: MastodonToken) throws -> Bool { try held.forget(token) }
@@ -169,6 +189,20 @@ private final class WatchedTokens: MastodonTokenStore, @unchecked Sendable {
         try held.forget(host: token.host)
         throw ForumCredentialError.keychain(-25_308)
     }
+    /// A keeping refused as a save is: what was held is gone from the Keychain with it.
+    func swap(expecting string: String?, with token: MastodonToken) throws -> Bool {
+        guard failing > 0 else { return try held.swap(expecting: string, with: token) }
+        failing -= 1
+        try held.forget(host: token.host)
+        throw ForumCredentialError.keychain(-25_308)
+    }
+    func left(host: String) throws -> [MastodonLeft] { try held.left(host: host) }
+    func leftHosts() throws -> Set<String> { try held.leftHosts() }
+    func journal(_ entry: MastodonLeft) throws { try held.journal(entry) }
+    func journalLost(_ token: MastodonToken, accountID: String?) throws { try held.journalLost(token, accountID: accountID) }
+    func unjournal(_ entry: MastodonLeft) throws { try held.unjournal(entry) }
+    func forgetLeft(host: String) throws { try held.forgetLeft(host: host) }
+    func restoreLost(host: String) throws -> Bool { try held.restoreLost(host: host) }
     func forget(host: String) throws { try held.forget(host: host) }
     func forget(_ token: MastodonToken) throws -> Bool { try held.forget(token) }
     func grants() throws -> [String: MastodonGrant] { try held.grants() }

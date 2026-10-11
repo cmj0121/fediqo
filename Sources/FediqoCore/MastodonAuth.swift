@@ -229,9 +229,20 @@ public struct MastodonOAuth: Sendable {
     /// issued, so the one in hand may be the sign-in this device holds — and a check fails for a
     /// timeout or a 5xx as for a refusal. Whether to ask the server to end it is for whoever
     /// knows what is held.
+    ///
+    /// **`pending` is handed the token before it is checked** (#347), so whoever keeps a note
+    /// of sign-ins made and not yet kept writes it down while nothing has been awaited on
+    /// it: a quit during the check then leaves a note to end it by. Where the note cannot be
+    /// taken the token is not checked, and comes back as one that could not be kept.
+    /// **Not a token shown to be handed back** (`handedBack`): it was made by an earlier
+    /// sign-in, here or on another device, and is not this one's to end.
+    ///
+    /// **`accountID` is whose sign-in the check said it is**, off the answer the check
+    /// already asks for; nothing where the check failed or named nobody.
     public func signIn(
-        as app: MastodonApp, asking page: String? = nil, through browser: any OAuthBrowser
-    ) async throws -> (token: MastodonToken, failed: MastodonSignInError?) {
+        as app: MastodonApp, asking page: String? = nil, through browser: any OAuthBrowser,
+        pending: (@Sendable (MastodonToken) async throws -> Void)? = nil
+    ) async throws -> (token: MastodonToken, failed: MastodonSignInError?, accountID: String?, handedBack: Bool) {
         if let page, !MastodonRegistration.holds(page, on: app.scopes) {
             throw MastodonSignInError.unreadable
         }
@@ -269,12 +280,17 @@ public struct MastodonOAuth: Sendable {
             scopes: Self.granted(issued.scope, of: scopes),
             asked: scopes
         )
+        let handedBack = issued.handedBack
         do {
-            try await verify(token)
+            if !handedBack { try await pending?(token) }
         } catch {
-            return (token, error as? MastodonSignInError ?? .unreachable)
+            return (token, .keychain, nil, handedBack)
         }
-        return (token, nil)
+        do {
+            return (token, nil, try await verify(token), handedBack)
+        } catch {
+            return (token, error as? MastodonSignInError ?? .unreachable, nil, handedBack)
+        }
     }
 
     /// What a sign-in that asked for `asked` is written down as holding, from the server's own
@@ -415,16 +431,19 @@ public struct MastodonOAuth: Sendable {
 
     /// The token, and **what the server says it granted** — which is not always what was asked
     /// for. `scope` is nothing where the server sent none; RFC 6749 lets it out only when the
-    /// grant is exactly the request.
+    /// grant is exactly the request. `handedBack` where the answer shows the token was made
+    /// before this trade (`handedBack(made:answered:after:)`).
     func exchange(
         code: String, verifier: String, clientID: String, clientSecret: String,
         scopes: String = MastodonOAuth.reading
-    ) async throws -> (accessToken: String, scope: String?) {
+    ) async throws -> (accessToken: String, scope: String?, handedBack: Bool) {
         struct Issued: Decodable {
             let access_token: String
             let scope: String?
+            let created_at: Int?
         }
-        let answer: Issued = try await post("/oauth/token", [
+        let asked = ContinuousClock.now
+        let (answer, date): (Issued, String?) = try await posted("/oauth/token", [
             ("grant_type", "authorization_code"),
             ("code", code),
             ("client_id", clientID),
@@ -434,29 +453,50 @@ public struct MastodonOAuth: Sendable {
             ("scope", scopes),
         ])
         guard !answer.access_token.isEmpty else { throw MastodonSignInError.unreadable }
-        return (answer.access_token, answer.scope)
+        let handedBack = Self.handedBack(made: answer.created_at, answered: date, after: asked.duration(to: .now))
+        return (answer.access_token, answer.scope, handedBack)
     }
 
-    func verify(_ token: MastodonToken) async throws {
+    /// Checks that the source honours `token`, and hands back the id it gives the account
+    /// the token signs in — nothing where its answer names none, or names one longer than
+    /// an id may run (`clientBytes`).
+    @discardableResult
+    func verify(_ token: MastodonToken) async throws -> String? {
+        struct Me: Decodable { let id: String? }
         guard let url = Host.httpsURL(host: host, path: "/api/v1/accounts/verify_credentials")
         else { throw MastodonSignInError.unreadable }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
-        let (_, response) = try await send(request)
+        let (body, response) = try await send(request)
         guard (200..<300).contains(response.statusCode) else {
             throw MastodonSignInError.http(response.statusCode)
         }
+        guard let id = (try? JSONDecoder().decode(Me.self, from: body))?.id,
+              !id.isEmpty, id.utf8.count <= Self.clientBytes
+        else { return nil }
+        return id
     }
 
-    /// Asks the server to forget the token. Best effort: signing out is done on this device
-    /// before this is asked, and nothing it answers changes that.
-    public func revoke(_ token: MastodonToken) async {
+    /// Asks the server to end a sign-in, and says what it answered. Best effort: signing out
+    /// is done on this device before this is asked, and nothing it answers changes that.
+    ///
+    /// **Only a 2xx is the source saying it has** — it answers so the first time and every
+    /// time after. **A 403 saying `unauthorized_client` is a refusal that asking again will
+    /// not change**: the sign-in is not this registration's to end. Anything else is no
+    /// answer to go by.
+    @discardableResult
+    public func revoke(_ left: MastodonLeft) async -> MastodonEnd {
         guard let request = Self.form(host: host, path: "/oauth/revoke", [
-            ("client_id", token.clientID),
-            ("client_secret", token.clientSecret),
-            ("token", token.accessToken),
-        ]) else { return }
-        _ = try? await sender.send(request)
+            ("client_id", left.clientID),
+            ("client_secret", left.clientSecret),
+            ("token", left.accessToken),
+        ]), let (body, response) = try? await sender.send(request)
+        else { return .unanswered }
+        if (200..<300).contains(response.statusCode) { return .ended }
+        // The source's own word for it, and not any 403: one from something in front of the
+        // source says nothing of whose the sign-in is.
+        let said = (try? JSONDecoder().decode(Refusal.self, from: body))?.error
+        return response.statusCode == 403 && said == "unauthorized_client" ? .refused : .unanswered
     }
 
     private struct Refusal: Decodable { let error: String }
@@ -464,6 +504,13 @@ public struct MastodonOAuth: Sendable {
     private func post<Answer: Decodable>(
         _ path: String, _ fields: [(String, String)]
     ) async throws -> Answer {
+        try await posted(path, fields).answer
+    }
+
+    /// `post`, and the moment the server says it answered, as its `Date` header spells it.
+    private func posted<Answer: Decodable>(
+        _ path: String, _ fields: [(String, String)]
+    ) async throws -> (answer: Answer, date: String?) {
         guard let request = Self.form(host: host, path: path, fields) else {
             throw MastodonSignInError.unreadable
         }
@@ -485,7 +532,31 @@ public struct MastodonOAuth: Sendable {
         guard let answer = try? JSONDecoder().decode(Answer.self, from: body) else {
             throw MastodonSignInError.unreadable
         }
-        return answer
+        return (answer, response.value(forHTTPHeaderField: "Date"))
+    }
+
+    /// Whether a token its answer dates `made` was made before the trade that answer, dated
+    /// `answered`, belongs to (#347): handed back, and so a sign-in somebody already has.
+    ///
+    /// A Mastodon dates a token the second it makes it, and a token handed back keeps its
+    /// first date. `took` is how long the trade took, as this device counted it.
+    ///
+    /// **Shown only where the token cannot have been made by this trade**: both dates are
+    /// whole seconds, so the token was made before the second after `made`, and the trade
+    /// was sent no sooner than `took` before `answered`. It is handed back where the first
+    /// is no later than the second — two seconds apart for a server that answers at once,
+    /// and more for one that is slow. **Anything less certain — or either date missing or
+    /// unreadable — is a token made here**, which is what every token was before this: one
+    /// not kept is then ended, where a fresh one read as handed back would be dropped live.
+    static func handedBack(made: Int?, answered: String?, after took: Duration) -> Bool {
+        guard let made, let answered else { return false }
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.timeZone = TimeZone(identifier: "GMT")
+        format.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        guard let date = format.date(from: answered) else { return false }
+        let waited = Double(took.components.seconds) + Double(took.components.attoseconds) / 1e18
+        return Double(made + 1) <= date.timeIntervalSince1970 - max(0, waited)
     }
 
     /// A transport failure is `.unreachable`; a reader walking away is `.cancelled`.
@@ -533,6 +604,57 @@ extension URLRequest {
     }
 }
 
+/// The hosts whose source said, **in its own words**, that the sign-in held there is over
+/// (#347) — noted by the door that heard it, and taken once by whoever goes on to end the
+/// earlier sign-ins this device left there.
+///
+/// **A bare 401 is not that.** Anything in front of a source can answer 401 to everything — a
+/// maintenance page behind a password, a firewall, a network's own sign-in page — and ending
+/// what was left on its word would sign the person's other devices out for good once it lifts.
+public final class MastodonEndings: @unchecked Sendable {
+    private let lock = NSLock()
+    private var said: Set<String> = []
+    private var dropped: Set<String> = []
+
+    public init() {}
+
+    func note(_ host: String, saidBySource: Bool, dropped count: Int) {
+        lock.withLock {
+            if saidBySource { said.insert(host.lowercased()) }
+            if count > 0 { dropped.insert(host.lowercased()) }
+        }
+    }
+
+    /// Whether `host`'s source said so since this was last asked. Asked once: the answer
+    /// goes with the asking.
+    public func takeSaid(_ host: String) -> Bool {
+        lock.withLock { said.remove(host.lowercased()) != nil }
+    }
+
+    /// The hosts where a 401 that was not the source's own took earlier sign-ins off this
+    /// device unended, since this was last asked: what the person is yet to be told.
+    public func takeDropped() -> Set<String> {
+        lock.withLock {
+            defer { dropped = [] }
+            return dropped
+        }
+    }
+
+    /// Whether a 401's body is a Mastodon's own answer to a token it does not honour — JSON
+    /// that names an `error`, as it answers one revoked ("The access token was revoked") and
+    /// one it never knew ("The access token is invalid"). A page, a line of text and nothing
+    /// at all are somebody else's.
+    ///
+    /// **JSON naming an `error` from something that is not the source still passes**: the
+    /// sentence itself is the source's to word, and in the language asked for, so it is
+    /// not read. To follow up, once a capture of a revoked token's 401 shows the source
+    /// sends it: require `WWW-Authenticate: Bearer … error="invalid_token"` as well.
+    static func isSourcesOwn(_ body: Data) -> Bool {
+        struct Said: Decodable { let error: String }
+        return (try? JSONDecoder().decode(Said.self, from: body))?.error.isEmpty == false
+    }
+}
+
 /// The one door a signed-in request goes through (#25b reads Home and lists here).
 ///
 /// The address is built from the token's own host, so the token is only ever sent there; a
@@ -543,15 +665,25 @@ extension URLRequest {
 /// must not wipe a token that works. Confirmed, the token is forgotten — only if it is still the
 /// one held, so a late answer about a replaced token cannot take the new one — and `.signedOut`
 /// is thrown. 403, 5xx and a failed connection leave it alone.
+///
+/// **Whether the source said so itself is noted apart** (#347, `MastodonEndings`): any 401
+/// from the account check forgets the token, as it always has, and only one that reads as the
+/// source's own answer is a reason to end anything else. Any other takes the earlier sign-ins
+/// left there off the device unended, with the token and in one step of the store.
 public struct MastodonAuthorized: Sendable {
     public let token: MastodonToken
     private let sender: any HTTPSender
     private let store: any MastodonTokenStore
+    private let endings: MastodonEndings?
 
-    public init(token: MastodonToken, sender: any HTTPSender, store: any MastodonTokenStore) {
+    public init(
+        token: MastodonToken, sender: any HTTPSender, store: any MastodonTokenStore,
+        endings: MastodonEndings? = nil
+    ) {
         self.token = token
         self.sender = sender
         self.store = store
+        self.endings = endings
     }
 
     static let accountCheck = "/api/v1/accounts/verify_credentials"
@@ -655,12 +787,12 @@ public struct MastodonAuthorized: Sendable {
         case 200..<300:
             return result.body
         case 401:
-            if path != Self.accountCheck,
-               (try? await send(path: Self.accountCheck))?.status != 401
-            {
-                throw MastodonAuthError.http(401)
-            }
-            guard (try? store.forget(token)) == true else { throw MastodonAuthError.http(401) }
+            let check = path == Self.accountCheck ? result : try? await send(path: Self.accountCheck)
+            guard let check, check.status == 401 else { throw MastodonAuthError.http(401) }
+            let own = MastodonEndings.isSourcesOwn(check.body)
+            // One step in the store: no pass over what was left can come between the two.
+            guard let dropped = try? store.forget(token, saidBySource: own) else { throw MastodonAuthError.http(401) }
+            endings?.note(token.host, saidBySource: own, dropped: dropped)
             throw MastodonAuthError.signedOut
         default:
             throw MastodonAuthError.http(result.status)

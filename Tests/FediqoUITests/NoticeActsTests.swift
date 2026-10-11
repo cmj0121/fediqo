@@ -306,6 +306,18 @@ struct NoticeActsTests {
         #expect(help.contains(english ? "bookmarks" : "書籤"))
     }
 
+    /// The read-or-act question as the session puts it: the question itself, and — over a
+    /// sign-in held — what it says first of the sign-in an answer may end (#347, pinned in
+    /// `MastodonLeftTests`).
+    private func put(_ session: ShellSession, _ host: String, notices: Bool = false) -> ShellConfirmation {
+        var question = ShellQuestion.signIn(host: host, notices: notices)
+        guard let ends = session.mastodon.signInEnds(host: host, notices: notices) else { return question }
+        (question.line, question.help) = ShellQuestion.saying(
+            ShellQuestion.signInEnds(ends, host: host), line: question.line, help: question.help
+        )
+        return question
+    }
+
     @Test("Every place that raises an ordinary sign-in question asks the session, which reads what that sign-in will carry: the question and the page it leads to agree")
     func theQuestionAndThePageAgree() async throws {
         let beforeBookmarks = MastodonOAuth.scopes(writing: true, bookmarks: false, notices: true)
@@ -314,12 +326,12 @@ struct NoticeActsTests {
         ])
         // A sign-in that reads notices, asked what it may do: the row's own press for writing.
         #expect(session.mastodon.carriesNotices(host: Self.a))
-        #expect(session.signInQuestion(host: Self.a) == ShellQuestion.signIn(host: Self.a, notices: true))
+        #expect(session.signInQuestion(host: Self.a) == put(session, Self.a, notices: true))
         #expect(session.signInQuestion(host: "A.Example").line == session.signInQuestion(host: Self.a).line)
         // One never asked for notices, and a source nobody is signed in to, carry none.
         for host in [Self.b, "d.example", "nobody.example"] {
             #expect(!session.mastodon.carriesNotices(host: host))
-            #expect(session.signInQuestion(host: host) == ShellQuestion.signIn(host: host))
+            #expect(session.signInQuestion(host: host) == put(session, host))
             #expect(session.bookmarkQuestion(host: host) == ShellQuestion.bookmarks(host: host))
         }
         // The bookmark question, which a post's row and Account both put.
@@ -331,7 +343,7 @@ struct NoticeActsTests {
             let page = NoticeActPage()
             await session.signIn(host: Self.a, through: page, writing: writing)
             #expect(page.scopes == [wanted], "the page asked for other than the question said")
-            #expect(session.signInQuestion(host: Self.a) == ShellQuestion.signIn(host: Self.a, notices: true))
+            #expect(session.signInQuestion(host: Self.a) == put(session, Self.a, notices: true))
         }
         let asked = NoticeActPage()
         await session.allowBookmarks(host: "c.example", through: asked)
@@ -356,7 +368,7 @@ struct NoticeActsTests {
         try allow(Self.a, F.reads)
         #expect(session.mastodon.carriesNotices(host: Self.a))
         #expect(session.signInAsked(host: Self.a) == asked, "a card drawn again came to say something else")
-        #expect(session.signInQuestion(host: Self.a) == ShellQuestion.signIn(host: Self.a))
+        #expect(session.signInQuestion(host: Self.a) == put(session, Self.a))
         let page = NoticeActPage()
         session.putDownSignInChoice()
         await session.signIn(host: Self.a, through: page, writing: true, noticesSaid: asked.notices)
@@ -367,7 +379,7 @@ struct NoticeActsTests {
         try allow(Self.a, F.acts)
         session.signInChoice = Self.a
         let again = session.signInAsked(host: Self.a)
-        #expect(again.notices && session.signInQuestion(host: Self.a) == ShellQuestion.signIn(host: Self.a, notices: true))
+        #expect(again.notices && session.signInQuestion(host: Self.a) == put(session, Self.a, notices: true))
         // Said to carry them and since lost: the page asks for less, never more.
         try allow(Self.a, F.plainActing)
         let less = NoticeActPage()

@@ -616,7 +616,8 @@ struct AccountPane: View {
                             session.progress, drawnAs: session.stage, host: row.source.host
                         ),
                         refusal: session.rowRefusal,
-                        notice: session.forums.notice(host: row.source.host)?.sentence(),
+                        notice: session.forums.notice(host: row.source.host)?.sentence()
+                            ?? session.mastodon.leftLine(host: row.source.host),
                         clearAsks: { session.clearQuestion(host: row.source.host) },
                         removeAsks: { session.removeQuestion(host: row.source.host, postsStay: postsStay()) },
                         presses: presses(row, postsStay: postsStay)

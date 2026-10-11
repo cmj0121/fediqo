@@ -841,6 +841,22 @@
 "account.mastodon.ended.title"        = "Signed out by the server";
 "account.mastodon.ended.detail"       = "%@ ended this sign-in. What it brought in is still here; sign in again on Account to read it as you.";
 "account.mastodon.ended.line" = "%@ ended this sign-in.";
+/* What this device left at a source (#347) */
+"account.signout.ask.others" = "Any other device carrying this sign-in is signed out too.";
+"account.signin.ask.ends.read" = "Sign in to read ends the sign-in this device has at %@, and so does signing in as another account. Any other device carrying this sign-in is signed out too.";
+"account.signin.ask.ends.either" = "Either answer ends the sign-in this device has at %@. Any other device carrying this sign-in is signed out too.";
+"account.signin.ask.ends.another" = "Signing in as another account ends the sign-in this device has at %@. Any other device carrying this sign-in is signed out too.";
+"account.mastodon.ended.left" = "Other devices carrying an earlier form of the sign-in at %@ are signed out too.";
+"account.left.owed" = "%1$d earlier sign-ins at %2$@ could not be ended yet.";
+"account.left.owed.one" = "%1$d earlier sign-in at %2$@ could not be ended yet.";
+"account.signout.unconfirmed.title" = "Sign-out not confirmed";
+"account.signout.unconfirmed.line" = "%1$@ did not confirm the sign-out. This device has forgotten the sign-in; to be sure it is ended everywhere, remove every Fediqo entry from %1$@'s list of authorised apps.";
+"account.left.refused.title" = "Earlier sign-in not ended";
+"account.left.refused.line" = "%1$@ refused to end an earlier sign-in this device left there, and is not asked again. To be sure it is ended, remove every Fediqo entry from %1$@'s list of authorised apps, then sign in again.";
+"account.left.others.title" = "Earlier sign-ins ended";
+"account.left.others.line" = "The sign-in at %@ is now another account's, so the earlier sign-ins this device had left there were ended.";
+"account.left.unknown.title" = "Earlier sign-in ended";
+"account.left.unknown.line" = "Fediqo could not confirm that the sign-in this device had at %@ was the same account's, so it was ended there. Any other device carrying it is signed out too.";
 
 /* #25 — Home and your lists, read as you, and choosing which lists. */
 "account.mastodon.home.progress"      = "Reading your Home on %@…";
