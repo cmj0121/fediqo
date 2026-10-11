@@ -872,6 +872,7 @@ struct TimelinePane: View {
         // What `y` does (#284), and it says so itself: one act, one outcome, whichever asked.
         acting.keep = { Task { await session.toggleKept(item) } }
         acting.ask = { _ in session.askToBookmark(item) }
+        acting.locks = session.locks(on: item, acts: acting.acts)
         // Taking back is an item of the row's `…` (#109), built only where the post offers it:
         // the question the key `d` asks, about the copy that goes, and a yes that refuses what
         // that asking refuses.

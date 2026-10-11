@@ -649,12 +649,19 @@ struct JoinSheet: View {
 
     /// What the source's row had to cut to its one line, whole (#244): the errand running, a
     /// refusal of the last press and the forum's own notice — each of them, not only the first.
+    /// And last, what its sign-in holds, part by part and whole (#347): read as the page is
+    /// drawn, and not there for a source with no sign-in or no parts.
+    func standingLines(_ host: String, language: DummyLanguage? = nil) -> [String] {
+        SourceRow.statusLines(
+            waiting: SourceRow.waitingLine(session.progress, drawnAs: nil, host: host),
+            refusal: session.rowRefusal, notice: session.forums.notice(host: host)?.sentence(), host: host,
+            language: language
+        ) + [session.mastodon.holds(host: host, whole: true, language: language)].compactMap { $0 }
+    }
+
     @ViewBuilder
     private func standing(_ host: String) -> some View {
-        let lines = SourceRow.statusLines(
-            waiting: SourceRow.waitingLine(session.progress, drawnAs: nil, host: host),
-            refusal: session.rowRefusal, notice: session.forums.notice(host: host)?.sentence(), host: host
-        )
+        let lines = standingLines(host)
         if !lines.isEmpty {
             SourceStanding(lines: lines)
                 .padding(ShellSpace.pad)

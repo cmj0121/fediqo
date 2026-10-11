@@ -618,6 +618,8 @@ struct AccountPane: View {
                         refusal: session.rowRefusal,
                         notice: session.forums.notice(host: row.source.host)?.sentence()
                             ?? session.mastodon.leftLine(host: row.source.host),
+                        holds: session.mastodon.holds(host: row.source.host),
+                        lock: session.mastodon.bookmarkPlace(host: row.source.host),
                         clearAsks: { session.clearQuestion(host: row.source.host) },
                         removeAsks: { session.removeQuestion(host: row.source.host, postsStay: postsStay()) },
                         presses: presses(row, postsStay: postsStay)

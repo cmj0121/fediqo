@@ -875,6 +875,16 @@
 "part.notices.ask.line" = "它的頁面會問你已允許的，並加上你的通知。";
 "part.notices.ask.detail" = "%1$@ 自己的登入頁面會打開，問這個登入已經有的，再多問一件事——你的通知：讀取 %1$@ 說在那裡發生在你身上的事，以及它擋下的通知。不會先登出，這台裝置和其他裝置都不會：關掉那一頁，或在上面拒絕，你原有的登入都照舊。";
 "part.notices.ask.beside" = "因為這個登入之後既能以你的身分寫入，又能讀取通知，它的頁面還會問移除通知，以及放行或放下被擋下的通知。";
+/* What a sign-in holds, part by part (#347): its row and its source's page. */
+"part.held.line" = "這個登入允許：%@。";
+"part.held.partly" = "%@（部分）";
+"part.held.other" = "這個登入有 %@，是這個版本的 Fediqo 不會問的。";
+"part.reading.name" = "以你的身分讀取";
+"part.search.name" = "以你的身分搜尋";
+"part.acting.name" = "以你的身分寫入";
+"part.bookmarks.name" = "書籤";
+"part.notices.name" = "你的通知";
+"part.notices.name.beside" = "移除通知";
 
 /* #25 — Home and your lists, read as you, and choosing which lists. */
 "account.mastodon.home.progress"      = "正在讀你在 %@ 的首頁…";

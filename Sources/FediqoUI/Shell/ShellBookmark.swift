@@ -114,3 +114,38 @@ extension ShellSession {
         await write()
     }
 }
+
+extension MastodonSessions {
+    /// What a place draws where the bookmark would be (#347), for how the sign-in at `host`
+    /// stands to bookmarks — `PartWords.place`, the one reading every place draws from: never
+    /// asked, refused on the source's own page, none there, or the source being asked now.
+    ///
+    /// Nothing where the bookmark is offered, and nothing where bookmarks are not what is
+    /// in the way: no sign-in; one that does not act, which has nothing to add them to and
+    /// whose row already says to sign in to act; and a source that turned a bookmark away
+    /// this run — its sign-in holds bookmarks, so that is no standing, and it is said in its
+    /// own words until the next sign-in.
+    func bookmarkPlace(host raw: String) -> PartWords.Place? {
+        let host = raw.lowercased()
+        guard let held = heldParts[host], MastodonParts.holds(.acting, in: held.scopes),
+              let standing = standing(.bookmarks, host: host)
+        else { return nil }
+        return PartWords.place(standing, of: .bookmarks, asking: asking.contains(host))
+    }
+}
+
+extension ShellSession {
+    /// The locks of a row's marks (`ItemActing.locks`): the bookmark's, where the row offers
+    /// its other acts and not that one. It is about the source the press asks (`askingCopy`);
+    /// where no copy's sign-in can be asked, about the first whose source has none.
+    func locks(on item: DummyItem, acts: PostActs) -> [PostAct: ItemActing.Lock] {
+        guard !acts.offers(.bookmark), !acts.offered.isEmpty else { return [:] }
+        let asked = askingCopy(of: item, for: .bookmark)
+        for copy in asked.map({ [$0] }) ?? item.actCopies {
+            let host = copy.source.host.lowercased()
+            guard let place = mastodon.bookmarkPlace(host: host), asked != nil || place.kind == PartWords.Place.Kind.none else { continue }
+            return [.bookmark: ItemActing.Lock(place: place, host: host)]
+        }
+        return [:]
+    }
+}

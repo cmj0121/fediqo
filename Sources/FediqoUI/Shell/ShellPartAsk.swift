@@ -270,17 +270,33 @@ enum PartWords {
     }
 
     /// The most words a question names as given up, and the most of each: they are whatever
-    /// a source chose to call them.
+    /// a source chose to call them. And the most a source's own page lists (`holds`), where
+    /// every one is to be said.
     static let wordsShown = 3
     static let wordLength = 24
+    static let wordsWhole = 32
 
-    /// The words a question says are given up: the first few, each cut short, and how many
-    /// more there are.
-    static func shown(_ words: [String], language: DummyLanguage? = nil) -> String {
-        let few = words.prefix(wordsShown).map { $0.count > wordLength ? String($0.prefix(wordLength)) + "…" : $0 }
+    /// The words a question says are given up: the first few — `most` of them — each cut
+    /// short, and how many more there are.
+    ///
+    /// **Only what can be seen of a word is shown**: a mark that turns the line round, or
+    /// any other character that draws nothing, is left out, and so is a word made of nothing
+    /// else.
+    static func shown(_ words: [String], most: Int = wordsShown, language: DummyLanguage? = nil) -> String {
+        let seen = words.map { String(String.UnicodeScalarView($0.unicodeScalars.filter(isSeen))) }.filter { !$0.isEmpty }
+        let few = seen.prefix(most).map { $0.count > wordLength ? String($0.prefix(wordLength)) + "…" : $0 }
         let listed = few.joined(separator: ", ")
-        guard words.count > few.count else { return listed }
-        return String(format: L10n.t("part.ask.givesUp.more", language: language), listed, words.count - few.count)
+        guard seen.count > few.count else { return listed }
+        return String(format: L10n.t("part.ask.givesUp.more", language: language), listed, seen.count - few.count)
+    }
+
+    /// Whether a scalar of a source's word draws anything: not a control character, and not
+    /// one that only directs the text around it.
+    private static func isSeen(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.properties.generalCategory {
+        case .control, .format, .lineSeparator, .paragraphSeparator: false
+        default: true
+        }
     }
 
     /// What a place draws where a part's act would be, for one standing of the sign-in.

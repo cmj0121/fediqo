@@ -140,7 +140,8 @@ struct SourceRow: Identifiable, Hashable {
     /// What may be done on this source, in the reader's own words (#69).
     ///
     /// **Said, and not drawn.** `spoken(_:)` says it on every row — four words and no silence, so
-    /// a listener never has to read a source by what is missing — and what a sighted reader is
+    /// a listener never has to read a source by what is missing, unless what the sign-in holds
+    /// is listed after it and says more (`spoken`'s `listed`) — and what a sighted reader is
     /// shown is the one case that asks something of them: the permission control (`owed`).
     ///
     /// **No `default:`**, this file's rule everywhere it switches over a closed set.
@@ -182,8 +183,14 @@ struct SourceRow: Identifiable, Hashable {
     /// what the row stopped drawing and its detail still shows — what may be done here, the
     /// figures, the evidence line and the board names **whole** — so a reader who cannot see the
     /// detail is owed nothing by the row.
+    ///
+    /// **`listed` is whether what the sign-in holds is said after this, part by part**
+    /// (`heard`): the one word for reading or writing is then left to it, since a sign-in that
+    /// only reads may hold a part that acts. The word stays where nothing is listed — no
+    /// sign-in, a source with no parts — and for a write the source refused, which no listing
+    /// says.
     @MainActor
-    static func spoken(_ row: SourceRow) -> String {
+    static func spoken(_ row: SourceRow, listed: Bool = false) -> String {
         var said = [String(
             format: L10n.t("source.spoken"),
             row.source.host,
@@ -193,7 +200,7 @@ struct SourceRow: Identifiable, Hashable {
         // Straight after the identity and before the figures: it is what decides whether a press
         // on this source can ever write, so it is not left to the end of a sentence a reader may
         // stop listening to.
-        said.append(L10n.t(writingKey(row.writing)))
+        if !listed || row.writing == .refused { said.append(L10n.t(writingKey(row.writing))) }
         said += figures(row.profile)
         if let evidence = evidenceKey(row.profile) { said.append(L10n.t(evidence)) }
         if let boards = boardsLine(row.source) { said.append(boards) }
@@ -449,9 +456,18 @@ extension SourceRow {
     /// What the permission control says beyond its word — to the pointer, to VoiceOver, and at
     /// the head of the row's `…`, which is where a finger reads it. Nothing where nothing is
     /// owed. **The only place a row says why**: no sentence stands on the page about it.
-    static func permissionLine(_ row: SourceRow, language: DummyLanguage? = nil) -> String? {
+    ///
+    /// `lock` is how the sign-in's bookmarks stand, where that is what is owed
+    /// (`MastodonSessions.bookmarkPlace`): **its line is then the control's** — never asked in
+    /// the words above, refused on the source's page in the line that asks again, and being
+    /// asked now. A write turned away is said before it, as it is asked before it. **Only
+    /// a place that asks, or the asking one**: a source with none owes nothing for it, and its
+    /// line is never the control's.
+    static func permissionLine(_ row: SourceRow, lock: PartWords.Place? = nil, language: DummyLanguage? = nil) -> String? {
         guard row.owed != .nothing else { return nil }
-        return String(format: L10n.t("account.source.permission", language: language), row.source.host)
+        var key = "account.source.permission"
+        if row.owed == .asking, let lock, lock.asks || lock.kind == .asking { key = lock.key }
+        return String(format: L10n.t(key, language: language), row.source.host)
     }
 
     /// The word drawn after the permission glyph: one word whatever is owed, since the cure is
@@ -462,12 +478,16 @@ extension SourceRow {
     /// its sentence, and a mark's two looks — live, or dim for now while the row's acts are not
     /// live. **The look decides the press** (`ShellMark.press`), so a control that cannot be
     /// pressed is never drawn as one that can, and says "not right now" after its sentence.
+    ///
+    /// **While the source is being asked, it is dim too**: one thing is asked of a source at a
+    /// time, the line says so, and a press would raise nothing.
     static func permission(
-        _ row: SourceRow, actsLive: Bool, language: DummyLanguage? = nil
+        _ row: SourceRow, actsLive: Bool, lock: PartWords.Place? = nil, language: DummyLanguage? = nil
     ) -> ShellMark? {
-        guard let line = permissionLine(row, language: language) else { return nil }
+        guard let line = permissionLine(row, lock: lock, language: language) else { return nil }
+        let asking = row.owed == .asking && lock?.kind == .asking
         return ShellMark(
-            permissionSymbol, line, look: actsLive ? .live : .dim(.notNow),
+            permissionSymbol, line, look: actsLive && !asking ? .live : .dim(.notNow),
             word: L10n.t(permissionWord, language: language)
         )
     }
@@ -500,14 +520,19 @@ extension SourceRow {
     }
 
     /// What stands at the head of the row's `…` before any dim mark's reason: every standing
-    /// sentence, then what the permission glyph says.
-    static func head(_ row: SourceRow, said: [String], language: DummyLanguage? = nil) -> [String] {
-        said + [permissionLine(row, language: language)].compactMap { $0 }
+    /// sentence, then what the sign-in holds, part by part (`holds`, #347) — the only place
+    /// a finger reads it on the row — then what the permission glyph says.
+    static func head(
+        _ row: SourceRow, said: [String], holds: String? = nil, lock: PartWords.Place? = nil,
+        language: DummyLanguage? = nil
+    ) -> [String] {
+        said + [holds, permissionLine(row, lock: lock, language: language)].compactMap { $0 }
     }
 
-    /// What a listener is told of the row: what it is, and then whatever it has to say.
-    static func heard(row: String, said: [String]) -> String {
-        ([row] + said).joined(separator: " ")
+    /// What a listener is told of the row: what it is, then whatever it has to say, and then
+    /// what its sign-in holds — one sentence, as it is written.
+    static func heard(row: String, said: [String], holds: String? = nil) -> String {
+        ([row] + said + [holds].compactMap { $0 }).joined(separator: " ")
     }
 
     /// What each press of a row does, handed in by the page: the row acts on nothing itself.
@@ -552,17 +577,17 @@ extension SourceRow {
     /// not once a row each time the list is drawn.
     @MainActor
     static func more(
-        _ row: SourceRow, actsLive: Bool, said: [String],
+        _ row: SourceRow, actsLive: Bool, said: [String], holds: String? = nil, lock: PartWords.Place? = nil,
         clearAsks: @escaping () -> ShellConfirmation,
         removeAsks: @escaping () -> ShellConfirmation, presses: Presses
     ) -> ShellMore {
         func mark(_ control: Control) -> ShellMark {
             Self.mark(control, source: row.source, signedIn: row.signedIn, actsLive: actsLive)
         }
-        let drawn = [permission(row, actsLive: actsLive)].compactMap { $0 } + onRow.map(mark)
+        let drawn = [permission(row, actsLive: actsLive, lock: lock)].compactMap { $0 } + onRow.map(mark)
         let own = presses.ownPage.map { ShellMoreItem.plain(ownPageSymbol, ownPageLabel(row.source.host), act: $0) }
         return ShellMore(
-            head: head(row, said: said) + ShellMore.reasons(of: drawn),
+            head: head(row, said: said, holds: holds, lock: lock) + ShellMore.reasons(of: drawn),
             items: [own].compactMap { $0 } + [
                 .plain(mark(.boards), act: presses.changeBoards),
                 .plain(mark(.lists), act: presses.chooseLists),
@@ -697,6 +722,13 @@ struct SourceRowView: View {
     /// it in again and why, or that a password was not kept or not deleted — already a sentence.
     /// The caller asks `ForumSessions.notice(host:)` for this row's host; nothing here looks.
     var notice: String? = nil
+    /// What this source's sign-in holds, part by part, already a sentence (#347) — or nothing
+    /// where it has no sign-in or its kind of source has no parts. Handed in as `notice` is:
+    /// the caller asks `MastodonSessions.holds(host:)`, and nothing here looks.
+    var holds: String? = nil
+    /// How the sign-in's bookmarks stand where they are not held (#347), which is what the
+    /// permission control then says — `MastodonSessions.bookmarkPlace(host:)`, handed in.
+    var lock: PartWords.Place? = nil
     /// Builds the question Clear asks. Handed in: what it says depends on a saved password and a
     /// sign-in, which are the session's to know — and called only when Clear is chosen.
     let clearAsks: () -> ShellConfirmation
@@ -740,9 +772,14 @@ struct SourceRowView: View {
     /// acts that take something away are destructive items of it.
     var more: ShellMore {
         SourceRow.more(
-            row, actsLive: actsLive, said: said, clearAsks: clearAsks, removeAsks: removeAsks,
-            presses: presses
+            row, actsLive: actsLive, said: said, holds: holds, lock: lock, clearAsks: clearAsks,
+            removeAsks: removeAsks, presses: presses
         )
+    }
+
+    /// What a listener is told of the row. Internal for `more`'s reason.
+    var heard: String {
+        SourceRow.heard(row: SourceRow.spoken(row, listed: holds != nil), said: said, holds: holds)
     }
 
     /// `more`, as the builder `…` calls when it is opened.
@@ -755,7 +792,7 @@ struct SourceRowView: View {
 
     /// The permission control, where one is owed. Internal for `key`'s reason.
     var permission: ShellMark? {
-        SourceRow.permission(row, actsLive: actsLive)
+        SourceRow.permission(row, actsLive: actsLive, lock: lock)
     }
 
     /// Whether the line drawn carries the permission control's word. What a hosted row is asked
@@ -819,7 +856,7 @@ struct SourceRowView: View {
             .disabled(pressed == .inert)
             .help(String(format: L10n.t("account.source.open"), row.source.host))
             // Every word of the row, and everything it has to say, though none of it is drawn.
-            .accessibilityLabel(SourceRow.heard(row: SourceRow.spoken(row), said: said))
+            .accessibilityLabel(heard)
             .accessibilityHint(Text(L10n.t("account.source.open.hint")))
             // Spaced so no two presses overlap (`ShellTouchFloor.gap`), and never squeezed: under
             // a narrow page it is the hostname that gives way, by its middle. The worded control

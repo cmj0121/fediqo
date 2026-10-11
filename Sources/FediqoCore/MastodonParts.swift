@@ -184,6 +184,28 @@ public enum MastodonParts {
         return words(held.asked).isDisjoint(with: missing) ? .unasked : .notGiven
     }
 
+    /// What a sign-in holds, part by part, by its scope string — **every word of it said
+    /// once**: a part whole, a part held in part, the act a part gains beside acting, and a
+    /// word this table does not know. Read off the table alone, so a part added to it is
+    /// listed with no edit here. In the table's order; the words it does not know, as held.
+    ///
+    /// **Nothing here is how a sign-in is called** — one that reads, one that acts: a sign-in
+    /// holds parts, and a part stands by itself (#347).
+    public static func holdings(in scopes: String?) -> MastodonHoldings {
+        let has = words(scopes)
+        var entries: [MastodonHoldings.Entry] = []
+        for part in MastodonPart.allCases {
+            let held = part.words.filter(has.contains)
+            if held.count == part.words.count {
+                entries.append(.whole(part))
+            } else if !held.isEmpty {
+                entries.append(.partly(part))
+            }
+            if part.wordsBesideActing.contains(where: has.contains) { entries.append(.beside(part)) }
+        }
+        return MastodonHoldings(entries: entries, other: unknown(in: scopes))
+    }
+
     /// Words as the one string a source reads them in.
     private static func spelt(_ words: [String]) -> String {
         words.joined(separator: " ")
@@ -246,4 +268,22 @@ public enum MastodonPartStanding: Sendable, Equatable, CaseIterable {
     /// Asked, and the source gave none of it — or has none to give. Asking again would get
     /// the same answer.
     case notGiven
+}
+
+/// What a sign-in holds, part by part (`MastodonParts.holdings`).
+public struct MastodonHoldings: Sendable, Equatable {
+    public enum Entry: Sendable, Equatable {
+        /// Every word of the part.
+        case whole(MastodonPart)
+        /// Some of its words, and not all.
+        case partly(MastodonPart)
+        /// The act the part gains beside acting (`MastodonPart.wordsBesideActing`).
+        case beside(MastodonPart)
+    }
+
+    /// What is held of the table's parts, in the table's order.
+    public let entries: [Entry]
+    /// The held words the table does not know, in the order held — the source's one word
+    /// for every read, or for every write, among them.
+    public let other: [String]
 }

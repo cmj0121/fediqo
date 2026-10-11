@@ -50,6 +50,22 @@ struct ItemActing {
     /// on a sign-in made before it was asked for. It raises the question and sends nothing.
     /// Nothing where the list cannot act, and then the dim mark's press goes nowhere.
     var ask: ((PostAct) -> Void)?
+    /// What an act's mark says where the sign-in does not hold its part (#347): how the
+    /// sign-in stands to it, as every place draws a standing (`PartWords.place`). Missing for
+    /// an act that is offered, and for one whose part is not what keeps it from being.
+    var locks: [PostAct: Lock] = [:]
+
+    /// One act's lock: the standing's place, and the source whose sign-in it is about.
+    struct Lock: Equatable {
+        let place: PartWords.Place
+        let host: String
+
+        /// The place's line. Nothing where it was never asked: the dim mark's own reason
+        /// says that, and says it once.
+        func line(language: DummyLanguage? = nil) -> String? {
+            place.kind == .unasked ? nil : String(format: L10n.t(place.key, language: language), host)
+        }
+    }
     /// Taking the post back (#109), which is never a mark: the question it asks and what its yes
     /// does, for the one destructive item of the row's `…`. Nothing where the list cannot act,
     /// or the post does not offer it.
@@ -281,7 +297,7 @@ extension ItemActs {
     static func look(
         _ act: PostAct, acting: ItemActing, language: DummyLanguage? = nil
     ) -> (look: MarkLook, why: String?) {
-        look(act, acting: acting, refused: refused(acting, language: language))
+        look(act, acting: acting, refused: refused(acting, language: language), language: language)
     }
 
     /// Why the post offers no act, where it offers none: the reason its marks are dim for, and
@@ -292,9 +308,21 @@ extension ItemActs {
         acting.acts.refused.map { (reason($0), refusalLine($0, language: language)) }
     }
 
+    /// **A mark whose part the sign-in does not hold is dim whatever its standing** — the
+    /// mark does not change — **and the standing decides what it says and what a press
+    /// does** (`ItemActing.locks`): never asked or refused on the source's page, the press
+    /// asks; while the source is being asked, and where it has none, there is no press.
     private static func look(
-        _ act: PostAct, acting: ItemActing, refused: (reason: DimReason, line: String)?
+        _ act: PostAct, acting: ItemActing, refused: (reason: DimReason, line: String)?, language: DummyLanguage?
     ) -> (look: MarkLook, why: String?) {
+        if let lock = acting.locks[act] {
+            let line = lock.line(language: language)
+            switch lock.place.kind {
+            case .unasked, .refused: return (.dim(.askAgain), line)
+            case .asking: return (.dim(.notNow), line)
+            case .none: return (.dim(.never), line)
+            }
+        }
         if acting.acts.asks(act) { return (.dim(.askAgain), nil) }
         if let refused { return (.dim(refused.reason), refused.line) }
         guard acting.acts.offers(act) else {
@@ -331,7 +359,7 @@ extension ItemActs {
             switch kind {
             case .act(let act):
                 let shown = mark(act, on: item, acting: acting, language: language)
-                let (look, why) = look(act, acting: acting, refused: refused)
+                let (look, why) = look(act, acting: acting, refused: refused, language: language)
                 let count = (shown.count ?? 0) > 0 ? shown.count : nil
                 return made(kind, ShellMark(shown.glyph, shown.spoken, look: look, on: shown.done, count: count), why: why)
             case .quote:
@@ -405,8 +433,11 @@ extension ItemActs {
         for mark in marks {
             if mark.kind == .quote { quoted.append(mark.label) } else { shared.append(mark.mark) }
         }
+        // A lock's own line, after its mark's reason: what a finger is told of how the
+        // sign-in stands, where a pointer and VoiceOver hear it on the mark.
+        let locked = PostAct.allCases.compactMap { acting.locks[$0]?.line(language: language) }
         let head = head(for: item, here: here, refused: acting.acts.refused, language: language)
-            + ShellMore.reasons(of: shared, language: language) + quoted
+            + ShellMore.reasons(of: shared, language: language) + locked + quoted
         return ShellMore(head: head, items: items)
     }
 
