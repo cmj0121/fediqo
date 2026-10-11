@@ -112,6 +112,13 @@ struct TagPane: View {
     var failed: [String] = []
     /// Which of the timeline's sources were asked and why the rest were not (#197), or nothing.
     var reach: String?
+    /// One line a source the reader is signed in to and that says who people are (#318):
+    /// whether they follow the hashtag there, or how the sign-in stands. None for a forum.
+    var follows: [TagFollowLine] = []
+    /// A line's press at one source: follow or unfollow, or ask again whether it is followed.
+    var onFollow: (TagFollowLine) -> Void = { _ in }
+    /// A lock's press: the question that asks that source's sign-in for who the reader follows.
+    var onAskFollows: (String) -> Void = { _ in }
     let catalogues: EmojiCatalogueStore
     var catalogueSettled: Bool = false
     let posts: ForumPosts
@@ -139,6 +146,12 @@ struct TagPane: View {
             ShellRule()
             heading
             ShellRule()
+            if !follows.isEmpty {
+                ForEach(follows) { line in
+                    TagFollowRow(line: line, onPress: { onFollow(line) }, onAsk: { onAskFollows(line.host) })
+                }
+                ShellRule()
+            }
             // Where the page's rows came from, as a search says it under its field (#197). Wraps
             // rather than truncates, since the names are the point.
             if let reach {
@@ -309,6 +322,77 @@ struct TagPane: View {
             onTurn: { onTurnRow(item) },
             onEnded: { playback.stop() }
         )
+    }
+}
+
+/// One source's line under a hashtag's heading (#318): at which source, whether the reader
+/// follows the hashtag there as the source last said, and the press for the other — or, where
+/// the sign-in does not hold who the reader follows, how it stands, dim with the lock.
+///
+/// It draws what it is handed and asks nothing: the asking and the press are
+/// `ShellTagFollow`'s.
+struct TagFollowRow: View {
+    let line: TagFollowLine
+    var onPress: () -> Void
+    var onAsk: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if line.isLocked {
+                locked
+            } else {
+                WordsThenPress(words: words, press: press)
+            }
+            if let missed = line.missedWords() {
+                // A press that did not arrive, in full ink under the line it left as it was.
+                Text(missed)
+                    .shellFont(.meta)
+                    .foregroundStyle(ShellChrome.ink(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, ShellSpace.pad)
+                    .padding(.bottom, ShellSpace.snug)
+            }
+        }
+    }
+
+    private var words: some View {
+        Text(line.words())
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .accessibilityAddTraits(line.offers == nil ? .updatesFrequently : [])
+    }
+
+    @ViewBuilder
+    private var press: some View {
+        if let word = line.pressWords() {
+            let spoken = line.pressSpoken() ?? word
+            ShellLinkButton(word, action: onPress)
+                .accessibilityLabel(spoken)
+                .help(spoken)
+                .fixedSize()
+        }
+    }
+
+    /// How the sign-in stands, dim, after the glyph a source's row draws where its sign-in
+    /// must be asked again: the whole line is the press where it asks, and words where not.
+    @ViewBuilder
+    private var locked: some View {
+        let label = Label(line.words(), systemImage: SourceRow.permissionSymbol)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.markDim(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.snug)
+        if line.offers == .ask {
+            Button(action: onAsk) { label.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .help(L10n.t("mark.dim.askAgain"))
+        } else {
+            label
+        }
     }
 }
 

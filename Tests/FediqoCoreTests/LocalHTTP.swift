@@ -161,6 +161,12 @@ enum LocalServers {
                 let token: String
             }
             let narrow: Token?
+            /// A sign-in of the writer's that reads and holds both words of follows, and nothing
+            /// else that acts (#318). Nothing in a file a seed older than that wrote.
+            let following: Token?
+            /// The same without the word that changes who they follow: it only sees. Nothing
+            /// in a file a seed older than that wrote.
+            let standing: Token?
             /// The five followers of `person`, in the order the seed made them. With `person` and
             /// `far` they are who the seed lists in the directory (#315).
             let fans: [Named]

@@ -954,6 +954,20 @@
 "tag.reach.partial" = "沒有問，因為這個時間軸只顯示它們送來的一部分：%@。";
 "tag.reach.tagless" = "沒有問，因為它們沒有標籤：%@。";
 "tag.reach.tagsOff" = "沒有可問的，因為 %@ 關閉了標籤。";
+"tag.follow.at" = "在 %1$@：%2$@";
+"tag.follow.followed" = "已追蹤。";
+"tag.follow.notFollowed" = "未追蹤。";
+"tag.follow.asking" = "正在查詢你是否追蹤它…";
+"tag.follow.unknown" = "無法得知你是否追蹤它。";
+"tag.follow.absent" = "%@ 沒有這個主題標籤。";
+"tag.follow.following" = "正在追蹤…";
+"tag.follow.unfollowing" = "正在取消追蹤…";
+"tag.follow.follow" = "追蹤";
+"tag.follow.unfollow" = "取消追蹤";
+"tag.follow.follow.spoken" = "在 %2$@ 追蹤 %1$@";
+"tag.follow.unfollow.spoken" = "在 %2$@ 取消追蹤 %1$@";
+"tag.follow.failed.follow" = "無法在 %2$@ 追蹤 %1$@。";
+"tag.follow.failed.unfollow" = "無法在 %2$@ 取消追蹤 %1$@。";
 "item.person.open" = "打開 %@";
 "item.open.thread" = "打開討論串";
 
@@ -1754,6 +1768,7 @@
 "search.lookup.signedOut.there" = "只有登入 %1$@ 的人，才能請它查找 %2$@。";
 "work.purpose.lookUp" = "請來源查找某個人";
 "work.purpose.personHome" = "向某個人所在的站台詢問他們";
+"work.purpose.followedTags" = "讀取你在來源是否追蹤某個主題標籤";
 "person.home.ask" = "詢問 %@";
 "person.home.asking" = "正在詢問 %@…";
 "person.home.said" = "依 %1$@ 的說法，於 %2$@ 詢問。";

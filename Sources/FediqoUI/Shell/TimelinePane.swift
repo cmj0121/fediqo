@@ -215,6 +215,18 @@ struct TimelinePane: View {
                     asking: session.reload.tagAsk?.tag == tag ? session.reload.tagAsking : [],
                     failed: session.reload.tagAsk?.tag == tag ? session.reload.tagFailed : [],
                     reach: session.reload.tagAsk?.tag == tag ? session.reload.tagAsk?.reach.sentence : nil,
+                    // Whether the reader follows it at each source they are signed in to (#318).
+                    follows: people?.tags.lines(of: tag, in: session) ?? [],
+                    onFollow: { line in
+                        Task {
+                            if line.offers == .again {
+                                await people?.tags.again(tag, at: line.host, in: session)
+                            } else {
+                                await people?.tags.press(tag, at: line.host, in: session)
+                            }
+                        }
+                    },
+                    onAskFollows: { host in session.askFor([.follows], host: host) },
                     catalogues: session.emoji,
                     catalogueSettled: false,
                     posts: session.posts,
@@ -236,6 +248,12 @@ struct TimelinePane: View {
                     onBack: onBack
                 )
                 .id(HeldUnderTag.folded(tag))
+                // **The ask is the page coming in front**: each source whose sign-in holds
+                // follows, once. And who asks, and what they hold, is part of which opening it
+                // is: a sign-in given follows opens the page again, and it is read — never acted.
+                .task(id: people?.tags.opening(tag, in: session)) { await people?.tags.opened(tag, in: session) }
+                // What a source said of a hashtag is held only while its page is in front.
+                .onDisappear { people?.tags.closed(tag) }
             case .people(let list):
                 // A list whose source is no longer one that says who people are — removed since
                 // — draws the stream instead, as a conversation no longer held does.

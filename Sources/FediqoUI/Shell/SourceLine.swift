@@ -67,6 +67,7 @@ extension SourceWork.Purpose {
         case .ownSettings: "person.crop.square.filled.and.at.rectangle"
         case .lookUp: "person.crop.circle.badge.questionmark"
         case .personHome: "house"
+        case .followedTags: "number"
         }
     }
 }

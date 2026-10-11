@@ -975,6 +975,20 @@
 "tag.reach.partial" = "Not asked, as this timeline shows only some of what they send: %@.";
 "tag.reach.tagless" = "Not asked, as they keep no tags: %@.";
 "tag.reach.tagsOff" = "Nothing to ask, as tags are turned off on %@.";
+"tag.follow.at" = "At %1$@: %2$@";
+"tag.follow.followed" = "followed.";
+"tag.follow.notFollowed" = "not followed.";
+"tag.follow.asking" = "finding out whether you follow it…";
+"tag.follow.unknown" = "could not find out whether you follow it.";
+"tag.follow.absent" = "%@ has no such hashtag.";
+"tag.follow.following" = "following…";
+"tag.follow.unfollowing" = "unfollowing…";
+"tag.follow.follow" = "Follow";
+"tag.follow.unfollow" = "Unfollow";
+"tag.follow.follow.spoken" = "Follow %1$@ at %2$@";
+"tag.follow.unfollow.spoken" = "Unfollow %1$@ at %2$@";
+"tag.follow.failed.follow" = "Could not follow %1$@ at %2$@.";
+"tag.follow.failed.unfollow" = "Could not unfollow %1$@ at %2$@.";
 "item.person.open" = "Open %@";
 "item.open.thread" = "Open the thread";
 
@@ -1799,6 +1813,7 @@
 "search.lookup.signedOut.there" = "%1$@ can be asked to look %2$@ up only by somebody signed in to it.";
 "work.purpose.lookUp" = "Asking a source to look somebody up";
 "work.purpose.personHome" = "Asking the server someone lives on about them";
+"work.purpose.followedTags" = "Reading whether you follow a hashtag at a source";
 "person.home.ask" = "Ask %@";
 "person.home.asking" = "Asking %@…";
 "person.home.said" = "As %1$@ says, asked at %2$@.";

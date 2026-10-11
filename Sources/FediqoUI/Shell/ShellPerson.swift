@@ -232,6 +232,9 @@ final class ShellPersonPages {
     /// The server somebody lives on, asked what it says of them at their page's press (#310):
     /// numbered on the same count. Asked with no sign-in, so no reader's change lets it go.
     let home: ShellPersonHome
+    /// Whether the reader follows a hashtag at each source, for that hashtag's page (#318):
+    /// numbered on the same count, and let go with the same reader.
+    let tags: ShellTagFollow
 
     init() {
         let count = PageErrands(), looks = PageReaders()
@@ -249,12 +252,15 @@ final class ShellPersonPages {
         let found = ShellSearchFound(errands: count, readers: looks)
         self.found = found
         home = ShellPersonHome(errands: count)
+        let tags = ShellTagFollow(errands: count, readers: looks)
+        self.tags = tags
         looks.whenChanged { [weak found] host in found?.letGo(at: host) }
         looks.whenChanged { [weak self] host in self?.letGo(at: host) }
         looks.whenChanged { [weak lists] host in lists?.letGo(at: host) }
         looks.whenChanged { [weak more] host in more?.letGo(at: host) }
         looks.whenChanged { [weak rising] host in rising?.letGo(at: host) }
         looks.whenChanged { [weak you] host in you?.letGo(at: host) }
+        looks.whenChanged { [weak tags] host in tags?.letGo(at: host) }
     }
 
     /// A page opening, as its pane's task is named: who they are **and who asks**, so a page
@@ -272,8 +278,9 @@ final class ShellPersonPages {
     }
 
     /// How often the sign-in held at `host` has become another, as the session last looked:
-    /// read to draw, and to nothing else.
-    private static func signIns(at host: String, in session: ShellSession) -> Int {
+    /// read to draw, and to nothing else. **The one place the count is read**, for every page
+    /// that is drawn by it.
+    static func signIns(at host: String, in session: ShellSession) -> Int {
         session.mastodon.changes[host, default: 0]
     }
 

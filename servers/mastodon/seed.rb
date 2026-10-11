@@ -485,7 +485,13 @@ end
 standing = "#{reading} read:follows"
 # And one of the writer's that lacks the word for reading their own account, which what they
 # set here is refused to (#321).
-people_sign_ins = { "standing" => [user, standing], "hidden" => [hidden.user, "read write"], "narrow" => [user, "read:statuses"] }.transform_values do |(owner, scopes)|
+# And one that reads and holds both words of follows and nothing else that acts: what following
+# a hashtag and listing the followed ones must be enough for (#318).
+following = "#{standing} write:follows"
+people_sign_ins = {
+  "standing" => [user, standing], "hidden" => [hidden.user, "read write"], "narrow" => [user, "read:statuses"],
+  "following" => [user, following]
+}.transform_values do |(owner, scopes)|
   held = Doorkeeper::AccessToken.find_by(application: grained, resource_owner_id: owner.id, scopes: scopes, revoked_at: nil) ||
     Doorkeeper::AccessToken.create!(application: grained, resource_owner_id: owner.id, scopes: scopes, expires_in: nil)
   { "token" => held.token, "scopes" => scopes }

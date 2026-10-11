@@ -113,6 +113,10 @@ final class SourceWork {
         /// added. With no sign-in, let through by an entry of `Allowance` for that one press,
         /// and listed under the server asked. Nothing read under it is held.
         case personHome
+        /// Whether the reader follows a hashtag at a source, read as them because that
+        /// hashtag's page came in front (#318). Nothing read under it is held. Following and
+        /// unfollowing are a `write`.
+        case followedTags
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -125,7 +129,7 @@ final class SourceWork {
         /// Everything else reaches wherever a post, a page or a directory points.
         var isOfTheSource: Bool {
             switch self {
-            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings, .lookUp: true
+            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings, .lookUp, .followedTags: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
                  .nearbyMove, .personHome:

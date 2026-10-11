@@ -228,6 +228,12 @@ struct SourceReach {
         MastodonTag(http: wire(for: .timeline, name: name, within: limit), host: host)
     }
 
+    /// Whether the reader follows a hashtag, following one and stopping (#318): only ever as
+    /// the reader, through the signed-in door.
+    func tagFollows(_ door: MastodonAuthorized) -> MastodonTagFollows {
+        MastodonTagFollows(door: door)
+    }
+
     /// A search, which a Mastodon answers only to somebody signed in.
     func search(_ door: MastodonAuthorized) -> MastodonSearch {
         MastodonSearch(door: door)
