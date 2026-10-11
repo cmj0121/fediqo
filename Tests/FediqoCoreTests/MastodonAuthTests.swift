@@ -208,6 +208,12 @@ struct MastodonAuthTests {
                 from: URL(string: "fediqo://oauth?error=invalid_scope&state=st")!, state: "st"
             )
         }
+        // Only the person's own no is one: anything else the source says went wrong is a failure.
+        for error in ["server_error", "temporarily_unavailable", ""] {
+            #expect(throws: MastodonSignInError.unreadable) {
+                try MastodonOAuth.code(from: URL(string: "fediqo://oauth?error=\(error)&state=st")!, state: "st")
+            }
+        }
         #expect(throws: MastodonSignInError.unreadable) {
             try MastodonOAuth.code(from: URL(string: "fediqo://oauth?state=st")!, state: "st")
         }
@@ -229,7 +235,7 @@ struct MastodonAuthTests {
         -> MastodonToken
     {
         try await MastodonOAuth(host: host, sender: server)
-            .signIn(as: MastodonFixture.app, through: browser)
+            .signIn(as: MastodonFixture.app, through: browser).token
     }
 
     @Test("Page, token, check — in that order, and the token is the one issued to the app")
@@ -274,7 +280,7 @@ struct MastodonAuthTests {
         )
         let app = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: asked)
         let token = try await MastodonOAuth(host: host, sender: server)
-            .signIn(as: app, through: await FixtureBrowser.approving())
+            .signIn(as: app, through: await FixtureBrowser.approving()).token
         #expect(await server.form("/oauth/token")["scope"] == asked, "the page asked for both parts")
         #expect(token.scopes == MastodonOAuth.reading)
         #expect(token.grant == .reading, "a token that cannot write read as one that can")
@@ -289,7 +295,7 @@ struct MastodonAuthTests {
         let asked = MastodonOAuth.scopes(writing: true)
         let app = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: asked)
         let token = try await MastodonOAuth(host: host, sender: MastodonFixture.server(issued: issued))
-            .signIn(as: app, through: await FixtureBrowser.approving())
+            .signIn(as: app, through: await FixtureBrowser.approving()).token
         #expect(token.scopes == asked)
         #expect(token.grant == .writing)
     }
@@ -328,15 +334,27 @@ struct MastodonAuthTests {
         #expect(await server.paths.isEmpty)
     }
 
-    @Test("A token the account check refuses is not a sign-in, and is revoked")
-    func refusedCheck() async {
-        let server = MastodonFixture.server(verify: .json("{}", status: 403))
-        let browser = await FixtureBrowser.approving()
-        await #expect(throws: MastodonSignInError.http(403)) {
-            _ = try await signIn(server, browser)
-        }
-        #expect(await server.paths.last == "/oauth/revoke")
-        #expect(await server.form("/oauth/revoke")["token"] == "tok-123")
+    /// **The token in hand may be the sign-in this device already holds** (#347): a server
+    /// answers the same words on the same registration with the token it issued before. So a
+    /// check that fails — refused, a 5xx, or never answered — ends nothing here: the token is
+    /// handed back with the failure, for whoever knows what is held.
+    @Test("A token whose account check fails is handed back with the failure, and the server is not asked to end it", arguments: [403, 500, 0])
+    func failedCheck(status: Int) async throws {
+        let server = MastodonFixture.server(verify: status == 0 ? .fail : .json("{}", status: status))
+        let signed = try await MastodonOAuth(host: host, sender: server)
+            .signIn(as: MastodonFixture.app, through: await FixtureBrowser.approving())
+        let failure: MastodonSignInError = status == 0 ? .unreachable : .http(status)
+        #expect(signed.failed == failure)
+        #expect(signed.token.accessToken == "tok-123")
+        #expect(await server.paths == ["/oauth/token", "/api/v1/accounts/verify_credentials"])
+    }
+
+    @Test("A token that passes its check is handed back with no failure")
+    func passedCheck() async throws {
+        let signed = try await MastodonOAuth(host: host, sender: MastodonFixture.server())
+            .signIn(as: MastodonFixture.app, through: await FixtureBrowser.approving())
+        #expect(signed.failed == nil)
+        #expect(signed.token.accessToken == "tok-123")
     }
 
     @Test("A server that no longer knows the app says so as a rejected client")
@@ -357,12 +375,12 @@ struct MastodonAuthTests {
     @Test("Revoking sends the token with the app it was issued to, and never throws")
     func revokes() async {
         let server = MastodonFixture.server()
-        await MastodonOAuth(host: host, sender: server).revoke(MastodonFixture.token)
+        await MastodonOAuth(host: host, sender: server).revoke(MastodonLeft(MastodonFixture.token, as: .left))
         let form = await server.form("/oauth/revoke")
         #expect(form == ["client_id": "cid", "client_secret": "csecret", "token": "tok-123"])
 
         let offline = FixtureSender(["/oauth/revoke": .fail])
-        await MastodonOAuth(host: host, sender: offline).revoke(MastodonFixture.token)
+        await MastodonOAuth(host: host, sender: offline).revoke(MastodonLeft(MastodonFixture.token, as: .left))
     }
 
     // MARK: - The signed-in door

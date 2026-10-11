@@ -23,6 +23,12 @@ actor NoticeActServer: HTTPSender {
     private let refuses: String?
     private(set) var asked: [String] = []
     private var issued = 0
+    /// The sign-ins this server gives its own account of, where it is asked for one.
+    private var held: MemoryMastodonTokens?
+
+    func tells(of held: MemoryMastodonTokens) {
+        self.held = held
+    }
 
     init(_ routes: [String: Outcome] = [:], refuses: String? = nil) {
         self.routes = routes
@@ -76,6 +82,9 @@ actor NoticeActServer: HTTPSender {
             return answer(#"{"id":"1","acct":"me"}"#)
         case "/oauth/revoke":
             return answer("{}")
+        case "/oauth/token/info":
+            let token = (try? held?.token(host: url.host ?? "")) ?? nil
+            return answer(PartAskFixture.info(token?.scopes))
         default:
             throw FixtureHTTPError.unmapped
         }
@@ -176,6 +185,7 @@ enum NoticeActFixture {
         let tokens = MemoryMastodonTokens()
         for (host, scopes) in hosts { try tokens.save(token(host, scopes: scopes)) }
         let server = NoticeActServer(routes, refuses: refuses)
+        await server.tells(of: tokens)
         let store = ItemStore(sources: hosts.keys.sorted().map { Source(host: $0, kind: .mastodon) }, notes: [])
         let session = ShellSession(
             http: FixtureHTTP(), store: store, mastodon: MastodonSessions(tokens: tokens, sender: server)
@@ -236,10 +246,11 @@ struct NoticeActsTests {
         let page = NoticeActPage()
 
         #expect(session.askForNotices(host: Self.a))
-        #expect(session.noticeAsk == Self.a)
+        let asked = try #require(session.partAsks.open)
+        #expect(asked.host == Self.a && asked.ticked == [.notices])
         #expect(await server.asked.isEmpty && page.scopes.isEmpty, "something was sent before the question was answered")
 
-        let reads = ShellQuestion.notices(host: Self.a, grant: session.mastodon.grants[Self.a], language: .english)
+        let reads = ShellQuestion.part(asked, language: .english)
         #expect(reads.title == "Ask a.example for your notices?")
         #expect(reads.line == "Its page asks again for what you allowed, and to read notices.")
         #expect(reads.help?.contains("to read your notifications there") == true)
@@ -248,7 +259,8 @@ struct NoticeActsTests {
         #expect(reads.choices.map(\.label) == ["Ask"] && !reads.warns && reads.cancel == "Cancel")
 
         // Where the sign-in acts, dismissing is named too.
-        let acts = ShellQuestion.notices(host: Self.b, grant: session.mastodon.grants[Self.b], language: .english)
+        #expect(session.askForNotices(host: Self.b))
+        let acts = ShellQuestion.part(try #require(session.partAsks.open), language: .english)
         #expect(acts.line == "Its page asks for what you allowed, and to read and dismiss notices.")
         #expect(acts.help?.contains("to read your notifications there, and to dismiss them") == true)
         #expect(acts.help?.contains("the sign-in you have goes on as it is") == true)
@@ -256,8 +268,8 @@ struct NoticeActsTests {
             #expect(ShellQuestion.width(question.line) <= ShellQuestion.lineLength)
         }
 
-        session.cancelNoticeAsk()
-        #expect(session.noticeAsk == nil)
+        session.partAsks.putDown()
+        #expect(session.partAsks.open == nil)
         #expect(session.mastodon.notices(host: Self.a) == .unasked)
         #expect(try tokens.token(host: Self.a)?.accessToken == "tok-a.example")
         #expect(await server.asked.isEmpty && page.scopes.isEmpty)
@@ -306,6 +318,18 @@ struct NoticeActsTests {
         #expect(help.contains(english ? "bookmarks" : "書籤"))
     }
 
+    /// The read-or-act question as the session puts it: the question itself, and — over a
+    /// sign-in held — what it says first of the sign-in an answer may end (#347, pinned in
+    /// `MastodonLeftTests`).
+    private func put(_ session: ShellSession, _ host: String, notices: Bool = false) -> ShellConfirmation {
+        var question = ShellQuestion.signIn(host: host, notices: notices)
+        guard let ends = session.mastodon.signInEnds(host: host, notices: notices) else { return question }
+        (question.line, question.help) = ShellQuestion.saying(
+            ShellQuestion.signInEnds(ends, host: host), line: question.line, help: question.help
+        )
+        return question
+    }
+
     @Test("Every place that raises an ordinary sign-in question asks the session, which reads what that sign-in will carry: the question and the page it leads to agree")
     func theQuestionAndThePageAgree() async throws {
         let beforeBookmarks = MastodonOAuth.scopes(writing: true, bookmarks: false, notices: true)
@@ -314,24 +338,27 @@ struct NoticeActsTests {
         ])
         // A sign-in that reads notices, asked what it may do: the row's own press for writing.
         #expect(session.mastodon.carriesNotices(host: Self.a))
-        #expect(session.signInQuestion(host: Self.a) == ShellQuestion.signIn(host: Self.a, notices: true))
+        #expect(session.signInQuestion(host: Self.a) == put(session, Self.a, notices: true))
         #expect(session.signInQuestion(host: "A.Example").line == session.signInQuestion(host: Self.a).line)
         // One never asked for notices, and a source nobody is signed in to, carry none.
         for host in [Self.b, "d.example", "nobody.example"] {
             #expect(!session.mastodon.carriesNotices(host: host))
-            #expect(session.signInQuestion(host: host) == ShellQuestion.signIn(host: host))
-            #expect(session.bookmarkQuestion(host: host) == ShellQuestion.bookmarks(host: host))
+            #expect(session.signInQuestion(host: host) == put(session, host))
+            #expect(!session.askBookmarks(host: host), "a sign-in with no bookmarks to be asked for was put the question")
         }
         // The bookmark question, which a post's row and Account both put.
         #expect(session.mastodon.bookmarks(host: "c.example") == .unasked)
-        #expect(session.bookmarkQuestion(host: "c.example") == ShellQuestion.bookmarks(host: "c.example", notices: true))
+        #expect(session.askBookmarks(host: "c.example"))
+        let raised = try #require(session.partAsks.open)
+        #expect(ShellQuestion.part(raised) == ShellQuestion.bookmarks(host: "c.example", notices: true).inPlace(at: "c.example"))
+        session.partAsks.putDown()
 
         // What the question said is what the page is asked for, whichever answer is given.
         for (writing, wanted) in [(false, F.reads), (true, F.acts)] {
             let page = NoticeActPage()
             await session.signIn(host: Self.a, through: page, writing: writing)
             #expect(page.scopes == [wanted], "the page asked for other than the question said")
-            #expect(session.signInQuestion(host: Self.a) == ShellQuestion.signIn(host: Self.a, notices: true))
+            #expect(session.signInQuestion(host: Self.a) == put(session, Self.a, notices: true))
         }
         let asked = NoticeActPage()
         await session.allowBookmarks(host: "c.example", through: asked)
@@ -356,7 +383,7 @@ struct NoticeActsTests {
         try allow(Self.a, F.reads)
         #expect(session.mastodon.carriesNotices(host: Self.a))
         #expect(session.signInAsked(host: Self.a) == asked, "a card drawn again came to say something else")
-        #expect(session.signInQuestion(host: Self.a) == ShellQuestion.signIn(host: Self.a))
+        #expect(session.signInQuestion(host: Self.a) == put(session, Self.a))
         let page = NoticeActPage()
         session.putDownSignInChoice()
         await session.signIn(host: Self.a, through: page, writing: true, noticesSaid: asked.notices)
@@ -367,7 +394,7 @@ struct NoticeActsTests {
         try allow(Self.a, F.acts)
         session.signInChoice = Self.a
         let again = session.signInAsked(host: Self.a)
-        #expect(again.notices && session.signInQuestion(host: Self.a) == ShellQuestion.signIn(host: Self.a, notices: true))
+        #expect(again.notices && session.signInQuestion(host: Self.a) == put(session, Self.a, notices: true))
         // Said to carry them and since lost: the page asks for less, never more.
         try allow(Self.a, F.plainActing)
         let less = NoticeActPage()
@@ -378,14 +405,27 @@ struct NoticeActsTests {
         // The bookmark question, the same way.
         let beforeBookmarks = MastodonOAuth.scopes(writing: true, bookmarks: false)
         try allow(Self.b, beforeBookmarks)
-        session.bookmarkAsk = Self.b
-        let bookmark = session.signInAsked(host: Self.b)
-        #expect(!bookmark.notices && session.bookmarkQuestion(host: Self.b) == ShellQuestion.bookmarks(host: Self.b))
+        #expect(session.askBookmarks(host: Self.b))
+        let bookmark = try #require(session.partAsks.open)
+        #expect(ShellQuestion.part(bookmark) == ShellQuestion.bookmarks(host: Self.b).inPlace(at: Self.b))
         try allow(Self.b, MastodonOAuth.scopes(writing: true, bookmarks: false, notices: true))
         #expect(session.mastodon.carriesNotices(host: Self.b) && session.mastodon.bookmarks(host: Self.b) == .unasked)
+        #expect(session.partAsks.open == bookmark, "a card drawn again came to say something else")
         let marks = NoticeActPage()
-        await session.allowBookmarks(host: Self.b, through: marks, noticesSaid: bookmark.notices)
-        #expect(marks.scopes == [F.plainActing], "the page asked for notices the question never named")
+        session.partAsks.answer(bookmark, through: marks, in: session)
+        await session.partAsks.landed(host: Self.b)
+        // **Changed with #347, on purpose.** The page used to drop the notices the sign-in had
+        // come to hold, because its question had not named them — which ended that sign-in for
+        // a narrower one. Now no page opens on a question that did not name them: the question
+        // is put again, naming them, and its yes asks for what is held and for bookmarks.
+        #expect(marks.scopes.isEmpty, "a page carried the notices its question never named")
+        let named = try #require(session.partAsks.open)
+        var plain = named
+        plain.again = false
+        #expect(named.again && ShellQuestion.part(plain) == ShellQuestion.bookmarks(host: Self.b, notices: true).inPlace(at: Self.b))
+        session.partAsks.answer(named, through: marks, in: session)
+        await session.partAsks.landed(host: Self.b)
+        #expect(marks.scopes == [F.acts], "the page asked a word more than bookmarks, or gave up one that was held")
         #expect(session.bookmarkAsk == nil && session.noticesSaid.isEmpty)
     }
 
@@ -401,7 +441,7 @@ struct NoticeActsTests {
             await session.allowNotices(host: Self.a, through: page)
 
             #expect(page.scopes == [MastodonOAuth.scopes(writing: writing, notices: true)])
-            #expect(session.noticeAsk == nil)
+            #expect(session.partAsks.open == nil)
             #expect(session.mastodon.notices(host: Self.a) == .allowed)
             #expect(session.mastodon.dismisses(host: Self.a) == writing, "dismissing was asked of a sign-in that only reads")
             #expect(session.mastodon.grants[Self.a] == (writing ? .writing : .reading))
@@ -435,7 +475,7 @@ struct NoticeActsTests {
 
         await session.allowNotices(host: Self.a, through: NoticeActPage())
 
-        #expect(session.noticeList.acts.said[Self.a] == .init(act: .ask, why: .unreachable))
+        #expect(session.noticeList.acts.said[Self.a] == .init(act: .ask, why: .unreachable, key: "notices.ask.failed"))
         #expect(NoticesPane.said(in: session, language: .english).map(\.words)
             == ["Notices were not allowed on a.example. Its sign-in works as it did."])
         #expect(session.rowRefusal == nil, "the sign-in was said to have failed")
@@ -464,24 +504,34 @@ struct NoticeActsTests {
         #expect(await server.asked.count == sent && page.scopes.isEmpty)
     }
 
-    @Test("A sign-in made before any was asked what it may do is asked to read or to act, with notices in both answers")
-    func anEarliestSignInChooses() async throws {
-        for writing in [false, true] {
-            let (session, _, _) = try await F.shell([F.get(Self.a): F.page()], signedIn: [Self.a: nil])
+    @Test("A sign-in made before any was asked what it may do is not made to choose again to be asked for notices: its source is asked what it holds, the question is put again from that saying why, and its yes asks for notices on top of exactly what is held — where the source gives no account of it, no page opens and the page says what to do")
+    func anEarliestSignInIsAskedWhatItHolds() async throws {
+        for held in [F.plain, F.plainActing] {
+            let (session, server, tokens) = try await F.shell([F.get(Self.a): F.page()], signedIn: [Self.a: nil])
             #expect(session.mastodon.grants[Self.a] == .unasked)
-            let question = ShellQuestion.notices(host: Self.a, grant: .unasked, language: .english)
-            #expect(question.choices.map(\.label) == ["Read only", "Read and write"])
-            #expect(question.line == "Its page asks to read your notices. Choose what else it may do.")
-            #expect(question.chorded?.id == ShellQuestion.signInRead, "the answer a key gives is the one that grants least")
-            #expect(ShellQuestion.noticesChose(ShellQuestion.signInWrite) == true)
-            #expect(ShellQuestion.noticesChose(ShellQuestion.signInRead) == false)
-            #expect(ShellQuestion.noticesChose(ShellQuestion.yes) == nil)
-
+            await server.set("GET a.example/oauth/token/info", .body(PartAskFixture.info(held)))
             let page = NoticeActPage()
-            await session.allowNotices(host: Self.a, through: page, writing: writing)
-            #expect(page.scopes == [MastodonOAuth.scopes(writing: writing, notices: true)])
-            #expect(session.mastodon.dismisses(host: Self.a) == writing)
+
+            await session.allowNotices(host: Self.a, through: page)
+
+            #expect(page.scopes.isEmpty, "a page opened on a question drawn from nothing its source had said")
+            #expect(try tokens.token(host: Self.a)?.scopes == held)
+            let again = try #require(session.partAsks.open, "the yes came to nothing")
+            #expect(again.again)
+            #expect(ShellQuestion.part(again, language: .english).choices.map(\.label) == ["Ask"])
+            session.partAsks.answer(again, through: page, in: session)
+            await session.partAsks.landed(host: Self.a)
+            #expect(page.scopes == [MastodonParts.page(held: held, ticked: [.notices])])
+            #expect(session.mastodon.dismisses(host: Self.a) == (held == F.plainActing))
         }
+        // The fixture's own account of a sign-in filed with no words is an empty list.
+        let (session, _, tokens) = try await F.shell([:], signedIn: [Self.a: nil])
+        let page = NoticeActPage()
+        await session.allowNotices(host: Self.a, through: page)
+        #expect(page.scopes.isEmpty && session.partAsks.open == nil)
+        #expect(try tokens.token(host: Self.a)?.scopes == nil)
+        #expect(NoticesPane.said(in: session, language: .english).map(\.words)
+            == ["Fediqo could not confirm whose sign-in this is at a.example, so it was not asked. Try again later, or sign out and sign in again, choosing what to allow."])
     }
 
     @Test("A question left open over a source since signed out asks nothing")

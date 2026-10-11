@@ -489,7 +489,9 @@ struct ThreadReadingTests {
         #expect(DummyCommand.from("r") == .reload)
         // `o` opens a quoted post since #214.
         #expect(DummyCommand.from("o") == .openQuote)
-        for free in ["l", "h"] {
+        // `h` opens the rising hashtags since #320.
+        #expect(DummyCommand.from("h") == .openRising)
+        for free in ["l"] {
             #expect(DummyCommand.from(Character(free)) == nil, "\(free) is no longer free")
         }
     }

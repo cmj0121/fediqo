@@ -102,8 +102,28 @@ struct NoticesPane: View {
             hosts: hosts,
             locked: list.locked,
             unread: unread,
-            full: list.fullHosts
+            full: list.fullHosts,
+            places: places(among: hosts, in: session)
         )
+    }
+
+    /// What each source's sign-in draws where its notices would be, by how it stands to them
+    /// (`MastodonSessions.standing`) and whether it is being asked for something now.
+    static func places(
+        among hosts: [(host: String, notices: NoticeStanding)], in session: ShellSession
+    ) -> [String: PartWords.Place.Kind] {
+        let mastodon = session.mastodon
+        return hosts.reduce(into: [:]) { kinds, entry in
+            guard let standing = mastodon.standing(.notices, host: entry.host) else { return }
+            kinds[entry.host] = PartWords.place(standing, of: .notices, asking: mastodon.asking.contains(entry.host))?.kind
+        }
+    }
+
+    /// What is said of each source where no sign-in may read notices and there is no list.
+    static func notAllowedLines(
+        _ hosts: [(host: String, notices: NoticeStanding)], in session: ShellSession
+    ) -> [NoticesLine] {
+        NoticesLine.lines(reading: [], failures: [], askable: [], hosts: hosts, places: places(among: hosts, in: session))
     }
 
     /// What stands under the last line now.
@@ -204,7 +224,7 @@ struct NoticesPane: View {
         return VStack(alignment: .leading, spacing: 0) {
             ShellNotice(symbol: "bell", title: words.title, detail: words.line, fills: false, help: words.help)
                 .modifier(NoticesProbed(.notAllowed, says: words.line, probe: probe))
-            ForEach(NoticesLine.lines(reading: [], failures: [], askable: [], hosts: hosts)) { line in
+            ForEach(Self.notAllowedLines(hosts, in: session)) { line in
                 ShellRule()
                 sourceLine(line)
             }
@@ -419,10 +439,25 @@ struct NoticesPane: View {
     ///
     /// On one line with its press where both fit whole; the press under the words where they
     /// do not, and the words wrapped. Neither is cut.
+    ///
+    /// **A source refused on its own page is one press**: the line says what happened and
+    /// asks again, and the whole of it is what is pressed.
+    @ViewBuilder
     private func sourceLine(_ line: NoticesLine) -> some View {
         let words = line.words(touch: touch)
-        return WordsThenPress(words: lineWords(words, of: line), press: linePress(line))
-            .modifier(NoticesProbed(.line(line.id), says: words, probe: probe))
+        if case .declined(let host) = line {
+            ShellLinkButton(words, symbol: NoticeAskSlot.symbol) { session.askForNotices(host: host) }
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .modifier(NoticesProbed(.linePress(line.id), says: words, probe: probe))
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.vertical, ShellSpace.snug)
+                .modifier(NoticesProbed(.line(line.id), says: words, probe: probe))
+        } else {
+            WordsThenPress(words: lineWords(words, of: line), press: linePress(line))
+                .modifier(NoticesProbed(.line(line.id), says: words, probe: probe))
+        }
     }
 
     private func lineWords(_ words: String, of line: NoticesLine) -> some View {
@@ -449,7 +484,7 @@ struct NoticesPane: View {
                 .modifier(NoticesProbed(.linePress(line.id), says: Self.retryHint(waits: waits), probe: probe))
         case .unasked(let host):
             NoticeAskSlot(host: host, session: session)
-        case .reading, .failed, .refused, .locked, .unread, .full:
+        case .reading, .failed, .refused, .locked, .unread, .full, .declined, .asking:
             EmptyView()
         }
     }
@@ -471,7 +506,7 @@ struct NoticesPane: View {
     static func standsOut(_ line: NoticesLine) -> Bool {
         switch line {
         case .failed, .full: true
-        case .reading, .unasked, .refused, .locked, .unread: false
+        case .reading, .unasked, .refused, .locked, .unread, .declined, .asking: false
         }
     }
 

@@ -14,6 +14,9 @@ public enum NetLog {
     /// A move nearby, step by step, on either side (#253), its lines built by `NearbyLog`.
     public static let nearby = Logger(subsystem: "Fediqo", category: "nearby")
 
+    /// What stands where a host is not named: an ask of a server nobody added.
+    public static let unnamed = "(unnamed)"
+
     /// `request m.example: NSURLErrorDomain -1001`, `sign-in m.example: MastodonSignInError.denied`.
     public static func line(_ what: StaticString, host: String, error: any Error) -> String {
         "\(what) \(host): \(kind(of: error))"

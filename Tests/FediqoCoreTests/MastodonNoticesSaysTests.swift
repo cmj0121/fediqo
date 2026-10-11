@@ -316,7 +316,7 @@ struct MastodonNoticesSaysTests {
     func aSignInAskingForNotices() async throws {
         try await LocalServers.requireHealthy()
         let asked = MastodonOAuth.scopes(writing: true, notices: true)
-        #expect(asked.hasSuffix(" \(MastodonOAuth.noticing) \(MastodonOAuth.dismissing)"))
+        #expect(asked.hasSuffix(" \(MastodonOAuth.noticing) write:notifications"))
 
         // This app's own sign-in, with the server's page approved as the writer approves it
         // at a browser, started on a registration **the seed made, in the server, and not this
@@ -330,7 +330,7 @@ struct MastodonNoticesSaysTests {
         #expect(registered.scopes == asked, "the seed's registration asks what this app asks")
         let oauth = MastodonOAuth(host: Self.host, sender: try LocalHTTP.client())
         let app = MastodonApp(host: Self.host, clientID: registered.id, clientSecret: registered.secret, scopes: asked)
-        let token = try await oauth.signIn(as: app, through: Approving(host: Self.host, browser: try LocalHTTP.browser()))
+        let token = try await oauth.signIn(as: app, through: Approving(host: Self.host, browser: try LocalHTTP.browser())).token
         #expect(token.scopes == asked && token.asked == asked)
         #expect(MastodonOAuth.notices(token.scopes) && MastodonOAuth.dismisses(token.scopes))
         #expect(MastodonOAuth.writes(token.scopes) && MastodonOAuth.bookmarks(token.scopes), "and it is no lesser a sign-in for it")
@@ -343,7 +343,7 @@ struct MastodonNoticesSaysTests {
         #expect(page.gathered && !page.notices.isEmpty)
         // A gathered line that was never there is dismissed with a plain yes: nothing is lost.
         #expect(try await ask(token.accessToken, "POST", "\(MastodonNotices.gatheredPath)/favourite-1-1/dismiss").status == 200)
-        await oauth.revoke(token)
+        await oauth.revoke(MastodonLeft(token, as: .left))
     }
 
     // MARK: - 6. Dismissing

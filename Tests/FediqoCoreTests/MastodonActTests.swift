@@ -156,7 +156,7 @@ struct MastodonActTests {
         }
         #expect(await server.paths.isEmpty)
         let http = FixtureHTTP([:])
-        #expect(try await MastodonPost(http: http, host: host).id(of: reblog) == nil)
+        #expect(try await MastodonPost(http: http, host: host).id(of: reblog, lookingItUp: true) == nil)
         #expect(await http.paths.isEmpty)
     }
 

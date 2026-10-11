@@ -489,9 +489,9 @@ struct NoticeWordsTests {
         let stood = walk.walk(to: .thread("held\u{1e}1"), from: "lamp")
         #expect(stood)
         let errand = try #require(
-            NoticeErrand.setOut(to: .thread("a.example\u{1e}30"), for: "line", on: &walk, lamp: "held\u{1e}1")
+            PlaceErrand.setOut(to: .thread("a.example\u{1e}30"), from: .notices, line: "line", on: &walk, lamp: "held\u{1e}1")
         )
-        #expect(errand == NoticeErrand(notice: "line", base: 1))
+        #expect(errand == PlaceErrand(from: .notices, line: "line", base: 1))
         #expect(walk.openedThread == "a.example\u{1e}30" && walk.depth == 2)
         #expect(!errand.isOver(walk))
 
@@ -516,7 +516,7 @@ struct NoticeWordsTests {
         let step = ShellStep.thread("a.example\u{1e}30")
         let stood = walk.walk(to: step, from: "lamp")
         #expect(stood)
-        #expect(NoticeErrand.setOut(to: step, for: "line", on: &walk, lamp: nil) == nil)
+        #expect(PlaceErrand.setOut(to: step, from: .notices, line: "line", on: &walk, lamp: nil) == nil)
         #expect(walk.depth == 1, "a second step was taken")
         // Leaving it is leaving the timeline's own step, with the timeline's own lamp.
         let left = walk.back()

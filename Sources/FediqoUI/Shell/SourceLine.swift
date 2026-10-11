@@ -60,6 +60,14 @@ extension SourceWork.Purpose {
         case .readBack: "square.and.arrow.down"
         case .nearbyMove: "dot.radiowaves.left.and.right"
         case .ownPosts: "person.text.rectangle"
+        case .person: "person.crop.rectangle"
+        case .people: "person.2"
+        case .serverSays: "doc.plaintext"
+        case .rising: "chart.line.uptrend.xyaxis"
+        case .ownSettings: "person.crop.square.filled.and.at.rectangle"
+        case .lookUp: "person.crop.circle.badge.questionmark"
+        case .personHome: "house"
+        case .followedTags: "number"
         }
     }
 }

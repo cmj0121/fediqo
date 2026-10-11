@@ -993,7 +993,7 @@ struct NoticesHostedTests {
         let row = try #require(await session.landed(noticePost: post))
         #expect(session.held(row) != nil, "the conversation opens from what is held")
         var walk = ShellWalk()
-        let errand = try #require(NoticeErrand.setOut(to: .thread(row), for: line.id, on: &walk, lamp: nil))
+        let errand = try #require(PlaceErrand.setOut(to: .thread(row), from: .notices, line: line.id, on: &walk, lamp: nil))
         #expect(walk.openedThread == row)
 
         let probe = PaneProbe()
@@ -1007,8 +1007,8 @@ struct NoticesHostedTests {
         let left = walk.back()
         #expect(left != nil)
         #expect(errand.isOver(walk))
-        root.selected = errand.notice
-        root.mark.keep(errand.notice)
+        root.selected = errand.line
+        root.mark.keep(errand.line)
         let (_, back) = hosted(session, root: root)
         #expect(back.frames[.row(line.id)] != nil)
         #expect(root.mark.id == line.id && root.mark.lamp(for: line.id).lit)
@@ -1048,7 +1048,7 @@ struct NoticesHostedTests {
         }
         #expect(person.name == "Bo" && person.host == Self.a)
         var walk = ShellWalk()
-        let errand = try #require(NoticeErrand.setOut(to: .person(person), for: line.id, on: &walk, lamp: "lamp"))
+        let errand = try #require(PlaceErrand.setOut(to: .person(person), from: .notices, line: line.id, on: &walk, lamp: "lamp"))
         #expect(walk.openedPerson == person)
         #expect(session.heldPosts(of: person).isEmpty, "what this device holds of them, which may be nothing")
         let left = walk.back()

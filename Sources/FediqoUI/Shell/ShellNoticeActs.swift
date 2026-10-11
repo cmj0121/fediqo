@@ -38,6 +38,9 @@ final class ShellNoticeActs {
     struct Said: Equatable, Sendable {
         let act: Act
         let why: WriteWhy
+        /// The key of the sentence itself, where the act has more than one to say: what an
+        /// ask for notices came to.
+        var key: String?
     }
 
     /// The last ask for notices, or reading of requests, at each source that changed
@@ -463,7 +466,7 @@ final class ShellNoticeActs {
     }
 
     /// Says, or takes down, what the ask for notices at one source came to. The ask is the
-    /// session's (`allowNotices`), and says its failure here: on the page, where the press
+    /// session's (`ShellSession.allow`), and says what it came to here: on the page, where the press
     /// for it is.
     func say(_ word: Said?, host: String) {
         said[host.lowercased()] = word

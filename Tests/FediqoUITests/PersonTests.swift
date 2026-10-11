@@ -180,6 +180,18 @@ struct PersonTests {
         #expect(!FediqoRootView.canReload(
             place: .timeline, editing: false, hasSources: true, open: [.person, .selection]
         ))
+        // Unless their source is one that says who people are (#310): then the page is its
+        // word, `r` asks it again, and the mark that is `r`'s touch path is there with it.
+        #expect(FediqoRootView.canReload(
+            place: .timeline, editing: false, hasSources: true, open: [.person, .selection], personAsked: true
+        ))
+        // And only on their page: under a viewer, or with no page of theirs in front, it changes nothing.
+        #expect(!FediqoRootView.canReload(
+            place: .timeline, editing: false, hasSources: true, open: [.person, .viewer], personAsked: true
+        ))
+        #expect(!FediqoRootView.canReload(
+            place: .timeline, editing: true, hasSources: true, open: [.person], personAsked: true
+        ))
     }
 
     /// **A person is not a source.** A source is a server the reader joined — it has a sign-in,

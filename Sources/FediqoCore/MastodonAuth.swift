@@ -6,8 +6,9 @@ import Security
 // the server's own page, asking for what reading needs and — where the reader said so — for what
 // writing needs.
 //
-// The app is registered once per host and its registration kept (`MastodonApp`), so a sign-in
-// after a sign-out does not register again; Mastodon tokens do not expire, so there is no
+// The app is registered once per host, for every word a sign-in may come to be asked for
+// (`MastodonRegistration`), and its registration kept (`MastodonApp`), so a sign-in after a
+// sign-out, and a page that asks for more, do not register again; Mastodon tokens do not expire, so there is no
 // refresh. PKCE is always sent: a server older than 4.3 ignores it,
 // and `state` and the client secret still bind the flow there.
 
@@ -34,8 +35,9 @@ public enum MastodonSignInError: Error, Equatable, Sendable {
     case keychain
     /// The server no longer knows this app's registration (`invalid_client`): register again.
     case clientRejected
-    /// The server answered `invalid_scope`: the registration was made for other scopes than
-    /// this build asks for. It is dropped, so the next attempt registers afresh.
+    /// The server will not have the scopes: a registration it refuses for them, or
+    /// `invalid_scope` where a code is traded. A registration it was said of is dropped, so the
+    /// next attempt registers afresh.
     ///
     /// **From the token exchange, or from a registration refused for its scopes — not, on a
     /// Mastodon, from its sign-in page** (#298). Asked there for a scope the registration does
@@ -54,6 +56,31 @@ public enum MastodonAuthError: Error, Equatable, Sendable {
     /// Any other refusal — 403 included, which is a token outside its scope or a suspended
     /// login, not a revoked one.
     case http(Int)
+}
+
+/// A request made with a token, refused for want of a scope the token was not issued with.
+public enum MastodonScopeError: Error, Equatable, Sendable {
+    case outside
+}
+
+/// A refusal for want of a scope, told from every other 403 by what the server said (#319) —
+/// asked of a real one (`MastodonSearchCaptures`): a suspended login and a proxy's own rule
+/// are 403 too, and neither is mended by signing in again for more.
+public enum MastodonScopeRefusal {
+    /// The server's sentence, as a Mastodon writes it in English.
+    static let sentence = "this action is outside the authorized scopes"
+    /// How much of an answer is looked at: the sentence is short, and a page is not read.
+    static let bodyLength = 4_096
+
+    /// Whether an answer refuses for want of a scope: a 403 whose `WWW-Authenticate` names the
+    /// error RFC 6750 has for it, or whose body is the server's own sentence for it. The
+    /// header is looked at first, since the sentence is written in the reader's language.
+    public static func isOne(status: Int, body: Data, authenticate: String?) -> Bool {
+        guard status == 403 else { return false }
+        if authenticate?.contains("insufficient_scope") == true { return true }
+        guard body.count <= bodyLength, let said = try? JSONSerialization.jsonObject(with: body) else { return false }
+        return ((said as? [String: Any])?["error"] as? String)?.lowercased() == sentence
+    }
 }
 
 /// A PKCE pair (RFC 7636): a random verifier and its S256 challenge.
@@ -92,10 +119,10 @@ public struct MastodonOAuth: Sendable {
     public static let redirect = "fediqo://oauth"
     /// Decision 8: what Home, lists, the account check and finding a post again by its address
     /// (#29) need, and no more. A token issued before `read:search` was asked for lacks it.
-    public static let reading = "read:statuses read:lists read:accounts read:search"
-    /// Decision 32: what is asked of a server that refuses `read:search` (`invalid_scope`), once.
-    /// Everything but finding an old post again works; that says to sign in again.
-    public static let readingWithoutSearch = "read:statuses read:lists read:accounts"
+    public static let reading = scopes(writing: false)
+    /// Decision 32: reading on a server that has no `read:search`. Everything but finding an old
+    /// post again works; that says to sign in again.
+    public static let readingWithoutSearch = scopes(search: false, writing: false)
     /// What writing needs (#69), and no more: `write:statuses` is a post, a boost, a reply and
     /// taking any of them back; `write:favourites` is a favourite. **Nothing here follows anybody,
     /// changes a profile or touches a filter** — those are other `write:` scopes and this app asks
@@ -104,7 +131,7 @@ public struct MastodonOAuth: Sendable {
     /// **Asked for only where the reader said so.** It is never part of the reading pair above, so
     /// a sign-in that refuses the writing part is byte-for-byte the sign-in this app made before
     /// this existed.
-    public static let writing = "write:statuses write:favourites"
+    public static let writing = MastodonParts.page(held: nil, ticked: [.acting])
     /// What bookmarking needs (#285), and no more: a bookmark put on a post at its source, and
     /// taken off it. **Apart from `writing` and not a third word in it**, because `writes(_:)`
     /// asks for every word of that, and a sign-in made before this existed — which posts, boosts
@@ -112,7 +139,7 @@ public struct MastodonOAuth: Sendable {
     ///
     /// Asked for with the writing part and never without it: reading alone asks for what it
     /// always asked.
-    public static let bookmarking = "write:bookmarks"
+    public static let bookmarking = MastodonParts.page(held: nil, ticked: [.bookmarks])
     /// What reading notices needs (#323), and no more: what the source says happened to the
     /// reader. **Apart from `reading` and not a fifth word in it**, for `bookmarking`'s reason
     /// turned the other way: every sign-in made before this asked for `reading` to the letter,
@@ -120,98 +147,67 @@ public struct MastodonOAuth: Sendable {
     ///
     /// **Asked for only where the reader pressed for it on the notices page** — no sign-in asks
     /// for it unasked, so one that never wanted notices is byte-for-byte what it was.
-    public static let noticing = "read:notifications"
-    /// What dismissing a notice needs (#323) — and letting through or letting go one the source
-    /// held back. An act, so it is asked for with `noticing` only where the writing part is
-    /// asked for too, and never a word in `writing`: `writes(_:)` asks for every word of that.
-    public static let dismissing = "write:notifications"
+    ///
+    /// Dismissing a notice — and letting through or letting go one the source held back — is an
+    /// act, so its word is asked for beside this only where the writing part is asked for too
+    /// (`MastodonPart.wordsBesideActing`), and is never a word in `writing`.
+    public static let noticing = MastodonParts.page(held: nil, ticked: [.notices])
 
     /// The whole of what one sign-in asks for: reading, and the writing part after it where the
     /// reader agreed to it — with bookmarking after that, unless `bookmarks` is false, which is
-    /// the rung a server that refuses the bookmark scope is asked on, and what a sign-in to act
-    /// asked for before #285. Where `notices` is asked (#323), reading them comes after all of
-    /// that, and dismissing them after it where the writing part is asked.
+    /// what a server with no bookmark scope is asked, and what a sign-in to act asked for
+    /// before #285. Where `notices` is asked (#323), reading them comes after all of that, and
+    /// dismissing them after it where the writing part is asked.
     ///
     /// **Reading first, writing next, then bookmarking, noticing and dismissing, always in this
-    /// order**, because the string is also what a registration records and what `known(writing:)`
-    /// compares against — two spellings of one ask would register twice for one choice.
+    /// order**: one choice is one string, however it was reached.
+    ///
+    /// **The words and their order are the table's** (`MastodonParts.page`): this says which
+    /// parts a choice ticks, and spells none of them. `search` is false for a server that has
+    /// no search to allow (decision 32).
+    ///
+    /// **`carried` is what the sign-in held brings to either answer** (#347,
+    /// `MastodonParts.carried`): the parts it was asked for where it stood. Reading and
+    /// acting keeps every word of them; reading alone keeps the ones that read and asks for
+    /// none that acts. `ticking` are parts ticked beside the answer — a first sign-in raised
+    /// from a part's lock — which ride the same way. With neither, a choice is the string it
+    /// always was.
     public static func scopes(
-        reading: String = reading, writing wanted: Bool, bookmarks: Bool = true,
-        notices: Bool = false
+        search: Bool = true, writing wanted: Bool, bookmarks: Bool = true,
+        notices: Bool = false, carried: String? = nil, ticking more: Set<MastodonPart> = []
     ) -> String {
-        var asked = [reading]
-        if wanted { asked.append(Self.writing) }
-        if wanted, bookmarks { asked.append(bookmarking) }
-        if notices { asked.append(noticing) }
-        if notices, wanted { asked.append(dismissing) }
-        return asked.joined(separator: " ")
+        var ticked: Set<MastodonPart> = more.union([.reading])
+        if search { ticked.insert(.search) }
+        if wanted { ticked.insert(.acting) }
+        if wanted, bookmarks { ticked.insert(.bookmarks) }
+        if notices { ticked.insert(.notices) }
+        return MastodonParts.page(held: carried, ticked: ticked, readOnly: !wanted)
     }
 
-    /// The ladder one answer is asked on, widest first: what a sign-in registers for, and what it
-    /// falls back to, a rung at a time, where the server answers `invalid_scope`.
-    ///
-    /// Reading has decision 32's two rungs: with `read:search`, and without. Reading and acting
-    /// has four (#285): those two with bookmarking, then the same two without it — so a server
-    /// that has no bookmark scope leaves the reader with the read-and-write sign-in they asked
-    /// for, which is what such a sign-in was before bookmarks were asked for at all. Nothing the
-    /// callback carries says which word was refused, so the rungs are tried in order.
-    ///
-    /// **One owner for every rung.** `MastodonSessions.signIn` needs them in order and needs to
-    /// know which registrations it may reuse, and those were two derivations of one ladder in two
-    /// files — true together only by inspection. `known(writing:)` is read off this.
-    ///
-    /// **Asking for notices adds no rung** (#323): each rung carries the notices words after its
-    /// own, and that is all. Notices are only ever asked on top of a sign-in already held, and a
-    /// sign-in replaces the one held only where it succeeds — so the rung "without notices" is
-    /// the sign-in the reader already has, and a server with no such scope fails the ask and
-    /// takes nothing.
-    public static func ladder(writing wanted: Bool, notices: Bool = false) -> [String] {
-        let readings = [reading, readingWithoutSearch]
-        guard wanted else {
-            return readings.map { scopes(reading: $0, writing: false, notices: notices) }
-        }
-        return readings.map { scopes(reading: $0, writing: true, notices: notices) }
-            + readings.map { scopes(reading: $0, writing: true, bookmarks: false, notices: notices) }
-    }
-
-    /// The registrations this build may start a sign-in on that wants `writing`, or not: the
-    /// rungs of its ladder that ask for everything the answer asks for but `read:search`.
-    ///
-    /// **It is per writing choice and not one list of everything.** A registration made for
-    /// reading alone cannot carry a page that asks to write — the server answers `invalid_scope` —
-    /// so a reader who signs in again to add writing must register again. The two rungs inside one
-    /// choice are decision 32's: a host that refused `read:search` keeps its narrower registration
-    /// rather than registering afresh every time.
-    ///
-    /// **A registration made for acting without bookmarks is not one of them** (#285), though it
-    /// is a rung: a sign-in started on it would never ask for bookmarks, and a reader asked to
-    /// allow them would be sent to a page that does not mention them. It is reached only by
-    /// falling to it, within one sign-in.
-    ///
-    /// **And it is per notices choice** (#323), read off that choice's ladder: a sign-in that
-    /// asks for notices starts on no registration that cannot ask for them, and one that does not
-    /// starts on none made for them — its page would ask for what nobody pressed for.
-    public static func known(writing wanted: Bool, notices: Bool = false) -> Set<String> {
-        Set(ladder(writing: wanted, notices: notices).filter { !wanted || bookmarks($0) })
-    }
+    /// The parts the two answers and what a sign-in carries of notices decide between them:
+    /// never carried from the sign-in held by any other rule (`scopes`).
+    public static let chosen: Set<MastodonPart> = [.reading, .search, .acting, .bookmarks, .notices]
 
     /// Whether a scope string bought reading notices (#323) — read scope by scope, as
     /// `writes(_:)` is.
     public static func notices(_ scopes: String?) -> Bool {
-        guard let scopes else { return false }
-        return scopes.split(separator: " ").contains(Substring(noticing))
+        MastodonParts.holds(.notices, in: scopes)
     }
 
     /// Whether a scope string bought dismissing notices (#323), read the same way.
     public static func dismisses(_ scopes: String?) -> Bool {
-        guard let scopes else { return false }
-        return scopes.split(separator: " ").contains(Substring(dismissing))
+        MastodonParts.holdsBesideActing(.notices, in: scopes)
+    }
+
+    /// Whether a scope string bought searching (#319): `read:search` itself, or the whole of
+    /// reading, which holds it — as the server names the two when it refuses for want of them.
+    public static func searches(_ scopes: String?) -> Bool {
+        MastodonParts.holds(.search, in: scopes) || MastodonParts.holdsEveryRead(in: scopes)
     }
 
     /// Whether a scope string bought bookmarking — read scope by scope, as `writes(_:)` is.
     public static func bookmarks(_ scopes: String?) -> Bool {
-        guard let scopes else { return false }
-        return scopes.split(separator: " ").contains(Substring(bookmarking))
+        MastodonParts.holds(.bookmarks, in: scopes)
     }
 
     /// Whether a scope string bought the writing part.
@@ -220,14 +216,8 @@ public struct MastodonOAuth: Sendable {
     /// scopes in another order still reads as writing, and a scope that merely contains one of
     /// these words does not.
     public static func writes(_ scopes: String?) -> Bool {
-        guard let scopes else { return false }
-        let granted = Set(scopes.split(separator: " "))
-        return writingScopes.allSatisfy(granted.contains)
+        MastodonParts.holds(.acting, in: scopes)
     }
-
-    /// `writing`, split once. This is asked of every held token at launch and again whenever the
-    /// app comes to the front, so the constant is split once rather than once per item.
-    private static let writingScopes: [Substring] = writing.split(separator: " ")
 
     let host: String
     private let sender: any HTTPSender
@@ -238,14 +228,41 @@ public struct MastodonOAuth: Sendable {
     }
 
     /// Opens the server's page for `app`, checks the answer, trades the code for a token and
-    /// proves the token works. Nothing is saved here. A token that fails the check is revoked
-    /// before the failure is reported, so no working token is left behind on the server.
-    public func signIn(as app: MastodonApp, through browser: any OAuthBrowser) async throws
-        -> MastodonToken
-    {
+    /// checks that the token works. Nothing is saved here, **and nothing is revoked here**: the
+    /// token is handed back with why its check failed, or nothing where it passed.
+    ///
+    /// **The page asks for `page`, which may be less than the registration was made for**
+    /// (#347) — and never a word it was not made for: a server answers such a page with one of
+    /// its own and sends nothing back, so it is refused here, before anything opens. Left out,
+    /// the page asks for everything the registration records.
+    ///
+    /// A server answers the same words on the same registration with the token it already
+    /// issued, so the one in hand may be the sign-in this device holds — and a check fails for a
+    /// timeout or a 5xx as for a refusal. Whether to ask the server to end it is for whoever
+    /// knows what is held.
+    ///
+    /// **`pending` is handed the token before it is checked** (#347), so whoever keeps a note
+    /// of sign-ins made and not yet kept writes it down while nothing has been awaited on
+    /// it: a quit during the check then leaves a note to end it by. Where the note cannot be
+    /// taken the token is not checked, and comes back as one that could not be kept.
+    /// **Not a token shown to be handed back** (`handedBack`): it was made by an earlier
+    /// sign-in, here or on another device, and is not this one's to end.
+    ///
+    /// **`accountID` and `handle` are whose sign-in the check said it is**, off the answer
+    /// the check already asks for — so a sign-in is named with no ask of its own, whatever it
+    /// may do. Nothing where the check failed or named nobody (`MastodonWho.said`).
+    public func signIn(
+        as app: MastodonApp, asking page: String? = nil, through browser: any OAuthBrowser,
+        pending: (@Sendable (MastodonToken) async throws -> Void)? = nil
+    ) async throws -> (
+        token: MastodonToken, failed: MastodonSignInError?, accountID: String?, handle: String?, handedBack: Bool
+    ) {
+        if let page, !MastodonRegistration.holds(page, on: app.scopes) {
+            throw MastodonSignInError.unreadable
+        }
         let pkce = PKCE.make()
         let state = PKCE.random(bytes: 16)
-        let scopes = app.scopes ?? Self.reading
+        let scopes = page ?? app.scopes ?? Self.reading
         guard let page = authorizeURL(
             clientID: app.clientID, challenge: pkce.challenge, state: state, scopes: scopes
         ) else { throw MastodonSignInError.unreadable }
@@ -277,13 +294,18 @@ public struct MastodonOAuth: Sendable {
             scopes: Self.granted(issued.scope, of: scopes),
             asked: scopes
         )
+        let handedBack = issued.handedBack
         do {
-            try await verify(token)
+            if !handedBack { try await pending?(token) }
         } catch {
-            await revoke(token)
-            throw error
+            return (token, .keychain, nil, nil, handedBack)
         }
-        return token
+        do {
+            let who = try await verify(token)
+            return (token, nil, who.id, who.handle, handedBack)
+        } catch {
+            return (token, error as? MastodonSignInError ?? .unreachable, nil, nil, handedBack)
+        }
     }
 
     /// What a sign-in that asked for `asked` is written down as holding, from the server's own
@@ -291,29 +313,100 @@ public struct MastodonOAuth: Sendable {
     /// all of `asked` where it named none — RFC 6749 lets the word out only when the grant is
     /// exactly the request. A narrower answer narrows; nothing in it can widen.
     static func granted(_ echo: String?, of asked: String) -> String {
-        guard let echo, !echo.isEmpty else { return asked }
-        let named = Set(echo.split(separator: " "))
-        return asked.split(separator: " ").filter(named.contains).joined(separator: " ")
+        named(echo.map { $0.split(separator: " ").map(String.init) } ?? [], of: asked)
     }
 
-    /// This app, registered on the server with the callback and `scopes`, which it records.
+    /// `granted(_:of:)`, for an answer that names its words one by one: a registration's.
+    static func named(_ echo: [String], of asked: String) -> String {
+        guard !echo.isEmpty else { return asked }
+        let named = Set(echo)
+        return asked.split(separator: " ").map(String.init).filter(named.contains).joined(separator: " ")
+    }
+
+    /// How long a client id or secret may be: a Mastodon's are forty-three characters.
+    static let clientBytes = 512
+
+    /// This app, registered on the server with the callback and `scopes`.
     ///
     /// **A server that refuses the registration for its scopes** — a 4xx whose own `error` says
-    /// so — is `invalidScope`, as its page answering `invalid_scope` is, so a sign-in falls a
-    /// rung either way. Any other refusal, and every failure that names no scope, is what it was.
+    /// so — is `invalidScope`: it refuses the whole of it for one word it does not know, and
+    /// names none. Any other refusal, and every failure that names no scope, is what it was.
     public func register(scopes: String = MastodonOAuth.reading) async throws -> MastodonApp {
-        struct Registered: Decodable {
-            let client_id: String
-            let client_secret: String
-        }
+        try await registered(for: scopes).app
+    }
+
+    /// `register(scopes:)`, and whether the server said which of the words asked it registered.
+    ///
+    /// **What is recorded is what was asked and the server named, never more** — all of what
+    /// was asked where it named none, as an older server does. A page is only ever opened for
+    /// words its registration records, so a word the server left out is asked on no page.
+    ///
+    /// **A registration that names a callback other than this app's is not one of ours**: a
+    /// code sent there would be somebody else's to trade. It is refused, and nothing is kept.
+    /// **Nor is one with no client id or secret, or one longer than `clientBytes`**: both are
+    /// kept in the Keychain and sent on every page, and a server's word is not kept unbounded.
+    public func registered(for scopes: String) async throws -> (app: MastodonApp, echoed: Bool) {
         let answer: Registered = try await post("/api/v1/apps", [
             ("client_name", Fediqo.name),
             ("redirect_uris", Self.redirect),
             ("scopes", scopes),
         ])
-        return MastodonApp(
-            host: host, clientID: answer.client_id, clientSecret: answer.client_secret, scopes: scopes
+        guard answer.callbacks.allSatisfy({ $0 == Self.redirect }) else { throw MastodonSignInError.unreadable }
+        for named in [answer.clientID, answer.clientSecret] {
+            guard !named.isEmpty, named.utf8.count <= Self.clientBytes else { throw MastodonSignInError.unreadable }
+        }
+        let app = MastodonApp(
+            host: host, clientID: answer.clientID, clientSecret: answer.clientSecret,
+            scopes: Self.named(answer.scopes, of: scopes)
         )
+        return (app, !answer.scopes.isEmpty)
+    }
+
+    /// A registration's answer. **Only the two keys must be there**; what it says of scopes and
+    /// callbacks is read where it is said, as one string or as a list — a Mastodon has written
+    /// both — and is nothing where it is neither.
+    private struct Registered: Decodable {
+        let clientID: String
+        let clientSecret: String
+        let scopes: [String]
+        let callbacks: [String]
+
+        private enum Key: String, CodingKey {
+            case clientID = "client_id", clientSecret = "client_secret", scopes
+            case callback = "redirect_uri", callbacks = "redirect_uris"
+        }
+
+        init(from decoder: any Decoder) throws {
+            let said = try decoder.container(keyedBy: Key.self)
+            clientID = try said.decode(String.self, forKey: .clientID)
+            clientSecret = try said.decode(String.self, forKey: .clientSecret)
+            func words(_ key: Key) -> [String] {
+                if let list = try? said.decode([String].self, forKey: key) { return list }
+                let one = (try? said.decode(String.self, forKey: key)) ?? ""
+                return one.split(whereSeparator: \.isWhitespace).map(String.init)
+            }
+            scopes = words(.scopes)
+            callbacks = words(.callback) + words(.callbacks)
+        }
+    }
+
+    /// The host's own list of the scope words it knows, or nothing where it gives none — a
+    /// host that publishes no list, is slow, answers anything but 200, sends the ask elsewhere,
+    /// or writes what cannot be read. **Nothing is an answer here and never a failure**: the
+    /// registration is then asked as it is.
+    ///
+    /// Asked with no sign-in, of this host alone, and read as a stranger's writing
+    /// (`MastodonRegistration.listed`). What bounds the body as it arrives, and refuses a
+    /// redirect off the host, is the client this was built over.
+    public func listedWords() async -> Set<String>? {
+        guard let url = Host.httpsURL(host: host, path: MastodonRegistration.listPath) else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let (body, response) = try? await sender.send(request), response.statusCode == 200,
+              let answered = response.url, answered.scheme == "https", answered.host() == url.host(),
+              answered.port == url.port
+        else { return nil }
+        return MastodonRegistration.listed(in: body)
     }
 
     func authorizeURL(
@@ -341,11 +434,16 @@ public struct MastodonOAuth: Sendable {
         // **The state before anything the answer says**, a refusal included: RFC 6749 §4.1.2.1
         // has the server send it back on an error as on a code, and an `error=` that does not
         // carry this attempt's state is not this attempt's answer. Acted on unchecked, anything
-        // able to open this app's callback could walk a sign-in down its ladder — a registration
-        // and a page for each rung.
+        // able to open this app's callback could end a sign-in the person is in the middle of,
+        // and have its registration dropped.
         guard value("state") == state else { throw MastodonSignInError.stateMismatch }
-        if let error = value("error") {
-            throw error == "invalid_scope" ? MastodonSignInError.invalidScope : MastodonSignInError.denied
+        // Only `access_denied` is the person's no (RFC 6749 §4.1.2.1). Anything else the source
+        // says went wrong — `server_error`, `temporarily_unavailable` — is a failure of its own.
+        switch value("error") {
+        case "invalid_scope"?: throw MastodonSignInError.invalidScope
+        case "access_denied"?: throw MastodonSignInError.denied
+        case .some: throw MastodonSignInError.unreadable
+        case nil: break
         }
         guard let code = value("code"), !code.isEmpty else { throw MastodonSignInError.unreadable }
         return code
@@ -353,16 +451,19 @@ public struct MastodonOAuth: Sendable {
 
     /// The token, and **what the server says it granted** — which is not always what was asked
     /// for. `scope` is nothing where the server sent none; RFC 6749 lets it out only when the
-    /// grant is exactly the request.
+    /// grant is exactly the request. `handedBack` where the answer shows the token was made
+    /// before this trade (`handedBack(made:answered:after:)`).
     func exchange(
         code: String, verifier: String, clientID: String, clientSecret: String,
         scopes: String = MastodonOAuth.reading
-    ) async throws -> (accessToken: String, scope: String?) {
+    ) async throws -> (accessToken: String, scope: String?, handedBack: Bool) {
         struct Issued: Decodable {
             let access_token: String
             let scope: String?
+            let created_at: Int?
         }
-        let answer: Issued = try await post("/oauth/token", [
+        let asked = ContinuousClock.now
+        let (answer, date): (Issued, String?) = try await posted("/oauth/token", [
             ("grant_type", "authorization_code"),
             ("code", code),
             ("client_id", clientID),
@@ -372,29 +473,72 @@ public struct MastodonOAuth: Sendable {
             ("scope", scopes),
         ])
         guard !answer.access_token.isEmpty else { throw MastodonSignInError.unreadable }
-        return (answer.access_token, answer.scope)
+        let handedBack = Self.handedBack(made: answer.created_at, answered: date, after: asked.duration(to: .now))
+        return (answer.access_token, answer.scope, handedBack)
     }
 
-    func verify(_ token: MastodonToken) async throws {
+    /// Checks that the source honours `token`, and hands back who its answer says the token
+    /// signs in (`MastodonWho.said`): nobody, where it names none.
+    @discardableResult
+    func verify(_ token: MastodonToken) async throws -> MastodonWho {
         guard let url = Host.httpsURL(host: host, path: "/api/v1/accounts/verify_credentials")
         else { throw MastodonSignInError.unreadable }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
-        let (_, response) = try await send(request)
+        let (body, response) = try await send(request)
         guard (200..<300).contains(response.statusCode) else {
             throw MastodonSignInError.http(response.statusCode)
         }
+        return MastodonWho.said(body, at: host)
     }
 
-    /// Asks the server to forget the token. Best effort: signing out is done on this device
-    /// before this is asked, and nothing it answers changes that.
-    public func revoke(_ token: MastodonToken) async {
+    /// Where a source gives its own account of a token (#347). Fixed on the host, as every
+    /// address here is.
+    static let tokenInfoPath = "/oauth/token/info"
+    /// The most words a source's account of a token is read for.
+    static let tokenInfoWords = 128
+
+    /// The words `token` holds **as its source says** (#347) — what a sign-in this device did
+    /// not make itself is believed to hold, and nothing a package wrote beside it. Nothing,
+    /// where the source answered and named no list of them.
+    ///
+    /// Read as a stranger's: from the token's own host, bounded, and for the list alone.
+    public func words(of token: MastodonToken) async throws -> [String]? {
+        guard let url = Host.httpsURL(host: host, path: Self.tokenInfoPath) else { throw MastodonSignInError.unreadable }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
+        let (body, response) = try await send(request)
+        guard (200..<300).contains(response.statusCode) else {
+            throw MastodonSignInError.http(response.statusCode)
+        }
+        guard let said = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let entries = said["scope"] as? [Any], entries.count <= Self.tokenInfoWords
+        else { return nil }
+        let words = entries.compactMap { $0 as? String }
+        guard words.count == entries.count, words.allSatisfy(MastodonRegistration.isWord) else { return nil }
+        return words
+    }
+
+    /// Asks the server to end a sign-in, and says what it answered. Best effort: signing out
+    /// is done on this device before this is asked, and nothing it answers changes that.
+    ///
+    /// **Only a 2xx is the source saying it has** — it answers so the first time and every
+    /// time after. **A 403 saying `unauthorized_client` is a refusal that asking again will
+    /// not change**: the sign-in is not this registration's to end. Anything else is no
+    /// answer to go by.
+    @discardableResult
+    public func revoke(_ left: MastodonLeft) async -> MastodonEnd {
         guard let request = Self.form(host: host, path: "/oauth/revoke", [
-            ("client_id", token.clientID),
-            ("client_secret", token.clientSecret),
-            ("token", token.accessToken),
-        ]) else { return }
-        _ = try? await sender.send(request)
+            ("client_id", left.clientID),
+            ("client_secret", left.clientSecret),
+            ("token", left.accessToken),
+        ]), let (body, response) = try? await sender.send(request)
+        else { return .unanswered }
+        if (200..<300).contains(response.statusCode) { return .ended }
+        // The source's own word for it, and not any 403: one from something in front of the
+        // source says nothing of whose the sign-in is.
+        let said = (try? JSONDecoder().decode(Refusal.self, from: body))?.error
+        return response.statusCode == 403 && said == "unauthorized_client" ? .refused : .unanswered
     }
 
     private struct Refusal: Decodable { let error: String }
@@ -402,6 +546,13 @@ public struct MastodonOAuth: Sendable {
     private func post<Answer: Decodable>(
         _ path: String, _ fields: [(String, String)]
     ) async throws -> Answer {
+        try await posted(path, fields).answer
+    }
+
+    /// `post`, and the moment the server says it answered, as its `Date` header spells it.
+    private func posted<Answer: Decodable>(
+        _ path: String, _ fields: [(String, String)]
+    ) async throws -> (answer: Answer, date: String?) {
         guard let request = Self.form(host: host, path: path, fields) else {
             throw MastodonSignInError.unreadable
         }
@@ -423,7 +574,31 @@ public struct MastodonOAuth: Sendable {
         guard let answer = try? JSONDecoder().decode(Answer.self, from: body) else {
             throw MastodonSignInError.unreadable
         }
-        return answer
+        return (answer, response.value(forHTTPHeaderField: "Date"))
+    }
+
+    /// Whether a token its answer dates `made` was made before the trade that answer, dated
+    /// `answered`, belongs to (#347): handed back, and so a sign-in somebody already has.
+    ///
+    /// A Mastodon dates a token the second it makes it, and a token handed back keeps its
+    /// first date. `took` is how long the trade took, as this device counted it.
+    ///
+    /// **Shown only where the token cannot have been made by this trade**: both dates are
+    /// whole seconds, so the token was made before the second after `made`, and the trade
+    /// was sent no sooner than `took` before `answered`. It is handed back where the first
+    /// is no later than the second — two seconds apart for a server that answers at once,
+    /// and more for one that is slow. **Anything less certain — or either date missing or
+    /// unreadable — is a token made here**, which is what every token was before this: one
+    /// not kept is then ended, where a fresh one read as handed back would be dropped live.
+    static func handedBack(made: Int?, answered: String?, after took: Duration) -> Bool {
+        guard let made, let answered else { return false }
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.timeZone = TimeZone(identifier: "GMT")
+        format.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        guard let date = format.date(from: answered) else { return false }
+        let waited = Double(took.components.seconds) + Double(took.components.attoseconds) / 1e18
+        return Double(made + 1) <= date.timeIntervalSince1970 - max(0, waited)
     }
 
     /// A transport failure is `.unreachable`; a reader walking away is `.cancelled`.
@@ -471,6 +646,57 @@ extension URLRequest {
     }
 }
 
+/// The hosts whose source said, **in its own words**, that the sign-in held there is over
+/// (#347) — noted by the door that heard it, and taken once by whoever goes on to end the
+/// earlier sign-ins this device left there.
+///
+/// **A bare 401 is not that.** Anything in front of a source can answer 401 to everything — a
+/// maintenance page behind a password, a firewall, a network's own sign-in page — and ending
+/// what was left on its word would sign the person's other devices out for good once it lifts.
+public final class MastodonEndings: @unchecked Sendable {
+    private let lock = NSLock()
+    private var said: Set<String> = []
+    private var dropped: Set<String> = []
+
+    public init() {}
+
+    func note(_ host: String, saidBySource: Bool, dropped count: Int) {
+        lock.withLock {
+            if saidBySource { said.insert(host.lowercased()) }
+            if count > 0 { dropped.insert(host.lowercased()) }
+        }
+    }
+
+    /// Whether `host`'s source said so since this was last asked. Asked once: the answer
+    /// goes with the asking.
+    public func takeSaid(_ host: String) -> Bool {
+        lock.withLock { said.remove(host.lowercased()) != nil }
+    }
+
+    /// The hosts where a 401 that was not the source's own took earlier sign-ins off this
+    /// device unended, since this was last asked: what the person is yet to be told.
+    public func takeDropped() -> Set<String> {
+        lock.withLock {
+            defer { dropped = [] }
+            return dropped
+        }
+    }
+
+    /// Whether a 401's body is a Mastodon's own answer to a token it does not honour — JSON
+    /// that names an `error`, as it answers one revoked ("The access token was revoked") and
+    /// one it never knew ("The access token is invalid"). A page, a line of text and nothing
+    /// at all are somebody else's.
+    ///
+    /// **JSON naming an `error` from something that is not the source still passes**: the
+    /// sentence itself is the source's to word, and in the language asked for, so it is
+    /// not read. To follow up, once a capture of a revoked token's 401 shows the source
+    /// sends it: require `WWW-Authenticate: Bearer … error="invalid_token"` as well.
+    static func isSourcesOwn(_ body: Data) -> Bool {
+        struct Said: Decodable { let error: String }
+        return (try? JSONDecoder().decode(Said.self, from: body))?.error.isEmpty == false
+    }
+}
+
 /// The one door a signed-in request goes through (#25b reads Home and lists here).
 ///
 /// The address is built from the token's own host, so the token is only ever sent there; a
@@ -481,15 +707,25 @@ extension URLRequest {
 /// must not wipe a token that works. Confirmed, the token is forgotten — only if it is still the
 /// one held, so a late answer about a replaced token cannot take the new one — and `.signedOut`
 /// is thrown. 403, 5xx and a failed connection leave it alone.
+///
+/// **Whether the source said so itself is noted apart** (#347, `MastodonEndings`): any 401
+/// from the account check forgets the token, as it always has, and only one that reads as the
+/// source's own answer is a reason to end anything else. Any other takes the earlier sign-ins
+/// left there off the device unended, with the token and in one step of the store.
 public struct MastodonAuthorized: Sendable {
     public let token: MastodonToken
     private let sender: any HTTPSender
     private let store: any MastodonTokenStore
+    private let endings: MastodonEndings?
 
-    public init(token: MastodonToken, sender: any HTTPSender, store: any MastodonTokenStore) {
+    public init(
+        token: MastodonToken, sender: any HTTPSender, store: any MastodonTokenStore,
+        endings: MastodonEndings? = nil
+    ) {
         self.token = token
         self.sender = sender
         self.store = store
+        self.endings = endings
     }
 
     static let accountCheck = "/api/v1/accounts/verify_credentials"
@@ -498,7 +734,36 @@ public struct MastodonAuthorized: Sendable {
         try await finish(try await send(path: path, query: query), path: path)
     }
 
+    /// `get(path:query:)`, and beside the body what the answer's `Link` header says: where a
+    /// list that pages by its own word names its next stretch. Nothing where it sent none.
+    public func getLinked(path: String, query: [URLQueryItem] = []) async throws -> (body: Data, link: String?) {
+        let answer = try await send(path: path, query: query)
+        return (try await finish(answer, path: path), answer.link)
+    }
+
     /// A form POST through the same door: the token, the 401 rule, and never off this host.
+    /// As `get`, with a not-found of the address told from every other refusal: throws
+    /// `MastodonHostMoreError.noSuchAddress` where the host says it has no such address
+    /// (`MastodonHostNotFound`) — which is a word about the host, and nothing about the sign-in.
+    public func getAtAddress(path: String, query: [URLQueryItem] = []) async throws -> Data {
+        let result = try await send(path: path, query: query)
+        if MastodonHostNotFound.isOfTheAddress(status: result.status, body: result.body) {
+            throw MastodonHostMoreError.noSuchAddress
+        }
+        return try await finish(result, path: path)
+    }
+
+    /// As `get`, with a refusal for want of a scope told from every other 403 (#319): throws
+    /// `MastodonScopeError.outside` where the server says the token was not issued with what
+    /// the ask needs (`MastodonScopeRefusal`), and what `get` throws for any other refusal.
+    public func getInScope(path: String, query: [URLQueryItem] = []) async throws -> Data {
+        let result = try await send(path: path, query: query)
+        if MastodonScopeRefusal.isOne(status: result.status, body: result.body, authenticate: result.authenticate) {
+            throw MastodonScopeError.outside
+        }
+        return try await finish(result, path: path)
+    }
+
     public func post(path: String, form: [(String, String)]) async throws -> Data {
         try await post(path: path, form: form, headers: [:])
     }
@@ -506,6 +771,20 @@ public struct MastodonAuthorized: Sendable {
     /// `post(path:form:)`, with headers of the request's own beside the door's.
     public func post(path: String, form: [(String, String)], headers: [String: String]) async throws -> Data {
         try await finish(try await send(path: path, method: "POST", form: form, headers: headers), path: path)
+    }
+
+    /// A PATCH carrying a body of several parts through the same door (#312): a file's bytes
+    /// beside fields of text, with the token, the 401 rule, and never off this host.
+    ///
+    /// **The body is made before anything is sent** — every name checked, the whole of it
+    /// under `limit` — and one that will not do is thrown as a `MultipartError`, with nothing
+    /// asked of the source. `limit` is for a source that says it takes less: it only ever
+    /// lowers the bound, and one above `MultipartBody.byteLimit` is that.
+    public func patch(
+        path: String, parts: [MultipartPart], limit: Int = MultipartBody.byteLimit
+    ) async throws -> Data {
+        let body = try MultipartBody(parts, limit: min(limit, MultipartBody.byteLimit))
+        return try await finish(try await send(path: path, method: "PATCH", parts: body), path: path)
     }
 
     /// Who the reader is on this source, as `@user@host` — the spelling `Note.handle` takes, so a
@@ -517,18 +796,19 @@ public struct MastodonAuthorized: Sendable {
     /// (`MastodonToken.accountID` and `handle`, in the sign-in's Keychain item) — never apart
     /// from one, which would be this device deciding whose posts are whose.
     public func handle() async throws -> String {
-        try await who().handle
+        guard let handle = try await who().handle else { throw MastodonWriteError.unreadable }
+        return handle
     }
 
-    /// `handle()`, and beside it the id this source gives the account, where it says one: what
-    /// names the account whatever it is renamed to, and what its own posts are read by.
-    public func who() async throws -> (id: String?, handle: String) {
-        struct Me: Decodable { let id: String?; let acct: String }
+    /// Who the reader is on this source, as its account check says through this sign-in
+    /// (`MastodonWho.said`): the id it gives the account, which names it whatever it is
+    /// renamed to, and a handle only where it is this source's own.
+    public func who() async throws -> MastodonWho {
         let data = try await get(path: Self.accountCheck)
-        guard let me = try? MastodonJSON.decoder.decode(Me.self, from: data) else {
+        guard (try? JSONSerialization.jsonObject(with: data)) is [String: Any] else {
             throw MastodonWriteError.unreadable
         }
-        return (me.id, StatusDTO.handle(me.acct, host: token.host))
+        return MastodonWho.said(data, at: token.host)
     }
 
     /// A DELETE through the same door (#109): taking back what the reader wrote.
@@ -536,17 +816,26 @@ public struct MastodonAuthorized: Sendable {
         try await finish(try await send(path: path, method: "DELETE"), path: path)
     }
 
-    private func finish(_ result: (Data, status: Int), path: String) async throws -> Data {
+    /// What one request was answered: its body, its status, and its `Link` and
+    /// `WWW-Authenticate` headers where it sent them.
+    private struct Answered {
+        let body: Data
+        let status: Int
+        let link: String?
+        let authenticate: String?
+    }
+
+    private func finish(_ result: Answered, path: String) async throws -> Data {
         switch result.status {
         case 200..<300:
-            return result.0
+            return result.body
         case 401:
-            if path != Self.accountCheck,
-               (try? await send(path: Self.accountCheck))?.status != 401
-            {
-                throw MastodonAuthError.http(401)
-            }
-            guard (try? store.forget(token)) == true else { throw MastodonAuthError.http(401) }
+            let check = path == Self.accountCheck ? result : try? await send(path: Self.accountCheck)
+            guard let check, check.status == 401 else { throw MastodonAuthError.http(401) }
+            let own = MastodonEndings.isSourcesOwn(check.body)
+            // One step in the store: no pass over what was left can come between the two.
+            guard let dropped = try? store.forget(token, saidBySource: own) else { throw MastodonAuthError.http(401) }
+            endings?.note(token.host, saidBySource: own, dropped: dropped)
             throw MastodonAuthError.signedOut
         default:
             throw MastodonAuthError.http(result.status)
@@ -558,8 +847,9 @@ public struct MastodonAuthorized: Sendable {
         method: String = "GET",
         query: [URLQueryItem] = [],
         form: [(String, String)]? = nil,
+        parts: MultipartBody? = nil,
         headers: [String: String] = [:]
-    ) async throws -> (Data, status: Int) {
+    ) async throws -> Answered {
         guard let url = Host.httpsURL(host: token.host, path: path, query: query) else {
             throw URLError(.badURL)
         }
@@ -570,7 +860,14 @@ public struct MastodonAuthorized: Sendable {
         request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let form { request.setForm(form) }
+        if let parts {
+            request.setValue(parts.contentType, forHTTPHeaderField: "Content-Type")
+            request.httpBody = parts.data
+        }
         let (body, response) = try await sender.send(request)
-        return (body, response.statusCode)
+        return Answered(
+            body: body, status: response.statusCode, link: response.value(forHTTPHeaderField: "Link"),
+            authenticate: response.value(forHTTPHeaderField: "WWW-Authenticate")
+        )
     }
 }

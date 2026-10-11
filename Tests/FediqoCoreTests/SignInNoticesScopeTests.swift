@@ -5,7 +5,7 @@ import Testing
 
 /// What a sign-in asks for so notices can be read (#323), and what an earlier sign-in is read as.
 ///
-/// The words asked for and their order, the ladder and the registrations a sign-in may start on,
+/// The words asked for and their order, which registrations carry a page that asks for them,
 /// and what a held token's attributes say. What `MastodonSessions` does with them is
 /// `SignInNoticesTests`' in the UI suite.
 @Suite("What a sign-in asks for so notices can be read")
@@ -25,7 +25,7 @@ struct SignInNoticesScopeTests {
     @Test("Without notices every string is what it was; with them, reading them comes last, and dismissing after it only where the sign-in acts")
     func theStringsInTheirOrder() {
         #expect(MastodonOAuth.noticing == "read:notifications")
-        #expect(MastodonOAuth.dismissing == "write:notifications")
+        #expect(MastodonPart.notices.wordsBesideActing == ["write:notifications"])
 
         // Not asked: byte for byte what a sign-in asked before this.
         #expect(MastodonOAuth.scopes(writing: false) == Self.reading)
@@ -39,7 +39,7 @@ struct SignInNoticesScopeTests {
             == "\(Self.reading) \(Self.writing) write:bookmarks read:notifications write:notifications")
         #expect(MastodonOAuth.scopes(writing: true, bookmarks: false, notices: true)
             == "\(Self.reading) \(Self.writing) read:notifications write:notifications")
-        #expect(MastodonOAuth.scopes(reading: Self.readingWithoutSearch, writing: false, notices: true)
+        #expect(MastodonOAuth.scopes(search: false, writing: false, notices: true)
             == "\(Self.readingWithoutSearch) read:notifications")
 
         // Dismissing is an act: never asked of a sign-in that only reads.
@@ -85,59 +85,46 @@ struct SignInNoticesScopeTests {
         #expect(!MastodonOAuth.dismisses(nil) && !MastodonOAuth.dismisses(""))
     }
 
-    @Test("Asking for notices adds no rung: each rung carries the notices words after its own, and without them the ladder is as it was")
-    func theLadder() {
+    @Test("Asking for notices adds its words after the others and takes none away: a source with no search or bookmarks is asked for the same without them, and notices still")
+    func whatIsAskedWithNotices() {
         let acting = "\(Self.reading) \(Self.writing)"
         let actingWithoutSearch = "\(Self.readingWithoutSearch) \(Self.writing)"
-        #expect(MastodonOAuth.ladder(writing: false, notices: false) == [Self.reading, Self.readingWithoutSearch])
-        #expect(MastodonOAuth.ladder(writing: true, notices: false) == [
-            acting + " write:bookmarks", actingWithoutSearch + " write:bookmarks", acting, actingWithoutSearch,
-        ])
-        #expect(MastodonOAuth.ladder(writing: false) == MastodonOAuth.ladder(writing: false, notices: false))
-        #expect(MastodonOAuth.ladder(writing: true) == MastodonOAuth.ladder(writing: true, notices: false))
-
-        #expect(MastodonOAuth.ladder(writing: false, notices: true) == [
-            Self.reading + " read:notifications", Self.readingWithoutSearch + " read:notifications",
-        ])
         let both = " read:notifications write:notifications"
-        #expect(MastodonOAuth.ladder(writing: true, notices: true) == [
-            acting + " write:bookmarks" + both, actingWithoutSearch + " write:bookmarks" + both,
-            acting + both, actingWithoutSearch + both,
-        ])
+        #expect(MastodonOAuth.scopes(writing: false, notices: true) == Self.reading + " read:notifications")
+        #expect(MastodonOAuth.scopes(writing: true, notices: true) == acting + " write:bookmarks" + both)
+        // The least each can be: what is registered for once the whole of it is refused.
+        let leastReading = MastodonOAuth.scopes(search: false, writing: false, bookmarks: false, notices: true)
+        let leastActing = MastodonOAuth.scopes(search: false, writing: true, bookmarks: false, notices: true)
+        #expect(leastReading == Self.readingWithoutSearch + " read:notifications")
+        #expect(leastActing == actingWithoutSearch + both)
         for wanted in [false, true] {
-            let with = MastodonOAuth.ladder(writing: wanted, notices: true)
-            #expect(with.count == MastodonOAuth.ladder(writing: wanted).count, "a rung was added")
-            #expect(with.allSatisfy(MastodonOAuth.notices), "a rung fell to a sign-in without notices")
-            #expect(with.allSatisfy { MastodonOAuth.writes($0) == wanted })
+            let chosen = MastodonOAuth.scopes(writing: wanted, notices: true)
+            let least = wanted ? leastActing : leastReading
+            #expect(MastodonRegistration.page(chosen, on: least) == least)
+            #expect(MastodonOAuth.notices(least), "the least a sign-in can be fell to one without notices")
+            #expect(MastodonOAuth.writes(least) == wanted)
+            #expect(MastodonRegistration.page(chosen, on: MastodonRegistration.superset()) == chosen)
         }
     }
 
-    @Test("A sign-in that asks for notices starts on no registration that cannot ask for them, and one that does not starts on none made for them")
-    func noRegistrationIsReusedAcrossTheChoice() {
-        for wanted in [false, true] {
-            let with = MastodonOAuth.known(writing: wanted, notices: true)
-            let without = MastodonOAuth.known(writing: wanted, notices: false)
-            #expect(without == MastodonOAuth.known(writing: wanted), "the set a sign-in had before this moved")
-            #expect(with.count == 2 && without.count == 2)
-            #expect(with.allSatisfy(MastodonOAuth.notices), "a registration that cannot ask for notices is reused")
-            #expect(!without.contains(where: MastodonOAuth.notices), "a registration made for notices is started on unasked")
-            #expect(with.isDisjoint(with: without))
-            // Nor one made for the other answer about writing, as before.
-            #expect(with.isDisjoint(with: MastodonOAuth.known(writing: !wanted, notices: true)))
-            #expect(with.isDisjoint(with: MastodonOAuth.known(writing: !wanted, notices: false)))
-            // Read off the ladder by the rule it had: the rungs that leave bookmarks out are not started on.
-            #expect(with.isSubset(of: Set(MastodonOAuth.ladder(writing: wanted, notices: true))))
-            #expect(with.allSatisfy { MastodonOAuth.bookmarks($0) == wanted })
-        }
+    @Test("A registration made before notices were asked for carries no page that asks for them, and one made for everything carries a page with or without")
+    func noEarlierRegistrationCarriesThem() {
         // Every registration an earlier build made, and one nothing is written down for.
-        let earlier = [
+        let earlier: [String?] = [
             Self.reading, Self.readingWithoutSearch, "\(Self.reading) \(Self.writing)",
-            "\(Self.reading) \(Self.writing) write:bookmarks", "",
+            "\(Self.reading) \(Self.writing) write:bookmarks", "", nil,
         ]
         for wanted in [false, true] {
+            let chosen = MastodonOAuth.scopes(writing: wanted, notices: true)
             for scopes in earlier {
-                #expect(!MastodonOAuth.known(writing: wanted, notices: true).contains(scopes), "\(scopes)")
+                #expect(MastodonRegistration.page(chosen, on: scopes) == nil, "\(scopes ?? "nothing")")
+                #expect(!MastodonRegistration.holds(chosen, on: scopes))
             }
+            // Notices are never left off a page as search and bookmarks are.
+            let whole = MastodonRegistration.superset()
+            let unnoticed = whole.replacingOccurrences(of: " read:notifications write:notifications", with: "")
+            #expect(MastodonRegistration.page(chosen, on: unnoticed) == nil)
+            #expect(MastodonRegistration.page(MastodonOAuth.scopes(writing: wanted), on: whole) == MastodonOAuth.scopes(writing: wanted))
         }
     }
 

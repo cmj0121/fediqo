@@ -54,6 +54,35 @@ struct PersonPane: View {
     var onOpenThread: (String) -> Void
     var jumpToTop: Int
     var onBack: () -> Void
+    /// What their source says of them, where it is one that says who people are (#310). **Handed
+    /// none, this page is the page it always was** — what this device holds of theirs, read
+    /// through a host, with nothing asked of anybody — and it never asks which it was handed by
+    /// looking at the source: the caller knows, and this draws what it was given.
+    var said: PersonSaid?
+    /// "Try again", where the source could not be asked who they are.
+    var onAskAgain: () -> Void = {}
+    /// Where their source has not heard of them and they live elsewhere (#319): the press that
+    /// asks that source to look them up, where the asking stands, or why there is none.
+    var lookUp: SearchLookUpLine?
+    var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
+    /// The line about the server they live on (#310): the press that asks it, where the
+    /// asking stands, what it came to, or the way back. Nothing where there is nobody to ask.
+    var home: PersonHomeLine?
+    /// What that server said of them, while it is what the page draws in place of the source's.
+    var homeSaid: PersonHomeSaid?
+    var onHome: (PersonHomeLine.Press) -> Void = { _ in }
+    /// The foot's press: the stretch of their posts older than what is drawn.
+    var onReadOn: () -> Void = {}
+    /// The press beside "They moved to …": the page of the account the source says they went
+    /// to, asked of that same source.
+    var onOpenMoved: ((Person.Moved) -> Void)?
+    /// A figure that counts a list of people, pressed (#311): that list's page, answered by
+    /// the root as one more step of the walk.
+    var onOpenList: ((PeopleList) -> Void)?
+    /// The way to the hashtags the reader follows, where this is their own page (#318), and
+    /// its press: the list's page, or the question its lock asks.
+    var followed: FollowedTagsEntry?
+    var onFollowed: ((FollowedTagsEntry) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
@@ -70,7 +99,7 @@ struct PersonPane: View {
             ShellRule()
             heading
             ShellRule()
-            list
+            if let said { saidList(said) } else { list }
         }
     }
 
@@ -93,31 +122,48 @@ struct PersonPane: View {
     /// page is this" — a handle is only a name once you know where — and naming it is exactly as
     /// far as a person page may go towards a source without becoming one.
     private var heading: some View {
-        HStack(alignment: .center, spacing: ShellSpace.step) {
+        let named = Self.named(person, said: said, home: homeSaid)
+        return HStack(alignment: .center, spacing: ShellSpace.step) {
             face
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
                 // Their own writing, pictures and all — the same view the row draws a name with,
-                // so a name written in emoji reads the same in both places.
-                EmojiText(person.name, emojis: person.emojis, host: person.host, role: .name)
+                // so a name written in emoji reads the same in both places. **Once the source
+                // has said who they are, the heading is its word and not the row's**: the name,
+                // the handle and the face the answer carried — so an answer about somebody else
+                // shows as somebody else.
+                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                    EmojiText(named.name, emojis: named.emojis, host: person.host, role: .name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .lineLimit(1)
-                if let handle = person.handle {
+                    if (homeSaid?.person ?? said?.person)?.locked == true {
+                        Image(systemName: "lock")
+                            .shellFont(.mark)
+                            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                            .help(PersonSaid.locked())
+                            .accessibilityLabel(PersonSaid.locked())
+                    }
+                }
+                if let handle = named.handle {
                     Text(handle)
                         .shellFont(.meta)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                Text(String(format: L10n.t("person.through"), person.host))
+                Text(Self.viewLine(of: person, said: said, home: homeSaid))
                     .shellFont(.mark)
+                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                    .lineLimit(said == nil ? 1 : 2)
+            }
+            Spacer(minLength: 0)
+            // How much of theirs this device holds: the figure of a page that draws what it
+            // holds. A page drawing what the source gave says the source's own figures instead.
+            if let held = Self.heldLine(items.count, said: said) {
+                Text(held)
+                    .shellFont(.reading)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                     .lineLimit(1)
             }
-            Spacer(minLength: 0)
-            Text(Self.heldLine(items.count))
-                .shellFont(.reading)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .lineLimit(1)
         }
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.step)
@@ -132,11 +178,29 @@ struct PersonPane: View {
     /// asked for without building a pane: a line spelled inside a `View` is a line no test reads.
     static func heldLine(_ count: Int) -> String { L10n.count("person.held", count) }
 
+    /// The held figure at the heading's far end, or nothing on a page handed what a source says.
+    static func heldLine(_ count: Int, said: PersonSaid?) -> String? {
+        said == nil ? heldLine(count) : nil
+    }
+
+    /// The heading's third line: the host this device read them through, or — on a page handed
+    /// what a source says — whose view the page is.
+    ///
+    /// **While what their own server said is drawn, the line names that server and when it was
+    /// asked**: whose word the page is must be said where the page says who they are.
+    static func viewLine(
+        of person: DummyPerson, said: PersonSaid?, home: PersonHomeSaid? = nil, language: DummyLanguage? = nil
+    ) -> String {
+        if let home { return home.whoseView(language: language) }
+        return said.map { PersonSaid.whoseView($0.source, person: $0.person, language: language) }
+            ?? String(format: L10n.t("person.through", language: language), person.host)
+    }
+
     /// Their picture, and the plate where the post carried none — the row's own two cases, at the
     /// size this page draws them.
     private var face: some View {
         Group {
-            if let url = person.avatarURL {
+            if let url = Self.face(of: person, said: said) {
                 RemoteImage(
                     url: url,
                     tier: .deck,
@@ -156,6 +220,26 @@ struct PersonPane: View {
         .accessibilityHidden(true)
     }
 
+    /// Who the heading names: the source's word once it has said who they are — the name and
+    /// the handle made fit for a line, and the pictures the name is written in — and what their
+    /// row carried until then.
+    ///
+    /// **Their own server's word while that is what the page draws** — and then in letters
+    /// alone: no picture is taken from a server nobody added.
+    static func named(
+        _ person: DummyPerson, said: PersonSaid?, home: PersonHomeSaid? = nil
+    ) -> (name: String, handle: String?, emojis: [CustomEmoji]) {
+        if let subject = home?.person { return (subject.lineName, subject.lineHandle, []) }
+        guard let subject = said?.person else { return (person.name, person.handle, person.emojis) }
+        return (subject.lineName, subject.lineHandle, subject.emojis)
+    }
+
+    /// The face the heading draws: the source's own word once it has said who they are —
+    /// which may be that they have none — and the one their row carried until then.
+    static func face(of person: DummyPerson, said: PersonSaid?) -> URL? {
+        said?.person.map(\.avatarURL) ?? person.avatarURL
+    }
+
     @ViewBuilder
     private var list: some View {
         if items.isEmpty {
@@ -171,6 +255,128 @@ struct PersonPane: View {
         } else {
             rows
         }
+    }
+
+    // MARK: - As the source says
+
+    /// What a page handed the source's word draws under its heading, top to bottom, as one list
+    /// that scrolls together: where the asking stands, what the source says of them, their
+    /// posts, and what stands under those.
+    ///
+    /// **Their posts are the source's once it has answered, and what this device holds until
+    /// then** — and for good where it did not answer, or has not heard of them: a failure takes
+    /// nothing away.
+    private func saidList(_ said: PersonSaid) -> some View {
+        let shown = said.posts ?? items
+        return ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    Color.clear.frame(height: 0).id(Self.head).accessibilityHidden(true)
+                    if let homeSaid {
+                        // Their own server's word in place of the source's, with nothing in it
+                        // to press but the way back under it.
+                        PersonSaidBlock(person: homeSaid.person, source: homeSaid.home, linked: false)
+                        if let home { PersonHomeLineView(line: home, onPress: onHome) }
+                        ShellRule()
+                    } else {
+                        sourceSaid(said)
+                    }
+                    if let sentence = Self.emptyLine(said, held: items.count) {
+                        quiet(sentence)
+                    }
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { index, item in
+                        row(item)
+                            .id(item.id)
+                        if index < shown.count - 1 { ShellRule() }
+                    }
+                    if let foot = said.foot {
+                        ShellRule()
+                        PersonFootRow(foot: foot, source: said.source, onPress: onReadOn)
+                    }
+                }
+            }
+            .scrollIndicators(.never)
+            .clearsFloatingCorner()
+            .onChange(of: selectedID) { _, id in
+                guard let id else { return }
+                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
+            }
+            // The top of the page is what the source says of them, and the first row the keys
+            // walk is there (#311): `g` brings that back, and not their first post alone.
+            .onChange(of: jumpToTop) { _, _ in
+                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(Self.head, anchor: .top) }
+            }
+        }
+    }
+
+    /// What the source says, as the page always drew it: where the asking stands, the press
+    /// that asks the source to look them up, what it says of them — and under that the line
+    /// about the server they live on, where there is one to ask.
+    @ViewBuilder
+    private func sourceSaid(_ said: PersonSaid) -> some View {
+        if let line = said.stateLine(of: person.handle ?? person.name) {
+            stateLine(line, said: said)
+            ShellRule()
+        }
+        if let lookUp {
+            SearchLookUpView(line: lookUp, onPress: onLookUp)
+                .padding(.horizontal, ShellSpace.pad)
+                .padding(.vertical, ShellSpace.snug)
+            ShellRule()
+        }
+        if let subject = said.person {
+            PersonSaidBlock(
+                person: subject, source: said.source, onOpenMoved: onOpenMoved,
+                lit: selectedID, onOpenList: onOpenList, followed: followed, onFollowed: onFollowed
+            )
+            if home == nil { ShellRule() }
+        }
+        if let home {
+            PersonHomeLineView(line: home, onPress: onHome)
+            ShellRule()
+        }
+    }
+
+    /// The head of the list a page handed the source's word scrolls: what `g` scrolls back to.
+    private static let head = "person.head"
+
+    /// Where the asking stands, and beside a failure the press that asks again.
+    private func stateLine(_ line: String, said: PersonSaid) -> some View {
+        WordsThenPress(
+            words: Text(line)
+                .shellFont(.meta)
+                .foregroundStyle(said.reading == .asking ? ShellChrome.inkFaint(colorScheme) : ShellChrome.ink(colorScheme)),
+            press: Group {
+                if said.offersAgain {
+                    ShellLinkButton(L10n.t("person.retry"), action: onAskAgain)
+                        .disabled(said.askingPosts)
+                        .fixedSize()
+                }
+            }
+        )
+    }
+
+    /// What stands where posts would and none are drawn, or nothing where some are, or where
+    /// their newest are still being asked for. About the source where the source answered with
+    /// none, about this device where what it holds is all there is to draw.
+    static func emptyLine(_ said: PersonSaid, held: Int, language: DummyLanguage? = nil) -> String? {
+        if let posts = said.posts {
+            // A suspended account's line has said why already; a stretch that did not come is
+            // the foot's to say.
+            guard posts.isEmpty, said.foot == nil, said.person?.suspended != true else { return nil }
+            return PersonSaid.gaveNone(said.source, counted: said.person?.tally.posts, language: language)
+        }
+        guard held == 0, said.reading == .unheardOf || said.reading == .failed else { return nil }
+        return L10n.t("person.none", language: language)
+    }
+
+    private func quiet(_ sentence: String) -> some View {
+        Text(sentence)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(ShellSpace.pad)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var rows: some View {

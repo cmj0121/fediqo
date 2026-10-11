@@ -1,0 +1,481 @@
+import AppKit
+import Foundation
+import SwiftUI
+import Testing
+@testable import FediqoCore
+@testable import FediqoUI
+
+/// Two sources behind one client, each its own `PageServer`: an ask goes to the server of the
+/// host it names, and to nobody where no source is of that host.
+struct ServersByHost: HTTPClient, HTTPSender {
+    let servers: [String: PageServer]
+
+    func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+        try await send(URLRequest(url: url))
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        guard let server = servers[request.url?.host() ?? ""] else { throw URLError(.cannotFindHost) }
+        return try await server.send(request)
+    }
+}
+
+/// #320, the two pages: what is asked of each source for the hashtags and the links rising on
+/// it, when, what the pages are handed and say in each state — one band a source, never merged
+/// — and that a source which is not asked who people are has no band, and is asked nothing.
+///
+/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
+/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+@MainActor
+@Suite("The hashtags and links rising on the sources", .serialized, .timeLimit(.minutes(1)))
+struct RisingTests {
+    private static let one = "m.example", two = "n.example"
+    private static let forum = Source(host: "forum.example", kind: .discuz)
+    private static let tags = "/api/v1/trends/tags?limit=20"
+    private static let links = "/api/v1/trends/links?limit=20"
+
+    private static func tagsAnswer(_ names: [String], uses: Int = 12) -> PageServer.Answer {
+        PageServer.Answer(body: "[" + names.map {
+            #"{"name":"\#($0)","history":[{"day":"1700086400","accounts":"\#(uses)","uses":"\#(uses * 2)"},{"day":"1700000000","accounts":"3","uses":"4"}]}"#
+        }.joined(separator: ",") + "]")
+    }
+
+    private static let story = PageServer.Answer(body: #"""
+    [{"url":"https://far.example/story","title":"A story","description":"What it says.","image":"https://tracker.example/p.png",
+      "history":[{"day":"1700086400","accounts":"20","uses":"21"}]}]
+    """#)
+    private static let none = PageServer.Answer(body: "[]")
+    private static let off = PageServer.Answer(body: #"{"error":"Not Found"}"#, status: 404)
+
+    private static func tag(_ name: String, at source: String, people: Int = 15, posts: Int = 28) -> RisingRow {
+        .tag(RisingTag(tag: PostTag("#" + name)!, use: RisingUse(posts: posts, people: people, days: 2)), source: source)
+    }
+
+    /// A session of two sources that say who people are and a forum, each with a server of its own.
+    private func session(
+        _ first: [String: PageServer.Answer], _ second: [String: PageServer.Answer] = [:], sources: [Source]? = nil
+    ) async -> (ShellSession, [String: PageServer], SourceWork) {
+        let servers = [Self.one: PageServer(first), Self.two: PageServer(second), Self.forum.host: PageServer([:])]
+        let router = ServersByHost(servers: servers)
+        let session = ShellSession(
+            http: router, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: router)
+        )
+        let work = SourceWork()
+        session.work = work
+        let joined = sources ?? [Source(host: Self.one, kind: .mastodon), Source(host: Self.two, kind: .mastodon), Self.forum]
+        for source in joined { await session.store.add(source) }
+        session.sources = await session.store.sources()
+        return (session, servers, work)
+    }
+
+    private func signIn(_ session: ShellSession, at host: String = one) throws {
+        try session.mastodon.tokens.save(MastodonToken(host: host, accessToken: "tok", clientID: "c", clientSecret: "s"))
+        session.mastodon.refresh()
+    }
+
+    private func bands(_ rising: ShellRising, _ which: RisingWhich, _ session: ShellSession) -> [RisingSaid.Band] {
+        rising.said(which, in: session)?.bands ?? []
+    }
+
+    // MARK: - What is asked, and when
+
+    @Test("Opening the rising hashtags asks each source that has them for one stretch of twenty — one ask a source, with no sign-in, listed in the run's record under that source — and the page is handed one band a source, in the order the sources stand, each with its own rows in its own order: the same hashtag on two sources is two rows, never one. Opened again, nobody is asked; the links are a page of their own; and a forum has no band")
+    func openingAsksEachSourceOnce() async throws {
+        let (session, servers, work) = await session(
+            [Self.tags: Self.tagsAnswer(["Swift", "birds"]), Self.links: Self.story], [Self.tags: Self.tagsAnswer(["swift"], uses: 2), Self.links: Self.none]
+        )
+        let rising = ShellPersonPages().rising
+        #expect(bands(rising, .tags, session) == [RisingSaid.Band(source: Self.one), RisingSaid.Band(source: Self.two)], "before anything answered")
+        #expect(bands(rising, .tags, session).allSatisfy { $0.stateLine(.tags, language: .english) == "Asking \($0.source)…" })
+
+        await rising.opened(.tags, in: session)
+        for host in [Self.one, Self.two] {
+            #expect(await servers[host]?.asked == [Self.tags])
+            #expect(await servers[host]?.bearers == [""])
+        }
+        #expect(await servers[Self.forum.host]?.asked.isEmpty == true)
+        #expect(work.record.map(\.reached).sorted() == [Self.one, Self.two] && work.record.allSatisfy { $0.purpose == .rising && $0.source == $0.reached })
+
+        let said = try #require(rising.said(.tags, in: session))
+        #expect(said.bands.map(\.source) == [Self.one, Self.two] && said.bands.allSatisfy { $0.reading == .said && !$0.asking })
+        #expect(said.bands[0].rows == [Self.tag("Swift", at: Self.one), Self.tag("birds", at: Self.one)])
+        #expect(said.bands[1].rows == [Self.tag("swift", at: Self.two, people: 5, posts: 8)])
+        #expect(Set(said.rows.map(\.id)).count == 3 && rising.walked(.tags, in: session) == said.rows.map(\.id))
+        #expect(rising.row(said.rows[2].id, of: .tags, in: session) == said.rows[2] && rising.row("nothing", of: .tags, in: session) == nil)
+        #expect(rising.row(said.rows[0].id, of: .links, in: session) == nil, "a row of one page is none of the other's")
+        #expect(session.notes.isEmpty)
+
+        await rising.opened(.tags, in: session)
+        #expect(await servers[Self.one]?.asked.count == 1)
+        // The links: asked where they are, when their own page opens.
+        await rising.opened(.links, in: session)
+        #expect(await servers[Self.one]?.asked == [Self.tags, Self.links])
+        let links = try #require(rising.said(.links, in: session))
+        guard case .link(let link, let source) = try #require(links.bands[0].rows.first) else {
+            Issue.record("the link's row is no link")
+            return
+        }
+        #expect(source == Self.one && link.link.host == "far.example" && link.title == "A story" && link.use == RisingUse(posts: 21, people: 20, days: 1))
+        #expect(links.bands[1].rows.isEmpty && links.bands[1].stateLine(.links, language: .english) == "n.example gave no rising links.")
+        // Listing a link fetches nothing of it: every ask of the run went to a source, and none to the page or its picture.
+        #expect(Set(work.record.map(\.reached)) == [Self.one, Self.two])
+    }
+
+    @Test("A source that fails says so under its own band while the others land; its Try again asks that source and no other, and asking again from the keys asks every source; a source that gave none says it gave none — never that it has none or that it is switched off")
+    func oneFailsAndTheOthersLand() async throws {
+        let (session, servers, _) = await session([Self.tags: PageServer.Answer(body: "", status: 503)], [Self.tags: Self.none])
+        let rising = ShellPersonPages().rising
+        await rising.opened(.tags, in: session)
+        let said = bands(rising, .tags, session)
+        #expect(said[0].reading == .failed && said[0].offersAgain && said[0].rows.isEmpty)
+        #expect(said[0].stateLine(.tags, language: .english) == "Could not ask m.example for its rising hashtags.")
+        #expect(said[1].reading == .said && !said[1].offersAgain && said[1].stateLine(.tags, language: .english) == "n.example gave no rising hashtags.")
+        for language in DummyLanguage.allCases {
+            let line = try #require(said[1].stateLine(.tags, language: language)).lowercased()
+            #expect(!line.contains("switched") && !line.contains("關閉") && !line.contains("停用"), "\(line)")
+        }
+        // Opened again, a failure stands: it is asked again by the person, not by the page.
+        await rising.opened(.tags, in: session)
+        #expect(await servers[Self.one]?.asked.count == 1)
+
+        await servers[Self.one]?.answer(Self.tags, Self.tagsAnswer(["birds"]))
+        await rising.again(.tags, at: Self.one, in: session)
+        #expect(await servers[Self.one]?.asked.count == 2)
+        #expect(await servers[Self.two]?.asked.count == 1, "Try again asks the source it stands under")
+        #expect(bands(rising, .tags, session)[0].rows == [Self.tag("birds", at: Self.one)])
+        await rising.again(.tags, in: session)
+        #expect(await servers[Self.one]?.asked.count == 3)
+        #expect(await servers[Self.two]?.asked.count == 2)
+    }
+
+    @Test("A source is left out of a page only where its own address answered that it is not there: that is remembered for the run, for that page and not the other, and the source is not asked for it again; with every source left out there is no page")
+    func absentOnlyByItsOwnAddress() async throws {
+        let (session, servers, _) = await session([Self.tags: Self.none, Self.links: Self.none], [Self.tags: Self.none, Self.links: Self.off])
+        let pages = ShellPersonPages()
+        let rising = pages.rising
+        await rising.opened(.links, in: session)
+        #expect(bands(rising, .links, session).map(\.source) == [Self.one])
+        #expect(pages.more.hosts.has(.risingLinks, at: Self.two) == .absent && pages.more.hosts.has(.risingTags, at: Self.two) == .unsaid)
+        #expect(pages.more.hosts.has(.risingLinks, at: Self.one) == .unsaid, "an empty answer makes nothing absent")
+        await rising.opened(.links, in: session)
+        await rising.again(.links, at: Self.one, in: session)
+        #expect(await servers[Self.two]?.asked == [Self.links], "what is absent is not asked for again by opening, or by another's Try again")
+        // `r` is the person's reload: a source left out is asked afresh, and is there if it now gives.
+        await servers[Self.two]?.answer(Self.links, Self.story)
+        #expect(rising.canAskAgain(.links, in: session))
+        await rising.again(.links, in: session)
+        #expect(await servers[Self.two]?.asked == [Self.links, Self.links])
+        #expect(bands(rising, .links, session).map(\.source) == [Self.one, Self.two] && bands(rising, .links, session)[1].rows.count == 1)
+        #expect(bands(rising, .tags, session).map(\.source) == [Self.one, Self.two])
+        #expect(rising.offered(on: .trends, searching: false, in: session))
+
+        let (bare, _, _) = await self.session([Self.links: Self.off], sources: [Source(host: Self.one, kind: .mastodon)])
+        let alone = ShellPersonPages().rising
+        await alone.opened(.links, in: bare)
+        #expect(alone.said(.links, in: bare) == nil && alone.canAskAgain(.links, in: bare), "nothing to draw, and somebody to ask afresh")
+    }
+
+    // MARK: - While an ask is out
+
+    @Test("An ask is the pages' and not the pane's: the pane leaving does not stop it and it lands for the next visit; opening again, or asking again, while a source is being asked asks it nothing more — and the source beside it is not kept waiting")
+    func theAskOutlivesThePane() async throws {
+        let (session, servers, _) = await session([Self.tags: Self.tagsAnswer(["birds"])], [Self.tags: Self.tagsAnswer(["maps"])])
+        let first = try #require(servers[Self.one])
+        let rising = ShellPersonPages().rising
+        await first.hold(Self.tags)
+        defer { Task { await first.release(Self.tags) } }
+        let pane = Task { await rising.opened(.tags, in: session) }
+        await first.arrival(of: Self.tags)
+        await servers[Self.two]?.arrival(of: Self.tags)
+        pane.cancel()
+        let again = Task { await rising.opened(.tags, in: session) }
+        await rising.again(.tags, at: Self.one, in: session)
+        #expect(await first.asked.count == 1, "a press while the source is being asked asks nothing")
+        #expect(!rising.canAskAgain(.tags, in: session) && rising.canAskAgain(.links, in: session), "a reload is refused while the page's asks are out")
+        let midway = bands(rising, .tags, session)
+        #expect(midway[0].asking && midway[0].reading == .asking && midway[0].stateLine(.tags, language: .english) == "Asking m.example…")
+        await first.release(Self.tags)
+        await again.value
+        await pane.value
+        #expect(rising.canAskAgain(.tags, in: session))
+        let landed = bands(rising, .tags, session)
+        #expect(landed.map(\.rows.count) == [1, 1] && landed.allSatisfy { !$0.asking && $0.reading == .said })
+        #expect(await first.asked.count == 1)
+        #expect(await servers[Self.two]?.asked.count == 1)
+    }
+
+    @Test("An ask that was stopped before it answered leaves nothing saying Asking: its band says it was not asked to the end, with the press that asks again, and it is asked again when the page next opens")
+    func aStoppedAskIsAskedAgain() async throws {
+        let (session, servers, _) = await session([Self.tags: PageServer.Answer(body: "", cancelled: true)], [Self.tags: Self.none])
+        let rising = ShellPersonPages().rising
+        await rising.opened(.tags, in: session)
+        let stopped = bands(rising, .tags, session)[0]
+        #expect(stopped.reading == .stopped && !stopped.asking && stopped.offersAgain)
+        #expect(stopped.stateLine(.tags, language: .english) == "m.example was not asked to the end.")
+        await servers[Self.one]?.answer(Self.tags, Self.tagsAnswer(["birds"]))
+        await rising.opened(.tags, in: session)
+        #expect(bands(rising, .tags, session)[0].rows.count == 1)
+        #expect(await servers[Self.two]?.asked.count == 1, "the source that answered is not asked again")
+    }
+
+    @Test("What was asked as one sign-in is not shown to the next, and its answer, come late, lands nowhere — rows, or a word that the address is not there: the band is the reader's who asked since, whose own ask is still out; and a sign-in at one source lets nothing of another go")
+    func asWhoeverAsked() async throws {
+        for late in [Self.tagsAnswer(["old"]), Self.off] {
+            let (session, servers, _) = await session([Self.tags: late], [Self.tags: Self.tagsAnswer(["maps"])])
+            let first = try #require(servers[Self.one])
+            let pages = ShellPersonPages()
+            let rising = pages.rising
+            // A wire that goes on answering an ask that was called off, as a transfer already ended does.
+            rising.reaching = { host in MastodonRising(http: ServersByHost(servers: servers), host: host) }
+            await first.hold(Self.tags)
+            defer { Task { await first.release(Self.tags) } }
+            let unsigned = Task { await rising.opened(.tags, in: session) }
+            await first.arrival(of: Self.tags)
+
+            try signIn(session)
+            #expect(bands(rising, .tags, session)[0] == RisingSaid.Band(source: Self.one), "nobody's band is not the reader's")
+            let signed = Task { await rising.opened(.tags, in: session) }
+            await first.arrival(of: Self.tags, times: 2)
+            await first.releaseOne(Self.tags)
+            await unsigned.value
+            let between = bands(rising, .tags, session)
+            #expect(between.map(\.source) == [Self.one, Self.two], "a late not-found leaves no source out")
+            #expect(between[0].rows.isEmpty && between[0].asking && between[0].reading == .asking)
+            #expect(pages.more.hosts.has(.risingTags, at: Self.one) == .unsaid)
+            #expect(between[1].rows.count == 1, "the other source's band is as it was")
+            await first.answer(Self.tags, Self.tagsAnswer(["new"]))
+            await first.release(Self.tags)
+            await signed.value
+            #expect(bands(rising, .tags, session)[0].rows == [Self.tag("new", at: Self.one)])
+            #expect(await servers[Self.two]?.asked.count == 1, "a sign-in at one source asks nothing of another")
+        }
+    }
+
+    @Test("The asks go out under the small body's ceiling, as every small unsigned ask does: an answer past it is refused and its source says it could not be asked, while the source beside it lands")
+    func underTheSmallCeiling() async throws {
+        let big = PageServer.Answer(body: "[" + String(repeating: #"{"name":"a"},"#, count: 120_000) + #"{"name":"b"}]"#)
+        let (session, _, _) = await session([Self.tags: big], [Self.tags: Self.tagsAnswer(["maps"])])
+        let rising = ShellPersonPages().rising
+        await rising.opened(.tags, in: session)
+        #expect(bands(rising, .tags, session).map(\.reading) == [.failed, .said] && big.body.utf8.count > SourceReach.smallBody)
+    }
+
+    // MARK: - A forum
+
+    @Test("A source that is not asked who people are has no band and is asked nothing; where every source is such a one there are no pages, no line at the head of Trends and no key — the timeline is drawn as it was — and the files that draw and ask name no kind of source")
+    func aForumReadsTheSame() async throws {
+        let (session, servers, work) = await session([:], sources: [Self.forum, Source(host: "talk.example", kind: .discourse)])
+        let rising = ShellPersonPages().rising
+        for which in RisingWhich.allCases {
+            #expect(rising.said(which, in: session) == nil && !rising.canAskAgain(which, in: session))
+            await rising.opened(which, in: session)
+            await rising.again(which, in: session)
+            #expect(rising.walked(which, in: session).isEmpty && rising.opening(which, in: session).isEmpty)
+        }
+        #expect(!rising.offered(on: .trends, searching: false, in: session), "a forum's Trends gains no line")
+        #expect(!rising.opensByKey(place: .timeline, open: [], timeline: .trends, in: session))
+        for server in servers.values { #expect(await server.asked.isEmpty) }
+        #expect(work.record.isEmpty)
+
+        for file in ["RisingPane.swift", "ShellRising.swift"] {
+            let text = try String(contentsOf: Self.shell.appending(path: file), encoding: .utf8)
+            for word in ["ProtocolKind", ".kind", "isForum", ".mastodon", ".discuz", ".discourse", "offers."] {
+                #expect(!text.contains(word), "\(file) names \(word)")
+            }
+        }
+        let asked = try String(contentsOf: Self.shell.appending(path: "ShellRising.swift"), encoding: .utf8)
+        #expect(asked.contains("ShellPersonPages.source(at:"), "the one fact is read where a person's page reads it")
+        // The timeline's own file decides by the one rule, and draws what it drew where the rule says no.
+        let pane = try String(contentsOf: Self.shell.appending(path: "TimelinePane.swift"), encoding: .utf8)
+        #expect(pane.components(separatedBy: "rising.offered(on:").count == 2 && pane.contains("} else {\n            stream\n        }"))
+        #expect(!pane.contains("offers.") && !pane.contains(".kind == "))
+    }
+
+    @Test("The ways to the two pages stand at the head of the timeline that reads what is rising and nowhere else: not on All or a written timeline, not over a search; and the key opens the hashtags only there, with nothing in front of the stream but a lit row")
+    func whereTheWaysAre() async throws {
+        let (session, _, _) = await session([:])
+        let rising = ShellPersonPages().rising
+        #expect(rising.offered(on: .trends, searching: false, in: session))
+        #expect(!rising.offered(on: .all, searching: false, in: session) && !rising.offered(on: .written(UUID()), searching: false, in: session))
+        #expect(!rising.offered(on: .trends, searching: true, in: session))
+
+        #expect(rising.opensByKey(place: .timeline, open: [], timeline: .trends, in: session))
+        #expect(rising.opensByKey(place: .timeline, open: [.selection], timeline: .trends, in: session))
+        #expect(!rising.opensByKey(place: .timeline, open: [], timeline: .all, in: session))
+        #expect(!rising.opensByKey(place: .account, open: [], timeline: .trends, in: session))
+        for layer in DummyLayer.allCases where layer != .selection {
+            #expect(!rising.opensByKey(place: .timeline, open: [layer], timeline: .trends, in: session), "\(layer)")
+        }
+        #expect(DummyCommand.from("h") == .openRising && DummyCommand.from("h", typing: true) == nil && DummyCommand.from("h", fieldFocused: true) == nil)
+        let line = try #require(DummyShortcut.all.first { $0.commands == [.openRising] })
+        #expect(line.keys == ["h"] && line.group == .move && line.touch == .press)
+        #expect(L10n.t("shortcut.rising", language: .english) == "On Trends, open the hashtags rising on your sources")
+        let keys = try String(contentsOf: Self.shell.appending(path: "DummyShellKeys.swift"), encoding: .utf8)
+        #expect(keys.contains(#""o", "h", "y""#), "the key reaches the shell")
+    }
+
+    private static var shell: URL {
+        var url = URL(fileURLWithPath: #filePath)
+        while url.pathComponents.count > 1, !FileManager.default.fileExists(atPath: url.appending(path: "Package.swift").path) {
+            url.deleteLastPathComponent()
+        }
+        return url.appending(path: "Sources/FediqoUI/Shell")
+    }
+
+    // MARK: - A step of the walk
+
+    @Test("A page of what is rising is one step of the walk: leaving it gives back the row it was opened over, a hashtag opened from it is the next step and leaving that gives its row back; the keys that leave, walk, go to the top and ask again treat it as they treat a list of people")
+    func aStepOfTheWalk() throws {
+        var walk = ShellWalk()
+        let took = walk.walk(to: .rising(.tags), from: "post"), again = walk.walk(to: .rising(.tags), from: "post")
+        #expect(took && !again && walk.openedRising == .tags && walk.depth == 1, "a step onto the page in front is no step")
+        let row = Self.tag("birds", at: Self.one)
+        let opened = walk.walk(to: .tag(PostTag("#birds")!), from: row.id)
+        #expect(opened && walk.openedRising == nil && walk.openedTag != nil)
+        let fromTag = walk.back()
+        #expect(fromTag?.lamp == row.id && walk.openedRising == .tags)
+        let left = walk.back()
+        #expect(left?.step == .rising(.tags) && left?.lamp == "post" && walk.isEmpty)
+        let links = walk.walk(to: .rising(.links), from: nil)
+        #expect(links && walk.openedRising == .links)
+
+        #expect(DummyCommand.walk.contains(.rising) && DummyCommand.canWalk(whenOpen: [.rising]) && DummyCommand.canLightRow(whenOpen: [.rising]))
+        #expect(!DummyCommand.canEditTimeline(whenOpen: [.rising]) && DummyCommand.outermost(of: [.rising, .selection]) == .rising)
+        #expect(FediqoRootView.escapeSees([.rising, .selection], place: .usage) == [.selection])
+        #expect(TimelinePane.page(.rising(.tags)) == .opened && TimelinePane.openedID(.rising(.links)) == "rising:links")
+        #expect(FediqoRootView.canReload(place: .timeline, editing: false, hasSources: true, open: [.rising], personAsked: true))
+        #expect(!FediqoRootView.canReload(place: .timeline, editing: false, hasSources: true, open: [.rising]))
+        #expect(!FediqoRootView.canSearch(place: .timeline, open: [.rising]))
+        #expect(FediqoRootView.moved(in: [row.id, "b"], from: nil, by: 1, open: [.rising]) == row.id)
+        var selected: String? = "b"
+        var jump = 0
+        #expect(FediqoRootView.jumpedToTop(in: [row.id, "b"], standing: .rising(.tags), place: .timeline, selected: &selected, jump: &jump))
+        #expect(selected == row.id && jump == 1)
+    }
+
+    @Test("A link's row leads where a post's link leads, by the same door: its address is one this device would follow, the reader opens it listed under the source that named it and says the host of the address — and a row is drawn as words alone, with no picture and no press of its own inside it")
+    func aLinkGoesThroughThePostsDoor() async throws {
+        let (session, _, work) = await session([Self.links: Self.story])
+        let rising = ShellPersonPages().rising
+        await rising.opened(.links, in: session)
+        guard case .link(let link, let source) = try #require(rising.said(.links, in: session)?.rows.first) else {
+            Issue.record("no link was listed")
+            return
+        }
+        #expect(PostLink(link.link.text) == link.link && PostLink.followable(link.link.url.absoluteString) != nil)
+        let reader = ShellReader()
+        reader.work = work
+        #expect(reader.open(link.link.url, from: source))
+        #expect(reader.reading?.source == Self.one && reader.reading?.host == "far.example")
+        #expect(!work.record.contains { $0.reached == "far.example" || $0.reached == "tracker.example" }, "opening the row's page is the press, and listing reached neither")
+
+        let drawn = try String(contentsOf: Self.shell.appending(path: "RisingPane.swift"), encoding: .utf8)
+        for word in ["RemoteImage", "AsyncImage", "Link(", "openURL", "AttributedString", "LocalizedStringKey", "markdown"] {
+            #expect(!drawn.contains(word), "RisingPane.swift draws with \(word)")
+        }
+    }
+
+    // MARK: - What the pages say
+
+    @Test("A row says what it is and whose figures these are: a hashtag as it was written, a link by what its source calls it or by its address where it calls it nothing, the host read out of the address, and the source's counts written whole — 'not said' where it gave one figure and not the other, and no line where it gave none")
+    func theWords() throws {
+        #expect(RisingSaid.title(.tags, language: .english) == "Rising hashtags" && RisingSaid.title(.links, language: .english) == "Rising links")
+        #expect(RisingSaid.used(RisingUse(posts: 1_204, people: 310, days: 2), language: .english) == "Posts 1,204, people 310, over two days.")
+        #expect(RisingSaid.used(RisingUse(posts: 7, people: nil, days: 1), language: .english) == "Posts 7, people not said, today.")
+        #expect(RisingSaid.used(.unsaid) == nil && RisingSaid.used(RisingUse(posts: nil, people: nil, days: 2)) == nil)
+
+        let link = try #require(PostLink("https://far.example/a/rather/long/story"))
+        let named = RisingLink(link: link, title: "A story", words: "What it says.", use: RisingUse(posts: 21, people: 20, days: 1))
+        #expect(RisingSaid.called(named) == "A story" && RisingSaid.called(RisingLink(link: link)) == "https://far.example/a/rather/long/story")
+        #expect(RisingSaid.spoken(.link(named, source: Self.one), language: .english)
+            == "leads to far.example, A story, What it says., Posts 21, people 20, today.", "where it leads is heard before what a stranger called it")
+        #expect(RisingSaid.spoken(.link(RisingLink(link: link), source: Self.one), language: .english)
+            == "leads to far.example, https://far.example/a/rather/long/story")
+        #expect(RisingSaid.spoken(Self.tag("birds", at: Self.one), language: .english) == "#birds, Posts 28, people 15, over two days.")
+        #expect(RisingSaid.spoken(.tag(RisingTag(tag: PostTag("#birds")!), source: Self.one), language: .english) == "#birds")
+        // A site's name is whatever its source was told: the host is the address's own.
+        let spoofed = RisingLink(link: try #require(PostLink("https://evil.example/x")), title: "apple.com \u{202E}moc.elppa")
+        #expect(!spoofed.title.unicodeScalars.contains("\u{202E}"))
+        #expect(RisingSaid.spoken(.link(spoofed, source: Self.one), language: .english).hasPrefix("leads to evil.example, "))
+        // A press that opens nothing moves nothing.
+        #expect(ShellRising.lamp(after: false, of: .link(named, source: Self.one), before: "post") == "post")
+        #expect(ShellRising.lamp(after: true, of: .link(named, source: Self.one), before: "post") == RisingRow.link(named, source: Self.one).id)
+    }
+
+    @Test("Every sentence of the two pages, the key's line and the sentence for Return are written in each language the app speaks, with the places they fill, no figure through a bare number's place, and the two Chinese tables alike — and Return's sentence says a row, whatever kind it is")
+    func writtenInEveryLanguage() throws {
+        let resources = Self.shell.deletingLastPathComponent().appending(path: "Resources")
+        let english = try String(contentsOf: resources.appending(path: "en.lproj/Localizable.strings"), encoding: .utf8)
+        let keys = english.split(separator: "\n").compactMap { line -> String? in
+            guard line.hasPrefix("\"rising.") || line.hasPrefix("\"work.purpose.rising\"") || line.hasPrefix("\"shortcut.rising\"")
+                || line.hasPrefix("\"shortcut.expand\"")
+            else { return nil }
+            return line.dropFirst().split(separator: "\"").first.map(String.init)
+        }
+        #expect(keys.count == 16 && keys.contains("rising.use.two") && keys.contains("work.purpose.rising") && keys.contains("shortcut.expand"))
+        func places(_ text: String) -> [String] {
+            text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
+        }
+        for key in keys {
+            let written = L10n.t(key, language: .english)
+            #expect(written != key && !written.contains("%d") && !written.contains("$d"), "\(key)")
+            for language in DummyLanguage.allCases {
+                let other = L10n.t(key, language: language)
+                #expect(other != key && places(other) == places(written), "\(key) in \(language)")
+            }
+        }
+        let taiwan = try Data(contentsOf: resources.appending(path: "zh-TW.lproj/Localizable.strings"))
+        let hant = try Data(contentsOf: resources.appending(path: "zh-Hant.lproj/Localizable.strings"))
+        #expect(taiwan == hant)
+        #expect(SourceWork.Purpose.rising.isOfTheSource && !SourceWork.Purpose.rising.gathers)
+        let opens = L10n.t("shortcut.expand", language: .english)
+        #expect(opens == "Open the row you are on; on Notices, what the notice you are on is about" && !opens.contains("thread"))
+        let chinese = L10n.t("shortcut.expand", language: .taiwanese)
+        #expect(chinese.contains("那一列") && chinese.contains("通知") && !chinese.contains("討論串"))
+    }
+
+    @Test("The pages, the line at the head of Trends and a row are laid out to the width they are given and never past it, in light and in dark, in each state they have; a link's row is no taller for a title or words of any length than for four lines of them")
+    func laidOut() throws {
+        func size<Content: View>(_ content: Content, _ width: CGFloat, scheme: ColorScheme = .light) -> CGSize {
+            let hosted = NSHostingView(rootView: VStack(spacing: 0) { content }.frame(width: width).environment(\.colorScheme, scheme))
+            hosted.layoutSubtreeIfNeeded()
+            return hosted.fittingSize
+        }
+        let link = try #require(PostLink("https://a-rather-long-name-of-a-host.a-rather-long-instance-name.example/a/story"))
+        let long = String(repeating: "words and more words ", count: 40)
+        let wordy = RisingRow.link(RisingLink(link: link, title: long, words: long, use: RisingUse(posts: 1_204_000, people: 310_000, days: 2)), source: Self.one)
+        let brief = RisingRow.link(RisingLink(link: link, title: "A", words: "B", use: RisingUse(posts: 1, people: 1, days: 1)), source: Self.one)
+        let bare = RisingRow.link(RisingLink(link: link), source: Self.one)
+        let tag = Self.tag(String(repeating: "long", count: 25), at: Self.one)
+        for (width, scheme) in [(CGFloat(720), ColorScheme.light), (390, .dark), (320, .light)] {
+            for row in [wordy, brief, bare, tag, .tag(RisingTag(tag: PostTag("#a")!), source: Self.one)] {
+                for selected in [false, true] {
+                    let laid = size(RisingRowView(row: row, selected: selected), width, scheme: scheme)
+                    #expect(laid.width == width && laid.height > 0, "at \(width)")
+                }
+            }
+            let tall = size(RisingRowView(row: wordy), width).height, short = size(RisingRowView(row: brief), width).height
+            #expect(tall >= short && tall < short * 3, "a link's words are held to their lines at \(width): \(tall) against \(short)")
+            #expect(size(RisingRowView(row: bare), width).height < short)
+            #expect(size(RisingLine(onOpen: { _ in }), width, scheme: scheme).width == width)
+            #expect(size(RisingHead(which: .links), width, scheme: scheme).width == width)
+        }
+        let states = [
+            RisingSaid(which: .tags, bands: [RisingSaid.Band(source: Self.one), RisingSaid.Band(source: Self.two, reading: .failed)]),
+            RisingSaid(which: .tags, bands: [
+                RisingSaid.Band(source: Self.one, reading: .said, asking: true, rows: [tag, Self.tag("birds", at: Self.one)]),
+                RisingSaid.Band(source: Self.two, reading: .said), RisingSaid.Band(source: "o.example", reading: .stopped),
+            ]),
+            RisingSaid(which: .links, bands: [RisingSaid.Band(source: Self.one, reading: .said, rows: [wordy, brief, bare])]),
+        ]
+        for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 320)] {
+            for said in states {
+                let pane = RisingPane(said: said, selectedID: .constant(said.rows.first?.id), onOpen: { _ in }, onBack: {})
+                    .environment(\.shellLayout, layout)
+                let hosted = NSHostingView(rootView: pane.frame(width: width, height: 700))
+                hosted.layoutSubtreeIfNeeded()
+                #expect(hosted.fittingSize == CGSize(width: width, height: 700))
+            }
+        }
+    }
+}

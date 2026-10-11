@@ -396,6 +396,21 @@ enum JoinStage: Identifiable, Equatable {
 /// window does not resize as the reader moves between stages.
 struct JoinSheet: View {
     @Bindable var session: ShellSession
+    /// Opens the signed-in reader's own page at the source this sheet is about (#310), answered
+    /// by the root once the sheet has come down. Nothing where nobody answers, and then the
+    /// line that offers it is not drawn.
+    var onOwnPage: ((DummyPerson) -> Void)?
+    /// Opens a page of people of a joined source's (#315) — its directory, or the people it
+    /// suggests — answered by the root once the sheet has come down. Nothing where nobody
+    /// answers, and then the lines that offer them are not drawn.
+    var onPeople: ((PeopleList) -> Void)?
+    /// What a joined source says of itself beyond its document (#321), asked and kept by the
+    /// pages the root holds. Nothing where the sheet is drawn with none: nothing more is then
+    /// asked of any source, or drawn.
+    var more: ShellSourceMore?
+    /// What the person set at a joined source they are signed in to (#321), asked and kept by
+    /// the pages the root holds. Nothing where the sheet is drawn with none.
+    var you: ShellYouThere?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
@@ -589,8 +604,18 @@ struct JoinSheet: View {
             // comment records: the list squeezed to a sliver at 320pt with nothing to scroll.
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if case .joined(let source) = origin { standing(source.host) }
+                    if case .joined(let source) = origin {
+                        standing(source.host)
+                        if let me = ownPage(at: source.host) { OwnPageLine(me: me, press: { openOwnPage(me) }) }
+                    }
                     SourcePreviewView(preview: preview, surface: .sheet, origin: origin)
+                    if case .joined(let source) = origin, let you { YouThereBlock(host: source.host, you: you, session: session) }
+                    if case .joined(let source) = origin, let more {
+                        SourceMoreBlock(
+                            host: source.host, more: more, session: session, onDirectory: directoryPress(at: source.host),
+                            onSuggested: suggestedPress(at: source.host)
+                        )
+                    }
                 }
             }
         case .choosingBoards(let offer, _):
@@ -602,14 +627,57 @@ struct JoinSheet: View {
         }
     }
 
+    /// Whose page "Signed in as …" opens on a joined source's page, or nobody: no sign-in there,
+    /// a source that does not say who people are, or nobody to answer the press.
+    func ownPage(at host: String) -> DummyPerson? {
+        onOwnPage == nil ? nil : ShellPersonPages.own(at: host, in: session)
+    }
+
+    /// The line's press: the sheet comes down, as its Close takes it down, and the page opens.
+    func openOwnPage(_ me: DummyPerson) {
+        session.dismissStage()
+        onOwnPage?(me)
+    }
+
+    /// What the line "Its directory of people" presses on a joined source's page, or nothing
+    /// where nobody answers: the sheet comes down, as its Close takes it down, and the
+    /// directory opens. **Which sources have such a line is not decided here**: the block that
+    /// draws it is handed nothing for a source that does not say who people are.
+    func directoryPress(at host: String) -> (() -> Void)? {
+        guard let onPeople else { return nil }
+        return {
+            session.dismissStage()
+            onPeople(PeopleList(directoryAt: host))
+        }
+    }
+
+    /// What the line "People it suggests" presses on a joined source's page, or nothing where
+    /// nobody answers: the sheet comes down, and they open as the directory does. **Which
+    /// sources have such a line, and for whom, is not decided here**: the block that draws it
+    /// is handed that.
+    func suggestedPress(at host: String) -> (() -> Void)? {
+        guard let onPeople else { return nil }
+        return {
+            session.dismissStage()
+            onPeople(PeopleList(suggestedAt: host))
+        }
+    }
+
     /// What the source's row had to cut to its one line, whole (#244): the errand running, a
     /// refusal of the last press and the forum's own notice — each of them, not only the first.
+    /// And last, what its sign-in holds, part by part and whole (#347): read as the page is
+    /// drawn, and not there for a source with no sign-in or no parts.
+    func standingLines(_ host: String, language: DummyLanguage? = nil) -> [String] {
+        SourceRow.statusLines(
+            waiting: SourceRow.waitingLine(session.progress, drawnAs: nil, host: host),
+            refusal: session.rowRefusal, notice: session.forums.notice(host: host)?.sentence(), host: host,
+            language: language
+        ) + [session.mastodon.holds(host: host, whole: true, language: language)].compactMap { $0 }
+    }
+
     @ViewBuilder
     private func standing(_ host: String) -> some View {
-        let lines = SourceRow.statusLines(
-            waiting: SourceRow.waitingLine(session.progress, drawnAs: nil, host: host),
-            refusal: session.rowRefusal, notice: session.forums.notice(host: host)?.sentence(), host: host
-        )
+        let lines = standingLines(host)
         if !lines.isEmpty {
             SourceStanding(lines: lines)
                 .padding(ShellSpace.pad)
@@ -1068,4 +1136,32 @@ struct JoinSheet: View {
         return locale.localizedString(forLanguageCode: trimmed) ?? trimmed
     }
 
+}
+
+/// Who the reader is signed in as at a source, on that source's page, and the press that opens
+/// their own page there (#310). Drawn only where there is such a page.
+///
+/// **Their handle is a source's word set in a sentence of ours**, so it is made fit for a line
+/// where the sentence is made.
+struct OwnPageLine: View {
+    let me: DummyPerson
+    let press: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    static func words(_ me: DummyPerson, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("person.own.signedIn", language: language), LineText.oneLine(me.handle ?? me.name))
+    }
+
+    static func pressWords(language: DummyLanguage? = nil) -> String {
+        L10n.t("person.own.open", language: language)
+    }
+
+    var body: some View {
+        WordsThenPress(
+            words: Text(Self.words(me))
+                .shellFont(.meta)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme)),
+            press: ShellLinkButton(Self.pressWords(), symbol: SourceRow.ownPageSymbol, action: press).fixedSize()
+        )
+    }
 }

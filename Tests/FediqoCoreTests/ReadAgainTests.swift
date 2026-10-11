@@ -61,7 +61,7 @@ struct ReadAgainTests {
             "https://social.example/api/v1/statuses/9/context": .text(Self.context),
         ])
         let post = MastodonPost(http: http, host: host)
-        let id = try await post.id(of: held(statusID: "9"))
+        let id = try await post.id(of: held(statusID: "9"), lookingItUp: true)
         #expect(id == "9")
         let notes = [try await post.post(id: "9", source: source)]
             + (try await post.context(id: "9", source: source))
@@ -115,7 +115,7 @@ struct ReadAgainTests {
         let tokens = MemoryMastodonTokens()
         try tokens.save(MastodonFixture.token)
         let post = MastodonPost(door: MastodonAuthorized(token: MastodonFixture.token, sender: server, store: tokens))
-        let id = try await post.id(of: held(statusID: nil))
+        let id = try await post.id(of: held(statusID: nil), lookingItUp: true)
         #expect(id == "9")
         _ = try await post.post(id: "9", source: source)
         _ = try await post.context(id: "9", source: source)
@@ -134,7 +134,7 @@ struct ReadAgainTests {
     @Test("Without an id and signed out, nothing is asked and nothing is guessed")
     func signedOutWithoutID() async throws {
         let http = FixtureHTTP()
-        let id = try await MastodonPost(http: http, host: host).id(of: held(statusID: nil))
+        let id = try await MastodonPost(http: http, host: host).id(of: held(statusID: nil), lookingItUp: true)
         #expect(id == nil)
         #expect(await http.requested.isEmpty)
     }
@@ -210,7 +210,7 @@ struct ReadAgainTests {
         let tokens = MemoryMastodonTokens()
         try tokens.save(MastodonFixture.token)
         let post = MastodonPost(door: MastodonAuthorized(token: MastodonFixture.token, sender: server, store: tokens))
-        #expect(try await post.id(of: held(statusID: nil)) == nil)
+        #expect(try await post.id(of: held(statusID: nil), lookingItUp: true) == nil)
     }
 
     @Test("A URI with + in it is searched for as written, not with a space")
@@ -223,21 +223,48 @@ struct ReadAgainTests {
             id: "https://social.example/users/a+b/statuses/9?x=1&y=2", source: source, author: "A",
             handle: "@a+b@social.example", body: "", postedAt: Date(timeIntervalSince1970: 0), categories: []
         )
-        _ = try await post.id(of: plus)
+        _ = try await post.id(of: plus, lookingItUp: true)
         let url = try #require(await server.requests.first?.url)
         #expect(url.query?.contains("q=https://social.example/users/a%2Bb/statuses/9?x%3D1%26y%3D2") == true)
         let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "q" }
         #expect(q?.value == plus.id)
     }
 
-    @Test("A token that cannot search is refused with a 403, for the caller to say so")
+    @Test("A token that cannot search is told from every other refusal, for the caller to say so")
     func searchScopeRefused() async throws {
-        let server = FixtureSender(["/api/v2/search": .json("{}", status: 403)])
+        let server = FixtureSender([
+            "/api/v2/search": .json(#"{"error":"This action is outside the authorized scopes"}"#, status: 403),
+        ])
         let tokens = MemoryMastodonTokens()
         try tokens.save(MastodonFixture.token)
         let post = MastodonPost(door: MastodonAuthorized(token: MastodonFixture.token, sender: server, store: tokens))
-        await #expect(throws: MastodonAuthError.http(403)) { _ = try await post.id(of: held(statusID: nil)) }
+        await #expect(throws: MastodonScopeError.outside) {
+            _ = try await post.id(of: held(statusID: nil), lookingItUp: true)
+        }
         #expect(try tokens.signedInHosts() == [host], "a 403 is not a sign-out")
+    }
+
+    @Test("Another 403 from the look-up is not the scope's: it is a refusal like any other")
+    func searchRefusedOtherwise() async throws {
+        let server = FixtureSender(["/api/v2/search": .json(#"{"error":"Your login is currently disabled"}"#, status: 403)])
+        let tokens = MemoryMastodonTokens()
+        try tokens.save(MastodonFixture.token)
+        let post = MastodonPost(door: MastodonAuthorized(token: MastodonFixture.token, sender: server, store: tokens))
+        await #expect(throws: MastodonAuthError.http(403)) {
+            _ = try await post.id(of: held(statusID: nil), lookingItUp: true)
+        }
+        #expect(try tokens.signedInHosts() == [host], "a 403 is not a sign-out")
+    }
+
+    @Test("Not to be looked up, a post held without its id is not searched for, signed in or not")
+    func notLookedUpUnlessAsked() async throws {
+        let server = FixtureSender(["/api/v2/search": .json(#"{"statuses":["# + Self.status("9", "x") + "]}")])
+        let tokens = MemoryMastodonTokens()
+        try tokens.save(MastodonFixture.token)
+        let post = MastodonPost(door: MastodonAuthorized(token: MastodonFixture.token, sender: server, store: tokens))
+        #expect(try await post.id(of: held(statusID: nil), lookingItUp: false) == nil)
+        #expect(try await post.id(of: held(statusID: "9"), lookingItUp: false) == "9")
+        #expect(await server.requests.isEmpty)
     }
 
     @Test("A Discourse topic is read from its own page, with its opening post's words")

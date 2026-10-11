@@ -482,7 +482,7 @@ struct ActOutrunsReadTests {
         ]))
         let door = MastodonAuthorized(token: MastodonFixture.token, sender: signed, store: tokens)
         try await said(
-            try await MastodonSearch(door: door).statuses(matching: "hello", source: source).first, on: signed,
+            try await MastodonSearch(door: door).everything(matching: "hello", source: source).posts.first, on: signed,
             "a search"
         )
 

@@ -1002,7 +1002,10 @@ struct ReloadTests {
     func mastodonThreadScope() async throws {
         let tokens = MemoryMastodonTokens()
         try tokens.save(MastodonToken(host: Self.one, accessToken: "tok", clientID: "c", clientSecret: "s"))
-        let signedIn = Paths(["/api/v2/search": "{}"], status: ["/api/v2/search": 403])
+        let signedIn = Paths(
+            ["/api/v2/search": #"{"error":"This action is outside the authorized scopes"}"#],
+            status: ["/api/v2/search": 403]
+        )
         let (session, http) = await shell(mastodon: MastodonSessions(tokens: tokens, sender: signedIn))
         let item = await holding(Self.mastodonNote(statusID: nil), in: session)
         await session.reload.thread(item, in: session)
@@ -1010,6 +1013,23 @@ struct ReloadTests {
         #expect(await http.requested.isEmpty)
         #expect(session.reload.unfindable == .cannotSearch(host: Self.one))
         #expect(session.reload.line == "This post can't be reloaded: sign in to one.example again to let Fediqo find it.")
+        #expect(session.isSignedIn(host: Self.one), "a 403 is not a sign-out")
+    }
+
+    @Test("Another 403 from the look-up is a read that failed, and nothing says to sign in again")
+    func mastodonThreadRefusedOtherwise() async throws {
+        let tokens = MemoryMastodonTokens()
+        try tokens.save(MastodonToken(host: Self.one, accessToken: "tok", clientID: "c", clientSecret: "s"))
+        let signedIn = Paths(
+            ["/api/v2/search": #"{"error":"Your login is currently disabled"}"#],
+            status: ["/api/v2/search": 403]
+        )
+        let (session, _) = await shell(mastodon: MastodonSessions(tokens: tokens, sender: signedIn))
+        let item = await holding(Self.mastodonNote(statusID: nil), in: session)
+        await session.reload.thread(item, in: session)
+        #expect(await signedIn.paths == ["/api/v2/search"])
+        #expect(session.reload.unfindable == nil)
+        #expect(session.reload.failures[.thread] == [Self.one])
         #expect(session.isSignedIn(host: Self.one), "a 403 is not a sign-out")
     }
 

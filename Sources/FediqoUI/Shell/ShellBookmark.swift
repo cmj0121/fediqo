@@ -1,18 +1,15 @@
-import AuthenticationServices
 import FediqoCore
 import Foundation
-import SwiftUI
 
 /// A bookmark is kept at the source (#285): the act itself is `toggle(.bookmark, on:)`, beside
 /// the boost and the favourite, and the mark is what the source last said, under a press still out. What lives here is the
 /// one thing only a bookmark needs — asking a sign-in made before bookmarks were asked for to
 /// allow them, **without signing anybody out**.
 ///
-/// The sign-in it asks for is the ordinary one to read and act (`signIn(host:through:writing:)`),
-/// which already copes with a host that holds a token: the new token replaces it here, the one it
-/// supersedes is revoked at the server, and a reader who closes the server's page still has the
-/// sign-in they had. Nothing is widened until the reader has said yes twice — to the question
-/// here, and on the source's own page.
+/// It is asked as every part is (`ShellPartAsk`, #347): a question, then the source's own page
+/// for what the sign-in holds and bookmarks, and the sign-in the person had left exactly as it
+/// was by a page closed, a no on it, or any failure. Allowed, the wider sign-in takes its
+/// place here and the one it had stays live at the source until the person signs out.
 extension ShellSession {
     /// The press on a row's bookmark mark where its sign-in has to be asked again: raises the
     /// question about the source of the first copy that is true of. Sends nothing. Returns
@@ -20,48 +17,21 @@ extension ShellSession {
     @discardableResult
     func askToBookmark(_ item: DummyItem) -> Bool {
         guard let copy = askingCopy(of: item, for: .bookmark) else { return false }
-        bookmarkAsk = copy.source.host
-        return true
+        return askBookmarks(host: copy.source.host)
     }
 
-    /// The question answered no: everything stays as it was.
-    func cancelBookmarkAsk() {
-        if let bookmarkAsk { noticesSaid[bookmarkAsk.lowercased()] = nil }
-        bookmarkAsk = nil
+    /// The bookmark question about `host`, from a post's row and from Account alike. Nothing
+    /// where that sign-in is not one to ask — and where its source is being asked for
+    /// something already, the press says so (`askFor`).
+    @discardableResult
+    func askBookmarks(host: String) -> Bool {
+        guard mastodon.bookmarks(host: host) == .unasked else { return false }
+        return askFor([.bookmarks], host: host)
     }
 
-    /// The question answered yes: the source's own page, asking for reading, acting and
-    /// bookmarks.
-    ///
-    /// **Only while that sign-in is still one to ask** — one that acts, was made before bookmarks
-    /// were asked for, and has not been asked since. A question left open over a source that was
-    /// signed out, narrowed to reading or already answered asks nothing: this press is never the
-    /// way a sign-in comes to write.
-    ///
-    /// **What it says afterwards is what is true.** The sign-in the reader had is still held and
-    /// still does everything it did, whatever happened on the page — so a failure is "bookmarks
-    /// were not allowed", never "the sign-in failed", and a source with none to give is said to
-    /// have none. A page closed says nothing, as any sign-in's does.
-    ///
-    /// `noticesSaid` is what the question said of notices (`SignInAsked`): said to carry none,
-    /// the page asks for none.
-    func allowBookmarks(host raw: String, through browser: any OAuthBrowser, noticesSaid said: Bool? = nil) async {
-        cancelBookmarkAsk()
-        let host = raw.lowercased()
-        guard mastodon.bookmarks(host: host) == .unasked else { return }
-        if rowRefusal?.host == host { rowRefusal = nil }
-        let failure = await mastodon.signIn(host: host, through: browser, writing: true, noticesSaid: said)
-        await forgetReaderMarksDue()
-        if let failure {
-            NetLog.auth.notice("\(NetLog.line("bookmarks", host: host, error: failure), privacy: .public)")
-            if isAdded(host) { rowRefusal = (host: host, key: "account.bookmarks.failed") }
-            showToast(L10n.t("account.bookmarks.failed"))
-            return
-        }
-        if mastodon.isSignedIn(host: host) { await readAsYou(host: host) }
-        if mastodon.bookmarksRefused.contains(host) {
-            showToast(L10n.t("account.bookmarks.unavailable"))
-        }
+    /// The source whose sign-in is being asked to allow bookmarks, where one is (#285).
+    var bookmarkAsk: String? {
+        partAsks.open.flatMap { $0.ticked.contains(.bookmarks) ? $0.host : nil }
     }
 
     /// Lets go of what a source said a reader had done to its posts — boosted, favourited,
@@ -145,28 +115,37 @@ extension ShellSession {
     }
 }
 
-/// Bookmarks, asked of a source already signed in to act — a modifier, so the root's chain gains
-/// one plain call and no presenter closure of its own. On the root, because the question is put
-/// from a post's row and from Account alike, and one presenter answers both.
-struct BookmarkQuestion: ViewModifier {
-    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
-    let session: ShellSession
+extension MastodonSessions {
+    /// What a place draws where the bookmark would be (#347), for how the sign-in at `host`
+    /// stands to bookmarks — `PartWords.place`, the one reading every place draws from: never
+    /// asked, refused on the source's own page, none there, or the source being asked now.
+    ///
+    /// Nothing where the bookmark is offered, and nothing where bookmarks are not what is
+    /// in the way: no sign-in; one that does not act, which has nothing to add them to and
+    /// whose row already says to sign in to act; and a source that turned a bookmark away
+    /// this run — its sign-in holds bookmarks, so that is no standing, and it is said in its
+    /// own words until the next sign-in.
+    func bookmarkPlace(host raw: String) -> PartWords.Place? {
+        let host = raw.lowercased()
+        guard let held = heldParts[host], MastodonParts.holds(.acting, in: held.scopes),
+              let standing = standing(.bookmarks, host: host)
+        else { return nil }
+        return PartWords.place(standing, of: .bookmarks, asking: asking.contains(host))
+    }
+}
 
-    func body(content: Content) -> some View {
-        content.shellConfirm(asked, question: question) { ask, _ in
-            Task {
-                await session.allowBookmarks(
-                    host: ask.host, through: WebAuthBrowser(session: webAuthenticationSession), noticesSaid: ask.notices
-                )
-            }
+extension ShellSession {
+    /// The locks of a row's marks (`ItemActing.locks`): the bookmark's, where the row offers
+    /// its other acts and not that one. It is about the source the press asks (`askingCopy`);
+    /// where no copy's sign-in can be asked, about the first whose source has none.
+    func locks(on item: DummyItem, acts: PostActs) -> [PostAct: ItemActing.Lock] {
+        guard !acts.offers(.bookmark), !acts.offered.isEmpty else { return [:] }
+        let asked = askingCopy(of: item, for: .bookmark)
+        for copy in asked.map({ [$0] }) ?? item.actCopies {
+            let host = copy.source.host.lowercased()
+            guard let place = mastodon.bookmarkPlace(host: host), asked != nil || place.kind == PartWords.Place.Kind.none else { continue }
+            return [.bookmark: ItemActing.Lock(place: place, host: host)]
         }
-    }
-
-    private func question(_ ask: SignInAsked) -> ShellConfirmation {
-        session.bookmarkQuestion(host: ask.host)
-    }
-
-    private var asked: Binding<SignInAsked?> {
-        Binding(get: { session.bookmarkAsk.map(session.signInAsked) }, set: { if $0 == nil { session.cancelBookmarkAsk() } })
+        return [:]
     }
 }

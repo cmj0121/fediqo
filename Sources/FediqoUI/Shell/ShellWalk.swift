@@ -33,6 +33,22 @@ enum ShellStep: Hashable, Sendable {
     /// The tag as the author wrote it where it was pressed; which posts carry it is asked without
     /// regard to case, as the servers this app reads treat a tag.
     case tag(PostTag)
+    /// A list of people a source keeps (#311) — whom somebody follows, who follows them — opened
+    /// from where the source counts them. A row of it opens that person, and leaving their page
+    /// gives the row back: both are the walk's own.
+    case people(PeopleList)
+    /// The hashtags, or the links, rising on the sources (#320), opened from the head of the
+    /// timeline that reads what is rising. A hashtag's row opens that hashtag's page, and
+    /// leaving it gives the row back: both are the walk's own.
+    case rising(RisingWhich)
+    /// All the hashtags one source found for a search's words (#319), opened from the press
+    /// under its band. A hashtag's row opens that hashtag's page, and leaving it gives the row
+    /// back: both are the walk's own.
+    case foundTags(FoundTags)
+    /// The hashtags the reader follows at one source (#318), opened from its line on their own
+    /// page there. A hashtag's row opens that hashtag's page, and leaving it gives the row
+    /// back: both are the walk's own.
+    case followedTags(FollowedTags)
 }
 
 /// How far the reader has walked from the stream, and what each step is owed when it is left.
@@ -82,6 +98,12 @@ struct ShellWalk: Hashable, Sendable {
         return tag
     }
 
+    /// The list of people in front, where one is (#311).
+    var openedPeople: PeopleList? {
+        guard case .people(let list) = standing else { return nil }
+        return list
+    }
+
     /// The page read out of a post that is in front, where one is (#169).
     var openedLink: URL? {
         guard case .link(let url) = standing else { return nil }
@@ -99,6 +121,15 @@ struct ShellWalk: Hashable, Sendable {
             if case .link = step.step { return false }
             return true
         }?.step
+    }
+
+    /// Every list of the hashtags followed among the steps (#318), in front or under another:
+    /// what a walk ended in one go lets go of, as leaving each would.
+    var followedTags: [FollowedTags] {
+        taken.compactMap { step in
+            if case .followedTags(let page) = step.step { return page }
+            return nil
+        }
     }
 
     var isEmpty: Bool { taken.isEmpty }

@@ -87,6 +87,36 @@ final class SourceWork {
         /// The person's own newest posts at a source, read once before a text that may have
         /// been posted is sent again (`ShellOutbox`): asked by their press, and nothing landed.
         case ownPosts
+        /// Somebody a source knows and their posts, read for their page because the person
+        /// opened it or read on there (#310). Nothing read under it is held.
+        case person
+        /// A list of people a source keeps — whom somebody follows, who follows them — read a
+        /// stretch at a time because the person opened it or read on there (#311). Nothing
+        /// read under it is held.
+        case people
+        /// What a server says of itself beyond its one document — its longer account, the
+        /// servers it knows, how busy it has been — read because the person opened that
+        /// source's page or asked again there (#321). Nothing read under it is held.
+        case serverSays
+        /// The hashtags and the links rising on a source, read because the person opened the
+        /// page of them or asked again there (#320). Nothing read under it is held.
+        case rising
+        /// What the person set at a source for the posts they write there, read as them
+        /// because they opened that source's page (#321). Nothing read under it is held.
+        case ownSettings
+        /// One source asked to look somebody up by their address, because the person pressed
+        /// for that (#319): the one ask that lets a source reach a server on the person's word.
+        /// Listed under the source asked — where it goes from there is the source's own doing.
+        case lookUp
+        /// The server somebody lives on asked what it says of them, because the person pressed
+        /// for that on their page (#310): the one ask this device itself makes of a host nobody
+        /// added. With no sign-in, let through by an entry of `Allowance` for that one press,
+        /// and listed under the server asked. Nothing read under it is held.
+        case personHome
+        /// Whether the reader follows a hashtag at a source, read as them because that
+        /// hashtag's page came in front (#318). Nothing read under it is held. Following and
+        /// unfollowing are a `write`.
+        case followedTags
 
         var titleKey: String { "work.purpose.\(rawValue)" }
 
@@ -99,10 +129,10 @@ final class SourceWork {
         /// Everything else reaches wherever a post, a page or a directory points.
         var isOfTheSource: Bool {
             switch self {
-            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts: true
+            case .timeline, .conversation, .lists, .search, .notices, .write, .reference, .signInCheck, .ownPosts, .person, .people, .serverSays, .rising, .ownSettings, .lookUp, .followedTags: true
             case .forumPost, .forumReplies, .joining, .boards, .directory, .serverCheck, .picture, .emoji,
                  .signIn, .signOut, .page, .video, .signInPage, .personCheck, .pagePart, .takeAway, .readBack,
-                 .nearbyMove:
+                 .nearbyMove, .personHome:
                 false
             }
         }
@@ -199,6 +229,9 @@ final class SourceWork {
         /// What reaches beyond a source now (#226): the person's list, as `AllowanceBook` hands it
         /// in; what the app starts with until it does.
         var allowances: [Allowance] = Allowance.standing
+        /// The presses standing now, each with the one host it named (#310): what an entry
+        /// that applies only `.pressed` lets through, one request a press.
+        var presses: [Int: String] = [:]
     }
 
     @ObservationIgnored private nonisolated let held = OSAllocatedUnfairLock(initialState: Held())
@@ -242,7 +275,7 @@ final class SourceWork {
 
     nonisolated func begin(
         host: String, for purpose: Purpose, name: Name? = nil, source: String? = nil,
-        allowedBy: Allowance.ID? = nil
+        allowedBy: Allowance.ID? = nil, sent: Int? = nil
     ) -> Token {
         let now = Date()
         let entry = Running(
@@ -251,7 +284,9 @@ final class SourceWork {
         let (token, publish) = held.withLock { held -> (Token, Bool) in
             held.next += 1
             held.running[held.next] = entry
-            Self.write(&held, reached: host, source: source, purpose: purpose, at: now, allowedBy: allowedBy)
+            Self.write(
+                &held, reached: host, source: source, purpose: purpose, at: now, allowedBy: allowedBy, sent: sent
+            )
             return (Token(id: held.next), Self.claim(&held))
         }
         if publish { schedule() }
@@ -348,6 +383,42 @@ final class SourceWork {
         }
     }
 
+    /// A press that names `host` as the one server it reaches (#310): until it is spent or
+    /// ended, an entry that applies only `.pressed` lets one request of that host through.
+    struct Press: Hashable, Sendable {
+        fileprivate let id: Int
+    }
+
+    /// The person pressed for `host` to be asked. Ended with `end(_:)` on every way out of
+    /// the ask, so a press whose request never left lets nothing through later.
+    nonisolated func press(for host: String) -> Press {
+        let folded = Self.fold(host)
+        return held.withLock { held in
+            held.next += 1
+            held.presses[held.next] = folded
+            return Press(id: held.next)
+        }
+    }
+
+    nonisolated func end(_ press: Press) {
+        held.withLock { _ = $0.presses.removeValue(forKey: press.id) }
+    }
+
+    /// Takes what `admission` let a request to `host` through by, as it leaves. **A press is
+    /// spent by the one request it lets through**: false where none stands for that host any
+    /// more, and then the request does not leave. Everything else is let through as it was.
+    nonisolated func spend(_ admission: Admission, at host: String) -> Bool {
+        let folded = Self.fold(host)
+        return held.withLock { held in
+            guard case .allowed(let id) = admission,
+                  held.allowances.contains(where: { $0.id == id && $0.when == .pressed })
+            else { return true }
+            guard let press = held.presses.first(where: { $0.value == folded }) else { return false }
+            held.presses[press.key] = nil
+            return true
+        }
+    }
+
     /// The person named `host` to add: what is asked of it before it is a source is theirs.
     nonisolated func named(_ host: String) {
         let folded = Self.fold(host)
@@ -385,11 +456,11 @@ final class SourceWork {
         reached: String, source: String?, for purpose: Purpose? = nil
     ) -> Admission? {
         let owner = Self.fold(SourceAct.attributed(reached: reached, pointedBy: source))
-        let (ours, adding, list) = held.withLock { held -> (Bool, Bool, [Allowance]) in
-            let adding = !held.adding.isEmpty
-            guard let added = held.added else { return (true, adding, held.allowances) }
+        let (ours, adding, pressed, list) = held.withLock { held -> (Bool, Bool, Bool, [Allowance]) in
+            let adding = !held.adding.isEmpty, pressed = held.presses.values.contains(owner)
+            guard let added = held.added else { return (true, adding, pressed, held.allowances) }
             let ours = !owner.isEmpty && (added.contains(owner) || held.named.contains(owner))
-            return (ours, adding, held.allowances)
+            return (ours, adding, pressed, held.allowances)
         }
         if ours {
             guard source != nil, let there = URL(string: "https://\(reached.lowercased())/"),
@@ -398,10 +469,12 @@ final class SourceWork {
             return .allowed(own.id)
         }
         // A request an entry names by its purpose, to one of its hosts, asked of nobody's pointing
-        // — and only while the entry applies: `.adding` while an add sheet is browsing.
+        // — and only while the entry applies: `.adding` while an add sheet is browsing, and
+        // `.pressed` to the one host a press standing now named, which is the only host it has.
         guard let purpose, source == nil, let url = URL(string: "https://\(owner)/") else { return nil }
         let entry = list.first {
-            $0.reach == .request(purpose) && $0.allows(url) && ($0.when != .adding || adding)
+            $0.reach == .request(purpose) && ($0.when == .pressed ? pressed : $0.allows(url))
+                && ($0.when != .adding || adding)
         }
         return entry.map { .allowed($0.id) }
     }
@@ -429,12 +502,12 @@ final class SourceWork {
     /// written.
     private nonisolated static func write(
         _ held: inout Held, reached: String, source: String?, purpose: Purpose, at: Date,
-        allowedBy: Allowance.ID?
+        allowedBy: Allowance.ID?, sent: Int? = nil
     ) {
         guard !reached.isEmpty else { return }
         held.pending.append(SourceAct(
             id: held.next, reached: reached, pointedBy: source, purpose: purpose, at: at,
-            allowedBy: allowedBy
+            allowedBy: allowedBy, sent: sent
         ))
     }
 
@@ -571,7 +644,8 @@ struct SourceWorkRow: Identifiable, Equatable {
 
 /// An `HTTPClient` — and a sender — that puts each request on `SourceWork` while it runs: its
 /// host, and the purpose — and the name, where it reads one timeline or board — that the caller
-/// that built it knows. Nothing else of the request is read.
+/// that built it knows. Nothing else of the request is read but how many bytes its body is,
+/// where it carries one out (#312): the size, and nothing of what is in it.
 ///
 /// The entry is ended on the way out of every path: an answer, a failure, and a cancellation,
 /// which throws like any failure does.
@@ -618,24 +692,28 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         guard let sender, let url = request.url else { throw URLError(.unsupportedURL) }
-        return try await watched(url) { try await sender.send(request) }
+        return try await watched(url, sent: request.httpBody?.count) { try await sender.send(request) }
     }
 
     private func watched(
-        _ url: URL, _ body: @Sendable () async throws -> (Data, HTTPURLResponse)
+        _ url: URL, sent: Int? = nil, _ body: @Sendable () async throws -> (Data, HTTPURLResponse)
     ) async throws -> (Data, HTTPURLResponse) {
         let host = url.host() ?? ""
         // **The gate** (#220): an act that belongs to no source the person added never leaves,
         // and is not written to the record as though it had.
-        guard let admission = work.admission(reached: host, source: source, for: purpose) else {
+        guard let admission = work.admission(reached: host, source: source, for: purpose),
+              work.spend(admission, at: host)
+        else {
+            // A server nobody added is not named in the log: whom the person asked after is theirs.
+            let named = purpose == .personHome ? NetLog.unnamed : host
             NetLog.network.notice(
-                "\(NetLog.line("refused", host: host, error: OutwardRefusal.noSource), privacy: .public)"
+                "\(NetLog.line("refused", host: named, error: OutwardRefusal.noSource), privacy: .public)"
             )
             throw OutwardRefusal.noSource
         }
         // Synchronous both ways, and so never behind the main actor: see `SourceWork`.
         let token = work.begin(
-            host: host, for: purpose, name: name, source: source, allowedBy: admission.allowedBy
+            host: host, for: purpose, name: name, source: source, allowedBy: admission.allowedBy, sent: sent
         )
         defer { work.end(token) }
         let answer = try await Outward.$admitted.withValue(true) { try await body() }
@@ -655,7 +733,8 @@ struct WatchedHTTP: HTTPClient, HTTPSender {
 /// One outward act of this run, as the activity page lists it (#218): the source it was for, what
 /// for, and when it left. **Built from a host and a word from a fixed list, never from an
 /// address**, so nothing past a host — no path, no query, no body, no header, no token — can
-/// reach the page through here: the rule `NetLog` holds, for its reason.
+/// reach the page through here: the rule `NetLog` holds, for its reason. Of a body it carried
+/// out it holds a count of bytes (#312), which says how much left and nothing of what.
 ///
 /// **Who it is listed under.** A source's own traffic goes to the source's own host. A picture, an
 /// emoji or a page a source pointed to may be kept somewhere else — a media server, another
@@ -673,10 +752,12 @@ struct SourceAct: Identifiable, Equatable, Sendable {
     let at: Date
     /// The entry of `Allowance` that let it through, where it was not a source's own (#220).
     let allowedBy: Allowance.ID?
+    /// How many bytes of body it carried out; nil where it carried none.
+    let sent: Int?
 
     init(
         id: Int, reached: String, pointedBy: String? = nil, purpose: SourceWork.Purpose, at: Date,
-        allowedBy: Allowance.ID? = nil
+        allowedBy: Allowance.ID? = nil, sent: Int? = nil
     ) {
         self.id = id
         self.reached = SourceWork.foldKey(reached)
@@ -684,6 +765,7 @@ struct SourceAct: Identifiable, Equatable, Sendable {
         self.purpose = purpose
         self.at = at
         self.allowedBy = allowedBy
+        self.sent = sent
     }
 
     /// A source as the record draws it: a host as itself, the one key that is no host —
@@ -696,7 +778,9 @@ struct SourceAct: Identifiable, Equatable, Sendable {
 
     /// The same act, listed under `source` instead.
     func renamed(to source: String) -> SourceAct {
-        SourceAct(id: id, reached: source, pointedBy: nil, purpose: purpose, at: at, allowedBy: allowedBy)
+        SourceAct(
+            id: id, reached: source, pointedBy: nil, purpose: purpose, at: at, allowedBy: allowedBy, sent: sent
+        )
     }
 
     /// The source an act is listed under: the one that pointed to it where one did, and

@@ -1462,11 +1462,15 @@ struct OutboxTests {
         let raw = "@oth\u{202E}er\u{0007}\n\u{2066}@social.example"
         try tokens.save(token("tok-2", "2", raw))
         session.mastodon.refresh()
-        #expect(session.mastodon.reader(host: Self.host)?.handle == raw, "kept as sent, for what it is compared with")
-        #expect(session.outbox.hold(entry, in: session) == .otherAccount(here: "@other @social.example"))
+        // As an earlier build may have written it down: no handle a check would give today, so
+        // none is shown, and the id beside it still says it is another account.
+        let reader = try #require(session.mastodon.reader(host: Self.host))
+        #expect(reader.id == "2")
+        #expect(reader.handle == nil)
+        #expect(session.outbox.hold(entry, in: session) == .otherAccount(here: nil))
         let said = line(entry, in: session)
-        #expect(said == "Your post was written as @me@social.example, and social.example is signed in as @other @social.example. Sign in as @me@social.example to send it.")
         #expect(fit(said))
+        #expect(!said.contains("oth"))
 
         // The writer's own handle, as a row written by an earlier build may hold it.
         var dirty = entry.unsent

@@ -67,6 +67,29 @@ struct TimelinePane: View {
     var ways: TimelineWays
     /// While open, its results are the list and the timeline waits under it (#32).
     var search: ShellSearch?
+    /// What sources say of the people whose pages are opened (#310), held by the app beside the
+    /// walk. Nothing where the pane is drawn with none: every page is then what this device
+    /// holds, and nobody is asked.
+    var people: ShellPersonPages?
+    /// A row of a list of people opened (#311), answered by the root: it lights the row and
+    /// takes the step together, so leaving that person's page gives the row back.
+    var onOpenListed: (Person) -> Void = { _ in }
+    /// A figure on somebody's page that counts a list of people, pressed (#311), answered by
+    /// the root: the list is one more step of the walk, and its figure is lit to come back to.
+    var onOpenPeople: (PeopleList) -> Void = { _ in }
+    /// One of the two ways at the head of the timeline that reads what is rising, pressed
+    /// (#320), answered by the root: the page of rising hashtags or links is a step of the walk.
+    var onOpenRising: (RisingWhich) -> Void = { _ in }
+    /// A row of such a page opened, answered by the root: a hashtag's page, or a link through
+    /// the door a post's link goes through.
+    var onOpenRisingRow: (RisingRow) -> Void = { _ in }
+    /// A row of what a search found at a source opened (#319), answered by the root: somebody's
+    /// page, a hashtag's, or the page of all of one kind.
+    var onOpenFound: (SearchFoundRow) -> Void = { _ in }
+    /// The way to the hashtags followed, pressed on the reader's own page (#318).
+    var onFollowed: (FollowedTagsEntry) -> Void = { _ in }
+    /// The press about looking somebody up through a source, answered by the root.
+    var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
     /// again. Per host and not one counter for the pane: see `waitForCatalogues`.
     @State private var settledHosts: Set<String> = []
@@ -93,6 +116,13 @@ struct TimelinePane: View {
     /// A search is open over this timeline. `search` is never nil in the product — the root holds
     /// one for the life of the window — so whether one is open is this, and not `search == nil`.
     private var searching: Bool { search?.isOpen == true }
+
+    /// The people and the hashtags the sources found for the search's words (#319): drawn over
+    /// its posts, and none with no search open.
+    private var foundBands: [SearchBands] {
+        guard searching, let search, search.isSearching, let people else { return [] }
+        return people.found.said(for: search.pattern, in: session)
+    }
 
     private var items: [DummyItem] {
         search.flatMap { session.searched($0, latest: prefs.latestDate) }
@@ -138,8 +168,11 @@ struct TimelinePane: View {
                     posts: session.posts,
                     selectedID: $selectedID,
                     // A row here opens the conversation it belongs to (#122), so the answer mark
-                    // does what it does on the timeline: it opens that conversation first.
-                    acting: acting,
+                    // does what it does on the timeline: it opens that conversation first. A post
+                    // that is on the page only is made an item by the press, and then acts.
+                    acting: { item in
+                        people?.acting(item, of: person, in: session, held: { acting($0) }) ?? acting(item)
+                    },
                     decks: $decks,
                     playback: playback,
                     onPlayRow: onPlayRow,
@@ -147,10 +180,36 @@ struct TimelinePane: View {
                     onTurnRow: onTurnRow,
                     onOpenThread: onOpenThread,
                     jumpToTop: jumpToTop,
-                    onBack: onBack
+                    onBack: onBack,
+                    // What their source says of them, where it says who people are; nothing for
+                    // anybody else, and then this is the page it always was.
+                    said: people?.said(of: person, in: session),
+                    onAskAgain: { Task { await people?.again(person, in: session) } },
+                    lookUp: people.flatMap { $0.found.line(of: person, said: $0.said(of: person, in: session), in: session) },
+                    onLookUp: onLookUp,
+                    // Their own server, asked only at this line's press and as nobody (#310).
+                    home: people?.homeLine(of: person, in: session),
+                    homeSaid: people?.homeSaid(of: person, in: session),
+                    onHome: { press in Task { await people?.homePressed(press, on: person, in: session) } },
+                    onReadOn: { Task { await people?.readOn(person, in: session) } },
+                    // Where they moved to is somebody this same source names: their page is
+                    // asked of it by that name, and "not heard of" is a state of that page.
+                    onOpenMoved: { moved in
+                        if let there = DummyPerson(handle: moved.handle, host: person.host) { onOpenPerson(there) }
+                    },
+                    onOpenList: onOpenPeople,
+                    followed: people?.followedEntry(of: person, in: session),
+                    onFollowed: onFollowed
                 )
                 // One pane per person, so opening a second face from inside one draws afresh.
                 .id(person.id)
+                // **The ask is the page opening**, once a person a run: who they are and their
+                // newest posts, of the source they were met through and nobody else.
+                // And who asks is part of which opening it is: a reader who ends, begins or
+                // changes while the page is in front opens it again, and it is asked as them.
+                .task(id: ShellPersonPages.opening(person, in: session)) { await people?.opened(person, in: session) }
+                // What their own server said is held only while this page is in front (#310).
+                .onDisappear { people?.home.letGo(of: person) }
             case .tag(let tag):
                 TagPane(
                     tag: tag,
@@ -160,6 +219,18 @@ struct TimelinePane: View {
                     asking: session.reload.tagAsk?.tag == tag ? session.reload.tagAsking : [],
                     failed: session.reload.tagAsk?.tag == tag ? session.reload.tagFailed : [],
                     reach: session.reload.tagAsk?.tag == tag ? session.reload.tagAsk?.reach.sentence : nil,
+                    // Whether the reader follows it at each source they are signed in to (#318).
+                    follows: people?.tags.lines(of: tag, in: session) ?? [],
+                    onFollow: { line in
+                        Task {
+                            if line.offers == .again {
+                                await people?.tags.again(tag, at: line.host, in: session)
+                            } else {
+                                await people?.tags.press(tag, at: line.host, in: session)
+                            }
+                        }
+                    },
+                    onAskFollows: { host in session.askFor([.follows], host: host) },
                     catalogues: session.emoji,
                     catalogueSettled: false,
                     posts: session.posts,
@@ -181,6 +252,83 @@ struct TimelinePane: View {
                     onBack: onBack
                 )
                 .id(HeldUnderTag.folded(tag))
+                // **The ask is the page coming in front**: each source whose sign-in holds
+                // follows, once. And who asks, and what they hold, is part of which opening it
+                // is: a sign-in given follows opens the page again, and it is read — never acted.
+                .task(id: people?.tags.opening(tag, in: session)) { await people?.tags.opened(tag, in: session) }
+                // What a source said of a hashtag is held only while its page is in front.
+                .onDisappear { people?.tags.closed(tag) }
+            case .people(let list):
+                // A list whose source is no longer one that says who people are — removed since
+                // — draws the stream instead, as a conversation no longer held does.
+                if let people, let said = people.lists.said(of: list, in: session) {
+                    PeoplePane(
+                        said: said,
+                        selectedID: $selectedID,
+                        onOpen: onOpenListed,
+                        onAskAgain: { Task { await people.lists.again(list, in: session) } },
+                        onReadOn: { Task { await people.lists.readOn(list, in: session) } },
+                        onChoose: { choice in Task { await people.lists.choose(choice, for: list, in: session) } },
+                        jumpToTop: jumpToTop,
+                        onBack: onBack
+                    )
+                    // One pane per list, so a second list opened from inside one draws afresh.
+                    .id(list.id)
+                    // **The ask is the page opening**, once a list a run: its first stretch, of
+                    // the source that keeps it and nobody else. Nothing reads on unpressed.
+                    .task(id: ShellPeoplePages.opening(list, in: session)) { await people.lists.opened(list, in: session) }
+                } else {
+                    underneath
+                }
+            case .rising(let which):
+                // No source with such a page — the last one removed since — draws the stream.
+                if let rising = people?.rising, let said = rising.said(which, in: session) {
+                    RisingPane(
+                        said: said,
+                        selectedID: $selectedID,
+                        onOpen: onOpenRisingRow,
+                        onAskAgain: { host in Task { await rising.again(which, at: host, in: session) } },
+                        jumpToTop: jumpToTop,
+                        onBack: onBack
+                    )
+                    .id(which)
+                    // **The ask is the page opening**, once a run for each source: one stretch
+                    // of what is rising there, of that source and nobody else.
+                    .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
+                } else {
+                    underneath
+                }
+            case .foundTags(let page):
+                // An answer no longer held — another Return, the search closed — draws the stream.
+                if let said = people?.found.said(of: page, in: session) {
+                    FoundTagsPane(said: said, selectedID: $selectedID, onOpen: onOpenFound, jumpToTop: jumpToTop, onBack: onBack)
+                        .id(page.id)
+                } else {
+                    underneath
+                }
+            case .followedTags(let page):
+                // No such list to draw — the sign-in ended, or sees who is followed no longer,
+                // or its source was removed — draws the stream instead.
+                if let followed = people?.followed, let said = followed.said(of: page, in: session) {
+                    FollowedTagsPane(
+                        said: said,
+                        selectedID: $selectedID,
+                        onOpen: onOpenRisingRow,
+                        onAskAgain: { Task { await followed.again(page, in: session) } },
+                        onReadOn: { Task { await followed.readOn(page, in: session) } },
+                        onAct: { row in Task { await followed.press(row.id, on: page, in: session) } },
+                        onAsk: { session.askFor([.follows], host: page.host) },
+                        jumpToTop: jumpToTop,
+                        onBack: onBack
+                    )
+                    .id(page.id)
+                    // **The ask is the page opening**, once a list a run: its first stretch, as
+                    // the reader. And who asks is part of which opening it is. Nothing reads on
+                    // unpressed.
+                    .task(id: followed.opening(page, in: session)) { await followed.opened(page, in: session) }
+                } else {
+                    underneath
+                }
             case .thread(let id):
                 // A root this device no longer holds draws the stream instead, which is the same
                 // answer the pane gave when it looked the root up among the timeline's own rows.
@@ -468,7 +616,7 @@ struct TimelinePane: View {
     /// opened over it, or a page read out of a post, which is somebody's own.
     static func page(_ standing: ShellStep?) -> TimelineSwipe.Page {
         switch standing {
-        case .person, .tag, .thread: .opened
+        case .person, .tag, .people, .rising, .foundTags, .followedTags, .thread: .opened
         case .link: .link
         case nil: .timeline
         }
@@ -480,6 +628,10 @@ struct TimelinePane: View {
         case .thread(let id): "thread:" + id
         case .person(let person): "person:" + person.id
         case .tag(let tag): "tag:" + String(describing: tag)
+        case .people(let list): "people:" + list.id
+        case .rising(let which): "rising:" + which.rawValue
+        case .foundTags(let page): "found:" + page.id
+        case .followedTags(let page): "followed:" + page.id
         case .link, nil: nil
         }
     }
@@ -502,17 +654,35 @@ struct TimelinePane: View {
     /// miss are the bottom toast, and the distinctions inside empty live on `EmptyNotice`.
     @ViewBuilder
     private var underneath: some View {
-        // Bound once: the list, each row's rule under it and the jump to the top all read the
-        // same rows, and each read of `items` used to ask the session for them again.
-        let items = items
-        if items.isEmpty {
-            empty
+        // The ways to the hashtags and the links rising (#320) stand at the head of the
+        // timeline that reads what is rising, over its posts or over there being none — and
+        // nowhere else: every other timeline is drawn exactly as it was.
+        if people?.rising.offered(on: timeline, searching: searching, in: session) == true {
+            VStack(alignment: .leading, spacing: 0) {
+                RisingLine(onOpen: onOpenRising)
+                ShellRule()
+                stream
+            }
         } else {
-            list(items)
+            stream
         }
     }
 
-    private func list(_ items: [DummyItem]) -> some View {
+    @ViewBuilder
+    private var stream: some View {
+        // Bound once: the list, each row's rule under it and the jump to the top all read the
+        // same rows, and each read of `items` used to ask the session for them again.
+        let items = items
+        let bands = foundBands
+        // With no post found, what the sources found still stands, over the line that says so.
+        if items.isEmpty, bands.isEmpty {
+            empty
+        } else {
+            list(items, under: bands)
+        }
+    }
+
+    private func list(_ items: [DummyItem], under bands: [SearchBands] = []) -> some View {
         let last = items.count - 1
         // Where the timeline in front is not whole, said at its place (#201). A search's results
         // are not a timeline, and say nothing of the kind.
@@ -520,6 +690,19 @@ struct TimelinePane: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    // What the sources found beside posts (#319): short bands over the posts,
+                    // which begin under them exactly as they always did.
+                    if !bands.isEmpty {
+                        SearchBandsView(
+                            bands: bands, timeline: session.name(of: timeline), selectedID: $selectedID, onOpen: onOpenFound
+                        )
+                        if items.isEmpty {
+                            Text(String(format: L10n.t("search.empty.title"), session.name(of: timeline)))
+                                .shellFont(.meta)
+                                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+                                .padding(ShellSpace.pad)
+                        }
+                    }
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         let isLast = index == last
                         // **One view a post, the rule under it included** (#303). The list
@@ -735,6 +918,7 @@ struct TimelinePane: View {
         // What `y` does (#284), and it says so itself: one act, one outcome, whichever asked.
         acting.keep = { Task { await session.toggleKept(item) } }
         acting.ask = { _ in session.askToBookmark(item) }
+        acting.locks = session.locks(on: item, acts: acting.acts)
         // Taking back is an item of the row's `…` (#109), built only where the post offers it:
         // the question the key `d` asks, about the copy that goes, and a yes that refuses what
         // that asking refuses.

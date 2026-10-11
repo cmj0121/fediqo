@@ -62,6 +62,12 @@ enum L10n {
         value.formatted(.number.notation(.compactName).locale(locale(language)))
     }
 
+    /// A count written whole, with its thousands apart as the shell's language sets them:
+    /// `compact`'s rule, for a figure that is said exactly.
+    static func grouped(_ value: Int, language: DummyLanguage? = nil) -> String {
+        value.formatted(.number.grouping(.automatic).locale(locale(language)))
+    }
+
     static func bundle(for language: DummyLanguage) -> Bundle {
         guard let name = language.lprojName else { return .module }
         let candidates = [name, name.lowercased(), "zh-Hant", "zh-hant"]

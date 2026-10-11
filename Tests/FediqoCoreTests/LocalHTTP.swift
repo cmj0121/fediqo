@@ -116,12 +116,83 @@ enum LocalServers {
             let spare: [String]
             let held: [Held]
         }
+        /// The people the seed made for the checks of what a Mastodon says of a person (#309):
+        /// each one thing a page has to say, none of whom a check can make — an account is
+        /// suspended, moved or held as somebody of another server only from inside the server.
+        struct People: Decodable {
+            /// Somebody by the id this server gives them and the `acct` it names them by.
+            struct Named: Decodable {
+                let id: String
+                let acct: String
+            }
+            /// Somebody the checks also sign in as.
+            struct SignedIn: Decodable {
+                let id: String
+                let acct: String
+                let token: String
+            }
+            /// Somebody whole, with eight followers and four they follow.
+            let person: Named
+            let locked: Named
+            /// Hides their lists, and has two followers.
+            let hidden: SignedIn
+            /// Moved to `person`.
+            let moved: Named
+            /// Suspended.
+            let gone: Named
+            /// Limited by this server.
+            let limited: Named
+            /// Automated, with nothing.
+            let robot: Named
+            /// Blocks the writer; has a post and a follower.
+            let blocker: Named
+            /// Followed by nobody, the writer least of all: who the check of following and
+            /// unfollowing follows (#313). Nothing in a file a seed older than that wrote.
+            let followable: Named?
+            /// Followers of `person` the writer mutes and blocks.
+            let muted: Named
+            let blocked: Named
+            /// Two of `elsewhere.example`, the second holding its lists hidden.
+            let far: Named
+            let farHidden: Named
+            /// A sign-in of the writer's for reading posts and nothing else (#321). Nothing in a
+            /// file a seed older than that wrote.
+            struct Token: Decodable {
+                let token: String
+            }
+            let narrow: Token?
+            /// A sign-in of the writer's that reads and holds both words of follows, and nothing
+            /// else that acts (#318). Nothing in a file a seed older than that wrote.
+            let following: Token?
+            /// The same without the word that changes who they follow: it only sees. Nothing
+            /// in a file a seed older than that wrote.
+            let standing: Token?
+            /// The five followers of `person`, in the order the seed made them. With `person` and
+            /// `far` they are who the seed lists in the directory (#315).
+            let fans: [Named]
+            /// What `person` wrote that anyone is given, oldest first: five posts, one in public,
+            /// an answer to the first, and a boost.
+            let posts: [String]
+            /// And what only some may see: one for their followers, one for nobody.
+            struct Kept: Decodable {
+                let `private`: String
+                let direct: String
+            }
+            let kept: Kept
+            /// The three posts of `far` this server holds.
+            let farPosts: [String]
+        }
         let writer: String
         let other: String
         let client: String
         let seeded: Posts
         /// Nothing in a file a seed older than #323 wrote, which the checks of posts still read.
         let notices: Notices?
+        /// Nothing in a file a seed older than #309 wrote.
+        let people: People?
+        /// This app as it would register itself for every part a sign-in may be asked for,
+        /// registered by the seed (#347). Nothing in a file an older seed wrote.
+        let signIn: Notices.App?
     }
 
     static func seeded() throws -> Seeded {

@@ -26,9 +26,11 @@ struct Allowance: Identifiable, Equatable, Sendable {
         static let personCheck = ID(rawValue: "personCheck")
         /// A page the person follows away from a forum's sign-in.
         static let signInPage = ID(rawValue: "signInPage")
+        /// The server somebody lives on, asked what it says of them at their page's press (#310).
+        static let personHome = ID(rawValue: "personHome")
 
         /// The entries the app starts with, in the order the list shows them.
-        static let builtIn: [ID] = [.directory, .forumChallenge, .personCheck, .signInPage]
+        static let builtIn: [ID] = [.directory, .forumChallenge, .personCheck, .signInPage, .personHome]
 
         private static let ownPrefix = "own:"
 
@@ -61,6 +63,9 @@ struct Allowance: Identifiable, Equatable, Sendable {
         case forumPage
         /// Only while the person has a forum's sign-in in front of them.
         case signingIn
+        /// Only at a press that names the one host it reaches, and for one request of it
+        /// (`SourceWork.press`): the entry lists no host, and lets nothing through unpressed.
+        case pressed
     }
 
     /// What it lets through.
@@ -146,6 +151,39 @@ struct Allowance: Identifiable, Equatable, Sendable {
             ]
         ),
         Allowance(id: .signInPage, when: .signingIn, reach: .navigation, hosts: []),
+        Allowance(id: .personHome, when: .pressed, reach: .request(.personHome), hosts: []),
+    ]
+
+    /// The server a handle names as somebody's home, as a press may reach it — or nothing,
+    /// and then no press is offered: the name came out of a handle or a server's answer, and
+    /// the device itself would be the one to go there.
+    ///
+    /// **A name, as a host the person adds is one** (`AllowanceBook.host`): no scheme, port,
+    /// path or credentials, no brackets, two labels or more of letters, digits and inner
+    /// hyphens — a name in another script in its ASCII spelling — and no address in digits.
+    ///
+    /// **And one that could be registered.** Its last label is letters alone, or the ASCII
+    /// spelling of a name in another script: so no address in any form — `0x7f.0x1` is one to
+    /// a resolver. And it is none of the names kept for a device and the network it is on.
+    ///
+    /// **What this does not cover.** A registered name is not looked up before it is asked:
+    /// one that resolves to this device or to an address on its network is asked all the same.
+    @MainActor
+    static func homeServer(_ named: String) -> String? {
+        guard case .success(let host) = AllowanceBook.host(named), host == named.lowercased(),
+              let last = host.split(separator: ".").last,
+              last.hasPrefix("xn--") || last.allSatisfy(\.isLetter), !notRegistered.contains(String(last))
+        else { return nil }
+        return host
+    }
+
+    /// The last labels nobody can register: kept for this device, the network it is on, and
+    /// names that are never in the public tree (RFC 6761, RFC 6762, RFC 7686, RFC 8375,
+    /// RFC 9476, the three ICANN set aside for private networks, and the ones private networks
+    /// name themselves by all the same).
+    private static let notRegistered: Set<String> = [
+        "localhost", "local", "localdomain", "internal", "intranet", "private", "lan", "home", "corp", "arpa", "test",
+        "invalid", "onion", "alt",
     ]
 
     /// The person's own entry: what `source`'s forum pages pull in from `host`, and what `source`
@@ -191,6 +229,7 @@ struct Allowance: Identifiable, Equatable, Sendable {
         case .adding: L10n.t("allow.when.adding", language: language)
         case .forumPage: L10n.t("allow.when.forumPage", language: language)
         case .signingIn: L10n.t("allow.when.signingIn", language: language)
+        case .pressed: L10n.t("allow.when.pressed", language: language)
         }
     }
 
@@ -201,9 +240,9 @@ struct Allowance: Identifiable, Equatable, Sendable {
 
     /// The hosts it lets through, as the list shows them; a sentence where it goes anywhere.
     func hostsText(language: DummyLanguage? = nil) -> String {
-        reach == .navigation
-            ? L10n.t("allow.hosts.anywhere", language: language)
-            : hosts.map(\.text).joined(separator: ", ")
+        if reach == .navigation { return L10n.t("allow.hosts.anywhere", language: language) }
+        if when == .pressed { return L10n.t("allow.hosts.pressed", language: language) }
+        return hosts.map(\.text).joined(separator: ", ")
     }
 }
 

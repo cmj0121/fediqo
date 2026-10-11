@@ -179,16 +179,13 @@ final class ShellSession {
         guard let asked = signOutAsk else { return }
         if host == nil || asked.host.lowercased() == host?.lowercased() { signOutAsk = nil }
     }
-    /// The source whose sign-in is being asked to allow bookmarks, where one is (#285). Observed,
-    /// and the question is presented from it; a press on a row's mark writes it.
-    var bookmarkAsk: String?
+    /// The question open about asking a sign-in for more where it stands, and the asks on
+    /// their way (#347, `ShellPartAsk`): what a press on a locked act raises.
+    let partAsks = ShellPartAsks()
     /// What the sign-in question open about a host said of notices, kept from when it was first
     /// drawn until it is answered or put down (`ShellNoticeAsk`). Not observed: it is read by
     /// the question being drawn, and must not draw it again.
     @ObservationIgnored var noticesSaid: [String: Bool] = [:]
-    /// The source whose sign-in is being asked to allow notices, where one is (#323). Observed,
-    /// and the question is presented from it; the press on the notices page writes it.
-    var noticeAsk: String?
     /// Whether the rows of every source nobody is signed in to have been checked once this run
     /// for what an earlier reader left on them (`forgetReaderMarksDue`).
     @ObservationIgnored var readerMarksSwept = false
@@ -859,6 +856,8 @@ final class ShellSession {
         }
         // What the notices page draws is what the store holds (#323).
         noticeList.store = store
+        // A question about a sign-in goes with it, however it went.
+        mastodon.onBecameAnother = { [weak self] host in self?.partAsks.putDown(host: host) }
         // A source that ends a sign-in itself answers a sign-out still being asked about it.
         mastodon.onEnded = { [weak self] host in
             self?.dropSignOutAsk(host: host)
@@ -3139,7 +3138,7 @@ final class ShellSession {
 
     /// Puts the sign-out question about `host`, read as things stand now and held as read.
     func askSignOut(host: String) {
-        signOutAsk = SignOutAsk(host: host, question: signOutQuestion(host: host))
+        signOutAsk = SignOutAsk(host: host, question: sayingOthersSignedOut(signOutQuestion(host: host), host: host))
     }
 
     /// The question before `host` is signed out, with what this session holds for it read here:
@@ -3169,22 +3168,22 @@ final class ShellSession {
     ///
     /// **And how many texts wait to be sent to it**: a sign-out leaves them waiting, and a
     /// Remove lets them go, which is said before the yes.
-    func removeQuestion(host: String, postsStay: Bool) -> ShellConfirmation {
-        ShellQuestion.remove(
+    func removeQuestion(host: String, postsStay: Bool, language: DummyLanguage? = nil) -> ShellConfirmation {
+        sayingOthersSignedOut(ShellQuestion.remove(
             host: host, boards: Self.boards(of: host, in: sources), postsStay: postsStay,
-            kept: holdings.kept(host: host).posts, unsent: outbox.count(host: host)
-        )
+            kept: holdings.kept(host: host).posts, unsent: outbox.count(host: host), language: language
+        ), host: host, language: language)
     }
 
     /// The question before what `host` left here is cleared, with what this session holds for it
     /// read here: whether a saved password goes with it, and whether a sign-in does. One function
     /// for the two places Clear is offered — a source row's `…` on Account and the `…` of a
     /// source's detail on Usage — so the two ask one question.
-    func clearQuestion(host: String) -> ShellConfirmation {
-        ShellQuestion.clear(host: host, detailKey: SourceRow.clearDetailKey(
+    func clearQuestion(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        sayingOthersSignedOut(ShellQuestion.clear(host: host, detailKey: SourceRow.clearDetailKey(
             hasPassword: forums.hasPassword(host: host),
             reachedSignIn: isSignedIn(host: host)
-        ))
+        ), language: language), host: host, language: language)
     }
 
     /// Whether this device holds a sign-in for that source, whichever protocol it is.
@@ -3207,7 +3206,8 @@ final class ShellSession {
     /// `noticesSaid` is what that question said of notices (`SignInAsked.notices`); nothing
     /// where none was put.
     func signIn(
-        host raw: String, through browser: any OAuthBrowser, writing: Bool = false, noticesSaid: Bool? = nil
+        host raw: String, through browser: any OAuthBrowser, writing: Bool = false, noticesSaid: Bool? = nil,
+        answering drawn: SignInDrawn? = nil
     ) async {
         guard let host = try? Host.parse(raw) else { return }
         guard kind(of: host) == .mastodon else {
@@ -3215,7 +3215,13 @@ final class ShellSession {
             return
         }
         if rowRefusal?.host == host { rowRefusal = nil }
-        let failure = await mastodon.signIn(host: host, through: browser, writing: writing, noticesSaid: noticesSaid)
+        let answer = await mastodon.signIn(host: host, through: browser, writing: writing, noticesSaid: noticesSaid, answering: drawn)
+        if answer == .changed { return askSignInAgain(drawn, host: raw) }
+        guard case .landed(let failure) = answer else {
+            // Not kept over a sign-in filed while the page was up, and nothing held ended.
+            if isAdded(host) { rowRefusal = (host: host, key: "account.signin.replaced") }
+            return
+        }
         // **Before the first read as whoever signed in** (#285): what the source said an earlier
         // reader did is let go of first, so what it now says of this one is not taken with it.
         await forgetReaderMarksDue()
@@ -3225,7 +3231,8 @@ final class ShellSession {
         }
         NetLog.auth.notice("\(NetLog.line("sign-in", host: host, error: failure), privacy: .public)")
         guard isAdded(host) else { return }
-        rowRefusal = (host: host, key: Self.signInFailureKey(failure))
+        // A source that cannot be asked again this run is said to be that, not to have failed.
+        rowRefusal = (host: host, key: mastodon.stranded(host: host) ? "part.ask.stranded" : Self.signInFailureKey(failure))
     }
 
     /// Home and the lists this source reads, read as the reader (#25) — right after a sign-in.
