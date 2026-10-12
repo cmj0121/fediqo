@@ -3,9 +3,12 @@ import Foundation
 
 /// The timelines the reader wrote, kept on this device in their order (#27).
 ///
-/// **In the preferences, not the store.** A timeline is the reader's setting, like the language
-/// or the keep window, and the GRDB index holds what servers sent; keeping it beside `DummyPrefs`
-/// adds no migration to the one 0.2.0 has (Decision 2).
+/// **Not in the index.** A timeline is the reader's setting, like the language or the keep
+/// window, and the GRDB index holds what servers sent; keeping it out adds no migration to the
+/// one 0.2.0 has (Decision 2). **And no longer in the preferences** (#344): a timeline names
+/// the sources a person reads and the words they filter, so it is a file beside the index
+/// (`file`), unreadable while the device is locked, moved there once from the key earlier
+/// builds kept it under. Only a store handed no file — a test, a preview — keeps to the key.
 ///
 /// **The shape is versioned** — this build writes `{"version":3,"timelines":[…]}` (a rule on a
 /// field one kind of source declares, #287: `field` and `type` on a rule) and still reads
@@ -26,11 +29,22 @@ struct WrittenTimelineStore {
 
     let defaults: UserDefaults
     var key = "fediqo.timelines"
+    /// The file beside the index the timelines are kept in, where the app handed one in.
+    var file: ListFile?
 
     /// Nothing kept only where nothing is under the key: a value of another type there is
-    /// something this build cannot read, not an absence.
+    /// something this build cannot read, not an absence. **Nor is a file that would not be
+    /// read, or preferences that may only look empty behind a lock** (`ListFile.Read.unread`):
+    /// unreadable, and so never written over.
     func load() -> Loaded {
-        guard let value = defaults.object(forKey: key) else { return .timelines([]) }
+        let value: Any?
+        switch file?.read() {
+        case .unread?, .notKnown?: return .unreadable
+        case .data(let kept)?: value = kept
+        case .some(.none): value = nil
+        case nil: value = defaults.object(forKey: key)
+        }
+        guard let value else { return .timelines([]) }
         guard let data = value as? Data,
               Self.knowsEveryField(data),
               let kept = try? JSONDecoder().decode(Kept.self, from: data),
@@ -45,11 +59,18 @@ struct WrittenTimelineStore {
     }
 
     /// Refused while what is kept cannot be read: it is never written over, whoever asks.
-    func save(_ timelines: [TimelineDefinition]) {
-        guard load() != .unreadable else { return }
+    /// Says whether it was written down.
+    @discardableResult
+    func save(_ timelines: [TimelineDefinition]) -> Bool {
+        guard load() != .unreadable else { return false }
         let kept = Kept(version: Self.version, timelines: timelines.map(TimelineRow.init))
-        guard let data = try? JSONEncoder().encode(kept) else { return }
-        defaults.set(data, forKey: key)
+        guard let data = try? JSONEncoder().encode(kept) else { return false }
+        // At the act, whole and atomic: nothing of it waits for a save or for leaving.
+        guard let file else {
+            defaults.set(data, forKey: key)
+            return true
+        }
+        return file.write(data)
     }
 
     /// Whether every object holds only the fields this version writes. A field added by a later

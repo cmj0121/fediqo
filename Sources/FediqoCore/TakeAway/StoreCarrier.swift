@@ -27,6 +27,13 @@ public protocol StoreCarrier: Sendable {
     func readBack(
         _ url: URL, key: PackageKey, replacing: Bool, progress: @escaping @Sendable (PackageProgress) -> Void
     ) async throws
+    /// What an earlier run left not put back, by step; and that the person has now been told.
+    func leftOwed() -> [String]
+    func toldLeftOwed()
+    /// Whether this device is locked right now — the canary beside its store refuses (#344):
+    /// what turns a file the system would not make or open into "the device is locked", and
+    /// not into a failure the person is asked to act on.
+    func isLocked() -> Bool
 }
 
 extension StoreCarrier {
@@ -38,6 +45,15 @@ extension StoreCarrier {
     }
 
     public func stagingFolder() -> URL { FileManager.default.temporaryDirectory }
+
+    /// The parts of a read back an earlier run could not put back and did not live to (#344),
+    /// by name; none, for a carrier that keeps no such record.
+    public func leftOwed() -> [String] { [] }
+
+    /// The person has been told of them.
+    public func toldLeftOwed() {}
+
+    public func isLocked() -> Bool { false }
 }
 
 /// What taking away would come to.

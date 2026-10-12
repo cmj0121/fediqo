@@ -232,6 +232,9 @@ final class SourceWork {
         /// The presses standing now, each with the one host it named (#310): what an entry
         /// that applies only `.pressed` lets through, one request a press.
         var presses: [Int: String] = [:]
+        /// Whether the list as it now stands is written down where it is kept (#344): no
+        /// where the device would not keep the last change.
+        var allowancesWritten = true
     }
 
     @ObservationIgnored private nonisolated let held = OSAllocatedUnfairLock(initialState: Held())
@@ -358,13 +361,24 @@ final class SourceWork {
     /// What reaches beyond a source from now on (#226). The gate reads it on the next act; a
     /// forum's browser is told at once (`allowancesChanged`), so what a page may pull in and where
     /// it may go change without a relaunch.
-    func allow(_ list: [Allowance]) {
-        held.withLock { $0.allowances = list }
+    ///
+    /// `written` is whether the list as it now stands was written down where it is kept
+    /// (#344); every session told of the change reads it, and says so where it was not.
+    func allow(_ list: [Allowance], written: Bool = true) {
+        held.withLock {
+            $0.allowances = list
+            $0.allowancesWritten = written
+        }
         NotificationCenter.default.post(name: Self.allowancesChanged, object: self)
     }
 
     /// Posted, with this object, whenever `allow` changes the list.
     static let allowancesChanged = Notification.Name("FediqoAllowancesChanged")
+
+    /// Whether the list as it stands is written down where it is kept.
+    nonisolated var allowancesWritten: Bool {
+        held.withLock { $0.allowancesWritten }
+    }
 
     /// What reaches beyond a source this instant.
     nonisolated var allowances: [Allowance] {

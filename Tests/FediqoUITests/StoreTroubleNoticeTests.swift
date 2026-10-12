@@ -155,18 +155,34 @@ struct StoreTroubleNoticeTests {
         }
     }
 
+    @Test("Every notice of a store put aside says when it goes if nobody answers: the first time Fediqo is opened thirty days or more after", arguments: languages)
+    func saysHowLongItIsKept(_ language: DummyLanguage) {
+        let phrase = language == .english
+            ? "the first time Fediqo is opened 30 days or more after it was put aside"
+            : "放到一旁滿 30 天後，下一次打開 Fediqo 時"
+        for key in ["store.damaged.detail", "store.damaged.other.detail", "store.unreachable.putAside.detail", "store.unreachable.otherBack.detail"] {
+            let said = L10n.t(key, language: language)
+            #expect(said.contains(phrase), "\(key)")
+            #expect(said != key && !said.contains(key), "\(key)")
+        }
+    }
+
     @Test("A read back refused because the store did not open, and a take-away with nothing to take, each say so in a line of their own — from a file and from a device nearby", arguments: languages)
     func refusedForWantOfAStore(_ language: DummyLanguage) {
         var lines: Set<String> = []
         for notice in [
             ShellQuestion.carryRefused(.init(PackageFault.storeNotOpened), language: language),
             ShellQuestion.carryRefused(.init(PackageFault.nothingToTake), language: language),
+            // And one refused because the device is locked (#344): a sentence, not an error's name.
+            ShellQuestion.carryRefused(.init(PackageFault.locked), language: language),
         ] {
             #expect(!notice.title.contains("carry.") && !notice.line.contains("carry.") && !notice.line.contains("FediqoCore"))
             #expect(ShellQuestion.width(notice.line) <= ShellQuestion.lineLength, "\(notice.line)")
             lines.insert(notice.line)
         }
-        #expect(lines.count == 2)
+        #expect(lines.count == 3)
+        #expect(ShellQuestion.nearbyRefused(.locked, language: language) == ShellQuestion.carryRefused(.locked, language: language))
+        #expect(ShellCarry.Trouble(PackageFault.locked) == .locked && NearbyRefusal(PackageFault.locked) == .locked)
         #expect(ShellQuestion.nearbyRefused(.storeNotOpened, language: language)
             == ShellQuestion.carryRefused(.storeNotOpened, language: language))
         #expect(ShellQuestion.nearbyRefused(.nothingToTake, language: language)

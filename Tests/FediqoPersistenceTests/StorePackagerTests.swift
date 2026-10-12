@@ -95,7 +95,10 @@ struct StorePackagerTests {
         #expect(await onto.store.said(host: Self.mastodon.host) == word)
         #expect(reopened.said == [word])
         // The person's settings.
-        #expect(onto.defaults.data(forKey: "fediqo.timelines") == from.defaults.data(forKey: "fediqo.timelines"))
+        // The timelines in their file beside the index (#344), and under no key.
+        let timelines = try #require(try from.lists.timelines.held())
+        #expect(onto.lists.timelines.read() == .data(timelines))
+        #expect(onto.defaults.object(forKey: "fediqo.timelines") == nil)
         #expect(onto.defaults.string(forKey: "fediqo.dummy.language") == "zh-TW")
         #expect(onto.defaults.string(forKey: "fediqo.dummy.keepMonths") == "6")
         // What signs in.
@@ -107,6 +110,42 @@ struct StorePackagerTests {
         #expect(copy == (pictures ? Data(repeating: 7, count: 3000) : nil))
         #expect(onto.media.totalBytes() == (pictures ? 3100 : 0))
         #expect(try await onto.packager().weigh().holdsStore)
+    }
+
+    /// #344 changed where a package's lists come from and how its files are made, and not
+    /// what it carries of a sign-in — which, since #347, is less than a device holds.
+    @Test("A package carries of a sign-in what it always did — the token, its registration, what it may do — and neither whose it is nor the sign-ins this device left: read back, the source is asked who it is, and nothing is owed an end")
+    func signInAsCarried() async throws {
+        let from = try await Self.populated()
+        let onto = try await Device()
+        let url = package()
+        defer { from.remove(); onto.remove(); try? FileManager.default.removeItem(at: url) }
+        let host = Self.mastodon.host
+        let whose = MastodonToken(
+            host: host, accessToken: "t", clientID: "c", clientSecret: "s", scopes: "read",
+            accountID: "42", handle: "@ada@\(host)"
+        )
+        try from.tokens.save(whose)
+        let left = MastodonToken(host: host, accessToken: "narrower", clientID: "c", clientSecret: "s", scopes: "read")
+        try from.tokens.journal(MastodonLeft(left, as: .left, accountID: "42"))
+        try #require(try from.tokens.token(host: host)?.accountID == "42", "the premise: the device knows whose it is")
+        try #require(try from.tokens.leftHosts() == [host], "the premise: and what it left there")
+
+        try await from.packager().takeAway(to: url, key: .password("open sesame"), pictures: false) { _ in }
+        try await readAll(url, key: .password("open sesame"), onto: onto)
+
+        let carried = try #require(try onto.tokens.token(host: host))
+        #expect(carried.accessToken == "t")
+        #expect(carried.clientID == "c")
+        #expect(carried.clientSecret == "s")
+        #expect(carried.scopes == "read")
+        #expect(carried.accountID == nil)
+        #expect(carried.handle == nil)
+        #expect(try onto.tokens.leftHosts().isEmpty)
+        #expect(try onto.tokens.left(host: host).isEmpty)
+        // And taking it away took nothing off the device it came from.
+        #expect(try from.tokens.token(host: host)?.accountID == "42")
+        #expect(try from.tokens.left(host: host).map(\.state) == [.left])
     }
 
     @Test("A store larger than one chunk streams through, and the index is opened whole after")

@@ -671,6 +671,40 @@ struct MastodonLeftTests {
         #expect(try states(made).isEmpty)
     }
 
+    /// #344 beside #347: a launch may be made while what the device holds is closed. The
+    /// sign-in held is then not read, and that is not its going — what leaving the app lets go
+    /// of from the store for a reader who changed (`readersChangedWaiting`) stays empty.
+    @Test("A launch behind a lock with a sign-in held and others left: nobody is taken for signed out, no reader is said to have changed, nothing is asked of the source or dropped — and at the unlock the sign-in is the one held, as it was")
+    func aLockedLaunchHoldsItsSignIn() async throws {
+        let tokens = MemoryMastodonTokens()
+        try tokens.save(token("tok-held"))
+        try tokens.journal(MastodonLeft(token("tok-left"), as: .left, accountID: "1"))
+        try tokens.journal(MastodonLeft(token("tok-owed"), as: .owed))
+        let keychain = LeftKeychain(tokens)
+        keychain.locked = true
+        let made = fresh(tokens, through: keychain)
+
+        await made.sessions.verifyAll()
+        made.sessions.cameToFront()
+        await made.sessions.leftSettled()
+        #expect(await made.source.sent.isEmpty)
+        #expect(made.sessions.ended.isEmpty)
+        #expect(made.sessions.leftTold.isEmpty)
+        #expect(made.sessions.readersChangedWaiting.isEmpty, "a sign-in not read is not a reader gone")
+        #expect(try held(made) == "tok-held")
+        #expect(try states(made) == [.left, .owed])
+
+        keychain.locked = false
+        made.sessions.cameToFront()
+        await made.sessions.leftSettled()
+        #expect(made.sessions.isSignedIn(host: host))
+        #expect(made.sessions.ended.isEmpty)
+        #expect(made.sessions.readersChangedWaiting.isEmpty)
+        #expect(try held(made) == "tok-held")
+        #expect(await made.source.revoked == ["tok-owed"], "only what was owed an end is asked for one")
+        #expect(try states(made) == [.left])
+    }
+
     @Test("Where who is signed in cannot be read, nothing left is ended or dropped, though the journal itself can be read")
     func whoIsSignedInUnread() async throws {
         let tokens = MemoryMastodonTokens()

@@ -668,6 +668,11 @@ struct StoreFileOpenTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try garbage.write(to: dir.appendingPathComponent("index.sqlite"))
         let now = Date(timeIntervalSince1970: 1_800_000_000)
+        // Last written before then, whatever the day this check is run on: the name is never
+        // a time before the index was written.
+        try FileManager.default.setAttributes(
+            [.modificationDate: now.addingTimeInterval(-60)], ofItemAtPath: dir.appendingPathComponent("index.sqlite").path
+        )
         let opened = StoreFile.open(at: dir, now: now)
         let aside = try #require(opened.setAside)
         #expect(aside.lastPathComponent.hasPrefix("index-unreadable-20270115T080000"))

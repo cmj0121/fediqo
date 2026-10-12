@@ -207,7 +207,7 @@ struct NearbyMoveTests {
 
         #expect(await pair.onto.store.snapshot().notes.map(\.language) == ["ja", nil])
         #expect(try StoreFile(at: pair.onto.directory).load().notes.map(\.language) == ["ja", nil])
-        #expect(pair.onto.defaults.data(forKey: "fediqo.timelines") == timelines, "the rule did not move with what the device holds")
+        #expect(pair.onto.lists.timelines.read() == .data(timelines), "the rule did not move with what the device holds")
     }
 
     @Test("A receiver holding a store is asked to replace, and replaces only on that yes")

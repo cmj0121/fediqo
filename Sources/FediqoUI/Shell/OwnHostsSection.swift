@@ -44,6 +44,7 @@ struct OwnHostsSection: View {
 
     private var list: some View {
         Section {
+            if let line = AllowanceSection.standing(book) { ShellReadingLine(line) }
             if book.own.isEmpty {
                 Text(L10n.t("allow.own.none"))
                     .foregroundStyle(ShellChrome.inkDim(colorScheme))
@@ -219,6 +220,7 @@ struct OwnHostAdding: View {
         case .address: L10n.t("allow.own.refused.address", language: language)
         case .port: L10n.t("allow.own.refused.port", language: language)
         case .path: L10n.t("allow.own.refused.path", language: language)
+        case .unread: L10n.t("allow.own.refused.unread", language: language)
         }
     }
 }

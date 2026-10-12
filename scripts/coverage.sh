@@ -42,6 +42,9 @@ grep -vE '^◇ |^✔ (Test|Suite)|^↳ ' "$RUN_LOG" | tail -300 || true
 grep -E 'Test run with' "$RUN_LOG" || true
 if [ "$TEST_CODE" -ne 0 ]; then
     echo
+    # A build that fails says so among hundreds of warnings, and the tail above can cut it
+    # off: what the compiler refused is said first, by itself.
+    grep -E -A14 ': error: ' "$RUN_LOG" | head -200 || true
     echo "the tests failed (swift test exited $TEST_CODE); each issue, as it was recorded:"
     grep -E -A12 'recorded an issue' "$RUN_LOG" | grep -vE '^◇ |^✔ ' | head -400 || true
     exit "$TEST_CODE"

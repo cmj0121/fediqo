@@ -1,11 +1,113 @@
 import FediqoCore
 import Foundation
 import GRDB
-import SQLite3
+// For `sqlite3_temp_directory` alone, a variable of C's that Swift cannot vouch for: see
+// `keepTemporaries(in:)` for when it is set and why that is safe.
+@preconcurrency import SQLite3
 
 /// The on-device index. Lives in Application Support and is excluded from backup.
 public struct StoreFile: Sendable {
-    let db: DatabaseQueue
+    /// The connection, kept where it can be made again (`remakeConnection`): whoever uses it
+    /// takes it once, for the one thing they do.
+    private let held: Held
+    var db: DatabaseQueue { held.queue }
+
+    /// The one connection a `StoreFile` has, and — for one opened on disk — where it was
+    /// opened and **which file that was**, so that it can be made again to that file and to
+    /// no other.
+    private final class Held: @unchecked Sendable {
+        struct Origin {
+            let path: String
+            let directory: URL
+            let busyWait: TimeInterval
+            /// The file's own identity on its volume, as it was when this was opened: a name
+            /// can come to mean another file, and this cannot.
+            let file: (any NSObjectProtocol)?
+        }
+
+        private let lock = NSLock()
+        private var current: DatabaseQueue
+        private var opened: Origin?
+
+        init(_ queue: DatabaseQueue) { current = queue }
+
+        var queue: DatabaseQueue {
+            lock.lock()
+            defer { lock.unlock() }
+            return current
+        }
+
+        var origin: Origin? {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return opened
+            }
+            set {
+                lock.lock()
+                defer { lock.unlock() }
+                opened = newValue
+            }
+        }
+
+        func swap(_ fresh: DatabaseQueue) {
+            lock.lock()
+            defer { lock.unlock() }
+            current = fresh
+        }
+    }
+
+    /// Why a connection could not be made again.
+    enum Remake: Error, Equatable {
+        /// This store was never a file on disk opened by path.
+        case notOpenedOnDisk
+        /// The file at the path is not the file that was opened.
+        case anotherFile
+    }
+
+    private static func identity(at path: String) -> (any NSObjectProtocol)? {
+        try? URL(fileURLWithPath: path).resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier
+    }
+
+    /// Makes this store's own connection again (#344): for a device whose files close when it
+    /// locks — a phone — where the connection held through the lock may not write again
+    /// after the unlock. (On a Mac it does, seen across a real lock; there this is not reached.)
+    ///
+    /// **To the same file, and to nothing else.** The path it was opened at must still be the
+    /// very file that was opened — by the file's identity on its volume, recorded then — not
+    /// written by a newer build since, and not opened for reading alone. The same
+    /// configuration and the same `secure_delete`. **No migration, no load, no rebuild**: what
+    /// the session holds is not read again, and nothing is written but by the save that follows.
+    ///
+    /// **Why this is not a store opened under a run that began without it.** That hazard is a
+    /// session that never read the store writing its emptiness over it. This session read
+    /// *this* file; what it holds is that file's contents and what was done since, and the
+    /// save was already owed. A run with no `StoreFile` has no connection to make again and
+    /// nothing here gives it one: this is a method of a store that was opened, and the saver
+    /// reaches it only where it was handed one.
+    ///
+    /// **Called where a save would run** (`StoreSaver.exclusively`), so no transaction of the
+    /// saver's is in flight on the connection being let go. A reader that took the old one a
+    /// moment before finishes on it. Should the old connection still hold a lock on the file,
+    /// the new one waits for it as any connection does — `busyWait` for its first read and
+    /// again for the pragma — with the saver waiting behind it, and then fails as busy: the
+    /// save stays owed.
+    func remakeConnection() throws {
+        guard let origin = held.origin, let was = origin.file else { throw Remake.notOpenedOnDisk }
+        guard let now = Self.identity(at: origin.path), now.isEqual(was) else { throw Remake.anotherFile }
+        if Self.isNewer(at: origin.path) { throw Newer() }
+        let fresh = try DatabaseQueue(path: origin.path, configuration: Self.configuration(busyWait: origin.busyWait))
+        if try fresh.read(migrator.hasBeenSuperseded) { throw Newer() }
+        try fresh.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA secure_delete = ON") }
+        let readOnly = try fresh.read { db in sqlite3_db_readonly(db.sqliteConnection, "main") == 1 }
+        guard !readOnly, FileManager.default.isWritableFile(atPath: origin.directory.path) else {
+            throw DatabaseError(resultCode: .SQLITE_READONLY)
+        }
+        // Asked once more, with the new connection open and before it is taken: the name may
+        // have come to mean another file between the first asking and the opening.
+        guard let still = Self.identity(at: origin.path), still.isEqual(was) else { throw Remake.anotherFile }
+        held.swap(fresh)
+    }
 
     /// `busyWait` is how long this connection waits on another before a read or a write fails
     /// as busy (#295): another copy of the app saving into the same folder is an ordinary thing,
@@ -14,9 +116,7 @@ public struct StoreFile: Sendable {
         try makeExcludedFromBackup(directory)
         let path = directory.appendingPathComponent(Self.indexName).path
         if Self.isNewer(at: path) { throw Newer() }
-        var waiting = Configuration()
-        waiting.busyMode = .timeout(busyWait)
-        try self.init(database: DatabaseQueue(path: path, configuration: waiting))
+        try self.init(database: DatabaseQueue(path: path, configuration: Self.configuration(busyWait: busyWait)))
         // **A store that can be read and not written is not one this run may use** (#295).
         // SQLite opens a file it may not write for reading alone and says nothing until the
         // first write — which would be the first save, failing into a log after the person had
@@ -27,13 +127,75 @@ public struct StoreFile: Sendable {
         guard !readOnly, FileManager.default.isWritableFile(atPath: directory.path) else {
             throw DatabaseError(resultCode: .SQLITE_READONLY)
         }
+        // Which file this is, for as long as this run has it: a rebuild writes back into the
+        // same file (its copy is a temporary one, and never takes the index's place), so
+        // nothing a run does makes this stale.
+        held.origin = Held.Origin(path: path, directory: directory, busyWait: busyWait, file: Self.identity(at: path))
     }
+
+    /// How every connection to an index on disk is made (#344), the probes that only read
+    /// included: one place, so that what is true of one connection is true of all of them.
+    ///
+    /// `busyWait` is how long the connection waits on another; nil is SQLite's own, no wait.
+    static func configuration(readOnly: Bool = false, busyWait: TimeInterval? = nil) -> Configuration {
+        var made = Configuration()
+        made.readonly = readOnly
+        if let busyWait { made.busyMode = .timeout(busyWait) }
+        return made
+    }
+
+    /// What the folder SQLite's own temporary files are made in is called, in the store's folder.
+    static let temporariesName = ".temporary"
+
+    /// **What SQLite writes outside the index and its journal is written in `folder`** (#344): a
+    /// rebuild's copy of the whole index, a statement's journal, a temporary table. Left to
+    /// itself SQLite makes these in the system's temporary directory, where nothing of this
+    /// app's sets their class; `folder` is one `Guarded` made, in the store's folder, so each
+    /// takes the class the index has. Each is unlinked as it is opened and so has no name to
+    /// find it by — but a file with no name is still a file on the disk until it is closed.
+    ///
+    /// **Kept in a file and not in memory**: a rebuild holds a copy of the index, and in memory
+    /// that was 2.3 GB for a store of 2 GB — more than a phone gives an app. In a file it is
+    /// 180 MB whatever the store weighs.
+    ///
+    /// **SQLite's own variable, and not the environment's.** Its unix layer asks, in order,
+    /// `sqlite3_temp_directory`, then `SQLITE_TMPDIR`, then `TMPDIR`, then fixed paths, and takes
+    /// the first that is a folder it may write in (checked against the SQLite this links,
+    /// 3.51). The first of those is this process's alone and is read each time; the environment
+    /// is read once, when SQLite starts, which a system framework may have made happen already.
+    ///
+    /// **Process-wide, and set before the first connection is opened** — by the launch
+    /// (`ProtectedFolders.first`), once. Set as SQLite sets it itself (`PRAGMA
+    /// temp_store_directory`): under the mutex its unix layer holds while it reads the variable
+    /// to name a temporary file — `SQLITE_MUTEX_STATIC_VFS1`, checked against its source — so
+    /// no connection reads it half-changed, and what it replaces is freed under the same
+    /// mutex. Allocated by SQLite, as its documentation asks of whoever sets it.
+    ///
+    /// **Where `folder` is gone or cannot be written, SQLite goes on down its list without a
+    /// word**, and nothing here can stop it: the copy is then made in the temporary directory,
+    /// which inside a sandbox the launch has classed as well.
+    ///
+    /// `nil` un-says it, and SQLite goes by its own list again: for a test, whose folder is
+    /// about to go while other tests' connections are open. Nothing in the app asks for that.
+    static func keepTemporaries(in folder: URL?) {
+        let mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_VFS1)
+        sqlite3_mutex_enter(mutex)
+        defer { sqlite3_mutex_leave(mutex) }
+        if let folder, let now = sqlite3_temp_directory, String(cString: now) == folder.path { return }
+        sqlite3_free(sqlite3_temp_directory)
+        sqlite3_temp_directory = folder.flatMap { folder in
+            folder.path.withCString { path in withVaList([path]) { sqlite3_vmprintf("%s", $0) } }
+        }
+    }
+
+    /// Where SQLite's temporary files are made now, where that was ever said.
+    static var temporaries: String? { sqlite3_temp_directory.map { String(cString: $0) } }
 
     public init(database: DatabaseQueue) throws {
         // Asked before `migrate`: GRDB migrates a superseded store without complaint, and the
         // first save would then empty tables this build only half understands.
         if try database.read(migrator.hasBeenSuperseded) { throw Newer() }
-        db = database
+        held = Held(database)
         // Before anything is written, a migration's rewriting of rows included.
         try db.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA secure_delete = ON") }
         try migrator.migrate(db)
@@ -113,9 +275,7 @@ public struct StoreFile: Sendable {
     /// falls through to the read-write open, whose own check still stands behind it.
     private static func isNewer(at path: String) -> Bool {
         guard FileManager.default.fileExists(atPath: path) else { return false }
-        var readOnly = Configuration()
-        readOnly.readonly = true
-        guard let probe = try? DatabaseQueue(path: path, configuration: readOnly) else { return false }
+        guard let probe = try? DatabaseQueue(path: path, configuration: Self.configuration(readOnly: true)) else { return false }
         return (try? probe.read(migrator.hasBeenSuperseded)) ?? false
     }
 
@@ -123,9 +283,7 @@ public struct StoreFile: Sendable {
     /// person pressed to send — or `nil`
     /// where that cannot be asked. Asked on a read-only connection, so asking changes nothing.
     static func holdsNothing(indexAt path: String) -> Bool? {
-        var readOnly = Configuration()
-        readOnly.readonly = true
-        guard let probe = try? DatabaseQueue(path: path, configuration: readOnly) else { return nil }
+        guard let probe = try? DatabaseQueue(path: path, configuration: Self.configuration(readOnly: true)) else { return nil }
         return try? probe.read { db in
             let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table'")
             for table in ["source", "note", "unsent"] where tables.contains(table) {
@@ -198,24 +356,115 @@ public struct StoreFile: Sendable {
     /// **A read back left unsettled opens nothing** (#292): see `StorePackager.settleHalfCommits`.
     ///
     /// The decision lives here rather than in the app so it can be tested against a real file.
-    public static func open(at directory: URL, now: Date = Date(), busyWait: TimeInterval = StoreFile.busyWait) -> Opened {
-        open(at: directory, now: now) { try StoreFile(at: $0, busyWait: busyWait) }
+    public static func open(
+        at directory: URL, now: Date = Date(), busyWait: TimeInterval = StoreFile.busyWait,
+        protected: ProtectedData = .always, unlocked: Bool = false
+    ) -> Opened {
+        open(at: directory, now: now, protected: protected, unlocked: unlocked) { try StoreFile(at: $0, busyWait: busyWait) }
     }
 
-    /// `open(at:now:busyWait:)`, with the opening itself handed in: the one failure a test
-    /// cannot make a real file give — a disk with no room — is made here instead.
-    static func open(at directory: URL, now: Date, opening: (URL) throws -> StoreFile) -> Opened {
+    /// What `open` reads, in order, each of which may be what fails.
+    private enum Reading: Comparable {
+        case opening, items, unsent, notices
+    }
+
+    /// `open(at:now:busyWait:protected:unlocked:)`, with the opening itself handed in: the
+    /// failures a test cannot make a real file give — a disk with no room, a device that
+    /// locks between two reads — are made here instead.
+    ///
+    /// **A locked device is never read as a damaged store** (#344). No code decides that: a
+    /// lock may report anything, and the system's own flag cannot change while this runs. The
+    /// canary decides — a closed file of the index's class beside it, opened afresh each time:
+    ///
+    /// - **Nothing is classed as damage, and nothing is put aside, unless the canary read
+    ///   before the attempt, read again after the failure, and the read that failed, tried a
+    ///   second time, failed the same way between two good canary reads.**
+    /// - **A canary that refuses is the lock**, and the only thing that is: the answer is
+    ///   `.locked`, nothing is moved, and the launch waits for the unlock (`StoreGate`).
+    /// - **The second try is the read that failed and what follows it, on a connection opened
+    ///   afresh** — refused, then, by what refuses the canary. It never repeats a rebuild, a
+    ///   rename or a put-aside. One that succeeds *is* the open. One that fails another way
+    ///   is said by its own cause, and is never damage.
+    /// - **With no canary** — none could be made, or (`unlocked`) one refuses on a device a
+    ///   person is known to have unlocked — nothing can tell a lock from anything else: the
+    ///   store is opened, and a failure of any kind is one that could not be opened for the
+    ///   moment. Nothing is put aside in such a launch.
+    static func open(
+        at directory: URL, now: Date, protected: ProtectedData = .always, unlocked: Bool = false,
+        opening: (URL) throws -> StoreFile
+    ) -> Opened {
+        let canary: Bool
+        switch protected.canary() {
+        case .reads: canary = true
+        case .none: canary = false
+        case .refused, .closed:
+            guard unlocked else { return Opened(file: nil, trouble: .unreachable(.locked)) }
+            canary = false
+        }
+        // **First, and in a run with a store or without**: a store put aside thirty days ago
+        // goes (#344). Only where the canary reads — it is a deletion.
+        if canary { dropExpired(in: directory, now: now) }
+        // When the index was last written, read before anything here can write it: an open
+        // that rolls a journal back writes it again, under this launch's clock (`setAside`).
+        let written = (try? directory.appendingPathComponent(indexName)
+            .resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        /// What a failure is where it may not be called damage: the lock, where the canary
+        /// refuses now; else its own cause, and where that would be damage, out of reach.
+        func notDamage(_ error: any Error) -> Opened {
+            if !unlocked, protected.canary() == .refused { return Opened(file: nil, trouble: .unreachable(.locked)) }
+            if case .unreachable(let why) = cause(of: error) { return Opened(file: nil, trouble: .unreachable(why)) }
+            return Opened(file: nil, trouble: .unreachable(.outOfReach))
+        }
         // A read back's old index is aside here, neither replaced nor put back (#292): the store
         // this device held is that one, and no index is opened or made beside it. The run reads
-        // nothing and saves nothing, and the next launch tries to settle it again.
-        if let unsettled = StorePackager.unsettledReadBack(in: directory) {
-            return Opened(file: nil, trouble: unsettled)
+        // nothing and saves nothing, and the next launch tries to settle it again. Where a
+        // marker will not be read, whether there is one is not known — and nothing is opened.
+        do {
+            if let unsettled = try StorePackager.unsettledReadBack(in: directory) {
+                return Opened(file: nil, trouble: unsettled)
+            }
+        } catch {
+            return notDamage(error)
+        }
+        var file: StoreFile?
+        var snapshot: (sources: [Source], notes: [Note], said: [SourceProfile]) = ([], [], [])
+        var unsent: [Unsent] = []
+        var notices: [NoticeReach] = []
+        var reading = Reading.opening
+        /// Reads from `first` on, over a connection opened afresh.
+        func read(from first: Reading) throws {
+            reading = .opening
+            let opened = try opening(directory)
+            file = opened
+            if first <= .items {
+                reading = .items
+                snapshot = try opened.load()
+            }
+            if first <= .unsent {
+                reading = .unsent
+                unsent = try opened.loadUnsent()
+            }
+            reading = .notices
+            notices = try opened.loadNotices(of: snapshot.sources)
         }
         do {
-            let file = try opening(directory)
-            let snapshot = try file.load()
-            let unsent = try file.loadUnsent()
-            let notices = try file.loadNotices(of: snapshot.sources)
+            do {
+                try read(from: .opening)
+            } catch is Newer {
+                return Opened(file: nil, storeIsNewer: true)
+            } catch let first {
+                guard canary, protected.canary() == .reads else { return notDamage(first) }
+                let failed = reading
+                do {
+                    try read(from: failed)
+                } catch is Newer {
+                    return Opened(file: nil, storeIsNewer: true)
+                } catch let second {
+                    guard protected.canary() == .reads, Self.sameFailure(first, second) else { return notDamage(second) }
+                    throw second
+                }
+            }
+            guard let file else { return Opened(file: nil, trouble: .unreachable(.outOfReach)) }
             // Read, and so not about to be set aside: only now is it rewritten (#292).
             file.scrub()
             // One put aside by a launch that was quit before it could say so is said now — and
@@ -229,25 +478,43 @@ public struct StoreFile: Sendable {
                 unsent: unsent, notices: notices,
                 trouble: untold.isEmpty ? nil : .damaged(replacedBy: restored ? .otherStore : .empty)
             )
-        } catch is Newer {
-            return Opened(file: nil, storeIsNewer: true)
         } catch {
+            // The same failure twice, between good canary reads: what it is, it is.
             switch cause(of: error) {
             case .unreachable(let why):
                 return Opened(file: nil, trouble: .unreachable(why))
             case .damaged:
-                guard let aside = try? setAside(in: directory, now: now) else {
-                    return Opened(file: nil, trouble: .unreachable(.outOfReach))
-                }
+                // Nothing holds the damaged index open while it is moved.
+                file = nil
                 // The store the person chose of two (`StorePackager.choose`) is the one that
                 // turned out damaged: the other, kept only until this one had opened and saved,
-                // is the store again. Nothing is made in the damaged one's place — the next
-                // launch puts the other back there.
-                if StorePackager.reinstateDisplaced(in: directory) {
+                // is the store again. Asked before anything is moved: where its marker will not
+                // be read nothing is, and nothing is made in the damaged one's place — an empty
+                // store made there would, at its first save, take the other with it.
+                let other: URL?
+                do {
+                    other = try StorePackager.displaced(in: directory)
+                } catch {
+                    return notDamage(error)
+                }
+                // Asked once more, directly before anything is moved.
+                guard protected.canary() == .reads else { return notDamage(error) }
+                guard let aside = try? setAside(in: directory, now: now, written: written) else {
+                    return Opened(file: nil, trouble: .unreachable(.outOfReach))
+                }
+                // Nothing is made in the damaged one's place — the next launch puts the other
+                // back there.
+                if let other {
+                    // **No store is ever made while the other one is kept and still says it
+                    // was chosen against**: the first save of a fresh one would remove it
+                    // (`dropWhatWasReplaced`), and it is the one good store there is.
+                    guard StorePackager.reinstate(other) else {
+                        return Opened(file: nil, setAside: aside, trouble: .unreachable(.putAsideOnly))
+                    }
                     // Written down beside the damaged one, so that the launch that comes to say
                     // it was damaged says what took its place.
                     let base = aside.deletingPathExtension().lastPathComponent
-                    try? Data().write(to: directory.appendingPathComponent(base + restoredSuffix))
+                    try? Guarded.write(Data(), to: directory.appendingPathComponent(base + restoredSuffix), atomic: false)
                     return Opened(file: nil, setAside: aside, trouble: .unreachable(.otherComesBack))
                 }
                 guard let fresh = try? opening(directory) else {
@@ -258,9 +525,22 @@ public struct StoreFile: Sendable {
         }
     }
 
+    /// Whether two failures of one read are the same failure: the same code from SQLite, the
+    /// same kind of row that will not decode, the same error from the system.
+    static func sameFailure(_ first: any Error, _ second: any Error) -> Bool {
+        if let first = first as? DatabaseError, let second = second as? DatabaseError {
+            return first.extendedResultCode == second.extendedResultCode
+        }
+        if first is DatabaseError || second is DatabaseError { return false }
+        let decoding: (any Error) -> Bool = { $0 is DecodingError || $0 is RowDecodingError }
+        if decoding(first) || decoding(second) { return decoding(first) && decoding(second) }
+        let (one, other) = (first as NSError, second as NSError)
+        return one.domain == other.domain && one.code == other.code
+    }
+
     /// `open(at:now:)` on the index this app keeps in Application Support.
-    public static func openApplicationSupport() -> Opened {
-        open(at: applicationSupportDirectory)
+    public static func openApplicationSupport(protected: ProtectedData = .always, unlocked: Bool = false) -> Opened {
+        open(at: applicationSupportDirectory, protected: protected, unlocked: unlocked)
     }
 
     /// Where the index this app keeps lives, and what sits beside it (the limits' account, #251).
@@ -299,14 +579,21 @@ public struct StoreFile: Sendable {
     /// same instant never lands on the first one's copy.
     /// Throws when there is no index to move, which is the case where the directory itself could
     /// not be made: then there is nothing to protect by moving, and nowhere safe to write either.
-    private static func setAside(in directory: URL, now: Date) throws -> URL {
+    private static func setAside(in directory: URL, now: Date, written before: Date?) throws -> URL {
         let manager = FileManager.default
         let index = directory.appendingPathComponent(indexName)
         guard manager.fileExists(atPath: index.path) else { throw CocoaError(.fileNoSuchFile) }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime, .withFractionalSeconds, .withTimeZone]
         let random = UUID().uuidString.prefix(8).lowercased()
-        let base = "\(unreadablePrefix)\(formatter.string(from: now))-\(random)"
+        // Never a time before the index was last written: a clock that is behind — a device
+        // come back from a dead battery — must not name it as put aside years ago, which is
+        // what its thirty days are counted from (`dropExpired`). As it was before this launch
+        // tried it (`before`) and as it is now, whichever is later: the failed open may itself
+        // have written the index, under the clock that is behind.
+        let written = (try? index.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        let at = max(now, before ?? now, written ?? now)
+        let base = "\(unreadablePrefix)\(formatter.string(from: at))-\(random)"
         let aside = directory.appendingPathComponent(base + ".sqlite")
         try manager.moveItem(at: index, to: aside)
         for suffix in sidecars {
@@ -324,7 +611,7 @@ public struct StoreFile: Sendable {
         return aside
     }
 
-    private static let indexName = "index.sqlite"
+    static let indexName = "index.sqlite"
     /// What SQLite may leave beside the index: moved with it, and weighed with it.
     static let sidecars = ["-journal", "-wal", "-shm"]
 
@@ -373,6 +660,40 @@ public struct StoreFile: Sendable {
                 (byHost[record.host] ?? record.formerSource).flatMap(record.note(from:))
             }
             return (sources, notes, said)
+        }
+    }
+
+    /// **Only what is this device's alone and changed** (#344), in one small transaction:
+    /// the rows let go deleted — zeroed as they go, `secure_delete` being on — the rows whose
+    /// `kept` changed updated in that one column, and the source rows that changed written or
+    /// removed. Nothing else is touched. What a full save would also write, ahead of it: so
+    /// that these are on disk where the full save, which rewrites every row and takes as long
+    /// as the store is large, is cut off by a device locking or a quit that will not wait.
+    ///
+    /// Every row here is one a full save writes the same way, and the full save that follows
+    /// rewrites them all. **Between the two the index is neither the store as it was nor as it
+    /// is** — the device's own brought up to date, the sources' word as last saved — and that
+    /// is the point: it is the state a save cut off there leaves, and every row of it is one
+    /// that was true, with nothing the person let go still in it.
+    ///
+    /// **What is not here, because it is not in the index at all**: where the reader was
+    /// standing on each timeline, and which posts were read this run. Both are kept for the
+    /// run alone, in memory (`TimelinePlaces`, `ItemStore.readAt`), and no save — whole or cut
+    /// off — writes or loses them.
+    func save(own changes: OwnChanges) async throws {
+        try await db.write { db in
+            for host in changes.removed {
+                try db.execute(sql: "DELETE FROM source WHERE host = ?", arguments: [host])
+            }
+            for row in changes.sources {
+                try SourceRecord(row.source, said: row.said).save(db)
+            }
+            for key in changes.gone {
+                try db.execute(sql: "DELETE FROM note WHERE host = ? AND id = ?", arguments: [key.host, key.id])
+            }
+            for row in changes.kept {
+                try db.execute(sql: "UPDATE note SET kept = ? WHERE host = ? AND id = ?", arguments: [row.kept, row.key.host, row.key.id])
+            }
         }
     }
 
@@ -426,8 +747,10 @@ public struct StoreFile: Sendable {
     /// **Never an aside that was only moved out of the way.** One whose marker says neither
     /// replaced nor displaced is the store this device held and the only copy of it.
     ///
-    /// Deleting is unlinking; what the file system keeps beneath is the system's, as above. Each
-    /// store's mark goes last, so a deleting cut short is finished by the next save.
+    /// Deleting is unlinking; what the file system keeps beneath is the system's, as above. Of a
+    /// store put aside, the mark that the person was told outlives everything but the index, so
+    /// a deleting cut short is finished by the next save; cut short between those two, it is
+    /// said once more.
     private func dropWhatWasReplaced() {
         let path = db.path
         guard path != ":memory:", !path.isEmpty else { return }
@@ -436,14 +759,16 @@ public struct StoreFile: Sendable {
         for name in (try? manager.contentsOfDirectory(atPath: folder.path)) ?? []
         where name.hasPrefix(Self.readBackAsidePrefix) {
             let kept = folder.appendingPathComponent(name)
-            if StorePackager.wasReplaced(kept, in: folder) || StorePackager.wasDisplaced(kept) {
+            // One whose marker will not be read is kept: nothing is known of it.
+            if (try? StorePackager.wasReplaced(kept, in: folder)) == true || (try? StorePackager.wasDisplaced(kept)) == true {
                 try? manager.removeItem(at: kept)
             }
         }
-        for aside in Self.putAside(in: folder) where aside.told {
-            for ending in [".sqlite"] + Self.sidecars.map({ ".sqlite" + $0 }) + ["-" + LimitAccountFile.name, Self.restoredSuffix, Self.toldSuffix] {
-                try? manager.removeItem(at: folder.appendingPathComponent(aside.base + ending))
-            }
+        // Everything under its name, the mark of when its days are counted from among it, and
+        // the index last (`remove`). By the mark and not by the index: what an earlier build,
+        // which took the index first, left of one it was cut short on is finished here too.
+        for aside in Self.asides(in: folder) where aside.names.contains(aside.base + Self.toldSuffix) {
+            Self.remove(aside, in: folder)
         }
     }
 
@@ -451,6 +776,31 @@ public struct StoreFile: Sendable {
     /// replacing into, are named by.
     static let unreadablePrefix = "index-unreadable-"
     static let readBackAsidePrefix = "incoming-aside-"
+}
+
+/// What is this device's alone and has changed since the last write that landed (#344): what
+/// `StoreFile.save(own:)` writes ahead of a full save.
+struct OwnChanges: Sendable, Equatable {
+    struct Kept: Sendable, Equatable {
+        let key: NoteKey
+        let kept: Bool
+    }
+
+    struct SourceRow: Sendable, Equatable {
+        let source: Source
+        let said: SourceProfile?
+    }
+
+    /// Rows let go: by hand, by a limit, with their source.
+    var gone: [NoteKey] = []
+    /// Rows the person keeps, or no longer does.
+    var kept: [Kept] = []
+    /// Sources added, or following something else now.
+    var sources: [SourceRow] = []
+    /// Sources removed, by host.
+    var removed: [String] = []
+
+    var isEmpty: Bool { gone.isEmpty && kept.isEmpty && sources.isEmpty && removed.isEmpty }
 }
 
 private var migrator: DatabaseMigrator {

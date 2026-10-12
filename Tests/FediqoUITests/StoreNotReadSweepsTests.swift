@@ -107,6 +107,6 @@ struct StoreNotReadSweepsTests {
         let swept = try #require(app.range(of: "forums.sweepAtLaunch("))
         #expect(said.lowerBound < swept.lowerBound)
         #expect(app.contains("storeNotOpened: opened.file == nil && !opened.storeIsNewer"))
-        #expect(app.contains("storeTrouble: Launch.shared.storeTrouble"))
+        #expect(app.contains("storeTrouble: launch.storeTrouble"))
     }
 }

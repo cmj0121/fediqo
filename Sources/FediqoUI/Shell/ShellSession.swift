@@ -129,6 +129,10 @@ final class ShellSession {
     /// What takes this device's store away and reads one back (#247), or nothing where the app
     /// handed none in — a preview, a test — and then Preferences offers neither.
     @ObservationIgnored var carrier: (any StoreCarrier)?
+    /// Whether this run has a store it can write (#344): no where it did not open, is a newer
+    /// build's, or a read back is unsettled. Read by the questions whose answer leaves
+    /// something on this device that a run with a store would have taken off it.
+    @ObservationIgnored var storeWritable = true
     /// The take-away and read-back flow, its steps and its questions.
     let carry: ShellCarry
     /// The file picker for a read back is up.
@@ -604,6 +608,12 @@ final class ShellSession {
     /// The account has been read from `limitStore` this run; until it has, a line recorded is
     /// written after the read rather than over it.
     @ObservationIgnored var limitAccountLoaded = false
+    /// The person cleared the account while it could not be read (#344): the lines on disk are
+    /// still there, and go when it can be. **Owed by this session alone, and only so far**: it
+    /// is not written down, so a quit before then forgets it and the lines are back at the next
+    /// launch; and it is done only when the account is next asked for — a line recorded, a
+    /// clear, a read back — not at the unlock itself.
+    @ObservationIgnored var limitAccountClearOwed = false
 
     /// The limits' account (#251), newest first: each time a limit acted, which, when, how many
     /// posts and picture copies went, and from which sources. Read from `limitStore` at launch.
@@ -1884,6 +1894,7 @@ final class ShellSession {
     /// it is asked.
     private func allowancesChanged(by from: ObjectIdentifier?) {
         guard from == ObjectIdentifier(work) else { return }
+        kept(.allowances, written: work.allowancesWritten)
         switch stage {
         case .browsingServers(let kind):
             guard ServerDirectory.covers(kind) else { return }
@@ -3147,7 +3158,7 @@ final class ShellSession {
     func signOutQuestion(host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
         ShellQuestion.signOut(
             host: host, mastodon: kind(of: host) == .mastodon,
-            hasPassword: forums.hasPassword(host: host), language: language
+            hasPassword: forums.hasPassword(host: host), storeWritable: storeWritable, language: language
         )
     }
 

@@ -406,7 +406,7 @@
 "store.unreachable.readBack.detail" = "The store the read back had moved out of the way could not be moved back this time. It is where the read back left it, and Fediqo has opened without it. What you do in Fediqo this time is not kept. Open Fediqo again.";
 "store.damaged.title" = "This device's store was damaged";
 "store.damaged.line" = "An empty one took its place. The damaged one is deleted for good.";
-"store.damaged.detail" = "What this device held could not be read, so it was put aside and Fediqo opened with nothing. Once you press I understand and the new store has been saved, the damaged one is deleted from this device. There is no way to get it back after that, and Fediqo cannot repair it. Put this notice down any other way and the damaged one is kept, and this is said again next time. Add your sources again and their posts are read afresh; what only this device knew — what you kept, what you had read — goes with it.";
+"store.damaged.detail" = "What this device held could not be read, so it was put aside and Fediqo opened with nothing. Once you press I understand and the new store has been saved, the damaged one is deleted from this device. There is no way to get it back after that, and Fediqo cannot repair it. Put this notice down any other way and the damaged one is kept, and this is said again next time. Left unanswered, it is deleted the first time Fediqo is opened 30 days or more after it was put aside. Add your sources again and their posts are read afresh; what only this device knew — what you kept, what you had read — goes with it.";
 "store.two.title" = "This device holds two stores";
 "store.two.line" = "A read back was interrupted. Choose which one to keep.";
 "store.two.line.neither" = "A read back was interrupted, and neither could be read just now.";
@@ -417,18 +417,20 @@
 "store.glance" = "%1$@, last written %2$@";
 "store.glance.unread" = "it cannot be read";
 "store.unreachable.putAside.line" = "It was damaged and has been put aside. Open Fediqo again.";
-"store.unreachable.putAside.detail" = "What this device held could not be read, so it was put aside. A new store could not be made in its place this time, so Fediqo has opened without one, and what you do in Fediqo this time is not kept. Open Fediqo again: it opens with an empty store, and says what becomes of the damaged one.";
+"store.unreachable.putAside.detail" = "What this device held could not be read, so it was put aside. A new store could not be made in its place this time, so Fediqo has opened without one, and what you do in Fediqo this time is not kept. Open Fediqo again: it opens with an empty store, and says what becomes of the damaged one. The damaged one is deleted the first time Fediqo is opened 30 days or more after it was put aside.";
 "store.unreachable.otherBack.line" = "The store you chose was damaged. The other one comes back.";
-"store.unreachable.otherBack.detail" = "The store you chose could not be read, and has been put aside. The other one, kept until the chosen one had opened and saved, is put back when you open Fediqo again. Fediqo has opened without either this time, and what you do in it now is not kept.";
+"store.unreachable.otherBack.detail" = "The store you chose could not be read, and has been put aside. The other one, kept until the chosen one had opened and saved, is put back when you open Fediqo again. Fediqo has opened without either this time, and what you do in it now is not kept. The damaged one is deleted the first time Fediqo is opened 30 days or more after it was put aside.";
 "store.damaged.told" = "I understand";
 "store.damaged.later" = "Not now";
 "store.damaged.other.line" = "The other store took its place. The damaged one is deleted for good.";
-"store.damaged.other.detail" = "The store you chose could not be read, so it was put aside and the other one was put back in its place. Once you press I understand and the store has been saved, the damaged one is deleted from this device. There is no way to get it back after that, and Fediqo cannot repair it. Put this notice down any other way and the damaged one is kept, and this is said again next time.";
+"store.damaged.other.detail" = "The store you chose could not be read, so it was put aside and the other one was put back in its place. Once you press I understand and the store has been saved, the damaged one is deleted from this device. There is no way to get it back after that, and Fediqo cannot repair it. Put this notice down any other way and the damaged one is kept, and this is said again next time. Left unanswered, it is deleted the first time Fediqo is opened 30 days or more after it was put aside.";
 "store.two.detail.neither" = "Where the store belongs: %1$@. Moved out of the way by the read back: %2$@. Neither would say what it holds. Another copy of Fediqo using them can do that for a moment, so open Fediqo again to look again. You can also keep the one in place: nothing moves, and if it proves damaged the other is put back. The one not kept is deleted once the other has opened and been saved, and cannot be got back.";
 "carry.refused.storeNotOpened.title" = "This device's store is not open";
 "carry.refused.storeNotOpened.line" = "Reading back would replace a store that did not open. Nothing changed.";
 "carry.refused.nothingToTake.title" = "Nothing to take away";
 "carry.refused.nothingToTake.line" = "The store did not open this time, so there is nothing to take.";
+"carry.refused.locked.title" = "This device is locked";
+"carry.refused.locked.line" = "It cannot be read or written until it is unlocked. Nothing changed.";
 "store.newer.title" = "A newer Fediqo wrote this device's index";
 "store.newer.detail" = "This version cannot read it, so it has left it exactly as it was and will save nothing over it. Open Fediqo in the newer version to see what it holds.";
 "store.newer.ok" = "OK";
@@ -791,6 +793,12 @@
 "account.signout.ask.forum.detail" = "The forum's session on this device goes. Boards that need a sign-in are not read until you sign in again. The pictures, emoji names and posts held from it stay, and so do the boards you picked.";
 "account.signout.ask.forum.password.line" = "You are signed out, and the password saved for it is deleted.";
 "account.signout.ask.forum.password.detail" = "The forum's session on this device goes, and the password saved for it is deleted from this device's Keychain. Only the password does not come back: you type it again next time. Boards that need a sign-in are not read until you sign in again. The pictures, emoji names and posts held from it stay, and so do the boards you picked.";
+"account.signout.ask.mastodon.unwritten.line" = "The sign-in is handed back; what the store holds of it stays for now.";
+"account.signout.ask.mastodon.unwritten.detail" = "This device forgets the sign-in and asks the server to end it. Your Home and your lists are no longer read, and you can no longer post, reply, boost, favourite or bookmark from Fediqo. Fediqo opened without a store it can write this time, so signing out changes nothing in the store this time: the marks for what you favourited, boosted and bookmarked on its posts, and what it told you, stay on this device until Fediqo next opens with its store.";
+"account.signout.ask.forum.unwritten.line" = "You are signed out; what this device holds of the forum stays.";
+"account.signout.ask.forum.unwritten.detail" = "The forum's session on this device goes. Boards that need a sign-in are not read until you sign in again. The pictures, emoji names and posts held from it stay, and so do the boards you picked. Fediqo opened without a store it can write this time; that changes nothing about signing out of a forum.";
+"account.signout.ask.forum.password.unwritten.line" = "You are signed out, the password deleted; what the device holds stays.";
+"account.signout.ask.forum.password.unwritten.detail" = "The forum's session on this device goes, and the password saved for it is deleted from this device's Keychain. Only the password does not come back: you type it again next time. Boards that need a sign-in are not read until you sign in again. The pictures, emoji names and posts held from it stay, and so do the boards you picked. Fediqo opened without a store it can write this time; that changes nothing about signing out of a forum.";
 
 "account.source.boards"          = "%1$d boards: %2$@";
 "account.source.unread"          = "Its description could not be read.";
@@ -1080,6 +1088,12 @@
 "allow.own.refused.address" = "Add a host by its name, not a numbered address: a source's pictures are named by host.";
 "allow.own.refused.port" = "Leave the port off: a host you add is reached on the web's own ports.";
 "allow.own.refused.path" = "Type only the host, with no path or query after it: an entry is for the whole host.";
+"allow.own.refused.unread" = "The list could not be read this time, so nothing is added to it. Open Fediqo again.";
+"allow.unknown.notRead" = "This list could not be read this time. Nothing beyond your sources is reached until it can be. Open Fediqo again.";
+"allow.unknown.cannotKeep" = "This device will not let Fediqo keep this list right now: it has no room left, or Fediqo's folder cannot be written. Nothing beyond your sources is reached until it can.";
+"said.unkept.allowances" = "A change to what is allowed beyond your sources could not be kept on this device. It holds for now, and is gone the next time Fediqo is opened.";
+"said.unkept.timelines" = "A change to your timelines could not be kept on this device. It holds for now, and is gone the next time Fediqo is opened.";
+"said.unkept.limits" = "The account of what the limits let go could not be cleared on this device. It is empty for now, and its lines are back the next time Fediqo is opened.";
 
 /* The shared pieces every screen is built from (#232). */
 "help.about" = "More about %@";

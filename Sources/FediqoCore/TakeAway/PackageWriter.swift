@@ -39,8 +39,7 @@ public final class PackageWriter {
         keys = try PackageKeys(key, prelude: prelude)
         prefix = prelude.noncePrefix
         entryCount = summary.entryCount
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-        handle = try FileHandle(forWritingTo: url)
+        handle = try Guarded.makeFile(at: url)
         let preludeBytes = prelude.encode()
         try handle.write(contentsOf: preludeBytes)
         let header = try JSONEncoder().encode(PackageSummary.Header(summary))

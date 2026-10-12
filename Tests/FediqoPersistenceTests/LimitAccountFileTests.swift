@@ -19,7 +19,7 @@ struct LimitAccountFileTests {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = try LimitAccountFile(directory: dir)
-        #expect(file.read().isEmpty, "nothing yet reads as no lines")
+        #expect(try file.read().isEmpty, "nothing yet reads as no lines")
         let lines = [
             LimitAct(limit: .room, at: origin.addingTimeInterval(60), posts: 0, copies: 4, sources: ["alpha.test"]),
             LimitAct(limit: .months, at: origin, posts: 2, sources: ["alpha.test", "beta.test"]),
@@ -36,10 +36,10 @@ struct LimitAccountFileTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = try LimitAccountFile(directory: dir)
         try Data("not json".utf8).write(to: dir.appendingPathComponent(LimitAccountFile.name))
-        #expect(file.read().isEmpty)
+        #expect(try file.read().isEmpty)
         let line = LimitAct(limit: .months, at: origin, posts: 1, sources: [])
         try file.write([line])
-        #expect(file.read() == [line])
+        #expect(try file.read() == [line])
     }
 
     @Test("An index that cannot be read takes its account aside with it")

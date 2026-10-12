@@ -17,6 +17,22 @@ struct Said: Identifiable, Equatable, Sendable {
         /// disk yet (`ShellSession.saveNow`): no source's, and nothing to press — it is tried
         /// again by itself.
         case unwritten(Unwritten)
+        /// A change to one of the person's own lists that this device would not keep (#344,
+        /// `ShellSession.kept`): no source's, and — unlike `unwritten` — not tried again by
+        /// itself, and not taken down by a save of the store. It stands until that list is
+        /// next written.
+        case unkept(Unkept)
+    }
+
+    /// One of the person's own lists, kept in a file of its own beside the store.
+    enum Unkept: String, CaseIterable, Sendable {
+        case timelines
+        /// What may be reached beyond a source.
+        case allowances
+        /// The limits' account (#251), where what would not be kept is the person clearing
+        /// it: the lines are gone from what they see and still in the file
+        /// (`ShellSession.clearLimitAccount`).
+        case limits
     }
 
     /// What the person asked to be gone from this device, as its line names it.
@@ -118,6 +134,7 @@ struct Said: Identifiable, Equatable, Sendable {
         case .notice(let act): return "\(host)\u{1e}notice\u{1e}\(act)"
         case .found(let text, _): return "\(host)\u{1e}found\u{1e}\(text.uuidString)"
         case .unwritten(let gone): return "\u{1e}unwritten\u{1e}\(gone.rawValue)"
+        case .unkept(let list): return "\u{1e}unkept\u{1e}\(list.rawValue)"
         }
     }
 
@@ -130,6 +147,8 @@ struct Said: Identifiable, Equatable, Sendable {
             return String(format: L10n.t(answer ? "outbox.found.answer" : "outbox.found.post", language: language), host)
         case .unwritten(let gone):
             return L10n.t("said.unwritten.\(gone.rawValue)", language: language)
+        case .unkept(let list):
+            return L10n.t("said.unkept.\(list.rawValue)", language: language)
         case .notice(let act):
             return NoticeActs.words(
                 ShellNoticeActs.Said(act: act, why: why), host: host, about: about, many: many, language: language

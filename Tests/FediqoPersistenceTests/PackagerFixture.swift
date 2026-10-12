@@ -41,11 +41,14 @@ enum PackagerFixture {
             }
         }
 
-        func packager(free: Int = .max) -> StorePackager {
+        /// The person's own lists beside this device's index, as the app reads them.
+        var lists: ListFiles { ListFiles(directory: directory, defaults: defaults, protected: .always) }
+
+        func packager(free: Int = .max, protected: ProtectedData = .always) -> StorePackager {
             StorePackager(
                 directory: directory, file: file, store: store, media: media, tokens: tokens,
                 credentials: credentials, defaults: defaults, device: "a test", appVersion: "0.7.0",
-                freeSpace: { _ in free }, rounds: 1000
+                protected: protected, freeSpace: { _ in free }, rounds: 1000
             )
         }
 
@@ -61,6 +64,9 @@ enum PackagerFixture {
             }
             for (key, value) in defaults.dictionaryRepresentation() where key.hasPrefix("fediqo.") {
                 out["defaults/\(key)"] = Data(String(describing: value).utf8)
+            }
+            for name in [ListFile.allowancesName, ListFile.timelinesName] {
+                if let held = try? Data(contentsOf: directory.appendingPathComponent(name)) { out["lists/\(name)"] = held }
             }
             return out
         }

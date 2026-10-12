@@ -248,7 +248,15 @@ struct Allowance: Identifiable, Equatable, Sendable {
 
 /// What the person decided about what reaches beyond a source (#226): which of the entries the
 /// app starts with are off, and the hosts they added for a source. **Only decisions** — never a
-/// host reached or when — kept in the app's preferences so the list outlives a relaunch.
+/// host reached or when — kept on this device so the list outlives a relaunch: **in a file
+/// beside the index** (#344, `file`), unreadable while the device is locked, moved there once
+/// from the preference key earlier builds kept it under. Only a book handed no file — a test,
+/// a preview — keeps to the key.
+///
+/// **A list that could not be read is not an empty one** (`unread`): nothing beyond a source is
+/// let through, no switch and no host is changed, and nothing is written — an empty list
+/// written over the one a locked device holds would switch back on what the person switched
+/// off. It stays so until it is read (`reread`).
 ///
 /// Every change is handed at once to `SourceWork` (`allow`), which the gate, a forum's browser and
 /// the rules its pages load under all read: nothing waits for a relaunch.
@@ -258,8 +266,30 @@ struct Allowance: Identifiable, Equatable, Sendable {
 @MainActor
 @Observable
 final class AllowanceBook {
-    /// The app's own, on its preferences and `SourceWork.shared`. A test builds its own.
-    static let shared = AllowanceBook(defaults: .standard, work: .shared)
+    /// The app's own, on its file beside the store and `SourceWork.shared`. A test builds its
+    /// own. **First touched after `kept` is said** (`FediqoRootView.onlyToSources`), which is
+    /// after the store was opened: nothing of the list is read on a device still locked.
+    static let shared = AllowanceBook(defaults: .standard, work: .shared, file: kept)
+
+    /// The file the app's own book keeps its list in, said before `shared` is first touched.
+    static var kept: ListFile?
+
+    /// Why the list is not known this run (#344), where it is not.
+    enum Unknown: Equatable {
+        /// What is kept is there and would not be read.
+        case notRead
+        /// Nothing is kept, and the device cannot say that nothing is — a run with no canary:
+        /// it will not let a first list be made.
+        case cannotKeep
+    }
+
+    /// Why what is kept is not known, or nil where it was read.
+    private(set) var unknown: Unknown?
+    /// What is kept would not be read, or cannot be said: the list is not known this run.
+    var unread: Bool { unknown != nil }
+    /// The last change would not be written down: what is shown is not what is kept. Handed
+    /// to `work` with the list, where every session reads it and says so (`ShellSession.kept`).
+    private(set) var unwritten = false
 
     /// The entries the app starts with that the person switched off.
     private(set) var off: Set<Allowance.ID> = []
@@ -268,6 +298,7 @@ final class AllowanceBook {
 
     @ObservationIgnored let work: SourceWork
     @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let file: ListFile?
 
     static let key = "fediqo.allowances"
 
@@ -288,6 +319,8 @@ final class AllowanceBook {
         case itsOwnHost
         /// Already on the list for that source.
         case alreadyThere
+        /// The list could not be read this run, and nothing is added to what is not known.
+        case unread
     }
 
     /// As it is kept: the decisions, and nothing else. **A key that is missing is empty**, and
@@ -313,26 +346,40 @@ final class AllowanceBook {
         }
     }
 
-    init(defaults: UserDefaults, work: SourceWork) {
+    init(defaults: UserDefaults, work: SourceWork, file: ListFile? = nil) {
         self.defaults = defaults
+        self.file = file
         self.work = work
         load()
         work.allow(effective)
     }
 
-    /// The list read again off the preferences — after a take-away was read back (#247), which
+    /// The list read again off where it is kept — after a take-away was read back (#247), which
     /// replaced them under this object. What the gate lets through changes with it.
     func reread() {
         off = []
         own = []
+        // What is shown from here is what is kept: nothing of an earlier change is unwritten.
+        unwritten = false
         load()
         work.allow(effective)
     }
 
     private func load() {
-        if let data = defaults.data(forKey: Self.key),
-           let kept = try? JSONDecoder().decode(Kept.self, from: data)
-        {
+        let data: Data?
+        switch file?.read() {
+        case .unread?:
+            unknown = .notRead
+            return
+        case .notKnown?:
+            unknown = .cannotKeep
+            return
+        case .data(let kept)?: data = kept
+        case .some(.none): data = nil
+        case nil: data = defaults.data(forKey: Self.key)
+        }
+        unknown = nil
+        if let data, let kept = try? JSONDecoder().decode(Kept.self, from: data) {
             off = Set(kept.off.map(Allowance.ID.init(rawValue:)).filter(Allowance.ID.builtIn.contains))
             // Read as though typed again: what would be refused now is not let through, and a
             // host kept twice is one entry.
@@ -350,15 +397,16 @@ final class AllowanceBook {
     /// Every entry the list shows: the app's own, then the person's.
     var entries: [Allowance] { Allowance.standing + own }
 
-    /// What is let through now.
-    var effective: [Allowance] { Allowance.standing.filter { !off.contains($0.id) } + own }
+    /// What is let through now — nothing, while the list is not known: what the person
+    /// switched off is not let through for want of reading that they did.
+    var effective: [Allowance] { unread ? [] : Allowance.standing.filter { !off.contains($0.id) } + own }
 
-    func isOn(_ id: Allowance.ID) -> Bool { !off.contains(id) }
+    func isOn(_ id: Allowance.ID) -> Bool { !unread && !off.contains(id) }
 
     /// Switches one of the app's own entries off or on again. A person's own entry is removed,
     /// not switched.
     func set(_ id: Allowance.ID, on: Bool) {
-        guard Allowance.ID.builtIn.contains(id), on == off.contains(id) else { return }
+        guard !unread, Allowance.ID.builtIn.contains(id), on == off.contains(id) else { return }
         if on { off.remove(id) } else { off.insert(id) }
         changed()
     }
@@ -367,6 +415,7 @@ final class AllowanceBook {
     /// and nothing more (`host`). Answers why not where it is refused.
     @discardableResult
     func add(_ typed: String, for source: String) -> Refusal? {
+        guard !unread else { return .unread }
         let host: String
         switch Self.host(typed) {
         case .success(let read): host = read
@@ -382,7 +431,7 @@ final class AllowanceBook {
     }
 
     func remove(_ id: Allowance.ID) {
-        guard own.contains(where: { $0.id == id }) else { return }
+        guard !unread, own.contains(where: { $0.id == id }) else { return }
         own.removeAll { $0.id == id }
         changed()
     }
@@ -452,11 +501,21 @@ final class AllowanceBook {
     }
 
     private func changed() {
+        // Never over a list that was not read.
+        guard !unread else { return }
         let kept = Kept(
             off: Allowance.ID.builtIn.filter(off.contains).map(\.rawValue),
             own: own.compactMap { entry in entry.source.map { Kept.Own(host: entry.hosts[0].host, source: $0) } }
         )
-        if let data = try? JSONEncoder().encode(kept) { defaults.set(data, forKey: Self.key) }
-        work.allow(effective)
+        // At the act, whole and atomic: nothing of it waits for a save or for leaving.
+        if let data = try? JSONEncoder().encode(kept) {
+            if let file {
+                // Not written, what is shown is not what is kept: said, not passed over.
+                unwritten = !file.write(data)
+            } else {
+                defaults.set(data, forKey: Self.key)
+            }
+        }
+        work.allow(effective, written: !unwritten)
     }
 }

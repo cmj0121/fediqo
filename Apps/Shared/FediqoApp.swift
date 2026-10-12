@@ -11,11 +11,72 @@ import UIKit
 /// What a launch read from disk, built once, and the one saver that writes it back.
 ///
 /// **One instance, reached by the app and by its delegate alike**, so the save a quit waits for
-/// is the save a backgrounding runs, and neither can find it unset: it is a constant made on
-/// first use, not a slot something has to remember to fill.
+/// is the save a backgrounding runs.
+///
+/// **There is none until the store has been opened** (#344), and it is made from what was
+/// opened: a launch behind a locked device waits (`StoreGate`), and nothing here — no session,
+/// no saver — exists to run without the store and then write its emptiness over it. So
+/// `shared` is nil until then, whoever asks: a quit or a backgrounding before the first frame
+/// finds nothing to save, where it once built all of this itself. Made once; a second making
+/// is a mistake in the app, and stops it.
 @MainActor
 final class Launch {
-    static let shared = Launch()
+    private(set) static var shared: Launch?
+
+    /// The one gate of this run, made at the first evaluation of a body — once the app object
+    /// exists, which the platform's signals ask — and never from a static or the app's own
+    /// initializer.
+    private static var gate: StoreGate?
+    /// Whether the walk of everything outside the store's folder has been set going.
+    private static var walked = false
+
+    /// The run, where the store could be opened at once — every ordinary launch, before the
+    /// first frame — and nothing where the device is locked.
+    static func atOnce() -> Launch? {
+        shared ?? opening().opened.map { make($0) }
+    }
+
+    /// The run, once the store can be opened: waited for where the device is locked.
+    static func whenOpened() async -> Launch? {
+        let gate = opening()
+        await gate.wait()
+        return shared ?? gate.opened.map { make($0) }
+    }
+
+    private static func make(_ opened: StoreFile.Opened) -> Launch {
+        precondition(shared == nil, "the store is opened, and the run made of it, once")
+        let made = Launch(opened)
+        shared = made
+        return made
+    }
+
+    private static func opening() -> StoreGate {
+        if let gate { return gate }
+        let directory = StoreFile.applicationSupportDirectory
+        let protected = ProtectedSignals.protected(store: directory)
+        let made = StoreGate(
+            protected: protected, waits: ProtectedSignals.waits, unlockedForSomebody: ProtectedSignals.unlockedForSomebody
+        ) { unlocked in
+            // First of all (#344): the store's folder, the canary, and the folders the system
+            // writes into are at the class before anything here opens, reads or writes a file —
+            // and what an earlier build left beside the index is brought to it before the index
+            // is opened. The walk of everything else is nothing a first frame waits for.
+            ProtectedFolders.first()
+            // Once a run, however many times the gate comes to ask.
+            if !walked {
+                walked = true
+                Task.detached(priority: .utility) { ProtectedFolders.rest() }
+            }
+            // What a take-away or a read back that was killed midway left on disk goes next
+            // (#247): a plaintext index in scratch is nothing a later run reads. Only where the
+            // canary reads — the sweep asks it.
+            let media = try? MediaCache.caches()
+            StorePackager.sweepLeftovers(directory: directory, media: media?.location, protected: protected)
+            return StoreFile.openApplicationSupport(protected: protected, unlocked: unlocked)
+        }
+        gate = made
+        return made
+    }
 
     let store: ItemStore
     let forums: ForumSessions
@@ -24,10 +85,15 @@ final class Launch {
     /// What takes the store away as one locked file and reads one back (#247). Built on what
     /// this launch opened, so it writes the index this run writes and replaces it in place.
     let carrier: StorePackager
+    /// Whether what this device keeps can be read: the canary the gate asked.
+    private let protected: ProtectedData
     /// The index on disk, measured for Usage (#194); nil where this run has none.
     let file: StoreFile?
     /// The limits' account beside the index (#251); nil where the folder could not be made.
     let limits: LimitAccountFile?
+    /// The person's own lists beside the index (#344): what may be reached beyond a source,
+    /// and the timelines they wrote. Read in every kind of run, with a store or without.
+    let lists: ListFiles
     /// The index was written by a newer build and left alone; the root view says so. Cleared when
     /// the reader dismisses that, so it is said once a launch rather than once a window.
     var storeIsNewer: Bool
@@ -40,15 +106,16 @@ final class Launch {
     /// sources to name would otherwise let go of everything.
     let storeRead: Bool
 
-    /// The index is opened and read here, on the main actor, before the first frame. Moving it
-    /// off would leave the store empty while the first frame draws, and every save asked for in
-    /// that gap would have to be held back or it would write the empty store over the index.
-    private init() {
-        // What a take-away or a read back that was killed midway left on disk goes first (#247):
-        // a plaintext index in scratch is nothing a later run reads.
+    /// Built from what the gate opened, on the main actor, before the first frame that shows
+    /// anything. Moving the read off would leave the store empty while that frame draws, and
+    /// every save asked for in the gap would have to be held back or it would write the empty
+    /// store over the index.
+    private init(_ opened: StoreFile.Opened) {
+        // Where Caches cannot be made, pictures are read from their hyperlinks only.
         let media = try? MediaCache.caches()
-        StorePackager.sweepLeftovers(directory: StoreFile.applicationSupportDirectory, media: media?.location)
-        let opened = StoreFile.openApplicationSupport()
+        // The one the gate asked: made once for the store, and the same one here.
+        let protected = ProtectedSignals.protected(store: StoreFile.applicationSupportDirectory)
+        self.protected = protected
         store = ItemStore(
             sources: opened.sources, notes: opened.notes, said: opened.said, notices: opened.notices,
             unsent: opened.unsent
@@ -56,7 +123,12 @@ final class Launch {
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
-        saver = StoreSaver(store: store, file: opened.file)
+        // Handed what was read, so that from the first save what is this device's alone — a
+        // post kept or let go, a source added or removed — is written ahead of everything else.
+        saver = StoreSaver(
+            store: store, file: opened.file, protected: protected,
+            holding: opened.setAside == nil ? (opened.sources, opened.notes) : nil
+        )
         file = opened.file
         // Only beside an index this run writes: a run that must not write the index (a newer
         // build's, or one that could not be set aside) writes no lines about it either.
@@ -70,12 +142,24 @@ final class Launch {
             defaults: .standard, device: Self.deviceName,
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
             storeIsNewer: opened.storeIsNewer,
-            storeNotOpened: opened.file == nil && !opened.storeIsNewer, saver: saver
+            storeNotOpened: opened.file == nil && !opened.storeIsNewer, saver: saver, protected: protected
         )
+        // An undo a lock refused is still owed (#344), and done when the device is back: each
+        // wake-up asks, and the carrier asks the canary itself before it does anything.
+        // And a save a lock refused is written then: the saver asks the canary, counts its
+        // tries afresh and saves at once.
+        Task { [carrier, saver] in
+            for await _ in protected.changes() {
+                await carrier.finishOwed()
+                await saver.owedNow()
+            }
+        }
         // Before anything is asked: every act from here on belongs to one of these, or to a host
         // the person names to add (#220).
+        lists = ListFiles(directory: StoreFile.applicationSupportDirectory, defaults: .standard, protected: protected)
         FediqoRootView.onlyToSources(
-            opened.sources.map(\.host), kept: store, read: opened.file != nil && opened.setAside == nil
+            opened.sources.map(\.host), kept: store, read: opened.file != nil && opened.setAside == nil,
+            lists: lists
         )
         // Built on first use only: a reader with no forum never opens the WebKit store.
         let sessions = ForumSessions(dataStore: ForumWebsiteData.onDevice())
@@ -96,7 +180,6 @@ final class Launch {
             within: StoreSaver.deadline
         )
         forums.signInAgain(hosts: opened.sources.filter { $0.kind == .discuz }.map(\.host))
-        // Where Caches cannot be made, pictures are read from their hyperlinks only.
         if let media {
             FediqoRootView.keepPictures(in: media, for: opened.sources.map(\.host), read: storeRead)
         }
@@ -144,11 +227,27 @@ final class Launch {
     /// As the app goes to the background, which may be a moment away to a password manager in the
     /// middle of a sign-in: the save, and only the forum browser's copies of what it fetched. The
     /// rest waits for the quit, or for the next launch's sweep.
+    #if os(iOS)
+    /// **On a phone** this is the last the app does before the device may lock (#344): the
+    /// save first and to its end, under the grant the caller already holds, and the cache
+    /// dropped only where there is still time and a device to do it on (`Leaving`).
+    func pause(holding grant: any BackgroundGranting) async {
+        await Leaving.leave(
+            holding: grant, decide: { await forgetChangedReaders() }, saver: saver, protected: protected,
+            stillLeft: { UIApplication.shared.applicationState != .active },
+            then: { await forums.dropCache(within: StoreSaver.deadline) }
+        )
+    }
+    #else
+    /// **A Mac has no leaving step for a lock, and needs none**: nothing announces one, its
+    /// app is not suspended behind a locked screen, and a save goes through the lock on the
+    /// connection it holds. Where a phase is delivered at all, this is what it always was.
     func pause() async {
         await forgetChangedReaders()
         _ = await saver.flush()
         await forums.dropCache(within: StoreSaver.deadline)
     }
+    #endif
 }
 
 #if os(macOS)
@@ -163,7 +262,7 @@ final class FediqoAppDelegate: NSObject, NSApplicationDelegate {
         if Staged.isOn { return .terminateNow }
         #endif
         Task {
-            await Launch.shared.end()
+            await Launch.shared?.end()
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
@@ -190,7 +289,7 @@ final class FediqoAppDelegate: NSObject, UIApplicationDelegate {
         }
         #endif
         ending = Task { @MainActor in
-            await Launch.shared.end()
+            await Launch.shared?.end()
             self.finished = true
         }
     }
@@ -233,37 +332,14 @@ struct FediqoApp: App {
     #elseif os(iOS)
     @UIApplicationDelegateAdaptor(FediqoAppDelegate.self) private var appDelegate
     #endif
-    @Environment(\.scenePhase) private var scenePhase
-
-    /// The index's one measure on disk (#194), or nothing where this run has no index.
-    private var measureStore: (@Sendable () async -> Int)? {
-        guard let file = Launch.shared.file else { return nil }
-        return { file.bytesOnDisk() }
-    }
-
-    /// Gives the index back what rows let go of left in it (#249), or nothing where this run
-    /// has no index.
-    private var compactStore: (@Sendable () async throws -> Void)? {
-        guard let file = Launch.shared.file else { return nil }
-        let saver = Launch.shared.saver
-        // Where a save would run: after every save asked for before it and before any after,
-        // and never inside a read back's commit, which holds the same place (#247).
-        return { try await saver.exclusively { try await file.compact() } }
-    }
-
-    /// What the rows held weigh, whatever the file does (#249); nothing where this run has no index.
-    private var weighStore: (@Sendable () async -> Int)? {
-        guard let file = Launch.shared.file else { return nil }
-        return { file.bytesHeld() }
-    }
 
     var body: some Scene {
         WindowGroup {
             Group {
                 #if DEBUG
-                if Staged.isOn { Staged.root } else { live }
+                if Staged.isOn { Staged.root } else { Opening() }
                 #else
-                live
+                Opening()
                 #endif
             }
             // The window's own ground is the page's, so what shows before the first frame and
@@ -277,29 +353,99 @@ struct FediqoApp: App {
         .windowResizability(.contentMinSize)
         #endif
     }
+}
 
-    /// The app as a person launches it. Apart from `body` only so that a launch made for a
-    /// picture (`Staged`) can stand in its place without `Launch.shared` ever being made.
-    private var live: some View {
+/// What a window shows until this run has its store (#344): on every ordinary launch that is
+/// no time at all, and the app is drawn in the first frame as it always was. Behind a locked
+/// device it is the launch ground and nothing else — no words — until the device is unlocked.
+/// Apart from the app's own body so that a launch made for a picture (`Staged`) can stand in
+/// its place without the store ever being asked for.
+private struct Opening: View {
+    @State private var launch = Launch.atOnce()
+
+    var body: some View {
+        if let launch {
+            Live(launch: launch)
+        } else {
+            Waiting { launch = $0 }
+        }
+    }
+}
+
+/// The launch ground, while the store waits for the device to be unlocked. **Anything a person
+/// does to it asks again**: the system's own notices of an unlock are wake-ups nobody has
+/// promised, and a finger, a key or a pointer on the app is proof of somebody in front of it.
+private struct Waiting: View {
+    let opened: (Launch?) -> Void
+    #if os(macOS)
+    @State private var listening: Any?
+    #endif
+
+    var body: some View {
+        Color("Ground").ignoresSafeArea()
+            .contentShape(Rectangle())
+            .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in ProtectedSignals.somebodyIsHere() })
+            #if os(macOS)
+            .onAppear {
+                // One at a time: a ground shown again without having gone would leave the first.
+                ProtectedSignals.stop(listening)
+                listening = ProtectedSignals.listenForSomebody()
+            }
+            .onDisappear { ProtectedSignals.stop(listening) }
+            #endif
+            .task { opened(await Launch.whenOpened()) }
+    }
+}
+
+/// The app as a person launches it, once its store is open.
+private struct Live: View {
+    let launch: Launch
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// The index's one measure on disk (#194), or nothing where this run has no index.
+    private var measureStore: (@Sendable () async -> Int)? {
+        guard let file = launch.file else { return nil }
+        return { file.bytesOnDisk() }
+    }
+
+    /// Gives the index back what rows let go of left in it (#249), or nothing where this run
+    /// has no index.
+    private var compactStore: (@Sendable () async throws -> Void)? {
+        guard let file = launch.file else { return nil }
+        let saver = launch.saver
+        // Where a save would run: after every save asked for before it and before any after,
+        // and never inside a read back's commit, which holds the same place (#247).
+        return { try await saver.exclusively { try await file.compact() } }
+    }
+
+    /// What the rows held weigh, whatever the file does (#249); nothing where this run has no index.
+    private var weighStore: (@Sendable () async -> Int)? {
+        guard let file = launch.file else { return nil }
+        return { file.bytesHeld() }
+    }
+
+    var body: some View {
         FediqoRootView(
-            store: Launch.shared.store, forums: Launch.shared.forums,
-            mastodon: Launch.shared.mastodon, persist: save, persistUnsent: saveUnsent,
-            savesLanded: { [saver = Launch.shared.saver] in await saver.landings() },
+            store: launch.store, forums: launch.forums,
+            mastodon: launch.mastodon, persist: save, persistUnsent: saveUnsent,
+            savesLanded: { [saver = launch.saver] in await saver.landings() },
             measureStore: measureStore, compactStore: compactStore, weighStore: weighStore,
-            limits: Launch.shared.limits,
-            storeIsNewer: Launch.shared.storeIsNewer,
-            storeNoticeSeen: { Launch.shared.storeIsNewer = false },
-            storeTrouble: Launch.shared.storeTrouble,
+            limits: launch.limits,
+            storeIsNewer: launch.storeIsNewer,
+            storeNoticeSeen: { launch.storeIsNewer = false },
+            storeTrouble: launch.storeTrouble,
             storeTroubleAnswered: { answer in
-                guard let trouble = Launch.shared.storeTrouble else { return }
-                Launch.shared.storeTrouble = nil
+                guard let trouble = launch.storeTrouble else { return }
+                launch.storeTrouble = nil
                 Task {
-                    await Launch.shared.saver.answered(
+                    await launch.saver.answered(
                         answer, to: trouble, in: StoreFile.applicationSupportDirectory
                     )
                 }
             },
-            carrier: Launch.shared.carrier,
+            carrier: launch.carrier,
+            storeWritable: launch.file != nil,
+            lists: launch.lists,
             nearby: NWNearbyLink(), deviceName: Launch.deviceName
         )
         .onChange(of: scenePhase) { _, phase in
@@ -314,37 +460,36 @@ struct FediqoApp: App {
     /// this device tells the person (`ShellSession.saveNow`). A run with no store to write
     /// has no file for anything to be left in, and its save is the logged no-op it always was.
     private func save() async -> Bool {
-        (try? await Launch.shared.saver.save()) != nil
+        (try? await launch.saver.save()) != nil
     }
 
     /// Only what the person pressed to send (`StoreSaver.saveUnsent`): awaited by a send before
     /// its request leaves, and answered with whether the texts are on disk — no where the write
     /// failed, which the saver has logged, and where this run has no store to write.
     private func saveUnsent() async -> Bool {
-        (try? await Launch.shared.saver.saveUnsent()) ?? false
+        (try? await launch.saver.saveUnsent()) ?? false
     }
 
-    /// On iOS a backgrounded app is suspended within moments, which would stop a write halfway;
-    /// the background task asks for the time to finish it, and gives it back as soon as it has —
-    /// or at the deadline, the same one a quit has.
+    /// On iOS a backgrounded app is suspended within moments, which would stop a write halfway:
+    /// the background task asks for the time to finish it, and is given back when leaving is
+    /// done — the save having run to its end, not to a deadline — or when the system takes it.
     private func saveInBackground() {
         #if os(iOS)
+        // Taken now, as the app is told, and not a turn of the run loop later: everything
+        // leaving does is done under it, and it is given back there (`Leaving`).
         let grant = BackgroundGrant()
+        Task { await launch.pause(holding: grant) }
+        #else
+        Task { await launch.pause() }
         #endif
-        Task {
-            await Launch.shared.pause()
-            #if os(iOS)
-            grant.end()
-            #endif
-        }
     }
 }
 
 #if os(iOS)
-/// One background task, ended exactly once: when the save returns, or when the system runs out
+/// One background task, ended exactly once: when leaving is done, or when the system runs out
 /// of patience first.
 @MainActor
-private final class BackgroundGrant {
+private final class BackgroundGrant: BackgroundGranting {
     private var id = UIBackgroundTaskIdentifier.invalid
 
     init() {

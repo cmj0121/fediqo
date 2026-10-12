@@ -92,6 +92,9 @@ public enum PackageFault: Error, Sendable, Equatable {
     /// This run holds none of what this device holds — its store did not open, or is a newer
     /// build's — so there is nothing to take away, and an empty package is not written.
     case nothingToTake
+    /// The device is locked (#344): what it keeps cannot be read or written until it is
+    /// unlocked, so a take-away or a read back does not begin. Nothing changed.
+    case locked
     /// The package's store could not be read back as a store, though every tag held.
     case unreadableStore
     /// A step of the commit refused, and putting an earlier step back refused too: the device

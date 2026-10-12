@@ -19,6 +19,10 @@ public enum StoreTrouble: Equatable, Sendable {
         /// Anything else about the moment and not about the store: the folder or the file would
         /// not be read or written.
         case outOfReach
+        /// The device is locked: the canary beside the index would not be read (#344). **Never
+        /// shown** — a launch that meets it waits for the unlock and opens the store then.
+        /// Exactly that, and nothing else: no code SQLite or the system reports is taken for it.
+        case locked
         /// A read back was interrupted, and the store it had moved out of the way could not be
         /// moved back (`StorePackager.settleHalfCommits`).
         case readBackInterrupted

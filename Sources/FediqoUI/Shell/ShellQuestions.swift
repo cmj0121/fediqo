@@ -268,11 +268,20 @@ enum ShellQuestion {
     /// **Keyed and not destructive, as Clear is and for its reason**: signing in again brings
     /// the sign-in back. **Except where a saved password goes**: that does not come back, so
     /// that sign-out is a loss, drawn and chorded as one.
+    ///
+    /// **Where this run has no store it can write** (`storeWritable` false — it did not open,
+    /// is a newer build's, or a read back is unsettled) the question says so (#344). A
+    /// Mastodon's sign-out then changes nothing in the store: the marks and notices it would
+    /// have taken stay until a run that has one. A forum's never wrote the store, and says
+    /// what stays as it always does. A whole sentence of its own for each kind, never a
+    /// clause joined on.
     static func signOut(
-        host: String, mastodon: Bool, hasPassword: Bool = false, language: DummyLanguage? = nil
+        host: String, mastodon: Bool, hasPassword: Bool = false, storeWritable: Bool = true,
+        language: DummyLanguage? = nil
     ) -> ShellConfirmation {
-        let key = mastodon ? "account.signout.ask.mastodon"
+        let kind = mastodon ? "account.signout.ask.mastodon"
             : hasPassword ? "account.signout.ask.forum.password" : "account.signout.ask.forum"
+        let key = storeWritable ? kind : kind + ".unwritten"
         return ShellConfirmation(
             symbol: "key", title: String(format: L10n.t("account.signout.ask.title", language: language), host),
             line: L10n.t(key + ".line", language: language),
@@ -548,7 +557,9 @@ enum ShellQuestion {
             let key = switch why {
             case .inUse: "store.unreachable.inUse"
             case .noRoom: "store.unreachable.noRoom"
-            case .outOfReach: "store.unreachable.outOfReach"
+            // `.locked` is never shown: the launch waits it out. Were it ever to reach here it
+            // is a store that would not open for the moment, and is said as one.
+            case .outOfReach, .locked: "store.unreachable.outOfReach"
             case .readBackInterrupted: "store.unreachable.readBack"
             case .putAsideOnly: "store.unreachable.putAside"
             case .otherComesBack: "store.unreachable.otherBack"
@@ -691,6 +702,9 @@ enum ShellQuestion {
         case .nothingToTake:
             key = "carry.refused.nothingToTake"
             line = L10n.t(key + ".line", language: language)
+        case .locked:
+            key = "carry.refused.locked"
+            line = L10n.t(key + ".line", language: language)
         case .unwound(let steps):
             key = "carry.refused.unwound"
             let named = steps.map { L10n.t("carry.step.\($0)", language: language) }.joined(separator: ", ")
@@ -797,6 +811,8 @@ enum ShellQuestion {
             return carryRefused(.storeNotOpened, language: language)
         case .nothingToTake:
             return carryRefused(.nothingToTake, language: language)
+        case .locked:
+            return carryRefused(.locked, language: language)
         case .notAllowed, .wrongCode, .refusedThere, .lost, .malformed, .unsure, .guessing, .timedOut:
             key = "nearby.refused.\(refusal)"
             line = L10n.t(key + ".line", language: language)

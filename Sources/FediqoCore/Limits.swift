@@ -93,8 +93,10 @@ public enum LimitAccount {
 /// Where the account outlives a relaunch. The app hands the shell a file beside the index; a
 /// test that does not care hands in none, and then the lines live for the run.
 public protocol LimitAccountStore: Sendable {
-    /// The lines as last written, newest first; empty where nothing was ever written.
-    func read() -> [LimitAct]
+    /// The lines as last written, newest first; empty where nothing was ever written. **Throws
+    /// where they are there and will not be read** (#344): a locked device's refusal is not
+    /// "no lines", and whoever reads writes nothing until it has read.
+    func read() throws -> [LimitAct]
     /// Writes `lines` in place of whatever was there.
     func write(_ lines: [LimitAct]) throws
 }

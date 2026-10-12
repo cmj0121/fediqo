@@ -642,6 +642,56 @@ struct MastodonSignInTests {
         #expect(session.mastodon.ended.contains(host))
     }
 
+    @Test("In a run with no store it can write, signing out says that what the device held of that sign-in is still on it — each kind in a sentence of its own",
+          arguments: [DummyLanguage.english, .taiwanese])
+    func signingOutWithNoStoreToWrite(_ language: DummyLanguage) throws {
+        let kinds: [(mastodon: Bool, password: Bool)] = [(true, false), (false, false), (false, true)]
+        var said: Set<String> = []
+        for kind in kinds {
+            let usual = ShellQuestion.signOut(host: "one.example", mastodon: kind.mastodon, hasPassword: kind.password, language: language)
+            let unwritten = ShellQuestion.signOut(
+                host: "one.example", mastodon: kind.mastodon, hasPassword: kind.password, storeWritable: false, language: language
+            )
+            #expect(unwritten.line != usual.line && unwritten.help != usual.help)
+            let help = try #require(unwritten.help)
+            // Words, not keys; and within what a line may be.
+            #expect(!unwritten.line.contains("account.") && !help.contains("account."))
+            #expect(ShellQuestion.width(unwritten.line) <= ShellQuestion.lineLength, "\(unwritten.line)")
+            #expect(help.contains("store"), "it says why: no store this run can write")
+            // What is true of each: a Mastodon's marks stay until a run with the store; a
+            // forum's sign-out never wrote the store, and what stays is what always stays.
+            let english = language == .english
+            let phrase = kind.mastodon
+                ? (english ? "until Fediqo next opens with its store" : "直到 Fediqo 下次帶著 store 開啟")
+                : (english ? "The pictures, emoji names and posts held from it stay" : "圖片、表情名稱和文章都還在")
+            #expect(help.contains(phrase), "\(help)")
+            #expect(kind.mastodon || usual.help?.contains(phrase) == true, "the ordinary wording's own sentence")
+            // The same question otherwise: the same press, as much a loss as it was.
+            #expect(unwritten.title == usual.title && unwritten.choices == usual.choices && unwritten.cancel == usual.cancel)
+            said.insert(unwritten.line)
+            said.insert(help)
+        }
+        #expect(said.count == 6, "a whole sentence for each kind, line and detail")
+    }
+
+    @Test("The session's sign-out question goes by whether this run has a store to write, which the root hands it")
+    func theSessionKnowsWhetherItCanWrite() {
+        let session = ShellSession(http: FixtureHTTP(), store: ItemStore(), forums: ForumSessions(credentials: MemoryCredentials()))
+        session.sources = [Source(host: forum, kind: .discuz)]
+        #expect(session.storeWritable, "a run is taken to have its store unless it is told otherwise")
+        #expect(session.signOutQuestion(host: forum, language: .english) == ShellQuestion.signOut(host: forum, mastodon: false, language: .english))
+        session.storeWritable = false
+        #expect(session.signOutQuestion(host: forum, language: .english)
+            == ShellQuestion.signOut(host: forum, mastodon: false, storeWritable: false, language: .english))
+        // Held to the source: the root takes it as a parameter and the app hands in whether it has a file.
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let view = try? String(contentsOf: root.appendingPathComponent("Sources/FediqoUI/FediqoRootView.swift"), encoding: .utf8)
+        let app = try? String(contentsOf: root.appendingPathComponent("Apps/Shared/FediqoApp.swift"), encoding: .utf8)
+        #expect(view?.contains("        storeWritable: Bool = true,\n") == true && view?.contains("        session.storeWritable = storeWritable\n") == true)
+        #expect(app?.contains("            storeWritable: launch.file != nil,\n") == true)
+    }
+
     @Test("A forum's sign-out question says whether a saved password goes with it")
     func aForumsSignOutNamesThePassword() async throws {
         let none = ShellSession(http: FixtureHTTP(), store: ItemStore(), forums: ForumSessions(credentials: MemoryCredentials()))

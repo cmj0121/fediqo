@@ -1,3 +1,4 @@
+import FediqoCore
 import Foundation
 import WebKit
 
@@ -122,7 +123,7 @@ enum PageRules {
     private static func store() async -> WKContentRuleListStore? {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("FediqoPageRules", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? Guarded.makeFolder(folder)
         guard let store = WKContentRuleListStore(url: folder) else { return nil }
         let sweeping = sweep ?? Task { @MainActor in
             for name in await store.availableIdentifiers() ?? [] {

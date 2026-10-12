@@ -64,6 +64,11 @@ scripts/env.sh --check          # 只說名字 —— 它從不印出值
 沒有要填的就讓它註解著。一個名字後面空著，跟這個名字不存在，是兩件事：fastlane 自己也會讀 `.env`，而
 在 Ruby 裡空字串為真 —— 所以空的 `MATCH_PASSWORD=` 會被當成通關密語，keychain 從頭到尾沒被問過。
 
+**手機 app 的 provisioning 必須帶著 Data Protection。** iOS app 會請系統在裝置鎖定時，把替它寫下的東西都關
+上；它是用一個 entitlement 來要求的，而只有簽署過的 build 才帶著它。在這個 capability 打開之前為那個 app ID
+做的 profile 簽不了這樣的 build，而不需要憑證就能完成的 build 都看不出這件事。先為那個 app ID 打開 Data
+Protection、選最嚴格的那一級，再讓 match 重新產生 iOS 的 profile。Mac app 沒有這樣的要求，不需要更動。
+
 ## 兩條進去的路
 
 哪一條完整就走哪一條，兩條都完整時優先用 key。
@@ -147,7 +152,8 @@ scripts/metadata.py --resolve           # ⋯⋯以及那些連結會不會回�
 理由只有這一個：每一個演算法都是公開的標準演算法、由作業系統而非這個 app 實作，而且用途是保護使用者自己的
 資料 —— 這正是那個問題豁免於合規文件的類別。`false` 沒有決定的，是對美國 BIS 的年度自我分類報告：一個
 使用標準加密的上架 app 可能仍然適用；由發佈的人決定一次、記在這裡，而不是由一個 build 設定替他決定。哪一個
-build 若加入了自己的加密演算法、或帶著一個的函式庫，上傳前得先回頭重看這兩件事。
+build 若加入了自己的加密演算法、或帶著一個的函式庫，上傳前得先回頭重看這兩件事。裝置鎖定時把 app 寫下的東
+西關上，並不改變上面任何一點：那是 app 向系統提出的要求，做的是系統。
 
 截圖就在隔壁，這條 lane 不必被告知就會從 `fastlane/screenshots/<platform>/` 把它們在同一趟裡一起上傳。
 

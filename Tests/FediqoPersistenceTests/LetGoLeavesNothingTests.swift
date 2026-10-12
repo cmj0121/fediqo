@@ -483,8 +483,11 @@ struct LetGoLeavesNothingTests {
         #expect(try names(in: device.directory).contains(left.replaced))
     }
 
-    /// The one exception that remains, pinned so that it is a decision and not an accident.
-    @Test("A store set aside because it could not be opened is kept byte for byte, through every save: nothing let go afterwards reaches it")
+    /// The one exception that remains, pinned so that it is a decision and not an accident —
+    /// **and still true of every save** (#344): what ends it is the person being told, or
+    /// thirty days, and the thirty days are a launch's to count (`AsideExpiryTests`), never a
+    /// save's.
+    @Test("A store set aside because it could not be opened is kept byte for byte through every save, until the person is told of it or thirty days have gone: nothing let go afterwards reaches it")
     func anUnopenableStoreIsKept() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }

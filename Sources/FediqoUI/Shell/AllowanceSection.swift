@@ -27,6 +27,7 @@ struct AllowanceSection: View {
 
     private var list: some View {
         Section {
+            if let line = Self.standing(book) { ShellReadingLine(line) }
             ForEach(Allowance.standing) { entry in
                 ShellListRow(
                     id: entry.id, title: entry.title(), brief: entry.whenText(),
@@ -39,6 +40,18 @@ struct AllowanceSection: View {
             .onAppear { if case .entry(let id) = returning { lit = id } }
         } header: {
             ShellSectionHead(title: "allow.builtIn", line: "allow.builtIn.brief", help: "allow.builtIn.footer")
+        }
+    }
+
+    /// What the list says of itself before its rows, where it is not simply what is kept
+    /// (#344): that it could not be read and nothing beyond a source is reached meanwhile,
+    /// that the device will not keep one at all right now, or that the last change was not
+    /// written down. Nothing where it was read and written.
+    static func standing(_ book: AllowanceBook, language: DummyLanguage? = nil) -> String? {
+        switch book.unknown {
+        case .notRead?: L10n.t("allow.unknown.notRead", language: language)
+        case .cannotKeep?: L10n.t("allow.unknown.cannotKeep", language: language)
+        case nil: book.unwritten ? L10n.t("said.unkept.allowances", language: language) : nil
         }
     }
 

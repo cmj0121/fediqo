@@ -164,12 +164,21 @@ extension ShellSession {
     /// run: a line recorded before this ran is kept ahead of what was read.
     func loadLimitAccount() async {
         guard !limitAccountLoaded else { return }
+        guard let limitStore else {
+            limitAccountLoaded = true
+            return
+        }
+        // There and not to be read — a device that locked — is not "no lines" (#344): the
+        // account stays unread, nothing is written over it (`writeLimitAccount`), and it is
+        // asked again the next time a line is recorded.
+        guard let read = await Task.detached(operation: { try? limitStore.read() }).value else { return }
         limitAccountLoaded = true
-        guard let limitStore else { return }
-        let read = await Task.detached { limitStore.read() }.value
         let recorded = limitAccount
-        limitAccount = Array((recorded + read).prefix(LimitAccount.capacity))
-        if !recorded.isEmpty { await writeLimitAccount() }
+        // Cleared while it could not be read: what was on disk then is what was cleared.
+        let cleared = limitAccountClearOwed
+        limitAccountClearOwed = false
+        limitAccount = Array((recorded + (cleared ? [] : read)).prefix(LimitAccount.capacity))
+        if !recorded.isEmpty || cleared { await writeLimitAccount() }
     }
 
     /// The account as it now is on disk, in place of what this run held (#251): after a read
@@ -183,10 +192,18 @@ extension ShellSession {
 
     /// Clears the account (#251). Only the lines go: nothing held, and nothing on disk but the
     /// file they were in, is touched.
+    ///
+    /// **Where the file would not take the clear, the person is told** (#344): the lines are
+    /// gone from the page and still on the device — they name sources — and a quit before
+    /// the clear lands brings them back. One line on the strip, as for a list that would not
+    /// be kept (`kept`), standing until the account is next written.
     func clearLimitAccount() async {
         await loadLimitAccount()
         limitAccount = []
-        await writeLimitAccount()
+        // Not read, so not written over — and the clear is owed until it can be.
+        if !limitAccountLoaded { limitAccountClearOwed = true }
+        let written = await writeLimitAccount()
+        if !written { kept(.limits, written: false) }
     }
 
     /// One act, at the head of the account and written down — after the account has been read,
@@ -197,10 +214,18 @@ extension ShellSession {
         await writeLimitAccount()
     }
 
-    private func writeLimitAccount() async {
-        guard let limitStore else { return }
+    /// Writes the account down, and says whether what is on disk is now what this session
+    /// holds — yes, too, where there is nowhere to keep it. A write that lands takes down
+    /// what was said of a clear that had not (`clearLimitAccount`).
+    @discardableResult
+    private func writeLimitAccount() async -> Bool {
+        guard let limitStore else { return true }
+        // Not read, and so not written: kept only where no clear waits for the read.
+        guard limitAccountLoaded else { return !limitAccountClearOwed }
         let lines = limitAccount
-        await Task.detached { try? limitStore.write(lines) }.value
+        let written = await Task.detached { (try? limitStore.write(lines)) != nil }.value
+        if written { kept(.limits, written: true) }
+        return written
     }
 }
 

@@ -9,12 +9,9 @@ extension StoreGlance {
     /// Asked of the file's own date and of a read-only connection, so asking changes nothing.
     static func of(indexAt url: URL, wait: TimeInterval = StoreGlance.wait) -> StoreGlance {
         let written = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        var readOnly = Configuration()
-        readOnly.readonly = true
         // A store another connection is just then writing is not one that cannot be read: it is
         // waited on for a moment before that is concluded.
-        readOnly.busyMode = .timeout(wait)
-        let posts = (try? DatabaseQueue(path: url.path, configuration: readOnly))
+        let posts = (try? DatabaseQueue(path: url.path, configuration: StoreFile.configuration(readOnly: true, busyWait: wait)))
             .flatMap { try? $0.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM note") } }
         return StoreGlance(written: written, posts: posts)
     }
@@ -97,8 +94,222 @@ extension StoreFile {
     /// were told would go.
     public static func told(in directory: URL) {
         for aside in putAside(in: directory) where !aside.told {
-            try? Data().write(to: directory.appendingPathComponent(aside.base + toldSuffix))
+            try? Guarded.write(Data(), to: directory.appendingPathComponent(aside.base + toldSuffix), atomic: false)
         }
+    }
+}
+
+// MARK: - A store put aside is not kept for ever
+
+extension StoreFile {
+    /// How long a store put aside is kept where nobody answers the notice of it (#344): thirty
+    /// days from when it was put aside.
+    public static let asideKept: TimeInterval = 30 * 24 * 60 * 60
+
+    /// What comes between an aside's name and the time in the mark that says since when its
+    /// thirty days are counted, where that is not the time in its name (`dropExpired`).
+    static let sinceInfix = ".since-"
+
+    /// One store put aside and everything that goes under its name.
+    struct Aside {
+        /// `index-unreadable-<time>…`, without any ending.
+        let base: String
+        /// Every file of it in the folder: the index, what SQLite kept beside it, the limits'
+        /// account, the marks.
+        let names: [String]
+        /// The time in its name, where its name is one a build wrote.
+        let named: Date?
+
+        var index: String? { names.first { $0 == base + ".sqlite" } }
+
+        /// Its files in the order they are removed in (`remove`): the index last, and just
+        /// before it the marks the notice of it is read from — that the other store took its
+        /// place, then that the person was told.
+        var removal: [String] {
+            let last = [base + StoreFile.restoredSuffix, base + StoreFile.toldSuffix, base + ".sqlite"]
+            return names.filter { !last.contains($0) } + last.filter(names.contains)
+        }
+
+        /// The times its `.since` marks carry, where it has any.
+        var since: [Date] {
+            names.compactMap { name in
+                guard name.hasPrefix(base + StoreFile.sinceInfix) else { return nil }
+                return StoreFile.stamp.date(from: String(name.dropFirst(base.count + StoreFile.sinceInfix.count)))
+            }
+        }
+    }
+
+    /// The time as the first builds wrote it in a name, and as a mark carries it: to the second.
+    static var stamp: ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime, .withTimeZone]
+        return formatter
+    }
+
+    /// The time as a name carries it today: to the millisecond.
+    static var fineStamp: ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withYear, .withMonth, .withDay, .withTime, .withFractionalSeconds, .withTimeZone]
+        return formatter
+    }
+
+    /// The base a file's name begins with, and the time in it — by **the three shapes a build
+    /// has ever written**, and never by where the first dot falls (today's has one in its time):
+    ///
+    /// - `index-unreadable-<time>` — the first, to the second;
+    /// - `index-unreadable-<time>-<attempt>` — the same build, a second failure in one second;
+    /// - `index-unreadable-<time to the millisecond>-<eight of 0-9a-f>` — every build since.
+    ///
+    /// A base is taken only where what follows it is what follows a base: a dot and an ending,
+    /// or the limits' account's own ending. So the first shape is never read out of the second —
+    /// `…<time>` is the beginning of `…<time>-2` — and one aside's files are never another's.
+    static func named(_ name: String) -> (base: String, at: Date)? {
+        let time = #"\d{8}T\d{6}"#
+        let shapes: [(String, ISO8601DateFormatter)] = [
+            (#"^index-unreadable-(\#(time)\.\d{3}Z)-[0-9a-f]{8}"#, fineStamp),
+            (#"^index-unreadable-(\#(time)Z)-\d+"#, stamp),
+            (#"^index-unreadable-(\#(time)Z)"#, stamp),
+        ]
+        for (pattern, formatter) in shapes {
+            guard let expression = try? NSRegularExpression(pattern: pattern),
+                  let match = expression.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)),
+                  let whole = Range(match.range, in: name), let timed = Range(match.range(at: 1), in: name)
+            else { continue }
+            let rest = name[whole.upperBound...]
+            guard rest.hasPrefix(".") || rest == "-" + LimitAccountFile.name else { continue }
+            guard let at = formatter.date(from: String(name[timed])) else { continue }
+            return (String(name[whole]), at)
+        }
+        return nil
+    }
+
+    /// Every store put aside in `directory`, each with all that goes under its name — one whose
+    /// index is already gone among them, where a removal was cut short. A name no build wrote
+    /// is an aside only by an index of that name (`….sqlite`), and has no time in it.
+    ///
+    /// **A file is one aside's and no other's.** By the shapes where its name has one — so
+    /// `…<time>` is not `…<time>-2`'s; else the longest name it goes under, so that of two
+    /// names no build wrote, one beginning the other, neither takes the other's.
+    static func asides(in directory: URL) -> [Aside] {
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [])
+            .filter { $0.hasPrefix(unreadablePrefix) }.sorted()
+        var bases: Set<String> = []
+        var times: [String: Date] = [:]
+        for name in names {
+            if let known = named(name) {
+                bases.insert(known.base)
+                times[known.base] = known.at
+            } else if name.hasSuffix(".sqlite") {
+                bases.insert(String(name.dropLast(".sqlite".count)))
+            }
+        }
+        var own: [String: [String]] = [:]
+        for name in names {
+            let base = named(name)?.base ?? bases
+                .filter { name.hasPrefix($0 + ".") || name == $0 + "-" + LimitAccountFile.name }
+                .max { $0.count < $1.count }
+            if let base { own[base, default: []].append(name) }
+        }
+        return bases.sorted().map { Aside(base: $0, names: own[$0] ?? [], named: times[$0]) }
+    }
+
+    /// Removes everything under `aside`'s name: **what lies beside the index first, the index
+    /// last**. An aside is found by its index, so one whose removal is cut short is found
+    /// again and finished; taken first, the index would leave the rest with nothing to find
+    /// them by, for ever. **The mark that the person was told goes just before the index**:
+    /// cut short anywhere ahead of it, the next save still knows they were, and finishes
+    /// (`dropWhatWasReplaced`). **And the mark of what took its place just before that**: cut
+    /// short between the last two, it is said once more, and in the sentence that is true.
+    static func remove(_ aside: Aside, in directory: URL) {
+        for name in aside.removal {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+        }
+    }
+
+    /// **A store put aside is gone thirty days after it was** (#344), whether or not the person
+    /// ever answered the notice of it: what could not be read is every post that store held,
+    /// and nothing let go since reaches it. Asked as a launch begins, before any index is
+    /// opened and in a run with or without one — **and only where the canary reads**
+    /// (`open`): this deletes, and nothing is deleted on a device that may be locked.
+    ///
+    /// It is the person's only copy of that store, and it must not go early:
+    ///
+    /// - **Each has one time its days are counted from**: the mark beside it where there is
+    ///   one (`<base>.since-<time>`), else the time in its name, in any shape a build has
+    ///   written. A name no build wrote, with no mark, has neither, and then it is when
+    ///   its index was last written — its modification date. **A mark never counts for less than the name
+    ///   once the clock has reached the name's time**: such a mark was made by a launch whose
+    ///   clock was behind, and the later of the two is taken.
+    /// - **And never, whichever of those it is, from before its index was last written**, where that is not ahead of the
+    ///   clock: a store written then was not put aside before then, whatever a name or a mark
+    ///   made under a clock that was behind says — a device come back from a dead battery,
+    ///   whose launch put the store aside under a name a quarter of a century old.
+    /// - **A time ahead of the clock counts as now, and is written down as now**: a mark is
+    ///   made — in place of one that lay ahead — and the thirty days run from this launch. A
+    ///   clock that was wrong when the store was put aside does not keep it for ever.
+    /// - **Nothing goes in a launch that made such a mark.** The clock was behind one of
+    ///   them, and is not one to delete by; the marks being made first, a name years ahead
+    ///   holds everything back for this one launch and no longer. **One whose mark could not
+    ///   be written is itself kept, and holds nothing else back**: a folder that refuses the
+    ///   mark at every launch would otherwise keep every other for ever.
+    ///
+    /// A save never does this: what a save lets go is what the person was told of
+    /// (`dropWhatWasReplaced`). Answers how many went, which is also said in the log.
+    @discardableResult
+    static func dropExpired(
+        in directory: URL, now: Date, kept: TimeInterval = StoreFile.asideKept, on device: Guarded.Device = .this
+    ) -> Int {
+        var times: [(aside: Aside, since: Date)] = []
+        var ahead = false
+        for aside in asides(in: directory) {
+            // Of several marks — a replacing cut short — the latest that is not ahead of the
+            // clock: the later, the longer kept.
+            let marks = aside.since
+            let mark = marks.filter { $0 <= now }.max() ?? marks.min()
+            let written = aside.index.flatMap {
+                try? directory.appendingPathComponent($0)
+                    .resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            }
+            var since: Date
+            if let mark, let inName = aside.named, inName <= now {
+                // The clock has reached the time in the name, so that time was never ahead of
+                // a true clock: the mark was made by a launch whose own clock was behind, and
+                // counting from it would take the store years early. The later of the two.
+                since = max(mark, inName)
+            } else if let mark {
+                since = mark
+            } else if let inName = aside.named {
+                since = inName
+            } else if let written {
+                since = written
+            } else {
+                // Nothing says when: counted from now, this launch and every one, and so kept.
+                since = now
+            }
+            // Not from before its index was last written: only ever the longer kept.
+            if let written, written <= now { since = max(since, written) }
+            if since > now {
+                // Counted from now — and said so beside it, or the next launch counts from
+                // the same wrong time again. Not said, it is not counted at all this launch.
+                let stamped = aside.base + sinceInfix + stamp.string(from: now)
+                guard (try? Guarded.write(Data(), to: directory.appendingPathComponent(stamped), atomic: false, on: device)) != nil
+                else { continue }
+                ahead = true
+                for name in aside.names where name.hasPrefix(aside.base + sinceInfix) && name != stamped {
+                    try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+                }
+                continue
+            }
+            times.append((aside, since))
+        }
+        // A clock that was behind any of them as this launch began is a clock not to delete
+        // by: the marks are made, and it is the next launch — which finds nothing ahead of it,
+        // where the clock is right — that lets anything go.
+        guard !ahead else { return 0 }
+        let gone = times.filter { now.timeIntervalSince($0.since) >= kept }
+        for (aside, _) in gone { remove(aside, in: directory) }
+        StoreSaver.reportExpired(gone.count)
+        return gone.count
     }
 }
 

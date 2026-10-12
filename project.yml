@@ -201,11 +201,26 @@ targets:
         # Both stores refuse a submission that does not say which shelf it belongs on, and
         # macOS wants the answer in the bundle rather than only in App Store Connect.
         LSApplicationCategoryType: public.app-category.social-networking
+    # What this device holds cannot be read while the device is locked (#344). Every folder
+    # and file the app makes asks for that itself (`Guarded`); this asks it of what the system
+    # writes for the app -- its preferences, its web store, its caches -- which the app never
+    # gets to make. **Written here and not into the file**: XcodeGen rewrites the file from
+    # this block on every build, as it does the plists, so the key lives here.
+    #
+    # iOS only. A Mac behind a locked screen is not suspended and must go on writing through
+    # what it holds open, so the Mac is held at its own class by `Guarded` and asks nothing
+    # here. **The provisioning profile must carry the Data Protection capability**: a signed
+    # build whose profile lacks it does not sign, which no build without a certificate shows.
+    entitlements:
+      path: Apps/iOS/Fediqo.entitlements
+      properties:
+        com.apple.developer.default-data-protection: NSFileProtectionComplete
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.mini-poc.fediqo
         PRODUCT_NAME: Fediqo
         INFOPLIST_FILE: Apps/iOS/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Apps/iOS/Fediqo.entitlements
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
