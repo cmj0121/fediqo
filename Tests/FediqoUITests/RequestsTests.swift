@@ -356,7 +356,6 @@ struct RequestsTests {
         #expect(entry.words(language: .taiwanese) == "1,204 人請求跟隨你")
         func words(_ counted: Int?, _ language: DummyLanguage) -> String { RequestsEntry(list: Self.requests, counted: counted).words(language: language) }
         #expect(words(1, .english) == "1 person asks to follow you" && words(1, .taiwanese) == "1 人請求跟隨你")
-        #expect(words(0, .english) == "Nobody asks to follow you" && words(0, .taiwanese) == "沒有人請求跟隨你")
         #expect(words(nil, .english) == "People who ask to follow you")
 
         // A request accepted here: the figure is the source's, and stays as its check said it.
@@ -367,12 +366,17 @@ struct RequestsTests {
         // The check runs again, and its word replaces the last.
         await server.answer(Self.who, check(#","follow_requests_count":0"#))
         await session.mastodon.learnWho(host: Self.host)
-        #expect(pages.requestsEntry(of: me, in: session)?.counted == 0)
+        // Nought, as the check said it: no line at all, no block of About, and nothing for the lamp to stop on.
+        #expect(session.mastodon.asking(host: Self.host) == 0 && pages.requestsEntry(of: me, in: session) == nil)
+        #expect(pages.about(of: me, in: session)?.blocks.contains(.requests) == false)
+        #expect(!pages.walkedIDs(of: me, in: session).contains(RequestsEntry.id))
+        #expect(L10n.t("people.requests.entry.none", language: .english) == "people.requests.entry.none", "the sentence for nobody is gone")
         // A check that says no figure: words alone.
         await server.answer(Self.who, check(""))
         await session.mastodon.learnWho(host: Self.host)
         let silent = try #require(pages.requestsEntry(of: me, in: session))
         #expect(silent.counted == nil && silent.words(language: .english) == "People who ask to follow you")
+        #expect(pages.walkedIDs(of: me, in: session).contains(RequestsEntry.id), "no figure said is not nobody: the line stands")
 
         // Another sign-in takes the source and has not been checked: nothing of the first's is said of it.
         await server.answer(Self.who, check(#","follow_requests_count":9"#))
@@ -462,7 +466,6 @@ struct RequestsTests {
             "person.act.refuse.failed", "person.act.removeFollower.failed", "person.refuse.ask.title", "person.refuse.ask.line",
             "person.removeFollower.ask.title", "person.removeFollower.ask.line", "people.requests.entry", "people.title.requests",
             "people.requests.asking", "people.requests.failed", "people.requests.none", "people.requests.entry.count",
-            "people.requests.entry.none",
         ]
         func places(_ text: String) -> [String] { text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted() }
         let tables = try ["en", "zh-TW", "zh-Hant"].map { name in

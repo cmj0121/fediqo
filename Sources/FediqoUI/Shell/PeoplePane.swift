@@ -460,7 +460,8 @@ struct DirectoryChoiceMenu: View {
 /// **Its figure is the source's, as the sign-in's own account check last said it** — the one
 /// place a source says how many ask — and never arithmetic: it does not count down when a
 /// request is answered here, and changes when that check next runs. Where the check said
-/// none, the line is words alone.
+/// no figure, the line is words alone: the source did not say there are none. **Where it
+/// said nought there is no line at all** (`ShellPersonPages.requestsEntry`).
 struct RequestsEntry: Equatable {
     let list: PeopleList
     /// How many ask, as the account check last said. Nothing where it has not said.
@@ -480,7 +481,6 @@ struct RequestsEntry: Equatable {
     func words(language: DummyLanguage? = nil) -> String {
         if let locked { return String(format: L10n.t(locked.key, language: language), list.host) }
         guard let counted else { return L10n.t("people.requests.entry", language: language) }
-        if counted == 0 { return L10n.t("people.requests.entry.none", language: language) }
         return PersonSaid.figure("people.requests.entry.count", counted, language: language)
     }
 }

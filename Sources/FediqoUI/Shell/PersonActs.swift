@@ -127,18 +127,21 @@ struct PersonActing: Equatable {
     /// What is taken from them, in the order About draws it: their boosts, a notice of each
     /// post. **Only of somebody the reader follows** — not one only asked — **and only what
     /// the source said**: one it left out has no row, and nothing is guessed in its place.
-    /// **And only where the sign-in may change who the reader follows**: one that holds less
-    /// has the lock's own sentence on About, and no row that would take no press.
+    /// **A sign-in that sees and may not change who the reader follows is shown them too, as
+    /// the source said** — plain rows that take no press (`narrowsTakePress`), beside the
+    /// lock's own sentence, which goes on asking for the rest.
     func narrows() -> [Narrow] {
-        guard changes, let standing = shown, standing.following else { return [] }
+        guard let standing = shown, standing.following else { return [] }
         return [
             standing.showsBoosts.map { Narrow(which: .boosts, on: $0) },
             standing.notifies.map { Narrow(which: .notices, on: $0) },
         ].compactMap { $0 }
     }
 
-    /// Whether a press on one of them is taken now: not while another press is on its way.
-    var narrowsTakePress: Bool { doing == nil }
+    /// Whether a press on one of them is taken now: only from a sign-in that may change who
+    /// the reader follows, and not while another press is on its way. **What is sent rests
+    /// on this**: where it is false the rows are words, and nothing leaves for them.
+    var narrowsTakePress: Bool { changes && doing == nil }
 
     /// What a pointer and a listener are told a press on one of them does, and where.
     func narrowHint(language: DummyLanguage? = nil) -> String {

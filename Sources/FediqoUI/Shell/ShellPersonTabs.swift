@@ -122,6 +122,20 @@ final class ShellPersonTabs {
         return true
     }
 
+    /// The walk has left the page `id` names: which tab was in front, and each tab's lamp,
+    /// are forgotten — opened afresh it opens on its first tab, About. What its tabs read
+    /// is kept with the page, as before.
+    func left(_ id: String) {
+        fronts[id] = nil
+        lamps[id] = nil
+    }
+
+    /// The walk has ended in one go: every page's tab in front is forgotten.
+    func leftAll() {
+        fronts = [:]
+        lamps = [:]
+    }
+
     /// Everything kept of the page `id` names let go: it is no longer one of the pages kept.
     func forget(_ id: String) {
         fronts[id] = nil
@@ -351,6 +365,16 @@ extension ShellPersonPages {
         return tabs.turn(who.id, to: to, among: all, lamp: &lamp)
     }
 
+    /// A step of the walk was left. **The tab in front is kept while the page's step is in
+    /// the walk, and forgotten when the walk leaves it** — so stepping from somebody's page
+    /// into somebody else and back keeps the tab, and a page opened afresh opens on About.
+    /// Somebody met twice in one walk is one page: theirs is forgotten when the last of
+    /// their steps goes.
+    func left(_ step: ShellStep, of walk: ShellWalk) {
+        guard case .person(let who) = step, !walk.holdsPerson(who.id) else { return }
+        tabs.left(who.id)
+    }
+
     // MARK: - What each part of the page is handed
 
     /// The head of the page of `who`.
@@ -386,8 +410,11 @@ extension ShellPersonPages {
               Self.own(at: who.host, in: session)?.id == who.id
         else { return nil }
         let place = session.mastodon.place(.follows, host: who.host) ?? PartWords.Place(kind: .none, key: "part.ask.partly")
+        // The source's own check said nobody asks: no line, and nothing for the lamp to stop on.
+        let counted = session.mastodon.asking(host: who.host)
+        if counted == 0 { return nil }
         return RequestsEntry(
-            list: PeopleList(requestsAt: source.host), counted: session.mastodon.asking(host: who.host),
+            list: PeopleList(requestsAt: source.host), counted: counted,
             locked: ShellPersonActs.sees(at: who.host, in: session) ? nil : place
         )
     }

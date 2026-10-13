@@ -330,8 +330,9 @@ Fediqo asked for before it could write at all, so refusing the writing part chan
 about reading. Signing in again is how you change your answer.
 
 If you signed in before Fediqo could write, that sign-in still only reads, and Fediqo writes
-nothing with it. That source's row on Account says so, with a lock and the words Update
-permission before its key: one press asks the same question, without signing you out first.
+nothing with it. That source's row on Account says so, with the mark signing in wears — a
+person and a key — and the words Update permission before its key: one press asks the same
+question, without signing you out first.
 Cancel on the server's page and the sign-in you already had is still the one in use. What you
 already agreed to is never widened behind your back.
 
@@ -343,7 +344,7 @@ grant leaves you signed in to read and write, and the bookmark is drawn grey the
 
 Reading your notices is asked for apart from all of that, and only when you press for it on the
 Notices page — for a sign-in made today and one made long ago alike. No sign-in asks for it
-unasked, and no row on Account gains a lock for it. The press asks first and says everything
+unasked, and no row on Account gains that mark for it. The press asks first and says everything
 the server's page will be asked for: reading notices; dismissing them too where that sign-in
 reads and writes, since dismissing is an act; and bookmarks as well, where a sign-in to read
 and write was made before Fediqo could bookmark. A sign-in made before Fediqo could write is
@@ -369,7 +370,7 @@ stand, follows and unfollows for you, withdraws a request to follow, changes wha
 from somebody you follow, answers a request to follow you, and removes a follower — each only
 at your press; see Reading, below. A sign-in that only
 reads may be asked too: it sees who you follow and how you stand, and changes neither. A
-sign-in that holds less than a page needs is told so on that page, under the same lock, in a
+sign-in that holds less than a page needs is told so on that page, under the same mark, in a
 line that says what it was not asked — how you stand to people, seeing who you follow, or
 following and unfollowing — and a press on it asks for exactly that. Nothing is guessed
 meanwhile: no standing is drawn for a sign-in that cannot see it.
@@ -411,10 +412,12 @@ and Remove. What may be done on that source — read, read and write, or read on
 protocol has no writing in Fediqo at all, which is every forum — is no longer written on the
 row, and VoiceOver still says it. It is the server's own answer: a server that grants less than
 Fediqo asked for is taken at its word, and what is said is what may be done rather than what
-was asked. Where a sign-in has to be asked again before something it could do is offered, a
-lock with the words Update permission stands before the key, on the same line and drawn as the
-key is; on a row too narrow for the words and the whole hostname it is the lock alone. It is
-red on a source that turned a write away, and stays until you sign in to it again.
+was asked. Where a sign-in has to be asked again before something it could do is offered, the
+mark signing in wears stands before the key with the words Update permission, on the same line
+and drawn as the key is; on a row too narrow for the words and the whole hostname it is the
+mark alone. It is one mark wherever a sign-in is asked for more; a plain lock means only what
+is locked — an account that asks before anyone follows, a post for followers only. The
+sign-in's mark is red on a source that turned a write away, and stays until you sign in to it again.
 
 Whatever takes something away, signing out aside, is behind three dots on the row or the
 section it acts on, and asks first: Clear and Remove on a source's row, Clear and Forget
@@ -551,8 +554,9 @@ is not newest first.
 Read through a Mastodon source you are signed in to, the page says how you and they
 stand, once that sign-in may see it — see Signing in to Mastodon, above. It is what the source
 last said: that they follow you, that you follow them, that you have asked to, that you muted
-them and until when, that you blocked them. Each is a mark in the head, with its words for a
-pointer and for VoiceOver, and the words in full are on About; nothing is told by colour
+them and until when, that you blocked them. Each is a mark in the head with a short word
+beside it, read to VoiceOver as one thing, and the words in full are on About; nothing is told
+by colour
 alone. Somebody who has blocked you is said so in a
 sentence that names them and says the source shows you none of their posts. Where a source
 gave no posts of somebody it counts posts for, and it is not known why — the sign-in cannot
@@ -590,7 +594,8 @@ stand is read once more before anything is sent: still followed, it is sent; oth
 nothing is, and the page turns to what the source says.
 
 Requests to follow you are answered on your own page at a source, which Account opens. Its
-About has a line for who asks to follow you, with a figure, and a press on it opens the list.
+About has a line for who asks to follow you, with the figure the source last gave, and a press
+on it opens the list; where the source said nobody asks, there is no line.
 On a row there, accepting is one press; refusing is behind the row's three dots, and asks
 first. Removing a follower is behind the three dots of a row of your own Followers tab, and
 behind the three dots of the page of somebody who follows you, and asks first as well. Each
@@ -695,7 +700,7 @@ Notices is what your signed-in Mastodon sources say happened to you there: someb
 mentioned, boosted, favourited, followed, asked to follow or quoted you; a poll ended; a post
 you boosted was edited; the server itself has a word. The page can always be entered. With
 nobody signed in to a Mastodon it says what would make it fill, and a source signed in to and
-not yet asked for notices is named with one press that asks, under the same lock a source's
+not yet asked for notices is named with one press that asks, under the same mark a source's
 row on Account draws where its sign-in must be asked again — see Signing in to Mastodon,
 above.
 

@@ -2070,6 +2070,8 @@ public struct FediqoRootView: View {
         if case .tag = left.step { session.reload.endTag() }
         // What a list of the hashtags followed was told goes with its step (#318).
         if case .followedTags(let page) = left.step { people.followed.closed(page) }
+        // The tab in front of somebody's page goes with its last step (F9, decided 2026-10-13).
+        people.left(left.step, of: walk)
         selectedItemID = left.lamp
         returnFromErrand()
         return true
@@ -2102,6 +2104,8 @@ public struct FediqoRootView: View {
         ) else { return clearWalk() }
         if hadLink { linkReader.close() }
         for page in lists { people.followed.closed(page) }
+        // Only the tag's page is left of the walk: no person's page is in it any more.
+        people.tabs.leftAll()
         if let lamp = selectedItemID,
            !session.heldPosts(under: tag, latest: prefs.latestDate).contains(where: { $0.id == lamp }) {
             selectedItemID = nil
@@ -2136,6 +2140,7 @@ public struct FediqoRootView: View {
         // What each list of the hashtags followed was told goes with its step (#318).
         for page in walk.followedTags { people.followed.closed(page) }
         walk.clear()
+        people.tabs.leftAll()
         errand = nil
     }
 

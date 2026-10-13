@@ -750,7 +750,7 @@
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
 "account.sources.marks"          = "每一列都帶同樣的標記。鑰匙是登入：登入之後是實心的，那個來源不提供登入的話是灰的。實心的時候按它，會先問過才登出。⋯ 裡面是其他的：這一列要說的話、換版塊或列表、清除它留在這裡的東西、移除它。來源沒有的那一項在裡面也是灰的，並且說為什麼。紅色的 ⋯ 是有話要說。";
 /* #69 — what may be done on a source, said on its row and explained once for the list. */
-"account.sources.writing"        = "鑰匙前面的鎖和「更新權限」，是說那個登入要再問一次，才會提供它還能做的事：有一次寫入被擋了下來，或者它登入的時候 Fediqo 還沒問過寫入或書籤。在你回答之前，那個登入原本做得到的都和原來一樣。按它就會問；不會把誰登出。列太窄、放不下字的時候，只畫那把鎖。";
+"account.sources.writing"        = "鑰匙前面那個登入用的標記（一個人和一把鑰匙）和「更新權限」，是說那個登入要再問一次，才會提供它還能做的事：有一次寫入被擋了下來，或者它登入的時候 Fediqo 還沒問過寫入或書籤。在你回答之前，那個登入原本做得到的都和原來一樣。按它就會問；不會把誰登出。列太窄、放不下字的時候，只畫那把鎖。";
 "account.source.permission"      = "更新 %@ 的權限：要再問一次它的登入，才會提供它還能做的事";
 "account.source.permission.word" = "更新權限";
 "account.source.writing.never"   = "唯讀";
@@ -1884,4 +1884,3 @@
 "people.requests.none" = "%@ 說沒有人請求跟隨你。";
 "people.requests.entry.count" = "%@ 人請求跟隨你";
 "people.requests.entry.count.one" = "%@ 人請求跟隨你";
-"people.requests.entry.none" = "沒有人請求跟隨你";

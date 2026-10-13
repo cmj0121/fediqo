@@ -215,10 +215,17 @@ struct PersonHead: View {
                     acts
                 }
                 if !head.figures.isEmpty || stands != nil {
-                    HStack(alignment: .center, spacing: ShellSpace.step) {
-                        figures
-                        Spacer(minLength: 0)
-                        standsRun
+                    // Beside the figures where both fit whole, and under them where not.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .center, spacing: ShellSpace.step) {
+                            figures
+                            Spacer(minLength: 0)
+                            standsRun
+                        }
+                        VStack(alignment: .leading, spacing: ShellSpace.snug) {
+                            figures
+                            standsRun
+                        }
                     }
                 }
                 words
@@ -411,57 +418,84 @@ struct PersonHead: View {
         return acting
     }
 
-    /// The glyphs of how the reader stands to them, in full ink and one element to a
+    /// How the reader stands to them: each way a mark and a short word beside it, in full
+    /// ink — the words a row of a list says it in — and all of them one element to a
     /// listener; where the source could not be asked, the press that asks again; and where
-    /// the sign-in holds less than following needs, the lock and a word — the whole sentence
-    /// to a pointer and a listener, and the press that asks where it may be asked.
+    /// the sign-in holds less than following needs, the mark of a sign-in asked for more and
+    /// a word — the whole sentence to a pointer and a listener, and the press that asks
+    /// where it may be asked.
+    ///
+    /// **Each stands whole, on one line where they all fit and one under another where they
+    /// do not**: a narrow page, the largest text. None is cut, and none loses its word —
+    /// where one alone is wider than the page, its word goes on to a second line.
     @ViewBuilder
     private var standsRun: some View {
-        if let acting = stands {
-            let marks = acting.marks()
-            HStack(alignment: .center, spacing: ShellSpace.snug) {
-                if !marks.isEmpty {
-                    HStack(spacing: ShellSpace.snug) {
-                        ForEach(marks) { mark in
-                            Image(systemName: mark.symbol)
-                                .shellFont(.mark)
-                                .foregroundStyle(ShellChrome.ink(colorScheme))
-                                .help(mark.words)
-                        }
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(PersonActing.spoken(marks))
-                }
-                if let failed = acting.failedWords() {
-                    ShellLinkButton(L10n.t("person.retry"), symbol: Self.failedSymbol, action: onStandingAgain)
-                        .help(failed)
-                        .accessibilityLabel(ShellMark.said(L10n.t("person.retry"), failed))
-                        .fixedSize()
-                }
-                if let words = acting.lockWords() { lock(words, asks: acting.lock?.asks == true) }
+        if let stood = stands {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: ShellSpace.step) { standsParts(stood, whole: true) }
+                VStack(alignment: .leading, spacing: ShellSpace.tight) { standsParts(stood, whole: true) }
+                VStack(alignment: .leading, spacing: ShellSpace.tight) { standsParts(stood, whole: false) }
             }
             .modifier(HeadProbed(.stands, probe: probe))
         }
     }
 
+    /// One way the reader stands: its glyph, and its word beside it.
+    private func stance(_ mark: PersonActing.Mark, whole: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+            Image(systemName: mark.symbol).accessibilityHidden(true)
+            Text(mark.words)
+        }
+        .shellFont(.mark)
+        .foregroundStyle(ShellChrome.ink(colorScheme))
+        .fixedSize(horizontal: whole, vertical: true)
+    }
+
+    /// The marks and the presses that stand with them. `whole` is whether each is laid out
+    /// on one line of its own length; where it is not, each has the page's width and wraps.
     @ViewBuilder
-    private func lock(_ words: String, asks: Bool) -> some View {
+    private func standsParts(_ stood: PersonActing, whole: Bool) -> some View {
+        let marks = stood.marks()
+        if !marks.isEmpty {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: ShellSpace.step) { ForEach(marks) { stance($0, whole: true) } }
+                VStack(alignment: .leading, spacing: ShellSpace.tight) { ForEach(marks) { stance($0, whole: whole) } }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(PersonActing.spoken(marks))
+        }
+        standsPresses(stood, whole: whole)
+    }
+
+    /// What stands with the marks and is a press: asking again, and the sign-in asked for more.
+    @ViewBuilder
+    private func standsPresses(_ stood: PersonActing, whole: Bool) -> some View {
+        if let failed = stood.failedWords() {
+            ShellLinkButton(L10n.t("person.retry"), symbol: Self.failedSymbol, action: onStandingAgain)
+                .help(failed)
+                .accessibilityLabel(ShellMark.said(L10n.t("person.retry"), failed))
+                .fixedSize()
+        }
+        if let words = stood.lockWords() { lock(words, asks: stood.lock?.asks == true, whole: whole) }
+    }
+
+    @ViewBuilder
+    private func lock(_ words: String, asks: Bool, whole: Bool) -> some View {
         let label = Label(L10n.t("account.source.permission.word"), systemImage: SourceRow.permissionSymbol)
             .shellFont(.mark)
             .foregroundStyle(ShellChrome.markDim(colorScheme))
-            .lineLimit(1)
         if asks {
             Button(action: onAskFollows) { label.contentShape(Rectangle()) }
                 .buttonStyle(.plain)
                 .help(ShellMark.said(words, L10n.t("mark.dim.askAgain")))
                 .accessibilityLabel(words)
-                .fixedSize()
+                .fixedSize(horizontal: whole, vertical: true)
         } else {
             label
                 .help(words)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(words)
-                .fixedSize()
+                .fixedSize(horizontal: whole, vertical: true)
         }
     }
 

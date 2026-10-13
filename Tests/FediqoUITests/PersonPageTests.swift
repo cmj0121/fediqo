@@ -734,6 +734,120 @@ struct PersonPageTests {
         #expect(out?.lamp == "a row of the stream" && walk.isEmpty)
     }
 
+    @Test("The tab in front is the walk's while the page's step is in it: stepping from this page into somebody and back keeps it, with its lamp; once the walk has left the page it is forgotten, so the same person opened afresh opens on About, the lamp on nothing of the old tab, and nothing is asked but who they are and how the reader stands — and somebody met twice in one walk keeps theirs until the last of their steps goes")
+    func theTabInFrontIsTheWalks() async throws {
+        let (session, server) = await session()
+        try await signIn(session)
+        let pages = ShellPersonPages()
+        var walk = ShellWalk()
+        func leave() { if let left = walk.back() { pages.left(left.step, of: walk) } }
+        _ = walk.walk(to: .person(Self.ada), from: "a row of the stream")
+        await pages.opened(Self.ada, in: session)
+        await pages.standsOpened(to: Self.ada, in: session)
+        await bring(.followers, in: pages, session)
+        let list = try #require(pages.list(.followers, of: Self.ada, in: session))
+        let row = try #require(pages.lists.said(of: list, in: session)?.people.first)
+
+        // Into somebody from a row, and back: the tab stands.
+        _ = walk.walk(to: .person(DummyPerson(row)), from: row.id)
+        leave()
+        #expect(walk.openedPerson == Self.ada && pages.front(of: Self.ada, in: session) == .followers)
+        // The same person met again deeper in the walk is one page, and leaving the deeper step keeps it.
+        _ = walk.walk(to: .thread("a post"), from: nil)
+        _ = walk.walk(to: .person(Self.ada), from: nil)
+        #expect(walk.holdsPerson(Self.ada.id) && walk.depth == 3)
+        leave()
+        #expect(pages.front(of: Self.ada, in: session) == .followers, "their first step is still in the walk")
+        leave()
+
+        // The walk leaves the page: opened afresh it is About again, and its old lamp is not handed back.
+        let before = await asked(server)
+        leave()
+        #expect(walk.isEmpty && pages.front(of: Self.ada, in: session) == .about)
+        _ = walk.walk(to: .person(Self.ada), from: "another row")
+        await pages.opened(Self.ada, in: session)
+        await pages.standsOpened(to: Self.ada, in: session)
+        await pages.fronted(Self.ada, in: session)
+        let since = await asked(server).dropFirst(before.count)
+        #expect(since.allSatisfy { $0 == Self.lookup || $0 == Self.stands(42) }, "nothing but who they are and how the reader stands: \(since)")
+        var lamp: String? = nil
+        _ = pages.turn(Self.ada, to: .followers, lamp: &lamp, in: session)
+        #expect(lamp == nil, "each tab's lamp went with the tab in front")
+        // A walk ended in one go forgets every page's.
+        pages.tabs.leftAll()
+        #expect(pages.front(of: Self.ada, in: session) == .about)
+        // The root tells the pages of every way a step is left.
+        var url = URL(fileURLWithPath: #filePath)
+        while url.pathComponents.count > 1, !FileManager.default.fileExists(atPath: url.appending(path: "Package.swift").path) {
+            url.deleteLastPathComponent()
+        }
+        let root = try String(contentsOf: url.appending(path: "Sources/FediqoUI/FediqoRootView.swift"), encoding: .utf8)
+        #expect(root.components(separatedBy: "people.left(left.step, of: walk)").count == 2)
+        #expect(root.components(separatedBy: "people.tabs.leftAll()").count == 3)
+    }
+
+    @Test("Somebody met twice through two rows that carried them differently — another name, another picture — is one page: leaving the second step keeps the first's tab and its lamps, and leaving the last forgets them")
+    func metTwiceByTwoRows() async throws {
+        let (session, _) = await session()
+        let pages = ShellPersonPages()
+        let again = DummyPerson(Person(source: Self.source, accountID: "42", handle: "@ada@m.example", name: "Ada, as a list names her"))
+        #expect(again.id == Self.ada.id && again != Self.ada, "one person, two values")
+        var walk = ShellWalk()
+        func leave() { if let left = walk.back() { pages.left(left.step, of: walk) } }
+        _ = walk.walk(to: .person(Self.ada), from: "a row of the stream")
+        await pages.opened(Self.ada, in: session)
+        var lamp: String? = "about.words"
+        _ = pages.turn(Self.ada, to: .followers, lamp: &lamp, in: session)
+        lamp = "somebody"
+        let stepped = walk.walk(to: .person(again), from: lamp)
+        #expect(stepped && walk.depth == 2 && walk.holdsPerson(Self.ada.id), "another step, since the values differ")
+
+        leave()
+        #expect(walk.openedPerson == Self.ada && pages.front(of: Self.ada, in: session) == .followers, "the first page's tab stands")
+        var kept: String? = "somebody"
+        _ = pages.turn(Self.ada, to: .about, lamp: &kept, in: session)
+        #expect(kept == "about.words", "and so do its lamps")
+        _ = pages.turn(Self.ada, to: .followers, lamp: &kept, in: session)
+        #expect(kept == "somebody")
+
+        leave()
+        #expect(walk.isEmpty && !walk.holdsPerson(Self.ada.id) && pages.front(of: Self.ada, in: session) == .about)
+        var none: String?
+        _ = pages.turn(Self.ada, to: .followers, lamp: &none, in: session)
+        #expect(none == nil, "forgotten with the last of their steps")
+    }
+
+    @Test("Wherever a sign-in is asked for more it wears one mark, the one signing in wears, read from one place; a plain lock is left to mean what is locked, and the two stand side by side in a head as two marks; and the head says how the reader stands as a mark and a word each, the words a row says them in")
+    func oneMarkForASignInAskedForMore() throws {
+        #expect(SourceRow.permissionSymbol == "person.badge.key" && NoticeAskSlot.symbol == SourceRow.permissionSymbol)
+        var url = URL(fileURLWithPath: #filePath)
+        while url.pathComponents.count > 1, !FileManager.default.fileExists(atPath: url.appending(path: "Package.swift").path) {
+            url.deleteLastPathComponent()
+        }
+        let shell = url.appending(path: "Sources/FediqoUI/Shell")
+        for file in try FileManager.default.contentsOfDirectory(atPath: shell.path) {
+            let text = try String(contentsOf: shell.appending(path: file), encoding: .utf8)
+            #expect(!text.contains("\"exclamationmark.lock\""), "\(file) draws the old mark")
+            #expect(file == "SourceRow.swift" || !text.contains("\"person.badge.key\""), "\(file) spells the mark and does not read it")
+        }
+        for file in ["PersonHead.swift", "PersonAbout.swift", "PeopleRows.swift", "PersonActs.swift", "TagPane.swift", "ShellPartAsk.swift", "SourceLine.swift"] {
+            let text = try String(contentsOf: shell.appending(path: file), encoding: .utf8)
+            #expect(text.contains("SourceRow.permissionSymbol"), "\(file) reads the one mark")
+        }
+        // An account that asks before anyone follows, and a sign-in asked for more: two marks.
+        let locked = Person(source: Self.source, accountID: "1", handle: "@a@m.example", name: "a", locked: true)
+        #expect(PersonSaid.marks(of: locked, source: Self.host).map(\.symbol) == ["lock"])
+        let standing = PersonStanding(accountID: "42", following: true, followedBy: true, requested: true, muting: true, blocking: true)
+        let symbols = PersonActing.marks(of: standing).map(\.symbol)
+        #expect(!symbols.contains(SourceRow.permissionSymbol) && !symbols.contains("lock") && Set(symbols).count == 5)
+        // A mark and a word each: the head draws the word beside its glyph, and says them as one.
+        let head = try String(contentsOf: shell.appending(path: "PersonHead.swift"), encoding: .utf8)
+        #expect(head.contains("Image(systemName: mark.symbol).accessibilityHidden(true)\n            Text(mark.words)"))
+        #expect(head.contains(".accessibilityLabel(PersonActing.spoken(marks))"))
+        #expect(PersonActing.marks(of: standing, language: .english).map(\.words) == ["You follow them", "Follows you", "Asked", "Muted", "Blocked"])
+        #expect(PersonActing.marks(of: standing, language: .taiwanese).map(\.words) == PersonActing.marks(of: standing, language: .taiwanese).map(\.words).filter { !$0.isEmpty })
+    }
+
     @Test("The page takes the whole place: the timelines' head is not drawn over it and is over every other step; its sideways is its own — the tab beside, and on the first tab the swipe back leaves the page, as it leaves a page with one tab; a page that is a place is left by no swipe")
     func thePageAndItsSwipe() {
         #expect(!TimelinePane.headDrawn(over: .person(Self.ada)))
@@ -845,8 +959,29 @@ struct PersonPageTests {
         return (view.fittingSize.height, probe)
     }
 
-    @Test("The page lays out in every state it has — opening, said with every tab in front, hidden lists, not heard of, failed, suspended, moved, a forum's author — at 720, 390 and 320, in light and in dark, and at the largest text: the head's parts stand inside the page, no part over another, and at the largest text the head scrolls with the tab in front")
-    func laidOut() throws {
+    /// The states hosted in dark as well as in light.
+    private static let hostedInDark: Set<String> = [
+        "opening", "every standing, and a sign-in asked for more", "a forum's author", "said, about in front", "said, followers in front",
+    ]
+
+    /// The arrangements a page is hosted in: each width with its layout, in light and in dark,
+    /// and the narrowest at the largest text.
+    private static let arrangements: [(scheme: ColorScheme, layout: ShellLayout, width: CGFloat, size: DynamicTypeSize)] = {
+        var all: [(scheme: ColorScheme, layout: ShellLayout, width: CGFloat, size: DynamicTypeSize)] = []
+        for scheme in [ColorScheme.light, .dark] {
+            for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 390), (.narrow, 320)] {
+                for size in [DynamicTypeSize.large, .accessibility5] where size == .large || width == 320 {
+                    all.append((scheme, layout, width, size))
+                }
+            }
+        }
+        return all
+    }()
+
+    @Test("The page lays out in every state it has — opening, said with every tab in front, hidden lists, not heard of, failed, suspended, moved, a forum's author — at 720, 390 and 320, in light and in dark, and at the largest text: the head's parts stand inside the page, no part over another, and at the largest text the head scrolls with the tab in front", arguments: 0..<8)
+    func laidOut(_ which: Int) throws {
+        #expect(Self.arrangements.count == 8)
+        let arrangement = Self.arrangements[which]
         let every = try person(#","locked":true,"bot":true,"header":"https://m.example/h.png","fields":[{"name":"Site","value":"example.org"}]"#)
         let large = Person(
             source: Self.source, accountID: "42", handle: "@ada_with_a_long_name@a-long-host-name.example", name: "Ada with a long name indeed",
@@ -868,6 +1003,15 @@ struct PersonPageTests {
             ("moved", HostedPersonPage.page(Self.ada, said: PersonSaid(source: Self.host, reading: .said(try person(#","moved":{"id":"7","acct":"ada@new.example"}"#))))),
             ("hidden lists", HostedPersonPage.page(Self.ada, said: PersonSaid(source: Self.host, reading: .said(try person(#","hide_collections":true"#))))),
             ("large figures", HostedPersonPage.page(Self.ada, said: PersonSaid(source: Self.host, reading: .said(large)), standing: standing, canReload: true)),
+            ("every standing, and a sign-in asked for more", HostedPersonPage.page(
+                Self.ada, said: PersonSaid(source: Self.host, reading: .said(large)),
+                standing: PersonActing(
+                    source: Self.host, named: "@ada@m.example", reading: .said(PersonStanding(
+                        accountID: "42", following: true, followedBy: true, requested: true, muting: true,
+                        mutedUntil: Date(timeIntervalSince1970: 1_800_000_000), blocking: true, showsBoosts: true, notifies: false
+                    )), lock: PartWords.Place(kind: .partly, key: "part.follows.partly.changing"), changes: false
+                )
+            )),
             ("a forum's author", HostedPersonPage.page(Self.ada, said: nil, held: rows)),
         ]
         let said = PersonSaid(source: Self.host, reading: .said(every), posts: rows, foot: .more)
@@ -879,10 +1023,13 @@ struct PersonPageTests {
                 people: PeopleSaid(list: list, reading: .said, people: [large]), canReload: true
             )))
         }
-        for scheme in [ColorScheme.light, .dark] {
-            for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 390), (.narrow, 320)] {
-                for size in [DynamicTypeSize.large, .accessibility5] where size == .large || width == 320 {
-                    for (name, page) in pages {
+        for scheme in [arrangement.scheme] {
+            for (layout, width) in [(arrangement.layout, arrangement.width)] {
+                for size in [arrangement.size] {
+                    // Dark changes inks and no measure: there the states with the most in the head
+                    // are hosted, and every state in light. Hosting is this suite's longest work
+                    // on the main actor, which every other check of the run waits behind.
+                    for (name, page) in pages where scheme == .light || Self.hostedInDark.contains(name) {
                         let (height, probe) = hosted(page, width: width, layout: layout, scheme: scheme, size: size)
                         let at = "\(name) at \(width), \(scheme), \(size)"
                         #expect(height == 700, "\(at)")

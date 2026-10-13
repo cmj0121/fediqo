@@ -286,7 +286,7 @@ struct BookmarkPlaceTests {
             #expect(SourceRow.head(row, said: [], lock: lock, language: .english) == [Self.refusedLine])
         }
         if let mark {
-            #expect(mark.symbol == "exclamationmark.lock")
+            #expect(mark.symbol == SourceRow.permissionSymbol && mark.symbol == "person.badge.key")
             #expect(mark.word == "Update permission")
             // Held by a stage: dim, as it was, whatever the line.
             #expect(try control(session, actsLive: false)?.look == .dim(.notNow))

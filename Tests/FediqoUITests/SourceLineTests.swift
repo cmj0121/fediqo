@@ -289,7 +289,7 @@ struct SourceLineTests {
     @Test("The permission glyph is owed in three cases — a write turned away, a sign-in made before writing was asked for, one made before bookmarks were — and in no other; it is the alarm only for the first",
           arguments: SourceWriting.allCases)
     func whenPermissionIsOwed(_ writing: SourceWriting) {
-        #expect(SourceRow.permissionSymbol == "exclamationmark.lock")
+        #expect(SourceRow.permissionSymbol == "person.badge.key")
         for grant in [nil] + MastodonGrant.allCases.map(Optional.some) {
             for bookmarks in BookmarkStanding.allCases {
                 let owed = SourceRow.owed(
@@ -347,7 +347,7 @@ struct SourceLineTests {
 
         let live = SourceRow.permission(row, actsLive: true)!
         let held = SourceRow.permission(row, actsLive: false)!
-        #expect(live.symbol == "exclamationmark.lock" && live.drawn == held.drawn, "live and dim draw two glyphs")
+        #expect(live.symbol == "person.badge.key" && live.drawn == held.drawn, "live and dim draw two glyphs")
         #expect(live.look == .live && ShellMark.press(live.look) == .acts)
         #expect(held.look == .dim(.notNow) && ShellMark.press(held.look) == .nothing)
         #expect(live.spoken == SourceRow.permissionLine(row))
@@ -361,14 +361,14 @@ struct SourceLineTests {
         // And the row asks those rules with its own inputs.
         #expect(Self.view(row).permission == live && Self.view(row, actsLive: false).permission == held)
 
-        // Each dim mark's reason is in the head: held, the lock is named there with the key.
+        // Each dim mark's reason is in the head: held, the sign-in's mark is named there with the key.
         let busy = Self.view(row, actsLive: false)
         #expect(Self.view(row).more.head == [live.name])
         #expect(busy.more.head == [held.name] + ShellMore.reasons(of: [held, busy.key]))
         #expect(busy.more.head.last == "\(held.name), \(busy.key.name). \(L10n.t("mark.dim.notNow"))")
     }
 
-    @Test("The permission control is the lock and one word together, the same word whatever is owed and in every language; without room it is the same mark with the word left off")
+    @Test("The permission control is the sign-in's mark and one word together, the same word whatever is owed and in every language; without room it is the same mark with the word left off")
     func theControlIsALockAndAWord() {
         #expect(SourceRow.permissionWord == "account.source.permission.word")
         #expect(L10n.t(SourceRow.permissionWord, language: .english) == "Update permission")
@@ -391,7 +391,7 @@ struct SourceLineTests {
             let marks = owing.map { SourceRow.permission($0, actsLive: true, language: language)! }
             let word = L10n.t(SourceRow.permissionWord, language: language)
             #expect(word != SourceRow.permissionWord && !word.isEmpty)
-            #expect(marks.allSatisfy { $0.symbol == "exclamationmark.lock" && $0.word == word }, "\(language)")
+            #expect(marks.allSatisfy { $0.symbol == "person.badge.key" && $0.word == word }, "\(language)")
             // What is said is the sentence, and it starts by what the word says.
             #expect(marks.allSatisfy { $0.spoken == $0.name && $0.name.contains(source.host) && $0.name != word })
         }
@@ -506,7 +506,7 @@ struct SourceLineTests {
         #expect(elsewhere.said.isEmpty && elsewhere.saying == .nothing)
     }
 
-    @Test("The list's help names the key, the menu, and the lock with its word in all three tables, and the two Chinese tables are one")
+    @Test("The list's help names the key, the menu, and the sign-in's mark with its word in all three tables, and the two Chinese tables are one")
     func theHelpSaysTheNewMarks() throws {
         let resources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -536,7 +536,8 @@ struct SourceLineTests {
         for language in [DummyLanguage.english, .taiwanese] {
             let help = AccountPane.sourcesHelp(language: language)
             #expect(help.contains(L10n.t("account.sources.marks", language: language)))
-            #expect(help.contains(language == .english ? "lock" : "鎖"), "the help does not say what the lock means")
+            #expect(help.contains(language == .english ? "a person and a key" : "一個人和一把鑰匙"), "the help does not say which mark it means")
+            #expect(!help.contains(language == .english ? "A lock" : "的鎖"), "the help still calls it a lock")
             #expect(help.contains(L10n.t(SourceRow.permissionWord, language: language)), "the help does not name the word the row draws")
             // No sentence stands on the page about it any more, so the help says what it said.
             #expect(help.contains(language == .english ? "exactly as it was" : "和原來一樣"))
@@ -607,7 +608,7 @@ struct SourceLineTests {
     /// What the row leaves the hostname, measured off the hosted row: the row's width less
     /// everything in it that is not the hostname's text — which is the row at its ideal width
     /// around a one-letter host, less that letter. At its ideal width a row that owes the
-    /// permission control draws it with its word; `worded: false` is the row with the lock
+    /// permission control draws it with its word; `worded: false` is the row with the mark
     /// alone, which is that less what the word adds to the control.
     private func hostRoom(
         in width: CGFloat, type: DynamicTypeSize, owed: SourceRow.Owed?, worded: Bool = false
@@ -663,7 +664,7 @@ struct SourceLineTests {
         var maxX: CGFloat = 0
     }
 
-    @Test("The word gives way before the hostname does: the control carries its word wherever the whole hostname fits beside it, and is the lock alone on any narrower row — never a cut word, never no control")
+    @Test("The word gives way before the hostname does: the control carries its word wherever the whole hostname fits beside it, and is the mark alone on any narrower row — never a cut word, never no control")
     func theWordGivesWay() {
         let named = Self.sources[0].1
         let long = Self.sources[4].1
@@ -684,21 +685,21 @@ struct SourceLineTests {
         }
 
         // A 320-point phone's row at the default size: a hostname the row has room for whole
-        // keeps the word; one it has not is drawn with the lock alone and keeps what it had.
+        // keeps the word; one it has not is drawn with the mark alone and keeps what it had.
         let room = hostRoom(in: 288, type: .large, owed: .refused, worded: true)
-        // 54 points in English: 288 less the mark, the gaps, the worded control (106), the key
+        // 52 points in English: 288 less the mark, the gaps, the worded control (108), the key
         // and the menu. Under it the word goes and the hostname has the 128 it had.
-        #expect(abs(room - 54) <= 1, "the word leaves a hostname \(room) points at the default size")
-        #expect(abs(control(.large, worded: true) - 106) <= 1 && abs(wordAdds(.large) - 74) <= 1)
-        #expect(abs(hostRoom(in: 900, type: .large, owed: .refused, worded: true) - 666) <= 1)
+        #expect(abs(room - 52) <= 1, "the word leaves a hostname \(room) points at the default size")
+        #expect(abs(control(.large, worded: true) - 108) <= 1 && abs(wordAdds(.large) - 76) <= 1)
+        #expect(abs(hostRoom(in: 900, type: .large, owed: .refused, worded: true) - 664) <= 1)
         #expect(!drawn(named, width: 288, type: .large).worded)
         #expect(!drawn(long, width: 288, type: .large).worded)
         #expect(drawn(Source(host: "a", kind: .mastodon), width: 288, type: .large).worded == (room > 0))
-        // The largest size: the lock alone, for any host.
+        // The largest size: the mark alone, for any host.
         #expect(!drawn(named, width: 288, type: .accessibility1).worded)
         #expect(!drawn(Source(host: "a", kind: .mastodon), width: 288, type: .accessibility1).worded)
-        // There the worded control alone is 164 points, and the line would be 34 over the row.
-        #expect(abs(hostRoom(in: 288, type: .accessibility1, owed: .refused, worded: true) + 34) <= 1)
+        // There the worded control alone is 167 points, and the line would be 37 over the row.
+        #expect(abs(hostRoom(in: 288, type: .accessibility1, owed: .refused, worded: true) + 37) <= 1)
         #expect(abs(hostRoom(in: 288, type: .accessibility1, owed: .refused) - 77) <= 1)
     }
 
@@ -728,20 +729,20 @@ struct SourceLineTests {
         #expect(abs(tall - key) <= 0.5, "\(type): the control is \(tall) tall beside a key \(key) tall")
     }
 
-    @Test("The hostname's width on the narrowest row is a number that is watched: at 288 points with the lock, the key and the menu all drawn, 128 points at the default size and 77 at the largest")
+    @Test("The hostname's width on the narrowest row is a number that is watched: at 288 points with the sign-in's mark, the key and the menu all drawn, 128 points at the default size and 77 at the largest")
     func theHostKeepsItsRoom() {
         // The default size: 288 less the mark (24), two gaps (8) and three marks a finger apart
         // (44 each) — four points under the 132 the two-arrangement row promised a hostname.
         let standard = hostRoom(in: 288, type: .large, owed: .refused)
         #expect(standard >= 128, "the hostname has \(standard) points at the default size")
-        // The top of this app's ladder, with the lock: the narrowest case there is.
+        // The top of this app's ladder, with the mark: the narrowest case there is.
         #expect(DummyFontSize.largest.dynamicType == .accessibility1)
         let largest = hostRoom(in: 288, type: .accessibility1, owed: .refused)
         // **77 points, and that is under half of what the old floor scaled to** (132 × 28/17 =
         // 217; half is 109): the three marks grow with the type and the hostname pays for it,
         // losing its middle. Pinned so that a fourth mark, or a wider one, is seen here.
         #expect(largest >= 77, "the hostname has \(largest) points at the largest size")
-        // Without the lock it has a mark's box and its gap more.
+        // Without it the hostname has a mark's box and its gap more.
         #expect(hostRoom(in: 288, type: .accessibility1, owed: nil) > largest)
         // The word costs the hostname nothing on this row: it is not drawn where it would.
         #expect(!drawn(Self.sources[0].1, width: 288, type: .large).worded)

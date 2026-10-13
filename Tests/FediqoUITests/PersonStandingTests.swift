@@ -865,9 +865,12 @@ struct PersonStandingTests {
         #expect(acting(nil).narrows().isEmpty)
         #expect(acting(Self.followed(boosts: nil, notify: nil)).narrows().isEmpty)
         #expect(acting(Self.followed(boosts: nil, notify: true)).narrows().map(\.which) == [.notices])
-        // A sign-in that sees and may not change: no row that would take no press; the lock says why.
+        // A sign-in that sees and may not change: the two rows as the source said, and no press
+        // on either; the lock beside them says why, and goes on asking.
         let seeing = acting(Self.followed(), changes: false)
-        #expect(seeing.narrows().isEmpty && seeing.lockWords() != nil && seeing.marks().count == 1)
+        #expect(seeing.narrows().map(\.on) == [true, false] && !seeing.narrowsTakePress)
+        #expect(seeing.narrows().map { $0.words(language: .english) } == ["Their boosts: Shown", "A notice of each post: Off"])
+        #expect(seeing.lockWords() != nil && seeing.lock?.asks == true && seeing.marks().count == 1)
 
         // A press on its way is drawn over what the source said, and no row takes another meanwhile.
         let out = acting(Self.followed(), doing: .hideBoosts)
@@ -885,7 +888,11 @@ struct PersonStandingTests {
         #expect(drawn.walked.suffix(3) == ["about.stands", "about.boosts", "about.notices"])
         #expect(drawn.press(on: "about.boosts") == .act(.hideBoosts) && drawn.press(on: "about.notices") == .act(.notify))
         #expect(about(out).press(on: "about.boosts") == nil && about(out).blocks.contains(.boosts), "drawn, and takes no press")
-        for none in [about(nil), about(acting(PersonStanding(accountID: "42"))), about(seeing)] {
+        let plain = about(seeing)
+        #expect(plain.blocks == [.view, .none, .stands, .boosts, .notices], "drawn, and the lamp may stop on them")
+        #expect(plain.press(on: "about.boosts") == nil && plain.press(on: "about.notices") == nil, "Return does nothing")
+        #expect(plain.press(on: "about.stands") == .askFollows, "the lock line beside them asks for the rest")
+        for none in [about(nil), about(acting(PersonStanding(accountID: "42")))] {
             #expect(!none.blocks.contains(.boosts) && !none.blocks.contains(.notices) && none.press(on: "about.boosts") == nil)
         }
     }
@@ -975,8 +982,8 @@ struct PersonStandingTests {
         let sees = self.acts()
         await sees.opened(Self.ada, said: page, in: seeing)
         let locked = try #require(sees.acting(of: Self.ada, said: page, in: seeing))
-        #expect(locked.reading == .said(Self.followed()) && locked.narrows().isEmpty && locked.lock != nil)
-        await sees.press(.hideBoosts, on: Self.ada, said: page, in: seeing)
+        #expect(locked.reading == .said(Self.followed()) && locked.narrows().count == 2 && !locked.narrowsTakePress && locked.lock != nil)
+        for act in [PersonAct.hideBoosts, .showBoosts, .notify, .stopNotifying] { await sees.press(act, on: Self.ada, said: page, in: seeing) }
         #expect(await asked(silent) == [Self.stands])
     }
 

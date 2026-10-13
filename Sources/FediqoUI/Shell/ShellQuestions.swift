@@ -304,7 +304,7 @@ enum ShellQuestion {
     static func bookmarks(host: String, notices: Bool = false, language: DummyLanguage? = nil) -> ShellConfirmation {
         let key = notices ? "notices.ask.actsBookmarks" : "item.bookmark.ask"
         return ShellConfirmation(
-            symbol: "bookmark",
+            symbol: SourceRow.permissionSymbol,
             title: String(format: L10n.t("item.bookmark.ask.title", language: language), host),
             line: L10n.t(key + ".line", language: language),
             help: String(format: L10n.t(key + ".detail", language: language), host),
@@ -332,14 +332,14 @@ enum ShellQuestion {
         guard grant == .unasked else {
             let key = grant != .writing ? "notices.ask.reads" : bookmarks ? "notices.ask.actsBookmarks" : "notices.ask.acts"
             return ShellConfirmation(
-                symbol: "bell", title: title, line: L10n.t(key + ".line", language: language),
+                symbol: SourceRow.permissionSymbol, title: title, line: L10n.t(key + ".line", language: language),
                 help: String(format: L10n.t(key + ".detail", language: language), host),
                 choices: [.init(yes, L10n.t("item.bookmark.ask.confirm", language: language), role: .keyed)],
                 cancel: cancel
             )
         }
         return ShellConfirmation(
-            symbol: "bell", title: title, line: L10n.t("notices.ask.choose.line", language: language),
+            symbol: SourceRow.permissionSymbol, title: title, line: L10n.t("notices.ask.choose.line", language: language),
             help: String(format: L10n.t("notices.ask.choose.detail", language: language), host),
             choices: [
                 .init(signInRead, L10n.t("notices.ask.choose.read", language: language), role: .keyed),

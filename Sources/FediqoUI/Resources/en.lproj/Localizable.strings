@@ -769,7 +769,7 @@
 /* M1 tail rev 4 — the compact row. What the marks on a row mean, said once for the list. */
 "account.sources.marks"          = "Every row carries the same marks. The key is the sign-in: filled once you are signed in, grey where that source has none. Pressed while filled, it asks before it signs you out. ⋯ holds the rest: what the row has to say, changing boards or lists, clearing what the source left here, and removing it. What a source does not have is grey there too, and says why. A red ⋯ has something to say.";
 /* #69 — what may be done on a source, said on its row and explained once for the list. */
-"account.sources.writing"        = "A lock with the words Update permission, before the key, means that sign-in must be asked again before everything it could do is offered: a write was turned away, or it signed in before Fediqo asked to write or for bookmarks. Until you answer, what that sign-in already does is exactly as it was. Press it to be asked; nobody is signed out. On a row too narrow for the words, the lock stands alone.";
+"account.sources.writing"        = "The mark signing in wears, a person and a key, with the words Update permission, before the key, means that sign-in must be asked again before everything it could do is offered: a write was turned away, or it signed in before Fediqo asked to write or for bookmarks. Until you answer, what that sign-in already does is exactly as it was. Press it to be asked; nobody is signed out. On a row too narrow for the words, the lock stands alone.";
 "account.source.permission"      = "Update %@'s permission: its sign-in must be asked again before everything it could do is offered";
 "account.source.permission.word" = "Update permission";
 "account.source.writing.never"   = "read only";
@@ -1929,4 +1929,3 @@
 "people.requests.none" = "%@ says nobody asks to follow you.";
 "people.requests.entry.count" = "%@ people ask to follow you";
 "people.requests.entry.count.one" = "%@ person asks to follow you";
-"people.requests.entry.none" = "Nobody asks to follow you";
