@@ -2570,7 +2570,7 @@ final class ShellSession {
         }
         prefs.reread()
         if work === SourceWork.shared { AllowanceBook.shared.reread() }
-        mastodon.refresh()
+        mastodon.readBack()
         pictures.forgetAll()
         emojis.clear()
         pictures.disk?.trim()

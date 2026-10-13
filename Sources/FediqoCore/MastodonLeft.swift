@@ -25,6 +25,16 @@ public struct MastodonLeft: Sendable, Equatable, CustomStringConvertible,
         case lost
         /// The source was asked to end it and did not say it had: asked again.
         case owed
+        /// A read back is taking it out, with a package's sign-in or nothing put in its
+        /// place — and may yet put it back as the one held, where a later step refuses,
+        /// at once or when a locked device is unlocked. **Nothing ends it meanwhile but
+        /// the person signing out.**
+        case replacing
+        /// A read back that held took it out. Whether it is an earlier form of the sign-in
+        /// now held, and so left, or another account's or one that may do more, and so
+        /// ended, is said only by what its source answers of the one now held — never by
+        /// what the package said.
+        case replaced
     }
 
     public let host: String
@@ -179,8 +189,15 @@ extension MastodonKeychain {
         }
 
         /// Nothing, where the value is not a journal. **A state this build does not know is
-        /// read as left**: the one reading under which nothing is ended before the person
-        /// signs out, and nothing is dropped unended.
+        /// read as left**: nothing is dropped unended, and nothing is taken for the
+        /// person's own or for one to end at once.
+        ///
+        /// **Read so, it is not safe from being ended before the person signs out**: a
+        /// left sign-in is ended by a going-through where none is held at its host, and
+        /// where the one held is another account's. So a build from before a read back
+        /// wrote its own states (#347), run over a journal this one wrote, would end what
+        /// a read back took out as it ends any left one — the cost of going back a build,
+        /// and of nothing else.
         static func decode(_ data: Data, host: String) -> [MastodonLeft]? {
             guard let value = try? JSONDecoder().decode([Entry].self, from: data) else { return nil }
             return value.filter { !$0.accessToken.isEmpty }.map {

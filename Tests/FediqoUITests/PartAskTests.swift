@@ -339,6 +339,31 @@ struct PartAskTests {
         #expect(session.mastodon.notices(host: host) != .allowed)
     }
 
+    @Test("A package that files the very token this device made, saying it holds more, is believed in nothing it says: asked in place, the source is asked again whose the sign-in is and what it holds before any page, and the page is built from the source's own account of it")
+    func theVeryTokenFromAPackage() async throws {
+        let (session, server, tokens) = try await shell(holding: nil)
+        await session.signIn(host: host, through: PartPage(), writing: false)
+        let made = try #require(try tokens.token(host: host))
+        // As a read back files it: forgotten, then filed as the package says it is.
+        try tokens.forget(host: host)
+        let claimed = Self.reading + " read:follows write:follows"
+        try tokens.save(.carried(
+            host: host, accessToken: made.accessToken, clientID: made.clientID, clientSecret: made.clientSecret,
+            scopes: claimed, asked: claimed, refused: nil, accountID: made.accountID, handle: made.handle
+        ))
+        session.mastodon.readBack()
+        await session.mastodon.leftSettled()
+        await server.answer(S.info, .body(PartAskFixture.info(Self.reading)))
+        await server.forget()
+
+        let page = PartPage()
+        let answer = await session.mastodon.ask([.notices], host: host, through: page)
+
+        #expect(answer == .allowed)
+        #expect(Array(await server.paths.prefix(2)) == [S.check, S.info], "what a package said of a sign-in was taken for this device's own word")
+        #expect(page.scopes == [Self.reading + " read:notifications"], "the page carried a word only the package said the sign-in holds")
+    }
+
     @Test("Where the source gives no account of the token — an error, no answer, no list of words — no page opens and nothing held changes", arguments: [0, 1, 2])
     func noAccountOfTheToken(_ how: Int) async throws {
         let (session, server, tokens) = try await shell()
