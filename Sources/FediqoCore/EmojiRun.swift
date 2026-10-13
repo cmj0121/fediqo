@@ -33,8 +33,8 @@ public struct CustomEmoji: Sendable, Hashable {
 /// The cut is made here rather than on the screen so that it can be tested without one, and so
 /// that the places drawing somebody's words cannot come to disagree about what a shortcode is.
 ///
-/// **A `.link` and a `.tag` are only ever produced by `EmojiRun.prose`**, which is the cut a call
-/// site has to ask for by name. `CustomEmoji.runs` cannot make either, so a label — a name, a
+/// **A `.link`, a `.tag` and a `.mention` are only ever produced by `EmojiRun.prose`**, which is
+/// the cut a call site has to ask for by name. `CustomEmoji.runs` cannot make any, so a label — a name, a
 /// handle, a spoiler line — cannot grow a control by accident, nor a person who calls themselves
 /// `#1 fan` a pill round their name.
 public enum EmojiRun: Sendable, Hashable {
@@ -44,6 +44,8 @@ public enum EmojiRun: Sendable, Hashable {
     /// A word the author marked as a tag. A label and not a control: there is nothing for a
     /// press to open, and the drawing says so.
     case tag(PostTag)
+    /// Somebody the source says the post mentions, where the words spell them (#310).
+    case mention(PostMention)
 }
 
 public extension CustomEmoji {

@@ -1418,7 +1418,9 @@ struct DummyItemRow: View {
                 // taste. `covered` is read here rather than passed in because every call site of
                 // this function already agrees with it: `cover` draws only while it is true and
                 // `stitched` only while it is false.
-                EmojiText.words(item.body, emojis: written.body, host: host, covered: covered)
+                EmojiText.words(
+                    item.body, emojis: written.body, host: host, covered: covered, mentions: item.mentions
+                )
                     .foregroundStyle(
                         item.title == nil ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme)
                     )

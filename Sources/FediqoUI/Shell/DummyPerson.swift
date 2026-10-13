@@ -107,9 +107,17 @@ public struct DummyPerson: Identifiable, Hashable, Sendable {
         let called = handle.split(separator: "@").first.map(String.init) ?? handle
         self.host = host
         name = LineText.oneLine(called)
-        self.handle = handle
+        // A server's name is one name however it is cased, so `@ada@One.example` is the page
+        // `@ada@one.example` is. The name before it is kept as sent.
+        self.handle = Self.hostFolded(handle)
         avatarURL = nil
         emojis = []
+    }
+
+    /// `handle` with its server's name in lower case, where it names one.
+    static func hostFolded(_ handle: String) -> String {
+        guard let cut = handle.lastIndex(of: "@"), cut > handle.startIndex else { return handle }
+        return String(handle[..<cut]) + handle[cut...].lowercased()
     }
 
     /// Somebody a source listed (#311), met through that source: the page this opens is asked

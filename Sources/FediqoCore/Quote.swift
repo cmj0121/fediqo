@@ -81,6 +81,8 @@ public struct QuotedPost: Hashable, Sendable {
     public let sensitive: Bool?
     public let spoiler: String?
     public let emojis: [CustomEmoji]
+    /// `Note.mentions`, which the words' mentions are read by (#310).
+    public let mentions: [String]
     public let url: URL?
     public let audience: Audience?
     public let reply: Reply?
@@ -97,6 +99,7 @@ public struct QuotedPost: Hashable, Sendable {
         id: String, statusID: String? = nil, author: String, handle: String, body: String,
         postedAt: Date, avatarURL: URL? = nil, attachments: [Attachment] = [],
         sensitive: Bool? = nil, spoiler: String? = nil, emojis: [CustomEmoji] = [],
+        mentions: [String] = [],
         url: URL? = nil, audience: Audience? = nil, reply: Reply? = nil, quoting: NestedQuote? = nil,
         editedAt: Date? = nil, language: String? = nil
     ) {
@@ -111,6 +114,7 @@ public struct QuotedPost: Hashable, Sendable {
         self.sensitive = sensitive
         self.spoiler = spoiler
         self.emojis = emojis
+        self.mentions = mentions
         self.url = url
         self.audience = audience
         self.reply = reply
@@ -125,7 +129,7 @@ public struct QuotedPost: Hashable, Sendable {
             id: note.id, statusID: note.statusID, author: note.author, handle: note.handle,
             body: note.body, postedAt: note.postedAt, avatarURL: note.avatarURL,
             attachments: note.attachments, sensitive: note.sensitive, spoiler: note.spoiler,
-            emojis: note.emojis, url: note.url, audience: note.audience, reply: note.reply,
+            emojis: note.emojis, mentions: note.mentions, url: note.url, audience: note.audience, reply: note.reply,
             quoting: note.quote.map { NestedQuote(state: $0.state, statusID: $0.statusID) },
             editedAt: note.editedAt, language: note.language
         )
@@ -144,7 +148,7 @@ public struct QuotedPost: Hashable, Sendable {
             id: id, source: source, author: author, handle: handle, body: body,
             postedAt: postedAt, categories: [], audience: audience,
             avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
-            emojis: emojis, url: url, statusID: statusID, editedAt: editedAt, language: language,
+            emojis: emojis, mentions: mentions, url: url, statusID: statusID, editedAt: editedAt, language: language,
             refs: [
                 reply.map { Reference.answers($0.inReplyToId, to: $0.handle) },
                 quoting.map { Reference.quotes($0.state, statusID: $0.statusID) },

@@ -460,21 +460,25 @@ final class EmojiCache {
     /// The cut of a post's **own words**: the same memo, over the cut that also finds the
     /// addresses the author wrote. `EmojiText`'s two initialisers decide which of the two a line
     /// gets, and this keeps them apart in the memo so one cannot be handed the other's answer.
-    func proseRuns(in text: String, from emojis: [CustomEmoji]) -> [EmojiRun] {
-        remembered(text, emojis, linked: true)
+    /// `mentions` is whom the post's source says it mentions (#310), and part of what is
+    /// remembered by: the same words under another list are another cut.
+    func proseRuns(in text: String, from emojis: [CustomEmoji], mentions: [String] = []) -> [EmojiRun] {
+        remembered(text, emojis, linked: true, mentions: mentions)
     }
 
-    private func remembered(_ text: String, _ emojis: [CustomEmoji], linked: Bool) -> [EmojiRun] {
+    private func remembered(
+        _ text: String, _ emojis: [CustomEmoji], linked: Bool, mentions: [String] = []
+    ) -> [EmojiRun] {
         // A post nobody sent a picture for and that nobody wrote an address in is the fast path
         // in the scanners themselves — one run and no scan. A line longer than the memo will hold
         // is not remembered either: see `maxMemoisedLine` for why remembering it would cost what
         // it saves and hold what the budget above cannot see.
         guard linked || !emojis.isEmpty, text.utf8.count <= Self.maxMemoisedLine else {
-            return Self.cut(text, emojis, linked: linked)
+            return Self.cut(text, emojis, linked: linked, mentions: mentions)
         }
-        let cut = Cut(text: text, emojis: emojis, linked: linked)
+        let cut = Cut(text: text, emojis: emojis, linked: linked, mentions: mentions)
         if let remembered = cuts[cut] { return remembered }
-        let made = Self.cut(text, emojis, linked: linked)
+        let made = Self.cut(text, emojis, linked: linked, mentions: mentions)
         cuts[cut] = made
         cutOrder.append(cut)
         if cutOrder.count > Self.maxRememberedLines {
@@ -483,8 +487,12 @@ final class EmojiCache {
         return made
     }
 
-    private static func cut(_ text: String, _ emojis: [CustomEmoji], linked: Bool) -> [EmojiRun] {
-        linked ? EmojiRun.prose(in: text, emojis: emojis) : CustomEmoji.runs(in: text, from: emojis)
+    private static func cut(
+        _ text: String, _ emojis: [CustomEmoji], linked: Bool, mentions: [String]
+    ) -> [EmojiRun] {
+        linked
+            ? EmojiRun.prose(in: text, emojis: emojis, mentions: mentions)
+            : CustomEmoji.runs(in: text, from: emojis)
     }
 
     // MARK: - Fetching
@@ -625,6 +633,8 @@ final class EmojiCache {
         /// Which cut this is. The same words are cut two ways — a label's and a post's own — and
         /// a memo that could not tell them apart would hand a name the prose answer.
         let linked: Bool
+        /// Whom the words may name (#310). Empty on every label, and on most posts.
+        let mentions: [String]
     }
 
     private func touch(_ key: Key) {

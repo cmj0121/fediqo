@@ -1526,6 +1526,11 @@ private struct NoteFacts: Codable {
     /// `boosted`'s reasons: a row written before reads as none, and such a row always has a
     /// source row, since nothing before this kept a note past its source.
     var kind: String?
+    /// `Note.mentions` (#310): whom the source says the post mentions, or nothing where it
+    /// listed nobody. Additive and optional for `boosted`'s reasons: a row written before reads
+    /// as mentioning nobody, which the next read that says fills in, and an older build ignores
+    /// the key and draws the words as it always did.
+    var mentions: [String]?
 }
 
 /// `Counts` as `NoteFacts` writes it.
@@ -1782,7 +1787,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
                 .sorted { $0.category < $1.category },
             audience: note.audience?.rawValue,
             counts: CountsRow(note.counts),
-            kind: note.source.kind.rawValue
+            kind: note.source.kind.rawValue,
+            mentions: note.mentions.isEmpty ? nil : note.mentions
         )
     }
 
@@ -1854,6 +1860,7 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
             sensitive: facts.sensitive,
             spoiler: facts.spoiler,
             emojis: facts.emojis.map(\.emoji),
+            mentions: facts.mentions ?? [],
             url: facts.url,
             counts: facts.counts?.counts ?? Counts(),
             statusID: facts.statusID,

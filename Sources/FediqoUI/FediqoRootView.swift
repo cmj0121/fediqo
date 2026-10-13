@@ -75,6 +75,8 @@ public struct FediqoRootView: View {
     /// Where a hashtag pressed in a post's words goes (#124): this view's walk, handed down as the
     /// link reader is.
     @State private var tags = ShellTags()
+    /// Where somebody mentioned in a post's words, pressed, goes (#310): handed down as the tags are.
+    @State private var mentions = ShellMentions()
     /// Where a press on a quote goes (#214): this view's walk, handed down as the tags are.
     @State private var quotes = ShellQuotes()
     /// Up once at launch when the index on disk was written by a newer build and this run left it
@@ -275,6 +277,7 @@ public struct FediqoRootView: View {
                 // a Mac (#169), and the reader asks the walk here where it may be.
                 placeLinksInPage()
                 tags.placing = { tag, row in openTag(tag, from: row) }
+                placeMentions()
                 placeQuotes()
                 // What an earlier run could not put back and did not live to (#344): said once,
                 // as the launch begins, and from here — a listing of the store's folder is no
@@ -508,6 +511,7 @@ public struct FediqoRootView: View {
             // line on the screen with it. See `ShellReader`.
             .environment(\.shellReader, linkReader)
             .environment(\.shellTags, tags)
+            .environment(\.shellMentions, mentions)
             .environment(\.shellQuotes, quotes)
             // The hosts still here, handed down once for the same reason: a row from a source
             // since removed says so wherever it is drawn (#250), and only the root knows which.
@@ -1817,6 +1821,37 @@ public struct FediqoRootView: View {
         return PostTag.found(in: item.body).first { tag in
             standing.map { !HeldUnderTag.same($0, tag) } ?? true
         }
+    }
+
+    // MARK: - Somebody mentioned — #310
+
+    /// A mention's press, answered by the walk: set once, before anything can be pressed.
+    private func placeMentions() {
+        mentions.placing = { handle, host, row in openMentioned(handle, at: host, from: row) }
+    }
+
+    /// Somebody mentioned in a post's words, pressed: their page at the source the words were
+    /// read through, one more step of the walk — the page a face on a row of theirs opens.
+    ///
+    /// **The row the press was made on is lit first**, as a hashtag's is (`openTag`): the words
+    /// are a post's, so leaving the page gives that post back.
+    private func openMentioned(_ handle: String, at host: String, from row: String?) -> Bool {
+        guard Self.canWalk(place: place, open: openLayers),
+              let lamp = Self.walkToMentioned(handle, at: host, from: row ?? selectedItemID, on: &walk)
+        else { return false }
+        selectedItemID = lamp.row
+        return true
+    }
+
+    /// The step onto the page of whoever `handle` names at `host`, remembering `row` as the lamp
+    /// to give back: the row the lamp goes to now, or nothing where there is no step to take —
+    /// no handle, or their page already in front. Static, so a test can walk it without a window.
+    static func walkToMentioned(
+        _ handle: String, at host: String, from row: String?, on walk: inout ShellWalk
+    ) -> (row: String?, who: DummyPerson)? {
+        guard let who = DummyPerson(handle: handle, host: host), walk.walk(to: .person(who), from: row)
+        else { return nil }
+        return (row, who)
     }
 
     // MARK: - A quoted post — #214
