@@ -296,6 +296,12 @@ for every source or for one that declares the field. When the last source that d
 field is removed, the rule stays and is marked missing, as any rule naming something gone is.
 A reload of a timeline made only of these asks the sources that declare the field.
 
+What can be done at a source is said the same way. Whether something is offered there —
+following somebody, say — is said once for each kind of source, and the pages that draw are
+kept from knowing which kind they draw for: a page is handed what to draw. So a person's page
+is the same page whichever kind of source it is read through, and where a kind does not offer
+something, nothing is drawn for it. Most of the pages are held to that today, not yet all.
+
 ### Categories
 
 A post carries the categories its source put it in. They are how the source itself divides
@@ -316,8 +322,8 @@ A Mastodon source can be signed in to from its row on Account, so its Home and y
 be read. Before the server's page opens, Fediqo asks which sign-in you want, and says which
 part is which: reading alone, or reading and writing. Reading brings in your Home and your
 lists. Writing lets you post, reply, boost, favourite and bookmark from Fediqo, and take any of
-them back — and nothing else: Fediqo never asks to follow anybody, change your profile, or touch
-your filters. Choosing reading alone asks for exactly what Fediqo asked for before it could
+them back — and nothing else: no sign-in asks to follow anybody unasked, and Fediqo never asks
+to change your profile or touch your filters. Choosing reading alone asks for exactly what Fediqo asked for before it could
 write at all, so refusing the writing part changes nothing about reading. Signing in again is
 how you change your answer.
 
@@ -349,6 +355,21 @@ reading and writing is chosen — whether it is signing in again, adding the wri
 asking for bookmarks. What the question said is what is asked: notices allowed while it stood
 open are not added to it.
 
+Who you follow is asked for apart as well, and only when it is first needed: at a press on
+Follow on somebody's page or a hashtag's, or on the line there that says what the sign-in was
+not asked. The press asks first, and says what the server's page will be asked for: what the
+sign-in already has, and one thing more — who you follow: to see how you and somebody stand,
+to follow and unfollow people and hashtags, to answer requests to follow you, and to remove a
+follower. The last two are what the server's words cover; Fediqo does neither yet. Nobody is
+signed out, on this device or another. Close the server's page, or say no on it, and the
+sign-in you had goes on as it was. Once a sign-in holds it, Fediqo sees how you and somebody
+stand, follows and unfollows for you, and withdraws a request to follow. A sign-in that only
+reads may be asked too: it sees who you follow and how you stand, and changes neither. A
+sign-in that holds less than a page needs is told so on that page, under the same lock, in a
+line that says what it was not asked — how you stand to people, seeing who you follow, or
+following and unfollowing — and a press on it asks for exactly that. Nothing is guessed
+meanwhile: no standing is drawn for a sign-in that cannot see it.
+
 What a sign-in asks its server for, in the server's own words:
 
 | Part       | Asked for                                            | When                                            |
@@ -358,6 +379,8 @@ What a sign-in asks its server for, in the server's own words:
 | bookmarks  | `write:bookmarks`                                    | with writing                                    |
 | notices    | `read:notifications`                                 | only after you press for notices on Notices     |
 | dismissing | `write:notifications`                                | with notices, and only where the sign-in writes |
+| who you follow | `read:follows`                                   | only after you press for following              |
+| following  | `write:follows`                                      | with who you follow, and only where the sign-in writes |
 
 A server that refuses `read:search` or `write:bookmarks` is asked again without it.
 
@@ -438,6 +461,7 @@ on Preferences, and the question before removing says which it will do.
 | `r` | reload the selected timeline, or the open post and its thread   |
 | `e` | write or change the selected timeline                           |
 | `/` | search the posts this device holds                              |
+| `l` | follow whoever's page, or the hashtag whose page, is in front   |
 | `?` | show the keys list                                              |
 
 `r` asks exactly the sources the selected timeline draws from. All asks every source; Trends
@@ -446,6 +470,11 @@ and categories its rules name, and a rule for every source asks every source. Wi
 open, `r` reloads that post and its thread, from any source, and not the timeline under it.
 Pressing `r` again while a reload runs does not start a second one; Esc stops it. A source that fails says
 so, and the others still land. The selected post stays selected.
+
+`l` is the press on Follow on the page in front, and it only ever follows. On somebody's page
+it follows them, or asks to where they must agree. On a hashtag's page it follows the hashtag
+at the first of your sources that offers it. Unfollowing is never a key: it is behind the
+three dots on a person's page, and on the hashtag's own line.
 
 Reading toward the end of a timeline asks its sources for the next stretch, with no key
 pressed. On Trends that is the next stretch of what is rising on each Mastodon source: what
@@ -489,6 +518,30 @@ through none. A post held from before reblogs were rows, which arrived as a rebl
 where it was and says it arrived as a reblog by that person, until a timeline brings that
 reblog again; from then the reblog is the row that timeline shows, and the post is shown by
 it only where it also arrives on its own.
+
+Somebody's page, read through a Mastodon source you are signed in to, says how you and they
+stand, once that sign-in may see it — see Signing in to Mastodon, above. It is what the source
+last said: that they follow you, that you follow them, that you have asked to, that you muted
+them and until when, that you blocked them. Somebody who has blocked you is said so in a
+sentence that names them and says the source shows you none of their posts. Where a source
+gave no posts of somebody it counts posts for, and it is not known why — the sign-in cannot
+see how you stand, or the source has not answered — the page says that the source gives this
+sign-in none of them, and guesses at no reason. Your own page, a forum's author, and a page
+read through a source nobody is signed in to say nothing of standing.
+
+Follow is on that page, and `l` presses it. Somebody who must agree is asked, and shows as
+asked. Unfollowing, and withdrawing a request, are behind the page's three dots; unfollowing
+somebody who must agree asks first, since following them again means asking again. Follow is
+not offered where they have blocked you, where you block them, or where they have moved,
+since the source refuses it. Each is drawn at the press and the source asked after, as a mark
+on a post is: a read already on its way does not undo it, and a press that did not arrive
+puts the page back to what the source last said and says so. Where the source cannot be asked
+how you stand, the page says it could not ask and offers to try again, and draws no standing.
+
+Two things are not here. A row in a list of people — who somebody follows, who follows them —
+shows no standing; only their page does. And following somebody on another server is not
+settled by the press: the page reads the source again, and says "asked" until their server
+agrees.
 
 What a post refers to is read for it. When a post first arrives and the post it answers is
 not on this device — or a post it quotes that did not come with it — Fediqo asks the source
@@ -899,6 +952,25 @@ store is untouched. A read back that fails midway leaves the store as it was, an
 lists are put back with it. A list that cannot be read stops a take-away before anything is
 written, and a read back before anything is replaced. What a locked device does to either is
 under While the device is locked, above.
+
+For each sign-in the file carries, beside the secret, what that sign-in was asked for, what
+was refused, and whose it is. So a part refused on the device it came from is not offered
+here as never asked, and the account is named before its source has been asked. All of it is
+taken as unconfirmed on arrival: nothing is asked for, and no sign-in is ended, on a file's
+word, until the source itself has answered. A file from an earlier build carries none of
+this, and reads back as it did.
+
+A sign-in this device held, which a read back replaces with the file's, is not dropped
+unsaid. It is written down on this device before the file's sign-in takes its place. Nothing
+ends it while the read back can still be undone, and an undo puts it back as the one in use.
+Once the read back has held and the source has said whose the new sign-in is and what it
+holds, the one it replaced is ended there if it was another account's, or one that could do
+more than the new one; an earlier sign-in of the same account that could do no more is left,
+and is ended when you sign out. Where the source has not answered, it stays written down
+until it does, or until you sign out, Clear or Remove. Where the file brings no sign-in for a
+source this device is signed in to, today that sign-in is taken off this device, written down
+and left: it is not ended at its source until you Clear or Remove that source, or sign in
+there as somebody else.
 
 Nothing leaves this device either way. Both are listed under This device in the run's
 requests.
