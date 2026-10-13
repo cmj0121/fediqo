@@ -39,6 +39,11 @@ public struct MastodonPeople: Sendable {
         case followers(of: String)
         /// Whom they follow.
         case following(of: String)
+        /// Who asks to follow the reader (#313): the reader's own, and so asked only signed in.
+        case requests
+
+        /// Where the requests to follow the reader are listed, and under it answered.
+        static let requestsPath = "/api/v1/follow_requests"
 
         /// Where the list is asked. Nothing for an id that could not stand in a path as one
         /// segment: it came out of a stranger's answer.
@@ -46,6 +51,7 @@ public struct MastodonPeople: Sendable {
             switch self {
             case .followers(let id) where ListSubscription.isPathSegment(id): "/api/v1/accounts/\(id)/followers"
             case .following(let id) where ListSubscription.isPathSegment(id): "/api/v1/accounts/\(id)/following"
+            case .requests: Self.requestsPath
             default: nil
             }
         }

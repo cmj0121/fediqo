@@ -55,6 +55,16 @@ struct PeopleSaid: Equatable {
     /// that does not see it, a source where nobody is followed — where the ask is out, and
     /// where it failed. A row of somebody not here draws no word of it.
     var stands: [String: PersonStanding] = [:]
+    /// What a row of the list offers (#313), in the order it is drawn: accepting a request
+    /// is a press on the row, and refusing one or removing a follower an item of its `…`.
+    /// Nothing on a list with nothing to do to a row.
+    var acts: [PersonAct] = []
+    /// The sentence of a row whose press did not arrive, by the id the source knows them by.
+    var missed: [String: String] = [:]
+    /// How the sign-in stands where the rows of this list would offer something and it may
+    /// not change who follows whom (#313): said in one line over the rows, dim with the lock,
+    /// a press where it may be asked. Nothing where it may, and on a list with nothing to offer.
+    var lock: PartWords.Place?
     /// Whether the list is being asked from the top.
     var asking = false
     var foot: Foot?
@@ -72,7 +82,7 @@ struct PeopleSaid: Equatable {
     static func title(_ list: PeopleList, language: DummyLanguage? = nil) -> String {
         String(
             format: L10n.t("people.title.\(list.which.rawValue)", language: language),
-            list.readByCount ? list.host : list.lineHandle
+            list.readByCount || list.which == .requests ? list.host : list.lineHandle
         )
     }
 
@@ -123,6 +133,7 @@ struct PeopleSaid: Equatable {
         case .directory: "people.directory"
         case .found: "people.found"
         case .suggested: "people.suggested"
+        case .requests: "people.requests"
         case .following, .followers: "people"
         }
         return switch reading {
@@ -169,7 +180,7 @@ struct PeopleSaid: Equatable {
             let key = switch list.which {
             case .found: "people.found.foot.farthest"
             case .suggested: "people.suggested.foot.farthest"
-            case .directory, .following, .followers: "people.directory.foot.farthest"
+            case .directory, .following, .followers, .requests: "people.directory.foot.farthest"
             }
             return String(format: L10n.t(key, language: language), L10n.grouped(people.count, language: language), source)
         case .end:
@@ -207,6 +218,9 @@ struct PeopleSaid: Equatable {
         if list.which == .suggested {
             return String(format: L10n.t("people.suggested.none", language: language), source)
         }
+        if list.which == .requests {
+            return String(format: L10n.t("people.requests.none", language: language), source)
+        }
         if list.hidden, !own {
             return String(format: L10n.t("people.hidden", language: language), list.lineHandle)
         }
@@ -215,6 +229,19 @@ struct PeopleSaid: Equatable {
         }
         return String(format: L10n.t("people.none", language: language), source)
     }
+
+    /// The lock's sentence over the rows.
+    func lockWords(language: DummyLanguage? = nil) -> String? {
+        lock.map { String(format: L10n.t($0.key, language: language), source) }
+    }
+
+    // MARK: - What a row offers (#313)
+
+    /// The acts of a row that take something away, and so stand only in its `…` and ask first.
+    var dangerous: [PersonAct] { acts.filter { $0 == .refuseRequest || $0 == .removeFollower } }
+
+    /// Whether accepting is a press on the row.
+    var accepts: Bool { acts.contains(.acceptRequest) }
 
     // MARK: - A row's menu
 
@@ -260,6 +287,10 @@ struct PeoplePane: View {
     var onReadOn: () -> Void = {}
     /// A directory's order chosen, or only the people who live there: asked from the top.
     var onChoose: (DirectoryChoice) -> Void = { _ in }
+    /// A press on a row that answers a request or removes a follower (#313).
+    var onAct: (PersonAct, Person) -> Void = { _, _ in }
+    /// The press on the lock of a sign-in that may not change who follows whom.
+    var onAsk: () -> Void = {}
     var jumpToTop: Int = 0
     var onBack: () -> Void
 
@@ -288,7 +319,7 @@ struct PeoplePane: View {
     private var list: some View {
         PeopleRows(
             said: said, selectedID: $selectedID, onOpen: onOpen, onAskAgain: onAskAgain, onReadOn: onReadOn,
-            jumpToTop: jumpToTop
+            onAct: onAct, onAsk: onAsk, jumpToTop: jumpToTop
         )
     }
 
@@ -296,6 +327,24 @@ struct PeoplePane: View {
     /// **No item here asks first**, so no question is ever put and none is hung.
     static func menu(for said: PeopleSaid) -> NoticeRow.Menu? {
         said.more().map { more in NoticeRow.Menu(more: { more }, asks: .constant(nil)) }
+    }
+
+    /// The `…` of the row of `person` in `said`: what the list offers a row that takes
+    /// something away (#313) — refusing a request, removing a follower — each asked about
+    /// first, through the page's one asker; or what the list's own `…` holds, or nothing.
+    @MainActor
+    static func menu(
+        for said: PeopleSaid, of person: Person, asks: Binding<ShellMoreAsk?>, act: @escaping (PersonAct) -> Void
+    ) -> NoticeRow.Menu? {
+        let dangerous = said.dangerous
+        guard !dangerous.isEmpty else { return menu(for: said) }
+        let more = ShellMore(head: [person.lineName, person.lineHandle], items: dangerous.map { offered in
+            .danger(
+                PersonActing.symbol(offered), PersonActing.name(offered),
+                asks: ShellQuestion.about(offered, person.lineHandle, at: said.source)
+            ) { act(offered) }
+        })
+        return NoticeRow.Menu(more: { more }, asks: asks)
     }
 }
 
@@ -402,5 +451,36 @@ struct DirectoryChoiceMenu: View {
         .buttonStyle(.plain)
         .shellNamed("people.directory.choose")
         .accessibilityValue(PeopleSaid.sortingLine(choice, source: source))
+    }
+}
+
+/// The way to the people who ask to follow the reader, on their own page (#313): one line of
+/// "You there" on About, and what its press does.
+///
+/// **Its figure is the source's, as the sign-in's own account check last said it** — the one
+/// place a source says how many ask — and never arithmetic: it does not count down when a
+/// request is answered here, and changes when that check next runs. Where the check said
+/// none, the line is words alone.
+struct RequestsEntry: Equatable {
+    let list: PeopleList
+    /// How many ask, as the account check last said. Nothing where it has not said.
+    var counted: Int?
+    /// How the sign-in stands where it does not see who follows the reader. Nothing where it does.
+    var locked: PartWords.Place?
+
+    /// What the lamp stands on where it stands on this line.
+    static let id = "about.requests"
+
+    /// Whether pressing a locked line asks the sign-in for who the reader follows.
+    var asks: Bool { locked?.asks ?? false }
+
+    /// Whether the line is a press: open, or a lock that asks.
+    var presses: Bool { locked == nil || asks }
+
+    func words(language: DummyLanguage? = nil) -> String {
+        if let locked { return String(format: L10n.t(locked.key, language: language), list.host) }
+        guard let counted else { return L10n.t("people.requests.entry", language: language) }
+        if counted == 0 { return L10n.t("people.requests.entry.none", language: language) }
+        return PersonSaid.figure("people.requests.entry.count", counted, language: language)
     }
 }

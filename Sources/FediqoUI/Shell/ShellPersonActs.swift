@@ -152,13 +152,13 @@ final class ShellPersonActs {
     }
 
     /// Whether the sign-in at `host` may follow and unfollow: it holds all of following.
-    private static func changes(at host: String, in session: ShellSession) -> Bool {
+    static func changes(at host: String, in session: ShellSession) -> Bool {
         session.mastodon.standing(PersonAct.follow.needs, host: host) == .held
     }
 
     /// Whether the sign-in at `host` sees how the reader stands to people: it holds all of
     /// following, or the half of it that sees.
-    private static func sees(at host: String, in session: ShellSession) -> Bool {
+    static func sees(at host: String, in session: ShellSession) -> Bool {
         changes(at: host, in: session)
             || MastodonParts.half(of: .follows, in: session.mastodon.heldParts[host.lowercased()]?.scopes) == .seeing
     }
@@ -348,23 +348,30 @@ final class ShellPersonActs {
     /// change who the reader follows or is no longer the one the page was read through, the
     /// press does nothing. **One request out a person** (`PressGuard.begin`): pressed again
     /// meanwhile, nothing more is sent.
-    func press(_ act: PersonAct, on who: DummyPerson, said: PersonSaid?, in session: ShellSession) async {
-        guard let person = said?.person, let source = Self.source(of: who, in: session) else { return }
+    ///
+    /// `listed` is the list a row's press came from, where it came from one: the acts of a
+    /// row (#313) are offered there and nowhere else. Whether the source answered that the
+    /// press was done.
+    @discardableResult
+    func press(
+        _ act: PersonAct, on who: DummyPerson, said: PersonSaid?, listed: PeopleList.Which? = nil, in session: ShellSession
+    ) async -> Bool {
+        guard let person = said?.person, let source = Self.source(of: who, in: session) else { return false }
         let looked = readers.look(at: source.host, in: session)
         let key = who.id
         guard let held = looked.held, !looked.changed,
               let page = self.standing(key, of: person.accountID, at: source.host, in: session),
               let offered = acting(of: who, as: person, in: session),
-              Self.offers(act, on: offered),
+              Self.offers(act, on: offered, listed: listed),
               let flight = presses.begin(key, showing: act)
-        else { return }
+        else { return false }
         missed[key] = nil
         pressed[key] = Pressed(host: source.host, under: page.under)
         let through = session.reach.standing(session.mastodon.authorized(token: held, within: deadline, for: .write))
         // The door the read after a follow of somebody of another server goes through (`act`).
         let settling = session.reach.standing(session.mastodon.authorized(token: held, within: deadline, for: .person))
         // The request is this object's and not the pane's: a page left does not call it off.
-        await Task {
+        return await Task {
             await self.act(
                 act, flight: flight, on: page, key: key, through: through, settling: settling, with: held, at: source,
                 in: session
@@ -394,7 +401,7 @@ final class ShellPersonActs {
     private func act(
         _ act: PersonAct, flight: PressNumber, on pressedOn: Page, key: String, through: MastodonStanding,
         settling: MastodonStanding, with held: MastodonToken, at source: Source, in session: ShellSession
-    ) async {
+    ) async -> Bool {
         /// What the press came to: the source's word, that it has none of them, that the
         /// press did not arrive, or that it did and how it stands could not then be read.
         enum Outcome {
@@ -418,7 +425,7 @@ final class ShellPersonActs {
                 sends = false
             }
             // Let go of with its reader while the read was out: nothing is sent for them.
-            guard presses.isStill(flight, key) else { return }
+            guard presses.isStill(flight, key) else { return false }
         }
         if sends {
             do {
@@ -428,7 +435,7 @@ final class ShellPersonActs {
             }
         }
         // Let go of with its reader meanwhile: the entry, if any, is another press's.
-        guard presses.isStill(flight, key) else { return }
+        guard presses.isStill(flight, key) else { return false }
         // Somebody of another server is answered "followed" at the press, and is asked until
         // their server agrees: the answer is not how it stands, and is drawn nowhere. The
         // source is read now, **while the press is still out** — so the page goes on drawing
@@ -440,7 +447,7 @@ final class ShellPersonActs {
                 ShellPersonPages.concluded(error, at: source, askedAs: pressedOn.askedAs, in: session)
                 outcome = .unread
             }
-            guard presses.isStill(flight, key) else { return }
+            guard presses.isStill(flight, key) else { return false }
         }
         // The press is answered, or did not arrive: either way it is out no longer.
         presses.settle(key)
@@ -456,11 +463,11 @@ final class ShellPersonActs {
             {
                 _ = begin(key, of: pressedOn.accountID, far: pressedOn.far, at: source, with: held, in: session)
             }
-            return
+            return false
         }
         if case .missed = outcome {
             missed[key] = act
-            return
+            return false
         }
         // A read still out set out before this answer: it is awaited no longer.
         asks[key]?.cancel()
@@ -475,6 +482,7 @@ final class ShellPersonActs {
             // The source's word stands either way; one that is not what was pressed is said as
             // not done — but not where nothing was sent: then nothing failed.
             if !turned, !Self.did(act, answer) { missed[key] = act }
+            return !turned && Self.did(act, answer)
         case .unsaid:
             pages[key]?.said = nil
             pages[key]?.unsaid = true
@@ -489,13 +497,86 @@ final class ShellPersonActs {
         case .missed:
             break
         }
+        return false
+    }
+
+    // MARK: - A row of a list (#313)
+
+    /// Whether `act` is one a row of a list offers, and no page of somebody's.
+    static func isOfARow(_ act: PersonAct) -> Bool {
+        switch act {
+        case .acceptRequest, .refuseRequest, .removeFollower: true
+        case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying: false
+        }
+    }
+
+    /// A press on the row of `person` in a list of the reader's own: their request accepted
+    /// or refused, or they are removed from following the reader — **sent through the one
+    /// sequence a press on somebody's page is** (`press`), under the same guard: one request
+    /// out a person, whichever page or row it was pressed on. Whether the source answered
+    /// that it was done.
+    ///
+    /// **Somebody on a row has no page of their own open**, so what the list was told of how
+    /// the reader stands to them — `standing`, which may be nothing — is written down as what
+    /// the source last said, with nobody asked for it.
+    ///
+    /// **Each names them by the id the source gave, so a row gone stale can only fail or do
+    /// nothing** (asked of a real source: a request that is no longer there is refused as not
+    /// found, and removing somebody who already left changes nothing): no read is made first.
+    func pressRow(
+        _ act: PersonAct, on person: Person, standing said: PersonStanding?, listed: PeopleList.Which, in session: ShellSession
+    ) async -> Bool {
+        let who = DummyPerson(person)
+        guard Self.isOfARow(act), let source = Self.source(of: who, in: session), Self.sees(at: source.host, in: session)
+        else { return false }
+        if self.standing(who.id, of: person.accountID, at: source.host, in: session) == nil {
+            asks[who.id]?.cancel()
+            missed[who.id] = nil
+            pages[who.id] = Page(
+                host: source.host, accountID: person.accountID, far: !person.livesHere,
+                askedAs: ShellPersonPages.askedAs(at: source.host, in: session),
+                under: ShellPersonPages.signIns(at: source.host, in: session), number: errands.next(), said: said
+            )
+            for gone in order.keep(who.id, among: Self.kept, busy: { pages[$0]?.asking == true || presses.isOut($0) }) { drop(gone) }
+        }
+        return await press(act, on: who, said: PersonSaid(source: source.host, reading: .said(person)), listed: listed, in: session)
+    }
+
+    /// Whether the row of the person `key` names is leaving its list: a press of theirs that
+    /// takes them off it is out, made by whoever would ask now.
+    func isLeaving(_ key: String, at host: String, in session: ShellSession) -> Bool {
+        guard let out = presses.shown(key), Self.isOfARow(out) else { return false }
+        return pressed[key]?.under == ShellPersonPages.signIns(at: host, in: session)
+    }
+
+    /// The press on a row of the person `key` names that did not arrive is said no longer:
+    /// their list was read again from the top.
+    func forgetMissedOnARow(_ key: String) {
+        if missedOnARow(key) != nil { missed[key] = nil }
+    }
+
+    /// The press on a row of the person `key` names that did not arrive, where one did not.
+    func missedOnARow(_ key: String) -> PersonAct? {
+        missed[key].flatMap { Self.isOfARow($0) ? $0 : nil }
     }
 
     /// Whether the page offers `act` now: Follow where the head's press is that, an item of
     /// the `…` where it lists it, and a switch of what is taken from them (#313) where About
     /// draws that switch turned the other way and takes a press.
-    private static func offers(_ act: PersonAct, on offered: PersonActing) -> Bool {
+    ///
+    /// **An act of a row is offered only from the list it belongs on** — a request answered
+    /// from the requests, a follower removed from the followers — to a sign-in that may change
+    /// who follows whom, and with no press out; and nobody is removed whom the source said
+    /// does not follow the reader.
+    private static func offers(_ act: PersonAct, on offered: PersonActing, listed: PeopleList.Which?) -> Bool {
         switch act {
+        case .acceptRequest, .refuseRequest: listed == .requests && offered.changes && offered.doing == nil
+        case .removeFollower:
+            // From a row of the reader's own followers; and from the `…` of the page of
+            // somebody the source said follows the reader, where the page lists it.
+            listed == nil
+                ? offered.more.contains(.removeFollower)
+                : listed == .followers && offered.changes && offered.doing == nil && offered.shown?.followedBy != false
         case .follow: offered.press == .follow
         case .unfollow, .withdraw: offered.more.contains(act)
         case .showBoosts, .hideBoosts, .notify, .stopNotifying:
@@ -506,7 +587,7 @@ final class ShellPersonActs {
     /// Whether `act` is a switch of what is taken from somebody followed.
     private static func isSwitch(_ act: PersonAct) -> Bool {
         switch act {
-        case .follow, .unfollow, .withdraw: false
+        case .follow, .unfollow, .withdraw, .acceptRequest, .refuseRequest, .removeFollower: false
         case .showBoosts, .hideBoosts, .notify, .stopNotifying: true
         }
     }
@@ -521,6 +602,9 @@ final class ShellPersonActs {
         case .hideBoosts: try await through.narrow(accountID, boosts: false)
         case .notify: try await through.narrow(accountID, notify: true)
         case .stopNotifying: try await through.narrow(accountID, notify: false)
+        case .acceptRequest: try await through.answer(accountID, accept: true)
+        case .refuseRequest: try await through.answer(accountID, accept: false)
+        case .removeFollower: try await through.removeFollower(accountID)
         }
     }
 
@@ -534,6 +618,8 @@ final class ShellPersonActs {
         case .hideBoosts: answer.showsBoosts == false
         case .notify: answer.notifies == true
         case .stopNotifying: answer.notifies == false
+        case .acceptRequest: answer.followedBy
+        case .refuseRequest, .removeFollower: !answer.followedBy
         }
     }
 }

@@ -17,6 +17,10 @@ struct PeopleRows<Lead: View>: View {
     var onAskAgain: () -> Void = {}
     /// The foot's press: the next stretch.
     var onReadOn: () -> Void = {}
+    /// A press on a row that answers a request or removes a follower (#313).
+    var onAct: (PersonAct, Person) -> Void = { _, _ in }
+    /// The press on the lock of a sign-in that may not change who follows whom.
+    var onAsk: () -> Void = {}
     var jumpToTop: Int = 0
     /// What stands over the rows and scrolls away with them. Nothing on a page of people.
     @ViewBuilder var lead: Lead
@@ -24,6 +28,8 @@ struct PeopleRows<Lead: View>: View {
     @Environment(\.colorScheme) private var colorScheme
     /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
     @Environment(\.shellTouch) private var touch
+    /// The question of a row's `…` item that asks first: put once, by this list.
+    @State private var asked: ShellMoreAsk?
 
     private static var top: String { "people.top" }
 
@@ -37,19 +43,17 @@ struct PeopleRows<Lead: View>: View {
                         stateLine(line)
                         ShellRule()
                     }
+                    if let words = said.lockWords() {
+                        locked(words, asks: said.lock?.asks == true)
+                        ShellRule()
+                    }
                     ForEach(Array(said.people.enumerated()), id: \.element.id) { index, person in
                         row(person)
                             .id(person.id)
+                        if let missed = said.missed[person.accountID] { quiet(missed, ink: ShellChrome.ink(colorScheme)) }
                         if index < said.people.count - 1 { ShellRule() }
                     }
-                    if let sentence = said.nothing() {
-                        Text(sentence)
-                            .shellFont(.meta)
-                            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(ShellSpace.pad)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    if let sentence = said.nothing() { quiet(sentence, ink: ShellChrome.inkFaint(colorScheme)) }
                     if let foot = said.foot {
                         ShellRule()
                         PersonFootRow(
@@ -61,6 +65,7 @@ struct PeopleRows<Lead: View>: View {
             }
             .scrollIndicators(.never)
             .clearsFloatingCorner()
+            .modifier(ShellMoreAsks(asked: $asked))
             // Come back to from somebody's page, the row they were opened from is in view.
             .onAppear {
                 if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
@@ -108,19 +113,52 @@ struct PeopleRows<Lead: View>: View {
                 }
             },
             onOpen: { onOpen(person) },
-            menu: PeoplePane.menu(for: said)
+            menu: PeoplePane.menu(for: said, of: person, asks: $asked) { onAct($0, person) },
+            accept: said.accepts ? { onAct(.acceptRequest, person) } : nil
         )
+    }
+
+    /// How the sign-in stands, dim, after the glyph a source's row draws where its sign-in
+    /// must be asked again: the whole line the press where it asks, and words where not.
+    @ViewBuilder
+    private func locked(_ words: String, asks: Bool) -> some View {
+        let label = Label(words, systemImage: SourceRow.permissionSymbol)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.markDim(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.snug)
+        if asks {
+            Button(action: onAsk) { label.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .help(L10n.t("mark.dim.askAgain"))
+        } else {
+            label
+        }
+    }
+
+    /// A sentence in the list's own column: what stands where rows would, and under a row
+    /// the press that did not arrive.
+    private func quiet(_ sentence: String, ink: Color) -> some View {
+        Text(sentence)
+            .shellFont(.meta)
+            .foregroundStyle(ink)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(ShellSpace.pad)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 extension PeopleRows where Lead == EmptyView {
     init(
         said: PeopleSaid, selectedID: Binding<String?>, onOpen: @escaping (Person) -> Void,
-        onAskAgain: @escaping () -> Void = {}, onReadOn: @escaping () -> Void = {}, jumpToTop: Int = 0
+        onAskAgain: @escaping () -> Void = {}, onReadOn: @escaping () -> Void = {},
+        onAct: @escaping (PersonAct, Person) -> Void = { _, _ in }, onAsk: @escaping () -> Void = {}, jumpToTop: Int = 0
     ) {
         self.init(
             said: said, selectedID: selectedID, onOpen: onOpen, onAskAgain: onAskAgain, onReadOn: onReadOn,
-            jumpToTop: jumpToTop, lead: { EmptyView() }
+            onAct: onAct, onAsk: onAsk, jumpToTop: jumpToTop, lead: { EmptyView() }
         )
     }
 }

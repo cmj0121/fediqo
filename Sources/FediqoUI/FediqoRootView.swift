@@ -1488,6 +1488,7 @@ public struct FediqoRootView: View {
         // press (F9): Return presses it, and does nothing on a block that is words.
         if let person = walk.openedPerson, people.front(of: person, in: session) == .about {
             if let entry = people.followedEntry(of: person, in: session), entry.id == id { return followedPressed(entry) }
+            if id == RequestsEntry.id, let entry = people.requestsEntry(of: person, in: session) { return requestsPressed(entry) }
             return people.pressAbout(id, of: person, in: session)
         }
         // On a list of people the row the lamp is on is somebody (#311): Return opens them.
@@ -1862,6 +1863,22 @@ public struct FediqoRootView: View {
     private func openPerson(_ person: DummyPerson) -> Bool {
         guard Self.canWalk(place: place, open: openLayers) else { return false }
         return walk.walk(to: .person(person), from: selectedItemID)
+    }
+
+    /// The way to the people who ask to follow the reader, pressed on their own page (#313):
+    /// the list, one more step of the walk — or, where the line is the lock of a sign-in that
+    /// does not see who follows them and may be asked, the question that asks it.
+    private func requestsPressed(_ entry: RequestsEntry) -> Bool {
+        guard entry.locked == nil else {
+            guard entry.asks else { return false }
+            session.askFor([.follows], host: entry.list.host)
+            return true
+        }
+        // Left, the list gives the line back: the lamp is on it again, and nothing in the list is lit.
+        guard Self.canWalk(place: place, open: openLayers), walk.walk(to: .people(entry.list), from: RequestsEntry.id)
+        else { return false }
+        selectedItemID = nil
+        return true
     }
 
     /// A list of people opened as a page of its own — all a search found (#319): one more step of the
@@ -2364,6 +2381,7 @@ public struct FediqoRootView: View {
                 onOpenRisingRow: { _ = openRisingRow($0) },
                 onOpenFound: { _ = openFound($0) },
                 onFollowed: { _ = followedPressed($0) },
+                onRequests: { _ = requestsPressed($0) },
                 onLookUp: lookUpPressed
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {

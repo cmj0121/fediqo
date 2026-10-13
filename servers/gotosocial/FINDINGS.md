@@ -502,6 +502,37 @@ left it. Kept as checks in `MastodonStandingSaysTests.swift` (`whatIsTakenIsNarr
   - GoToSocial 0.22.2: the same two; not asked
   - What in the app rests on it: neither is read off anybody not followed; `true` and `false` are what is sent
 
+### Asked later — requests to follow, and removing a follower
+
+Asked 2026-10-13 with a short script, after the 172 and not counted among them. Kept as checks in
+`MastodonStandingSaysTests.swift` (`requestsAreAnswered`) and `GoToSocialSaysTests.swift` (`answersRequests`), and as
+answers in `MastodonRequestsCaptures.swift`.
+
+- **`follow_requests`, as who may change who follows them; with the reading words alone; with no sign-in**:
+  - Mastodon 4.6.6: 200, accounts; `Link` `since_id` prev, and `max_id` next only where a `limit` cut it; 403 (but
+    `read:follows` is enough to list); 401
+  - GoToSocial 0.22.2: 200, accounts; `Link` `max_id` next and `min_id` prev **always**, with `limit`; 403; 401
+  - What in the app rests on it: `MastodonPeople.List.requests`: read on by the source's own next; here a next is
+    named after the last stretch too, and reading on from it brings nobody
+- **How many ask**:
+  - Mastodon 4.6.6: only `source.follow_requests_count` in `accounts/verify_credentials`; nothing on the list
+  - GoToSocial 0.22.2: the same
+  - What in the app rests on it: the line on the reader's own page says no figure: the page does not ask that check
+- **`follow_requests/:id/authorize` · `/reject`, of somebody who asked**:
+  - Mastodon 4.6.6: 200, the whole standing; `followed_by` true · false
+  - GoToSocial 0.22.2: the same, with its fourteen things
+  - What in the app rests on it: `MastodonStanding.answer`
+- **Either again; of a request taken back; of one already answered; of somebody who never asked; of an id nobody has**:
+  - Mastodon 4.6.6: 404 `"Record not found"`, nothing changed
+  - GoToSocial 0.22.2: 404 `"Not Found"`, nothing changed
+  - What in the app rests on it: a row gone stale can only fail: the press did not arrive, and the row comes back
+- **`accounts/:id/remove_from_followers`**:
+  - Mastodon 4.6.6: 200, the whole standing with `followed_by: false`; again, or of somebody who already left, the
+    same and nothing changed; of somebody who has only asked, 200 and **the request stays**; 404 for an id nobody has
+  - GoToSocial 0.22.2: **404 `"Not Found"` always — there is no such address**, for a follower as for anybody
+  - What in the app rests on it: `MastodonStanding.removeFollower`: here the press does not arrive and says so; the
+    item is still offered (nothing says beforehand that the address is absent)
+
 ## Could not be asked, or not comparable — 11
 
 - **An app registered with a word no server knows; with no words (2)**:

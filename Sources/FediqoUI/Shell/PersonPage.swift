@@ -49,6 +49,10 @@ struct PersonPageActs {
     /// The press beside "They moved to …".
     var onOpenMoved: (Person.Moved) -> Void = { _ in }
     var onFollowed: (FollowedTagsEntry) -> Void = { _ in }
+    /// The way to the people who ask to follow the reader, pressed on their own page.
+    var onRequests: (RequestsEntry) -> Void = { _ in }
+    /// A press on a row of the list in front that removes a follower (#313).
+    var onListAct: (PersonAct, Person) -> Void = { _, _ in }
     /// The head's Follow, or an item of the `…`.
     var onAct: (PersonAct) -> Void = { _ in }
     /// The press on the lock of a sign-in that was not asked for following.
@@ -256,14 +260,16 @@ struct PersonPage: View {
             if let about {
                 PersonAbout(
                     said: about, lit: selectedID, jumpToTop: jumpToTop, onHome: acts.onHome, onFollowed: acts.onFollowed,
-                    onAskFollows: acts.onAskFollows, onStandingAgain: acts.onStandingAgain, onAct: acts.onAct, lead: lead
+                    onAskFollows: acts.onAskFollows, onStandingAgain: acts.onStandingAgain, onAct: acts.onAct, onRequests: acts.onRequests,
+                    lead: lead
                 )
             }
         case .following, .followers:
             if let people {
                 PeopleRows(
                     said: people, selectedID: $selectedID, onOpen: acts.onOpenListed, onAskAgain: acts.onListAgain,
-                    onReadOn: acts.onListReadOn, jumpToTop: jumpToTop, lead: lead
+                    onReadOn: acts.onListReadOn, onAct: acts.onListAct, onAsk: acts.onAskFollows, jumpToTop: jumpToTop,
+                    lead: lead
                 )
             }
         case .pinned:

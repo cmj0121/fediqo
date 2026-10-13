@@ -312,6 +312,7 @@ final class ShellPersonPages {
         self.followed = followed
         let acts = ShellPersonActs(errands: count, readers: looks)
         self.acts = acts
+        lists.acts = acts
         let tabs = ShellPersonTabs(errands: count, readers: looks, hosts: hosts)
         self.tabs = tabs
         looks.whenChanged { [weak tabs] host in tabs?.letGo(at: host) }

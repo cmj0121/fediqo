@@ -161,6 +161,28 @@ public struct MastodonStanding: Sendable {
         return try Self.answered(about: accountID, try await door.post(path: "/api/v1/accounts/\(accountID)/follow", form: form))
     }
 
+    /// Answers the request of the account `accountID` names to follow the reader (#313): lets
+    /// them, or with `accept` false refuses, and hands back how the reader stands to them
+    /// afterwards. **Only a request that is there**: where they have not asked, took it back,
+    /// or were answered already, the source says it knows no such request and nothing is
+    /// changed (asked of a real one: `MastodonRequestsCaptures`) — it is thrown as the door
+    /// threw it.
+    public func answer(_ accountID: String, accept: Bool) async throws -> PersonStanding {
+        guard ListSubscription.isPathSegment(accountID) else { throw MastodonRequestError.invalidURL }
+        let path = "\(MastodonPeople.List.requestsPath)/\(accountID)/\(accept ? "authorize" : "reject")"
+        return try Self.answered(about: accountID, try await door.post(path: path, form: []))
+    }
+
+    /// Has the account `accountID` names follow the reader no longer (#313), and hands back
+    /// how the reader stands to them afterwards. **Of somebody who does not follow the reader
+    /// it changes nothing**, and is answered the same.
+    public func removeFollower(_ accountID: String) async throws -> PersonStanding {
+        guard ListSubscription.isPathSegment(accountID) else { throw MastodonRequestError.invalidURL }
+        return try Self.answered(
+            about: accountID, try await door.post(path: "/api/v1/accounts/\(accountID)/remove_from_followers", form: [])
+        )
+    }
+
     /// The standing a press was answered with, where it is about whom the press was about.
     private static func answered(about accountID: String, _ body: Data) throws -> PersonStanding {
         guard let said = try? MastodonJSON.decoder.decode(Said.self, from: body), let standing = said.standing,

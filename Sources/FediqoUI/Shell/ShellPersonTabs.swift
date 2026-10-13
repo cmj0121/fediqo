@@ -370,7 +370,25 @@ extension ShellPersonPages {
         } ?? false
         return PersonAboutSaid.made(
             of: said, home: homeSaid(of: who, in: session), homeLine: homeLine(of: who, in: session),
-            standing: stands(to: who, in: session), followed: followedEntry(of: who, in: session), hidden: hidden
+            standing: stands(to: who, in: session), followed: followedEntry(of: who, in: session), hidden: hidden,
+            requests: requestsEntry(of: who, in: session)
+        )
+    }
+
+    /// The way to the people who ask to follow the reader (#313), where the page of `who` is
+    /// their own at a source where somebody is followed — once it has said who they are, and
+    /// not while the page draws what their own server says: as the way to the hashtags they
+    /// follow is. Where the sign-in does not see who follows them, the line is its lock.
+    func requestsEntry(of who: DummyPerson, in session: ShellSession) -> RequestsEntry? {
+        let said = said(of: who, in: session)
+        guard said?.person != nil, home.said(of: who, beside: said, in: session) == nil,
+              let source = Self.source(of: who, in: session), ShellPersonActs.offersFollowing(source),
+              Self.own(at: who.host, in: session)?.id == who.id
+        else { return nil }
+        let place = session.mastodon.place(.follows, host: who.host) ?? PartWords.Place(kind: .none, key: "part.ask.partly")
+        return RequestsEntry(
+            list: PeopleList(requestsAt: source.host), counted: session.mastodon.asking(host: who.host),
+            locked: ShellPersonActs.sees(at: who.host, in: session) ? nil : place
         )
     }
 

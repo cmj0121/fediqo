@@ -151,6 +151,9 @@ public final class MastodonSessions {
         /// Nothing where the source gave the account no name of its own there.
         let handle: String?
         fileprivate let accessToken: String
+        /// How many ask to follow them, as the check that named them said. Nothing where it
+        /// said none, and nothing for a reader known only from what was written down.
+        fileprivate var asking: Int? = nil
 
         /// `handle`, made fit to stand in a sentence of ours: no control or format character,
         /// no line break, and no longer than a name may run (`LineText.oneLine`).
@@ -182,6 +185,18 @@ public final class MastodonSessions {
         }
         guard let reader = readers[host], held.accessToken == reader.accessToken else { return nil }
         return reader
+    }
+
+    /// How many people ask to follow whoever is signed in at `host` (#313), **as that
+    /// sign-in's own account check last said this run** — the source's figure at that check:
+    /// it does not count down when a request is answered here, and changes when the check
+    /// next runs. Nothing where the check said none, has not run for the sign-in held now, or
+    /// was another sign-in's: what one reader's check said is never laid on the next.
+    func asking(host raw: String) -> Int? {
+        _ = readersLearnt
+        let host = raw.lowercased()
+        guard let held = token(host: host), let reader = readers[host], held.accessToken == reader.accessToken else { return nil }
+        return reader.asking
     }
 
     /// How many sign-ins are on their way at each host: a sign-in made and not yet kept is
@@ -1040,7 +1055,7 @@ public final class MastodonSessions {
             }
         }
         if who.handle != handles[host] { handles[host] = who.handle }
-        readers[host] = who.id.map { Reader(id: $0, handle: who.handle, accessToken: asked.accessToken) }
+        readers[host] = who.id.map { Reader(id: $0, handle: who.handle, accessToken: asked.accessToken, asking: who.asking) }
         readersLearnt += 1
     }
 

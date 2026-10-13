@@ -113,12 +113,18 @@ public enum PersonAct: Sendable, Hashable, CaseIterable {
     /// Has the reader told of each post of somebody followed, or not told.
     case notify
     case stopNotifying
+    /// Lets somebody who asked to follow the reader do so, or refuses them.
+    case acceptRequest
+    case refuseRequest
+    /// Has somebody who follows the reader follow them no longer.
+    case removeFollower
 
     /// The part of a sign-in the act needs (#347): where it is not held, the act's place says
     /// so and asks. **No `default:`**, so an act added later has to say which.
     public var needs: MastodonPart {
         switch self {
-        case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying: .follows
+        case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .acceptRequest, .refuseRequest,
+             .removeFollower: .follows
         }
     }
 }

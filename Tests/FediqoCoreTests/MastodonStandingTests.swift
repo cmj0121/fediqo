@@ -190,6 +190,39 @@ struct MastodonStandingTests {
         #expect(try read(silent, "9") == PersonStanding(accountID: "9", following: true), "a standing, with neither said")
     }
 
+    @Test("A request to follow the reader is answered, and a follower removed, by one post each to the address the source has for it, as the person, naming them by the id it gave — and each hands back how the reader stands as the server said; a request that is not there is thrown as the door threw it, and an id that is no segment is asked of nobody")
+    func requestsAndRemoval() async throws {
+        typealias Asked = MastodonRequestsCaptures
+        let id = Asked.asker
+        let (stands, server) = try signedIn([
+            "POST /api/v1/follow_requests/\(id)/authorize": .json(Asked.authorized),
+            "POST /api/v1/follow_requests/\(id)/reject": .json(Asked.refused),
+            "POST /api/v1/accounts/\(id)/remove_from_followers": .json(Asked.refused),
+            "POST /api/v1/follow_requests/7/authorize": .json(Asked.noSuchRequest, status: 404),
+            "POST /api/v1/follow_requests/8/reject": .json(Asked.authorized),
+        ])
+        let follows = PersonStanding(accountID: id, following: true, followedBy: true, showsBoosts: true, notifies: false)
+        var gone = follows
+        gone.followedBy = false
+        #expect(try await stands.answer(id, accept: true) == follows)
+        #expect(try await stands.answer(id, accept: false) == gone)
+        #expect(try await stands.removeFollower(id) == gone)
+        #expect(await server.lines == [
+            "POST \(Self.origin)/api/v1/follow_requests/\(id)/authorize", "POST \(Self.origin)/api/v1/follow_requests/\(id)/reject",
+            "POST \(Self.origin)/api/v1/accounts/\(id)/remove_from_followers",
+        ])
+        #expect(await server.asked.allSatisfy { $0.bearer == "Bearer tok-123" })
+        await #expect(throws: MastodonAuthError.http(404)) { _ = try await stands.answer("7", accept: true) }
+        // An answer about somebody else is not an answer.
+        await #expect(throws: MastodonStandingError.unreadable) { _ = try await stands.answer("8", accept: false) }
+        for bad in ["", "1/authorize", "../1", "1?x=1"] {
+            await #expect(throws: MastodonRequestError.invalidURL) { _ = try await stands.answer(bad, accept: true) }
+            await #expect(throws: MastodonRequestError.invalidURL) { _ = try await stands.removeFollower(bad) }
+        }
+        #expect(await server.asked.count == 5)
+        #expect(MastodonPeople.List.requests.path == "/api/v1/follow_requests")
+    }
+
     @Test("A refusal is thrown as the door threw it and nothing is made of it; an answer about somebody else, or one that is no standing, is not an answer")
     func refusedAndUnreadable() async throws {
         let follow = "POST /api/v1/accounts/\(Captures.followable)/follow"

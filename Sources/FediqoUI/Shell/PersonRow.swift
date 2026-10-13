@@ -46,6 +46,9 @@ struct PersonRow: View {
     /// The row's `…`, where the list it stands on has something to do to a row. Nothing on a
     /// list that has not.
     var menu: NoticeRow.Menu?
+    /// Accepting their request to follow the reader (#313), where the row is of somebody who
+    /// asks: a press on the row, in words. Nothing on any other list.
+    var accept: (() -> Void)?
     /// Where a hosted row reports what it laid out and what it says. See `PersonRowProbe`.
     var probe: PersonRowProbe?
 
@@ -114,6 +117,7 @@ struct PersonRow: View {
                     Spacer(minLength: 0)
                     if !narrow {
                         pillRun(kinds + standing)
+                        accepting
                         dots
                     }
                 }
@@ -129,7 +133,10 @@ struct PersonRow: View {
                                 .modifier(PersonProbed(.words, probe: probe))
                         }
                         Spacer(minLength: 0)
-                        if narrow { dots }
+                        if narrow {
+                            accepting
+                            dots
+                        }
                     }
                 }
             }
@@ -149,6 +156,7 @@ struct PersonRow: View {
         .accessibilityAddTraits(onOpen == nil ? [] : .isButton)
         .accessibilityAction(.default) { onOpen?() }
         .accessibilityActions {
+            if let accept { Button(Self.acceptSpoken(person), action: accept) }
             if let menu { NoticeMenuActions(more: menu.more, asks: menu.asks) }
         }
         .modifier(NoticeRowMenu(menu: menu))
@@ -244,6 +252,21 @@ struct PersonRow: View {
                     .help(PersonSaid.locked())
                     .modifier(PersonProbed(.lock, probe: probe))
             }
+        }
+    }
+
+    /// What accepting their request is called to a pointer and a listener.
+    static func acceptSpoken(_ person: Person, language: DummyLanguage? = nil) -> String {
+        PersonActing.acceptSpoken(person.lineHandle, at: person.source.host, language: language)
+    }
+
+    /// The press that accepts their request: words, beside the row's `…`.
+    @ViewBuilder
+    private var accepting: some View {
+        if let accept {
+            ShellLinkButton(PersonActing.name(.acceptRequest), action: accept)
+                .help(Self.acceptSpoken(person))
+                .fixedSize()
         }
     }
 

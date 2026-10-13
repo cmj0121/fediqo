@@ -15,7 +15,7 @@ import SwiftUI
 struct PersonAboutSaid: Equatable {
     /// One block of the tab, top to bottom: what the lamp stops on.
     enum Block: String, CaseIterable {
-        case view, sentences, picture, words, fields, figures, none, stands, boosts, notices, home, you
+        case view, sentences, picture, words, fields, figures, none, stands, boosts, notices, home, requests, you
     }
 
     /// The host of the source that says, and whose copies the pictures are.
@@ -39,6 +39,8 @@ struct PersonAboutSaid: Equatable {
     var home: PersonHomeLine?
     /// The way to the hashtags the reader follows, on their own page.
     var followed: FollowedTagsEntry?
+    /// The way to the people who ask to follow the reader, on their own page (#313).
+    var requests: RequestsEntry?
 
     /// What About is handed, from what the page was: the source's word, their own server's
     /// where it is drawn, and how the reader stands.
@@ -48,13 +50,13 @@ struct PersonAboutSaid: Equatable {
     /// their own server stands over the tabs instead — where the source has not heard of them.
     static func made(
         of said: PersonSaid, home: PersonHomeSaid?, homeLine: PersonHomeLine?, standing: PersonActing?,
-        followed: FollowedTagsEntry?, hidden: Bool, language: DummyLanguage? = nil
+        followed: FollowedTagsEntry?, hidden: Bool, requests: RequestsEntry? = nil, language: DummyLanguage? = nil
     ) -> PersonAboutSaid {
         var about = PersonAboutSaid(
             source: said.source,
             view: home?.whoseView(language: language) ?? PersonSaid.whoseView(said.source, person: said.person, language: language),
             person: home?.person ?? said.person, fromHome: home != nil, standing: standing,
-            home: said.reading == .unheardOf ? nil : homeLine, followed: followed
+            home: said.reading == .unheardOf ? nil : homeLine, followed: followed, requests: requests
         )
         guard let person = about.person else { return about }
         about.sentences = PersonSaid.marks(of: person, source: home?.home ?? said.source, language: language)
@@ -100,6 +102,7 @@ struct PersonAboutSaid: Equatable {
             case .boosts: taken(.boosts) != nil
             case .notices: taken(.notices) != nil
             case .home: home != nil
+            case .requests: requests != nil
             case .you: followed != nil
             }
         }
@@ -157,6 +160,8 @@ struct PersonAbout<Lead: View>: View {
     var onStandingAgain: () -> Void = {}
     /// A switch of what is taken from them, pressed.
     var onAct: (PersonAct) -> Void = { _ in }
+    /// The way to the people who ask to follow the reader, pressed.
+    var onRequests: (RequestsEntry) -> Void = { _ in }
     /// What stands over the blocks and scrolls away with them: the page's head, at a text
     /// size where it would fill the page.
     @ViewBuilder var lead: Lead
@@ -211,6 +216,7 @@ struct PersonAbout<Lead: View>: View {
         case .boosts: narrowRow(.boosts)
         case .notices: narrowRow(.notices)
         case .home: home
+        case .requests: requests
         case .you: you
         }
     }
@@ -324,7 +330,7 @@ struct PersonAbout<Lead: View>: View {
                     marked(PersonHead.failedSymbol, failed, ink: ShellChrome.ink(colorScheme))
                     ShellLinkButton(L10n.t("person.retry"), action: onStandingAgain).fixedSize()
                 }
-                if let words = standing.lockWords() { locked(words, asks: standing.lock?.asks == true) }
+                if let words = standing.lockWords() { locked(words, asks: standing.lock?.asks == true, press: onAskFollows) }
             }
         }
     }
@@ -350,10 +356,10 @@ struct PersonAbout<Lead: View>: View {
     }
 
     @ViewBuilder
-    private func locked(_ words: String, asks: Bool) -> some View {
+    private func locked(_ words: String, asks: Bool, press: @escaping () -> Void) -> some View {
         let label = marked(SourceRow.permissionSymbol, words, ink: ShellChrome.markDim(colorScheme))
         if asks {
-            Button(action: onAskFollows) { label.contentShape(Rectangle()) }
+            Button(action: press) { label.contentShape(Rectangle()) }
                 .buttonStyle(.plain)
                 .help(L10n.t("mark.dim.askAgain"))
         } else {
@@ -368,6 +374,30 @@ struct PersonAbout<Lead: View>: View {
             PersonHomeLineView(line: line, onPress: onHome)
                 .padding(.horizontal, -ShellSpace.pad)
                 .padding(.vertical, -ShellSpace.snug)
+        }
+    }
+
+    /// The way to the people who ask to follow the reader: words and the mark that says it
+    /// leads on; or, where the sign-in does not see who follows them, its own sentence dim
+    /// with the lock, a press where it may be asked.
+    @ViewBuilder
+    private var requests: some View {
+        if let entry = said.requests {
+            if let place = entry.locked {
+                locked(entry.words(), asks: place.asks, press: { onRequests(entry) })
+            } else {
+                Button { onRequests(entry) } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                        Text(entry.words()).fixedSize(horizontal: false, vertical: true)
+                        Image(systemName: "chevron.right").shellFont(.mark).accessibilityHidden(true)
+                    }
+                    .shellFont(.reading)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(entry.words())
+            }
         }
     }
 

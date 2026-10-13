@@ -85,6 +85,8 @@ struct TimelinePane: View {
     var onOpenFound: (SearchFoundRow) -> Void = { _ in }
     /// The way to the hashtags followed, pressed on the reader's own page (#318).
     var onFollowed: (FollowedTagsEntry) -> Void = { _ in }
+    /// The way to the people who ask to follow the reader, pressed there (#313).
+    var onRequests: (RequestsEntry) -> Void = { _ in }
     /// The press about looking somebody up through a source, answered by the root.
     var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
@@ -221,6 +223,8 @@ struct TimelinePane: View {
                         onAskAgain: { Task { await people.lists.again(list, in: session) } },
                         onReadOn: { Task { await people.lists.readOn(list, in: session) } },
                         onChoose: { choice in Task { await people.lists.choose(choice, for: list, in: session) } },
+                        onAct: { act, person in Task { await people.lists.press(act, on: person, of: list, in: session) } },
+                        onAsk: { session.askFor([PersonAct.removeFollower.needs], host: list.host) },
                         jumpToTop: jumpToTop,
                         onBack: onBack
                     )
@@ -666,6 +670,11 @@ struct TimelinePane: View {
                 if let there = DummyPerson(handle: moved.handle, host: person.host) { onOpenPerson(there) }
             },
             onFollowed: onFollowed,
+            onRequests: onRequests,
+            onListAct: { act, listed in
+                guard let people, let list = people.list(people.front(of: person, in: session), of: person, in: session) else { return }
+                Task { await people.lists.press(act, on: listed, of: list, in: session) }
+            },
             onAct: { act in Task { await people?.act(act, on: person, in: session) } },
             onAskFollows: { session.askFor([PersonAct.follow.needs], host: person.host) },
             onStandingAgain: { Task { await people?.standsAgain(to: person, in: session) } },

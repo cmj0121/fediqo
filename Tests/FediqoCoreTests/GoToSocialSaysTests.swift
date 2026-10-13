@@ -121,4 +121,54 @@ struct GoToSocialSaysTests {
         }
         #expect(try await stands.narrow(other, boosts: boosts, notify: notify) == before, "put back as the seed left it")
     }
+
+    @Test("Requests to follow are listed and answered there as on a Mastodon — accepted, refused, and a request that is not there refused as not found — but nobody is removed from following: that address is not there at all")
+    func answersRequests() async throws {
+        try await LocalServers.requireGoToSocial()
+        let seeded = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: LocalServers.repoRoot.appending(path: "servers/.run/gotosocial-tokens.json"))
+        ) as? [String: Any]
+        let other = try #require(seeded?["other_id"] as? String), me = try #require(seeded?["writer_id"] as? String)
+        let asker = try #require(seeded?["other"] as? String)
+        let http = try LocalHTTP.client()
+        func asAsker(_ act: String) async throws {
+            var request = URLRequest(url: try #require(URL(string: "https://\(Self.host)/api/v1/accounts/\(me)/\(act)")))
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(asker)", forHTTPHeaderField: "Authorization")
+            _ = try await http.send(request)
+        }
+        let tokens = MemoryMastodonTokens()
+        let token = MastodonToken(host: Self.host, accessToken: try LocalServers.gotosocialWriterToken(), clientID: "x", clientSecret: "x")
+        try tokens.save(token)
+        let door = MastodonAuthorized(token: token, sender: http, store: tokens)
+        let stands = MastodonStanding(door: door), people = MastodonPeople(door: door)
+        func listed() async throws -> [String] {
+            try await people.stretch(.requests, source: Source(host: Self.host, kind: .mastodon), limit: 80).people.map(\.accountID)
+        }
+        // As the seed left it they follow the writer: they leave, and ask again.
+        let thrown: (any Error)?
+        do {
+            await #expect(throws: MastodonAuthError.http(404)) { _ = try await stands.removeFollower(other) }
+            #expect(try await stands.standing(to: other)?.followedBy == true, "nobody was removed: there is no such address")
+            try await asAsker("unfollow")
+            #expect(try await listed().contains(other) == false)
+            await #expect(throws: MastodonAuthError.http(404)) { _ = try await stands.answer(other, accept: true) }
+            try await asAsker("follow")
+            #expect(try await listed() == [other])
+            #expect(try await stands.answer(other, accept: false).followedBy == false)
+            await #expect(throws: MastodonAuthError.http(404)) { _ = try await stands.answer(other, accept: false) }
+            try await asAsker("follow")
+            #expect(try await stands.answer(other, accept: true).followedBy == true)
+            await #expect(throws: MastodonAuthError.http(404)) { _ = try await stands.answer(other, accept: true) }
+            thrown = nil
+        } catch {
+            thrown = error
+        }
+        // Put back as the seed left it, whatever became of the asking.
+        if (try? await stands.standing(to: other))??.followedBy != true {
+            try? await asAsker("follow")
+            _ = try? await stands.answer(other, accept: true)
+        }
+        if let thrown { throw thrown }
+    }
 }

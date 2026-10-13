@@ -73,6 +73,8 @@ struct PersonActing: Equatable {
         case .hideBoosts: standing.showsBoosts = false
         case .notify: standing.notifies = true
         case .stopNotifying: standing.notifies = false
+        case .acceptRequest: standing.followedBy = true
+        case .refuseRequest, .removeFollower: standing.followedBy = false
         case nil: break
         }
         return standing
@@ -182,17 +184,25 @@ struct PersonActing: Equatable {
     }
 
     /// What the page's `…` offers, in the order it lists them: stopping following, or taking a
-    /// request back. None while a press is on its way, and none the sign-in may not make.
+    /// request back; and — under the divider, since it takes something from them — having
+    /// them follow the reader no longer (#313), only where the source said they do. None while
+    /// a press is on its way, and none the sign-in may not make.
     var more: [PersonAct] {
         guard changes, doing == nil, let standing = shown else { return [] }
-        if standing.following { return [.unfollow] }
-        return standing.requested ? [.withdraw] : []
+        let own: [PersonAct] = standing.following ? [.unfollow] : standing.requested ? [.withdraw] : []
+        return own + (standing.followedBy ? [.removeFollower] : [])
     }
 
     /// Whether `act` is asked about before it is sent: unfollowing somebody who must agree to
     /// be followed, since following them again means asking again.
     func asksBefore(_ act: PersonAct) -> Bool {
-        act == .unfollow && asksFirst
+        (act == .unfollow && asksFirst) || act == .removeFollower
+    }
+
+    /// The question `act` is asked about first with.
+    @MainActor
+    func question(before act: PersonAct) -> ShellConfirmation {
+        act == .removeFollower ? ShellQuestion.about(act, named, at: source) : ShellQuestion.unfollow(named, at: source)
     }
 
     /// Whether "Try again" stands beside the line: the source could not be asked.
@@ -298,7 +308,7 @@ struct PersonActing: Equatable {
 
     /// The sentence of a press that did not arrive, or nothing.
     func missedWords(language: DummyLanguage? = nil) -> String? {
-        missed.map { String(format: L10n.t(Self.key($0) + ".failed", language: language), named, source) }
+        missed.map { Self.missedWords($0, named: named, at: source, language: language) }
     }
 
     /// The word of the heading's press: to follow, or — of somebody who must agree — to ask.
@@ -316,6 +326,18 @@ struct PersonActing: Equatable {
         return String(format: L10n.t(key, language: language), named, source)
     }
 
+    /// What a press that did not arrive is said as, of an act on somebody a sentence of ours
+    /// calls `named` at `source`: the one sentence, on their page and on a row of a list.
+    static func missedWords(_ act: PersonAct, named: String, at source: String, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t(key(act) + ".failed", language: language), named, source)
+    }
+
+    /// What accepting somebody's request is called to a pointer and a listener: what it
+    /// does, to whom and where.
+    static func acceptSpoken(_ named: String, at source: String, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("person.act.accept.spoken", language: language), named, source)
+    }
+
     /// What an act is called in the page's `…`.
     static func name(_ act: PersonAct, language: DummyLanguage? = nil) -> String {
         L10n.t(key(act), language: language)
@@ -328,6 +350,9 @@ struct PersonActing: Equatable {
         case .withdraw: "arrow.uturn.backward"
         case .showBoosts, .hideBoosts: "arrow.2.squarepath"
         case .notify, .stopNotifying: "bell"
+        case .acceptRequest: "person.crop.circle.badge.checkmark"
+        case .refuseRequest: "person.crop.circle.badge.xmark"
+        case .removeFollower: "person.crop.circle.badge.minus"
         }
     }
 
@@ -338,6 +363,9 @@ struct PersonActing: Equatable {
         case .withdraw: "person.act.withdraw"
         case .showBoosts, .hideBoosts: "person.act.boosts"
         case .notify, .stopNotifying: "person.act.notify"
+        case .acceptRequest: "person.act.accept"
+        case .refuseRequest: "person.act.refuse"
+        case .removeFollower: "person.act.removeFollower"
         }
     }
 
@@ -348,7 +376,7 @@ struct PersonActing: Equatable {
         ShellMore(head: head, items: more.map { offered in
             let symbol = Self.symbol(offered), name = Self.name(offered)
             guard asksBefore(offered) else { return .plain(symbol, name) { act(offered) } }
-            return .danger(symbol, name, asks: ShellQuestion.unfollow(named, at: source)) { act(offered) }
+            return .danger(symbol, name, asks: question(before: offered)) { act(offered) }
         })
     }
 }

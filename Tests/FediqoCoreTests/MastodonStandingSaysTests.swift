@@ -243,6 +243,79 @@ struct MastodonStandingSaysTests {
         }
     }
 
+    @Test("Requests to follow somebody are listed to them and answered by them: accepted, the whole standing says the asker follows; refused, that they do not; either again, of a request taken back, or of somebody who never asked, is refused as not found and changes nothing. A follower is removed and the standing says so; again, and of somebody who already left, it changes nothing; of somebody who has only asked, the request stays. A sign-in that only sees is listed its own and refused every change")
+    func requestsAreAnswered() async throws {
+        try await LocalServers.requireHealthy()
+        let all = try LocalServers.seeded(), seeded = try seeded()
+        // Asked as the seed's person with a sign-in of their own, locked for the length of
+        // this: the writer's own requests are what other checks read, and are left alone.
+        let me = seeded.people.hidden
+        let asker = try #require(try await ask("/api/v1/accounts/verify_credentials", as: all.other).object["id"] as? String)
+        func asks() async throws { _ = try await ask(Self.account(me.id, "follow"), as: all.other, "POST") }
+        func leaves() async throws { _ = try await ask(Self.account(me.id, "unfollow"), as: all.other, "POST") }
+        func listed(as token: String) async throws -> [String] {
+            let people = MastodonPeople(door: MastodonAuthorized(
+                token: MastodonToken(host: Self.host, accessToken: token, clientID: "x", clientSecret: "x"),
+                sender: try LocalHTTP.client(), store: MemoryMastodonTokens()
+            ))
+            return try await people.stretch(.requests, source: Source(host: Self.host, kind: .mastodon), limit: 80).people.map(\.accountID)
+        }
+        _ = try await ask("/api/v1/accounts/update_credentials", as: me.token, "PATCH", form: "locked=true")
+        let thrown: (any Error)?
+        do {
+            let answers = try reader(me.token)
+            try await leaves()
+            #expect(try await listed(as: me.token).isEmpty)
+            await #expect(throws: MastodonAuthError.http(404)) { _ = try await answers.answer(asker, accept: true) }
+            await #expect(throws: MastodonAuthError.http(404)) { _ = try await answers.answer(asker, accept: false) }
+
+            try await asks()
+            #expect(try await listed(as: me.token) == [asker])
+            // Removing a follower does nothing to somebody who has only asked: they still ask.
+            #expect(try await answers.removeFollower(asker).followedBy == false)
+            #expect(try await listed(as: me.token) == [asker])
+            let whole = try await ask("/api/v1/follow_requests/\(asker)/authorize", as: me.token, "POST")
+            #expect(whole.text.contains(#""followed_by":true"#))
+            #expect(Set(whole.object.keys) == MastodonSignInCaptures.standingNames, "the whole standing")
+            #expect(try await listed(as: me.token).isEmpty)
+            await #expect(throws: MastodonAuthError.http(404)) { _ = try await answers.answer(asker, accept: true) }
+            await #expect(throws: MastodonAuthError.http(404)) { _ = try await answers.answer(asker, accept: false) }
+            #expect(try await answers.standing(to: asker)?.followedBy == true, "answering twice changed nothing")
+
+            #expect(try await answers.removeFollower(asker).followedBy == false)
+            #expect(try await answers.removeFollower(asker).followedBy == false, "again: nothing to change")
+            #expect(try await answers.standing(to: asker)?.followedBy == false)
+
+            try await asks()
+            #expect(try await answers.answer(asker, accept: false).followedBy == false)
+            await #expect(throws: MastodonAuthError.http(404)) { _ = try await answers.answer(asker, accept: false) }
+            // Taken back before it is answered.
+            try await asks()
+            try await leaves()
+            await #expect(throws: MastodonAuthError.http(404)) { _ = try await answers.answer(asker, accept: true) }
+            #expect(try await answers.standing(to: asker)?.followedBy == false, "nobody was let in")
+            await #expect(throws: MastodonAuthError.http(404)) { _ = try await answers.removeFollower("1999999999") }
+            // How many ask is said by the account check alone, and nowhere on the list.
+            let check = try await ask("/api/v1/accounts/verify_credentials", as: me.token).object
+            #expect((check["source"] as? [String: Any])?["follow_requests_count"] as? Int == 0 && check["follow_requests_count"] == nil)
+            thrown = nil
+        } catch {
+            thrown = error
+        }
+        try? await leaves()
+        _ = try await ask("/api/v1/accounts/update_credentials", as: me.token, "PATCH", form: "locked=false")
+        if let thrown { throw thrown }
+
+        // The writer's own, with the word that only sees: listed, and every change refused.
+        let sees = try reader(seeded.seeing)
+        _ = try await listed(as: seeded.seeing)
+        await #expect(throws: MastodonAuthError.http(403)) { _ = try await sees.answer(asker, accept: true) }
+        await #expect(throws: MastodonAuthError.http(403)) { _ = try await sees.answer(asker, accept: false) }
+        await #expect(throws: MastodonAuthError.http(403)) { _ = try await sees.removeFollower(asker) }
+        let none = try await ask("/api/v1/follow_requests")
+        #expect(none.status == 401)
+    }
+
     @Test("Somebody who must agree is asked and not followed, at every asking; unfollowing them is what withdraws the request, and the next read says so")
     func somebodyWhoMustAgree() async throws {
         try await LocalServers.requireHealthy()
