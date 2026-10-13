@@ -127,10 +127,23 @@ final class ShellPersonActs {
     /// somebody is followed, nobody is signed in to it, it has not said who the reader is
     /// there, or `who` is the reader.
     private static func source(of who: DummyPerson, in session: ShellSession) -> Source? {
-        guard let source = ShellPersonPages.source(of: who, in: session), offersFollowing(source),
-              let own = ShellPersonPages.own(at: source.host, in: session), own.id != who.id
+        guard let source = ShellPersonPages.source(of: who, in: session), stands(to: who.id, at: source, in: session)
         else { return nil }
         return source
+    }
+
+    /// Whether the reader stands to the person `id` names at `source`: somebody is followed
+    /// there, it has said who the reader is, and they are not the reader.
+    private static func stands(to id: String, at source: Source, in session: ShellSession) -> Bool {
+        guard offersFollowing(source), let own = ShellPersonPages.own(at: source.host, in: session) else { return false }
+        return own.id != id
+    }
+
+    /// Whether `source` is asked how the reader stands to the person `id` names: the reader
+    /// stands to them there, and their sign-in sees it. **The one rule**, for somebody's page
+    /// and for their row on a list of people.
+    static func isTold(of id: String, at source: Source, in session: ShellSession) -> Bool {
+        stands(to: id, at: source, in: session) && sees(at: source.host, in: session)
     }
 
     /// Whether somebody is followed at `source`: the fact itself, read here and by nobody else.
@@ -164,8 +177,8 @@ final class ShellPersonActs {
     /// The opening of the page of `who`, once their source has said who they are — or nothing
     /// where nobody is asked how the reader stands to them.
     func opening(_ who: DummyPerson, said: PersonSaid?, in session: ShellSession) -> Opening? {
-        guard let person = said?.person, let source = Self.source(of: who, in: session),
-              Self.sees(at: source.host, in: session)
+        guard let person = said?.person, let source = ShellPersonPages.source(of: who, in: session),
+              Self.isTold(of: who.id, at: source, in: session)
         else { return nil }
         return Opening(
             id: who.id, accountID: person.accountID, askedAs: ShellPersonPages.askedAs(at: source.host, in: session),

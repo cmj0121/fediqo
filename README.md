@@ -538,10 +538,8 @@ on a post is: a read already on its way does not undo it, and a press that did n
 puts the page back to what the source last said and says so. Where the source cannot be asked
 how you stand, the page says it could not ask and offers to try again, and draws no standing.
 
-Two things are not here. A row in a list of people — who somebody follows, who follows them —
-shows no standing; only their page does. And following somebody on another server is not
-settled by the press: the page reads the source again, and says "asked" until their server
-agrees.
+One thing is not here. Following somebody on another server is not settled by the press: the
+page reads the source again, and says "asked" until their server agrees.
 
 What a post refers to is read for it. When a post first arrives and the post it answers is
 not on this device — or a post it quotes that did not come with it — Fediqo asks the source

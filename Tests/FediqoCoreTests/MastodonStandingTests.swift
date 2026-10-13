@@ -51,6 +51,45 @@ struct MastodonStandingTests {
         #expect(try MastodonStanding.standing(to: "117417151802177425", in: Data("[]".utf8)) == nil)
     }
 
+    @Test("A stretch of people is asked about in one ask, naming each once by their id as the wire carries it, on the sign-in's host, as the person; each is read by the id their entry carries, whatever the order; whoever the server left out, whoever was not asked about and an entry that cannot be read have no standing; naming nobody asks nothing, an id that is no segment is named in no ask, and more than one ask names is refused before anything is asked")
+    func aStretchInOneAsk() async throws {
+        let body = MastodonPeopleCaptures.standing
+        let ids = try #require(try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [[String: Any]]).compactMap { $0["id"] as? String }
+        // Asked in another order than answered, with one named twice, an id nobody has, and one no segment.
+        let named = Array(ids.reversed()) + [ids[0], "1999999999", "1/follow"]
+        let query = (Array(ids.reversed()) + ["1999999999"]).map { "id%5B%5D=\($0)" }.joined(separator: "&")
+        let (stands, server) = try signedIn(["GET /api/v1/accounts/relationships?\(query)": .json(body)])
+        let said = try await stands.standings(to: named)
+        #expect(await server.asked == [.init(
+            method: "GET", address: "\(Self.origin)/api/v1/accounts/relationships?\(query)", bearer: "Bearer tok-123"
+        )])
+        #expect(Set(said.keys) == Set(ids) && said.allSatisfy { $0.key == $0.value.accountID })
+        for id in ids { #expect(said[id] == (try MastodonStanding.standing(to: id, in: Data(body.utf8)))) }
+
+        let whole = Captures.unfollowed, other = Captures.asked
+        let read = try MastodonStanding.standings(
+            to: [Captures.followable, "1999999999"],
+            in: Data("[7,\(whole.replacingOccurrences(of: #""following":false,"#, with: "")),\(other)]".utf8)
+        )
+        #expect(read.isEmpty, "an entry that leaves a part out, one that is no entry, and one about somebody not asked")
+        #expect(try MastodonStanding.standings(to: [Captures.followable], in: Data("[7,\(whole)]".utf8)) == [
+            Captures.followable: PersonStanding(accountID: Captures.followable),
+        ])
+        for silent in ["", "null", "{}", "<html>", whole] {
+            #expect(throws: MastodonStandingError.unreadable, "\(silent.prefix(40))") {
+                _ = try MastodonStanding.standings(to: [Captures.followable], in: Data(silent.utf8))
+            }
+        }
+
+        let (nobody, unasked) = try signedIn([:])
+        #expect(try await nobody.standings(to: []).isEmpty)
+        #expect(try await nobody.standings(to: ["", "1/follow", "../1"]).isEmpty)
+        await #expect(throws: MastodonRequestError.invalidURL) {
+            _ = try await nobody.standings(to: (0 ... MastodonStanding.most).map { "\($0)" })
+        }
+        #expect(await unasked.asked.isEmpty && MastodonStanding.most == 80)
+    }
+
     @Test("An answer that does not say how the reader stands is not one to go by, and is never read as not followed: a body that is no list, an entry of theirs that leaves a part out or says it in another shape, an entry that cannot be read beside none of theirs")
     func anAnswerThatDoesNotSay() {
         let id = Captures.followable

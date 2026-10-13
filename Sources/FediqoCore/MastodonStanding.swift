@@ -59,6 +59,9 @@ public enum MastodonStandingError: Error, Equatable, Sendable {
 /// before anything is asked. Coming back, a standing is taken only where it is about the id
 /// asked: a source that answers about somebody else has not answered.
 ///
+/// **A stretch of a list is asked about in one ask** (`standings`), naming everybody in it:
+/// the source answers for as many as are named, and leaves out whom it has nothing to say of.
+///
 /// **Unfollowing withdraws a request too**: the source has one address for both, and answers
 /// each the same way.
 ///
@@ -81,6 +84,41 @@ public struct MastodonStanding: Sendable {
         // `id[]`, spelled as the wire carries it: a query's name goes out as it is written here.
         let body = try await door.get(path: Self.path, query: [URLQueryItem(name: "id%5B%5D", value: accountID)])
         return try Self.standing(to: accountID, in: body)
+    }
+
+    /// How many people one ask names at most: as many as the longest stretch of a list
+    /// brings. **This app's bound, not the server's** — a real one counts nobody and refuses an
+    /// ask only by its length, past some six hundred names (`MastodonStandingSaysTests`).
+    public static let most = 80
+
+    /// How the reader stands to each of the accounts `accountIDs` name, as the source says
+    /// now, **in one ask**: by the id of each, for those it said every part of. Nobody is
+    /// there who was not asked about, an id that is no segment of a path is asked of nobody,
+    /// and an account the source has no entry for — one it suspended, an id nobody has — or
+    /// whose entry could not be read has no standing here, which is never "not followed".
+    /// Naming nobody asks nothing, and naming more than `most` is refused before anything is
+    /// asked. `unreadable` where the body is no list.
+    public func standings(to accountIDs: [String]) async throws -> [String: PersonStanding] {
+        var asked: [String] = []
+        for id in accountIDs where ListSubscription.isPathSegment(id) && !asked.contains(id) { asked.append(id) }
+        guard !asked.isEmpty else { return [:] }
+        guard asked.count <= Self.most else { throw MastodonRequestError.invalidURL }
+        let body = try await door.get(path: Self.path, query: asked.map { URLQueryItem(name: "id%5B%5D", value: $0) })
+        return try Self.standings(to: asked, in: body)
+    }
+
+    /// The standings to `accountIDs` in the answer to `relationships`: each entry that is
+    /// about one of them and says every part.
+    static func standings(to accountIDs: [String], in body: Data) throws -> [String: PersonStanding] {
+        guard let wire = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<Said>].self, from: body) else {
+            throw MastodonStandingError.unreadable
+        }
+        let asked = Set(accountIDs)
+        var said: [String: PersonStanding] = [:]
+        for standing in wire.compactMap({ $0.value?.standing }) where asked.contains(standing.accountID) {
+            said[standing.accountID] = standing
+        }
+        return said
     }
 
     /// Follows the account `accountID` names — asks to, where they must agree — or with `on`

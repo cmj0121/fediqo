@@ -134,7 +134,12 @@ struct PersonActing: Equatable {
     /// The pills of how the reader stands to them, in the order they are drawn: they follow the
     /// reader, the reader follows them, has asked to, mutes them, blocks them.
     func pills(language: DummyLanguage? = nil) -> [String] {
-        guard let standing = shown else { return [] }
+        shown.map { Self.pills(of: $0, language: language) } ?? []
+    }
+
+    /// The pills of `standing`, in that order and those words: a page's, and a row's on a list
+    /// of people.
+    static func pills(of standing: PersonStanding, language: DummyLanguage? = nil) -> [String] {
         var pills: [String] = []
         if standing.followedBy { pills.append(L10n.t("person.stands.followsYou", language: language)) }
         if standing.following { pills.append(L10n.t("person.stands.following", language: language)) }

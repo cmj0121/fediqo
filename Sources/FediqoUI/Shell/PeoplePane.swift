@@ -50,6 +50,11 @@ struct PeopleSaid: Equatable {
     /// said in a line of its own, above who it gave then — who stand.
     var againFailed = false
     var people: [Person] = []
+    /// How the reader stands to the people listed, as the source last said, by the id it knows
+    /// each by. **Only whom it has said of**: nobody where nobody was asked — no sign-in, one
+    /// that does not see it, a source where nobody is followed — where the ask is out, and
+    /// where it failed. A row of somebody not here draws no word of it.
+    var stands: [String: PersonStanding] = [:]
     /// Whether the list is being asked from the top.
     var asking = false
     var foot: Foot?
@@ -356,6 +361,7 @@ struct PeoplePane: View {
     private func row(_ person: Person) -> some View {
         PersonRow(
             person: person,
+            stands: said.stands[person.accountID],
             selected: person.id == selectedID,
             onPress: {
                 switch DummyCommand.tapped(person.id, selected: selectedID, touch: touch) {

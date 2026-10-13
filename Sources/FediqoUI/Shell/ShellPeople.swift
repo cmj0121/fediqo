@@ -50,6 +50,21 @@ import Observation
 // limit**: a host that gives fewer in a stretch than it was asked for is cut short there, and
 // that is called the end. Absent by the host's own address, as a directory is.
 // **Nothing here tells a source not to suggest somebody**: that needs a word no sign-in holds.
+//
+// **A stretch that lands is asked about once more: how the reader stands to the people in it**
+// (#310, #313) — one ask for each eighty people of a stretch, which is one ask a stretch as
+// these lists ask for them, naming them, through the door and on the record the stretch itself
+// was asked by. **Only where a person's page would be told** (`ShellPersonActs`): the
+// source is one where somebody is followed, the reader is signed in to it and named by it, and
+// their sign-in sees who they follow; and never about the reader themselves. Otherwise nobody
+// is asked and a row is as it was. **Nobody is asked about twice**: reading on asks about the
+// new stretch only, and an ask that fails is not made again until the list is asked from the
+// top — its rows stay without a word, and nothing is said of the failure or guessed in its
+// place. **An answer is the list's and the reader's it was asked for**: it lands only on the
+// page that asked, as it was last read from the top, while that page is still whoever would
+// ask now's. Asked from the top, what the source said before stands for whoever is still
+// listed until it answers again — and then its answer is its whole word of them: whoever it
+// says nothing of has none.
 
 /// A list of people a source keeps, as a step of the walk names it: which list, of whom, at
 /// which source — and what that source said of the account when the list was opened.
@@ -232,6 +247,17 @@ final class ShellPeoplePages {
         var farthest = false
         /// The number of the ask or the reading-on whose answer this list awaits.
         var awaits = 0
+        /// Which page this is, of all made this run: a page let go and made again is another.
+        let number: Int
+        /// How the reader stands to the people listed, as the source last said, by the id it
+        /// knows each by: only whom it has said of.
+        var stands: [String: PersonStanding] = [:]
+        /// Whom the source was asked about since the list was last read from the top: nobody
+        /// is asked about twice.
+        var stood: Set<String> = []
+        /// How often the list was read from the top: what an answer about an earlier reading
+        /// is told by.
+        var round = 0
 
         /// Whether asking came to something. A list that is not settled and has nothing on the
         /// wire — an ask that was stopped — is asked again when it is opened.
@@ -326,6 +352,7 @@ final class ShellPeoplePages {
         handed.reading = page.answered ? .said : page.failed ? .failed : .asking
         handed.againFailed = page.answered && page.failed
         handed.people = page.read.people
+        handed.stands = page.stands
         handed.asking = page.asking
         handed.foot = Self.foot(of: page)
         return handed
@@ -418,7 +445,10 @@ final class ShellPeoplePages {
         let askedAs = ShellPersonPages.askedAs(at: source.host, in: session)
         if self.standing(list, at: source, in: session) == nil {
             // Nobody's list yet, or somebody else's: what was given to them is not given to this one.
-            pages[id] = Page(host: source.host, askedAs: askedAs, under: ShellPersonPages.signIns(at: source.host, in: session))
+            pages[id] = Page(
+                host: source.host, askedAs: askedAs, under: ShellPersonPages.signIns(at: source.host, in: session),
+                number: errands.next()
+            )
         }
         named(id, as: askedAs)
         keep(id)
@@ -437,7 +467,10 @@ final class ShellPeoplePages {
         let through = self.door(to: list, asked: choice, at: source, with: held, in: session)
         let round = hosts.round(at: source.host)
         let task = Task {
-            await self.ask(list, of: through, asked: choice, at: source, as: askedAs, errand: errand, round: round, in: session)
+            await self.ask(
+                list, of: through, asked: choice, at: source, as: askedAs, with: held, errand: errand, round: round,
+                in: session
+            )
         }
         asks[id] = task
         return task
@@ -445,16 +478,25 @@ final class ShellPeoplePages {
 
     private func ask(
         _ list: PeopleList, of through: Stretches, asked choice: DirectoryChoice, at source: Source,
-        as askedAs: AskedAs, errand: Int, round: Int, in session: ShellSession
+        as askedAs: AskedAs, with held: MastodonToken?, errand: Int, round: Int, in session: ShellSession
     ) async {
         let id = list.id
         defer { if pages[id]?.awaits == errand { asks[id] = nil } }
+        var reached: [Person] = []
         do {
             let first = try await through(nil)
             guard pages[id]?.awaits == errand else { return }
             // From the top: what was read before is replaced whole.
             let fresh = try PeopleRead().readingOn(first)
             pages[id]?.read = fresh
+            // And everybody in it is asked about afresh. What the source said of whoever is
+            // still listed stands until it says again.
+            let listed = Set(fresh.people.map(\.accountID))
+            let standing = pages[id]?.stands.filter { listed.contains($0.key) } ?? [:]
+            pages[id]?.stands = standing
+            pages[id]?.stood = []
+            pages[id]?.round += 1
+            reached = fresh.people
             pages[id]?.answered = true
             pages[id]?.failed = false
             pages[id]?.footFailed = false
@@ -475,6 +517,60 @@ final class ShellPeoplePages {
         // as it was asked before.
         pages[id]?.wanted = nil
         pages[id]?.asking = false
+        await stand(to: reached, on: list, at: source, with: held, in: session)
+    }
+
+    // MARK: - How the reader stands to them
+
+    /// Whether an answer about the people of the page numbered `number`, as it was read from
+    /// the top the `round`th time, is still that page's to take: it stands **for whoever would
+    /// ask now**, and is that page and that reading of it.
+    private func isStill(_ number: Int, round: Int, of list: PeopleList, at source: Source, in session: ShellSession) -> Bool {
+        self.standing(list, at: source, in: session).map { $0.number == number && $0.round == round } ?? false
+    }
+
+    /// The stretch `people` came in has landed: the source is asked how the reader stands to
+    /// whoever of them it was not yet asked about — in one ask where they are no more than one
+    /// ask names, and in one after another where a source sent a longer stretch than that.
+    /// Nobody is asked about whom a person's page would not be told of
+    /// (`ShellPersonActs.isTold`), and nobody for a list whose reader is no longer who the
+    /// stretch was asked as.
+    ///
+    /// **An answer is the source's whole word of whoever it named**: somebody it says nothing
+    /// of — no entry, or one that cannot be read — has no word here from then on, whatever it
+    /// said of them before. An ask that fails takes nothing away.
+    private func stand(
+        to people: [Person], on list: PeopleList, at source: Source, with held: MastodonToken?,
+        in session: ShellSession
+    ) async {
+        let id = list.id
+        guard let held, let page = self.standing(list, at: source, in: session) else { return }
+        var named: [String] = []
+        for person in people where !page.stood.contains(person.accountID) && !named.contains(person.accountID) {
+            if ShellPersonActs.isTold(of: DummyPerson(person).id, at: source, in: session) { named.append(person.accountID) }
+        }
+        guard !named.isEmpty else { return }
+        pages[id]?.stood.formUnion(named)
+        let through = session.reach.standing(session.mastodon.authorized(token: held, within: deadline, for: .people))
+        var left = named[...]
+        while !left.isEmpty {
+            let asked = Array(left.prefix(MastodonStanding.most))
+            left = left.dropFirst(asked.count)
+            do {
+                let said = try await through.standings(to: asked)
+                guard isStill(page.number, round: page.round, of: list, at: source, in: session) else { return }
+                for silent in asked where said[silent] == nil { pages[id]?.stands[silent] = nil }
+                pages[id]?.stands.merge(said) { _, now in now }
+            } catch {
+                // The rows stay as they are: nothing is said of it, and nothing is drawn in its
+                // place. What it says of the sign-in is told whatever became of the list — to
+                // whoever is still the reader it was asked as, and to nobody else (`concluded`).
+                if !Cancellation.happened(error) {
+                    ShellPersonPages.concluded(error, at: source, askedAs: page.askedAs, in: session)
+                }
+                return
+            }
+        }
     }
 
     /// Whether `stretch`, asked for after `next` and which brought people and named no next, is
@@ -508,6 +604,7 @@ final class ShellPeoplePages {
         pages[list.id]?.failed = false
         pages[list.id]?.footFailed = false
         pages[list.id]?.read = PeopleRead()
+        pages[list.id]?.stands = [:]
     }
 
     /// The foot's press: the stretch after what the page holds, by the place the source named.
@@ -536,7 +633,10 @@ final class ShellPeoplePages {
         let through = self.door(to: list, asked: page.choice, at: source, with: looked.held, in: session)
         let round = hosts.round(at: source.host)
         let task = Task {
-            await self.read(list, after: next, of: through, at: source, as: askedAs, errand: errand, round: round, in: session)
+            await self.read(
+                list, after: next, of: through, at: source, as: askedAs, with: looked.held, errand: errand, round: round,
+                in: session
+            )
         }
         asks[id] = task
         await task.value
@@ -544,10 +644,11 @@ final class ShellPeoplePages {
 
     private func read(
         _ list: PeopleList, after next: String, of through: Stretches, at source: Source, as askedAs: AskedAs,
-        errand: Int, round: Int, in session: ShellSession
+        with held: MastodonToken?, errand: Int, round: Int, in session: ShellSession
     ) async {
         let id = list.id
         defer { if pages[id]?.awaits == errand { asks[id] = nil } }
+        var reached: [Person] = []
         do {
             let came = try await through(next)
             guard pages[id]?.awaits == errand, let held = pages[id]?.read else { return }
@@ -555,6 +656,7 @@ final class ShellPeoplePages {
             let further = try held.readingOn(came)
             pages[id]?.read = further
             pages[id]?.farthest = Self.stoppedShortOfTheEnd(came, of: list, after: next)
+            reached = came.people
         } catch {
             guard pages[id]?.awaits == errand else { return }
             if error is PagingError {
@@ -567,6 +669,7 @@ final class ShellPeoplePages {
             }
         }
         pages[id]?.readingOn = false
+        await stand(to: reached, on: list, at: source, with: held, in: session)
     }
 
     /// The way to the stretches of `list` at `source`. **A list of somebody's**: as the person

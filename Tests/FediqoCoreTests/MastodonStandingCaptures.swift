@@ -32,6 +32,10 @@ import Foundation
 /// | to unfollow any of those | 200, the standing as it was |
 /// | to follow a **suspended** account, an id nobody has, or an id that is no number | **404** `{"error":"Record not found"}` |
 /// | to follow **themselves** | **403** `{"error":"Following your own account is not allowed"}`; to unfollow themselves, 200 |
+/// | how the reader stands to **several people in one ask** (`relationships?id[]=…&id[]=…`), asked 2026-10-13 for #310's rows | 200, one entry each, **in no order of the asking**: read by the id each carries. An id named twice has one entry |
+/// | the same, naming among them a **suspended** account, an id nobody has, and an id that is no number | 200, and **no entry for any of the three**; everybody else is answered as if they were not named. (`with_suspended=true` gives the suspended one an entry, every part `false`: not asked for here) |
+/// | the same, naming **the reader themselves** | an entry like any other, every part `false` |
+/// | **how many one ask may name** | nobody is counted: 80 names and 200 are answered alike. An ask is refused by **its length** — a query past 10,240 bytes, some 640 names as this app spells them — with a bare **400** and no body, before Mastodon sees it |
 /// | how the reader stands to somebody they mute **for a time** | `muting` true and `muting_expires_at` a moment, to the second with no fraction (`2026-10-13T01:37:16Z`); muted for good, `null` |
 enum MastodonStandingCaptures {
     static let host = "mastodon.localhost"

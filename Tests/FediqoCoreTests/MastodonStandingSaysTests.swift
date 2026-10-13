@@ -15,7 +15,7 @@ import Testing
 /// is unfollowed, the locked account is asked again as the seed left it, and the mute is made
 /// for good again — by the writer's own sign-in for everything.
 ///
-/// **Asked gently.** A run makes some sixty requests and no registration: every sign-in here
+/// **Asked gently.** A run makes some seventy requests and no registration: every sign-in here
 /// is the seed's.
 @Suite("What a Mastodon says of how the reader stands to somebody, and of following them", .enabled(if: LocalServers.requested), .serialized)
 struct MastodonStandingSaysTests {
@@ -127,6 +127,41 @@ struct MastodonStandingSaysTests {
 
         let me = try #require(try await ask("/api/v1/accounts/verify_credentials", as: seeded.writer).object["id"] as? String)
         #expect(try await stands.standing(to: me) == PersonStanding(accountID: me))
+    }
+
+    @Test("A stretch of people is asked about in one ask: as many as a stretch brings are named and each is read by their own id, in whatever order the server answers; a suspended account, an id nobody has and an id that is no number have no entry and cost nobody else theirs; the reader themselves is an entry with nothing in it; somebody named twice is answered once; and an ask is refused by its length and not by how many it names, with nothing said")
+    func aStretchInOneAsk() async throws {
+        try await LocalServers.requireHealthy()
+        let seeded = try seeded()
+        let people = seeded.people
+        let stands = try reader(seeded.seeing)
+        let me = try #require(try await ask("/api/v1/accounts/verify_credentials", as: seeded.writer).object["id"] as? String)
+
+        let known = [people.person.id, people.blocked.id, people.muted.id, people.locked.id, people.blocker.id, me]
+        let absent = [people.gone.id, "1999999999"]
+        // As many as the longest stretch of a list brings, the rest ids nobody has.
+        let named = known + absent + (0 ..< MastodonStanding.most - known.count - absent.count).map { "\(2_999_999_999 + $0)" }
+        #expect(named.count == MastodonStanding.most)
+        let said = try await stands.standings(to: named)
+        #expect(Set(said.keys) == Set(known), "nobody but who is somebody there")
+        #expect(said[people.person.id] == PersonStanding(accountID: people.person.id))
+        #expect(said[people.blocked.id] == PersonStanding(accountID: people.blocked.id, blocking: true))
+        #expect(said[people.muted.id] == PersonStanding(accountID: people.muted.id, muting: true))
+        #expect(said[people.locked.id] == PersonStanding(accountID: people.locked.id, requested: true))
+        #expect(said[people.blocker.id] == PersonStanding(accountID: people.blocker.id, blockedBy: true))
+        #expect(said[me] == PersonStanding(accountID: me), "the reader themselves: an entry with nothing in it")
+
+        func many(_ ids: [String]) -> String { "/api/v1/accounts/relationships?" + ids.map { "id[]=\($0)" }.joined(separator: "&") }
+        let odd = try await ask(many(["abc", people.person.id, people.person.id, people.gone.id]), as: seeded.seeing)
+        #expect(odd.status == 200)
+        #expect(odd.list.compactMap { $0["id"] as? String } == [people.person.id], "no number, twice, and suspended: one entry")
+
+        // Not counted: two hundred names are answered as eighty are.
+        let long = try await ask(many([people.person.id] + (1 ..< 200).map { "\(2_999_999_999 + $0)" }), as: seeded.seeing)
+        #expect(long.status == 200 && long.list.count == 1)
+        // Refused by its length: a thousand names are a query past what the server's door reads.
+        let tooLong = try await ask(many([people.person.id] + (1 ..< 1000).map { "\(2_999_999_999 + $0)" }), as: seeded.seeing)
+        #expect(tooLong.status == 400 && tooLong.body.isEmpty)
     }
 
     @Test("Following and unfollowing want the word that changes who the reader follows: refused with none and to the word that only sees, in the words kept; with both words somebody is followed, said so by the next read, followed again at no cost, unfollowed, and unfollowed again")
