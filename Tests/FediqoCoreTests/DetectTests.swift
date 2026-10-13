@@ -32,7 +32,7 @@ struct DetectTests {
             "/api/v2/instance": .text(Self.mastodonV2),
         ])
         #expect(try await Detector(http: http).detect("first.example") == .mastodon)
-        #expect(await http.paths == ["/", "/api/v2/instance"])
+        #expect(await http.paths == ["/", "/api/v2/instance", "/.well-known/nodeinfo"])
     }
 
     @Test("HTML unknown and a Pleroma version on v2 is Pleroma")
@@ -217,21 +217,251 @@ struct DetectTests {
         #expect(try await Detector(http: http).detect("first.example") == .mastodon)
     }
 
-    @Test("Named HTML pages do not probe")
+    @Test("Named HTML pages do not probe, and only one named Mastodon is asked what it calls itself")
     func namedPagesSkipProbe() async throws {
-        for (page, kind) in [
-            (Self.mastodonPage, ProtocolKind.mastodon),
-            (Self.misskeyPage, .misskey),
-            (Self.pixelfedPage, .pixelfed),
+        for (page, kind, asked) in [
+            (Self.mastodonPage, ProtocolKind.mastodon, ["/", "/.well-known/nodeinfo"]),
+            (Self.misskeyPage, .misskey, ["/"]),
+            (Self.pixelfedPage, .pixelfed, ["/"]),
         ] {
             let http = FixtureHTTP([
                 "/": .text(page),
                 "/api/v2/instance": .text(Self.mastodonV2),
             ])
             #expect(try await Detector(http: http).detect("\(kind.rawValue).example") == kind)
-            #expect(await http.paths == ["/"])
+            #expect(await http.paths == asked)
         }
     }
+
+    // MARK: - What a server calls itself
+    //
+    // The two listings and the two documents are what the servers of this checkout answered on
+    // 2026-10-13 (Mastodon 4.6.6, GoToSocial 0.22.2), cut to the fields read and with the host
+    // changed; `LocalServerTests` and `GoToSocialSaysTests` ask the servers themselves.
+
+    @Test("A GoToSocial is named by its own account of itself, whichever of the two took it for a Mastodon")
+    func aGoToSocialIsNamedByItsOwnAccount() async throws {
+        let byThePage = Self.selfNamed(Self.gotosocialPage, listing: Self.gotosocialListing, Self.gotosocialSays)
+        #expect(HTMLKind.classify(Self.gotosocialPage) == .named(.mastodon))
+        #expect(try await Detector(http: byThePage).detect("social.example") == .gotosocial)
+        #expect(await byThePage.paths == ["/", "/.well-known/nodeinfo", "/nodeinfo/2.0"])
+
+        let byTheProbe = Self.selfNamed(Self.unknownPage, listing: Self.gotosocialListing, Self.gotosocialSays)
+        #expect(try await Detector(http: byTheProbe).detect("social.example") == .gotosocial)
+        #expect(await byTheProbe.paths == ["/", "/api/v2/instance", "/.well-known/nodeinfo", "/nodeinfo/2.0"])
+    }
+
+    @Test("A Mastodon that says it is one is one")
+    func aMastodonSaysItIsOne() async throws {
+        let http = Self.selfNamed(Self.mastodonPage, listing: Self.mastodonListing, Self.mastodonSays)
+        #expect(try await Detector(http: http).detect("social.example") == .mastodon)
+        #expect(await http.paths == ["/", "/.well-known/nodeinfo", "/nodeinfo/2.0"])
+    }
+
+    /// The first three names are **read about, not asked**: no fork of Mastodon stands in the
+    /// fixture. glitch-soc is said to keep `mastodon` and mark its `version`; Hometown and
+    /// Fedibird are said to name themselves. Nothing in `Sources/` holds any of them — which is
+    /// the point: a fork is a Mastodon here because its word is *not the one known*, not because
+    /// it is listed.
+    @Test("A word that is not GoToSocial's leaves the host a Mastodon: a fork's, one nobody has met, one that is no word")
+    func anyOtherWordIsAMastodonAsBefore() async throws {
+        for software in [
+            #"{"name":"mastodon","version":"4.3.0+glitch"}"#, // read about, not asked
+            #"{"name":"hometown","version":"1.1.1+4.2.10"}"#, // read about, not asked
+            #"{"name":"fedibird","version":"0.1"}"#, // read about, not asked
+            #"{"name":"something-new","version":"1.0"}"#,
+            #"{"name":"gotosocial-but-not","version":"1.0"}"#,
+            #"{"name":"","version":"1.0"}"#,
+            #"{"name":7}"#,
+            #"{"version":"gotosocial"}"#,
+        ] {
+            let http = Self.selfNamed(
+                Self.gotosocialPage,
+                listing: Self.gotosocialListing,
+                #"{"version":"2.0","software":\#(software)}"#
+            )
+            #expect(try await Detector(http: http).detect("social.example") == .mastodon, "\(software)")
+        }
+    }
+
+    @Test("An account of itself that cannot be read leaves the host a Mastodon")
+    func anUnreadableAccountIsAMastodonAsBefore() async throws {
+        let other = "http://example.com/another"
+        let listings: [FixtureHTTP.Outcome?] = [
+            nil,
+            FixtureHTTP.Outcome.fail,
+            .text("Not Found", status: 404),
+            .text(Self.gotosocialListing, status: 500),
+            .text("<html>a page</html>"),
+            .text("{}"),
+            .text(#"{"links":[]}"#),
+            .text(#"{"links":[{"rel":"\#(other)","href":"https://social.example/nodeinfo/2.0"}]}"#),
+            .text(#"{"links":[{"rel":"http://nodeinfo.diaspora.software/ns/schema/2.0"}]}"#),
+        ]
+        for listing in listings {
+            var routes: [String: FixtureHTTP.Outcome] = [
+                "/": .text(Self.gotosocialPage),
+                "/nodeinfo/2.0": .text(Self.gotosocialSays),
+            ]
+            routes["/.well-known/nodeinfo"] = listing
+            let http = FixtureHTTP(routes)
+            #expect(try await Detector(http: http).detect("social.example") == .mastodon)
+            #expect(await http.paths == ["/", "/.well-known/nodeinfo"])
+        }
+
+        let documents: [FixtureHTTP.Outcome] = [
+            .fail,
+            .text("Not Found", status: 404),
+            .text(Self.gotosocialSays, status: 503),
+            .text("gotosocial"),
+            .text("{}"),
+        ]
+        for document in documents {
+            let http = FixtureHTTP([
+                "/": .text(Self.gotosocialPage),
+                "/.well-known/nodeinfo": .text(Self.gotosocialListing),
+                "/nodeinfo/2.0": document,
+            ])
+            #expect(try await Detector(http: http).detect("social.example") == .mastodon)
+        }
+    }
+
+    /// How the one word is compared, as it stands: without regard to capitals, and with nothing
+    /// trimmed — a name with white space about it is not the word, and the host joins as before.
+    @Test("GoToSocial in capitals is the word; with white space about it, it is not")
+    func howTheWordIsCompared() async throws {
+        for (name, kind) in [("GoToSocial", ProtocolKind.gotosocial), ("GOTOSOCIAL", .gotosocial), (" gotosocial ", .mastodon)] {
+            let http = Self.selfNamed(
+                Self.gotosocialPage,
+                listing: Self.gotosocialListing,
+                #"{"version":"2.0","software":{"name":"\#(name)"}}"#
+            )
+            #expect(try await Detector(http: http).detect("social.example") == kind, "\(name)")
+        }
+    }
+
+    @Test("An answer that ended at another host, or is over the ceiling, is not this host's account of itself")
+    func anAnswerFromElsewhereOrTooLargeIsUnread() async throws {
+        for moved in ["/.well-known/nodeinfo", "/nodeinfo/2.0"] {
+            let inner = Self.selfNamed(Self.gotosocialPage, listing: Self.gotosocialListing, Self.gotosocialSays)
+            let http = EndedElsewhere(inner: inner, path: moved)
+            #expect(try await Detector(http: http).detect("social.example") == .mastodon, "\(moved)")
+        }
+
+        let padding = String(repeating: "x", count: NodeInfo.ceiling)
+        let large = #"{"version":"2.0","software":{"name":"gotosocial"},"metadata":"\#(padding)"}"#
+        let listing = String(Self.gotosocialListing.dropLast()) + #","metadata":"\#(padding)"}"#
+        #expect(try JSONDecoder().decode(NodeInfo.Body.self, from: Data(large.utf8)).software?.name == "gotosocial")
+        #expect(try JSONDecoder().decode(NodeInfo.Listing.self, from: Data(listing.utf8)).links?.count == 2)
+        for (listed, says) in [(listing, Self.gotosocialSays), (Self.gotosocialListing, large)] {
+            let http = Self.selfNamed(Self.gotosocialPage, listing: listed, says)
+            #expect(try await Detector(http: http).detect("social.example") == .mastodon)
+        }
+    }
+
+    /// A client whose answer for one path came from another host: what a followed redirect
+    /// looks like from here, the response carrying the address it ended at.
+    private struct EndedElsewhere: HTTPClient {
+        let inner: FixtureHTTP
+        let path: String
+
+        func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
+            let (data, response) = try await inner.data(from: url)
+            guard url.path == path, let elsewhere = URL(string: "https://elsewhere.example\(path)") else {
+                return (data, response)
+            }
+            return (data, HTTPURLResponse(url: elsewhere, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
+        }
+    }
+
+    @Test("A listing does not send this app to another host, another port, off https, or anywhere as somebody")
+    func aListingNamesOnlyTheHostAsked() async throws {
+        let own = FixtureHTTP([
+            "/": .text(Self.gotosocialPage),
+            "/.well-known/nodeinfo": .text(
+                #"{"links":[{"rel":"http://nodeinfo.diaspora.software/ns/schema/2.0","href":"https://social.example:443/nodeinfo/2.0"}]}"#
+            ),
+            "/nodeinfo/2.0": .text(Self.gotosocialSays),
+        ])
+        #expect(try await Detector(http: own).detect("social.example") == .gotosocial)
+
+        for href in [
+            "https://elsewhere.example/nodeinfo/2.0",
+            "http://social.example/nodeinfo/2.0",
+            "/nodeinfo/2.0",
+            "https://social.example:8443/nodeinfo/2.0",
+            "https://someone@social.example/nodeinfo/2.0",
+            "https://someone:secret@social.example/nodeinfo/2.0",
+        ] {
+            let http = FixtureHTTP([
+                "/": .text(Self.gotosocialPage),
+                "/.well-known/nodeinfo": .text(
+                    #"{"links":[{"rel":"http://nodeinfo.diaspora.software/ns/schema/2.0","href":"\#(href)"}]}"#
+                ),
+                "/nodeinfo/2.0": .text(Self.gotosocialSays),
+            ])
+            #expect(try await Detector(http: http).detect("social.example") == .mastodon, "\(href)")
+            #expect(await http.paths == ["/", "/.well-known/nodeinfo"], "\(href)")
+        }
+    }
+
+    @Test("A reader who left while the server was asked what it is leaves no answer")
+    func leavingWhileAskedIsNotAnAnswer() async {
+        let asked: [[String: FixtureHTTP.Outcome]] = [
+            ["/.well-known/nodeinfo": .cancelled],
+            ["/.well-known/nodeinfo": .text(Self.gotosocialListing), "/nodeinfo/2.0": .cancelled],
+        ]
+        for var routes in asked {
+            routes["/"] = .text(Self.gotosocialPage)
+            let http = FixtureHTTP(routes)
+            await #expect(throws: CancellationError.self) {
+                try await Detector(http: http).detect("social.example")
+            }
+        }
+    }
+
+    private static func selfNamed(_ page: String, listing: String, _ says: String) -> FixtureHTTP {
+        FixtureHTTP([
+            "/": .text(page),
+            "/api/v2/instance": .text(Self.gotosocialDocument),
+            "/.well-known/nodeinfo": .text(listing),
+            "/nodeinfo/2.0": .text(says),
+            "/nodeinfo/2.1": .text(says),
+        ])
+    }
+
+    /// The marker a GoToSocial's front page carries, and nothing else: no `generator`, and the
+    /// link its help text gives a visitor.
+    private static let gotosocialPage = #"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <title>social.example</title>
+    </head>
+    <body>
+      <p>Find a server at <a href="https://joinmastodon.org/servers">the joinmastodon.org server picker</a>.</p>
+    </body>
+    </html>
+    """#
+
+    /// Its instance document: a `version` that is a number, and nothing that names it.
+    private static let gotosocialDocument =
+        #"{"domain":"social.example","title":"social.example","version":"0.22.2+git-fb2bf13"}"#
+
+    private static let gotosocialListing = #"""
+    {"links":[{"rel":"http://nodeinfo.diaspora.software/ns/schema/2.0","href":"https://social.example/nodeinfo/2.0"},
+    {"rel":"http://nodeinfo.diaspora.software/ns/schema/2.1","href":"https://social.example/nodeinfo/2.1"}]}
+    """#
+
+    private static let gotosocialSays =
+        #"{"version":"2.0","software":{"name":"gotosocial","version":"0.22.2+git-fb2bf13"},"protocols":["activitypub"]}"#
+
+    private static let mastodonListing =
+        #"{"links":[{"rel":"http://nodeinfo.diaspora.software/ns/schema/2.0","href":"https://social.example/nodeinfo/2.0"}]}"#
+
+    private static let mastodonSays =
+        #"{"version":"2.0","software":{"name":"mastodon","version":"4.6.6"},"protocols":["activitypub"]}"#
 
     private static let mastodonV2 = #"{"version":"4.3.0","title":"Mastodon","domain":"first.example"}"#
 

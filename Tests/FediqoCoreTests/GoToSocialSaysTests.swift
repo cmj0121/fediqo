@@ -7,7 +7,8 @@ import Testing
 /// GoToSocial 0.22.2, brought up only by `FEDIQO_SERVERS_GOTOSOCIAL=1 make servers`.
 ///
 /// **It makes no such server a supported source** (#283 says so), and nothing here says what the
-/// app ought to do. Each check holds what the code does today, so that the day one of them
+/// app ought to do beyond the first check, which holds that the server is named for what it is
+/// and not joined. Each check holds what the code does today, so that the day one of them
 /// changes it is seen; the table of what the server answers beside Mastodon's is
 /// `servers/gotosocial/FINDINGS.md`.
 ///
@@ -17,30 +18,36 @@ import Testing
 struct GoToSocialSaysTests {
     private static let host = LocalServers.gotosocial
 
-    private func joined(_ http: some HTTPClient & HTTPSender) async throws -> ItemStore {
-        let store = ItemStore()
-        try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore()).join(host: Self.host)
-        return store
-    }
-
-    /// Twice over: its front page carries no `generator` tag and links `joinmastodon.org` in its
-    /// own words to a visitor, which is the last marker `HTMLKind.classify` takes for a Mastodon;
-    /// and its document's `version` is a bare number, so `Probe` would say Mastodon too.
-    @Test("Detect names it Mastodon, so a join adds it as a Mastodon, with nothing to read: its public timeline is kept from strangers and nothing is rising")
-    func takenForAMastodon() async throws {
+    /// Neither of the two things detection reads first names it: its front page carries no
+    /// `generator` tag and links `joinmastodon.org` in its own words to a visitor, which is the
+    /// last marker `HTMLKind.classify` takes for a Mastodon; and its document's `version` is a
+    /// bare number, so `Probe` says Mastodon too. Its node information does name it, and that is
+    /// what `Detector` asks a host it would have called a Mastodon. Until it did, this check held
+    /// the opposite: named Mastodon, and added with nothing in it.
+    @Test("Detect names it GoToSocial by what it says of itself, so a join refuses it by that name and adds nothing: its public timeline is kept from strangers and nothing is rising")
+    func namedForWhatItIs() async throws {
         try await LocalServers.requireGoToSocial()
         let http = try LocalHTTP.client()
-        #expect(try await Detector(http: http).detect(Self.host) == .mastodon)
-        #expect(!SourceJoin.reads(.gotosocial), "the kind it is would have been refused")
+        let front = try #require(Host.httpsURL(host: Self.host, path: "/"))
+        let instance = try #require(Host.httpsURL(host: Self.host, path: "/api/v2/instance"))
+        let page = String(decoding: try await http.data(from: front).0, as: UTF8.self)
+        #expect(HTMLKind.classify(page) == .named(.mastodon))
+        #expect(Probe.kind(from: try await http.data(from: instance).0) == .mastodon)
+        #expect(try await NodeInfo(http: http).software(of: Self.host) == "gotosocial")
+        #expect(try await Detector(http: http).detect(Self.host) == .gotosocial)
+        #expect(!SourceJoin.reads(.gotosocial))
 
+        // What a join would still meet there, were it let through: one read refused, one empty.
         let client = MastodonClient(http: http, host: Self.host)
         let source = Source(host: Self.host, kind: .mastodon)
         await #expect(throws: MastodonRequestError.http(401)) { try await client.publicTimeline(source: source) }
         #expect(try await client.trending(source: source).isEmpty)
 
-        let store = try await joined(http)
-        #expect(await store.sources().map(\.host) == [Self.host])
-        #expect(await store.sources().map(\.kind) == [.mastodon])
+        let store = ItemStore()
+        await #expect(throws: JoinError.unsupportedKind(.gotosocial)) {
+            try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore()).join(host: Self.host)
+        }
+        #expect(await store.sources().isEmpty)
         #expect(await store.all().isEmpty)
     }
 
@@ -62,7 +69,9 @@ struct GoToSocialSaysTests {
             .register(scopes: MastodonOAuth.scopes(writing: true))
         #expect(!app.clientID.isEmpty && app.host == Self.host)
 
-        let store = try await joined(http)
+        // A join refuses this host, so the source is put in the store as the writer needs it.
+        let store = ItemStore()
+        await store.add(Source(host: Self.host, kind: .mastodon))
         let tokens = MemoryMastodonTokens()
         let token = MastodonToken(
             host: Self.host, accessToken: try LocalServers.gotosocialWriterToken(), clientID: "x", clientSecret: "x"

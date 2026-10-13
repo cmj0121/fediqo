@@ -41,21 +41,25 @@ in status, in who may ask, or in words.
 
 ## What this app does with it today
 
-Read off the code and run through it (`GoToSocialSaysTests`, three checks, passing). The app was
-not launched.
+Read off the code and run through it (`GoToSocialSaysTests`, three checks, passing; the first two
+entries were turned by M0, 2026-10-13). The app was not launched.
 
 - **`Detector.detect`**:
   - Mastodon 4.6.6: `.mastodon`
-  - GoToSocial 0.22.2: **`.mastodon`** — not `.gotosocial`. Its front page has no `generator` tag, and its own help text
-    links `joinmastodon.org/servers`, which is the last marker `HTMLKind.classify` takes for a Mastodon. Without that
-    link the probe would say the same: `version` is `0.22.2+git-fb2bf13` and never says "gotosocial"
-  - Where: `Detect.swift` (`HTMLKind.classify`, `Probe.kind`)
+  - GoToSocial 0.22.2: **`.gotosocial`**, since M0 (2026-10-13). Until then `.mastodon`: its front page has no
+    `generator` tag, and its own help text links `joinmastodon.org/servers`, which is the last marker
+    `HTMLKind.classify` takes for a Mastodon; without that link the probe would say the same, since `version` is
+    `0.22.2+git-fb2bf13` and never says "gotosocial". Both still say so. What names it is its node information, which
+    a host taken for a Mastodon is now asked: `/.well-known/nodeinfo` lists `/nodeinfo/2.0` and `/nodeinfo/2.1` on
+    this server (`/nodeinfo/2.0` alone on Mastodon), and the document says `"software":{"name":"gotosocial"}`
+    (`"name":"mastodon"` on Mastodon). Only that word changes the answer; any other, or none, leaves it `.mastodon`
+  - Where: `Detect.swift` (`HTMLKind.classify`, `Probe.kind`, `NodeInfo`)
 - **A person adds the host**:
   - Mastodon 4.6.6: joined, public timeline and trends read
-  - GoToSocial 0.22.2: **joined as a Mastodon, with nothing in it.** `SourceJoin` never reaches its refusal of
-    `.gotosocial` ("%@ is GoToSocial. Only Mastodon can be added this session."). `MastodonJoin.ingest` refuses only
-    when *both* reads fail: the public timeline is 401, what is rising is `200 []`, so the source is added and the store
-    is empty
+  - GoToSocial 0.22.2: **refused by name, nothing added** — "%@ is GoToSocial. Only Mastodon can be added this
+    session." Until M0 it was joined as a Mastodon with nothing in it, and that is still what a join would meet were
+    the host let through: `MastodonJoin.ingest` refuses only when *both* reads fail, the public timeline is 401 and
+    what is rising is `200 []`
   - Where: `Join.swift` (`MastodonJoin.ingest`, `SourceJoin.reads`), `ShellSession.refuseMessage`
 - **`MastodonClient.said()`**:
   - Mastodon 4.6.6: kind Mastodon, 500 characters, featured hashtags present (10), the rest unsaid
@@ -457,8 +461,9 @@ its public timeline is one of them).
 
 Each names the unit of `PLAN-mastodon.md` it touches.
 
-1. **That a host the detector calls Mastodon is one.** This one is called Mastodon and joined
-   empty — P2, P10b, P16, P18 and every read "with no sign-in" would meet 401, not content.
+1. **That a host the detector calls Mastodon is one.** This one was called Mastodon and joined
+   empty until M0 asked it what it calls itself; a server that does not say is still taken for
+   one — P2, P10b, P16, P18 and every read "with no sign-in" would meet 401, not content.
 2. **That a scope refusal is recognisable.** The 403 here has no `insufficient_scope` and not
    Mastodon's sentence, and names no missing word — P4, P5b, P6a, P7, P8, P11, P17 and the
    "signed in for less" line of each would read it as any other 403.
