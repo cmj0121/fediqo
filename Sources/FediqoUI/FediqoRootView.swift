@@ -672,6 +672,8 @@ public struct FediqoRootView: View {
             return onFocusedItem { openQuote(of: $0) }
         case .openRising:
             return openRisingByKey()
+        case .follow:
+            return followByKey()
         case .compose:
             guard availability.canCompose else { return false }
             showingShortcuts = false
@@ -1886,6 +1888,14 @@ public struct FediqoRootView: View {
         guard people.rising.opensByKey(place: place, open: openLayers, timeline: session.currentTimeline, in: session)
         else { return false }
         return openRising(.tags)
+    }
+
+    /// `l`: follows whoever's page is in front, or the hashtag whose page is. Where the key
+    /// answers, and what it then does, is the pages' own (`ShellPersonPages.followByKey`).
+    private func followByKey() -> Bool {
+        people.followByKey(
+            place: place, open: openLayers, person: walk.openedPerson, tag: walk.openedTag, in: session
+        )
     }
 
     /// A row of such a page opened. **The lamp and the step in one turn**, as a post's row

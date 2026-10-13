@@ -429,18 +429,33 @@ final class ShellTagFollow {
 
     // MARK: - The press
 
+    /// `l` on the page of `tag`: follows it at the first source whose line offers that, and
+    /// hands back the press on its way — or nothing, where no line offers it. **It only ever
+    /// follows**: the press is sent as a follow and as nothing else (`press(_:at:only:in:)`).
+    @discardableResult
+    func followByKey(_ tag: PostTag, in session: ShellSession) -> Task<Void, Never>? {
+        guard let line = lines(of: tag, in: session).first(where: { $0.offers == .follow }) else { return nil }
+        return Task { await self.press(tag, at: line.host, only: true, in: session) }
+    }
+
     /// The line's press: follows the hashtag at `host`, or stops, by what the source last said.
     ///
     /// **Only over what the source said, as the reader it said it to**: where it has not
     /// answered, where the sign-in does not hold follows or is no longer the one the page was
     /// read through, the press does nothing. **One request out a hashtag and source**
     /// (`PressGuard.begin`): pressed again meanwhile, nothing more is sent.
-    func press(_ tag: PostTag, at host: String, in session: ShellSession) async {
+    ///
+    /// **`only` is the one way the press may go**, where whoever presses means one and not
+    /// the other — the key that only ever follows (`followByKey`): it is held against what the
+    /// source says **here, where the press is taken**, so a read that landed since the key
+    /// looked at the line cannot turn a follow into an unfollow.
+    func press(_ tag: PostTag, at host: String, only: Bool? = nil, in session: ShellSession) async {
         guard Self.asks(about: tag), let source = sources(in: session).first(where: { $0.host == host }) else { return }
         let looked = readers.look(at: source.host, in: session)
         let key = Self.key(tag, source.host)
         guard let held = looked.held, !looked.changed, Self.holds(at: source.host, in: session),
               let page = self.standing(key, at: source.host, in: session), let said = page.said,
+              only == nil || only == !said,
               let flight = presses.begin(key, showing: !said)
         else { return }
         missed[key] = nil

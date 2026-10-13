@@ -83,8 +83,20 @@ struct PersonPane: View {
     /// its press: the list's page, or the question its lock asks.
     var followed: FollowedTagsEntry?
     var onFollowed: ((FollowedTagsEntry) -> Void)?
+    /// How the reader stands to them at their source, and what may be done about it (#310,
+    /// #313). **Handed none, the page has no line of it, no press and no `…`** — a forum's
+    /// author, a source nobody is signed in to, the reader's own page — and it never asks why:
+    /// whether following is offered at a source is decided where the source is asked.
+    var standing: PersonActing?
+    /// The heading's Follow, or an item of the `…`.
+    var onAct: (PersonAct) -> Void = { _ in }
+    /// The press on the lock of a sign-in that was not asked for following.
+    var onAskFollows: () -> Void = {}
+    /// "Try again", where the source could not be asked how the reader stands to them.
+    var onStandingAgain: () -> Void = {}
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.shellLayout) private var shellLayout
     /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
     @Environment(\.shellTouch) private var touch
 
@@ -121,7 +133,40 @@ struct PersonPane: View {
     /// **The host is named rather than drawn as a way in.** It is the honest answer to "whose
     /// page is this" — a handle is only a name once you know where — and naming it is exactly as
     /// far as a person page may go towards a source without becoming one.
+    ///
+    /// **How the reader stands to them is the heading's last line and its far end** (#310,
+    /// #313): the pills in the words' own column, read with them; Follow and `…` beside the
+    /// words, and under them on a narrow page; and under all of it whatever no pill says.
     private var heading: some View {
+        let narrow = shellLayout == .narrow
+        let acts = standing.flatMap { PersonHeadActs.draws($0) ? $0 : nil }
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: ShellSpace.step) {
+                who.accessibilityElement(children: .combine)
+                if !narrow, let acts { headActs(acts) }
+            }
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.step)
+            if narrow, let acts {
+                headActs(acts)
+                    .padding(.horizontal, ShellSpace.pad)
+                    .padding(.bottom, ShellSpace.step)
+            }
+            if let standing, PersonStandingLines.draws(standing) {
+                PersonStandingLines(acting: standing, onAsk: onAskFollows, onAgain: onStandingAgain)
+            }
+        }
+    }
+
+    /// The heading's press and the page's `…`, whose head says who they are and whose view
+    /// the page is.
+    private func headActs(_ acting: PersonActing) -> some View {
+        let named = Self.named(person, said: said, home: homeSaid)
+        let head = [named.name, named.handle, Self.viewLine(of: person, said: said, home: homeSaid)].compactMap { $0 }
+        return PersonHeadActs(acting: acting, head: head, onAct: onAct, onAsk: onAskFollows)
+    }
+
+    private var who: some View {
         let named = Self.named(person, said: said, home: homeSaid)
         return HStack(alignment: .center, spacing: ShellSpace.step) {
             face
@@ -154,6 +199,16 @@ struct PersonPane: View {
                     .shellFont(.mark)
                     .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                     .lineLimit(said == nil ? 1 : 2)
+                if let standing {
+                    PersonStandingPills(pills: standing.pills())
+                    if let blocked = standing.blockedWords() {
+                        // Why the source gives none of their posts, in words and full ink.
+                        Text(blocked)
+                            .shellFont(.meta)
+                            .foregroundStyle(ShellChrome.ink(colorScheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
             Spacer(minLength: 0)
             // How much of theirs this device holds: the figure of a page that draws what it
@@ -165,9 +220,6 @@ struct PersonPane: View {
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.step)
-        .accessibilityElement(children: .combine)
     }
 
     /// How much of theirs is here. **A count of what this device holds and never of what they
@@ -281,7 +333,7 @@ struct PersonPane: View {
                     } else {
                         sourceSaid(said)
                     }
-                    if let sentence = Self.emptyLine(said, held: items.count) {
+                    if let sentence = Self.emptyLine(said, held: items.count, standing: standing) {
                         quiet(sentence)
                     }
                     ForEach(Array(shown.enumerated()), id: \.element.id) { index, item in
@@ -359,11 +411,24 @@ struct PersonPane: View {
     /// What stands where posts would and none are drawn, or nothing where some are, or where
     /// their newest are still being asked for. About the source where the source answered with
     /// none, about this device where what it holds is all there is to draw.
-    static func emptyLine(_ said: PersonSaid, held: Int, language: DummyLanguage? = nil) -> String? {
+    ///
+    /// **For a signed-in reader the source counts posts of theirs for and gives none, the
+    /// sentence is the one decided** (#310): that the source gives this sign-in none of them,
+    /// and nothing else — where they block the reader, since the heading has said why, and
+    /// where how the reader stands to them is not known (`PersonActing.givesNoneUnexplained`),
+    /// since then no reason is known and no figure is set beside the lack of one. Where the
+    /// source has said how the reader stands and it is not a block, and where nobody stands to
+    /// them here at all, what it gave and what it counts are said as they always were.
+    static func emptyLine(
+        _ said: PersonSaid, held: Int, standing: PersonActing? = nil, language: DummyLanguage? = nil
+    ) -> String? {
         if let posts = said.posts {
             // A suspended account's line has said why already; a stretch that did not come is
             // the foot's to say.
             guard posts.isEmpty, said.foot == nil, said.person?.suspended != true else { return nil }
+            if let standing, standing.givesNone(counted: said.person?.tally.posts) {
+                return String(format: L10n.t("person.posts.noneGiven", language: language), said.source)
+            }
             return PersonSaid.gaveNone(said.source, counted: said.person?.tally.posts, language: language)
         }
         guard held == 0, said.reading == .unheardOf || said.reading == .failed else { return nil }

@@ -14,9 +14,16 @@ struct SourceOffersTests {
         #expect(ProtocolKind.mastodon.offers == SourceOffers(
             timelines: true, trends: true, writes: true,
             fields: [.audience, .language, .covered, .reblog, .reblogOf],
-            loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true
+            loadsReferences: true, saysReaderMarks: true, saysQuotes: true, notices: true, people: true,
+            follows: true
         ))
         #expect(ProtocolKind.allCases.filter(\.offers.people) == [.mastodon], "only a Mastodon is asked who somebody is")
+        #expect(ProtocolKind.allCases.filter(\.offers.follows) == [.mastodon], "and only at a Mastodon is somebody followed")
+        for kind in ProtocolKind.allCases {
+            // There is no page to follow somebody from where a source does not say who people are.
+            #expect(!kind.offers.follows || kind.offers.people, "\(kind)")
+        }
+        #expect(!SourceOffers().follows, "a kind that says nothing offers none")
         for kind in Self.microblogs {
             #expect(kind.offers == SourceOffers(timelines: true, trends: true), "\(kind)")
         }

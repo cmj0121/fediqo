@@ -199,10 +199,20 @@ struct TimelinePane: View {
                     },
                     onOpenList: onOpenPeople,
                     followed: people?.followedEntry(of: person, in: session),
-                    onFollowed: onFollowed
+                    onFollowed: onFollowed,
+                    // How the reader stands to them, where somebody is followed at their source
+                    // and the reader is signed in to it (#310, #313); nothing for anybody else.
+                    standing: people?.stands(to: person, in: session),
+                    onAct: { act in Task { await people?.act(act, on: person, in: session) } },
+                    onAskFollows: { session.askFor([PersonAct.follow.needs], host: person.host) },
+                    onStandingAgain: { Task { await people?.standsAgain(to: person, in: session) } }
                 )
                 // One pane per person, so opening a second face from inside one draws afresh.
                 .id(person.id)
+                // **How the reader stands to them is asked once the page has said who they
+                // are** — by the id the source gave — and again for a reader who changed or a
+                // sign-in given follows: read, never acted.
+                .task(id: people?.standsOpening(to: person, in: session)) { await people?.standsOpened(to: person, in: session) }
                 // **The ask is the page opening**, once a person a run: who they are and their
                 // newest posts, of the source they were met through and nobody else.
                 // And who asks is part of which opening it is: a reader who ends, begins or
