@@ -384,12 +384,12 @@ struct LockedStoreTests {
         try account.write([LimitAct(limit: .months, at: PackagerFixture.origin, posts: 2, sources: ["alpha.test"])])
         let held = try Data(contentsOf: account.url)
         let package = PackagerFixture.package()
-        defer { try? FileManager.default.removeItem(at: package.deletingLastPathComponent()) }
+        defer { try? FileManager.default.removeItem(at: package) }
         try await device.packager().takeAway(to: package, key: .password("open sesame"), pictures: false, contents: .whole) { _ in }
 
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: account.url.path)
         let second = PackagerFixture.package()
-        defer { try? FileManager.default.removeItem(at: second.deletingLastPathComponent()) }
+        defer { try? FileManager.default.removeItem(at: second) }
         await #expect(throws: (any Error).self) {
             try await device.packager().takeAway(to: second, key: .password("open sesame"), pictures: false, contents: .whole) { _ in }
         }
