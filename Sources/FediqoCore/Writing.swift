@@ -97,6 +97,26 @@ public enum NoticeStanding: Sendable, Equatable, CaseIterable {
     case unavailable
 }
 
+/// One thing a reader does about how they stand to somebody, at the source that holds both
+/// accounts (#313) — named, as a post's acts are, so that what is offered and what is on its
+/// way are values and not conditions inside a view.
+public enum PersonAct: Sendable, Hashable, CaseIterable {
+    /// Follows them — or asks to, where they must agree.
+    case follow
+    /// Stops following them.
+    case unfollow
+    /// Takes back a request to follow that they have not answered.
+    case withdraw
+
+    /// The part of a sign-in the act needs (#347): where it is not held, the act's place says
+    /// so and asks. **No `default:`**, so an act added later has to say which.
+    public var needs: MastodonPart {
+        switch self {
+        case .follow, .unfollow, .withdraw: .follows
+        }
+    }
+}
+
 /// One thing a reader does to a post on the source they read it through — #54's acts, named so
 /// that the rule about which of them a post offers is a value rather than a run of conditions
 /// inside a view body.

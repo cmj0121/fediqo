@@ -314,6 +314,13 @@ private final class SealingTokens: MastodonTokenStore, @unchecked Sendable {
     func forget(host: String) throws { try open(); try inner.forget(host: host) }
     func forget(_ token: MastodonToken) throws -> Bool { try open(); return try inner.forget(token) }
     func grants() throws -> [String: MastodonGrant] { try inner.grants() }
+    func swap(expecting held: String?, with token: MastodonToken) throws -> Bool {
+        try open()
+        return try inner.swap(expecting: held, with: token)
+    }
+    func left(host: String) throws -> [MastodonLeft] { try inner.left(host: host) }
+    func journal(_ entry: MastodonLeft) throws { try open(); try inner.journal(entry) }
+    func unjournal(_ entry: MastodonLeft) throws { try open(); try inner.unjournal(entry) }
     func app(host: String) throws -> MastodonApp? { try inner.app(host: host) }
     func save(_ app: MastodonApp) throws {
         try open()
@@ -340,6 +347,10 @@ private final class WatchingTokens: MastodonTokenStore, @unchecked Sendable {
     func forget(host: String) throws { try inner.forget(host: host) }
     func forget(_ token: MastodonToken) throws -> Bool { try inner.forget(token) }
     func grants() throws -> [String: MastodonGrant] { try inner.grants() }
+    func swap(expecting held: String?, with token: MastodonToken) throws -> Bool { try inner.swap(expecting: held, with: token) }
+    func left(host: String) throws -> [MastodonLeft] { try inner.left(host: host) }
+    func journal(_ entry: MastodonLeft) throws { try inner.journal(entry) }
+    func unjournal(_ entry: MastodonLeft) throws { try inner.unjournal(entry) }
     func app(host: String) throws -> MastodonApp? { try inner.app(host: host) }
     func save(_ app: MastodonApp) throws { try inner.save(app) }
     func forgetApp(host: String) throws { try inner.forgetApp(host: host) }
@@ -358,6 +369,10 @@ private final class RefusingTokens: MastodonTokenStore, @unchecked Sendable {
     func forget(host: String) throws { try inner.forget(host: host) }
     func forget(_ token: MastodonToken) throws -> Bool { try inner.forget(token) }
     func grants() throws -> [String: MastodonGrant] { try inner.grants() }
+    func swap(expecting held: String?, with token: MastodonToken) throws -> Bool { try inner.swap(expecting: held, with: token) }
+    func left(host: String) throws -> [MastodonLeft] { try inner.left(host: host) }
+    func journal(_ entry: MastodonLeft) throws { try inner.journal(entry) }
+    func unjournal(_ entry: MastodonLeft) throws { try inner.unjournal(entry) }
     func app(host: String) throws -> MastodonApp? { try inner.app(host: host) }
     func save(_ app: MastodonApp) throws { try inner.save(app) }
     func forgetApp(host: String) throws { try inner.forgetApp(host: host) }

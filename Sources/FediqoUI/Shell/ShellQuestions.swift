@@ -425,6 +425,21 @@ enum ShellQuestion {
         )
     }
 
+    /// Unfollowing somebody who must agree to be followed (#313). **Asked first, and drawn as
+    /// a loss**: what goes is their yes, and following them again means asking for it again.
+    /// Unfollowing anybody else is not asked about — it is followed again in one press.
+    ///
+    /// `named` is their handle, already made fit for a line.
+    static func unfollow(_ named: String, at host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: PersonActing.symbol(.unfollow),
+            title: String(format: L10n.t("person.unfollow.ask.title", language: language), named, host),
+            line: L10n.t("person.unfollow.ask.line", language: language), help: nil,
+            choices: [.init(yes, PersonActing.name(.unfollow, language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     static let signInRead = "read"
     static let signInWrite = "write"
 

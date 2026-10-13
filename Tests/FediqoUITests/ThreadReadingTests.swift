@@ -491,9 +491,8 @@ struct ThreadReadingTests {
         #expect(DummyCommand.from("o") == .openQuote)
         // `h` opens the rising hashtags since #320.
         #expect(DummyCommand.from("h") == .openRising)
-        for free in ["l"] {
-            #expect(DummyCommand.from(Character(free)) == nil, "\(free) is no longer free")
-        }
+        // `l` follows whoever's page, or the hashtag whose page, is in front since #313.
+        #expect(DummyCommand.from("l") == .follow)
     }
 
     /// **The guide says what `s` does now.**

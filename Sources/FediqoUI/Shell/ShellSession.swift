@@ -1369,14 +1369,14 @@ final class ShellSession {
             }
         }
         // Let go of with its sign-in. Only an entry that is still this press's goes here.
-        if acts.flight(copy.id, act) == flight { acts.landed(copy.id, act) }
+        if acts.isStill(flight, copy.id, act) { acts.landed(copy.id, act) }
         await adopt(again: !taking.isEmpty)
     }
 
     /// Whether an act's entry is still the press that began as `flight`, and the sign-in still
     /// the one its request went with.
-    private func stands(_ flight: Int?, _ row: String, _ act: PostAct, _ door: MastodonAuthorized) -> Bool {
-        acts.flight(row, act) == flight
+    private func stands(_ flight: PressNumber?, _ row: String, _ act: PostAct, _ door: MastodonAuthorized) -> Bool {
+        acts.isStill(flight, row, act)
             && mastodon.token(host: door.token.host)?.accessToken == door.token.accessToken
     }
 
@@ -2570,7 +2570,7 @@ final class ShellSession {
         }
         prefs.reread()
         if work === SourceWork.shared { AllowanceBook.shared.reread() }
-        mastodon.refresh()
+        mastodon.readBack()
         pictures.forgetAll()
         emojis.clear()
         pictures.disk?.trim()

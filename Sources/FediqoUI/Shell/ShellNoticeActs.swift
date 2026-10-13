@@ -57,20 +57,19 @@ final class ShellNoticeActs {
     private(set) var opened: Set<String> = []
     /// The sources whose requests are on the wire.
     private(set) var readingRequests: Set<String> = []
-    /// One act the person said yes to, on its way to its source: which source, which act, and
-    /// which press — a number no other press shares, so an answer that comes back to a name
-    /// let go of meanwhile, or begun again since, is known not to be that entry's.
+    /// One act the person said yes to, on its way to its source: which source, and which act.
     private struct Out: Equatable {
         let host: String
         let act: Act
-        let flight: Int
     }
 
     /// What is on its way, by name: a line's id, a request's, or a source's own for
     /// dismissing all. **Each is left out of what is drawn from the yes** (`hidden`,
-    /// `listed`) and held underneath as it was.
-    private var out: [String: Out] = [:]
-    @ObservationIgnored private var flights = 0
+    /// `listed`) and held underneath as it was. Kept by the one guard of a press
+    /// (`PressGuard`), as a mark on a post is: each press has a number no other shares, so an
+    /// answer that comes back to a name let go of meanwhile, or begun again since, is known
+    /// not to be that entry's.
+    private var out = PressGuard<String, Out>()
     /// One thing an act did not take: its name, and what a line names it by.
     private struct Miss {
         let name: String
@@ -103,7 +102,7 @@ final class ShellNoticeActs {
     static func all(_ host: String) -> String { "all\u{1e}" + host.lowercased() }
 
     /// The names of what is on the wire now.
-    var acting: Set<String> { Set(out.keys) }
+    var acting: Set<String> { out.names }
 
     /// The notices left out of what is drawn while their act is out: single lines by id, and
     /// every line of a source that was asked to dismiss all.
@@ -121,7 +120,7 @@ final class ShellNoticeActs {
     /// What the list leaves out of what it draws just now (`ShellNoticeList.rebuild`).
     var hidden: Hidden {
         var hidden = Hidden()
-        for (name, out) in out {
+        for (name, out) in out.all {
             switch out.act {
             case .dismiss: hidden.lines.insert(name)
             case .dismissAll: hidden.hosts.insert(out.host)
@@ -143,7 +142,7 @@ final class ShellNoticeActs {
     /// has let through or let go that its source has not answered for yet.
     func listed(host raw: String) -> [NoticeRequest] {
         let host = raw.lowercased()
-        return (requests[host] ?? []).filter { out[$0.id] == nil }
+        return (requests[host] ?? []).filter { !out.isOut($0.id) }
     }
 
     /// What the page says one source holds back: what the source said (`held`), less what
@@ -152,7 +151,7 @@ final class ShellNoticeActs {
     func shownHeld(host raw: String) -> NoticesHeld? {
         let host = raw.lowercased()
         guard let held = held(host: host) else { return nil }
-        let leaving = (requests[host] ?? []).filter { out[$0.id] != nil }
+        let leaving = (requests[host] ?? []).filter { out.isOut($0.id) }
         guard !leaving.isEmpty else { return held }
         return NoticeHolding.holds(NoticesHeld(
             requests: max(0, held.requests - leaving.count),
@@ -374,34 +373,32 @@ final class ShellNoticeActs {
         _ work: @escaping @Sendable (MastodonNotices) async throws -> Void,
         held: () -> Bool, done: () -> Void
     ) async {
-        guard session.mastodon.dismisses(host: host), out[name] == nil else { return }
-        flights += 1
-        let flight = flights
+        guard session.mastodon.dismisses(host: host), let flight = out.begin(name, showing: Out(host: host, act: act))
+        else { return }
         let sent = session.mastodon.token(host: host)?.accessToken
         let list = session.noticeList
-        out[name] = Out(host: host, act: act, flight: flight)
         said[host] = nil
         list.redraw(atYes: true)
         let answer = await ask(host, for: .write, in: session, work)
         // Let go of with its sign-in, and perhaps begun again since: not this press's entry.
-        guard out[name]?.flight == flight else { return }
+        guard out.isStill(flight, name) else { return }
         switch answer {
         case .yes where session.mastodon.token(host: host)?.accessToken == sent:
             done()
-            out[name] = nil
+            out.settle(name)
             list.redraw()
             settle(host: host, in: session)
             // A dismissal is the person asking for a line to be gone: its words are off this
             // device's disk before the act is over (#292). Last, so nothing above waits for it.
             if act == .dismiss || act == .dismissAll { await list.gone(in: session) }
         case .no(let why) where session.mastodon.token(host: host)?.accessToken == sent:
-            out[name] = nil
+            out.settle(name)
             list.redraw()
             guard held() else { break }
             if act == .dismiss, why == .unconfirmed { unconfirmed[name] = host }
             miss(Miss(name: name, about: about), act, why, at: host, in: session)
         case .yes, .no, .nothing:
-            out[name] = nil
+            out.settle(name)
             list.redraw()
         }
     }
@@ -477,7 +474,7 @@ final class ShellNoticeActs {
     /// name a later sign-in may read again, and the answer still to come finds no entry.
     func forget(host raw: String) {
         let host = raw.lowercased()
-        out = out.filter { $0.value.host != host }
+        out.letGo { _, out in out.host == host }
         moved[host] = nil
         missed = missed.filter { !$0.key.hasPrefix(host + "\u{1e}") }
         unconfirmed = unconfirmed.filter { $0.value != host }

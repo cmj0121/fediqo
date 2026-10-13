@@ -17,6 +17,10 @@ import Observation
 // the entry here before the store; the store moves only on the source's word, so a read landing
 // meanwhile changes what lies under the press and nothing on screen, and a failure puts the mark
 // back by dropping one entry.
+//
+// **What is out is kept by the one guard of a press** (`PressGuard`), the same one a notice
+// dismissed and a hashtag followed are pressed under. What is a post's alone stays here: a
+// press that did not arrive, with what it wanted and when, and the rows a taking back leaves out.
 
 /// One act on one post. The row is `NoteKey.rowID`, so one post held from two servers is two
 /// presses — the rule #10 sets everywhere else in this app.
@@ -48,7 +52,18 @@ enum ShellActStanding: Equatable, Sendable {
 @MainActor
 @Observable
 final class ShellActs {
-    private(set) var standings: [ShellActKey: ShellActStanding] = [:]
+    /// The presses out, each with which way its mark is drawn meanwhile.
+    private var presses = PressGuard<ShellActKey, Bool>()
+    /// The acts that did not arrive, each until it is pressed again or let go.
+    private var fell: Set<ShellActKey> = []
+
+    /// Where every act that is not settled has got to: pressed, or failed. Never both — a
+    /// press begun takes its failure down, and a failure ends its press.
+    var standings: [ShellActKey: ShellActStanding] {
+        var all: [ShellActKey: ShellActStanding] = presses.all.mapValues { .pressed(to: $0) }
+        for key in fell { all[key] = .failed }
+        return all
+    }
 
     /// The rows whose taking back is pressed and not yet answered — every copy of each — which
     /// are left out of what is drawn until the source answers. Back the moment it fails.
@@ -57,15 +72,16 @@ final class ShellActs {
     @ObservationIgnored private var taken: [ShellActKey: Set<String>] = [:]
 
     func standing(of row: String, _ act: PostAct) -> ShellActStanding? {
-        standings[ShellActKey(row: row, act: act)]
+        let key = ShellActKey(row: row, act: act)
+        if let to = presses.shown(key) { return .pressed(to: to) }
+        return fell.contains(key) ? .failed : nil
     }
 
     /// Whether this act on this row is pressed and not yet answered. **What a second press
     /// reads**, so pressing twice never puts two of the same act on the wire: a mark pressed
     /// again is turned (`turn`), and a taking back is not asked twice.
     func isOnItsWay(_ row: String, _ act: PostAct) -> Bool {
-        if case .pressed = standing(of: row, act) { return true }
-        return false
+        presses.isOut(ShellActKey(row: row, act: act))
     }
 
     /// A press on a mark whose last press is still out: **the last press wins.** What is drawn
@@ -74,27 +90,27 @@ final class ShellActs {
     /// the last, and one request at a time is on the wire for a mark. `false` where no press
     /// is out, and then the press is a first one.
     func turn(_ row: String, _ act: PostAct) -> Bool {
-        let key = ShellActKey(row: row, act: act)
-        guard case .pressed(let to) = standings[key] else { return false }
-        standings[key] = .pressed(to: !to)
-        return true
+        presses.change(ShellActKey(row: row, act: act)) { !$0 }
     }
 
     /// What the mark is wanted as, while a press on it is out; nothing otherwise.
     func wanted(_ row: String, _ act: PostAct) -> Bool? {
-        guard case .pressed(let to) = standing(of: row, act) else { return nil }
-        return to
+        presses.shown(ShellActKey(row: row, act: act))
     }
 
     /// Which press an entry is, counted as presses begin. What a request reads when its answer
     /// lands, to know the entry is still its own: a sign-out or a Clear lets go of the entry
     /// while the request is out, and a later press may have begun another under the same key.
-    func flight(_ row: String, _ act: PostAct) -> Int? {
-        flights[ShellActKey(row: row, act: act)]
+    func flight(_ row: String, _ act: PostAct) -> PressNumber? {
+        presses.press(ShellActKey(row: row, act: act))
     }
 
-    @ObservationIgnored private var flights: [ShellActKey: Int] = [:]
-    @ObservationIgnored private var begun = 0
+    /// Whether the entry of this act on this row is still the press that began as `flight`
+    /// (`PressGuard.isStill`): what its request asks after every wait.
+    func isStill(_ flight: PressNumber?, _ row: String, _ act: PostAct) -> Bool {
+        presses.isStill(flight, ShellActKey(row: row, act: act))
+    }
+
     /// What each press that did not arrive wanted its mark to be, and when it failed in the
     /// run's order of reads (`ReadMoment`), so a read asked afterwards that shows the mark that
     /// way — the write had landed after all — lets the failure go (`ShellSession.settleMisses`).
@@ -109,11 +125,9 @@ final class ShellActs {
     /// may start: `false` is one already out, which a mark turns instead (`turn`).
     /// `taking` is every row a taking back leaves out meanwhile (`leaving`).
     func begin(_ row: String, _ act: PostAct, to: Bool = true, taking rows: Set<String> = []) -> Bool {
-        guard !isOnItsWay(row, act) else { return false }
         let key = ShellActKey(row: row, act: act)
-        standings[key] = .pressed(to: to)
-        begun += 1
-        flights[key] = begun
+        guard presses.begin(key, showing: to) != nil else { return false }
+        fell.remove(key)
         missed[key] = nil
         if !rows.isEmpty {
             taken[key] = rows
@@ -125,8 +139,8 @@ final class ShellActs {
     /// It arrived. The entry goes, and what the row draws from here is the source's own answer.
     func landed(_ row: String, _ act: PostAct) {
         let key = ShellActKey(row: row, act: act)
-        standings[key] = nil
-        flights[key] = nil
+        presses.settle(key)
+        fell.remove(key)
         missed[key] = nil
         stay(key)
     }
@@ -134,9 +148,9 @@ final class ShellActs {
     /// It did not arrive. What the row draws is what the source last said, as it was.
     func failed(_ row: String, _ act: PostAct) {
         let key = ShellActKey(row: row, act: act)
-        if case .pressed(let to) = standings[key], let at = ReadMoment.now().place { missed[key] = (to, at) }
-        standings[key] = .failed
-        flights[key] = nil
+        if let to = presses.shown(key), let at = ReadMoment.now().place { missed[key] = (to, at) }
+        presses.settle(key)
+        fell.insert(key)
         stay(key)
     }
 
@@ -151,15 +165,15 @@ final class ShellActs {
     /// the host: `NoteKey.rowID` joins them on the record separator, which no hostname contains.
     func forget(host raw: String) {
         let prefix = raw.lowercased() + "\u{1e}"
-        standings = standings.filter { !$0.key.row.hasPrefix(prefix) }
-        flights = flights.filter { !$0.key.row.hasPrefix(prefix) }
+        presses.letGo { key, _ in key.row.hasPrefix(prefix) }
+        fell = fell.filter { !$0.row.hasPrefix(prefix) }
         missed = missed.filter { !$0.key.row.hasPrefix(prefix) }
         for key in taken.keys where key.row.hasPrefix(prefix) { stay(key) }
     }
 
     func clear() {
-        standings = [:]
-        flights = [:]
+        presses.clear()
+        fell = []
         missed = [:]
         taken = [:]
         leaving = []

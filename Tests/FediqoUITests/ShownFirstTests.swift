@@ -575,6 +575,42 @@ struct ShownFirstTests {
         }
     }
 
+    /// Pins the press's number in `perform` (`PressGuard.isStill`): with the same token held
+    /// again, the token cannot tell the first press's answer from the second's.
+    @Test("An answer that comes back after a sign-out and a sign-in again finds a press that is not its own: it does not end the later press, move its mark or say anything", .timeLimit(.minutes(1)))
+    func aLateAnswerIsNotTheLaterPresss() async throws {
+        let (session, server, query) = try await shell()
+        let early = await pressed(session, server) { await session.toggle(.boost, on: DummyItem(session.notes.first { $0.statusID == "9" }!)) }
+        defer { early.watchdog.cancel() }
+
+        await session.signOut(host: Self.host)
+        try session.mastodon.tokens.save(MastodonToken(
+            host: Self.host, accessToken: "tok-123", clientID: "cid", clientSecret: "csecret",
+            scopes: MastodonOAuth.scopes(writing: true)
+        ))
+        session.mastodon.refresh()
+        await session.mastodon.verifyAll()
+        await session.reload.timeline(query, in: session)
+        let item = try row(session)
+        #expect(session.acts.standings.isEmpty, "the premise: the first press went with its sign-in")
+
+        let late = await pressed(session, server) { await session.toggle(.boost, on: item) }
+        defer { late.watchdog.cancel() }
+        #expect(session.acts.standing(of: item.id, .boost) == .pressed(to: true))
+        let atPress = try mark(.boost, session)
+
+        await early.gate.open()
+        await early.press.value
+        #expect(session.acts.standing(of: item.id, .boost) == .pressed(to: true), "the first press's answer ended the second press")
+        #expect(try mark(.boost, session) == atPress && session.said.lines.isEmpty)
+        #expect(await server.writes == ["boost true", "boost true"], "the first press's answer sent something for the second")
+
+        await late.gate.open()
+        await late.press.value
+        #expect(session.acts.standings.isEmpty && session.said.lines.isEmpty)
+        #expect(try mark(.boost, session) == atPress, "the source's yes changed what is drawn")
+    }
+
     // MARK: - A failure that had landed after all
 
     @Test("A read that lands after a failure and shows the mark as the press wanted lets the failure go, and its line", .timeLimit(.minutes(1)))

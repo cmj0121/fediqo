@@ -26,3 +26,8 @@ curl_https discourse.localhost /srv/status
 curl_https discuz.localhost /forum.php
 
 echo "servers: mastodon.localhost discourse.localhost discuz.localhost answered HTTPS"
+
+if [ "${FEDIQO_SERVERS_GOTOSOCIAL:-}" = "1" ]; then
+    curl_https gotosocial.localhost /readyz
+    echo "servers: gotosocial.localhost answered HTTPS"
+fi

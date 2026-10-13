@@ -46,12 +46,18 @@ public struct MastodonToken: Sendable, Equatable, CustomStringConvertible,
     /// sign-in**, so what the person writes can be named as theirs with no network at all.
     public let accountID: String?
     public let handle: String?
+    /// Whether this very token has ridden a package (#347): taken away from this device in
+    /// one, or read back onto it from one — so another device may be carrying it, string for
+    /// string. **Written down and never unwritten**, for as long as that string is the one
+    /// held; false in every sign-in kept before this was written down. Not a secret.
+    public let packaged: Bool
 
     public init(
         host: String, accessToken: String, clientID: String, clientSecret: String,
         scopes: String? = nil, asked: String? = nil, refused: String? = nil,
-        accountID: String? = nil, handle: String? = nil
+        accountID: String? = nil, handle: String? = nil, packaged: Bool = false
     ) {
+        self.packaged = packaged
         self.refused = refused
         self.accountID = accountID
         self.handle = handle
@@ -83,8 +89,43 @@ public struct MastodonToken: Sendable, Equatable, CustomStringConvertible,
     private func with(asked: String?, refused: String?, accountID: String?, handle: String?) -> MastodonToken {
         MastodonToken(
             host: host, accessToken: accessToken, clientID: clientID, clientSecret: clientSecret,
-            scopes: scopes, asked: asked, refused: refused, accountID: accountID, handle: handle
+            scopes: scopes, asked: asked, refused: refused, accountID: accountID, handle: handle,
+            packaged: packaged
         ).stamped(stamp)
+    }
+
+    /// A sign-in as a package brings it (#347): marked as having ridden one, with what the
+    /// device it came from wrote beside it.
+    ///
+    /// **Every fact beside the token is that device's word and nobody else's**: nothing is
+    /// asked in place of this sign-in before its own source has said whose it is and what it
+    /// holds. Whose it is, is taken as an account check's answer is (`MastodonWho`) — an id
+    /// that is nothing, longer than one may run, or holds a space, a control or a format
+    /// character is none, and a handle is kept only with an id, where it can be a name of
+    /// this very source.
+    ///
+    /// **Its lists of words are bounded as a source's own account of a token is**
+    /// (`MastodonParts.carriedWords`): they are filed in the Keychain, beside the value as well as in it.
+    public static func carried(
+        host: String, accessToken: String, clientID: String, clientSecret: String,
+        scopes: String?, asked: String?, refused: String?, accountID: String?, handle: String?
+    ) -> MastodonToken {
+        let id = accountID.flatMap { said in
+            said.isEmpty || said.utf8.count > MastodonOAuth.clientBytes || said.contains(where: \.isWhitespace)
+                || LineText.oneLine(said) != said ? nil : said
+        }
+        return MastodonToken(
+            host: host, accessToken: accessToken, clientID: clientID, clientSecret: clientSecret,
+            scopes: MastodonParts.carriedWords(scopes), asked: MastodonParts.carriedWords(asked),
+            refused: MastodonParts.carriedWords(refused), accountID: id,
+            handle: id == nil ? nil : handle.flatMap { MastodonWho.kept($0, at: host) }, packaged: true
+        )
+    }
+
+    /// What is written beside this sign-in, in place, to mark it as having ridden a package:
+    /// the mark and nothing else, so every other fact held stays as it is (`over`).
+    public var packagedNote: MastodonToken {
+        MastodonToken(host: host, accessToken: accessToken, clientID: clientID, clientSecret: clientSecret, packaged: true)
     }
 
     /// This token as a store files it. Only a store stamps.
@@ -109,11 +150,13 @@ public struct MastodonToken: Sendable, Equatable, CustomStringConvertible,
     /// **Nothing for `refused` keeps what is held; the empty string is what clears it.**
     /// **Who it is, is one fact**: a token that names the account carries that account's
     /// handle, none included, and the handle held is kept only where it names nobody.
+    /// **That it has ridden a package stays written.**
     func over(_ held: MastodonToken) -> MastodonToken {
         MastodonToken(
             host: host, accessToken: accessToken, clientID: clientID, clientSecret: clientSecret,
             scopes: scopes ?? held.scopes, asked: asked ?? held.asked, refused: refused ?? held.refused,
-            accountID: accountID ?? held.accountID, handle: accountID == nil ? handle ?? held.handle : handle
+            accountID: accountID ?? held.accountID, handle: accountID == nil ? handle ?? held.handle : handle,
+            packaged: packaged || held.packaged
         )
     }
 
@@ -135,6 +178,7 @@ public struct MastodonToken: Sendable, Equatable, CustomStringConvertible,
             && one.clientID == other.clientID && one.clientSecret == other.clientSecret
             && one.scopes == other.scopes && one.asked == other.asked && one.refused == other.refused
             && one.accountID == other.accountID && one.handle == other.handle
+            && one.packaged == other.packaged
     }
 
     public var app: MastodonApp {
@@ -612,6 +656,9 @@ public enum MastodonKeychain {
             /// which reads everything above as it did.
             var refused: String?
             var stamp: String?
+            /// Absent in an item whose sign-in has ridden no package, and in every one kept
+            /// before that was written down (#347).
+            var packaged: Bool?
         }
 
         private struct App: Codable {
@@ -626,7 +673,7 @@ public enum MastodonKeychain {
                 accessToken: token.accessToken, clientID: token.clientID,
                 clientSecret: token.clientSecret, scopes: token.scopes, asked: token.asked,
                 accountID: token.accountID, handle: token.handle,
-                refused: token.refused, stamp: token.stamp
+                refused: token.refused, stamp: token.stamp, packaged: token.packaged ? true : nil
             )
             return (try? JSONEncoder().encode(value)) ?? Data()
         }
@@ -643,7 +690,8 @@ public enum MastodonKeychain {
             return MastodonToken(
                 host: host, accessToken: value.accessToken, clientID: value.clientID,
                 clientSecret: value.clientSecret, scopes: value.scopes, asked: value.asked,
-                refused: value.refused, accountID: value.accountID, handle: value.handle
+                refused: value.refused, accountID: value.accountID, handle: value.handle,
+                packaged: value.packaged ?? false
             ).stamped(value.stamp)
         }
 

@@ -311,7 +311,7 @@ struct RisingTests {
         #expect(line.keys == ["h"] && line.group == .move && line.touch == .press)
         #expect(L10n.t("shortcut.rising", language: .english) == "On Trends, open the hashtags rising on your sources")
         let keys = try String(contentsOf: Self.shell.appending(path: "DummyShellKeys.swift"), encoding: .utf8)
-        #expect(keys.contains(#""o", "h", "y""#), "the key reaches the shell")
+        #expect(keys.contains(#""o", "h", "l", "y""#), "the key reaches the shell")
     }
 
     private static var shell: URL {

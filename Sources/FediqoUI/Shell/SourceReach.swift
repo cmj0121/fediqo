@@ -240,6 +240,12 @@ struct SourceReach {
         MastodonTagFollows(door: door)
     }
 
+    /// How the reader stands to somebody, following them and stopping (#310, #313): only ever
+    /// as the reader, through the signed-in door.
+    func standing(_ door: MastodonAuthorized) -> MastodonStanding {
+        MastodonStanding(door: door)
+    }
+
     /// A search, which a Mastodon answers only to somebody signed in.
     func search(_ door: MastodonAuthorized) -> MastodonSearch {
         MastodonSearch(door: door)

@@ -200,6 +200,38 @@ services:
       start_period: 40s
     restart: unless-stopped
 
+  # Not Mastodon, and asked as one: what a server that only speaks Mastodon's client API
+  # answers where Mastodon 4.6.6 answers otherwise (servers/gotosocial/FINDINGS.md). No
+  # check of the product needs it, so it stands behind a profile and comes up only for
+  # `FEDIQO_SERVERS_GOTOSOCIAL=1 make servers`.
+  gotosocial:
+    profiles: [gotosocial]
+    image: superseriousbusiness/gotosocial:0.22.2@sha256:43e5dd574c5d5f94238b73e2ce17cf5c778f763cebebf06cc7894623d151c78b
+    environment:
+      GTS_HOST: gotosocial.localhost
+      GTS_PROTOCOL: https
+      GTS_BIND_ADDRESS: 0.0.0.0
+      GTS_PORT: "8080"
+      GTS_DB_TYPE: sqlite
+      GTS_DB_ADDRESS: /gotosocial/storage/sqlite.db
+      GTS_STORAGE_LOCAL_BASE_PATH: /gotosocial/storage
+      GTS_LETSENCRYPT_ENABLED: "false"
+      GTS_TRUSTED_PROXIES: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32,::1/128
+      GTS_LOG_LEVEL: warn
+      # Its own default is 300 asks in five minutes from one address, answered 429 after
+      # that (FINDINGS.md has it). One run of `ask.py` after a seed is more than that.
+      GTS_ADVANCED_RATE_LIMIT_REQUESTS: "0"
+      TZ: UTC
+    volumes:
+      - gotosocial-data:/gotosocial/storage
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
 volumes:
   caddy-data:
   mastodon-db:
@@ -209,3 +241,4 @@ volumes:
   discuz-www:
   discuz-caddy-data:
   discuz-caddy-config:
+  gotosocial-data:

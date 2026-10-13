@@ -238,6 +238,9 @@ final class ShellPersonPages {
     /// The hashtags the reader follows at each source, as a list (#318): numbered on the same
     /// count, let go with the same reader, and pressed through `tags`.
     let followed: ShellFollowedTags
+    /// How the reader stands to whoever's page is open, and following them (#310, #313):
+    /// numbered on the same count, and let go with the same reader.
+    let acts: ShellPersonActs
 
     init() {
         let count = PageErrands(), looks = PageReaders()
@@ -259,6 +262,9 @@ final class ShellPersonPages {
         self.tags = tags
         let followed = ShellFollowedTags(errands: count, readers: looks, tags: tags)
         self.followed = followed
+        let acts = ShellPersonActs(errands: count, readers: looks)
+        self.acts = acts
+        looks.whenChanged { [weak acts] host in acts?.letGo(at: host) }
         looks.whenChanged { [weak followed] host in followed?.letGo(at: host) }
         looks.whenChanged { [weak found] host in found?.letGo(at: host) }
         looks.whenChanged { [weak self] host in self?.letGo(at: host) }
@@ -494,6 +500,8 @@ final class ShellPersonPages {
         let held = readers.look(at: source.host, in: session).held
         if self.standing(of: who, at: source, in: session)?.asking == true { return }
         await begin(who, at: source, with: held, in: session)?.value
+        // And how the reader stands to them (#310), by the id the page now says they have.
+        await acts.again(who, said: said(of: who, in: session), in: session)
     }
 
     /// Starts the two asks of a page, and hands back the task they run in. Everything they

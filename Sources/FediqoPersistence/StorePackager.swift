@@ -630,7 +630,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
         case .signInsOnly:
             // Only what signs in (#6): the one entry, and the header names the sources it
             // signs in to and nothing else.
-            let held = try secrets(sources: snapshot.sources.map(\.host))
+            let held = try secrets(sources: snapshot.sources.map(\.host), taking: true)
             pieces = [Piece(.secrets, name: "secrets", data: held.isEmpty ? Data() : try JSONEncoder().encode(held))]
             let hosts = Set(held.mastodon.map(\.host) + held.apps.map(\.host) + held.forums.map(\.host))
             sources = snapshot.sources.filter { hosts.contains($0.host) }.map { .init(host: $0.host, kind: $0.kind) }
@@ -743,6 +743,15 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             var clientID: String
             var clientSecret: String
             var scopes: String?
+            /// What the device it came from knew of the sign-in beyond what it was granted
+            /// (#347): every word its pages asked, the words refused on the source's own
+            /// page, and whose it is. Absent in a package from a build before these rode,
+            /// which reads as it did: never asked, nothing refused, nobody named. **That
+            /// device's word**, as `scopes` is — see `MastodonToken.carried`.
+            var asked: String?
+            var refused: String?
+            var accountID: String?
+            var handle: String?
         }
 
         struct App: Codable, Equatable {
@@ -767,14 +776,25 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
 
     /// Everything the Keychain holds for this app, read once. Hosts with a token, and every
     /// source's registration, and every forum with a password.
-    private func secrets(sources: [String]) throws -> Secrets {
+    ///
+    /// **`taking` is a take-away, and marks each sign-in it takes** (#347) as one that has
+    /// ridden a package — beside the sign-in, in place, **before the token is turned into
+    /// bytes**: no package holds a sign-in this device does not know it shared. A mark the
+    /// Keychain refuses stops the take-away; a sign-in that became another between the look
+    /// and the mark is no longer the one held, and is not taken. **The journal never
+    /// rides**: what this device left at a source is its own to end.
+    private func secrets(sources: [String], taking: Bool = false) throws -> Secrets {
         var out = Secrets()
         let signedIn = try tokens.signedInHosts()
         for host in signedIn.sorted() {
             guard let token = try tokens.token(host: host) else { continue }
+            if taking, !token.packaged {
+                guard try tokens.update(token.packagedNote) else { continue }
+            }
             out.mastodon.append(.init(
                 host: token.host, accessToken: token.accessToken, clientID: token.clientID,
-                clientSecret: token.clientSecret, scopes: token.scopes
+                clientSecret: token.clientSecret, scopes: token.scopes, asked: token.asked,
+                refused: token.refused, accountID: token.accountID, handle: token.handle
             ))
         }
         for host in Set(sources).union(signedIn).sorted() {
@@ -790,16 +810,40 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
 
     /// Nothing at all where nothing signs in, so the header can say so.
     private func secretsJSON(sources: [String]) throws -> Data {
-        let held = try secrets(sources: sources)
+        let held = try secrets(sources: sources, taking: true)
         guard !held.isEmpty else { return Data() }
         return try JSONEncoder().encode(held)
+    }
+
+    /// What the Keychain held where a read back filed a package's, kept to put back.
+    private struct Replaced {
+        /// The registrations and the forum passwords, as they ride.
+        var rest = Secrets()
+        /// The sign-ins taken out, **as they were held** — the mark of each one's filing and
+        /// everything written beside it, which nothing that rides carries whole.
+        var tokens: [MastodonToken] = []
+        /// What this device had left at each host a sign-in was taken from or filed at,
+        /// where that could be read.
+        var journals: [String: [MastodonLeft]] = [:]
+        /// The notes this read back took itself, of the sign-ins it took out (`leave`).
+        var wrote: [MastodonLeft] = []
     }
 
     /// Files `fresh` in the Keychain in place of whatever is there — or, where `onlyTheirs`, in
     /// place of what is there for the package's hosts and nothing else (#6). Where a save
     /// refuses, what was there is put back, so the Keychain is as it was or as the package says.
     /// Hands back what was there, for a later step that refuses to put back the same way.
-    private func refile(_ fresh: Secrets, onlyTheirs: Bool) throws -> Secrets {
+    ///
+    /// **A sign-in a read back takes out is written down first** (#347, `leave`), so none
+    /// is live at its source with nothing here to end it by — one the package brings no
+    /// sign-in for among them, a host it brings only a registration for included.
+    ///
+    /// **A read back ends no sign-in.** It writes each one down as being replaced, which
+    /// nothing ends: a later step that refuses puts it back as the one held (`unfile`),
+    /// at once or when a locked device is unlocked. Only when every step has held is it
+    /// written down as replaced (`hold`), and what becomes of it then is the session's to
+    /// say, by what its source answers and never by what the package said.
+    private func refile(_ fresh: Secrets, onlyTheirs: Bool) throws -> Replaced {
         var previous = try secrets(sources: fresh.apps.map(\.host))
         if onlyTheirs {
             let hosts = Set(fresh.mastodon.map(\.host) + fresh.apps.map(\.host) + fresh.forums.map(\.host))
@@ -807,36 +851,161 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             previous.apps.removeAll { !hosts.contains($0.host) }
             previous.forums.removeAll { !hosts.contains($0.host) }
         }
+        let theirs = Dictionary(
+            fresh.mastodon.map { ($0.host.lowercased(), $0.accessToken) }, uniquingKeysWith: { _, last in last }
+        )
+        var before = Replaced()
+        before.rest.apps = previous.apps
+        before.rest.forums = previous.forums
+        // Whether any of the package's own has been filed: only then is there one to take out.
+        var filing = false
         do {
-            try clearSecrets(previous)
-            try clearSecrets(fresh)
+            // Each journal as it stands, before a word is written in it. One that cannot be
+            // read stops the read back where a sign-in is held to be written into it.
+            for token in previous.mastodon { before.journals[token.host] = try tokens.left(host: token.host) }
+            for host in theirs.keys where before.journals[host] == nil {
+                before.journals[host] = try? tokens.left(host: host)
+            }
+            for host in Set(previous.mastodon.map(\.host)).union(theirs.keys).sorted() {
+                if let held = try leave(host: host, for: theirs[host], noting: &before.wrote) {
+                    before.tokens.append(held)
+                }
+            }
+            try clearRest(previous)
+            try clearRest(fresh)
+            filing = true
             try fileSecrets(fresh)
         } catch {
-            try? clearSecrets(fresh)
-            try? fileSecrets(previous)
+            // Every step tried, whatever the one before came to: the device as near to what
+            // it was as it will go. Nothing of the package's was filed before `filing`.
+            try? putBack(filing ? fresh : Secrets(), before, strictly: false)
             throw error
         }
-        return previous
+        return before
+    }
+
+    /// Takes the sign-in held at `host` off this device and hands it back, nothing where none
+    /// is held — **written down first, with its own registration and whose it was, as one
+    /// a read back is replacing** (#347, `MastodonLeft.State.replacing`), unless it is the
+    /// very token the package brings (`theirs`), which is replaced by nothing but itself.
+    /// Each note taken is added to `wrote`.
+    ///
+    /// **Forgotten only while it is still the one held**: one filed in between, by a sign-in
+    /// landing from the main actor, is looked at in its turn and never taken out unwritten.
+    /// A note that cannot be taken stops the read back with the sign-in still held.
+    ///
+    /// **The package's own token is forgotten all the same before it is filed**, so it is
+    /// filed under a new mark: what the package says of it is taken for nobody's
+    /// confirmed word, though the string is one this device held.
+    private func leave(host: String, for theirs: String?, noting wrote: inout [MastodonLeft]) throws -> MastodonToken? {
+        while let held = try tokens.token(host: host) {
+            if held.accessToken != theirs {
+                let note = MastodonLeft(held, as: .replacing)
+                try tokens.journal(note)
+                wrote.append(note)
+            }
+            if try tokens.forget(held) { return held }
+        }
+        return nil
+    }
+
+    /// Every step of the read back held: each sign-in it took out is written down as
+    /// replaced, where it is still written down as being replaced — from here on nothing
+    /// puts it back, and the session may say what becomes of it. A note that cannot be
+    /// rewritten stays as it is, which ends nothing before the person signs out.
+    private func hold(_ before: Replaced) {
+        for note in before.wrote {
+            guard let now = try? tokens.left(host: note.host).first(where: note.isSame), now.state == .replacing
+            else { continue }
+            try? tokens.journal(now.marked(.replaced))
+        }
     }
 
     /// `fresh` taken out and `previous` put back: the Keychain as it was before `refile`, or a
-    /// throw where it could not be.
-    private func unfile(_ fresh: Secrets, previous: Secrets) throws {
-        try clearSecrets(fresh)
-        try fileSecrets(previous)
+    /// throw where it could not be — **the journals with it** (#347): a sign-in put back as
+    /// the one held is no longer one left, and each host's journal reads as it did.
+    ///
+    /// **A sign-in made at a host since is the person's newer one, and stands**: the
+    /// package's is taken out only while it is still the one held, and what was held
+    /// before is put back only where nothing is held now. Where one stands, the sign-in
+    /// the read back took out there stays written down — as replaced, for the session to
+    /// settle against the one now held, as if the read back had held for that host.
+    private func unfile(_ fresh: Secrets, previous: Replaced) throws {
+        try putBack(fresh, previous, strictly: true)
     }
 
-    private func clearSecrets(_ secrets: Secrets) throws {
-        for token in secrets.mastodon { try tokens.forget(host: token.host) }
+    /// `unfile`'s steps, in order — and `refile`'s own way back where a filing refused
+    /// midway, which is the same way. `strictly` stops at the first step that refuses;
+    /// otherwise each is tried whatever the one before came to.
+    ///
+    /// **The package's sign-in is forgotten only while it is the one held, and the one
+    /// held before is filed only while none is** — each one step of the store's
+    /// (`forget(_:)`, `swap(expecting:with:)`), so a sign-in landing from the main actor
+    /// is neither taken out nor written over.
+    private func putBack(_ fresh: Secrets, _ previous: Replaced, strictly: Bool) throws {
+        func step(_ body: () throws -> Void) throws {
+            if strictly { try body() } else { try? body() }
+        }
+        for token in fresh.mastodon {
+            try step {
+                _ = try tokens.forget(MastodonToken(
+                    host: token.host, accessToken: token.accessToken, clientID: token.clientID,
+                    clientSecret: token.clientSecret
+                ))
+            }
+        }
+        try step { try clearRest(fresh) }
+        try step { try fileSecrets(previous.rest) }
+        var standing: Set<String> = []
+        for token in previous.tokens {
+            try step { if try !tokens.swap(expecting: nil, with: token) { standing.insert(token.host) } }
+        }
+        try step { try rejournal(previous, standing: standing) }
+    }
+
+    /// Each host's journal put back as it stood before the read back: what it took out of
+    /// one — a sign-in the package brought, which left the journal as it was filed — is
+    /// written in again, and the notes the read back took itself (`Replaced.wrote`) go.
+    /// **Nothing else is taken out**: a note the session took meanwhile, of a sign-in of
+    /// its own, stays, and so does a state it has moved one to.
+    ///
+    /// Where nothing but the read back has written there since, every entry is written
+    /// again in its place, in order — which leaves them in the order they stood. **No
+    /// entry is taken out to do that**, and the read back's own notes go last, so a write
+    /// that fails midway has lost no note of a sign-in still live at its source.
+    ///
+    /// `standing` are the hosts where a sign-in made since stands in place of the one the
+    /// read back took out (`unfile`): its note there is kept, as replaced.
+    private func rejournal(_ before: Replaced, standing: Set<String> = []) throws {
+        for (host, entries) in before.journals {
+            let others = try tokens.left(host: host).filter { entry in !before.wrote.contains(where: entry.isSame) }
+            let asItStood = others.allSatisfy { entry in
+                entries.contains { $0.isSame(as: entry) && $0.state == entry.state }
+            }
+            for entry in entries where asItStood || !others.contains(where: entry.isSame) {
+                try tokens.journal(entry)
+            }
+        }
+        for note in before.wrote where before.journals[note.host]?.contains(where: note.isSame) != true {
+            if standing.contains(note.host) { try tokens.journal(note.marked(.replaced)) } else { try tokens.unjournal(note) }
+        }
+    }
+
+    /// The registrations and the forum passwords of `secrets`, taken out.
+    private func clearRest(_ secrets: Secrets) throws {
         for app in secrets.apps { try tokens.forgetApp(host: app.host) }
         for forum in secrets.forums { try credentials.forget(host: forum.host) }
     }
 
+    /// **Each sign-in is filed as one a package brought** (#347, `MastodonToken.carried`):
+    /// marked as having ridden one, and under a new mark of its filing — so whoever looks
+    /// next sees a sign-in nobody here has asked about.
     private func fileSecrets(_ secrets: Secrets) throws {
         for token in secrets.mastodon {
-            try tokens.save(MastodonToken(
+            try tokens.save(.carried(
                 host: token.host, accessToken: token.accessToken, clientID: token.clientID,
-                clientSecret: token.clientSecret, scopes: token.scopes
+                clientSecret: token.clientSecret, scopes: token.scopes, asked: token.asked,
+                refused: token.refused, accountID: token.accountID, handle: token.handle
             ))
         }
         for app in secrets.apps {
@@ -1343,6 +1512,7 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
                 try naming("secrets")
                 let previous = try refile(secrets, onlyTheirs: contents == nil)
                 undo.append(Undo(name: "secrets") { try unfile(secrets, previous: previous) })
+                settle.append { hold(previous) }
             }
             guard let contents else { return allHeld() }
             witness?(.staged)

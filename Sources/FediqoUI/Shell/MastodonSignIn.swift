@@ -668,8 +668,22 @@ public final class MastodonSessions {
         // either side, they are not shown to be one account. **Asked in place, the sign-in
         // held is the account its ask confirmed** (`Place.account`), whatever has been let
         // go of since: it is never ended for want of an id written beside it.
-        let owner = place?.account ?? replaced.flatMap { accountID(of: $0) }
+        //
+        // **What is written beside a sign-in that rode a package may be the package's word**
+        // (`MastodonToken.packaged`): whose such a one is, is only what its source said
+        // through it this run.
+        let owner = place?.account ?? replaced.flatMap { $0.packaged ? confirmedAccount(of: $0) : accountID(of: $0) }
         let sameAccount = owner != nil && owner == account
+        // One that rode a package and whose source has not said whose it is: not shown to
+        // be this account's, so no earlier form of the new sign-in — and not shown to be
+        // another's, so not ended on a package's word. It is written down as a read back's
+        // own are, saying nothing of whose it was, and stays until the person signs out.
+        //
+        // **Only where it may do nothing the new sign-in cannot.** One that may is ended
+        // whoever it is — a narrowing, or another account — so whose it is decides nothing
+        // there, and the question said it would end.
+        let unsaid = place == nil && owner == nil
+            && replaced.map { $0.packaged && !MastodonLeft($0, as: .left).holdsMore(than: token.scopes) } == true
         // Who read this source before, the sign-in handed back as it was included.
         let reader = place?.account ?? held.flatMap { accountID(of: $0) }
         // Left live only where it is the same account's and can do nothing the new one cannot.
@@ -679,6 +693,19 @@ public final class MastodonSessions {
             // no sign-out here would end.
             do {
                 try tokens.journal(MastodonLeft(replaced, as: .left, accountID: owner))
+            } catch {
+                await discard(fresh, handedBack)
+                return .failed(.keychain)
+            }
+            unended.removeAll { $0.isToken(replaced) }
+        }
+        if unsaid, let replaced {
+            let unnamed = MastodonToken(
+                host: host, accessToken: replaced.accessToken, clientID: replaced.clientID,
+                clientSecret: replaced.clientSecret, scopes: replaced.scopes
+            )
+            do {
+                try tokens.journal(MastodonLeft(unnamed, as: .replaced))
             } catch {
                 await discard(fresh, handedBack)
                 return .failed(.keychain)
@@ -701,7 +728,7 @@ public final class MastodonSessions {
         }
         guard kept else {
             // Still held, the replaced token is not one left behind.
-            if widening, let replaced, MastodonLeft(replaced, as: .left).isToken(self.token(host: host)) {
+            if widening || unsaid, let replaced, MastodonLeft(replaced, as: .left).isToken(self.token(host: host)) {
                 try? tokens.unjournal(MastodonLeft(replaced, as: .left))
             }
             refresh()
@@ -731,20 +758,27 @@ public final class MastodonSessions {
             readersLearnt += 1
         }
         // **After the new one is safely kept**, and never a token with the same string (`end`).
-        if let replaced, !widening {
+        if let replaced, !widening, !unsaid {
             // The read-or-act question says this first (`signInEnds`).
             await end(MastodonLeft(replaced, as: .left, accountID: owner), why: .leftBehind)
         }
         await endLeft(host: host) { left in
             // The one just asked about is not asked twice in one sign-in.
             if let replaced, left.isToken(replaced) { return false }
+            // The earlier forms of a sign-in a read back may yet put back go back with it.
+            if left.state == .left, self.mayBePutBack(at: host) { return false }
             return switch left.state {
             // One made and never kept is this sign-in's own while it is on its way (`endLeft`).
             case .pending, .owed: true
             // Another account's, or one that may do what the sign-in now held may not.
             case .left, .lost: left.accountID == nil || left.accountID != account || left.holdsMore(than: token.scopes)
+            // A read back's own: never while it may yet be put back, and once it has held,
+            // by the one rule for them (`settleReplaced`), on what this sign-in's own
+            // source has just said of it.
+            case .replacing, .replaced: false
             }
         }
+        if let account { await settleReplaced(host: host, account: account, words: token.scopes, telling: false) }
         leaveLost(host)
         await endLeft(host: host, beyond: Self.mostLeft)
         noteLeft(host)
@@ -1417,8 +1451,9 @@ public final class MastodonSessions {
     /// server answers the same words on the same registration with the token it already
     /// issued, so a token a sign-in could not keep may be, string for string, the one the row
     /// says the person has: ending it would sign them out behind a row that reads signed in.
-    /// **Nor is one not kept ended while it is written down as left or lost**: handed back
-    /// the same way, it is a sign-in another device may be carrying.
+    /// **Nor is one not kept ended while it is written down as left or lost, or as one a
+    /// read back took out**: handed back the same way, it is a sign-in another device may
+    /// be carrying.
     /// What is held and what is journalled are read here, with nothing awaited between the
     /// look and the send, so a token put back or kept a moment ago is seen. Where the
     /// Keychain cannot be read nothing is sent: that can leave a token nobody kept live at
@@ -1444,7 +1479,7 @@ public final class MastodonSessions {
                     return
                 }
                 if ending == .notKept, try tokens.left(host: host).contains(where: {
-                    $0.isSame(as: left) && ($0.state == .left || $0.state == .lost)
+                    $0.isSame(as: left) && [MastodonLeft.State.left, .lost, .replacing, .replaced].contains($0.state)
                 }) { return }
                 // Written down again, it is the journal's to end, and by the journal's rules.
                 if ending == .unended, try tokens.left(host: host).contains(where: left.isSame) {
@@ -1612,11 +1647,14 @@ public final class MastodonSessions {
         }
     }
 
-    /// Ends the oldest sign-ins left at `host` beyond the `most` newest.
+    /// Ends the oldest sign-ins left at `host` beyond the `most` newest — those a read back
+    /// that held took out counted with them. **None, while a read back there may yet be
+    /// undone**: its sign-in goes back with every earlier form of it.
+    /// Called only where the sign-in held has just been named by its own source.
     private func endLeft(host: String, beyond most: Int) async {
-        let left = ((try? tokens.left(host: host)) ?? []).filter { $0.state == .left }
+        let left = ((try? tokens.left(host: host)) ?? []).filter { $0.state == .left || $0.state == .replaced }
         let oldest = left.dropLast(most)
-        guard !oldest.isEmpty else { return }
+        guard !oldest.isEmpty, !mayBePutBack(at: host) else { return }
         await endLeft(host: host) { entry in oldest.contains { $0.isSame(as: entry) } }
     }
 
@@ -1645,9 +1683,16 @@ public final class MastodonSessions {
     /// For each host with a journal, each step whatever the one before came to:
     /// - a sign-in written down as lost is filed again as the one held, where none is;
     /// - with no sign-in held, everything else journalled is asked to end, once — and what
-    ///   the source does not confirm leaves the device and is told (`settle`);
+    ///   the source does not confirm leaves the device and is told (`settle`) — **but for
+    ///   what a read back took out** (`endsWithNoneHeld`);
     /// - with one held, sign-ins left by another account are ended and said, one made and
-    ///   never kept is ended, and each one owed is asked again.
+    ///   never kept is ended, each one owed is asked again, and what a read back that held
+    ///   took out is settled by what the source says of the one now held
+    ///   (`confirmReplaced`).
+    ///
+    /// **Whose the sign-in held is, is what its source said through it this run**, and
+    /// nothing written beside it: a package writes there too, and no sign-in is ended as
+    /// another account's on a package's word. Not yet said, nothing is ended for it.
     ///
     /// What is owed in memory alone is asked again before any of it.
     ///
@@ -1675,23 +1720,134 @@ public final class MastodonSessions {
                 continue
             }
             guard let held else {
-                await endLeft(host: host) { $0.state != .lost }
+                await endLeft(host: host) { left in
+                    Self.endsWithNoneHeld(left, among: (try? self.tokens.left(host: host)) ?? [])
+                }
                 noteLeft(host)
                 continue
             }
-            if let account = accountID(of: held) {
+            // While a read back there may yet be undone, the sign-in it took out goes back
+            // with every earlier form of it: none is ended as another account's meanwhile.
+            if let account = confirmedAccount(of: held), !mayBePutBack(at: host) {
                 let others = ((try? tokens.left(host: host)) ?? []).contains { Self.isAnothers($0, than: account) }
                 await endLeft(host: host) { Self.isAnothers($0, than: account) }
                 if others { tell(.others, host: host) }
             }
             await endLeft(host: host) { $0.state == .pending || $0.state == .owed }
+            await confirmReplaced(host: host)
             noteLeft(host)
         }
     }
 
+    /// **Decided by the person (2026-10-13): written down and left, not ended — and still
+    /// the one place it is made.** A read back that brought no sign-in for a source this
+    /// device was signed in to takes that sign-in off the device and writes it down. With
+    /// this `false` it is left as it is: live at the source, written down here, and ended
+    /// when the person clears or removes the source, or signs in there again as somebody
+    /// else. The other choice was to end it once the read back has held (`true`) — which
+    /// signs out every other device carrying it, and so must be said in the read-back
+    /// question before it is done. It stays one named switch so that choice remains one
+    /// switch and one sentence away.
+    static let endsWhatAReadBackLeftBare = false
+
+    /// Whether a sign-in journalled at a host where none is held is asked to end, by a
+    /// going-through — `entries` being everything journalled there: never one lost, which
+    /// is the person's own; never one a read back may yet put back; and one a read back
+    /// that held took out only as `endingBare` says, which is
+    /// `endsWhatAReadBackLeftBare` wherever the app asks.
+    ///
+    /// **The earlier forms of a sign-in a read back took out follow it**: left, they are
+    /// not ended while it may yet be put back, and once the read back has held they are
+    /// ended only where it is — so the one switch decides for the whole chain.
+    static func endsWithNoneHeld(
+        _ left: MastodonLeft, among entries: [MastodonLeft], endingBare: Bool = endsWhatAReadBackLeftBare
+    ) -> Bool {
+        switch left.state {
+        case .lost, .replacing: return false
+        case .replaced: return endingBare
+        case .left:
+            if entries.contains(where: { $0.state == .replacing }) { return false }
+            return entries.contains { $0.state == .replaced } ? endingBare : true
+        case .pending, .owed: return true
+        }
+    }
+
+    /// Whether a read back took a sign-in out at `host` and may yet put it back — it has
+    /// not held, or its undo waits on a locked device. Where what was left there cannot be
+    /// read, it may.
+    private func mayBePutBack(at host: String) -> Bool {
+        guard let entries = try? tokens.left(host: host) else { return true }
+        return entries.contains { $0.state == .replacing }
+    }
+
+    /// Whose sign-in `token` is, as its source said through that very token this run —
+    /// and by nothing written beside it. Nothing where the source has not been heard.
+    private func confirmedAccount(of token: MastodonToken) -> String? {
+        readers[token.host].flatMap { $0.accessToken == token.accessToken ? $0.id : nil }
+    }
+
+    /// Settles what a read back that held took out at `host`, where a sign-in is held
+    /// there now (#347) — **on its source's own word and no other**: whose the sign-in
+    /// held is, asked now where this run has not heard, and what it holds, read from the
+    /// source's own account of the token. Until both are had nothing is ended and nothing
+    /// is called an earlier form of the one held: what the package said of either decides
+    /// nothing, and the next going-through asks again.
+    ///
+    /// **The source's list is taken whole**, not cut to what the sign-in is filed as having
+    /// asked — a package's word too, which could make the one held look to hold less. And
+    /// only a list that reads word by word (`MastodonParts.reads`) is gone by: against the
+    /// source's one word for every read nothing can be shown to do more. Nothing is
+    /// written beside the sign-in here.
+    private func confirmReplaced(host: String) async {
+        guard ((try? tokens.left(host: host)) ?? []).contains(where: { $0.state == .replaced }),
+              let held = token(host: host)
+        else { return }
+        if confirmedAccount(of: held) == nil { await learnWho(host: host) }
+        guard let asked = token(host: host), asked.accessToken == held.accessToken,
+              let account = confirmedAccount(of: asked)
+        else { return }
+        let watched = WatchedHTTP(sender: SourceReach.wordList(sender), for: .signInCheck, in: work)
+        guard let listed = try? await MastodonOAuth(host: host, sender: watched).words(of: asked),
+              token(host: host)?.accessToken == held.accessToken
+        else { return }
+        let words = MastodonParts.believed(listed, asked: nil)
+        guard MastodonParts.reads(words) else { return }
+        await settleReplaced(host: host, account: account, words: words, telling: true)
+        // The bound on what is left is kept here and at a sign-in, where the source has
+        // answered. A source that never gives a usable list is never asked to end one for
+        // it, so read backs over a sign-in there can leave more than `mostLeft` written
+        // down, each until the person signs out: accepted, and better than ending on no word.
+        await endLeft(host: host, beyond: Self.mostLeft)
+    }
+
+    /// What becomes of each sign-in a read back that held took out at `host`, now that the
+    /// source has said the one held is `account`'s and holds `words`:
+    /// - another account's is ended, and said where `telling`;
+    /// - the same account's that may do what the one held may not is ended;
+    /// - the same account's otherwise is an earlier form of the one held, and left.
+    ///
+    /// **One that says nothing of whose it was stays as it is**: it cannot be shown to be
+    /// another's or the same one's, so it is neither ended nor called an earlier form —
+    /// written down until the person signs out, clears or removes, which ends it.
+    private func settleReplaced(host: String, account: String, words: String?, telling: Bool) async {
+        func over(_ left: MastodonLeft) -> Bool {
+            guard left.state == .replaced, let owner = left.accountID else { return false }
+            return owner != account || left.holdsMore(than: words)
+        }
+        let others = ((try? tokens.left(host: host)) ?? []).contains {
+            $0.state == .replaced && $0.accountID != nil && $0.accountID != account
+        }
+        await endLeft(host: host, over)
+        if others, telling { tell(.others, host: host) }
+        for left in (try? tokens.left(host: host)) ?? []
+            where left.state == .replaced && left.accountID == account && !left.holdsMore(than: words) {
+            try? tokens.journal(left.marked(.left))
+        }
+    }
+
     /// Whether `left` is a sign-in left by an account other than `account`: only where it
-    /// says whose it was. Until a package says whose sign-in it brings, a chain that is not
-    /// the held account's is ended and never added to.
+    /// says whose it was. A chain that is not the held account's is ended and never added
+    /// to. What a read back took out is no part of it (`settleReplaced`).
     private static func isAnothers(_ left: MastodonLeft, than account: String) -> Bool {
         left.state == .left && left.accountID != nil && left.accountID != account
     }
@@ -1726,6 +1882,29 @@ public final class MastodonSessions {
         after {
             $0.frontWaiting = false
             await $0.settleLeft()
+        }
+    }
+
+    /// A package was read back (#347): who is signed in is read again, and what the read
+    /// back took out where it put a sign-in is settled now, not at the next launch
+    /// (`confirmReplaced`) — on what each source answers of the sign-in now held.
+    ///
+    /// **Only the sources the read back took a sign-in out at are asked anything**, and of
+    /// those only where one is held now: what it took out with nothing put in its place
+    /// stays written down (`endsWhatAReadBackLeftBare`).
+    func readBack() {
+        refresh()
+        guard grantsKnown, let hosts = try? tokens.leftHosts() else { return }
+        let touched = hosts.filter { host in
+            grants[host] != nil && ((try? tokens.left(host: host)) ?? []).contains { $0.state == .replaced }
+        }
+        for host in hosts { noteLeft(host) }
+        guard !touched.isEmpty else { return }
+        after { sessions in
+            for host in touched.sorted() {
+                await sessions.confirmReplaced(host: host)
+                sessions.noteLeft(host)
+            }
         }
     }
 
@@ -1882,7 +2061,10 @@ public final class MastodonSessions {
     /// (`tellDropped`).
     private func endLeftOfEnded(_ host: String) {
         guard endings.takeSaid(host), grantsKnown, grants[host] == nil,
-              let left = try? tokens.left(host: host), left.contains(where: { $0.state == .left })
+              let left = try? tokens.left(host: host), left.contains(where: { $0.state == .left }),
+              // The earlier forms of a sign-in a read back took out follow it: not ended
+              // while it may yet be put back, nor while it stands written down as replaced.
+              !left.contains(where: { $0.state == .replacing || $0.state == .replaced })
         else { return }
         endedLeft.insert(host)
         after { await $0.endLeft(host: host) { $0.state == .left || $0.state == .owed } }
@@ -1924,7 +2106,8 @@ public final class MastodonSessions {
     /// token is read for it.
     ///
     /// **What was known of the sign-in before is not laid on the next**: the reader's handle
-    /// goes. Where one sign-in took another's place the source is asked who reads it now by
+    /// goes, and so does this device's having heard its words from its source. Where one
+    /// sign-in took another's place the source is asked who reads it now by
     /// the first read that reaches it (`learnWhoAgain`) — a sign-in made here has said
     /// already, and takes itself off that list.
     ///
@@ -1936,6 +2119,8 @@ public final class MastodonSessions {
             changes[host, default: 0] += 1
             handles[host] = nil
             readers[host] = nil
+            // Nor its words: a package may file the very string held, saying other of it.
+            wordsConfirmed[host] = nil
             if before[host] != nil, found[host] != nil { unlearned.insert(host) }
             onBecameAnother?(host)
         }

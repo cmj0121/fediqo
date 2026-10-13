@@ -83,6 +83,10 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     /// `h` — the hashtags rising on the sources (#320), from the timeline that reads what is
     /// rising: the press a finger makes on the line at its head. `h` for hashtag, and free.
     case openRising
+    /// `l` — follow whoever's page is in front, or the hashtag whose page is (#313, #318): the
+    /// press a finger makes on Follow there. Free, and beside `j` and `k` under the hand.
+    /// **It only ever follows**: unfollowing is in the page's `…` and on the hashtag's line.
+    case follow
     case showShortcuts
     /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.
     case search
@@ -142,6 +146,7 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
         case "t": return .openTag
         case "o": return .openQuote
         case "h": return .openRising
+        case "l": return .follow
         case "c": return .compose
         case "j", KeyEquivalent.downArrow.character: return .nextPost
         case "k", KeyEquivalent.upArrow.character: return .previousPost
@@ -622,6 +627,8 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
         // It is offered on the reader's own posts only, and the key is refused on everyone
         // else's, so there is no half of it a finger cannot reach. It is not a mark of its own.
         DummyShortcut(group: .act, keys: ["d"], name: "withdraw", commands: [.withdraw], touch: .press, also: .hold),
+        // Follow on somebody's page, and on a hashtag's line of its page, pressed (#313, #318).
+        DummyShortcut(group: .act, keys: ["l"], name: "follow", commands: [.follow], touch: .press),
         DummyShortcut(group: .act, keys: ["c"], name: "compose", commands: [.compose], touch: .press),
         // A tab held, or double-clicked — `TimelinePane.queryPill`.
         // On a narrow page there is no row of tabs to hold: it is in the list the timeline's

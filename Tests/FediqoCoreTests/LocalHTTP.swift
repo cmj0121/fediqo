@@ -25,10 +25,39 @@ enum LocalServers {
     static let discourse = "discourse.localhost"
     static let discuz = "discuz.localhost"
 
-    static let hosts: Set<String> = [mastodon, discourse, discuz]
+    /// A fourth, brought up only where it is asked for (`FEDIQO_SERVERS_GOTOSOCIAL=1 make
+    /// servers`): not Mastodon, and asked as one to see what differs. No check of the three
+    /// asks it, and `requireHealthy()` does not wait for it.
+    static let gotosocial = "gotosocial.localhost"
+
+    static let hosts: Set<String> = [mastodon, discourse, discuz, gotosocial]
 
     static var requested: Bool {
         ProcessInfo.processInfo.environment["FEDIQO_SERVERS"] == "1"
+    }
+
+    static var gotosocialRequested: Bool {
+        ProcessInfo.processInfo.environment["FEDIQO_SERVERS_GOTOSOCIAL"] == "1"
+    }
+
+    /// The fourth is up, or this throws: the same two questions as the gate above.
+    static func requireGoToSocial() async throws {
+        guard let url = Host.httpsURL(host: gotosocial, path: "/readyz") else {
+            throw LocalHTTPError.invalidURL
+        }
+        let (_, response) = try await LocalHTTP.client().data(from: url)
+        guard (200 ..< 400).contains(response.statusCode) else {
+            throw LocalHTTPError.unhealthy(gotosocial)
+        }
+    }
+
+    /// The writer's sign-in its seed made (`servers/gotosocial/seed.sh`).
+    static func gotosocialWriterToken() throws -> String {
+        let url = repoRoot.appending(path: "servers/.run/gotosocial-token")
+        let raw = try String(contentsOf: url, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { throw LocalHTTPError.unhealthy(gotosocial) }
+        return raw
     }
 
     static func requireHealthy() async throws {

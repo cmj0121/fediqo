@@ -253,6 +253,23 @@ public enum MastodonParts {
         return held == part.words.filter { !acts($0) } ? .seeing : nil
     }
 
+    /// A list of scope words as a package brings it (#347): only what can be a scope word
+    /// at all (`MastodonRegistration.isWord`), one space between — and nothing, where none
+    /// is one or there are more than a source's own account of a token may bring
+    /// (`MastodonOAuth.tokenInfoWords`). Nothing written down is a sign-in never asked,
+    /// which is asked again and widens nothing.
+    ///
+    /// **Not only the words this table knows**: a sign-in an earlier build made reads by
+    /// the source's one word for every read, which is no part's word, and must go on
+    /// reading as it did.
+    static func carriedWords(_ said: String?) -> String? {
+        guard let said, said.utf8.count <= MastodonOAuth.tokenInfoWords * (MastodonRegistration.wordLength + 1) else { return nil }
+        let words = said.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard words.count <= MastodonOAuth.tokenInfoWords else { return nil }
+        let kept = words.filter(MastodonRegistration.isWord)
+        return kept.isEmpty ? nil : spelt(kept)
+    }
+
     /// Words as the one string a source reads them in.
     private static func spelt(_ words: [String]) -> String {
         words.joined(separator: " ")

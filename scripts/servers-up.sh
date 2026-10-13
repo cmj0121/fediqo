@@ -11,6 +11,14 @@ ENV_FILE="$ROOT/servers/.env"
 RUN_DIR="$ROOT/servers/.run"
 COMPOSE=(docker compose -f servers/compose.yml --project-directory servers --env-file "$ENV_FILE")
 
+# A fourth server no check of the product needs: a GoToSocial, asked as a Mastodon is to see
+# what differs (servers/gotosocial/FINDINGS.md). Only where it is asked for, so that the three
+# come up exactly as they did.
+WITH_GOTOSOCIAL="${FEDIQO_SERVERS_GOTOSOCIAL:-}"
+if [ "$WITH_GOTOSOCIAL" = "1" ]; then
+    COMPOSE+=(--profile gotosocial)
+fi
+
 die() { echo >&2 "servers-up: $*"; exit 1; }
 
 need_docker() {
@@ -147,6 +155,13 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM pre_forum_post LIMIT 1);
 "
 }
 
+seed_gotosocial() {
+    wait_for "gotosocial is ready" 60 \
+        "${COMPOSE[@]}" exec -T gotosocial \
+        wget -q --spider http://127.0.0.1:8080/readyz
+    "$ROOT/servers/gotosocial/seed.sh"
+}
+
 need_docker
 command -v openssl >/dev/null 2>&1 || die "openssl is not on PATH"
 command -v curl >/dev/null 2>&1 || die "curl is not on PATH"
@@ -190,6 +205,9 @@ export_ca
 seed_mastodon
 seed_discourse
 seed_discuz
+if [ "$WITH_GOTOSOCIAL" = "1" ]; then
+    seed_gotosocial
+fi
 
 wait_for "caddy has a local CA" 30 test -s "$RUN_DIR/root.crt"
 "$ROOT/scripts/servers-health.sh"
@@ -199,6 +217,9 @@ echo "servers-up: ready on this machine"
 echo "  https://mastodon.localhost"
 echo "  https://discourse.localhost"
 echo "  https://discuz.localhost"
+if [ "$WITH_GOTOSOCIAL" = "1" ]; then
+    echo "  https://gotosocial.localhost (asked, not joined: servers/gotosocial/ask.py)"
+fi
 echo
 echo "  FEDIQO_SERVERS=1 make test"
 echo "  make servers-down"
