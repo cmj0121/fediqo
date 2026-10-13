@@ -16,11 +16,12 @@ import Observation
 // guessed**: the line is the lock of how that sign-in stands (`PartWords.place`), and its press
 // only raises the question. Nothing is asked while no such page is in front.
 //
-// **A press is shown first, and guarded as a mark on a post is** — by `ShellActs`, the guard a
-// bookmark is pressed under, as it is: one request out a hashtag and source, a press while it
-// is out sends nothing, and the answer is taken only by the press that began it. The line
-// reads as doing it meanwhile. What the source answers is what the line then says; a press
-// that did not arrive leaves the line as the source last said and says so under it.
+// **A press is shown first, and guarded as a mark on a post is** — by `PressGuard`, the one
+// guard a bookmark and a notice dismissed are pressed under: one request out a hashtag and
+// source, a press while it is out sends nothing, and the answer is taken only by the press
+// that began it. The line reads as doing it meanwhile. What the source answers is what the
+// line then says; a press that did not arrive leaves the line as the source last said and
+// says so under it.
 //
 // **Every answer lands only where it is still the one awaited**: each read is numbered on the
 // one count every page's asks are numbered on; a press's answer is written only to the page it
@@ -178,9 +179,12 @@ final class ShellTagFollow {
     }
 
     private var pages: [String: Page] = [:]
-    /// The presses out, and the ones that did not arrive: the guard a mark on a post is
-    /// pressed under, in an instance of its own so nothing of a post's is read by it.
-    private let acts = ShellActs()
+    /// The presses out, each with what it is drawn as doing — following, or unfollowing — by
+    /// the page's own key: the one guard of a press (`PressGuard`), as a mark on a post has.
+    private var presses = PressGuard<String, Bool>()
+    /// What each press that did not arrive wanted — to follow, or to unfollow — by the page's
+    /// key: said under the line until it is pressed again, or its page is left.
+    private var missed: [String: Bool] = [:]
     /// How often the sign-in at its host had become another when each press out was made: a
     /// press is drawn only for the reader who made it.
     private var pressedUnder: [String: Int] = [:]
@@ -198,16 +202,6 @@ final class ShellTagFollow {
     /// row is as an act answered (`ShellFollowedTags`). Told for the reader who pressed and
     /// nobody else, whether or not the page pressed on still stands.
     @ObservationIgnored var whenAnswered: ((_ tag: PostTag, _ host: String, _ followed: Bool) -> Void)?
-
-    /// The guard's key names a post's act, and a hashtag's follow is none of them: it is kept
-    /// under the one that is a mark put at the source for the reader alone.
-    ///
-    /// **A borrowed key.** `ShellActKey` only knows a post's acts, so there is none of a
-    /// hashtag's to keep this under. It does no harm here because `acts` is this object's
-    /// own and private, and nothing reads the act back out of it: no bookmark is ever sent
-    /// for it. **That instance must not be shared** — with a post's guard this would be read
-    /// as a bookmark on a row named by a hashtag's key.
-    private static let mark = PostAct.bookmark
 
     init(errands: PageErrands, readers: PageReaders) {
         self.errands = errands
@@ -272,7 +266,7 @@ final class ShellTagFollow {
             return TagFollowLine(host: host, tag: tag, standing: .locked(place))
         }
         let key = Self.key(tag, host)
-        if let to = acts.wanted(key, Self.mark), pressedUnder[key] == ShellPersonPages.signIns(at: host, in: session) {
+        if let to = presses.shown(key), pressedUnder[key] == ShellPersonPages.signIns(at: host, in: session) {
             return TagFollowLine(host: host, tag: tag, standing: .doing(to))
         }
         guard let page = self.standing(key, at: host, in: session) else {
@@ -283,9 +277,7 @@ final class ShellTagFollow {
             if page.absent { return TagFollowLine(host: host, tag: tag, standing: .absent) }
             return TagFollowLine(host: host, tag: tag, standing: page.failed ? .unknown : .asking)
         }
-        let missed = acts.standing(of: key, Self.mark) == .failed
-            ? acts.misses.first { $0.key == ShellActKey(row: key, act: Self.mark) }?.wanted : nil
-        return TagFollowLine(host: host, tag: tag, standing: .said(said), missed: missed)
+        return TagFollowLine(host: host, tag: tag, standing: .said(said), missed: missed[key])
     }
 
     // MARK: - Letting go
@@ -294,7 +286,10 @@ final class ShellTagFollow {
     /// asked (`PageReaders`). A press still out comes back to nothing of its own.
     func letGo(at host: String) {
         for (key, page) in pages where page.host == host { drop(key) }
-        acts.forget(host: host)
+        // By the key's first half, the host — in small letters, as a post's presses are let go.
+        let prefix = host.lowercased() + "\u{1e}"
+        presses.letGo { key, _ in key.hasPrefix(prefix) }
+        missed = missed.filter { !$0.key.hasPrefix(prefix) }
         pressedUnder = pressedUnder.filter { !$0.key.hasPrefix(host + "\u{1e}") }
     }
 
@@ -306,7 +301,7 @@ final class ShellTagFollow {
         for key in pages.keys where key.hasSuffix(suffix) {
             drop(key)
             // A press that did not arrive was said on the page that is gone.
-            if !acts.isOnItsWay(key, Self.mark) { acts.landed(key, Self.mark) }
+            missed[key] = nil
         }
     }
 
@@ -316,7 +311,7 @@ final class ShellTagFollow {
     func listClosed(at host: String) {
         for (key, page) in pages where page.host == host && page.seeded {
             drop(key)
-            if !acts.isOnItsWay(key, Self.mark) { acts.landed(key, Self.mark) }
+            missed[key] = nil
         }
     }
 
@@ -439,17 +434,17 @@ final class ShellTagFollow {
     /// **Only over what the source said, as the reader it said it to**: where it has not
     /// answered, where the sign-in does not hold follows or is no longer the one the page was
     /// read through, the press does nothing. **One request out a hashtag and source**
-    /// (`ShellActs.begin`): pressed again meanwhile, nothing more is sent.
+    /// (`PressGuard.begin`): pressed again meanwhile, nothing more is sent.
     func press(_ tag: PostTag, at host: String, in session: ShellSession) async {
         guard Self.asks(about: tag), let source = sources(in: session).first(where: { $0.host == host }) else { return }
         let looked = readers.look(at: source.host, in: session)
         let key = Self.key(tag, source.host)
         guard let held = looked.held, !looked.changed, Self.holds(at: source.host, in: session),
               let page = self.standing(key, at: source.host, in: session), let said = page.said,
-              acts.begin(key, Self.mark, to: !said)
+              let flight = presses.begin(key, showing: !said)
         else { return }
+        missed[key] = nil
         pressedUnder[key] = page.under
-        let flight = acts.flight(key, Self.mark)
         let through = session.reach.tagFollows(session.mastodon.authorized(token: held, within: deadline, for: .write))
         // The request is this object's and not the pane's: a page left does not call it off.
         await Task {
@@ -488,15 +483,15 @@ final class ShellTagFollow {
 
     /// Sends the press and takes its answer, if it is still this press's to take.
     ///
-    /// **A third copy of one sequence** — send, then "is the entry still mine?", then land or
-    /// fail — beside `ShellSession.perform` for a post's acts and `ShellNoticeActs.perform`.
-    /// It differs from them in two things. **A second press meanwhile sends nothing and keeps
-    /// no turn** (`ShellActs.begin` in `press`, never `turn`): there is one request, and the
-    /// line says what it answered. And **a failure is said under the line** (`missed`), not
-    /// on the foot strip. The one guard of a press (#347) is to fold all three into one; until
-    /// then a change to the sequence in one of them is owed to the other two.
+    /// **Under the one guard of a press** (`PressGuard`), as `ShellSession.perform` is for a
+    /// post's acts and `ShellNoticeActs.perform` for a notice's: sent, and then the guard is
+    /// asked whether the entry is still this press's before anything lands or fails. It
+    /// differs from them in two things, which are its own. **A second press meanwhile sends
+    /// nothing and keeps no turn** (`PressGuard.begin` in `press`, never `change`): there is
+    /// one request, and the line says what it answered. And **a failure is said under the
+    /// line** (`missed`), not on the foot strip.
     private func act(
-        _ tag: PostTag, to wanted: Bool, flight: Int?, on pressed: Page, of through: MastodonTagFollows,
+        _ tag: PostTag, to wanted: Bool, flight: PressNumber, on pressed: Page, of through: MastodonTagFollows,
         with held: MastodonToken, at source: Source, in session: ShellSession
     ) async {
         let key = Self.key(tag, source.host)
@@ -507,14 +502,14 @@ final class ShellTagFollow {
             ShellPersonPages.concluded(error, at: source, askedAs: pressed.askedAs, in: session)
         }
         // Let go of with its reader meanwhile: the entry, if any, is another press's.
-        guard acts.flight(key, Self.mark) == flight else { return }
+        guard presses.isStill(flight, key) else { return }
         pressedUnder[key] = nil
         let sameReader = session.mastodon.token(host: source.host)?.accessToken == held.accessToken
         // The source's word to the reader who pressed, wherever the page pressed on has gone.
         if sameReader, let answer { whenAnswered?(tag, source.host, answer) }
         guard sameReader, let page = self.standing(key, at: source.host, in: session), page.number == pressed.number else {
             // Not the page pressed on, or not its reader: the answer is written nowhere.
-            acts.landed(key, Self.mark)
+            presses.settle(key)
             // A page of the hashtag opened since is asked afresh: whatever it read, or has on
             // its way, was asked before the press landed — and is let go as that read begins.
             if sameReader, self.standing(key, at: source.host, in: session) != nil, Self.holds(at: source.host, in: session) {
@@ -522,12 +517,14 @@ final class ShellTagFollow {
             }
             return
         }
+        // The press is answered, or did not arrive: either way it is out no longer.
+        presses.settle(key)
         guard let answer else {
-            acts.failed(key, Self.mark)
+            missed[key] = wanted
             return
         }
         pages[key]?.said = answer
         // The source's word stands either way; one that is not what was pressed is said as not done.
-        if answer == wanted { acts.landed(key, Self.mark) } else { acts.failed(key, Self.mark) }
+        if answer != wanted { missed[key] = wanted }
     }
 }

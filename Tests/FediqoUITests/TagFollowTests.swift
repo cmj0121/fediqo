@@ -415,6 +415,40 @@ struct TagFollowTests {
         #expect(tags.lines(of: Self.swift, in: session) == line(.said(false)))
     }
 
+    /// Pins the press's number in `act` (`PressGuard.isStill`): with the same token held again,
+    /// the token cannot tell the first press's answer from the second's.
+    @Test("An answer that comes back after another reader had the page and the first, back with the same sign-in, pressed again finds a press that is not its own: it does not end the later press, and the line goes on reading as doing it until that one is answered")
+    func aLateAnswerIsNotTheLaterPresss() async throws {
+        let (session, server, _) = await session([Self.asked: Self.said(false), Self.follow: Self.said(true)])
+        try signIn(session)
+        let tags = ShellPersonPages().tags
+        await tags.opened(Self.swift, in: session)
+        await server.hold(Self.follow)
+        defer { Task { await server.release(Self.follow) } }
+        let early = Task { await tags.press(Self.swift, at: Self.host, in: session) }
+        await server.arrival(of: Self.follow)
+
+        // Another reader looks at the page, and then the first is back with the token they had.
+        try signIn(session, as: "other")
+        await tags.opened(Self.swift, in: session)
+        try signIn(session)
+        await tags.opened(Self.swift, in: session)
+        #expect(tags.lines(of: Self.swift, in: session) == line(.said(false)), "the premise: the first press went with its sign-in")
+        let late = Task { await tags.press(Self.swift, at: Self.host, in: session) }
+        await server.arrival(of: Self.follow, times: 2)
+        #expect(await server.asked.filter { $0 == Self.follow }.count == 2)
+        #expect(tags.lines(of: Self.swift, in: session) == line(.doing(true)))
+
+        await server.releaseOne(Self.follow)
+        await early.value
+        #expect(tags.lines(of: Self.swift, in: session) == line(.doing(true)), "the first press's answer ended the second press")
+        #expect(await server.asked.filter { $0 == Self.asked }.count == 3, "the first press's answer had the page asked afresh")
+
+        await server.release(Self.follow)
+        await late.value
+        #expect(tags.lines(of: Self.swift, in: session) == line(.said(true)))
+    }
+
     @Test("A page closed while a press is out is told nothing of its answer — not a yes, not a failure; opened again meanwhile it reads as doing it and no second request goes; and what the page then says is read from the source after the press landed, never a read that was already on its way")
     func aPageClosedWhileAPressIsOut() async throws {
         let (session, server, _) = await session([Self.asked: Self.said(false), Self.follow: Self.said(true)])
