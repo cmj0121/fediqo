@@ -136,7 +136,8 @@ was used.
 ## Using it
 
 An empty launch opens Account. Add a Mastodon host or a Discuz forum from the catalog or by
-typing its hostname. It names the protocol; only those two join this session. What a source
+typing its hostname. It names the protocol; only those two join this session. A server that
+only answers as a Mastodon does — a GoToSocial — is named as what it is, and is not added. What a source
 sends lands in this device's store, and every timeline is a query of that store. Compose
 stays off until it has something; Notices can always be entered, and says what would make it
 fill.
@@ -220,7 +221,8 @@ text being sent is not put away by any of that: it goes when it lands, or at its
 
 All and Trends are built in. Beside them you write your own. The header is `+`, then the
 tabs, then the rule for the one in front. Tab goes All, Trends, then yours, in the order you
-gave them. `e` opens the editor for the selected timeline; on All or Trends it says they
+gave them; while somebody's page is in front it turns that page's tabs instead — see Reading,
+below. `e` opens the editor for the selected timeline; on All or Trends it says they
 cannot be edited. Double-click or long-press a tab to edit it. To add one, press `+`. In the
 editor you name, reorder, and remove a timeline, and the editor shows its own keys. Edits
 apply on Done; Esc leaves the timeline as it was. Your timelines stay on this device across a
@@ -360,10 +362,12 @@ Follow on somebody's page or a hashtag's, or on the line there that says what th
 not asked. The press asks first, and says what the server's page will be asked for: what the
 sign-in already has, and one thing more — who you follow: to see how you and somebody stand,
 to follow and unfollow people and hashtags, to answer requests to follow you, and to remove a
-follower. The last two are what the server's words cover; Fediqo does neither yet. Nobody is
+follower. Nobody is
 signed out, on this device or another. Close the server's page, or say no on it, and the
 sign-in you had goes on as it was. Once a sign-in holds it, Fediqo sees how you and somebody
-stand, follows and unfollows for you, and withdraws a request to follow. A sign-in that only
+stand, follows and unfollows for you, withdraws a request to follow, changes what is taken
+from somebody you follow, answers a request to follow you, and removes a follower — each only
+at your press; see Reading, below. A sign-in that only
 reads may be asked too: it sees who you follow and how you stand, and changes neither. A
 sign-in that holds less than a page needs is told so on that page, under the same lock, in a
 line that says what it was not asked — how you stand to people, seeing who you follow, or
@@ -416,7 +420,8 @@ Whatever takes something away, signing out aside, is behind three dots on the ro
 section it acts on, and asks first: Clear and Remove on a source's row, Clear and Forget
 password in a source's detail on Usage, Stop keeping, letting go by dates, dropping picture
 copies, removing a timeline or a host you added, taking back a
-post of your own, dismissing a notice or every notice of a source, and letting go of what a
+post of your own, dismissing a notice or every notice of a source, refusing a request to
+follow you, removing a follower, and letting go of what a
 source holds back. Signing out is the key itself, and asks first too. One is not asked: removing
 a rule from a timeline being edited is behind the dots as well, but it is only a draft, and
 nothing is kept until Done. Discarding a text that was not sent asks first as well, from its
@@ -462,6 +467,7 @@ on Preferences, and the question before removing says which it will do.
 | `e` | write or change the selected timeline                           |
 | `/` | search the posts this device holds                              |
 | `l` | follow whoever's page, or the hashtag whose page, is in front   |
+| Tab | on somebody's page, the tab beside; ⇧Tab the one before        |
 | `?` | show the keys list                                              |
 
 `r` asks exactly the sources the selected timeline draws from. All asks every source; Trends
@@ -519,15 +525,49 @@ where it was and says it arrived as a reblog by that person, until a timeline br
 reblog again; from then the reblog is the row that timeline shows, and the post is shown by
 it only where it also arrives on its own.
 
-Somebody's page, read through a Mastodon source you are signed in to, says how you and they
+Somebody's page takes the whole place: nothing of the timelines stands over it. Its head
+says who they are and which source the page is read through, and carries three figures —
+their posts, who follows them, who they follow — each a mark and a number, as the source gave
+it. Under the head the page has tabs of its own: About, Following, Followers, Pinned and
+Posts, with About in front. About is what the source says of them and how you and they stand;
+Following is who they follow, Followers is who follows them, Pinned is what they pinned, and
+Posts is their posts. A press on a figure brings its tab in front. Tab and ⇧Tab turn the
+page's tabs while it is in front, round and back to the first, and the timelines are not
+turned from there. A tab is not a step: Esc or `q` leaves the page in one press from any of
+them.
+
+A page has only the tabs there is something behind. Somebody who hides who they follow and
+who follows them has neither tab: the two figures stay as the source said them and open
+nothing, and About says the lists are hidden. A source that has no pinned posts to give has
+no Pinned tab. A forum's author has their posts alone, and no tabs. Until a source has said
+who somebody is, the page has About and Posts.
+
+A tab asks its source only when it is first brought in front. Opening the page asks who they
+are and, where the sign-in may see it, how you and they stand, and nothing more. Their posts,
+what they pinned and each of the two lists are asked for when their tab first comes in front,
+and not again on coming back to it. What they pinned is read in the source's own order, which
+is not newest first.
+
+Read through a Mastodon source you are signed in to, the page says how you and they
 stand, once that sign-in may see it — see Signing in to Mastodon, above. It is what the source
 last said: that they follow you, that you follow them, that you have asked to, that you muted
-them and until when, that you blocked them. Somebody who has blocked you is said so in a
+them and until when, that you blocked them. Each is a mark in the head, with its words for a
+pointer and for VoiceOver, and the words in full are on About; nothing is told by colour
+alone. Somebody who has blocked you is said so in a
 sentence that names them and says the source shows you none of their posts. Where a source
 gave no posts of somebody it counts posts for, and it is not known why — the sign-in cannot
 see how you stand, or the source has not answered — the page says that the source gives this
 sign-in none of them, and guesses at no reason. Your own page, a forum's author, and a page
 read through a source nobody is signed in to say nothing of standing.
+
+A row of a list of people says the same of each of them: who somebody follows, who follows
+them, and every other list of people a source gives. Each row carries what the source last
+said — follows you, you follow them, asked, muted, blocked — in the words their page uses.
+The source is asked once for each stretch of people as it lands, and only about that stretch.
+Nobody is asked where the sign-in may not see how you stand, where nobody is signed in, about
+your own row, or at a kind of source that does not offer following. Somebody who has blocked
+you is not said on a row. A row is not read again after you follow from somebody's page,
+until the list is.
 
 Follow is on that page, and `l` presses it. Somebody who must agree is asked, and shows as
 asked. Unfollowing, and withdrawing a request, are behind the page's three dots; unfollowing
@@ -537,6 +577,29 @@ since the source refuses it. Each is drawn at the press and the source asked aft
 on a post is: a read already on its way does not undo it, and a press that did not arrive
 puts the page back to what the source last said and says so. Where the source cannot be asked
 how you stand, the page says it could not ask and offers to try again, and draws no standing.
+
+What is taken from somebody you follow can be narrowed. For them, About says two things more,
+as the source last said them: whether their boosts are shown to you, and whether you are sent
+a notice of each post of theirs. Each is a switch, turned by a press. Only somebody you
+follow has them: they are not there for somebody you do not follow or have only asked to, on
+your own page, or for a sign-in that may not change who you follow. A source that says one of
+the two gets that one alone. A press is drawn at once and sent after, and one that did not
+arrive puts the switch back to what the source last said and says so. A switch is never a
+follow nobody asked for. A source changes these by being asked to follow again, so how you
+stand is read once more before anything is sent: still followed, it is sent; otherwise
+nothing is, and the page turns to what the source says.
+
+Requests to follow you are answered on your own page at a source, which Account opens. Its
+About has a line for who asks to follow you, with a figure, and a press on it opens the list.
+On a row there, accepting is one press; refusing is behind the row's three dots, and asks
+first. Removing a follower is behind the three dots of a row of your own Followers tab, and
+behind the three dots of the page of somebody who follows you, and asks first as well. Each
+question names the person and the source, and says what will be so afterwards. A row leaves
+at the press, and one whose press did not arrive comes back and says so under it. The figure
+on the line is the source's, as old as that sign-in's last check: it does not count down as
+you answer here. A sign-in that sees who you follow and may not change it is told so above
+the rows, with a press that asks for the rest. None of this stands on anybody else's lists,
+with no sign-in, or at a forum.
 
 One thing is not here. Following somebody on another server is not settled by the press: the
 page reads the source again, and says "asked" until their server agrees.
@@ -735,7 +798,8 @@ is where you left it.
 
 Pull a timeline down to read it again. While it reads, the reload mark is Stop. Press the top
 of the screen to go to the top of the list. On an opened post, person or tag, or a row's detail, a
-sideways swipe goes back; on a page with tabs it goes to the tab beside.
+sideways swipe goes back; on a page with tabs it goes to the tab beside. Somebody's page has
+tabs, and on its first the swipe back leaves the page.
 
 On Notices, one press on a notice opens what it is about, and pulling the list down reads the
 notices again. Holding a notice, or pressing the three dots on its line, offers to dismiss it.
