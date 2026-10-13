@@ -854,7 +854,7 @@ struct PersonPageTests {
         )
         let standing = PersonActing(
             source: Self.host, named: "@ada@m.example",
-            reading: .said(PersonStanding(accountID: "42", following: true, followedBy: true, muting: true)), changes: true
+            reading: .said(PersonStanding(accountID: "42", following: true, followedBy: true, muting: true, showsBoosts: true, notifies: false)), changes: true
         )
         let rows = [DummyItem(Note(
             id: "https://m.example/a/1", source: Self.source, author: "Ada", handle: "@ada@m.example", body: "a post",

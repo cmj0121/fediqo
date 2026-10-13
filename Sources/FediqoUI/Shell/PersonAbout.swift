@@ -15,7 +15,7 @@ import SwiftUI
 struct PersonAboutSaid: Equatable {
     /// One block of the tab, top to bottom: what the lamp stops on.
     enum Block: String, CaseIterable {
-        case view, sentences, picture, words, fields, figures, none, stands, home, you
+        case view, sentences, picture, words, fields, figures, none, stands, boosts, notices, home, you
     }
 
     /// The host of the source that says, and whose copies the pictures are.
@@ -79,6 +79,12 @@ struct PersonAboutSaid: Equatable {
         return standing.shown != nil || standing.stillAsked || standing.offersAgain || standing.lock != nil
     }
 
+    /// One of the two things taken from somebody followed (#313), where About has a row of it:
+    /// under how the reader stands, and only where the reader follows them.
+    func taken(_ which: PersonActing.Narrow.Which) -> PersonActing.Narrow? {
+        standing?.narrows().first { $0.which == which }
+    }
+
     /// The blocks drawn, top to bottom.
     var blocks: [Block] {
         Block.allCases.filter { block in
@@ -91,6 +97,8 @@ struct PersonAboutSaid: Equatable {
             case .figures: figures != nil
             case .none: none != nil
             case .stands: standsDrawn
+            case .boosts: taken(.boosts) != nil
+            case .notices: taken(.notices) != nil
             case .home: home != nil
             case .you: followed != nil
             }
@@ -113,6 +121,8 @@ struct PersonAboutSaid: Equatable {
         case home(PersonHomeLine.Press)
         /// The question that asks the sign-in for following.
         case askFollows
+        /// One of what is taken from them, turned the other way.
+        case act(PersonAct)
     }
 
     /// The press of the block the lamp is on, where that block is one: the line about their
@@ -121,6 +131,10 @@ struct PersonAboutSaid: Equatable {
     func press(on id: String) -> Press? {
         if id == Self.name(.home), let press = home?.press { return .home(press) }
         if id == Self.name(.stands), standing?.lock?.asks == true { return .askFollows }
+        for which in PersonActing.Narrow.Which.allCases where id == Self.name(which == .boosts ? .boosts : .notices) {
+            guard standing?.narrowsTakePress == true, let row = taken(which) else { return nil }
+            return .act(row.act)
+        }
         return nil
     }
 }
@@ -141,6 +155,8 @@ struct PersonAbout<Lead: View>: View {
     var onAskFollows: () -> Void = {}
     /// "Try again", where the source could not be asked how the reader stands to them.
     var onStandingAgain: () -> Void = {}
+    /// A switch of what is taken from them, pressed.
+    var onAct: (PersonAct) -> Void = { _ in }
     /// What stands over the blocks and scrolls away with them: the page's head, at a text
     /// size where it would fill the page.
     @ViewBuilder var lead: Lead
@@ -192,6 +208,8 @@ struct PersonAbout<Lead: View>: View {
         case .figures: quiet(said.figures ?? "")
         case .none: quiet(said.none ?? "")
         case .stands: stands
+        case .boosts: narrowRow(.boosts)
+        case .notices: narrowRow(.notices)
         case .home: home
         case .you: you
         }
@@ -209,7 +227,9 @@ struct PersonAbout<Lead: View>: View {
     private func marked(_ symbol: String, _ words: String, ink: Color) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
             Image(systemName: symbol)
-                .frame(width: glyphColumn, alignment: .leading)
+                // A whole number of points: beside a column that is not, words that wrap are
+                // laid out a fraction wider than the room they were given.
+                .frame(width: glyphColumn.rounded(.up), alignment: .leading)
                 .accessibilityHidden(true)
             Text(words).fixedSize(horizontal: false, vertical: true)
         }
@@ -305,6 +325,26 @@ struct PersonAbout<Lead: View>: View {
                     ShellLinkButton(L10n.t("person.retry"), action: onStandingAgain).fixedSize()
                 }
                 if let words = standing.lockWords() { locked(words, asks: standing.lock?.asks == true) }
+            }
+        }
+    }
+
+    /// One thing taken from them, as a row: its glyph, what it is and how it stands in words,
+    /// the whole row a press that turns it — shown at the press, and sent after. While a
+    /// press is on its way the row is words, and takes none.
+    @ViewBuilder
+    private func narrowRow(_ which: PersonActing.Narrow.Which) -> some View {
+        if let standing = said.standing, let row = said.taken(which) {
+            let label = marked(row.symbol, row.words(), ink: ShellChrome.ink(colorScheme))
+            if standing.narrowsTakePress {
+                Button { onAct(row.act) } label: { label.contentShape(Rectangle()) }
+                    .buttonStyle(.plain)
+                    .help(ShellIconButton.hover(name: row.words(), help: standing.narrowHint()))
+                    .accessibilityLabel(row.name())
+                    .accessibilityValue(row.state())
+                    .accessibilityHint(standing.narrowHint())
+            } else {
+                label
             }
         }
     }

@@ -428,6 +428,7 @@ extension ShellPersonPages {
         switch press {
         case .home(let asked): Task { await homePressed(asked, on: who, in: session) }
         case .askFollows: session.askFor([PersonAct.follow.needs], host: who.host)
+        case .act(let pressed): Task { await act(pressed, on: who, in: session) }
         }
         return true
     }

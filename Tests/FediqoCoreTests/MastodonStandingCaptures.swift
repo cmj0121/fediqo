@@ -52,6 +52,24 @@ enum MastodonStandingCaptures {
     /// `POST /api/v1/accounts/117430794424495804/follow`, and the same again.
     static let followed = #"{"id":"117430794424495804","following":true,"showing_reblogs":true,"notifying":false,"languages":null,"followed_by":false,"blocking":false,"blocked_by":false,"muting":false,"muting_notifications":false,"muting_expires_at":null,"requested":false,"requested_by":false,"domain_blocking":false,"endorsed":false,"note":""}"#
 
+    /// `POST /api/v1/accounts/117431799951167099/follow` with `reblogs=false&notify=true`, of
+    /// somebody already followed (asked 2026-10-13, for #313's narrowing). **What a follow
+    /// said again with the words answers** — asked of Mastodon 4.6.6:
+    ///
+    /// | Asked | Answered |
+    /// | ----- | -------- |
+    /// | a follow with `reblogs` alone, of somebody followed | 200, the whole standing — the sixteen things — with `showing_reblogs` as sent and **`notifying` as it stood** |
+    /// | a follow with `notify` alone | the same the other way round: `showing_reblogs` as it stood |
+    /// | a follow with **no word**, of somebody followed | 200, and both as they stood: a plain follow resets neither |
+    /// | the next read of how the reader stands | both as the follow answered |
+    /// | `reblogs=0` · `reblogs=perhaps` | read as no · **read as yes**: whatever is not a no is a yes |
+    /// | the same follow of somebody **not followed** | follows them, with the word as sent |
+    /// | the same of somebody **asked and not yet agreed** | still `requested`, never `following`; the word is kept on the request and said back |
+    /// | either, as a sign-in that only sees who the reader follows | reads both; the follow is 403 `insufficient_scope`, as any follow |
+    /// | somebody not followed, read | `showing_reblogs` false, `notifying` false — said of nobody's follow |
+    static let narrowed = #"{"id":"117431799951167099","following":true,"showing_reblogs":false,"notifying":true,"languages":null,"followed_by":false,"blocking":false,"blocked_by":false,"muting":false,"muting_notifications":false,"muting_expires_at":null,"requested":false,"requested_by":false,"domain_blocking":false,"endorsed":false,"note":""}"#
+    static let narrowedID = "117431799951167099"
+
     /// `POST /api/v1/accounts/117430794424495804/unfollow`, and the same again.
     static let unfollowed = #"{"id":"117430794424495804","following":false,"showing_reblogs":false,"notifying":false,"languages":null,"followed_by":false,"blocking":false,"blocked_by":false,"muting":false,"muting_notifications":false,"muting_expires_at":null,"requested":false,"requested_by":false,"domain_blocking":false,"endorsed":false,"note":""}"#
 

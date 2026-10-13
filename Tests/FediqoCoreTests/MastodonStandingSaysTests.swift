@@ -182,7 +182,7 @@ struct MastodonStandingSaysTests {
             let follows = try reader(seeded.following)
             #expect(try await follows.standing(to: id) == PersonStanding(accountID: id), "a refusal followed nobody")
 
-            let followed = PersonStanding(accountID: id, following: true)
+            let followed = PersonStanding(accountID: id, following: true, showsBoosts: true, notifies: false)
             #expect(try await follows.follow(id) == followed)
             #expect(try await follows.standing(to: id) == followed)
             #expect(try await reader(seeded.seeing).standing(to: id) == followed, "told to the word that only sees")
@@ -193,6 +193,53 @@ struct MastodonStandingSaysTests {
 
             let plain = try await ask(Self.account(id, "unfollow"), as: seeded.following, "POST")
             #expect(Set(plain.object.keys) == MastodonSignInCaptures.standingNames)
+        }
+    }
+
+    @Test("What is taken from somebody followed is said again with a follow: each word changes its own thing and leaves the other as it stood, a follow with no word leaves both, the answer is the whole standing and the next read says the same; a sign-in that only sees is told both and refused the change; and of somebody asked and not yet agreed the word is kept on the request, which stays a request")
+    func whatIsTakenIsNarrowed() async throws {
+        try await LocalServers.requireHealthy()
+        let seeded = try seeded()
+        let id = seeded.followable
+        func stands(_ boosts: Bool, _ notify: Bool) -> PersonStanding {
+            PersonStanding(accountID: id, following: true, showsBoosts: boosts, notifies: notify)
+        }
+        try await restoring(seeded, unfollowed: [id]) {
+            let follows = try reader(seeded.following)
+            #expect(try await follows.follow(id) == stands(true, false), "a follow begins with their boosts shown and no notice")
+            #expect(try await follows.narrow(id, boosts: false) == stands(false, false))
+            #expect(try await follows.standing(to: id) == stands(false, false))
+            #expect(try await follows.narrow(id, notify: true) == stands(false, true), "the other is left as it stood")
+            #expect(try await follows.follow(id) == stands(false, true), "a follow with no word resets neither")
+            #expect(try await follows.narrow(id, boosts: true) == stands(true, true))
+            #expect(try await follows.narrow(id, notify: false) == stands(true, false))
+            #expect(try await follows.standing(to: id) == stands(true, false))
+
+            let seeing = try reader(seeded.seeing)
+            #expect(try await seeing.standing(to: id) == stands(true, false), "told to the word that only sees")
+            await #expect(throws: MastodonAuthError.http(403)) { _ = try await seeing.narrow(id, boosts: false) }
+            #expect(try await follows.standing(to: id) == stands(true, false), "a refusal changed nothing")
+
+            let whole = try await ask(Self.account(id, "follow"), as: seeded.following, "POST", form: "reblogs=false&notify=true")
+            #expect(Set(whole.object.keys) == MastodonSignInCaptures.standingNames, "the whole standing, not the two alone")
+            #expect(whole.object["showing_reblogs"] as? Bool == false && whole.object["notifying"] as? Bool == true)
+            // Whatever is not a no is a yes there: this app sends the two words it means.
+            let odd = try await ask(Self.account(id, "follow"), as: seeded.following, "POST", form: "reblogs=perhaps")
+            #expect(odd.object["showing_reblogs"] as? Bool == true)
+            #expect(try await follows.follow(id, false) == PersonStanding(accountID: id), "not followed: nothing is said of either")
+            let raw = try await ask(Self.stands(id), as: seeded.following)
+            #expect(raw.list.first?["showing_reblogs"] as? Bool == false && raw.list.first?["notifying"] as? Bool == false)
+        }
+
+        let locked = seeded.people.locked.id
+        try await restoring(seeded, asked: locked) {
+            let told = try await ask(Self.account(locked, "follow"), as: seeded.following, "POST", form: "notify=true")
+            #expect(told.object["requested"] as? Bool == true && told.object["following"] as? Bool == false)
+            #expect(told.object["notifying"] as? Bool == true && told.object["showing_reblogs"] as? Bool == true)
+            let asked = PersonStanding(accountID: locked, requested: true)
+            #expect(try await reader(seeded.following).standing(to: locked) == asked, "only asked: nothing is taken yet, so nothing is said of it")
+            let back = try await ask(Self.account(locked, "follow"), as: seeded.following, "POST", form: "notify=false")
+            #expect(back.object["notifying"] as? Bool == false && back.object["requested"] as? Bool == true)
         }
     }
 
@@ -221,7 +268,7 @@ struct MastodonStandingSaysTests {
         try await restoring(seeded, unfollowed: [id]) {
             let follows = try reader(seeded.following)
             #expect(try await follows.standing(to: id) == PersonStanding(accountID: id))
-            #expect(try await follows.follow(id) == PersonStanding(accountID: id, following: true), "what the press was answered")
+            #expect(try await follows.follow(id) == PersonStanding(accountID: id, following: true, showsBoosts: true, notifies: false), "what the press was answered")
             #expect(try await follows.standing(to: id) == PersonStanding(accountID: id, requested: true), "and how it stands")
             #expect(try await follows.follow(id, false) == PersonStanding(accountID: id))
         }

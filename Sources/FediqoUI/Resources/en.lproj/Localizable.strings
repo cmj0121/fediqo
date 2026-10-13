@@ -1901,3 +1901,13 @@
 "person.pinned.none" = "%@ gave no pinned posts of theirs.";
 "person.pinned.foot.more" = "More pinned posts can be read. Press here to read them.";
 "person.pinned.foot.end" = "No more pinned posts: %@ has sent all it gives.";
+"person.act.boosts" = "Their boosts";
+"person.act.notify" = "A notice of each post";
+"person.act.boosts.failed" = "Could not change whether the boosts of %1$@ are shown at %2$@.";
+"person.act.notify.failed" = "Could not change whether you are told of each post of %1$@ at %2$@.";
+"person.narrow.boosts.on" = "Shown";
+"person.narrow.boosts.off" = "Not shown";
+"person.narrow.notices.on" = "On";
+"person.narrow.notices.off" = "Off";
+"person.narrow.said" = "%1$@: %2$@";
+"person.narrow.hint" = "Press to change it at %@";

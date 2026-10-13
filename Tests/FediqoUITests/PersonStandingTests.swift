@@ -384,7 +384,7 @@ struct PersonStandingTests {
         #expect(work.record.last?.purpose == .write)
 
         let followed = try #require(acts.acting(of: Self.ada, said: page, in: session))
-        #expect(followed.reading == .said(PersonStanding(accountID: "42", following: true)) && followed.doing == nil)
+        #expect(followed.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false)) && followed.doing == nil)
         #expect(followed.press == nil && followed.more == [.unfollow] && followed.missed == nil)
         #expect(!followed.asksBefore(.unfollow), "somebody anyone may follow is unfollowed in one press")
         let menu = followed.menu(head: ["Ada"], act: { _ in })
@@ -560,7 +560,7 @@ struct PersonStandingTests {
         await server.release(Self.stands)
         await reading.value
         let after = try #require(acts.acting(of: Self.ada, said: page, in: session))
-        #expect(after.reading == .said(PersonStanding(accountID: "42", following: true)), "the read is told to nobody")
+        #expect(after.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false)), "the read is told to nobody")
         #expect(after.more == [.unfollow] && after.press == nil && after.missed == nil)
         await acts.opened(Self.ada, said: page, in: session)
         #expect(await asked(server).count == 3, "and the page is left asking nothing")
@@ -586,7 +586,7 @@ struct PersonStandingTests {
 
         await server.release(Self.follow)
         await pressed.value
-        #expect(acts.acting(of: Self.ada, said: page, in: session)?.reading == .said(PersonStanding(accountID: "42", following: true)))
+        #expect(acts.acting(of: Self.ada, said: page, in: session)?.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false)))
     }
 
     @Test("A press the source refused, or that did not arrive, leaves the page as the source last said and says so under the heading, in both languages; pressed again the sentence goes; and an answer that is not what was pressed for is said as not done")
@@ -825,6 +825,311 @@ struct PersonStandingTests {
         await tags.followByKey(swift, in: session)?.value
         #expect(await asked(server) == [Self.tagged, Self.tagUnfollow, Self.tagFollow])
         #expect(tags.lines(of: swift, in: session).map(\.standing) == [.said(true)])
+    }
+
+    // MARK: - What is taken from somebody followed (#313)
+
+    /// A standing to somebody followed, with the two things taken from them, in the shape a
+    /// real server's has (`MastodonStandingCaptures.narrowed`).
+    private static func narrowed(boosts: Bool?, notify: Bool?, following: Bool = true, requested: Bool = false) -> String {
+        let taken = [boosts.map { #""showing_reblogs":\#($0),"# }, notify.map { #""notifying":\#($0),"# }].compactMap { $0 }.joined()
+        return #"{"id":"42","following":\#(following),\#(taken)"languages":null,"followed_by":false,"blocking":false,"blocked_by":false,"muting":false,"muting_notifications":false,"muting_expires_at":null,"requested":\#(requested),"requested_by":false,"domain_blocking":false,"endorsed":false,"note":""}"#
+    }
+
+    private static func followed(boosts: Bool? = true, notify: Bool? = false) -> PersonStanding {
+        PersonStanding(accountID: "42", following: true, showsBoosts: boosts, notifies: notify)
+    }
+
+    @Test("What is taken from somebody followed is two rows, each as the source last said and in words: their boosts, a notice of each post — only of somebody the reader follows, not one only asked or not followed; only what the source said; and only where the sign-in may change who the reader follows. On About they stand under how the reader stands, each a block the lamp stops on, and Return on one is its press")
+    func whatIsTakenIsShownAsTheSourceSaid() throws {
+        func acting(_ standing: PersonStanding?, changes: Bool = true, doing: PersonAct? = nil) -> PersonActing {
+            PersonActing(
+                source: Self.host, named: "@ada@m.example", reading: standing.map { .said($0) } ?? .asking,
+                lock: changes ? nil : PartWords.Place(kind: .unasked, key: "part.follows.unasked"), changes: changes, doing: doing
+            )
+        }
+        let rows = acting(Self.followed()).narrows()
+        #expect(rows.map(\.which) == [.boosts, .notices] && rows.map(\.on) == [true, false])
+        #expect(rows.map(\.act) == [.hideBoosts, .notify] && rows.map(\.symbol) == ["arrow.2.squarepath", "bell"])
+        #expect(rows.map { $0.words(language: .english) } == ["Their boosts: Shown", "A notice of each post: Off"])
+        #expect(rows.map { $0.words(language: .taiwanese) } == ["他們的轉發：顯示", "每則貼文都通知：關"])
+        let other = acting(Self.followed(boosts: false, notify: true)).narrows()
+        #expect(other.map(\.act) == [.showBoosts, .stopNotifying])
+        #expect(other.map { $0.words(language: .english) } == ["Their boosts: Not shown", "A notice of each post: On"])
+        #expect(other.map { $0.state(language: .taiwanese) } == ["不顯示", "開"])
+        #expect(acting(Self.followed()).narrowHint(language: .english) == "Press to change it at m.example")
+
+        // Nothing of somebody not followed, only asked, or not yet said; nothing the source left out.
+        #expect(acting(PersonStanding(accountID: "42")).narrows().isEmpty)
+        #expect(acting(PersonStanding(accountID: "42", requested: true, showsBoosts: true, notifies: false)).narrows().isEmpty)
+        #expect(acting(nil).narrows().isEmpty)
+        #expect(acting(Self.followed(boosts: nil, notify: nil)).narrows().isEmpty)
+        #expect(acting(Self.followed(boosts: nil, notify: true)).narrows().map(\.which) == [.notices])
+        // A sign-in that sees and may not change: no row that would take no press; the lock says why.
+        let seeing = acting(Self.followed(), changes: false)
+        #expect(seeing.narrows().isEmpty && seeing.lockWords() != nil && seeing.marks().count == 1)
+
+        // A press on its way is drawn over what the source said, and no row takes another meanwhile.
+        let out = acting(Self.followed(), doing: .hideBoosts)
+        #expect(out.narrows().map(\.on) == [false, false] && !out.narrowsTakePress && acting(Self.followed()).narrowsTakePress)
+        #expect(acting(Self.followed(), doing: .notify).narrows().map(\.on) == [true, true])
+        #expect(out.marks().map(\.words) == acting(Self.followed()).marks().map(\.words), "how the reader stands is as it was")
+
+        // On About.
+        let page = try Self.page()
+        func about(_ standing: PersonActing?) -> PersonAboutSaid {
+            PersonAboutSaid.made(of: page, home: nil, homeLine: nil, standing: standing, followed: nil, hidden: false)
+        }
+        let drawn = about(acting(Self.followed()))
+        #expect(drawn.blocks == [.view, .none, .stands, .boosts, .notices])
+        #expect(drawn.walked.suffix(3) == ["about.stands", "about.boosts", "about.notices"])
+        #expect(drawn.press(on: "about.boosts") == .act(.hideBoosts) && drawn.press(on: "about.notices") == .act(.notify))
+        #expect(about(out).press(on: "about.boosts") == nil && about(out).blocks.contains(.boosts), "drawn, and takes no press")
+        for none in [about(nil), about(acting(PersonStanding(accountID: "42"))), about(seeing)] {
+            #expect(!none.blocks.contains(.boosts) && !none.blocks.contains(.notices) && none.press(on: "about.boosts") == nil)
+        }
+    }
+
+    @Test("A switch pressed is shown at once and sent after, through the one sequence following is sent through: one request out a person, a second press meanwhile sends nothing, a read landing meanwhile does not undo it, and what the source answers is what the page then says — the other switch and how the reader stands as they were")
+    func aSwitchIsPressed() async throws {
+        let (session, server, _) = await session([
+            Self.stands: Self.said(Self.narrowed(boosts: true, notify: false)),
+            Self.follow: Self.answered(Self.narrowed(boosts: false, notify: false)),
+        ])
+        try await signIn(session)
+        let acts = acts(), page = try Self.page()
+        await acts.opened(Self.ada, said: page, in: session)
+        let before = try #require(acts.acting(of: Self.ada, said: page, in: session))
+        #expect(before.reading == .said(Self.followed()) && before.narrows().map(\.on) == [true, false])
+
+        // Not what the page offers: the switch as it already stands.
+        await acts.press(.showBoosts, on: Self.ada, said: page, in: session)
+        await acts.press(.stopNotifying, on: Self.ada, said: page, in: session)
+        #expect(await asked(server) == [Self.stands], "nothing is sent for a switch that already stands so")
+
+        await server.hold(Self.follow)
+        let pressed = Task { await acts.press(.hideBoosts, on: Self.ada, said: page, in: session) }
+        await server.arrival(of: Self.follow)
+        let out = try #require(acts.acting(of: Self.ada, said: page, in: session))
+        #expect(out.doing == .hideBoosts && out.narrows().map(\.on) == [false, false] && !out.narrowsTakePress)
+        #expect(out.more.isEmpty && out.press == nil, "one request out a person")
+        // A second press, of either switch or of anything else, sends nothing.
+        for act in [PersonAct.notify, .hideBoosts, .showBoosts, .unfollow] { await acts.press(act, on: Self.ada, said: page, in: session) }
+        #expect(await asked(server) == [Self.stands, Self.stands, Self.follow], "read once more that the reader follows them, then sent")
+        // A read landing while the press is out says the old thing, and does not undo the press.
+        await acts.again(Self.ada, said: page, in: session)
+        #expect(acts.acting(of: Self.ada, said: page, in: session)?.narrows().map(\.on) == [false, false])
+
+        await server.release(Self.follow)
+        await pressed.value
+        let after = try #require(acts.acting(of: Self.ada, said: page, in: session))
+        #expect(after.reading == .said(Self.followed(boosts: false, notify: false)) && after.doing == nil && after.missed == nil)
+        #expect(after.narrows().map(\.act) == [.showBoosts, .notify] && after.narrowsTakePress)
+        #expect(after.marks().map(\.words) == before.marks().map(\.words) && after.more == [.unfollow])
+        #expect(await asked(server).filter { $0 == Self.follow }.count == 1)
+
+        // The other switch, the same way; the first stays as the source answered.
+        await server.answer(Self.follow, Self.answered(Self.narrowed(boosts: false, notify: true)))
+        await acts.press(.notify, on: Self.ada, said: page, in: session)
+        #expect(acts.acting(of: Self.ada, said: page, in: session)?.narrows().map(\.on) == [false, true])
+    }
+
+    @Test("A switch whose press the source refused, or that did not arrive, or was answered with something else, goes back to what the source last said and says so in the head, in both languages; pressed again and answered the sentence goes. It is not offered — and nothing is sent — of somebody not followed, only asked, or to a sign-in that only sees")
+    func aSwitchThatDidNotArrive() async throws {
+        let (session, server, _) = await session([Self.stands: Self.said(Self.narrowed(boosts: true, notify: false)), Self.follow: Self.refused])
+        try await signIn(session)
+        let acts = acts(), page = try Self.page()
+        await acts.opened(Self.ada, said: page, in: session)
+        for answer in [Self.refused, nil, Self.answered(Self.narrowed(boosts: true, notify: false))] as [PageServer.Answer?] {
+            await server.answer(Self.follow, answer)
+            await acts.press(.hideBoosts, on: Self.ada, said: page, in: session)
+            let missed = try #require(acts.acting(of: Self.ada, said: page, in: session))
+            #expect(missed.missed == .hideBoosts && missed.doing == nil && missed.narrows().map(\.on) == [true, false])
+            #expect(missed.headWords(language: .english) == ["Could not change whether the boosts of @ada@m.example are shown at m.example."])
+            #expect(missed.missedWords(language: .taiwanese) == "無法在 m.example 更改是否顯示 @ada@m.example 的轉發。")
+        }
+        let told = PersonActing(source: Self.host, named: "@ada@m.example", missed: .notify)
+        #expect(told.missedWords(language: .english) == "Could not change whether you are told of each post of @ada@m.example at m.example.")
+        #expect(told.missedWords(language: .taiwanese) == "無法在 m.example 更改是否通知 @ada@m.example 的每則貼文。")
+        #expect(told.missedWords() == PersonActing(source: Self.host, named: "@ada@m.example", missed: .stopNotifying).missedWords())
+        #expect(session.mastodon.signedInHosts.contains(Self.host), "a refusal signs nobody out")
+
+        await server.answer(Self.follow, Self.answered(Self.narrowed(boosts: false, notify: false)))
+        await acts.press(.hideBoosts, on: Self.ada, said: page, in: session)
+        let done = try #require(acts.acting(of: Self.ada, said: page, in: session))
+        #expect(done.missed == nil && done.narrows().map(\.on) == [false, false])
+
+        // Not followed, and only asked: no row, and a press sends nothing — it would be a follow.
+        for standing in [Self.narrowed(boosts: false, notify: false, following: false), Self.narrowed(boosts: true, notify: false, following: false, requested: true)] {
+            let (other, quiet, _) = await self.session([Self.stands: Self.said(standing), Self.follow: Self.answered(Self.narrowed(boosts: true, notify: true))])
+            try await signIn(other)
+            let none = self.acts()
+            await none.opened(Self.ada, said: page, in: other)
+            #expect(none.acting(of: Self.ada, said: page, in: other)?.narrows().isEmpty == true)
+            for act in [PersonAct.showBoosts, .hideBoosts, .notify, .stopNotifying] { await none.press(act, on: Self.ada, said: page, in: other) }
+            #expect(await asked(quiet) == [Self.stands])
+        }
+        // A sign-in that only sees: told how it stands, offered no switch, and nothing is sent.
+        let (seeing, silent, _) = await self.session([Self.stands: Self.said(Self.narrowed(boosts: true, notify: false)), Self.follow: Self.refused])
+        try await signIn(seeing, holding: Self.seeing)
+        let sees = self.acts()
+        await sees.opened(Self.ada, said: page, in: seeing)
+        let locked = try #require(sees.acting(of: Self.ada, said: page, in: seeing))
+        #expect(locked.reading == .said(Self.followed()) && locked.narrows().isEmpty && locked.lock != nil)
+        await sees.press(.hideBoosts, on: Self.ada, said: page, in: seeing)
+        #expect(await asked(silent) == [Self.stands])
+    }
+
+    @Test("A switch is a follow at the source, so it is sent only to somebody the source says the reader follows now: read once more first — and where they were unfollowed elsewhere since, an open account or a locked one, or are only asked, or the source has nothing of them, nothing is sent, the page turns to what the source says and nothing is said to have failed; where that read fails nothing is sent and the press did not arrive; and a reader who changed while the read was out is sent nothing and written nothing. Following itself gains no such read")
+    func aSwitchIsNeverAFollowNobodyAskedFor() async throws {
+        let follows = Self.said(Self.narrowed(boosts: true, notify: false))
+        let turned = Self.answered(Self.narrowed(boosts: false, notify: false))
+        // What the source says by the time of the press, and what the page then says.
+        let since: [(String, PageServer.Answer, PersonActing.Reading, String)] = [
+            ("unfollowed elsewhere", Self.said(Self.narrowed(boosts: false, notify: false, following: false)), .said(PersonStanding(accountID: "42")), ""),
+            ("a locked account, unfollowed elsewhere", Self.said(Self.narrowed(boosts: false, notify: false, following: false)), .said(PersonStanding(accountID: "42")), #","locked":true"#),
+            ("only asked now", Self.said(Self.narrowed(boosts: true, notify: false, following: false, requested: true)), .said(PersonStanding(accountID: "42", requested: true)), #","locked":true"#),
+            ("nothing of them", PageServer.Answer(body: "[]"), .unsaid, ""),
+        ]
+        for (name, answer, reading, more) in since {
+            let (session, server, _) = await session([Self.stands: follows, Self.follow: turned])
+            try await signIn(session)
+            let acts = acts(), page = try Self.page(more)
+            await acts.opened(Self.ada, said: page, in: session)
+            #expect(acts.acting(of: Self.ada, said: page, in: session)?.narrows().count == 2, "\(name)")
+            await server.answer(Self.stands, answer)
+            await acts.press(.hideBoosts, on: Self.ada, said: page, in: session)
+            #expect(await asked(server) == [Self.stands, Self.stands], "\(name): read, and nothing sent")
+            let after = try #require(acts.acting(of: Self.ada, said: page, in: session))
+            #expect(after.reading == reading && after.doing == nil, "\(name): the page says what the source says")
+            #expect(after.missed == nil && after.headWords().isEmpty, "\(name): nothing failed, and nothing says it did")
+            #expect(after.narrows().isEmpty && after.more == (reading == .said(PersonStanding(accountID: "42", requested: true)) ? [.withdraw] : []), "\(name)")
+            if reading == .said(PersonStanding(accountID: "42")) {
+                #expect(after.press == .follow && after.pressWords(language: .english) == (more.isEmpty ? "Follow" : "Ask to follow"), "\(name): Follow is back")
+            }
+        }
+
+        // The read fails: nothing is sent, and the press did not arrive — it could not be changed.
+        let (session, server, _) = await session([Self.stands: follows, Self.follow: turned])
+        try await signIn(session)
+        let acts = acts(), page = try Self.page()
+        await acts.opened(Self.ada, said: page, in: session)
+        await server.answer(Self.stands, Self.down)
+        await acts.press(.notify, on: Self.ada, said: page, in: session)
+        #expect(await asked(server) == [Self.stands, Self.stands])
+        let missed = try #require(acts.acting(of: Self.ada, said: page, in: session))
+        #expect(missed.missed == .notify && missed.reading == .said(Self.followed()) && missed.narrows().map(\.on) == [true, false])
+        #expect(missed.headWords(language: .english) == ["Could not change whether you are told of each post of @ada@m.example at m.example."])
+
+        // They are still followed: read, then sent.
+        await server.answer(Self.stands, follows)
+        await acts.press(.hideBoosts, on: Self.ada, said: page, in: session)
+        #expect(await asked(server) == [Self.stands, Self.stands, Self.stands, Self.follow])
+        #expect(acts.acting(of: Self.ada, said: page, in: session)?.narrows().map(\.on) == [false, false])
+
+        // The reader changes while the read is out: nothing is sent for them, and nothing written.
+        await server.hold(Self.stands)
+        let pressed = Task { await acts.press(.showBoosts, on: Self.ada, said: page, in: session) }
+        await server.arrival(of: Self.stands, times: 4)
+        try await signIn(session, as: "second")
+        #expect(acts.acting(of: Self.ada, said: page, in: session)?.reading == .asking)
+        // The next reader's page opens, which is the look that lets the first's press go.
+        let opening = Task { await acts.opened(Self.ada, said: page, in: session) }
+        await server.arrival(of: Self.stands, times: 5)
+        await server.release(Self.stands)
+        await pressed.value
+        await opening.value
+        #expect(await asked(server).filter { $0 == Self.follow }.count == 1, "the first reader's press sent nothing")
+        #expect(await server.bearers.last == "Bearer second")
+        let next = try #require(acts.acting(of: Self.ada, said: page, in: session))
+        #expect(next.reading == .said(Self.followed()) && next.doing == nil && next.missed == nil, "as the source told the second, and nothing of the first's")
+
+        // Following, unfollowing and taking a request back gain no such read.
+        let (plain, wire, _) = await self.session([
+            Self.stands: Self.said(Self.standing()), Self.follow: Self.answered(Self.standing(following: true)),
+            Self.unfollow: Self.answered(Self.standing()),
+        ])
+        try await signIn(plain)
+        let other = self.acts()
+        await other.opened(Self.ada, said: page, in: plain)
+        await other.press(.follow, on: Self.ada, said: page, in: plain)
+        await other.press(.unfollow, on: Self.ada, said: page, in: plain)
+        #expect(await asked(wire) == [Self.stands, Self.follow, Self.unfollow])
+    }
+
+    @Test("A switch whose reader changed while its press was out is told to nobody; and through the pages Return on its block of About presses it, the page's own person's and nobody else's")
+    func aSwitchItsReaderAndTheKey() async throws {
+        let (session, server, _) = await session([
+            Self.stands: Self.said(Self.narrowed(boosts: true, notify: false)),
+            Self.follow: Self.answered(Self.narrowed(boosts: false, notify: false)),
+        ])
+        try await signIn(session, as: "first")
+        let acts = acts(), page = try Self.page()
+        await acts.opened(Self.ada, said: page, in: session)
+        await server.hold(Self.follow)
+        let pressed = Task { await acts.press(.hideBoosts, on: Self.ada, said: page, in: session) }
+        await server.arrival(of: Self.follow)
+        try await signIn(session, as: "second")
+        let next = try #require(acts.acting(of: Self.ada, said: page, in: session))
+        #expect(next.reading == .asking && next.doing == nil && next.narrows().isEmpty, "the first reader's press is not the second's")
+        await acts.opened(Self.ada, said: page, in: session)
+        await server.release(Self.follow)
+        await pressed.value
+        let after = try #require(acts.acting(of: Self.ada, said: page, in: session))
+        #expect(after.reading == .said(Self.followed()) && after.missed == nil && after.doing == nil, "the answer landed nowhere")
+
+        // Return on the block, through the pages.
+        let lookup = "/api/v1/accounts/lookup?acct=ada"
+        let (shell, wire, _) = await self.session([
+            lookup: PageServer.Answer(body: #"{"id":"42","acct":"ada","display_name":"Ada"}"#),
+            Self.stands: Self.said(Self.narrowed(boosts: true, notify: false)),
+            Self.follow: Self.answered(Self.narrowed(boosts: true, notify: true)),
+        ])
+        try await signIn(shell)
+        let pages = ShellPersonPages()
+        await pages.opened(Self.ada, in: shell)
+        #expect(!pages.pressAbout("about.notices", of: Self.ada, in: shell), "nothing until the source has said how the reader stands")
+        await pages.standsOpened(to: Self.ada, in: shell)
+        #expect(pages.walkedIDs(of: Self.ada, in: shell).suffix(2) == ["about.boosts", "about.notices"])
+        await wire.hold(Self.follow)
+        #expect(pages.pressAbout("about.notices", of: Self.ada, in: shell))
+        await wire.arrival(of: Self.follow)
+        #expect(pages.stands(to: Self.ada, in: shell)?.doing == .notify)
+        #expect(!pages.pressAbout("about.boosts", of: Self.ada, in: shell), "a press is out: the other row takes none")
+        await wire.release(Self.follow)
+        await acts.opened(Self.ada, said: page, in: session)
+        #expect(await asked(wire) == [lookup, Self.stands, Self.stands, Self.follow])
+    }
+
+    @Test("The switches go through the sequence following has, and are no second copy of it: the file that sends has one place a press begins, one where it is settled, and one where the request is made")
+    func oneSequence() throws {
+        var url = URL(fileURLWithPath: #filePath)
+        while url.pathComponents.count > 1, !FileManager.default.fileExists(atPath: url.appending(path: "Package.swift").path) {
+            url.deleteLastPathComponent()
+        }
+        let shell = url.appending(path: "Sources/FediqoUI/Shell")
+        let acts = try String(contentsOf: shell.appending(path: "ShellPersonActs.swift"), encoding: .utf8)
+        for (call, times) in [("presses.begin(", 1), ("presses.settle(", 1), ("presses.isStill(flight, key)", 3), ("try await Self.send(act,", 1), ("PressGuard<", 1)] {
+            #expect(acts.components(separatedBy: call).count == times + 1, "\(call) stands \(times) times")
+        }
+        for file in try FileManager.default.contentsOfDirectory(atPath: shell.path) where file != "ShellPersonActs.swift" {
+            let text = try String(contentsOf: shell.appending(path: file), encoding: .utf8)
+            #expect(!text.contains(".narrow("), "\(file) sends what is taken from somebody by a way of its own")
+        }
+        let keys = [
+            "person.act.boosts", "person.act.notify", "person.act.boosts.failed", "person.act.notify.failed", "person.narrow.boosts.on",
+            "person.narrow.boosts.off", "person.narrow.notices.on", "person.narrow.notices.off", "person.narrow.said", "person.narrow.hint",
+        ]
+        func places(_ text: String) -> [String] { text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted() }
+        let tables = try ["en", "zh-TW", "zh-Hant"].map { name in
+            try String(contentsOf: shell.deletingLastPathComponent().appending(path: "Resources/\(name).lproj/Localizable.strings"), encoding: .utf8)
+        }
+        for key in keys {
+            #expect(tables.allSatisfy { $0.components(separatedBy: "\n\"\(key)\" = \"").count == 2 }, "\(key) is written once in each table")
+            let english = L10n.t(key, language: .english), taiwanese = L10n.t(key, language: .taiwanese)
+            #expect(english != key && taiwanese != key && english != taiwanese && places(english) == places(taiwanese), "\(key)")
+        }
+        #expect(tables[1] == tables[2])
     }
 
     private func height<Content: View>(_ view: Content, width: CGFloat, layout: ShellLayout, scheme: ColorScheme) -> CGFloat {

@@ -1856,3 +1856,13 @@
 "person.pinned.none" = "%@ 沒有給出他們釘選的貼文。";
 "person.pinned.foot.more" = "還有釘選的貼文可以讀。按這裡讀取。";
 "person.pinned.foot.end" = "沒有更多釘選的貼文了：%@ 把會給的都送來了。";
+"person.act.boosts" = "他們的轉發";
+"person.act.notify" = "每則貼文都通知";
+"person.act.boosts.failed" = "無法在 %2$@ 更改是否顯示 %1$@ 的轉發。";
+"person.act.notify.failed" = "無法在 %2$@ 更改是否通知 %1$@ 的每則貼文。";
+"person.narrow.boosts.on" = "顯示";
+"person.narrow.boosts.off" = "不顯示";
+"person.narrow.notices.on" = "開";
+"person.narrow.notices.off" = "關";
+"person.narrow.said" = "%1$@：%2$@";
+"person.narrow.hint" = "按一下就在 %@ 更改";

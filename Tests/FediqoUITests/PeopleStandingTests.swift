@@ -116,7 +116,7 @@ struct PeopleStandingTests {
         let said = try #require(pages.said(of: Self.followers, in: session))
         #expect(said.stands == [
             "3": PersonStanding(accountID: "3", followedBy: true),
-            "1": PersonStanding(accountID: "1", following: true, muting: true),
+            "1": PersonStanding(accountID: "1", following: true, muting: true, showsBoosts: true, notifies: false),
         ])
         #expect(said.reading == .said && said.foot == .more && said.stateLine() == nil && session.notes.isEmpty)
         #expect(PersonRow.standing(said.stands["3"], language: .english) == ["Follows you"])
@@ -151,7 +151,7 @@ struct PeopleStandingTests {
         await server.answer(Self.stands([3, 2, 1]), Self.said(Self.standing(3, following: true, followedBy: true)))
         await pages.again(Self.followers, in: session)
         #expect(await asked(server).suffix(2) == [Self.first, Self.stands([3, 2, 1])])
-        #expect(stands(pages, session) == ["3": PersonStanding(accountID: "3", following: true, followedBy: true)])
+        #expect(stands(pages, session) == ["3": PersonStanding(accountID: "3", following: true, followedBy: true, showsBoosts: true, notifies: false)])
     }
 
     @Test("Asked again from the top, what the source said before stands until it answers; its answer is then its whole word of whoever it named — somebody it now says nothing of, or of whom its entry cannot be read, loses their word, and the others have what it says now; and an ask that fails takes no word away")
@@ -180,7 +180,7 @@ struct PeopleStandingTests {
         await server.release(Self.stands([4, 3, 2, 1]))
         await again.value
         let now = [
-            "3": PersonStanding(accountID: "3", following: true, followedBy: true), "1": PersonStanding(accountID: "1", following: true),
+            "3": PersonStanding(accountID: "3", following: true, followedBy: true, showsBoosts: true, notifies: false), "1": PersonStanding(accountID: "1", following: true, showsBoosts: true, notifies: false),
         ]
         #expect(stands(pages, session) == now, "nothing is said of 2 and of 4 any longer")
 
@@ -324,7 +324,7 @@ struct PeopleStandingTests {
         await server.answer(Self.stands([3, 2, 1]), Self.said(Self.standing(3, following: true)))
         await server.release(Self.stands([3, 2, 1]))
         await new.value
-        #expect(stands(pages, session) == ["3": PersonStanding(accountID: "3", following: true)])
+        #expect(stands(pages, session) == ["3": PersonStanding(accountID: "3", following: true, showsBoosts: true, notifies: false)])
     }
 
     @Test("An answer is taken only by the reader it was asked for: where the reader changed while it was out, it is written nowhere — not on the list the next reader was given — and a stretch that lands after its reader changed is asked about for nobody")
@@ -404,7 +404,7 @@ struct PeopleStandingTests {
     @Test("A row says how the reader stands in the words their page says it in, in its order and in both languages, after what kind of account it is; a listener is read them between the handle and their words; and a row handed nothing, or only that they block the reader, says nothing more than it did")
     func theRowsWords() {
         let bot = Person(source: Self.source, accountID: "8", handle: "@bo@m.example", name: "Bo", words: "Hi", sort: .automated)
-        let every = PersonStanding(accountID: "8", following: true, followedBy: true, requested: true, muting: true, blocking: true)
+        let every = PersonStanding(accountID: "8", following: true, followedBy: true, requested: true, muting: true, blocking: true, showsBoosts: true, notifies: false)
         #expect(PersonRow.standing(every, language: .english) == ["Follows you", "You follow them", "Asked", "Muted", "Blocked"])
         #expect(PersonRow.standing(every, language: .taiwanese) == ["跟隨你", "你跟隨他們", "已請求", "已靜音", "已封鎖"])
         let page = PersonActing(source: Self.host, named: "@bo", reading: .said(every), changes: true)
@@ -441,7 +441,7 @@ struct PeopleStandingTests {
             name: "Ada Augusta Lovelace of the Analytical Engine and More", words: "Hi", sort: .automated
         )
         let one = PersonStanding(accountID: "8", followedBy: true)
-        let many = PersonStanding(accountID: "7", following: true, followedBy: true, muting: true, blocking: true)
+        let many = PersonStanding(accountID: "7", following: true, followedBy: true, muting: true, blocking: true, showsBoosts: true, notifies: false)
         for (layout, width, scheme) in [(ShellLayout.wide, CGFloat(720), ColorScheme.light), (.narrow, 390, .dark), (.narrow, 320, .light)] {
             let inside = width - 2 * ShellSpace.pad
             let (bare, bareHeight) = laidOut(bo, stands: nil, width: width, layout: layout, scheme: scheme)
@@ -479,7 +479,7 @@ struct PeopleStandingTests {
     func thePageHandsEachRowItsOwn() {
         let given = (0 ..< 3).map { Person(source: Self.source, accountID: "\($0)", handle: "@p\($0)@m.example", name: "P\($0)") }
         var said = PeopleSaid(list: Self.followers, signedIn: true, reading: .said, people: given, foot: .end)
-        said.stands = ["1": PersonStanding(accountID: "1", following: true, followedBy: true, muting: true, blocking: true)]
+        said.stands = ["1": PersonStanding(accountID: "1", following: true, followedBy: true, muting: true, blocking: true, showsBoosts: true, notifies: false)]
         for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 320)] {
             let pane = PeoplePane(said: said, selectedID: .constant(given[1].id), onOpen: { _ in }, onBack: {})
                 .environment(\.shellLayout, layout)

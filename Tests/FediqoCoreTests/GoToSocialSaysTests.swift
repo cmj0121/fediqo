@@ -87,4 +87,38 @@ struct GoToSocialSaysTests {
         let back = try await write.boost(boosted, on: false)
         #expect(back.boosted == false)
     }
+
+    @Test("What is taken from somebody followed is narrowed there as on a Mastodon: a follow said again with one word changes that thing and leaves the other, the answer is the whole standing, a follow with no word resets neither — and somebody who had to agree, once followed, is not asked again by it")
+    func narrowsAFollow() async throws {
+        try await LocalServers.requireGoToSocial()
+        let seeded = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: LocalServers.repoRoot.appending(path: "servers/.run/gotosocial-tokens.json"))
+        ) as? [String: Any]
+        let other = try #require(seeded?["other_id"] as? String, "servers/.run/gotosocial-tokens.json names nobody to follow")
+        let tokens = MemoryMastodonTokens()
+        let token = MastodonToken(
+            host: Self.host, accessToken: try LocalServers.gotosocialWriterToken(), clientID: "x", clientSecret: "x"
+        )
+        try tokens.save(token)
+        let stands = MastodonStanding(door: MastodonAuthorized(token: token, sender: try LocalHTTP.client(), store: tokens))
+
+        // As the seed left it: followed, and agreed to — an account here is made locked.
+        let before = try #require(try await stands.standing(to: other))
+        #expect(before.following && !before.requested)
+        let boosts = try #require(before.showsBoosts, "it says whether their boosts are shown")
+        let notify = try #require(before.notifies, "and whether the reader is told of each post")
+        var said = before
+        do {
+            said.showsBoosts = !boosts
+            #expect(try await stands.narrow(other, boosts: !boosts) == said)
+            said.notifies = !notify
+            #expect(try await stands.narrow(other, notify: !notify) == said, "the other is left as it stood")
+            #expect(try await stands.standing(to: other) == said)
+            #expect(try await stands.follow(other) == said, "a follow with no word resets neither, and asks nobody again")
+        } catch {
+            _ = try? await stands.narrow(other, boosts: boosts, notify: notify)
+            throw error
+        }
+        #expect(try await stands.narrow(other, boosts: boosts, notify: notify) == before, "put back as the seed left it")
+    }
 }

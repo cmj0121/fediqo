@@ -256,7 +256,7 @@ struct PersonPage: View {
             if let about {
                 PersonAbout(
                     said: about, lit: selectedID, jumpToTop: jumpToTop, onHome: acts.onHome, onFollowed: acts.onFollowed,
-                    onAskFollows: acts.onAskFollows, onStandingAgain: acts.onStandingAgain, lead: lead
+                    onAskFollows: acts.onAskFollows, onStandingAgain: acts.onStandingAgain, onAct: acts.onAct, lead: lead
                 )
             }
         case .following, .followers:

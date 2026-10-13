@@ -69,9 +69,78 @@ struct PersonActing: Equatable {
             standing.requested = asksFirst
         case .unfollow: standing.following = false
         case .withdraw: standing.requested = false
+        case .showBoosts: standing.showsBoosts = true
+        case .hideBoosts: standing.showsBoosts = false
+        case .notify: standing.notifies = true
+        case .stopNotifying: standing.notifies = false
         case nil: break
         }
         return standing
+    }
+
+    // MARK: - What is taken from somebody followed
+
+    /// One thing taken from somebody the reader follows, as About says it (#313): whether
+    /// their boosts are shown, or whether the reader is told of each of their posts — as the
+    /// source last said, with a press on its way drawn over it.
+    struct Narrow: Equatable, Identifiable {
+        enum Which: String, CaseIterable {
+            case boosts, notices
+        }
+
+        let which: Which
+        /// As it stands: shown, told.
+        let on: Bool
+
+        var id: String { which.rawValue }
+
+        /// What a press does: the act that turns it the other way.
+        var act: PersonAct {
+            switch which {
+            case .boosts: on ? .hideBoosts : .showBoosts
+            case .notices: on ? .stopNotifying : .notify
+            }
+        }
+
+        var symbol: String {
+            switch which {
+            case .boosts: "arrow.2.squarepath"
+            case .notices: "bell"
+            }
+        }
+
+        func name(language: DummyLanguage? = nil) -> String { PersonActing.name(act, language: language) }
+
+        /// How it stands, in words: nothing of it is said by a colour or a glyph alone.
+        func state(language: DummyLanguage? = nil) -> String {
+            L10n.t("person.narrow.\(which.rawValue).\(on ? "on" : "off")", language: language)
+        }
+
+        /// The row as it is written and read: what it is, and how it stands.
+        func words(language: DummyLanguage? = nil) -> String {
+            String(format: L10n.t("person.narrow.said", language: language), name(language: language), state(language: language))
+        }
+    }
+
+    /// What is taken from them, in the order About draws it: their boosts, a notice of each
+    /// post. **Only of somebody the reader follows** — not one only asked — **and only what
+    /// the source said**: one it left out has no row, and nothing is guessed in its place.
+    /// **And only where the sign-in may change who the reader follows**: one that holds less
+    /// has the lock's own sentence on About, and no row that would take no press.
+    func narrows() -> [Narrow] {
+        guard changes, let standing = shown, standing.following else { return [] }
+        return [
+            standing.showsBoosts.map { Narrow(which: .boosts, on: $0) },
+            standing.notifies.map { Narrow(which: .notices, on: $0) },
+        ].compactMap { $0 }
+    }
+
+    /// Whether a press on one of them is taken now: not while another press is on its way.
+    var narrowsTakePress: Bool { doing == nil }
+
+    /// What a pointer and a listener are told a press on one of them does, and where.
+    func narrowHint(language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("person.narrow.hint", language: language), source)
     }
 
     /// Whether they block the reader, as the source said: the one thing that says why it gives
@@ -257,6 +326,8 @@ struct PersonActing: Equatable {
         case .follow: "person.badge.plus"
         case .unfollow: "person.badge.minus"
         case .withdraw: "arrow.uturn.backward"
+        case .showBoosts, .hideBoosts: "arrow.2.squarepath"
+        case .notify, .stopNotifying: "bell"
         }
     }
 
@@ -265,6 +336,8 @@ struct PersonActing: Equatable {
         case .follow: "person.act.follow"
         case .unfollow: "person.act.unfollow"
         case .withdraw: "person.act.withdraw"
+        case .showBoosts, .hideBoosts: "person.act.boosts"
+        case .notify, .stopNotifying: "person.act.notify"
         }
     }
 

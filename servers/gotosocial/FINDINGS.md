@@ -475,6 +475,33 @@ posts were pinned through each server's own API and unpinned again. Kept as chec
   - GoToSocial 0.22.2: 422 `"cannot pin boosts"`; 422, the post "does not belong to" them
   - What in the app rests on it: an answer listing a boost is not the pinned posts; #334
 
+### Asked later — what is taken from somebody followed
+
+Asked 2026-10-13 with a short script, after the 172 and not counted among them; each follow was put back as its seed
+left it. Kept as checks in `MastodonStandingSaysTests.swift` (`whatIsTakenIsNarrowed`) and `GoToSocialSaysTests.swift`
+(`narrowsAFollow`), and as answers in `MastodonStandingCaptures.swift`.
+
+- **A follow said again with `reblogs` or `notify` alone, of somebody already followed**:
+  - Mastodon 4.6.6: 200, the whole standing (sixteen things); the word sent changes its own thing, the other stays
+  - GoToSocial 0.22.2: the same, with its fourteen things (no `languages`, no `muting_expires_at`)
+  - What in the app rests on it: `MastodonStanding.narrow` sends the one word that changed; nothing differs
+- **A follow with no word, of somebody already followed**:
+  - Mastodon 4.6.6: 200, both as they stood
+  - GoToSocial 0.22.2: the same — and somebody who had to agree, once followed, **is not asked again**
+  - What in the app rests on it: P5a: a switch pressed re-requests nobody; a plain follow resets neither
+- **The same with a word, of somebody asked and not yet agreed**:
+  - Mastodon 4.6.6: still `requested`; the word is kept on the request and said back
+  - GoToSocial 0.22.2: the same; when the other agrees, the follow has the words the request carried
+  - What in the app rests on it: nothing is drawn of it while only asked (`PersonStanding`: said of a follow alone)
+- **How the reader stands, read by a sign-in with the reading words alone; the same follow sent by it**:
+  - Mastodon 4.6.6: needs `read:follows` to be told; then told both; the follow is 403 `insufficient_scope`
+  - GoToSocial 0.22.2: told both (item 3 below); 403 `"Forbidden: token has insufficient scope permission"` (item 2)
+  - What in the app rests on it: a switch is offered only to a sign-in that may change who the reader follows
+- **Somebody not followed, read; `reblogs=perhaps`**:
+  - Mastodon 4.6.6: `showing_reblogs: false`, `notifying: false`; **read as a yes**
+  - GoToSocial 0.22.2: the same two; not asked
+  - What in the app rests on it: neither is read off anybody not followed; `true` and `false` are what is sent
+
 ## Could not be asked, or not comparable — 11
 
 - **An app registered with a word no server knows; with no words (2)**:

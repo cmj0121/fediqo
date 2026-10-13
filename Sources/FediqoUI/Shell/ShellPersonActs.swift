@@ -355,7 +355,7 @@ final class ShellPersonActs {
         guard let held = looked.held, !looked.changed,
               let page = self.standing(key, of: person.accountID, at: source.host, in: session),
               let offered = acting(of: who, as: person, in: session),
-              act == .follow ? offered.press == .follow : offered.more.contains(act),
+              Self.offers(act, on: offered),
               let flight = presses.begin(key, showing: act)
         else { return }
         missed[key] = nil
@@ -381,6 +381,16 @@ final class ShellPersonActs {
     /// and keeps no turn, and a failure is said on the page. **Its own:** the answer calls off
     /// whatever read of the page is still out, which set out before the answer was known; and
     /// a follow of somebody of another server is read once more before it is taken (`settling`).
+    ///
+    /// **A switch of what is taken from them is a follow at the source, so it is sent only to
+    /// somebody the source says the reader follows now** (#313): the page offered it over what
+    /// the source last said, and the reader may have unfollowed them elsewhere since. So how
+    /// the reader stands is read once more first — one ask more a press of a switch, through
+    /// `settling`, while the press is out. Where the source says the reader does not follow
+    /// them, or has only asked, **nothing is sent**: what it said is what the page then says,
+    /// and nothing is said to have failed, because nothing did. Where that read fails nothing
+    /// is sent either, and the press is one that did not arrive. Following, unfollowing and
+    /// taking a request back are sent as they always were, with no such read.
     private func act(
         _ act: PersonAct, flight: PressNumber, on pressedOn: Page, key: String, through: MastodonStanding,
         settling: MastodonStanding, with held: MastodonToken, at source: Source, in session: ShellSession
@@ -392,10 +402,30 @@ final class ShellPersonActs {
             case unsaid, missed, unread
         }
         var outcome = Outcome.missed
-        do {
-            outcome = .said(try await through.follow(pressedOn.accountID, act == .follow))
-        } catch {
-            ShellPersonPages.concluded(error, at: source, askedAs: pressedOn.askedAs, in: session)
+        // Whether the request is made, and whether the page turns to what a read said in its
+        // place: a switch for somebody the reader no longer follows.
+        var sends = true, turned = false
+        if Self.isSwitch(act) {
+            do {
+                let now = try await settling.standing(to: pressedOn.accountID)
+                if now?.following != true {
+                    outcome = now.map(Outcome.said) ?? .unsaid
+                    sends = false
+                    turned = true
+                }
+            } catch {
+                ShellPersonPages.concluded(error, at: source, askedAs: pressedOn.askedAs, in: session)
+                sends = false
+            }
+            // Let go of with its reader while the read was out: nothing is sent for them.
+            guard presses.isStill(flight, key) else { return }
+        }
+        if sends {
+            do {
+                outcome = .said(try await Self.send(act, about: pressedOn.accountID, through: through))
+            } catch {
+                ShellPersonPages.concluded(error, at: source, askedAs: pressedOn.askedAs, in: session)
+            }
         }
         // Let go of with its reader meanwhile: the entry, if any, is another press's.
         guard presses.isStill(flight, key) else { return }
@@ -442,8 +472,9 @@ final class ShellPersonActs {
             pages[key]?.said = answer
             pages[key]?.unsaid = false
             pages[key]?.failed = false
-            // The source's word stands either way; one that is not what was pressed is said as not done.
-            if !Self.did(act, answer) { missed[key] = act }
+            // The source's word stands either way; one that is not what was pressed is said as
+            // not done — but not where nothing was sent: then nothing failed.
+            if !turned, !Self.did(act, answer) { missed[key] = act }
         case .unsaid:
             pages[key]?.said = nil
             pages[key]?.unsaid = true
@@ -460,12 +491,49 @@ final class ShellPersonActs {
         }
     }
 
+    /// Whether the page offers `act` now: Follow where the head's press is that, an item of
+    /// the `…` where it lists it, and a switch of what is taken from them (#313) where About
+    /// draws that switch turned the other way and takes a press.
+    private static func offers(_ act: PersonAct, on offered: PersonActing) -> Bool {
+        switch act {
+        case .follow: offered.press == .follow
+        case .unfollow, .withdraw: offered.more.contains(act)
+        case .showBoosts, .hideBoosts, .notify, .stopNotifying:
+            offered.narrowsTakePress && offered.narrows().contains { $0.act == act }
+        }
+    }
+
+    /// Whether `act` is a switch of what is taken from somebody followed.
+    private static func isSwitch(_ act: PersonAct) -> Bool {
+        switch act {
+        case .follow, .unfollow, .withdraw: false
+        case .showBoosts, .hideBoosts, .notify, .stopNotifying: true
+        }
+    }
+
+    /// The one request `act` is, sent: a follow, the taking back of one, or a follow said
+    /// again with the one word that changed (#313) — the other is left as the source has it.
+    private static func send(_ act: PersonAct, about accountID: String, through: MastodonStanding) async throws -> PersonStanding {
+        switch act {
+        case .follow: try await through.follow(accountID, true)
+        case .unfollow, .withdraw: try await through.follow(accountID, false)
+        case .showBoosts: try await through.narrow(accountID, boosts: true)
+        case .hideBoosts: try await through.narrow(accountID, boosts: false)
+        case .notify: try await through.narrow(accountID, notify: true)
+        case .stopNotifying: try await through.narrow(accountID, notify: false)
+        }
+    }
+
     /// Whether what the source answered is what `act` was pressed for.
     private static func did(_ act: PersonAct, _ answer: PersonStanding) -> Bool {
         switch act {
         case .follow: answer.following || answer.requested
         case .unfollow: !answer.following
         case .withdraw: !answer.requested
+        case .showBoosts: answer.showsBoosts == true
+        case .hideBoosts: answer.showsBoosts == false
+        case .notify: answer.notifies == true
+        case .stopNotifying: answer.notifies == false
         }
     }
 }

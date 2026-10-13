@@ -123,7 +123,7 @@ struct MastodonStandingTests {
             "POST /api/v1/accounts/\(Captures.locked)/follow": .json(Captures.asked),
             "POST /api/v1/accounts/\(Captures.locked)/unfollow": .json(Captures.withdrawn),
         ])
-        #expect(try await stands.follow(Captures.followable) == PersonStanding(accountID: Captures.followable, following: true))
+        #expect(try await stands.follow(Captures.followable) == PersonStanding(accountID: Captures.followable, following: true, showsBoosts: true, notifies: false))
         #expect(try await stands.follow(Captures.followable, false) == PersonStanding(accountID: Captures.followable))
         #expect(try await stands.follow(Captures.locked) == PersonStanding(accountID: Captures.locked, requested: true))
         #expect(try await stands.follow(Captures.locked, false) == PersonStanding(accountID: Captures.locked))
@@ -134,6 +134,60 @@ struct MastodonStandingTests {
             "POST \(Self.origin)/api/v1/accounts/\(Captures.locked)/unfollow",
         ])
         #expect(await server.asked.allSatisfy { $0.bearer == "Bearer tok-123" })
+    }
+
+    /// A sender that keeps what each ask carried, and answers every one the same.
+    private actor Carried: HTTPSender {
+        private(set) var asked: [(line: String, body: String, bearer: String?)] = []
+        let answer: String
+
+        init(_ answer: String) { self.answer = answer }
+
+        func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+            let url = try #require(request.url)
+            asked.append((
+                "\(request.httpMethod ?? "GET") \(url.path)", String(decoding: request.httpBody ?? Data(), as: UTF8.self),
+                request.value(forHTTPHeaderField: "Authorization")
+            ))
+            return (Data(answer.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
+        }
+    }
+
+    @Test("What is taken from somebody followed is a follow said again with the word that changed, and with no other: one post to the account's own address as the person, carrying `reblogs` or `notify` or both as handed in; with neither it is refused before anything is asked, since that would be a bare follow; the answer is read whole, the two things with it")
+    func narrowing() async throws {
+        let id = Captures.narrowedID
+        let server = Carried(Captures.narrowed)
+        let tokens = MemoryMastodonTokens()
+        try tokens.save(Self.token)
+        let stands = MastodonStanding(door: MastodonAuthorized(token: Self.token, sender: server, store: tokens))
+        let said = PersonStanding(accountID: id, following: true, showsBoosts: false, notifies: true)
+        #expect(try await stands.narrow(id, boosts: false) == said)
+        #expect(try await stands.narrow(id, notify: true) == said)
+        #expect(try await stands.narrow(id, boosts: true, notify: false) == said, "what the source answered, and never what was sent")
+        await #expect(throws: MastodonRequestError.invalidURL) { _ = try await stands.narrow(id) }
+        let asked = await server.asked
+        #expect(asked.map(\.line) == Array(repeating: "POST /api/v1/accounts/\(id)/follow", count: 3))
+        #expect(asked.map(\.body) == ["reblogs=false", "notify=true", "reblogs=true&notify=false"], "no bare follow is sent by it")
+        #expect(asked.allSatisfy { $0.bearer == "Bearer tok-123" })
+        await #expect(throws: MastodonRequestError.invalidURL) { _ = try await stands.narrow("1/follow", boosts: true) }
+        await #expect(throws: MastodonStandingError.unreadable) { _ = try await stands.narrow(Captures.followable, boosts: true) }
+        #expect(await server.asked.count == 4, "an id that is no segment is asked of nobody")
+    }
+
+    @Test("What is taken from them is said of a follow and of nothing else: read where the reader follows them, nothing where they do not or have only asked, and nothing where a source leaves the two out — which is still a standing")
+    func whatIsTakenIsSaidOfAFollow() throws {
+        func read(_ body: String, _ id: String) throws -> PersonStanding? { try MastodonStanding.standing(to: id, in: Data("[\(body)]".utf8)) }
+        let followed = try #require(try read(Captures.followed, Captures.followable))
+        #expect(followed.following && followed.showsBoosts == true && followed.notifies == false)
+        let narrowed = try #require(try read(Captures.narrowed, Captures.narrowedID))
+        #expect(narrowed.showsBoosts == false && narrowed.notifies == true)
+        let unfollowed = try #require(try read(Captures.unfollowed, Captures.followable))
+        #expect(!unfollowed.following && unfollowed.showsBoosts == nil && unfollowed.notifies == nil)
+        // Asked and not agreed: the request carries `showing_reblogs: true`, and nothing is taken yet.
+        let asked = try #require(try read(Captures.asked, Captures.locked))
+        #expect(asked.requested && asked.showsBoosts == nil && asked.notifies == nil)
+        let silent = #"{"id":"9","following":true,"followed_by":false,"requested":false,"muting":false,"blocking":false,"blocked_by":false}"#
+        #expect(try read(silent, "9") == PersonStanding(accountID: "9", following: true), "a standing, with neither said")
     }
 
     @Test("A refusal is thrown as the door threw it and nothing is made of it; an answer about somebody else, or one that is no standing, is not an answer")
