@@ -64,7 +64,9 @@ struct NearbyMoveTests {
             guard case .code(let code, _)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else {
                 return (held, "", NearbyPeer(id: "", name: "", sessionID: ""))
             }
-            for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+            guard await met("the sender sees the receiver nearby", until: { !link.peers.isEmpty }) else {
+                return (held, code, NearbyPeer(id: "", name: "", sessionID: ""))
+            }
             return (held, code, link.peers[0])
         }
     }

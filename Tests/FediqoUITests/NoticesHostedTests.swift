@@ -270,10 +270,10 @@ struct NoticesHostedTests {
         let (session, server) = try await shell([Self.a: .held(gate, "[]")], signedIn: [Self.a: Self.reads])
 
         let (view, probe) = hosted(session, opening: true)
-        #expect(await spun(400) {
+        await met("the page has asked its source, and says it is reading") {
             Self.settle(view)
             return await server.asked.count == 1 && probe.says[.line("reading")] != nil
-        })
+        }
         #expect(probe.frames[.line("unread:a.example")] == nil, "a source on the wire was named as not read")
 
         #expect(session.noticeList.stop())

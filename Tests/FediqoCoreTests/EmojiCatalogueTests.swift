@@ -472,7 +472,7 @@ struct EmojiCatalogueTests {
 
     @Test(
         "The join returns with the timeline in hand while the catalogue is still on the wire",
-        .timeLimit(.minutes(3))
+        .watched
     )
     func joinDoesNotWaitForTheCatalogue() async throws {
         let gate = Gate()
@@ -481,10 +481,10 @@ struct EmojiCatalogueTests {
         let catalogues = EmojiCatalogueStore()
 
         // Nothing but this test can release the gate, so a join that went back to waiting for
-        // the catalogue would wait for ever. The guard turns that into a recorded issue inside
-        // the time limit instead of a suite that never finishes. On the passing path the join
-        // returns at once and this is cancelled without ever having waited.
-        let watchdog = hangGuard { await gate.open() }
+        // the catalogue would wait for ever. The guard turns that into a recorded issue, when
+        // the run has gone still, instead of a suite that never finishes. On the passing path
+        // the join returns at once and this is cancelled without ever having waited.
+        let watchdog = watching("the catalogue's answer, held on the wire") { await gate.open() }
         defer { watchdog.cancel() }
 
         try await MastodonJoin(http: http, store: items, catalogues: catalogues)

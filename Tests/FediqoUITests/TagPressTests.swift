@@ -7,7 +7,7 @@ import Testing
 /// #124: pressing a hashtag shows what this device holds under it, and asks the sources of the
 /// timeline in front for more — which lands in the store first.
 @MainActor
-@Suite("Pressing a hashtag")
+@Suite("Pressing a hashtag", .watched)
 struct TagPressTests {
     private static let one = "one.example"
     private static let forum = "forum.example"
@@ -117,12 +117,12 @@ struct TagPressTests {
     @Test("While on its way the page says so and shows what was held; a failure says so there, and a retry asks again")
     func onItsWayFailingAndRetry() async throws {
         let gated = GatedHTTP([Self.tagAddress: .text("oops", status: 500)], holding: "/api/v1/timelines/tag/Swift")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "the posts under the hashtag, held on the wire")
         defer { guardTask.cancel() }
         let session = await shell(gated)
 
         let asking = Task { await session.reload.tag(Self.swift, timeline: .all, in: session) }
-        #expect(await spun { await gated.asks == 1 })
+        await met("the source is asked for the hashtag", by: asking) { await gated.asks == 1 }
         #expect(session.reload.tagAsking == [Self.one])
         #expect(TagPane.said(asking: session.reload.tagAsking, failed: [], tag: Self.swift)
             == .asking("Asking one.example for #Swift…"))
@@ -154,11 +154,11 @@ struct TagPressTests {
     @Test("Leaving ends the ask: nothing it had not brought lands")
     func leavingEndsTheAsk() async {
         let gated = GatedHTTP([Self.tagAddress: Self.underTag], holding: "/api/v1/timelines/tag/Swift")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "the posts under the hashtag, held on the wire")
         defer { guardTask.cancel() }
         let session = await shell(gated)
         let asking = Task { await session.reload.tag(Self.swift, timeline: .all, in: session) }
-        #expect(await spun { await gated.asks == 1 })
+        await met("the source is asked for the hashtag", by: asking) { await gated.asks == 1 }
         session.reload.endTag()
         await asking.value
         #expect(session.reload.tagAsk == nil)

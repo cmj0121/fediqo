@@ -45,6 +45,14 @@ if [ "$TEST_CODE" -ne 0 ]; then
     # A build that fails says so among hundreds of warnings, and the tail above can cut it
     # off: what the compiler refused is said first, by itself.
     grep -E -A14 ': error: ' "$RUN_LOG" | head -200 || true
+    # A run that went still and could not be let go is ended by the checks' own bound
+    # (`Waits.swift` in each test target), which leaves no summary behind it: what it was
+    # waiting for is the whole of what it has to say, and is said here as that.
+    if grep -qE '^Ending it\.' "$RUN_LOG"; then
+        echo "the run went still and was ended; what it was waiting for:"
+        grep -E '^The run has not moved|^  - |^Ending it\.' "$RUN_LOG" | tail -200 || true
+        echo
+    fi
     echo "the tests failed (swift test exited $TEST_CODE); each issue, as it was recorded:"
     grep -E -A12 'recorded an issue' "$RUN_LOG" | grep -vE '^◇ |^✔ ' | head -400 || true
     exit "$TEST_CODE"

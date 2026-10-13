@@ -225,32 +225,42 @@ struct ReloadPullTests {
         #expect(ReloadMark.shown(canReload: true, stoppable: held.reload.stoppable) == .reload, "and the mark is the reload mark again")
     }
 
-    @Test("A wait whose list has gone ends with it, though the reload runs on")
+    @Test("A wait whose list has gone ends with it, though the reload runs on", .watched)
     func theWaitIsCancelled() async {
         let reload = ShellReload()
-        let asked = Task { await reload.run(.timeline) { try? await Task.sleep(for: .seconds(30)) } }
-        #expect(await spun { reload.stoppable })
-        final class Flag: @unchecked Sendable { var done = false }
-        let flag = Flag()
-        let waiting = Task {
-            await reload.settled(.timeline)
-            flag.done = true
+        let running = Gate()
+        let guardTask = watching(running, "the reload that is to run on")
+        defer { guardTask.cancel() }
+        let asked = Task { await reload.run(.timeline) { await running.wait() } }
+        await met("the reload is running", by: asked) { reload.stoppable }
+        // The wait's own clock, turned here: asleep on it is a look that was made and found the
+        // read running, and turned, it looks again — so "still waiting" is two looks that both
+        // found it so, and not a stretch of time in which nothing was seen to happen.
+        let clock = TurnedClock()
+        let waiting = Task { await reload.settled(.timeline, sleep: clock.sleep) }
+        await met("the wait has looked, and found the reload running", by: waiting) { clock.sleeping == 1 }
+        clock.turn()
+        await met("the wait has looked again, and found it running still", by: waiting) {
+            clock.asked.count == 2 && clock.sleeping == 1
         }
-        try? await Task.sleep(for: .milliseconds(250))
-        #expect(!flag.done, "while the reload runs, the wait is still waiting")
+        #expect(clock.asked == [ShellReload.look, ShellReload.look])
         waiting.cancel()
         await waiting.value
         #expect(reload.stoppable, "the reload itself was not stopped by it")
-        // And a wait for another read than the one running is over at once.
-        let other = Flag()
+        // And a wait for another read than the one running is over at once: over without ever
+        // having slept. One that did wait would be asleep on its clock, and is told apart.
+        final class Flag: @unchecked Sendable { var done = false }
+        let over = Flag()
+        let other = TurnedClock()
         let waitingForThread = Task {
-            await reload.settled(.thread)
-            other.done = true
+            await reload.settled(.thread, sleep: other.sleep)
+            over.done = true
         }
-        try? await Task.sleep(for: .milliseconds(250))
-        #expect(other.done, "a conversation's pull does not wait for a timeline's read")
+        await met("a conversation's wait is over, or asleep") { over.done || other.sleeping == 1 }
+        #expect(over.done && other.asked.isEmpty, "a conversation's pull does not wait for a timeline's read")
         waitingForThread.cancel()
         _ = reload.stop()
+        await running.open()
         asked.cancel()
     }
 

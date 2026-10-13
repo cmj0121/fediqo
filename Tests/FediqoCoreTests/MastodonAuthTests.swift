@@ -730,22 +730,6 @@ private actor HeldSender: HTTPSender {
     }
 }
 
-private actor Gate {
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-    private var opened = false
-
-    func wait() async {
-        guard !opened else { return }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-
-    func open() {
-        opened = true
-        for continuation in waiting { continuation.resume() }
-        waiting.removeAll()
-    }
-}
-
 /// Yields until `condition` holds, and gives up rather than hanging the suite.
 private func spin(until condition: () async -> Bool) async -> Bool {
     for _ in 0..<100_000 {

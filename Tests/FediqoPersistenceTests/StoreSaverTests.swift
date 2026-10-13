@@ -9,7 +9,7 @@ import Testing
     func exclusively() async throws {
         let store = ItemStore()
         let order = Order()
-        let gate = Gate()
+        let gate = FirstWriteGate()
         let saver = StoreSaver(store: store, write: { _, _, _ in
             order.add("save")
             await gate.passOnce()
@@ -32,7 +32,7 @@ import Testing
 }
 
 /// A door the first write waits at, and the test opens.
-private actor Gate {
+private actor FirstWriteGate {
     private var passed = false
     private var opened = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
