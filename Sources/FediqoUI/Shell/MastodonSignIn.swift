@@ -1739,14 +1739,15 @@ public final class MastodonSessions {
         }
     }
 
-    /// **Awaiting the person's decision — the one place it is made.** A read back that
-    /// brought no sign-in for a source this device was signed in to takes that sign-in off
-    /// the device and writes it down. With this `false` it is left as it is: live at the
-    /// source, written down here, and ended when the person clears or removes the source,
-    /// or signs in there again as somebody else. The alternatives are to end it once the
-    /// read back has held (`true`) — which signs out every other device carrying it, and
-    /// so must be said in the read-back question before it is done — or to leave it, as
-    /// now.
+    /// **Decided by the person (2026-10-13): written down and left, not ended — and still
+    /// the one place it is made.** A read back that brought no sign-in for a source this
+    /// device was signed in to takes that sign-in off the device and writes it down. With
+    /// this `false` it is left as it is: live at the source, written down here, and ended
+    /// when the person clears or removes the source, or signs in there again as somebody
+    /// else. The other choice was to end it once the read back has held (`true`) — which
+    /// signs out every other device carrying it, and so must be said in the read-back
+    /// question before it is done. It stays one named switch so that choice remains one
+    /// switch and one sentence away.
     static let endsWhatAReadBackLeftBare = false
 
     /// Whether a sign-in journalled at a host where none is held is asked to end, by a

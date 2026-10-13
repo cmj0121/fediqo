@@ -323,9 +323,9 @@ be read. Before the server's page opens, Fediqo asks which sign-in you want, and
 part is which: reading alone, or reading and writing. Reading brings in your Home and your
 lists. Writing lets you post, reply, boost, favourite and bookmark from Fediqo, and take any of
 them back — and nothing else: no sign-in asks to follow anybody unasked, and Fediqo never asks
-to change your profile or touch your filters. Choosing reading alone asks for exactly what Fediqo asked for before it could
-write at all, so refusing the writing part changes nothing about reading. Signing in again is
-how you change your answer.
+to change your profile or touch your filters. Choosing reading alone asks for exactly what
+Fediqo asked for before it could write at all, so refusing the writing part changes nothing
+about reading. Signing in again is how you change your answer.
 
 If you signed in before Fediqo could write, that sign-in still only reads, and Fediqo writes
 nothing with it. That source's row on Account says so, with a lock and the words Update
@@ -968,9 +968,9 @@ holds, the one it replaced is ended there if it was another account's, or one th
 more than the new one; an earlier sign-in of the same account that could do no more is left,
 and is ended when you sign out. Where the source has not answered, it stays written down
 until it does, or until you sign out, Clear or Remove. Where the file brings no sign-in for a
-source this device is signed in to, today that sign-in is taken off this device, written down
-and left: it is not ended at its source until you Clear or Remove that source, or sign in
-there as somebody else.
+source this device is signed in to, that sign-in is taken off this device, written down and
+left: it is not ended at its source until you Clear or Remove that source, or sign in there
+as somebody else.
 
 Nothing leaves this device either way. Both are listed under This device in the run's
 requests.

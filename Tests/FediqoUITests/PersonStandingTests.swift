@@ -137,7 +137,7 @@ struct PersonStandingTests {
         }
     }
 
-    @Test("Where a signed-in reader is given none of the posts a source counts, the posts' place says only that the source gives this sign-in none of them: where they block the reader, and where how the reader stands is not known — the follows part not held, the ask out, failed, or answered with nothing; where the source has said how the reader stands and it is no block, and where nobody stands to them here, the place says what it gave and counts, as before")
+    @Test("Where a signed-in reader is given none of the posts a source counts, the posts' place says only that the source gives this sign-in none of them: where they block the reader, and where how the reader stands is not known — the follows part not held, the ask failed, or answered with nothing; where the source has said how the reader stands and it is no block, and where nobody stands to them here, the place says what it gave and counts, as before; while how the reader stands is still being asked it says nothing")
     func whatStandsWherePostsWould() throws {
         let said = try Self.page()
         let decided = "m.example gives this sign-in none of them."
@@ -153,7 +153,7 @@ struct PersonStandingTests {
 
         // Not known why: the decided sentence alone, with no figure and no reason.
         let notHeld = acting(nil, lock: PartWords.Place(kind: .unasked, key: "part.follows.unasked"))
-        for unknown in [notHeld, acting(.asking), acting(.failed), acting(.unsaid)] {
+        for unknown in [notHeld, acting(.failed), acting(.unsaid)] {
             #expect(line(unknown, of: said) == decided, "\(String(describing: unknown.reading))")
         }
 
@@ -170,10 +170,43 @@ struct PersonStandingTests {
             reading: .said(try MastodonPeople.person(from: Data(#"{"id":"42","acct":"ada","statuses_count":0}"#.utf8), source: Self.source)),
             posts: []
         )
-        for standing in [notHeld, acting(.asking), acting(.said(PersonStanding(accountID: "42"))), nil] {
+        for standing in [notHeld, acting(.said(PersonStanding(accountID: "42"))), nil] {
             #expect(line(standing, of: none) == "m.example gave no posts of theirs.")
         }
         #expect(line(blockedBy, of: none) == decided, "blocked by them, the reason is known whatever it counts")
+
+        // Still being asked: which sentence it is hangs on the answer, so none is drawn yet.
+        #expect(line(acting(.asking), of: said) == nil && line(acting(.asking), of: none) == nil)
+    }
+
+    @Test("While the source is being asked how the reader stands to somebody it gave no posts of, nothing is drawn where their posts would be; the sentence is drawn once the ask has landed and is the one that stays: what it counts and gave where there is no block, the decided sentence where they block the reader or the source could not be asked")
+    func nothingWherePostsWouldWhileAsked() async throws {
+        let decided = "m.example gives this sign-in none of them."
+        let lands: [(PageServer.Answer, PersonActing.Reading, String)] = [
+            (Self.said(Self.standing()), .said(PersonStanding(accountID: "42")), "m.example counts 3 posts of theirs and gave none of them here."),
+            (Self.said(Self.standing(blockedBy: true)), .said(PersonStanding(accountID: "42", blockedBy: true)), decided),
+            (Self.down, .failed, decided),
+        ]
+        for (answer, landed, sentence) in lands {
+            let (session, server, _) = await session([Self.stands: answer])
+            try await signIn(session)
+            let acts = acts(), page = try Self.page()
+            func line() -> String? {
+                PersonPane.emptyLine(page, held: 0, standing: acts.acting(of: Self.ada, said: page, in: session), language: .english)
+            }
+
+            await server.hold(Self.stands)
+            defer { Task { await server.release(Self.stands) } }
+            let opening = Task { await acts.opened(Self.ada, said: page, in: session) }
+            await server.arrival(of: Self.stands)
+            #expect(acts.acting(of: Self.ada, said: page, in: session)?.reading == .asking)
+            #expect(line() == nil, "the ask is out: no sentence yet")
+
+            await server.release(Self.stands)
+            await opening.value
+            #expect(acts.acting(of: Self.ada, said: page, in: session)?.reading == landed)
+            #expect(line() == sentence, "\(landed)")
+        }
     }
 
     // MARK: - What is asked, and when

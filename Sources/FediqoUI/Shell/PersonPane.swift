@@ -419,6 +419,11 @@ struct PersonPane: View {
     /// since then no reason is known and no figure is set beside the lack of one. Where the
     /// source has said how the reader stands and it is not a block, and where nobody stands to
     /// them here at all, what it gave and what it counts are said as they always were.
+    ///
+    /// **Nothing while how the reader stands to them is still being asked** (decided
+    /// 2026-10-13): which sentence it is hangs on the answer, and a line that read one way and
+    /// then another would change under the reader. The place is the foot of the list, with
+    /// nothing drawn under it, so the line arriving moves nothing.
     static func emptyLine(
         _ said: PersonSaid, held: Int, standing: PersonActing? = nil, language: DummyLanguage? = nil
     ) -> String? {
@@ -426,6 +431,7 @@ struct PersonPane: View {
             // A suspended account's line has said why already; a stretch that did not come is
             // the foot's to say.
             guard posts.isEmpty, said.foot == nil, said.person?.suspended != true else { return nil }
+            if let standing, standing.stillAsked { return nil }
             if let standing, standing.givesNone(counted: said.person?.tally.posts) {
                 return String(format: L10n.t("person.posts.noneGiven", language: language), said.source)
             }

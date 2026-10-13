@@ -1521,9 +1521,9 @@ struct MastodonLeftTests {
         #expect(try made.tokens.leftHosts().isEmpty)
     }
 
-    @Test("A read back that brought no sign-in for a source this device was signed in to: the one taken out stays written down and nothing ends it — at the adopting, a launch or a coming to the front — until the person decides what is said of it; clearing the source ends it, and its question says so")
+    @Test("A read back that brought no sign-in for a source this device was signed in to: the one taken out stays written down and nothing ends it — at the adopting, a launch or a coming to the front, as the person decided; clearing the source ends it, and its question says so")
     func readBackBroughtNone() async throws {
-        #expect(!MastodonSessions.endsWhatAReadBackLeftBare, "the choice the person has not made was made for them")
+        #expect(!MastodonSessions.endsWhatAReadBackLeftBare, "the person decided it is left, and this says it is ended")
         let made = try readBack(over: token("tok-old"), bringing: nil)
 
         made.sessions.readBack()

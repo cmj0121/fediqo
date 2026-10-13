@@ -85,9 +85,14 @@ struct PersonActing: Equatable {
         if case .said = reading { false } else { true }
     }
 
+    /// Whether how the reader stands to them is still being asked: what stands where their
+    /// posts would waits for the answer, so that no sentence there turns into another.
+    var stillAsked: Bool { reading == .asking }
+
     /// Whether what stands where their posts would is only that the source gives this sign-in
     /// none of them, given how many it counts: where they block the reader, whatever it
     /// counts; and where it counts some and how the reader stands to them is not known.
+    /// Asked once the ask is no longer out (`stillAsked`).
     func givesNone(counted: Int?) -> Bool {
         blockedBy || (givesNoneUnexplained && (counted ?? 0) > 0)
     }
