@@ -195,11 +195,12 @@ struct DirectoryChoice: Hashable, Sendable {
 }
 
 extension ShellWalk {
-    /// A list opened from the figure that counts it, on somebody's page (#311): one more step
-    /// of the walk. **The lamp and the step in one turn**, as a row opens: the figure is lit
-    /// and is what the walk remembers, so leaving the list gives it back — pressed by a pointer
-    /// or a finger too, where the lamp was elsewhere or nowhere. A step that is not taken
-    /// moves nothing.
+    /// A list of people opened as a page of its own — all the people a search found, from the
+    /// press under its band (#319): one more step of the walk. **The lamp and the step in one
+    /// turn**, as a row opens: the line pressed is lit and is what the walk remembers, so
+    /// leaving the list gives it back — pressed by a pointer or a finger too, where the lamp
+    /// was elsewhere or nowhere. A step that is not taken moves nothing. **Whom somebody
+    /// follows and who follows them are no step**: they are tabs of that person's page (F9).
     mutating func open(_ list: PeopleList, lamp: inout String?) -> Bool {
         guard walk(to: .people(list), from: list.id) else { return false }
         lamp = list.id
@@ -319,6 +320,15 @@ final class ShellPeoplePages {
             pages[id] = nil
             order.forget(id)
         }
+    }
+
+    /// One list let go, and its ask called off: somebody's page was asked again with another
+    /// tab in front (`ShellPersonPages.again`), so this one asks when it is next in front.
+    func forget(_ list: PeopleList) {
+        asks[list.id]?.cancel()
+        asks[list.id] = nil
+        pages[list.id] = nil
+        order.forget(list.id)
     }
 
     // MARK: - What the page is handed

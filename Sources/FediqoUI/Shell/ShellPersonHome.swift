@@ -129,8 +129,10 @@ final class ShellPersonHome {
         case .asking:
             return PersonHomeLine(words: String(format: L10n.t("person.home.asking", language: language), home))
         case .said:
-            // The posts under it are still the source's, where the source gave any.
-            let posts = said?.posts.map { _ in String(format: L10n.t("person.home.posts", language: language), source) }
+            // Their posts are still the source's, where it has said who they are: what it gave
+            // for the page, and until then what this device holds of theirs, which was read
+            // through that same source. One that has not heard of them gave none to speak of.
+            let posts = said?.person.map { _ in String(format: L10n.t("person.home.posts", language: language), source) }
             return PersonHomeLine(
                 words: posts, press: .back, pressWords: String(format: L10n.t("person.home.back", language: language), source)
             )

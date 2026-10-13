@@ -615,7 +615,7 @@ struct PeopleTests {
         ))!
         #expect(pages.said(of: author, in: session) == nil && ShellPersonPages.own(at: Self.forum.host, in: session) == nil)
         #expect(ShellPersonPages.source(at: Self.forum.host, in: session) == nil && ShellPersonPages.source(at: Self.host, in: session) == Self.source)
-        #expect(PersonPane.viewLine(of: author, said: nil, language: .english) == "Read through forum.example")
+        #expect(PersonHeadSaid.made(of: author, said: nil, tabs: [.posts], held: 0, standing: nil, language: .english).through == "Read through forum.example")
 
         for file in ["PeoplePane.swift", "PersonRow.swift"] {
             let text = try String(contentsOf: Self.shell.appending(path: file), encoding: .utf8)

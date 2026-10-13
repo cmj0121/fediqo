@@ -154,6 +154,63 @@ struct PersonActing: Equatable {
         return pills
     }
 
+    /// One way the reader stands to them, as the head of their page draws it: a glyph, called
+    /// by the words About says beside it.
+    struct Mark: Equatable, Identifiable {
+        let symbol: String
+        let words: String
+        var id: String { symbol }
+    }
+
+    /// The marks of how the reader stands to them, in the order the head draws them: the
+    /// reader follows them, they follow the reader, the reader has asked to, mutes them,
+    /// blocks them. **A standing that is not so has no mark**: there is no glyph for "not".
+    func marks(language: DummyLanguage? = nil) -> [Mark] {
+        shown.map { Self.marks(of: $0, language: language) } ?? []
+    }
+
+    static func marks(of standing: PersonStanding, language: DummyLanguage? = nil) -> [Mark] {
+        var marks: [Mark] = []
+        func say(_ symbol: String, _ key: String) { marks.append(Mark(symbol: symbol, words: L10n.t(key, language: language))) }
+        if standing.following { say("person.fill.checkmark", "person.stands.following") }
+        if standing.followedBy { say("person.badge.plus", "person.stands.followsYou") }
+        if standing.requested { say("person.badge.clock", "person.stands.asked") }
+        if standing.muting {
+            let muted = PersonStanding(accountID: standing.accountID, muting: true, mutedUntil: standing.mutedUntil)
+            marks.append(Mark(symbol: "speaker.slash", words: pills(of: muted, language: language).first ?? ""))
+        }
+        if standing.blocking { say("hand.raised", "person.stands.blocked") }
+        return marks
+    }
+
+    /// Whether the head of their page has anything to draw where the marks stand: a mark, the
+    /// press that asks again where the source could not be asked, or the lock of a sign-in
+    /// that holds less than following needs. Nothing while it is being asked, and nothing
+    /// where the source answered with nothing about them.
+    var standsInHead: Bool { !marks().isEmpty || offersAgain || lock != nil }
+
+    /// What the head says in full ink under the figures, for what no glyph may say: that
+    /// they block the reader, and a press that did not arrive.
+    func headWords(language: DummyLanguage? = nil) -> [String] {
+        [blockedWords(language: language), missedWords(language: language)].compactMap { $0 }
+    }
+
+    /// What a listener is read of the marks, as one element: each in words, joined.
+    static func spoken(_ marks: [Mark], language: DummyLanguage? = nil) -> String {
+        marks.map(\.words).joined(separator: L10n.t("people.row.between", language: language))
+    }
+
+    /// What About says where the source said how the reader stands and it is none of the
+    /// five; and while it is being asked.
+    func neitherWords(language: DummyLanguage? = nil) -> String? {
+        guard let shown, Self.marks(of: shown).isEmpty else { return nil }
+        return L10n.t("person.stands.neither", language: language)
+    }
+
+    func askingWords(language: DummyLanguage? = nil) -> String? {
+        stillAsked ? String(format: L10n.t("person.stands.asking", language: language), source) : nil
+    }
+
     /// The sentence that they block the reader, in full ink — or nothing where they do not, or
     /// the source has not said.
     func blockedWords(language: DummyLanguage? = nil) -> String? {
@@ -223,22 +280,6 @@ struct PersonActing: Equatable {
     }
 }
 
-/// The pills of how the reader stands to somebody, on the heading's own line: each a few words
-/// of this app's on the well, as a row's source pill is.
-struct PersonStandingPills: View {
-    let pills: [String]
-
-    var body: some View {
-        if !pills.isEmpty {
-            // Wrapped where one line has no room: no pill is cut.
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: ShellSpace.tight) { ForEach(pills, id: \.self) { ShellWellPill($0) } }
-                VStack(alignment: .leading, spacing: ShellSpace.tight) { ForEach(pills, id: \.self) { ShellWellPill($0) } }
-            }
-        }
-    }
-}
-
 /// The heading's press and the page's `…`, side by side: Follow — dim with the lock where the
 /// sign-in must be asked first — and the menu, where it has anything to offer.
 struct PersonHeadActs: View {
@@ -284,59 +325,18 @@ struct PersonHeadActs: View {
     }
 }
 
-/// What stands under somebody's heading about how the reader stands to them, where there is
-/// something to say that no pill says: how the sign-in stands, dim with the lock and pressed to
-/// ask; that the source could not be asked, with the press that asks again; and a press that
-/// did not arrive, in full ink.
-struct PersonStandingLines: View {
-    let acting: PersonActing
-    var onAsk: () -> Void
-    var onAgain: () -> Void
-    @Environment(\.colorScheme) private var colorScheme
-
-    /// Whether there is any line to draw.
-    static func draws(_ acting: PersonActing) -> Bool {
-        acting.lock != nil || acting.reading == .failed || acting.missed != nil
-    }
+/// The pills of how the reader stands to somebody, on a row of a list of people: each a few
+/// words of this app's on the well, as a row's source pill is.
+struct PersonStandingPills: View {
+    let pills: [String]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let words = acting.lockWords() { locked(words) }
-            if let failed = acting.failedWords() {
-                WordsThenPress(
-                    words: Text(failed).shellFont(.meta).foregroundStyle(ShellChrome.ink(colorScheme)),
-                    press: ShellLinkButton(L10n.t("person.retry"), action: onAgain).fixedSize()
-                )
+        if !pills.isEmpty {
+            // Wrapped where one line has no room: no pill is cut.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: ShellSpace.tight) { ForEach(pills, id: \.self) { ShellWellPill($0) } }
+                VStack(alignment: .leading, spacing: ShellSpace.tight) { ForEach(pills, id: \.self) { ShellWellPill($0) } }
             }
-            if let missed = acting.missedWords() {
-                Text(missed)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, ShellSpace.pad)
-                    .padding(.vertical, ShellSpace.snug)
-            }
-        }
-    }
-
-    /// How the sign-in stands, dim, after the glyph a source's row draws where its sign-in
-    /// must be asked again: the whole line is the press where it asks, and words where not.
-    @ViewBuilder
-    private func locked(_ words: String) -> some View {
-        let label = Label(words, systemImage: SourceRow.permissionSymbol)
-            .shellFont(.meta)
-            .foregroundStyle(ShellChrome.markDim(colorScheme))
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, ShellSpace.pad)
-            .padding(.vertical, ShellSpace.snug)
-        if acting.lock?.asks == true {
-            Button(action: onAsk) { label.contentShape(Rectangle()) }
-                .buttonStyle(.plain)
-                .help(L10n.t("mark.dim.askAgain"))
-        } else {
-            label
         }
     }
 }

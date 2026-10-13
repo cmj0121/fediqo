@@ -74,9 +74,6 @@ struct TimelinePane: View {
     /// A row of a list of people opened (#311), answered by the root: it lights the row and
     /// takes the step together, so leaving that person's page gives the row back.
     var onOpenListed: (Person) -> Void = { _ in }
-    /// A figure on somebody's page that counts a list of people, pressed (#311), answered by
-    /// the root: the list is one more step of the walk, and its figure is lit to come back to.
-    var onOpenPeople: (PeopleList) -> Void = { _ in }
     /// One of the two ways at the head of the timeline that reads what is rising, pressed
     /// (#320), answered by the root: the page of rising hashtags or links is a step of the walk.
     var onOpenRising: (RisingWhich) -> Void = { _ in }
@@ -144,15 +141,19 @@ struct TimelinePane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
-                .padding(.horizontal, ShellSpace.pad)
-                .padding(.top, ShellSpace.step)
-                .padding(.bottom, ShellSpace.snug)
-                // The head stays where it is and shows the change: a swipe begins under it.
-                .headOfPage()
-                .modifier(ProbedPane(part: .head))
+            // **Somebody's page is a page of its own** (F9): it takes the pane's whole height,
+            // and the timelines' names, the search and the reload are not drawn over it.
+            if Self.headDrawn(over: standing) {
+                header
+                    .padding(.horizontal, ShellSpace.pad)
+                    .padding(.top, ShellSpace.step)
+                    .padding(.bottom, ShellSpace.snug)
+                    // The head stays where it is and shows the change: a swipe begins under it.
+                    .headOfPage()
+                    .modifier(ProbedPane(part: .head))
 
-            ShellRule()
+                ShellRule()
+            }
 
             Group {
             // **Whatever step the reader is standing on** (#122). A face pressed inside a
@@ -160,66 +161,7 @@ struct TimelinePane: View {
             // which is in front is `ShellWalk` and is not decided again here. **No `default:`.**
             switch standing {
             case .person(let person):
-                PersonPane(
-                    person: person,
-                    items: session.heldPosts(of: person),
-                    catalogues: session.emoji,
-                    catalogueSettled: settledHosts.contains(person.host),
-                    posts: session.posts,
-                    selectedID: $selectedID,
-                    // A row here opens the conversation it belongs to (#122), so the answer mark
-                    // does what it does on the timeline: it opens that conversation first. A post
-                    // that is on the page only is made an item by the press, and then acts.
-                    acting: { item in
-                        people?.acting(item, of: person, in: session, held: { acting($0) }) ?? acting(item)
-                    },
-                    decks: $decks,
-                    playback: playback,
-                    onPlayRow: onPlayRow,
-                    onViewRow: onViewRow,
-                    onTurnRow: onTurnRow,
-                    onOpenThread: onOpenThread,
-                    jumpToTop: jumpToTop,
-                    onBack: onBack,
-                    // What their source says of them, where it says who people are; nothing for
-                    // anybody else, and then this is the page it always was.
-                    said: people?.said(of: person, in: session),
-                    onAskAgain: { Task { await people?.again(person, in: session) } },
-                    lookUp: people.flatMap { $0.found.line(of: person, said: $0.said(of: person, in: session), in: session) },
-                    onLookUp: onLookUp,
-                    // Their own server, asked only at this line's press and as nobody (#310).
-                    home: people?.homeLine(of: person, in: session),
-                    homeSaid: people?.homeSaid(of: person, in: session),
-                    onHome: { press in Task { await people?.homePressed(press, on: person, in: session) } },
-                    onReadOn: { Task { await people?.readOn(person, in: session) } },
-                    // Where they moved to is somebody this same source names: their page is
-                    // asked of it by that name, and "not heard of" is a state of that page.
-                    onOpenMoved: { moved in
-                        if let there = DummyPerson(handle: moved.handle, host: person.host) { onOpenPerson(there) }
-                    },
-                    onOpenList: onOpenPeople,
-                    followed: people?.followedEntry(of: person, in: session),
-                    onFollowed: onFollowed,
-                    // How the reader stands to them, where somebody is followed at their source
-                    // and the reader is signed in to it (#310, #313); nothing for anybody else.
-                    standing: people?.stands(to: person, in: session),
-                    onAct: { act in Task { await people?.act(act, on: person, in: session) } },
-                    onAskFollows: { session.askFor([PersonAct.follow.needs], host: person.host) },
-                    onStandingAgain: { Task { await people?.standsAgain(to: person, in: session) } }
-                )
-                // One pane per person, so opening a second face from inside one draws afresh.
-                .id(person.id)
-                // **How the reader stands to them is asked once the page has said who they
-                // are** — by the id the source gave — and again for a reader who changed or a
-                // sign-in given follows: read, never acted.
-                .task(id: people?.standsOpening(to: person, in: session)) { await people?.standsOpened(to: person, in: session) }
-                // **The ask is the page opening**, once a person a run: who they are and their
-                // newest posts, of the source they were met through and nobody else.
-                // And who asks is part of which opening it is: a reader who ends, begins or
-                // changes while the page is in front opens it again, and it is asked as them.
-                .task(id: ShellPersonPages.opening(person, in: session)) { await people?.opened(person, in: session) }
-                // What their own server said is held only while this page is in front (#310).
-                .onDisappear { people?.home.letGo(of: person) }
+                personPage(person)
             case .tag(let tag):
                 TagPane(
                     tag: tag,
@@ -412,7 +354,7 @@ struct TimelinePane: View {
         }
         // **A sideways swipe, heard on the pane and begun under its head** (#305): whatever it draws —
         // posts, or that there are none — and whichever page is in front. On the timeline it
-        // goes to the one beside; on a post, a person or a tag opened over it, it goes back.
+        // goes to the one beside; on a post or a tag opened over it, it goes back; on somebody's page it is that page's own.
         // What follows the finger stays inside the pane: not over the rail on a wide page.
         .modifier(SwipesSideways(
             session: session, slide: slide, touch: touch, page: Self.page(standing),
@@ -626,10 +568,117 @@ struct TimelinePane: View {
     /// opened over it, or a page read out of a post, which is somebody's own.
     static func page(_ standing: ShellStep?) -> TimelineSwipe.Page {
         switch standing {
-        case .person, .tag, .people, .rising, .foundTags, .followedTags, .thread: .opened
+        // Somebody's page has tabs of its own, and its sideways is theirs (F9).
+        case .person: .tabbed
+        case .tag, .people, .rising, .foundTags, .followedTags, .thread: .opened
         case .link: .link
         case nil: .timeline
         }
+    }
+
+    /// Whether the timelines' head — their names, the search, the reload — is drawn over what
+    /// the reader stands on: over everything but somebody's page, which is a page of its own.
+    static func headDrawn(over standing: ShellStep?) -> Bool {
+        if case .person = standing { return false }
+        return true
+    }
+
+    /// Somebody's page (F9): handed which tabs it has, which is in front and each part's own
+    /// value, all of them worked out where the source is asked — nothing here looks at which
+    /// kind of source theirs is.
+    private func personPage(_ person: DummyPerson) -> some View {
+        let held = session.heldPosts(of: person)
+        let said = people?.said(of: person, in: session)
+        let tabs = people?.tabs(of: person, in: session) ?? [.posts]
+        let front = people?.front(of: person, in: session) ?? .posts
+        return PersonPage(
+            person: person,
+            tabs: tabs,
+            front: front,
+            head: people?.head(of: person, in: session)
+                ?? PersonHeadSaid.made(of: person, said: nil, tabs: tabs, held: held.count, standing: nil),
+            // What their source says of them, where it says who people are; nothing for
+            // anybody else, and then this is the page it always was.
+            said: said,
+            about: people?.about(of: person, in: session),
+            posts: PostRowsSaid.posts(of: said, held: held, standing: people?.stands(to: person, in: session)),
+            pinned: front == .pinned ? people?.pinned(of: person, in: session).map { PostRowsSaid.pinned($0) } : nil,
+            people: people.flatMap { pages in
+                pages.list(front, of: person, in: session).flatMap { pages.lists.said(of: $0, in: session) }
+            },
+            lookUp: people.flatMap { $0.found.line(of: person, said: said, in: session) },
+            // Their own server, asked only at this line's press and as nobody (#310).
+            home: people?.homeLine(of: person, in: session),
+            rows: PersonPageRows(
+                catalogues: session.emoji,
+                catalogueSettled: settledHosts.contains(person.host),
+                posts: session.posts,
+                // A row here opens the conversation it belongs to (#122), so the answer mark
+                // does what it does on the timeline: it opens that conversation first. A post
+                // that is on the page only is made an item by the press, and then acts.
+                acting: { item in
+                    people?.acting(item, of: person, in: session, held: { acting($0) }) ?? acting(item)
+                },
+                playback: playback,
+                onPlayRow: onPlayRow,
+                onViewRow: onViewRow,
+                onTurnRow: onTurnRow,
+                onOpenThread: onOpenThread
+            ),
+            selectedID: $selectedID,
+            decks: $decks,
+            jumpToTop: jumpToTop,
+            slide: session.slide("person"),
+            canReload: ways.canReload,
+            acts: personActs(person)
+        )
+        // One page per person, so opening a second face from inside one draws afresh.
+        .id(person.id)
+        // **How the reader stands to them is asked once the page has said who they
+        // are** — by the id the source gave — and again for a reader who changed or a
+        // sign-in given follows: read, never acted.
+        .task(id: people?.standsOpening(to: person, in: session)) { await people?.standsOpened(to: person, in: session) }
+        // **The ask is the page opening**, once a person a run: who they are, of the source
+        // they were met through and nobody else — and none of their posts (F9).
+        // And who asks is part of which opening it is: a reader who ends, begins or
+        // changes while the page is in front opens it again, and it is asked as them.
+        .task(id: ShellPersonPages.opening(person, in: session)) { await people?.opened(person, in: session) }
+        // **A tab asks when it is first in front, and never before**: their posts, what
+        // they pinned, a list of people. About asks nothing.
+        .task(id: people?.fronting(person, in: session)) { await people?.fronted(person, in: session) }
+        // What their own server said is held only while this page is in front (#310).
+        .onDisappear { people?.home.letGo(of: person) }
+    }
+
+    /// What the parts of somebody's page press.
+    private func personActs(_ person: DummyPerson) -> PersonPageActs {
+        PersonPageActs(
+            onBack: onBack,
+            onTab: { tab in _ = people?.turn(person, to: tab, lamp: &selectedID, in: session) },
+            onReload: ways.onReload,
+            onPull: { await people?.again(person, in: session) },
+            onAskAgain: { Task { await people?.again(person, in: session) } },
+            onLookUp: onLookUp,
+            onHome: { press in Task { await people?.homePressed(press, on: person, in: session) } },
+            // Where they moved to is somebody this same source names: their page is
+            // asked of it by that name, and "not heard of" is a state of that page.
+            onOpenMoved: { moved in
+                if let there = DummyPerson(handle: moved.handle, host: person.host) { onOpenPerson(there) }
+            },
+            onFollowed: onFollowed,
+            onAct: { act in Task { await people?.act(act, on: person, in: session) } },
+            onAskFollows: { session.askFor([PersonAct.follow.needs], host: person.host) },
+            onStandingAgain: { Task { await people?.standsAgain(to: person, in: session) } },
+            onReadOn: { Task { await people?.readOn(person, in: session) } },
+            onPinnedAgain: { Task { await people?.tabs.asked(person, beside: people?.said(of: person, in: session), again: true, in: session) } },
+            onPinnedReadOn: { Task { await people?.pinnedReadOn(person, in: session) } },
+            onOpenListed: onOpenListed,
+            onListAgain: { Task { await people?.fronted(person, again: true, in: session) } },
+            onListReadOn: {
+                guard let people, let list = people.list(people.front(of: person, in: session), of: person, in: session) else { return }
+                Task { await people.lists.readOn(list, in: session) }
+            }
+        )
     }
 
     /// A name for the page opened, so a swipe begun on one is not acted on over another.

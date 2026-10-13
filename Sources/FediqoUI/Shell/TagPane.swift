@@ -212,7 +212,7 @@ struct TagPane: View {
                 .lineLimit(1)
                 .accessibilityLabel(String(format: L10n.t("post.tag.spoken"), tag.name))
             Spacer(minLength: 0)
-            Text(PersonPane.heldLine(items.count))
+            Text(PersonHeadSaid.heldLine(items.count))
                 .shellFont(.reading)
                 .foregroundStyle(ShellChrome.inkFaint(colorScheme))
                 .lineLimit(1)

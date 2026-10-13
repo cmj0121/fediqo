@@ -263,10 +263,6 @@ struct PeoplePane: View {
     var jumpToTop: Int = 0
     var onBack: () -> Void
 
-    @Environment(\.colorScheme) private var colorScheme
-    /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
-    @Environment(\.shellTouch) private var touch
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             bar
@@ -288,89 +284,11 @@ struct PeoplePane: View {
         .padding(.vertical, ShellSpace.snug)
     }
 
-    /// Top to bottom, as one list that scrolls together: where the asking stands, the people
-    /// the source gave, what stands where they would where it gave nobody, and the foot.
+    /// The people the source gave, as the one list a tab of somebody's page draws too.
     private var list: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if let line = said.stateLine() {
-                        stateLine(line)
-                        ShellRule()
-                    }
-                    ForEach(Array(said.people.enumerated()), id: \.element.id) { index, person in
-                        row(person)
-                            .id(person.id)
-                        if index < said.people.count - 1 { ShellRule() }
-                    }
-                    if let sentence = said.nothing() {
-                        Text(sentence)
-                            .shellFont(.meta)
-                            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(ShellSpace.pad)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    if let foot = said.foot {
-                        ShellRule()
-                        PersonFootRow(
-                            symbol: said.footSymbol(foot), words: said.footWords(foot), presses: foot.presses,
-                            onPress: onReadOn
-                        )
-                    }
-                }
-            }
-            .scrollIndicators(.never)
-            .clearsFloatingCorner()
-            // Come back to from somebody's page, the row they were opened from is in view.
-            .onAppear {
-                if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
-            }
-            .onChange(of: selectedID) { _, id in
-                guard let id else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
-            }
-            .onChange(of: jumpToTop) { _, _ in
-                guard let first = said.people.first else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(first.id, anchor: .top) }
-            }
-        }
-    }
-
-    /// Where the asking stands, and beside a failure the press that asks again.
-    private func stateLine(_ line: String) -> some View {
-        WordsThenPress(
-            words: Text(line)
-                .shellFont(.meta)
-                .foregroundStyle(
-                    said.reading == .asking || said.reading == .absent
-                        ? ShellChrome.inkFaint(colorScheme) : ShellChrome.ink(colorScheme)
-                ),
-            press: Group {
-                if said.offersAgain {
-                    ShellLinkButton(L10n.t(said.reading == .absent ? "source.more.again" : "person.retry"), action: onAskAgain)
-                        .disabled(said.asking)
-                        .fixedSize()
-                }
-            }
-        )
-    }
-
-    /// One of them. A press lights the row, and a second on the row it is already on opens
-    /// them — `DummyCommand.tapped`, as on every list; under a finger one press opens.
-    private func row(_ person: Person) -> some View {
-        PersonRow(
-            person: person,
-            stands: said.stands[person.accountID],
-            selected: person.id == selectedID,
-            onPress: {
-                switch DummyCommand.tapped(person.id, selected: selectedID, touch: touch) {
-                case .select: selectedID = person.id
-                case .open: onOpen(person)
-                }
-            },
-            onOpen: { onOpen(person) },
-            menu: Self.menu(for: said)
+        PeopleRows(
+            said: said, selectedID: $selectedID, onOpen: onOpen, onAskAgain: onAskAgain, onReadOn: onReadOn,
+            jumpToTop: jumpToTop
         )
     }
 

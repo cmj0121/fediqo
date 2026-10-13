@@ -742,12 +742,13 @@ struct FollowedTagsTests {
         await pages.opened(me, in: session)
         let open = try #require(pages.followedEntry(of: me, in: session))
         #expect(open == FollowedTagsEntry(page: Self.page, locked: nil))
-        let figures = pages.lists(of: me, in: session).map(\.id)
-        let posts = pages.walked(of: me, in: session).map(\.id)
-        #expect(figures.count == 2)
-        #expect(posts.count == 1)
-        #expect(pages.walkedIDs(of: me, in: session) == figures + [open.id] + posts)
-        #expect(pages.entry(of: me, in: session) == posts.first, "the lamp still lands on their first post")
+        // It is the last block of About (F9), which is in front on opening: the lamp lands on
+        // About's first block, and reaches the way as it reaches every block.
+        let blocks = pages.walkedIDs(of: me, in: session)
+        #expect(pages.front(of: me, in: session) == .about && pages.about(of: me, in: session)?.blocks.last == .you)
+        #expect(blocks.last == open.id && blocks.count > 1)
+        #expect(pages.entry(of: me, in: session) == blocks.first, "the lamp lands on About's first block")
+        #expect(pages.tabs(of: me, in: session) == PersonTab.allCases, "a reader's own lists are always tabs")
         await pages.opened(other, in: session)
         #expect(pages.said(of: other, in: session)?.person != nil)
         #expect(pages.followedEntry(of: other, in: session) == nil, "somebody else's page has none")
@@ -768,9 +769,9 @@ struct FollowedTagsTests {
         let none = try #require(pages.followedEntry(of: me, in: session))
         #expect(none.locked == PartWords.Place(kind: .none, key: "part.ask.none"))
         #expect(none.asks == false)
-        let walked = pages.walkedIDs(of: me, in: session)
-        #expect(walked.contains(none.id) == false, "a line that is no press is not lit")
-        #expect(walked == pages.lists(of: me, in: session).map(\.id) + pages.walked(of: me, in: session).map(\.id))
+        // Still a block of About, read as any block is; Return on it opens nothing.
+        #expect(none.presses == false && pages.walkedIDs(of: me, in: session).last == none.id)
+        #expect(pages.about(of: me, in: session)?.press(on: none.id) == nil)
 
         // A forum's reader has no such line.
         let author = try #require(DummyPerson(handle: "@me@forum.example", host: Self.forum.host))

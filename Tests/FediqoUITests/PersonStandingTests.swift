@@ -145,11 +145,11 @@ struct PersonStandingTests {
             PersonActing(source: Self.host, named: "@ada", reading: reading, lock: lock, changes: lock == nil)
         }
         func line(_ standing: PersonActing?, of said: PersonSaid) -> String? {
-            PersonPane.emptyLine(said, held: 0, standing: standing, language: .english)
+            said.emptyLine(held: 0, standing: standing, language: .english)
         }
         let blockedBy = acting(.said(PersonStanding(accountID: "42", blockedBy: true)))
         #expect(line(blockedBy, of: said) == decided)
-        #expect(PersonPane.emptyLine(said, held: 0, standing: blockedBy, language: .taiwanese) == "m.example 一則也沒給這次登入。")
+        #expect(said.emptyLine(held: 0, standing: blockedBy, language: .taiwanese) == "m.example 一則也沒給這次登入。")
 
         // Not known why: the decided sentence alone, with no figure and no reason.
         let notHeld = acting(nil, lock: PartWords.Place(kind: .unasked, key: "part.follows.unasked"))
@@ -192,7 +192,7 @@ struct PersonStandingTests {
             try await signIn(session)
             let acts = acts(), page = try Self.page()
             func line() -> String? {
-                PersonPane.emptyLine(page, held: 0, standing: acts.acting(of: Self.ada, said: page, in: session), language: .english)
+                page.emptyLine(held: 0, standing: acts.acting(of: Self.ada, said: page, in: session), language: .english)
             }
 
             await server.hold(Self.stands)
@@ -270,7 +270,7 @@ struct PersonStandingTests {
         let gone = try Self.page(#","suspended":true"#)
         await acts.opened(Self.ada, said: gone, in: session)
         let unsaid = try #require(acts.acting(of: Self.ada, said: gone, in: session))
-        #expect(unsaid.reading == .unsaid && unsaid.press == nil && !PersonStandingLines.draws(unsaid))
+        #expect(unsaid.reading == .unsaid && unsaid.press == nil && !unsaid.standsInHead && unsaid.headWords().isEmpty)
 
         let (other, failing, _) = await self.session([Self.stands: Self.down])
         try await signIn(other)
@@ -297,7 +297,7 @@ struct PersonStandingTests {
         #expect(unasked.reading == nil && unasked.pills().isEmpty && unasked.blockedWords() == nil, "nothing is guessed")
         #expect(unasked.lock == PartWords.Place(kind: .unasked, key: "part.follows.unasked"))
         #expect(unasked.lockWords(language: .english) == "This sign-in was not asked how you stand to people. Update permission")
-        #expect(unasked.press == .ask && unasked.more.isEmpty && PersonStandingLines.draws(unasked))
+        #expect(unasked.press == .ask && unasked.more.isEmpty && unasked.standsInHead && unasked.marks().isEmpty)
         #expect(unasked.pressSpoken(language: .english).contains("This sign-in was not asked how you stand to people"))
         #expect(acts.opening(Self.ada, said: page, in: session) == nil)
         await acts.opened(Self.ada, said: page, in: session)
@@ -515,7 +515,7 @@ struct PersonStandingTests {
             #expect(unread.pills().isEmpty && unread.more.isEmpty && unread.press == nil && unread.doing == nil)
             #expect(unread.missed == nil, "the press arrived: it is not said to have failed")
             #expect(unread.failedWords(language: .english) == "Could not ask m.example how you stand to them.")
-            #expect(PersonStandingLines.draws(unread))
+            #expect(unread.standsInHead && unread.marks().isEmpty && unread.headWords().isEmpty)
             #expect(session.mastodon.signedInHosts.contains(Self.host))
 
             // Try again, and the source's own word stands: asked. Withdrawn, to press once more.
@@ -600,7 +600,7 @@ struct PersonStandingTests {
         #expect(missed.missed == .follow && missed.doing == nil && missed.pills().isEmpty && missed.press == .follow)
         #expect(missed.missedWords(language: .english) == "Could not follow @ada@m.example at m.example.")
         #expect(missed.missedWords(language: .taiwanese) == "無法在 m.example 跟隨 @ada@m.example。")
-        #expect(PersonStandingLines.draws(missed))
+        #expect(missed.headWords() == [missed.missedWords()].compactMap { $0 } && !missed.headWords().isEmpty)
         #expect(session.mastodon.signedInHosts.contains(Self.host), "a refusal signs nobody out")
 
         await server.answer(Self.follow, nil)
@@ -725,11 +725,12 @@ struct PersonStandingTests {
         await pages.opened(Self.ada, in: session)
         #expect(pages.standsOpening(to: Self.ada, in: session) != nil)
         await pages.standsOpened(to: Self.ada, in: session)
-        #expect(await asked(server) == [lookup, statuses, Self.stands])
+        // Two asks, and none of their posts: About is in front (F9).
+        #expect(await asked(server) == [lookup, Self.stands])
         #expect(pages.stands(to: Self.ada, in: session)?.press == .follow)
 
         await pages.again(Self.ada, in: session)
-        #expect(await asked(server) == [lookup, statuses, Self.stands, lookup, statuses, Self.stands])
+        #expect(await asked(server) == [lookup, Self.stands, lookup, Self.stands])
 
         await pages.act(.follow, on: Self.ada, in: session)
         #expect(pages.stands(to: Self.ada, in: session)?.more == [.unfollow])
@@ -850,22 +851,17 @@ struct PersonStandingTests {
         for scheme in [ColorScheme.light, .dark] {
             for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 390), (.narrow, 320)] {
                 for standing in handed {
-                    let pane = PersonPane(
-                        person: Self.ada, items: [], catalogues: EmojiCatalogueStore(), posts: ForumPosts(), selectedID: .constant(nil),
-                        decks: .constant(ShellDecks()), playback: ShellPlayback(), onPlayRow: { _ in }, onViewRow: { _ in },
-                        onTurnRow: { _ in }, onOpenThread: { _ in }, jumpToTop: 0, onBack: {}, said: page, standing: standing
-                    )
+                    let pane = HostedPersonPage.page(Self.ada, said: page, standing: standing)
                     let hosted = NSHostingView(
                         rootView: pane.frame(width: width, height: 700).environment(\.shellLayout, layout).environment(\.colorScheme, scheme)
                     )
                     hosted.layoutSubtreeIfNeeded()
                     #expect(hosted.fittingSize.height == 700, "\(String(describing: standing?.reading)) at \(width)")
                     guard let standing else { continue }
-                    let lines = height(PersonStandingLines(acting: standing, onAsk: {}, onAgain: {}), width: width, layout: layout, scheme: scheme)
-                    #expect((lines > 0) == PersonStandingLines.draws(standing), "\(standing) at \(width)")
                     let acts = height(PersonHeadActs(acting: standing, onAct: { _ in }, onAsk: {}), width: width, layout: layout, scheme: scheme)
                     #expect((acts > 0) == PersonHeadActs.draws(standing), "\(standing) at \(width)")
                     #expect((height(PersonStandingPills(pills: standing.pills()), width: width, layout: layout, scheme: scheme) > 0) == !standing.pills().isEmpty)
+                    #expect(standing.marks().count == standing.pills().count, "a glyph in the head for each way a row says in words")
                 }
             }
         }

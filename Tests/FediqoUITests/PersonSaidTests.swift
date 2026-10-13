@@ -163,13 +163,25 @@ struct PersonSaidTests {
 
     // MARK: - What is asked, and when
 
-    @Test("Opening somebody's page asks their source who they are and for their newest posts — two asks, listed in the run's record as that, and nothing held — and the page is handed what it said: the person, their posts newest first, and that older ones can be read")
-    func openingAsksTwice() async throws {
+    @Test("Opening somebody's page asks their source who they are and nothing else — one ask, listed in the run's record as that, and nothing held; their newest posts are asked for when the Posts tab is first in front, once — and the page is handed what it said: the person, their posts newest first, and that older ones can be read")
+    func openingAsksWhoAndThePostsTabItsPosts() async throws {
         let (session, server, work) = await session(Self.served())
         let pages = ShellPersonPages()
         #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking), "before anything answered")
 
         await pages.opened(Self.ada, in: session)
+        #expect(await server.asked == [Self.lookup], "About is in front, and needs none of their posts")
+        #expect(pages.front(of: Self.ada, in: session) == .about)
+        await pages.fronted(Self.ada, in: session)
+        #expect(await server.asked == [Self.lookup], "the tab in front asks nothing")
+        let before = try #require(pages.said(of: Self.ada, in: session))
+        #expect(before.person?.accountID == "42" && before.posts == nil && before.foot == nil && !before.askingPosts)
+
+        var lamp: String?
+        let turned = pages.turn(Self.ada, to: .posts, lamp: &lamp, in: session)
+        #expect(turned && pages.front(of: Self.ada, in: session) == .posts)
+        #expect(await server.asked == [Self.lookup], "bringing a tab in front draws; its task asks")
+        await pages.fronted(Self.ada, in: session)
         #expect(await server.asked == [Self.lookup, Self.statuses])
         let acts = work.record.filter { $0.reached == Self.host }
         #expect(acts.count == 2 && acts.allSatisfy { $0.purpose == .person && $0.source == Self.host })
@@ -181,7 +193,10 @@ struct PersonSaidTests {
         #expect(session.notes.isEmpty, "a post read for a page is no item")
         #expect(await session.store.held(host: Self.host).isEmpty)
 
-        // Opened again this run, it is drawn from what was answered: nobody is asked.
+        // Brought in front again, and opened again this run, it is drawn from what was answered.
+        _ = pages.turn(Self.ada, to: .about, lamp: &lamp, in: session)
+        _ = pages.turn(Self.ada, to: .posts, lamp: &lamp, in: session)
+        await pages.fronted(Self.ada, in: session)
         await pages.opened(Self.ada, in: session)
         #expect(await server.asked.count == 2)
     }
@@ -192,7 +207,7 @@ struct PersonSaidTests {
             "\(Self.statuses)?max_id=7": Self.stretch([7, 6, 5], next: 5), "\(Self.statuses)?max_id=5": Self.stretch([4]),
         ]))
         let pages = ShellPersonPages()
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         await pages.readOn(Self.ada, in: session)
         #expect(pages.said(of: Self.ada, in: session)?.posts?.map(\.statusID) == ["9", "8", "7", "6", "5"])
         #expect(pages.said(of: Self.ada, in: session)?.foot == .more)
@@ -205,7 +220,7 @@ struct PersonSaidTests {
         // A stretch that does not come is said at the foot, changes nothing drawn, and a press asks again.
         let (other, flaky, _) = await self.session(Self.served())
         let again = ShellPersonPages()
-        await again.opened(Self.ada, in: other)
+        await again.openedOnPosts(Self.ada, in: other)
         await again.readOn(Self.ada, in: other)
         #expect(again.said(of: Self.ada, in: other)?.foot == .failed)
         #expect(again.said(of: Self.ada, in: other)?.posts?.count == 3)
@@ -219,7 +234,7 @@ struct PersonSaidTests {
     func unheardOfFailedAndAgain() async throws {
         let (session, server, _) = await session([Self.lookup: PageServer.Answer(body: #"{"error":"Record not found"}"#, status: 404)])
         let pages = ShellPersonPages()
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .unheardOf))
         #expect(await server.asked == [Self.lookup], "their posts are not asked of a source that knows nobody")
         #expect(pages.walked(of: Self.ada, in: session) == session.heldPosts(of: Self.ada), "the keys walk what this device holds")
@@ -249,7 +264,7 @@ struct PersonSaidTests {
         let en = DummyLanguage.english
         let (session, server, _) = await session(Self.served())
         let pages = ShellPersonPages()
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         for (answer, trouble, words) in [
             (nil, PersonSaid.Trouble.failed, "Could not ask m.example again. What it said before is still here."),
             (PageServer.Answer(body: "{}", status: 404), .unheardOf, "m.example no longer knows them. What it said before is still here."),
@@ -259,7 +274,7 @@ struct PersonSaidTests {
             let said = try #require(pages.said(of: Self.ada, in: session))
             #expect(said.person?.accountID == "42" && said.again == trouble && said.posts?.count == 3 && said.foot == .more)
             #expect(said.stateLine(of: "@ada@m.example", language: en) == words && said.offersAgain)
-            #expect(PersonPane.emptyLine(said, held: 0, language: en) == nil)
+            #expect(said.emptyLine(held: 0, language: en) == nil)
         }
         await server.answer(Self.lookup, PageServer.Answer(body: Self.account()))
         await pages.again(Self.ada, in: session)
@@ -274,13 +289,13 @@ struct PersonSaidTests {
         let (session, server, _) = await session(Self.served())
         let pages = ShellPersonPages()
         await server.hold(Self.lookup)
-        let pane = Task { await pages.opened(Self.ada, in: session) }
+        let pane = Task { await pages.openedOnPosts(Self.ada, in: session) }
         await server.arrival(of: Self.lookup)
         pane.cancel()
         #expect(pages.said(of: Self.ada, in: session)?.reading == .asking)
 
         // The next visit, while the first ask is still out: it waits on that ask.
-        let again = Task { await pages.opened(Self.ada, in: session) }
+        let again = Task { await pages.openedOnPosts(Self.ada, in: session) }
         await server.release(Self.lookup)
         await again.value
         let said = try #require(pages.said(of: Self.ada, in: session))
@@ -294,23 +309,24 @@ struct PersonSaidTests {
         let stopped = PageServer.Answer(body: "", cancelled: true)
         let (session, server, _) = await session(Self.served([Self.lookup: stopped]))
         let pages = ShellPersonPages()
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking), "nothing is said of an ask that was stopped")
 
         // Between the two: who they are stands, and their posts were never answered.
         await server.answer(Self.lookup, PageServer.Answer(body: Self.account()))
         await server.answer(Self.statuses, stopped)
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         let between = try #require(pages.said(of: Self.ada, in: session))
         #expect(between.person != nil && between.posts == nil && !between.askingPosts && between.foot == nil)
 
         await server.answer(Self.statuses, Self.stretch([9, 8, 7]))
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         #expect(pages.said(of: Self.ada, in: session)?.posts?.count == 3)
-        #expect(await server.asked == [Self.lookup, Self.lookup, Self.statuses, Self.lookup, Self.statuses])
+        // Who they are had answered, and is not asked again for their posts' sake (F9).
+        #expect(await server.asked == [Self.lookup, Self.lookup, Self.statuses, Self.statuses])
         // Settled now: opened again, nobody is asked.
-        await pages.opened(Self.ada, in: session)
-        #expect(await server.asked.count == 5)
+        await pages.openedOnPosts(Self.ada, in: session)
+        #expect(await server.asked.count == 4)
     }
 
     @Test("Asking again while an ask is on the wire asks nothing, however often it is pressed; and asking again while older posts are being read takes the foot off Reading — the older stretch, answered late, does not land")
@@ -318,7 +334,7 @@ struct PersonSaidTests {
         let (session, server, _) = await session(Self.served(["\(Self.statuses)?max_id=7": Self.stretch([6, 5], next: 5)]))
         let pages = ShellPersonPages()
         await server.hold(Self.lookup)
-        let opening = Task { await pages.opened(Self.ada, in: session) }
+        let opening = Task { await pages.openedOnPosts(Self.ada, in: session) }
         await server.arrival(of: Self.lookup)
         for _ in 0..<3 { await pages.again(Self.ada, in: session) }
         await pages.readOn(Self.ada, in: session)
@@ -366,7 +382,7 @@ struct PersonSaidTests {
 
         // Nobody asks who they are, and the answer is slow.
         await server.hold(Self.lookup)
-        let unsigned = Task { await pages.opened(Self.ada, in: session) }
+        let unsigned = Task { await pages.openedOnPosts(Self.ada, in: session) }
         await server.arrival(of: Self.lookup)
 
         // The reader signs in meanwhile: nobody's page is not theirs, and theirs is asked as them.
@@ -374,13 +390,13 @@ struct PersonSaidTests {
         try session.mastodon.tokens.save(token)
         session.mastodon.refresh()
         #expect(ShellPersonPages.askedAs(at: Self.host, in: session) == .reader(nil))
-        let signed = Task { await pages.opened(Self.ada, in: session) }
+        let signed = Task { await pages.openedOnPosts(Self.ada, in: session) }
         await server.arrival(of: Self.lookup, times: 2)
         // Nobody's answer comes late: it lands nowhere, and their posts are not asked for it.
         await server.releaseOne(Self.lookup)
         await unsigned.value
         #expect(await server.asked == [Self.lookup, Self.lookup])
-        #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking, askingPosts: true))
+        #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking, asking: true))
         await server.release(Self.lookup)
         await signed.value
         #expect(await server.bearers == ["", "Bearer tok", "Bearer tok"])
@@ -392,14 +408,14 @@ struct PersonSaidTests {
         await session.mastodon.learnWho(host: Self.host)
         #expect(ShellPersonPages.askedAs(at: Self.host, in: session) == .reader("@me@m.example"))
         #expect(pages.said(of: Self.ada, in: session)?.posts?.count == 3 && pages.said(of: Self.ada, in: session)?.person != nil)
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         #expect(await server.asked.filter { $0 != "/api/v1/accounts/verify_credentials" }.count == settled)
         // Named now, it is that reader's and no other's.
         await server.answer("/api/v1/accounts/verify_credentials", PageServer.Answer(body: #"{"id":"2","acct":"you"}"#))
         await session.mastodon.learnWho(host: Self.host)
         #expect(ShellPersonPages.askedAs(at: Self.host, in: session) == .reader("@you@m.example"))
         #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking))
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         #expect(pages.said(of: Self.ada, in: session)?.posts?.count == 3)
         #expect(ShellPersonPages.AskedAs.reader(nil).isTheSame(as: .reader("a")) && !ShellPersonPages.AskedAs.reader("a").isTheSame(as: .reader("b")))
         #expect(!ShellPersonPages.AskedAs.nobody.isTheSame(as: .reader(nil)) && !ShellPersonPages.AskedAs.reader(nil).isTheSame(as: .nobody))
@@ -414,7 +430,7 @@ struct PersonSaidTests {
         session.mastodon.refresh()
         #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking), "the reader's page is not nobody's")
         await pages.readOn(Self.ada, in: session)
-        let nobody = Task { await pages.opened(Self.ada, in: session) }
+        let nobody = Task { await pages.openedOnPosts(Self.ada, in: session) }
         await server.arrival(of: Self.statuses, times: asked + 2)
         // The reader's posts come late — and are not shown to nobody.
         await server.releaseOne(Self.statuses)
@@ -437,7 +453,7 @@ struct PersonSaidTests {
             session.mastodon.refresh()
             let pages = ShellPersonPages()
             await server.hold(Self.lookup)
-            let asking = Task { await pages.opened(Self.ada, in: session) }
+            let asking = Task { await pages.openedOnPosts(Self.ada, in: session) }
             await server.arrival(of: Self.lookup)
             if gone {
                 // The reader signs out while the ask is out; the same token is then kept again
@@ -459,7 +475,7 @@ struct PersonSaidTests {
         let ring = PageServer.Answer(body: "[" + Self.status(6) + "]", link: #"<https://m.example/x?max_id=7>; rel="next""#)
         let (session, server, _) = await session(Self.served(["\(Self.statuses)?max_id=7": ring]))
         let pages = ShellPersonPages()
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         await pages.readOn(Self.ada, in: session)
         let said = try #require(pages.said(of: Self.ada, in: session))
         #expect(said.foot == .stopped && said.posts?.count == 3)
@@ -478,7 +494,7 @@ struct PersonSaidTests {
     func aPostIsHeldWhenOpened() async throws {
         let (session, _, _) = await session(Self.served())
         let pages = ShellPersonPages()
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         let rows = try #require(pages.said(of: Self.ada, in: session)?.posts)
         let row = rows[1].id
         #expect(pages.isOnlyOnPage(row, of: Self.ada, in: session) && session.held(row) == nil)
@@ -504,7 +520,7 @@ struct PersonSaidTests {
     func aMarkHoldsThenActs() async throws {
         let (session, _, _) = await session(Self.served())
         let pages = ShellPersonPages()
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         let rows = try #require(pages.said(of: Self.ada, in: session)?.posts)
         let (pressed, presses) = AsyncStream<String>.makeStream()
         func held(_ item: DummyItem) -> ItemActing {
@@ -554,10 +570,10 @@ struct PersonSaidTests {
         let (session, server, _) = await session(Self.served(["\(Self.statuses)?max_id=7": Self.stretch([6])]))
         let pages = ShellPersonPages()
         try signIn(session, as: "first")
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         #expect(ShellPersonPages.askedAs(at: Self.host, in: session) == .reader(nil))
         #expect(pages.said(of: Self.ada, in: session)?.posts?.map(\.statusID) == ["9", "8", "7"])
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         #expect(await server.asked == [Self.lookup, Self.statuses], "the same sign-in, pressing again, is asked nothing more")
 
         // The second reader presses the foot of what is drawn: nothing is read on from the first's place.
@@ -567,7 +583,7 @@ struct PersonSaidTests {
         await pages.readOn(Self.ada, in: session)
         await server.arrival(of: Self.lookup, times: 2)
         #expect(await server.asked.filter { $0 == Self.lookup }.count == 2, "the press itself asks the page afresh")
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         #expect(await server.asked == [Self.lookup, Self.statuses, Self.lookup, Self.statuses])
         #expect(await server.bearers == ["Bearer first", "Bearer first", "Bearer second", "Bearer second"])
         let second = try #require(pages.said(of: Self.ada, in: session)?.posts)
@@ -577,7 +593,7 @@ struct PersonSaidTests {
         try signIn(session, as: "third")
         #expect(await pages.holding(second[0].id, of: Self.ada, in: session) == nil)
         #expect(session.notes.isEmpty && session.toast == nil)
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         #expect(await server.bearers.suffix(2) == ["Bearer third", "Bearer third"])
 
         // A fourth asks again: what they are given is not laid over what the third was.
@@ -596,14 +612,14 @@ struct PersonSaidTests {
         try signIn(session, as: "first")
         await server.hold(Self.lookup)
         defer { Task { await server.release(Self.lookup) } }
-        let first = Task { await pages.opened(Self.ada, in: session) }
+        let first = Task { await pages.openedOnPosts(Self.ada, in: session) }
         await server.arrival(of: Self.lookup)
         try signIn(session, as: "second")
-        let second = Task { await pages.opened(Self.ada, in: session) }
+        let second = Task { await pages.openedOnPosts(Self.ada, in: session) }
         await server.arrival(of: Self.lookup, times: 2)
         await server.releaseOne(Self.lookup)
         await first.value
-        #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking, askingPosts: true))
+        #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking, asking: true))
         #expect(await server.asked == [Self.lookup, Self.lookup])
         await server.release(Self.lookup)
         await second.value
@@ -618,7 +634,7 @@ struct PersonSaidTests {
         ]))
         let pages = ShellPersonPages()
         try signIn(session, as: "first")
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         #expect(pages.said(of: Self.ada, in: session)?.posts?.count == 3)
         let first = ShellPersonPages.opening(Self.ada, in: session)
 
@@ -636,18 +652,18 @@ struct PersonSaidTests {
         #expect(ShellPersonPages.askedAs(at: Self.host, in: session) == .reader(nil), "no handle tells them apart")
         #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking), "the first reader's page is drawn for the second")
         #expect(ShellPersonPages.opening(Self.ada, in: session) != first, "nothing would ask the page again")
-        #expect(pages.lists(of: Self.ada, in: session).isEmpty)
+        #expect(pages.tabs(of: Self.ada, in: session) == [.about, .posts])
         #expect(pages.walked(of: Self.ada, in: session).isEmpty)
         let asked = await server.asked.filter { $0 != "/api/v1/accounts/verify_credentials" }
         #expect(asked == [Self.lookup, Self.statuses], "drawing asks nobody")
 
         // The pane's own opening: the sign-in's mark lets the old page go, and it is asked as the second.
         await server.answer(Self.statuses, Self.stretch([5, 4]))
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         #expect(await server.bearers.suffix(2) == ["Bearer second", "Bearer second"])
         #expect(pages.said(of: Self.ada, in: session)?.posts?.map(\.statusID) == ["5", "4"])
         let second = ShellPersonPages.opening(Self.ada, in: session)
-        await pages.opened(Self.ada, in: session)
+        await pages.openedOnPosts(Self.ada, in: session)
         #expect(ShellPersonPages.opening(Self.ada, in: session) == second)
         #expect(await server.asked.filter { $0 == Self.lookup }.count == 2, "asked once as each reader")
     }
@@ -665,12 +681,12 @@ struct PersonSaidTests {
         try signIn(session, as: "first")
         await server.hold(Self.lookup)
         defer { Task { await server.release(Self.lookup) } }
-        let reader = Task { await pages.opened(Self.ada, in: session) }
+        let reader = Task { await pages.openedOnPosts(Self.ada, in: session) }
         await server.arrival(of: Self.lookup)
         let held = try #require(try session.mastodon.tokens.token(host: Self.host))
         _ = try session.mastodon.tokens.forget(held)
         session.mastodon.refresh()
-        let nobody = Task { await pages.opened(Self.ada, in: session) }
+        let nobody = Task { await pages.openedOnPosts(Self.ada, in: session) }
         await off.wait()
         #expect(await off.asks == [Self.lookup])
         await server.release(Self.lookup)
@@ -691,7 +707,7 @@ struct PersonSaidTests {
                     Self.someone("x", "@x@gone.example", at: Source(host: "gone.example", kind: .mastodon)),
                     Self.someone("no handle", nil, at: Self.source)] {
             #expect(pages.said(of: who, in: session) == nil)
-            await pages.opened(who, in: session)
+            await pages.openedOnPosts(who, in: session)
             await pages.again(who, in: session)
             await pages.readOn(who, in: session)
             #expect(pages.walked(of: who, in: session) == session.heldPosts(of: who) && !pages.canAskAgain(who, in: session))
@@ -709,9 +725,9 @@ struct PersonSaidTests {
         await session.store.ingest(posts, ifSourceHere: Self.forum.host)
         await session.reloadFromStore()
         let held = session.heldPosts(of: author).map(\.id)
-        #expect(held.count == 3 && pages.lists(of: author, in: session).isEmpty)
+        #expect(held.count == 3 && pages.tabs(of: author, in: session) == [.posts] && pages.front(of: author, in: session) == .posts)
         #expect(pages.walkedIDs(of: author, in: session) == held && pages.entry(of: author, in: session) == held.first)
-        #expect(held.allSatisfy { pages.list($0, of: author, in: session) == nil })
+        #expect(pages.about(of: author, in: session) == nil && PersonTab.allCases.allSatisfy { pages.list($0, of: author, in: session) == nil })
         for (lamp, step) in [(nil, 1), (nil, -1), ("elsewhere", 1), ("elsewhere", -1), (held[0], 1), (held[2], -1), (held[0], -1)] as [(String?, Int)] {
             let entry = pages.entry(of: author, in: session), open: Set<DummyLayer> = lamp == nil ? [.person] : [.person, .selection]
             let now = FediqoRootView.moved(in: held, from: lamp, by: step, open: open, entry: entry)
@@ -721,16 +737,18 @@ struct PersonSaidTests {
 
         for language in [DummyLanguage.english, .taiwanese] {
             let through = String(format: L10n.t("person.through", language: language), author.host)
-            #expect(PersonPane.viewLine(of: author, said: nil, language: language) == through)
+            #expect(PersonHeadSaid.made(of: author, said: nil, tabs: [.posts], held: 3, standing: nil, language: language).through == through)
         }
-        #expect(PersonPane.viewLine(of: author, said: nil) == String(format: L10n.t("person.through"), "forum.example"))
-        #expect(PersonPane.heldLine(3, said: nil) == PersonPane.heldLine(3) && PersonPane.heldLine(3) == L10n.count("person.held", 3))
-        #expect(PersonPane.heldLine(3, said: PersonSaid(source: Self.host, reading: .asking)) == nil)
+        let head = pages.head(of: author, in: session)
+        #expect(head.through == String(format: L10n.t("person.through"), "forum.example") && head.whose == nil && head.figures.isEmpty)
+        #expect(head.held == PersonHeadSaid.heldLine(3) && PersonHeadSaid.heldLine(3) == L10n.count("person.held", 3))
+        let asked = PersonHeadSaid.made(of: author, said: PersonSaid(source: Self.host, reading: .asking), tabs: [.about, .posts], held: 3, standing: nil)
+        #expect(asked.held == nil && asked.through == nil && asked.whose == Self.host)
     }
 
     @Test("The page decides by what it is handed and by no check of which kind of source it is: its file names no kind of source")
     func thePageNamesNoKind() throws {
-        for file in ["PersonPane.swift", "PersonSaid.swift"] {
+        for file in ["PersonPane.swift", "PersonSaid.swift", "PersonPage.swift", "PersonHead.swift", "PersonAbout.swift", "PeopleRows.swift", "PersonTab.swift"] {
             let text = try String(contentsOf: Self.shell.appending(path: file), encoding: .utf8)
             for word in ["ProtocolKind", ".kind", "isForum", ".mastodon", ".discuz", ".discourse", "offers."] {
                 #expect(!text.contains(word), "\(file) names \(word)")
@@ -772,7 +790,7 @@ struct PersonSaidTests {
         #expect(ShellPersonPages.own(at: "forum.example", in: session) == nil && ShellPersonPages.own(at: "gone.example", in: session) == nil)
 
         let pages = ShellPersonPages()
-        await pages.opened(me, in: session)
+        await pages.openedOnPosts(me, in: session)
         #expect(pages.said(of: me, in: session)?.person?.lineName == "Me")
         #expect(await server.asked.suffix(2) == ["/api/v1/accounts/lookup?acct=me", "/api/v1/accounts/1/statuses"])
         #expect(await server.bearers.suffix(2) == ["Bearer tok", "Bearer tok"])
@@ -869,22 +887,20 @@ struct PersonSaidTests {
             lookup: PageServer.Answer(body: #"{"id":"7","acct":"ada@new.example","display_name":"Ada anew"}"#), "/api/v1/accounts/7/statuses": Self.stretch([]),
         ])
         let pages = ShellPersonPages()
-        await pages.opened(there, in: session)
+        await pages.openedOnPosts(there, in: session)
         #expect(await server.asked == [lookup, "/api/v1/accounts/7/statuses"], "the same source, and nobody else")
         let said = try #require(pages.said(of: there, in: session))
         #expect(said.person?.lineName == "Ada anew" && said.person?.home == "new.example" && said.source == Self.host)
 
         await server.answer(lookup, PageServer.Answer(body: "{}", status: 404))
         let unheard = ShellPersonPages()
-        await unheard.opened(there, in: session)
+        await unheard.openedOnPosts(there, in: session)
         #expect(unheard.said(of: there, in: session)?.reading == .unheardOf)
 
-        // The line with its press is laid out no shorter than the line alone, and at a phone's width too.
-        for width in [CGFloat(720), 320] {
-            let alone = height(PersonSaidBlock(person: moved, source: Self.host), width: width, layout: .narrow, scheme: .light)
-            let pressed = height(PersonSaidBlock(person: moved, source: Self.host, onOpenMoved: { _ in }), width: width, layout: .narrow, scheme: .dark)
-            #expect(alone > 0 && pressed >= alone, "\(pressed) against \(alone) at \(width)")
-        }
+        // It is the page's line, over every tab, and carries where its press opens.
+        let over = try #require(PersonLineSaid.made(of: PersonSaid(source: Self.host, reading: .said(moved)), named: "@ada@m.example"))
+        #expect(over.moved == line.moved && over.words == line.words && !over.again && !over.faint)
+        #expect(PersonSaid.sentences(of: moved, source: Self.host).allSatisfy { $0.moved == nil }, "and is not said a second time on About")
     }
 
     // MARK: - What the page says
@@ -904,7 +920,8 @@ struct PersonSaidTests {
         let turned = try MastodonPeople.person(from: Data(#"{"id":"1","acct":"a@‮moc.elgoog"}"#.utf8), source: Self.source)
         #expect(PersonSaid.whoseView("m.example", person: turned, language: en) == "As m.example says.")
         let said = PersonSaid(source: "m.example", reading: .said(far))
-        #expect(PersonPane.viewLine(of: Self.ada, said: said, language: en).hasSuffix("xn--bcher-kva.example."))
+        let head = PersonHeadSaid.made(of: Self.ada, said: said, tabs: [], held: 0, standing: nil, language: en)
+        #expect(head.whoseSpoken?.hasSuffix("xn--bcher-kva.example.") == true && head.whose == "m.example")
     }
 
     @Test("A suspended, moved, limited, locked, automated or group account each has its line, as has somebody the source knows only part of; an ordinary person living here has none")
@@ -943,16 +960,16 @@ struct PersonSaidTests {
             #expect(PersonSaid.gaveNone("m.example", counted: counted, language: en) == "m.example gave no posts of theirs.")
         }
         var said = PersonSaid(source: Self.host, reading: .said(try person("")), posts: [])
-        #expect(PersonPane.emptyLine(said, held: 5, language: en) == "m.example counts 10 posts of theirs and gave none of them here.")
+        #expect(said.emptyLine(held: 5, language: en) == "m.example counts 10 posts of theirs and gave none of them here.")
         said.foot = .failed
-        #expect(PersonPane.emptyLine(said, held: 0, language: en) == nil, "a stretch that did not come is the foot's to say")
+        #expect(said.emptyLine(held: 0, language: en) == nil, "a stretch that did not come is the foot's to say")
         said = PersonSaid(source: Self.host, reading: .said(try person(#","suspended":true"#)), posts: [])
-        #expect(PersonPane.emptyLine(said, held: 0, language: en) == nil, "its line has said so")
-        #expect(PersonPane.emptyLine(PersonSaid(source: Self.host, reading: .asking), held: 0, language: en) == nil)
+        #expect(said.emptyLine(held: 0, language: en) == nil, "its line has said so")
+        #expect(PersonSaid(source: Self.host, reading: .asking).emptyLine(held: 0, language: en) == nil)
         for reading in [PersonSaid.Reading.unheardOf, .failed] {
             let none = PersonSaid(source: Self.host, reading: reading)
-            #expect(PersonPane.emptyLine(none, held: 0, language: en) == L10n.t("person.none", language: en))
-            #expect(PersonPane.emptyLine(none, held: 2, language: en) == nil)
+            #expect(none.emptyLine(held: 0, language: en) == L10n.t("person.none", language: en))
+            #expect(none.emptyLine(held: 2, language: en) == nil)
         }
     }
 
@@ -963,12 +980,12 @@ struct PersonSaidTests {
             PersonSaid(source: "m.example", reading: reading).stateLine(of: "@ada@m.example", language: en)
         }
         #expect(line(.asking) == "Asking m.example for @ada@m.example…")
-        #expect(line(.unheardOf) == "m.example has not heard of them. What this device holds of theirs is below.")
-        #expect(line(.failed) == "Could not ask m.example for @ada@m.example. What this device holds of theirs is below.")
+        #expect(line(.unheardOf) == "m.example has not heard of them. What this device holds of theirs is under Posts.")
+        #expect(line(.failed) == "Could not ask m.example for @ada@m.example. What this device holds of theirs is under Posts.")
         #expect(line(.said(Person(source: Self.source, accountID: "1", handle: "@a@m.example", name: "a"))) == nil)
         // The name asked for is a stranger's word, and is made fit for the sentence it is set in.
         let turned = PersonSaid(source: "m.example", reading: .failed).stateLine(of: "@a\u{202E}da\nx@m.example", language: en)
-        #expect(turned == "Could not ask m.example for @ada x@m.example. What this device holds of theirs is below.")
+        #expect(turned == "Could not ask m.example for @ada x@m.example. What this device holds of theirs is under Posts.")
         let long = PersonSaid(source: "m.example", reading: .asking).stateLine(of: String(repeating: "a", count: 5_000), language: en) ?? ""
         #expect(long.count < 200)
         #expect(PersonSaid(source: "m.example", reading: .failed).offersAgain && !PersonSaid(source: "m.example", reading: .unheardOf).offersAgain)
@@ -1017,258 +1034,31 @@ struct PersonSaidTests {
         #expect(written.count == 8 && written.allSatisfy { keys.contains($0) || keys.contains($0.replacingOccurrences(of: ".one", with: "")) })
     }
 
-    @Test("Once the source has said who somebody is, the heading is its word and not the row's: the name and the handle the answer carried, made fit for a line, its pictures and its face — so an answer about somebody else shows as somebody else; until then, and on a page handed nothing, the row's")
-    func theHeadingIsTheSourcesWord() throws {
-        let row = PersonPane.named(Self.ada, said: nil)
+    @Test("Once the source has said who somebody is, the head is its word and not the row's: the name and the handle the answer carried, made fit for a line, its pictures and its face — so an answer about somebody else shows as somebody else; until then, and on a page handed nothing, the row's")
+    func theHeadIsTheSourcesWord() throws {
+        func head(_ person: DummyPerson, _ said: PersonSaid?) -> PersonHeadSaid {
+            PersonHeadSaid.made(of: person, said: said, tabs: ShellPersonTabs.tabs(said: said, own: false), held: 0, standing: nil)
+        }
+        let row = head(Self.ada, nil)
         #expect(row.name == "Ada" && row.handle == "@ada@m.example")
-        #expect(PersonPane.named(Self.ada, said: PersonSaid(source: Self.host, reading: .asking)).name == "Ada")
-        #expect(PersonPane.face(of: Self.ada, said: PersonSaid(source: Self.host, reading: .failed)) == Self.ada.avatarURL)
+        #expect(head(Self.ada, PersonSaid(source: Self.host, reading: .asking)).name == "Ada")
+        #expect(head(Self.ada, PersonSaid(source: Self.host, reading: .failed)).face == Self.ada.avatarURL)
 
         let other = try MastodonPeople.person(from: Data(#"""
         {"id":"7","acct":"eve@far.example","display_name":"E\u202Eve\nL","avatar":"https://m.example/eve.png",
          "emojis":[{"shortcode":"x","url":"https://m.example/x.png"}]}
         """#.utf8), source: Self.source)
-        let said = PersonSaid(source: Self.host, reading: .said(other))
-        let named = PersonPane.named(Self.ada, said: said)
+        let named = head(Self.ada, PersonSaid(source: Self.host, reading: .said(other)))
         #expect(named.name == "Eve L" && named.handle == "@eve@far.example" && named.emojis.map(\.shortcode) == ["x"])
-        #expect(PersonPane.face(of: Self.ada, said: said)?.absoluteString == "https://m.example/eve.png")
+        #expect(named.face?.absoluteString == "https://m.example/eve.png")
         // The source says they have no picture: none is drawn, and not the one a row carried.
         let faceless = PersonSaid(source: Self.host, reading: .said(try person("")))
         let carried = DummyPerson(making: Note(
             id: "https://m.example/a/2", source: Self.source, author: "Ada", handle: "@ada@m.example", body: "",
             postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: [], avatarURL: URL(string: "https://m.example/old.png")
         ))!
-        #expect(carried.avatarURL != nil && PersonPane.face(of: carried, said: faceless) == nil)
-        #expect(PersonPane.face(of: carried, said: nil) == carried.avatarURL)
-    }
-
-    // MARK: - The figures that open a list (#311)
-
-    @Test("Whom somebody follows and who follows them each open from the figure the source counts them by, and their posts' figure opens nothing: the list is of that account at that source, with the source's count and whether the account hides its lists carried as they were said — a figure of nothing and a hidden list are a press all the same, and where the source said no figure the line names the list and counts nothing")
-    func theFiguresOpen() throws {
-        let en = DummyLanguage.english
-        let ada = Person(
-            source: Self.source, accountID: "42", handle: "@ada@far.example", name: "Ada",
-            tally: Person.Tally(posts: 1204, following: 310, followers: 2811), hidesLists: true
-        )
-        let counts = PersonSaid.counts(of: ada, language: en)
-        #expect(counts.map(\.words) == ["1,204 posts", "Follows 310", "2,811 followers"])
-        #expect(counts.map(\.words) == PersonSaid.counts(of: ada.tally, language: en), "the figures are the source's, said as they were")
-        #expect(counts.map(\.opens) == [nil, PeopleList(.following, of: ada), PeopleList(.followers, of: ada)])
-        let follows = try #require(counts[1].opens), followers = try #require(counts[2].opens)
-        #expect(follows.host == Self.host && follows.accountID == "42" && follows.counted == 310 && follows.hidden)
-        #expect(followers.counted == 2811 && followers.hidden && followers.handle == "@ada@far.example")
-        #expect(counts.map(\.id) == ["posts", follows.id, followers.id] && Set(counts.map(\.id)).count == 3)
-
-        // A listener is read each as a thing of its own, and of the two that open, what opening does.
-        #expect(counts.map { $0.spoken(language: en) } == ["1,204 posts", "Follows 310, opens the list", "2,811 followers, opens the list"])
-        #expect(PersonSaid.counts(of: ada, language: .taiwanese).map { $0.spoken(language: .taiwanese) }
-            == ["1,204 則貼文", "跟隨 310 人，打開清單", "2,811 位跟隨者，打開清單"])
-
-        // Nothing counted, one, and a figure past what thirty-two bits hold.
-        let few = Person(source: Self.source, accountID: "1", handle: "@a@m.example", name: "a", tally: Person.Tally(following: 0, followers: 1))
-        #expect(PersonSaid.counts(of: few, language: en).map(\.words) == ["Follows 0", "1 follower"])
-        #expect(PersonSaid.counts(of: few, language: en).allSatisfy { $0.opens != nil && $0.opens?.hidden == false })
-        let many = Person(source: Self.source, accountID: "1", handle: "@a@m.example", name: "a", tally: Person.Tally(followers: 3_000_000_000))
-        #expect(PersonSaid.counts(of: many, language: en).map(\.words) == ["Who they follow", "3,000,000,000 followers"])
-
-        // No figure said: both lists still open, named and not counted, and no figure is made up.
-        let unsaid = PersonSaid.counts(of: Person(source: Self.source, accountID: "1", handle: "@a@m.example", name: "a"), language: en)
-        #expect(unsaid.map(\.words) == ["Who they follow", "Who follows them"] && unsaid.map(\.opens?.which) == [.following, .followers])
-        #expect(unsaid.allSatisfy { $0.opens?.counted == nil } && unsaid[1].spoken(language: en) == "Who follows them, opens the list")
-        #expect(PersonSaid.counts(of: Person(source: Self.source, accountID: "1", handle: "@a@m.example", name: "a"), language: .taiwanese).map(\.words)
-            == ["他們跟隨的人", "跟隨他們的人"])
-        // A line that only names its list is drawn where a press on it is answered, and nowhere else.
-        #expect(unsaid.map { $0.isDrawn(answered: true) } == [true, true] && unsaid.map { $0.isDrawn(answered: false) } == [false, false])
-        #expect(counts.allSatisfy { $0.isDrawn(answered: false) && $0.isDrawn(answered: true) }, "a figure said is words either way")
-    }
-
-    @Test("A suspended account has neither list to open: its page has said it is gone, so no figure of it is a press, the keys reach none, and Return opens none — what the source counts of its posts is still said")
-    func aSuspendedAccountOpensNoList() async throws {
-        let gone = try person(#","suspended":true"#)
-        #expect(gone.suspended && gone.tally.following == 4 && gone.tally.followers == 8)
-        let counts = PersonSaid.counts(of: gone, language: .english)
-        #expect(counts.map(\.words) == ["10 posts"] && counts.allSatisfy { $0.opens == nil })
-        #expect(PersonSaid.counts(of: Person(source: Self.source, accountID: "1", handle: "@a@m.example", name: "a", suspended: true)).isEmpty)
-
-        let (session, server, _) = await session(Self.served([Self.lookup: PageServer.Answer(body: Self.account(#","suspended":true"#))]))
-        let pages = ShellPersonPages()
-        await pages.opened(Self.ada, in: session)
-        #expect(pages.said(of: Self.ada, in: session)?.person?.suspended == true)
-        let posts = pages.walked(of: Self.ada, in: session).map(\.id)
-        #expect(pages.lists(of: Self.ada, in: session).isEmpty && pages.walkedIDs(of: Self.ada, in: session) == posts && posts.count == 3)
-        for which in PeopleList.Which.allCases {
-            #expect(pages.list(PeopleList(which, of: gone).id, of: Self.ada, in: session) == nil)
-        }
-        #expect(await server.asked == [Self.lookup, Self.statuses])
-    }
-
-    @Test("A key that acts on a post does nothing with the lamp on a figure: the figure is no post, the lamp is lit and so is not entering, and it is not moved onto a post the reader did not choose — where on a post it acts on that post, and with no lamp under nothing it lights the first")
-    func aMarkKeyOnAFigureDoesNothing() async throws {
-        let (session, _, _) = await session(Self.served())
-        let pages = ShellPersonPages()
-        await pages.opened(Self.ada, in: session)
-        let posts = pages.walked(of: Self.ada, in: session)
-        let figure = try #require(pages.lists(of: Self.ada, in: session).first).id
-        #expect(DummyCommand.focused(in: posts, selected: figure) == .first(posts[0].id), "the rule under it would light the first post")
-        #expect(FediqoRootView.focused(in: posts, selected: figure, open: [.person, .selection]) == .nothing)
-        #expect(FediqoRootView.focused(in: posts, selected: posts[1].id, open: [.person, .selection]) == .post(posts[1]))
-        #expect(FediqoRootView.focused(in: posts, selected: nil, open: []) == .first(posts[0].id))
-        #expect(FediqoRootView.focused(in: posts, selected: nil, open: [.person]) == .nothing, "as it was: no lamp enters under a page")
-        #expect(FediqoRootView.focused(in: [], selected: figure, open: [.person, .selection]) == .nothing)
-    }
-
-    @Test("The keys reach the figures: on a page the source has answered they stand over the posts in the order drawn, j from a lamp that is on none of the rows lands on the first post and k from there climbs to them, g lights the first of them, and Return on one opens its list — the figure lit and remembered, so leaving the list gives it back; until the source has said who they are there is no such line, and the list opened is asked of the source that keeps it and of nobody else")
-    func theKeysReachTheFigures() async throws {
-        let (session, server, _) = await session(Self.served())
-        let pages = ShellPersonPages()
-        #expect(pages.lists(of: Self.ada, in: session).isEmpty && pages.entry(of: Self.ada, in: session) == nil)
-        #expect(pages.walkedIDs(of: Self.ada, in: session).isEmpty, "nothing said yet, nothing held: nothing to walk")
-
-        await pages.opened(Self.ada, in: session)
-        let said = try #require(pages.said(of: Self.ada, in: session)), person = try #require(said.person)
-        let posts = try #require(said.posts).map(\.id)
-        let lists = pages.lists(of: Self.ada, in: session)
-        #expect(lists == [PeopleList(.following, of: person), PeopleList(.followers, of: person)])
-        #expect(lists.map(\.counted) == [4, 8] && lists.allSatisfy { $0.host == Self.host && $0.accountID == "42" && !$0.hidden })
-        let ids = pages.walkedIDs(of: Self.ada, in: session), entry = pages.entry(of: Self.ada, in: session)
-        #expect(ids == lists.map(\.id) + posts && posts.count == 3 && entry == posts[0])
-        #expect(pages.list(lists[1].id, of: Self.ada, in: session) == lists[1] && pages.list(posts[0], of: Self.ada, in: session) == nil)
-        #expect(pages.list("posts", of: Self.ada, in: session) == nil, "their posts' figure is no line the keys stand on")
-        #expect(pages.walked(of: Self.ada, in: session).map(\.id) == posts, "the marks of a post act on posts alone")
-
-        // A lamp is lit — on a row of this page, or left on the row of the list the page was opened from.
-        func moved(_ lamp: String?, _ step: Int, open: Set<DummyLayer> = [.person, .selection]) -> String? {
-            FediqoRootView.moved(in: ids, from: lamp, by: step, open: open, entry: entry)
-        }
-        #expect(moved("a row of the stream", 1) == posts[0] && moved(nil, 1, open: []) == posts[0], "reading starts at the first post")
-        #expect(moved(posts[0], -1) == lists[1].id && moved(lists[1].id, -1) == lists[0].id && moved(lists[0].id, -1) == lists[0].id)
-        #expect(moved(lists[0].id, 1) == lists[1].id && moved(lists[1].id, 1) == posts[0] && moved(posts[0], 1) == posts[1])
-        #expect(moved("a row of the stream", -1) == posts[2] && moved(posts[2], 1) == posts[2])
-        // A page reached with nothing lit — a face pressed by a pointer, your own page from Account —
-        // takes a first press: `j` lights the first post and `k` the last, as from a row elsewhere.
-        #expect(moved(nil, 1, open: [.person]) == posts[0] && moved(nil, -1, open: [.person]) == posts[2])
-        #expect(moved(nil, 1, open: [.shortcuts, .person]) == nil && moved(nil, -1, open: [.viewer, .person]) == nil)
-        // Nowhere to start but the figures: a page the source gave no posts for.
-        #expect(FediqoRootView.moved(in: lists.map(\.id), from: "elsewhere", by: 1, open: [.person, .selection], entry: nil) == lists[0].id)
-        #expect(FediqoRootView.moved(in: lists.map(\.id), from: "elsewhere", by: 1, open: [.person, .selection], entry: "gone") == lists[0].id)
-        var lamp: String? = posts[1], jump = 0
-        let jumped = FediqoRootView.jumpedToTop(in: ids, standing: .person(Self.ada), place: .timeline, selected: &lamp, jump: &jump)
-        #expect(jumped && lamp == lists[0].id && jump == 1)
-
-        // Return on the figure, or a press on it: the list, one step out, with the figure lit.
-        var walk = ShellWalk()
-        _ = walk.walk(to: .person(Self.ada), from: "a row of the stream")
-        lamp = posts[1]
-        let opened = walk.open(lists[1], lamp: &lamp)
-        #expect(opened && walk.openedPeople == lists[1] && lamp == lists[1].id && walk.depth == 2)
-        lamp = "moved since"
-        let twice = walk.open(lists[1], lamp: &lamp)
-        #expect(!twice && lamp == "moved since" && walk.depth == 2, "a step that is not taken moves nothing")
-        let left = walk.back()
-        #expect(left?.lamp == lists[1].id && walk.openedPerson == Self.ada)
-        #expect(pages.list(try #require(left?.lamp), of: Self.ada, in: session) == lists[1], "and Return there opens it again")
-
-        // Opening the page asked for no list; each is asked when it is opened, where it is kept.
-        #expect(await server.asked == [Self.lookup, Self.statuses])
-        await server.answer("/api/v1/accounts/42/followers?limit=80", PageServer.Answer(body: #"[{"id":"7","acct":"bo"}]"#))
-        await pages.lists.opened(lists[1], in: session)
-        #expect(await server.asked == [Self.lookup, Self.statuses, "/api/v1/accounts/42/followers?limit=80"])
-        #expect(pages.lists.said(of: lists[1], in: session)?.people.map(\.accountID) == ["7"])
-        #expect(pages.said(of: Self.ada, in: session) == said, "the page it was opened from stands as it stood")
-
-        // Somebody signs in, and presses nothing: what nobody was given is not theirs to open a list from.
-        try signIn(session, as: "tok")
-        #expect(pages.lists(of: Self.ada, in: session).isEmpty && pages.list(lists[1].id, of: Self.ada, in: session) == nil)
-        #expect(pages.walkedIDs(of: Self.ada, in: session).isEmpty && pages.entry(of: Self.ada, in: session) == nil)
-        #expect(await server.asked.count == 3, "and looking asks nothing")
-    }
-
-    @Test("What the keys walk on somebody's page, where the lamp first lands, what Return opens and how a list is stepped onto are each asked of the pages and the walk in one call: the root and the pane keep no rule of their own for them")
-    func theRootAsksThePages() throws {
-        let root = try String(contentsOf: Self.shell.deletingLastPathComponent().appending(path: "FediqoRootView.swift"), encoding: .utf8)
-        for call in [
-            "walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }",
-            "walk.openedPerson.flatMap { people.entry(of: $0, in: session) }",
-            "open: openLayers, entry: currentListEntry",
-            "if let person = walk.openedPerson, let list = people.list(id, of: person, in: session) {\n            return openPeople(list)",
-            "return walk.open(list, lamp: &selectedItemID)",
-            "onOpenPeople: { _ = openPeople($0) }",
-            "switch Self.focused(in: currentListItems, selected: selectedItemID, open: openLayers) {",
-        ] {
-            #expect(root.components(separatedBy: call).count == 2, "the root calls \(call) once")
-        }
-        let timeline = try String(contentsOf: Self.shell.appending(path: "TimelinePane.swift"), encoding: .utf8)
-        #expect(timeline.contains("onOpenList: onOpenPeople"))
-        let pane = try String(contentsOf: Self.shell.appending(path: "PersonPane.swift"), encoding: .utf8)
-        #expect(pane.contains("lit: selectedID, onOpenList: onOpenList"))
-    }
-
-    @Test("A figure pressed by a reader the page was not given to opens a list asked as them: the page drawn for the reader before is let go with it, nothing of theirs is read on, and coming back asks the page afresh — the figures are there again only once the source has answered this reader")
-    func aFigurePressedByAnotherReader() async throws {
-        let follows = "/api/v1/accounts/42/following?limit=80"
-        let (session, server, _) = await session(Self.served([follows: PageServer.Answer(body: #"[{"id":"7","acct":"bo"}]"#)]))
-        let pages = ShellPersonPages()
-        try signIn(session, as: "first")
-        await pages.opened(Self.ada, in: session)
-        let list = try #require(pages.lists(of: Self.ada, in: session).first)
-
-        try signIn(session, as: "second")
-        await pages.lists.opened(list, in: session)
-        #expect(await server.asked == [Self.lookup, Self.statuses, follows])
-        #expect(await server.bearers == ["Bearer first", "Bearer first", "Bearer second"])
-        #expect(pages.lists.said(of: list, in: session)?.people.map(\.accountID) == ["7"])
-        // What the first reader was given of ada is not there for the second: no figure, no post, no line to open.
-        #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking))
-        #expect(pages.lists(of: Self.ada, in: session).isEmpty && pages.list(list.id, of: Self.ada, in: session) == nil)
-        #expect(pages.walkedIDs(of: Self.ada, in: session).isEmpty)
-
-        await pages.opened(Self.ada, in: session)
-        #expect(await server.bearers.suffix(2) == ["Bearer second", "Bearer second"])
-        #expect(pages.lists(of: Self.ada, in: session).map(\.id).first == list.id)
-        await pages.lists.opened(list, in: session)
-        #expect(await server.asked.count == 5, "the same reader, pressing again, is asked nothing more")
-    }
-
-    @Test("The figures are laid out to the width they are given: on one line where they fit and one under another where they do not, each whole; a figure that opens stands as tall and as wide lit as unlit, so the lamp moves nothing — in light and in dark, with somebody to answer the press and with nobody")
-    func theFiguresLaidOut() throws {
-        func counted(_ figure: Int) -> Person {
-            Person(source: Self.source, accountID: "42", handle: "@ada@m.example", name: "Ada",
-                   tally: Person.Tally(posts: figure, following: figure, followers: figure))
-        }
-        let small = counted(3), large = counted(3_000_000_000)
-        for scheme in [ColorScheme.light, .dark] {
-            func block(_ person: Person, _ width: CGFloat, lit: String? = nil, answered: Bool = true) -> CGFloat {
-                let layout: ShellLayout = width < 500 ? .narrow : .wide
-                return height(
-                    PersonSaidBlock(person: person, source: Self.host, lit: lit, onOpenList: answered ? { _ in } : nil),
-                    width: width, layout: layout, scheme: scheme
-                )
-            }
-            let line = block(small, 720)
-            #expect(line > 0 && block(large, 720) == line, "three figures stand on one line across a wide page")
-            #expect(block(small, 320) == line, "and across a phone where they fit")
-            #expect(block(large, 320) > line * 2, "one under another where they do not: \(block(large, 320)) against \(line)")
-            let followers = PeopleList(.followers, of: large).id
-            for width in [CGFloat(720), 320] {
-                #expect(block(large, width, lit: followers) == block(large, width), "the lamp moves nothing at \(width)")
-                #expect(block(large, width, answered: false) == block(large, width), "a press is as tall as its words at \(width)")
-            }
-            // Nothing said and nobody to answer: no line at all, and none of a suspended account's lists.
-            let bare = Person(source: Self.source, accountID: "42", handle: "@ada@m.example", name: "Ada")
-            #expect(block(bare, 720) > block(bare, 720, answered: false), "a line that leads nowhere is not drawn")
-            let unsaid = try #require(PersonSaid.counts(of: bare).last)
-            let nowhere = NSHostingView(rootView: PersonCountLine(count: unsaid).fixedSize())
-            nowhere.layoutSubtreeIfNeeded()
-            #expect(nowhere.fittingSize.height == 0 && nowhere.fittingSize.width == 0)
-            let count = try #require(PersonSaid.counts(of: large).last)
-            func size(lit: Bool) -> CGSize {
-                let hosted = NSHostingView(rootView: PersonCountLine(count: count, lit: lit, onOpen: { _ in }).fixedSize().environment(\.colorScheme, scheme))
-                hosted.layoutSubtreeIfNeeded()
-                return hosted.fittingSize
-            }
-            #expect(size(lit: true) == size(lit: false) && size(lit: true).width > 0)
-        }
+        #expect(carried.avatarURL != nil && head(carried, faceless).face == nil)
+        #expect(head(carried, nil).face == carried.avatarURL)
     }
 
     // MARK: - Laid out
@@ -1281,43 +1071,26 @@ struct PersonSaidTests {
         return hosted.fittingSize.height
     }
 
-    @Test("What the source says is laid out to the width it is given and grows with what there is to say: an account with every line, a header, words and fields stands taller than a bare one, a narrow page no shorter than a wide one, and every foot has a height — at a wide page and across a phone, in light and in dark")
-    func laidOut() throws {
-        let bare = try MastodonPeople.person(from: Data(#"{"id":"1","acct":"a"}"#.utf8), source: Self.source)
-        let plain = try person("")
-        let long = String(repeating: "word ", count: 80)
-        let every = try person(#","suspended":true,"limited":true,"bot":true,"moved":{"id":"7","acct":"ada@new.example"},"header":"https://m.example/h.png","note":"<p>\#(long)</p>""#)
+    @Test("Every foot has a height, at a wide page and across a phone, in light and in dark")
+    func theFeetLaidOut() {
         for scheme in [ColorScheme.light, .dark] {
-            var before: [CGFloat]?
             for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 390), (.narrow, 320)] {
-                let heights = [bare, plain, every].map {
-                    height(PersonSaidBlock(person: $0, source: Self.host), width: width, layout: layout, scheme: scheme)
-                }
-                #expect(heights[0] > 0 && heights[1] > heights[0] && heights[2] > heights[1], "\(heights) at \(width)")
-                if let before { #expect(heights[2] >= before[2], "the long words wrap: \(heights[2]) at \(width) after \(before[2])") }
-                before = heights
                 for foot in [PersonSaid.Foot.more, .reading, .end, .failed, .stopped] {
                     #expect(height(PersonFootRow(foot: foot, source: Self.host, onPress: {}), width: width, layout: layout, scheme: scheme) > 0)
                 }
             }
         }
-        // The page itself, in each state it has, is built and laid out without a trap.
-        let rows = [DummyItem(Note(
-            id: "https://m.example/a/1", source: Self.source, author: "Ada", handle: "@ada@m.example", body: "a post",
-            postedAt: Date(timeIntervalSince1970: 1_700_000_000), categories: []
-        ))]
-        for said in [nil, PersonSaid(source: Self.host, reading: .asking), PersonSaid(source: Self.host, reading: .unheardOf),
-                     PersonSaid(source: Self.host, reading: .said(every), again: .failed, posts: rows, foot: .stopped),
-                     PersonSaid(source: Self.host, reading: .said(plain), posts: [], foot: nil)] as [PersonSaid?] {
-            let pane = PersonPane(
-                person: Self.ada, items: rows, catalogues: EmojiCatalogueStore(), posts: ForumPosts(), selectedID: .constant(nil),
-                decks: .constant(ShellDecks()), playback: ShellPlayback(), onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in },
-                onOpenThread: { _ in }, jumpToTop: 0, onBack: {}, said: said, onOpenList: { _ in }
-            )
-            let hosted = NSHostingView(rootView: pane.frame(width: 320, height: 700))
-            hosted.layoutSubtreeIfNeeded()
-            #expect(hosted.fittingSize.height == 700)
-        }
+    }
+}
+
+extension ShellPersonPages {
+    /// The page of `who` opened, and its Posts tab brought in front and asked: what the checks
+    /// of their posts read. Opening alone asks who they are and nothing else (F9).
+    func openedOnPosts(_ who: DummyPerson, in session: ShellSession) async {
+        await opened(who, in: session)
+        var lamp: String?
+        turn(who, to: .posts, lamp: &lamp, in: session)
+        await fronted(who, in: session)
     }
 }
 
