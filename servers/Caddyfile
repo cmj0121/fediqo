@@ -33,3 +33,13 @@ discuz.localhost {
 		header_up X-Forwarded-Host {host}
 	}
 }
+
+# Behind the `gotosocial` profile of compose.yml. Where that server is not up this name
+# answers 502 and nothing else here is touched.
+gotosocial.localhost {
+	tls internal
+	reverse_proxy gotosocial:8080 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host {host}
+	}
+}
