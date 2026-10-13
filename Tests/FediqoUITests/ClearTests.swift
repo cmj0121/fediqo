@@ -312,7 +312,7 @@ struct ClearTests {
     /// wait the reading says "No emoji names held" beside a server whose names arrived a moment
     /// later, for as long as the pane stays open.
     @Test("A catalogue still on the wire is waited for rather than reported as absent",
-          .timeLimit(.minutes(1)))
+          .timeLimit(.minutes(3)))
     func aCatalogueInFlightIsWaitedFor() async {
         let session = ShellSession(http: FixtureHTTP())
         let registered = [emoji("wave"), emoji("blobcat")]

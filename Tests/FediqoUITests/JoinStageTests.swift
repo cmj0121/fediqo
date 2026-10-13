@@ -116,7 +116,7 @@ struct JoinStageTests {
     /// that `pageWaiting` reads as *nobody is waiting*. `checking` is now `progress != nil` and
     /// there is no such state to spell, so the errand here is a real one: a look parked on the
     /// forum's front page while Subscribe is pressed underneath it.
-    @Test("Subscribe does nothing while a press is already in flight", .timeLimit(.minutes(1)))
+    @Test("Subscribe does nothing while a press is already in flight", .timeLimit(.minutes(3)))
     func confirmIsRefusedWhileChecking() async {
         // The front page is held, which is a Discuz! look's **first** request — so the look parks
         // before it has a preview to hand back, and Subscribe is pressed with an errand genuinely
@@ -154,7 +154,7 @@ struct JoinStageTests {
     /// turned the reader away leaves behind, and it is exactly the preview whose press reads.
     @Test(
         "A sheet swiped away mid-press does not spring back when the boards arrive",
-        .timeLimit(.minutes(1))
+        .timeLimit(.minutes(3))
     )
     func anAbandonedPressDoesNotReopenTheSheet() async {
         let http = GatedHTTP(Self.forumRoutes(), holding: "https://\(Self.forum)/forum.php")
@@ -200,7 +200,7 @@ struct JoinStageTests {
     /// with the store until something else happened to refresh it.
     @Test(
         "A join that finished behind a dismissed sheet still reaches the list",
-        .timeLimit(.minutes(1))
+        .timeLimit(.minutes(3))
     )
     func anAbandonedJoinIsStillAdopted() async {
         let http = GatedHTTP([
@@ -485,7 +485,7 @@ struct JoinStageTests {
     /// up and could not be pressed twice.
     @Test(
         "Stepping back and forward between the two steps asks the directory once",
-        .timeLimit(.minutes(1))
+        .timeLimit(.minutes(3))
     )
     func steppingBackAndForwardAsksTheDirectoryOnce() async {
         let http = GatedHTTP(["/servers": .text(#"""
@@ -1456,7 +1456,7 @@ struct JoinStageTests {
     /// is late passes on the fixed code and merely stops discriminating on the broken one.
     @Test(
         "A board read that lands while Remove is still running does not bring the server back",
-        .timeLimit(.minutes(1))
+        .timeLimit(.minutes(3))
     )
     func aSubscribeLandingMidRemoveStaysRemoved() async {
         let board = "https://\(Self.forum)/forum.php?mod=forumdisplay&fid=33&filter=author&orderby=dateline"

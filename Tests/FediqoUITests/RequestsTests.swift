@@ -13,7 +13,7 @@ import Testing
 /// the call that made it returning; a held ask is let go by the check, and by the server after
 /// its patience.
 @MainActor
-@Suite("Requests to follow are answered, and a follower removed", .serialized, .timeLimit(.minutes(1)))
+@Suite("Requests to follow are answered, and a follower removed", .serialized, .timeLimit(.minutes(3)))
 struct RequestsTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)

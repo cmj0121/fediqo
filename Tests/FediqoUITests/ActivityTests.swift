@@ -249,7 +249,7 @@ struct ActivityTests {
         #expect(Self.record(work).count == 1, "stopping is not an act")
     }
 
-    @Test("Reading a timeline is recorded under its source", .timeLimit(.minutes(1)))
+    @Test("Reading a timeline is recorded under its source", .timeLimit(.minutes(3)))
     func aTimeline() async {
         let work = SourceWork()
         let http = FixtureHTTP([

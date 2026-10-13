@@ -1386,7 +1386,7 @@ struct ShellPicturesTests {
     /// What Clear is for, end to end and from the reader's side: a server whose avatar was
     /// written off is asked about again once they have cleared it, where before the Clear it was
     /// not. Without the second sweep in `forget(host:)` the second fetch never reaches the client.
-    @Test("An address written off for a cleared server is asked for again", .timeLimit(.minutes(1)))
+    @Test("An address written off for a cleared server is asked for again", .timeLimit(.minutes(3)))
     func aClearedSourceIsAskedAgain() async throws {
         let http = Counting(png: try picture(width: 32, height: 32, bits: 8))
         let cache = ShellPictures(http: http)
@@ -1406,7 +1406,7 @@ struct ShellPicturesTests {
     /// fetch that was already running, which stores its answer back under the very host the
     /// reader asked to be rid of. Nothing about the cleared state is observable at the moment the
     /// fetch lands, so only the in-flight record can say the work no longer belongs to anybody.
-    @Test("A Clear during a fetch is not undone when the fetch lands", .timeLimit(.minutes(1)))
+    @Test("A Clear during a fetch is not undone when the fetch lands", .timeLimit(.minutes(3)))
     func forgottenDuringAFetchDoesNotComeBack() async throws {
         let gate = Gate()
         let http = Holding(png: try picture(width: 32, height: 32, bits: 8), gate: gate)
@@ -1449,7 +1449,7 @@ struct ShellPicturesTests {
     /// the host they just cleared, so the Clear re-populates `missing` and `missingSources` with
     /// their own cleared server a moment after they emptied it — and it spends a request on a
     /// stranger's server that nobody is waiting for. Being liftable later repairs neither.
-    @Test("A Clear during a fetch that fails writes no permanent mark", .timeLimit(.minutes(1)))
+    @Test("A Clear during a fetch that fails writes no permanent mark", .timeLimit(.minutes(3)))
     func forgottenDuringAFailingFetchIsNotWrittenOff() async throws {
         let gate = Gate()
         let http = Holding(png: nil, gate: gate)
@@ -1479,7 +1479,7 @@ struct ShellPicturesTests {
     /// source's fetch after the first one clears, and what lands is tagged for whoever is left.
     @Test(
         "A second source joins a fetch in the air and keeps it when the first clears",
-        .timeLimit(.minutes(1))
+        .timeLimit(.minutes(3))
     )
     func joiningSourceKeepsTheFetch() async throws {
         let gate = Gate()
@@ -1636,7 +1636,7 @@ struct ShellPicturesTests {
 
     /// The guard that stops a Clear being undone by work already in the air, on its disk half:
     /// bytes that land after every host was struck off are not written back under the one cleared.
-    @Test("A fetch that lands after its host was cleared keeps nothing on disk", .timeLimit(.minutes(1)))
+    @Test("A fetch that lands after its host was cleared keeps nothing on disk", .timeLimit(.minutes(3)))
     func clearedInFlightKeepsNothing() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -1660,7 +1660,7 @@ struct ShellPicturesTests {
         #expect(try MediaCache(directory: dir).data(host: alpha, url: address(1)) == nil)
     }
 
-    @Test("A fetch the asker cleared is kept on disk under the source still waiting", .timeLimit(.minutes(1)))
+    @Test("A fetch the asker cleared is kept on disk under the source still waiting", .timeLimit(.minutes(3)))
     func clearedAskerKeepsUnderJoiner() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -1731,7 +1731,7 @@ struct ShellPicturesTests {
     /// while the gate's own actor runs freely. Measured — at five seconds a watchdog fired before
     /// a starved body reached the line it was gating, and a loaded run of the whole suite has
     /// taken 23s, the same order as a twenty-second watchdog. The ceiling is the
-    /// `.timeLimit(.minutes(1))` on the tests that carry one, so 45 still leaves fifteen seconds
+    /// `.timeLimit(.minutes(3))` on the tests that carry one, so 45 still leaves fifteen seconds
     /// spare, and being early buys nothing while costing false failures.
     private static func watchdog(_ gate: Gate, rescued: Signal) async {
         try? await Task.sleep(for: .seconds(45))

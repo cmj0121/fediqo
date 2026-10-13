@@ -14,7 +14,7 @@ import Testing
 /// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
 /// itself: a held ask is let go in a `defer`, and by the server after its patience.
 @MainActor
-@Suite("The people a source suggests", .serialized, .timeLimit(.minutes(1)))
+@Suite("The people a source suggests", .serialized, .timeLimit(.minutes(3)))
 struct SuggestedTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)

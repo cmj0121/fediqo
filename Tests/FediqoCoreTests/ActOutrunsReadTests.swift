@@ -299,7 +299,7 @@ struct ActOutrunsReadTests {
 
     @Test(
         "Two acts on one post out at once both end as pressed, whichever answer lands first — each answer is the word on its own act only",
-        .timeLimit(.minutes(1)),
+        .timeLimit(.minutes(3)),
         arguments: Order.allCases
     )
     func twoActsAtOnce(landing order: Order) async throws {

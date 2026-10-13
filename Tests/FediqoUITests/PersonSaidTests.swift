@@ -107,7 +107,7 @@ actor PageServer: HTTPClient, HTTPSender {
 /// says in each state — and that the page of somebody whose source is not asked who people are
 /// is the page it was.
 @MainActor
-@Suite("Somebody's page as their source says it", .serialized, .timeLimit(.minutes(1)))
+@Suite("Somebody's page as their source says it", .serialized, .timeLimit(.minutes(3)))
 struct PersonSaidTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)

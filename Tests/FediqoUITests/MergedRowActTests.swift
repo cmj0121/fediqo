@@ -239,7 +239,7 @@ struct MergedRowActTests {
     // MARK: - On its way, failed, tried again
 
     @Test("Pressed and failed read on the acting copy; a failure leaves the row and tries again",
-          .timeLimit(.minutes(1)))
+          .timeLimit(.minutes(3)))
     func standingsAreTheActingCopys() async throws {
         let gate = Gate()
         let (session, server) = try await shell(

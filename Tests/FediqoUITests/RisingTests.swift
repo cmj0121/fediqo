@@ -27,7 +27,7 @@ struct ServersByHost: HTTPClient, HTTPSender {
 /// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
 /// itself: a held ask is let go in a `defer`, and by the server after its patience.
 @MainActor
-@Suite("The hashtags and links rising on the sources", .serialized, .timeLimit(.minutes(1)))
+@Suite("The hashtags and links rising on the sources", .serialized, .timeLimit(.minutes(3)))
 struct RisingTests {
     private static let one = "m.example", two = "n.example"
     private static let forum = Source(host: "forum.example", kind: .discuz)

@@ -112,7 +112,7 @@ struct ActBeforeReadLandsTests {
 
     @Test(
         "The mark a press set is still drawn when a reload asked before the press lands after it — put or taken back; and the next reload is the source's word",
-        .timeLimit(.minutes(1)),
+        .timeLimit(.minutes(3)),
         arguments: [PostAct.favourite, .boost, .bookmark], [true, false]
     )
     func aReloadOnItsWay(act: PostAct, on: Bool) async throws {
@@ -150,7 +150,7 @@ struct ActBeforeReadLandsTests {
 
     @Test(
         "A reload on its way when the reader signs out brings none of their marks back; the next sign-in's reload says its own",
-        .timeLimit(.minutes(1))
+        .timeLimit(.minutes(3))
     )
     func aReloadOnItsWayAtSignOut() async throws {
         let tokens = MemoryMastodonTokens()

@@ -180,14 +180,21 @@ enum MastodonInstance {
 /// **A hang guard, not a clock.** These used to open the gate after five seconds, and on a loaded
 /// runner five seconds is a time a starved test body can still be short of the line it gates —
 /// the watchdog then opened the gate early, the test measured an order it never set up, and CI
-/// went red on a test that was right. Fifty seconds is past any honest wait, and still inside the
-/// minute `.timeLimit` these tests carry, so the only run that reaches the end is one whose gate
+/// went red on a test that was right. The bound below is past any honest wait, and still inside
+/// the `.timeLimit` these tests carry, so the only run that reaches the end is one whose gate
 /// nobody was ever going to open, and that run says so rather than passing on whatever the gate
 /// let through. `.timeLimit` does not rescue a task parked on a
 /// continuation, which is why this has to exist at all.
+///
+/// **The bound is a stopgap, and it was moved once already (#346).** A check that waits behind
+/// everything else on the main actor answers when the whole run of this target does, and the
+/// run had grown to fifty-five seconds against a bound of fifty: seven checks then failed in
+/// every full run and passed in under a second alone. The bound is now well past the run, and
+/// the one-minute limits beside it went to three with it, so that this still speaks before
+/// they do. A bound in seconds is a guess about a machine either way; #346 takes it out.
 func hangGuard(_ gate: Gate) -> Task<Void, Never> {
     Task {
-        try? await Task.sleep(for: .seconds(50))
+        try? await Task.sleep(for: .seconds(170))
         // `try?` swallows the cancellation, so without this a guard cancelled on the passing path
         // would still go on to open the gate and record an issue against a test that passed.
         guard !Task.isCancelled else { return }

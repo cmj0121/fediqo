@@ -576,7 +576,7 @@ struct SourcePageTests {
     /// see — PLAN risk 8, which this split must not undo.
     @Test(
         "The field is out of the reader's hands behind a sheet, and only behind a sheet",
-        .timeLimit(.minutes(1))
+        .timeLimit(.minutes(3))
     )
     func theFieldIsDisabledOnlyWhereTheReaderCannotSeePastTheStage() async {
         let (session, http) = gatedSession()
@@ -1322,7 +1322,7 @@ struct SourcePageTests {
     /// rather than a second one.
     @Test(
         "A row's press is refused exactly when its controls are, and by the same rule",
-        .timeLimit(.minutes(1))
+        .timeLimit(.minutes(3))
     )
     func theRowsPressObeysTheSameRuleItsControlsDo() async {
         let (session, http) = gatedSession()

@@ -40,7 +40,7 @@ enum HostedPersonPage {
 /// the call that made it returning; a held ask is let go by the check, and by the server after
 /// its patience.
 @MainActor
-@Suite("Somebody's page, a page of its own", .serialized, .timeLimit(.minutes(1)))
+@Suite("Somebody's page, a page of its own", .serialized, .timeLimit(.minutes(3)))
 struct PersonPageTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)

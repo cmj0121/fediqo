@@ -244,7 +244,7 @@ struct StoreSaverTests {
     /// ending it. How soon after 50 ms it answers is how soon the deadline's own task gets a
     /// thread, which on a shared runner with every other suite at work took six seconds (#203).
     /// A flush that did wait for the write would never answer, and the time limit says so.
-    @Test("A write that hangs does not hold a flush past the deadline", .timeLimit(.minutes(1)))
+    @Test("A write that hangs does not hold a flush past the deadline", .timeLimit(.minutes(3)))
     func flushTimesOut() async {
         let never = Gate()
         let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _, _ in await never.wait() }

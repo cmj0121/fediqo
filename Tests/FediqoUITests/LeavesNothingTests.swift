@@ -57,7 +57,7 @@ struct LeavesNothingTests {
     // MARK: - Removing stops what is on its way
 
     @Test("A reload on its way to a removed source asks nothing more of it, and names no failure for it",
-          .timeLimit(.minutes(1)))
+          .timeLimit(.minutes(3)))
     func aReloadOnItsWay() async {
         let work = SourceWork()
         // The public timeline is held on the wire; its trends would be asked right after it.
@@ -83,7 +83,7 @@ struct LeavesNothingTests {
         #expect(session.reload.failures[.held]?.contains(Self.gone) != true)
     }
 
-    @Test("A forum's next board is not read once the forum is removed", .timeLimit(.minutes(1)))
+    @Test("A forum's next board is not read once the forum is removed", .timeLimit(.minutes(3)))
     func aForumsNextBoard() async {
         let work = SourceWork()
         let host = SubBoardChoiceTests.host
@@ -110,7 +110,7 @@ struct LeavesNothingTests {
     }
 
     @Test("The wait asks nothing of a removed source, round after round, and asks it again once it is added back",
-          .timeLimit(.minutes(1)))
+          .timeLimit(.minutes(3)))
     func theWait() async {
         let work = SourceWork()
         let http = FixtureHTTP(Self.mastodonRoutes(Self.gone).merging(Self.mastodonRoutes(Self.kept)) { a, _ in a })
@@ -168,7 +168,7 @@ struct LeavesNothingTests {
 
     // MARK: - Removing stops what is queued
 
-    @Test("A picture queued for a removed source never goes out", .timeLimit(.minutes(1)))
+    @Test("A picture queued for a removed source never goes out", .timeLimit(.minutes(3)))
     func aQueuedPicture() async {
         let work = SourceWork()
         let http = Parking()
@@ -193,7 +193,7 @@ struct LeavesNothingTests {
         #expect(Self.acts(work, for: Self.kept).count == ShellPictures.maxInFlight)
     }
 
-    @Test("An emoji queued for a removed source never goes out", .timeLimit(.minutes(1)))
+    @Test("An emoji queued for a removed source never goes out", .timeLimit(.minutes(3)))
     func aQueuedEmoji() async {
         let work = SourceWork()
         let http = Parking()
@@ -223,7 +223,7 @@ struct LeavesNothingTests {
         #expect(Self.acts(work, for: Self.gone).isEmpty)
     }
 
-    @Test("A forum post queued for a removed forum never goes out", .timeLimit(.minutes(1)))
+    @Test("A forum post queued for a removed forum never goes out", .timeLimit(.minutes(3)))
     func aQueuedForumPost() async {
         let work = SourceWork()
         let http = Parking()
@@ -250,7 +250,7 @@ struct LeavesNothingTests {
     // MARK: - Nothing left that can sign in
 
     @Test("A forum's launch sign-in still running is ended by a sign-out, and signs nothing back in",
-          .timeLimit(.minutes(1)))
+          .timeLimit(.minutes(3)))
     func aLaunchSignIn() async throws {
         let credentials = MemoryCredentials()
         try credentials.save(ForumCredential(host: Self.gone, username: "reader", password: "p"))
@@ -341,7 +341,7 @@ struct LeavesNothingTests {
     }
 
     @Test("A reload that starts while a Remove is still under way asks nothing of the source",
-          .timeLimit(.minutes(1)))
+          .timeLimit(.minutes(3)))
     func aReloadInsideTheRemove() async {
         let work = SourceWork()
         let http = FixtureHTTP(Self.mastodonRoutes(Self.gone).merging(Self.mastodonRoutes(Self.kept)) { a, _ in a })
@@ -369,7 +369,7 @@ struct LeavesNothingTests {
     }
 
     @Test("An emoji two sources wait on still comes for the one left when the other is removed",
-          .timeLimit(.minutes(1)))
+          .timeLimit(.minutes(3)))
     func aSharedEmoji() async {
         let work = SourceWork()
         let http = Parking(answering: EmojiFixture.gif(delays: [0.1, 0.1]))

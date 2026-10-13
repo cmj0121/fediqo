@@ -12,7 +12,7 @@ import Testing
 /// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
 /// itself: a held ask is let go in a `defer`, and by the server after its patience.
 @MainActor
-@Suite("What a search finds beside posts, and somebody looked up through a source", .serialized, .timeLimit(.minutes(1)))
+@Suite("What a search finds beside posts, and somebody looked up through a source", .serialized, .timeLimit(.minutes(3)))
 struct SearchFoundTests {
     private static let one = "m.example", two = "n.example"
     private static let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 34, name: "Dev")])
