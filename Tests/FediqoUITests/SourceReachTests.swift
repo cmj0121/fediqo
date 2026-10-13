@@ -85,4 +85,22 @@ struct SourceReachTests {
         // The plain wire is as it was.
         #expect(try await reach.wire(for: .timeline, within: nil).data(from: try #require(URL(string: "https://mastodon.example/api/v1/accounts/42"))).0.count > SourceReach.smallBody)
     }
+
+    @Test("What somebody pinned is read through the door their posts are, and there is no other: with no token the ask is written in the run's record under the source asked and the purpose it was made for, and an answer past the ceiling a signed-in read has is refused")
+    func whatSomebodyPinnedIsListedAndSmall() async throws {
+        let work = SourceWork()
+        let http = FixtureHTTP(["/api/v1/accounts/42/statuses": .text("[]")])
+        let source = Source(host: "mastodon.example", kind: .mastodon)
+        let reader = SourceReach(http: http, work: work).unsignedPerson(source.host, for: .person, within: .seconds(5))
+        #expect(try await reader.pinned(of: "42", source: source) == PostStretch(posts: [], next: nil))
+        #expect(await http.paths == ["/api/v1/accounts/42/statuses"])
+        let acts = work.record.filter { $0.reached == source.host }
+        #expect(acts.count == 1 && acts.first?.purpose == .person && acts.first?.source == source.host)
+
+        let big = #"["\#(String(repeating: "w", count: SourceReach.smallBody))"]"#
+        let large = SourceReach(http: FixtureHTTP(["/api/v1/accounts/42/statuses": .text(big)]), work: SourceWork())
+        await #expect(throws: URLError.self) {
+            _ = try await large.unsignedPerson(source.host, for: .person, within: .seconds(5)).pinned(of: "42", source: source)
+        }
+    }
 }

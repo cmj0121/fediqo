@@ -431,6 +431,50 @@ takes for "no such address" — as it is meant to. Two of the twenty word it oth
   - GoToSocial 0.22.2: 200 `[]`
   - What in the app rests on it: `EmojiCatalogueStore`
 
+### Asked later — the posts a person pinned
+
+Asked 2026-10-13 with `curl`, after the 172 and not counted among them; nobody in either seed has pinned anything, so
+posts were pinned through each server's own API and unpinned again. Kept as checks in `MastodonPinnedSaysTests.swift`
+(both suites) and as answers in `MastodonPinnedCaptures.swift`.
+
+- **`accounts/:id/statuses?pinned=true`, with no sign-in**:
+  - Mastodon 4.6.6: 200, as to anybody; a token that is none is answered as nobody is
+  - GoToSocial 0.22.2: **401**, as every read
+  - What in the app rests on it: `MastodonPerson.pinned`: read unsigned where the source allows
+- **The same, of somebody who pinned nothing; of an id nobody has**:
+  - Mastodon 4.6.6: `200 []`, no `Link`; 404 `"Record not found"`
+  - GoToSocial 0.22.2: `200 []`, no `Link`; **`200 []`**
+  - What in the app rests on it: none pinned is an empty stretch; somebody unheard of is told only on Mastodon
+- **The same, of somebody who pinned some**:
+  - Mastodon 4.6.6: all of them, **the one pinned last first**; `Link` has `rel="prev"` alone and repeats `pinned=true`
+  - GoToSocial 0.22.2: all of them, **the one pinned first first**; **no `Link` at all**
+  - What in the app rests on it: the source's order is kept, and is not newest first
+- **Whether a post says it is pinned**:
+  - Mastodon 4.6.6: `pinned` is sent **to its author alone** (`true`, and `false` on their other posts); a boost and
+    every post read by anybody else carry no such field
+  - GoToSocial 0.22.2: `pinned` on every post to everybody, about the reader: `true` to the author, **`false` to
+    anybody else on a post that is pinned**
+  - What in the app rests on it: nothing on a post is read for it — a `false` here would hide every pinned post
+- **With `limit` shorter than what is pinned**:
+  - Mastodon 4.6.6: cut; `rel="next"` names `max_id` the last listed post's id, **in a list that is not in id order**:
+    the next stretch repeats, and a pinned post with a larger id than the last listed would never come
+  - GoToSocial 0.22.2: `limit` and `max_id` are passed over: the whole answer again
+  - What in the app rests on it: no length is asked for; a next is followed, and `PostsRead` lists nothing twice
+- **A made-up word in place of `pinned`; `pinned=false`**:
+  - Mastodon 4.6.6: the ordinary newest posts; `Link` without the word, or repeating `pinned=false` as sent
+  - GoToSocial 0.22.2: the ordinary newest posts, boosts among them; `Link` says **`pinned=false`**, as on every
+    ordinary answer
+  - What in the app rests on it: how ordinary posts are told from pinned ones — an address for more that does not say
+    the word as a yes, or a boost. A server that passes the word over, names no address and lists no boost is not told
+- **`pinned=1`, `pinned=yes`**:
+  - Mastodon 4.6.6: both a yes, repeated as sent
+  - GoToSocial 0.22.2: `1` a yes; `yes` is **400** `"error parsing pinned"`
+  - What in the app rests on it: `true` is what is sent; `true` and `1` are what is believed in an address
+- **A boost pinned by who made it; somebody else's post pinned**:
+  - Mastodon 4.6.6: 422 `"A boost cannot be pinned"`; 422 `"Someone else's post cannot be pinned"`
+  - GoToSocial 0.22.2: 422 `"cannot pin boosts"`; 422, the post "does not belong to" them
+  - What in the app rests on it: an answer listing a boost is not the pinned posts; #334
+
 ## Could not be asked, or not comparable — 11
 
 - **An app registered with a word no server knows; with no words (2)**:
@@ -497,3 +541,5 @@ Each names the unit of `PLAN-mastodon.md` it touches.
 15. **That a list just made can be read.** Its timeline drops the connection until somebody is
     on it — #336 (#337).
 16. **That a withdrawn post is gone on the next ask** — #327: here it answers 200 again.
+17. **That a post says whether it is pinned.** Here `pinned` is about the reader, and `false` on a
+    pinned post read by anybody but its author; Mastodon sends it to the author alone — M7, #334.

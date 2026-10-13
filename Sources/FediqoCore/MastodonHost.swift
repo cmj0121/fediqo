@@ -24,6 +24,11 @@ import Foundation
 // the source giving nothing, never as the host having no such thing; and only the document or
 // the host's own "no such address" makes a thing absent.
 //
+// **One thing shares its address with another**: the posts an account pinned are asked for
+// where its posts are, by one word more, so no not-found is theirs alone. What stands for it is
+// the host answering the word with the ordinary posts (`MastodonPerson.pinned`), and whoever
+// keeps this remembers that as it remembers a not-found.
+//
 // **Nothing here is an address.** Every fact is a figure or a yes, bounded where it is read; a
 // host's word about itself can make the app offer less, and can never make it reach anywhere
 // (#282). The first fact that is an address — where a host says its live line is served, often
@@ -61,6 +66,10 @@ public enum MastodonHostThing: String, Sendable, Hashable, CaseIterable {
     case knownServers
     /// How busy it has been, week by week (#321).
     case activity
+    /// The posts an account pinned (#310). Never said by the document, and with no address of
+    /// its own to answer not-found: a host has none where it answered the word with an
+    /// account's ordinary posts (`MastodonPerson.pinned` handing back nothing).
+    case pinnedPosts
 }
 
 /// What is known of one thing at one host.
@@ -112,7 +121,7 @@ public struct MastodonHostSays: Sendable, Hashable {
             guard let featuredTagLimit else { return .unsaid }
             return featuredTagLimit > 0 ? .present : .absent
         case .suggestions, .directory, .featuredPeople, .risingTags, .risingLinks, .announcements,
-             .longerAccount, .knownServers, .activity:
+             .longerAccount, .knownServers, .activity, .pinnedPosts:
             return .unsaid
         }
     }

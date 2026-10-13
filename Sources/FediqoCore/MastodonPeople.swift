@@ -173,6 +173,18 @@ enum MastodonLink {
         }
         return nil
     }
+
+    /// What each address the header names says for `name` in its query, whatever the address is
+    /// marked as: nothing for an address that does not say it, and no entry where the header
+    /// names no address. Read to learn which question an answer was to, never to go anywhere.
+    static func said(_ name: String, in header: String?) -> [String?] {
+        guard let header else { return [] }
+        return header.split(separator: "<", omittingEmptySubsequences: false).dropFirst().compactMap { entry -> String?? in
+            guard let close = entry.firstIndex(of: ">") else { return nil }
+            let items = URLComponents(string: String(entry[..<close]))?.queryItems ?? []
+            return .some(items.first { $0.name == name }?.value)
+        }
+    }
 }
 
 /// One account as a Mastodon hands it over, in the fields a person is made of.
