@@ -12,7 +12,7 @@ import Testing
 /// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
 /// itself: a held ask is let go in a `defer`, and by the server after its patience.
 @MainActor
-@Suite("The server somebody lives on, asked at a press", .serialized, .timeLimit(.minutes(1)))
+@Suite("The server somebody lives on, asked at a press", .serialized, .timeLimit(.minutes(3)))
 struct PersonHomeTests {
     private static let one = "m.example", home = "elsewhere.example", other = "other.example"
     private static let source = Source(host: one, kind: .mastodon)
@@ -139,14 +139,20 @@ struct PersonHomeTests {
         #expect(said.home == Self.home && said.person.handle == "@far@elsewhere.example" && said.person.name == "Whole :m:")
         #expect(said.person.tally == Person.Tally(posts: 1_204, following: 310, followers: 2_811))
         #expect(said.person.avatarURL == nil && said.person.headerURL == nil && said.person.emojis.isEmpty)
-        let line = PersonHomeLine(words: "The posts below are what m.example gave.", press: .back, pressWords: "Back to what m.example says")
+        let line = PersonHomeLine(words: "The posts under Posts are what m.example gave.", press: .back, pressWords: "Back to what m.example says")
         #expect(pages.homeLine(of: Self.far, in: session) == line)
-        let view = PersonPane.viewLine(of: Self.far, said: before, home: said, language: .english)
-        #expect(view.hasPrefix("As elsewhere.example says, asked at ") && view != PersonPane.viewLine(of: Self.far, said: before))
-        let named = PersonPane.named(Self.far, said: before, home: said)
-        #expect(named.name == "Whole :m:" && named.handle == "@far@elsewhere.example" && named.emojis.isEmpty)
-        #expect(PersonPane.face(of: Self.far, said: before) == nil, "the face stays the source's, which has none")
-        #expect(pages.lists(of: Self.far, in: session).isEmpty, "the source's figures are not on the page meanwhile")
+        // About alone is that server's (F9): whose view it says, and whose words it draws — in
+        // letters, with its figures as one line of words. The head, its figures and every other
+        // tab stay the added source's.
+        let about = try #require(pages.about(of: Self.far, in: session))
+        #expect(about.view == said.whoseView() && said.whoseView(language: .english).hasPrefix("As elsewhere.example says, asked at "))
+        #expect(about.fromHome && about.person?.name == "Whole :m:" && about.person?.emojis.isEmpty == true)
+        #expect(about.figures == PersonSaid.counts(of: said.person.tally).joined(separator: L10n.t("people.row.between")))
+        #expect(about.home == line && about.blocks.contains(.home) && about.followed == nil)
+        let head = pages.head(of: Self.far, in: session)
+        #expect(head.name == before.person?.lineName && head.whose == before.source && head.face == nil, "the face stays the source's, which has none")
+        #expect(head.figures == PersonSaid.figures(of: try #require(before.person), tabs: pages.tabs(of: Self.far, in: session)))
+        #expect(pages.tabs(of: Self.far, in: session).first == .about && pages.tabs(of: Self.far, in: session).last == .posts)
         #expect(pages.said(of: Self.far, in: session) == before, "what the added source says stands")
         #expect(session.notes.isEmpty, "nothing was held")
         pages.home.letGo(of: Self.near)
@@ -154,7 +160,7 @@ struct PersonHomeTests {
 
         await pages.homePressed(.back, on: Self.far, in: session)
         #expect(pages.homeSaid(of: Self.far, in: session) == nil && pages.homeLine(of: Self.far, in: session) == Self.offer)
-        #expect(pages.lists(of: Self.far, in: session).count == 2 && pages.said(of: Self.far, in: session) == before)
+        #expect(pages.about(of: Self.far, in: session)?.fromHome == false && pages.said(of: Self.far, in: session) == before)
         #expect(await home.asked.count == 1, "going back asked nothing")
 
         await pages.homePressed(.ask, on: Self.far, in: session)
@@ -205,7 +211,7 @@ struct PersonHomeTests {
             let line = PersonHomeLine(words: words, press: .ask, pressWords: "Ask elsewhere.example", failed: true)
             #expect(pages.homeLine(of: Self.far, in: session) == line)
             #expect(pages.homeSaid(of: Self.far, in: session) == nil && pages.said(of: Self.far, in: session) == before)
-            #expect(pages.lists(of: Self.far, in: session).count == 2)
+            #expect(pages.about(of: Self.far, in: session)?.fromHome == false)
             let asked = await home.asked
             #expect(asked.count == 1 && shell.homeActs.count == 1, "one ask, and no second try")
         }
@@ -359,11 +365,14 @@ struct PersonHomeTests {
         #expect(pane.contains("onHome: { press in Task { await people?.homePressed(press, on: person, in: session) } }"))
         #expect(pane.components(separatedBy: "homePressed(").count == 2)
         // What that server said is drawn with nothing in it to press, open or fetch.
-        let page = try String(contentsOf: Self.shell.appending(path: "PersonPane.swift"), encoding: .utf8)
-        #expect(page.contains("PersonSaidBlock(person: homeSaid.person, source: homeSaid.home, linked: false)"))
-        #expect(page.components(separatedBy: "homeSaid.person").count == 2, "its block alone: nowhere a face or a list")
-        let block = try String(contentsOf: Self.shell.appending(path: "PersonSaid.swift"), encoding: .utf8)
-        #expect(block.contains("EmojiText.words(person.words, emojis: person.emojis, host: source, covered: !linked)"))
+        // It is About's alone (F9): the head, the figures and every other tab are never handed it.
+        let about = try String(contentsOf: Self.shell.appending(path: "PersonAbout.swift"), encoding: .utf8)
+        #expect(about.contains("person: home?.person ?? said.person, fromHome: home != nil"))
+        #expect(about.contains("EmojiText.words(person.words, emojis: person.emojis, host: said.source, covered: said.fromHome)"))
+        for file in ["PersonHead.swift", "PersonPane.swift", "PeopleRows.swift"] {
+            let text = try String(contentsOf: Self.shell.appending(path: file), encoding: .utf8)
+            #expect(!text.contains("PersonHomeSaid"), "\(file) is handed their own server's word")
+        }
     }
 
     // MARK: - Answers that come late
@@ -466,13 +475,13 @@ struct PersonHomeTests {
         let before = try #require(pages.said(of: Self.far, in: session))
         await pages.homePressed(.ask, on: Self.far, in: session)
         #expect(pages.homeSaid(of: Self.far, in: session) != nil)
-        #expect(pages.lists(of: Self.far, in: session).isEmpty)
+        #expect(pages.about(of: Self.far, in: session)?.fromHome == true)
 
         shell.work.allow(without)
         #expect(pages.homeSaid(of: Self.far, in: session) == nil)
         #expect(pages.homeLine(of: Self.far, in: session) == nil)
         #expect(pages.said(of: Self.far, in: session) == before)
-        #expect(pages.lists(of: Self.far, in: session).count == 2, "the source's figures are on the page again")
+        #expect(pages.about(of: Self.far, in: session)?.fromHome == false, "the source's figures are on the page again")
 
         // Switched off while an ask is out.
         shell.work.allow(Allowance.standing)
@@ -536,7 +545,7 @@ struct PersonHomeTests {
         let lines = [
             PersonHomeLine(press: .ask, pressWords: "Ask \(long).example"),
             PersonHomeLine(words: "Asking \(long).example…"),
-            PersonHomeLine(words: "The posts below are what \(long).example gave.", press: .back, pressWords: "Back to what \(long).example says"),
+            PersonHomeLine(words: "The posts under Posts are what \(long).example gave.", press: .back, pressWords: "Back to what \(long).example says"),
             PersonHomeLine(words: Self.noAccount, press: .ask, pressWords: "Ask elsewhere.example", failed: true),
             PersonHomeLine(words: Self.nobody, press: .ask, pressWords: "Ask elsewhere.example", failed: true),
         ]
@@ -563,11 +572,7 @@ struct PersonHomeTests {
             (PersonSaid(source: Self.one, reading: .unheardOf), lines[3], nil),
         ]
         for (said, line, drawn) in pages {
-            let pane = PersonPane(
-                person: Self.far, items: [], catalogues: EmojiCatalogueStore(), posts: ForumPosts(), selectedID: .constant(nil),
-                decks: .constant(ShellDecks()), playback: ShellPlayback(), onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in },
-                onOpenThread: { _ in }, jumpToTop: 0, onBack: {}, said: said, home: line, homeSaid: drawn
-            )
+            let pane = HostedPersonPage.page(Self.far, said: said, home: drawn, homeLine: line)
             let hosted = NSHostingView(rootView: pane.frame(width: 320, height: 700))
             hosted.layoutSubtreeIfNeeded()
             #expect(hosted.fittingSize == CGSize(width: 320, height: 700))

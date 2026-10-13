@@ -32,6 +32,10 @@ import Foundation
 /// | to unfollow any of those | 200, the standing as it was |
 /// | to follow a **suspended** account, an id nobody has, or an id that is no number | **404** `{"error":"Record not found"}` |
 /// | to follow **themselves** | **403** `{"error":"Following your own account is not allowed"}`; to unfollow themselves, 200 |
+/// | how the reader stands to **several people in one ask** (`relationships?id[]=…&id[]=…`), asked 2026-10-13 for #310's rows | 200, one entry each, **in no order of the asking**: read by the id each carries. An id named twice has one entry |
+/// | the same, naming among them a **suspended** account, an id nobody has, and an id that is no number | 200, and **no entry for any of the three**; everybody else is answered as if they were not named. (`with_suspended=true` gives the suspended one an entry, every part `false`: not asked for here) |
+/// | the same, naming **the reader themselves** | an entry like any other, every part `false` |
+/// | **how many one ask may name** | nobody is counted: 80 names and 200 are answered alike. An ask is refused by **its length** — a query past 10,240 bytes, some 640 names as this app spells them — with a bare **400** and no body, before Mastodon sees it |
 /// | how the reader stands to somebody they mute **for a time** | `muting` true and `muting_expires_at` a moment, to the second with no fraction (`2026-10-13T01:37:16Z`); muted for good, `null` |
 enum MastodonStandingCaptures {
     static let host = "mastodon.localhost"
@@ -47,6 +51,24 @@ enum MastodonStandingCaptures {
 
     /// `POST /api/v1/accounts/117430794424495804/follow`, and the same again.
     static let followed = #"{"id":"117430794424495804","following":true,"showing_reblogs":true,"notifying":false,"languages":null,"followed_by":false,"blocking":false,"blocked_by":false,"muting":false,"muting_notifications":false,"muting_expires_at":null,"requested":false,"requested_by":false,"domain_blocking":false,"endorsed":false,"note":""}"#
+
+    /// `POST /api/v1/accounts/117431799951167099/follow` with `reblogs=false&notify=true`, of
+    /// somebody already followed (asked 2026-10-13, for #313's narrowing). **What a follow
+    /// said again with the words answers** — asked of Mastodon 4.6.6:
+    ///
+    /// | Asked | Answered |
+    /// | ----- | -------- |
+    /// | a follow with `reblogs` alone, of somebody followed | 200, the whole standing — the sixteen things — with `showing_reblogs` as sent and **`notifying` as it stood** |
+    /// | a follow with `notify` alone | the same the other way round: `showing_reblogs` as it stood |
+    /// | a follow with **no word**, of somebody followed | 200, and both as they stood: a plain follow resets neither |
+    /// | the next read of how the reader stands | both as the follow answered |
+    /// | `reblogs=0` · `reblogs=perhaps` | read as no · **read as yes**: whatever is not a no is a yes |
+    /// | the same follow of somebody **not followed** | follows them, with the word as sent |
+    /// | the same of somebody **asked and not yet agreed** | still `requested`, never `following`; the word is kept on the request and said back |
+    /// | either, as a sign-in that only sees who the reader follows | reads both; the follow is 403 `insufficient_scope`, as any follow |
+    /// | somebody not followed, read | `showing_reblogs` false, `notifying` false — said of nobody's follow |
+    static let narrowed = #"{"id":"117431799951167099","following":true,"showing_reblogs":false,"notifying":true,"languages":null,"followed_by":false,"blocking":false,"blocked_by":false,"muting":false,"muting_notifications":false,"muting_expires_at":null,"requested":false,"requested_by":false,"domain_blocking":false,"endorsed":false,"note":""}"#
+    static let narrowedID = "117431799951167099"
 
     /// `POST /api/v1/accounts/117430794424495804/unfollow`, and the same again.
     static let unfollowed = #"{"id":"117430794424495804","following":false,"showing_reblogs":false,"notifying":false,"languages":null,"followed_by":false,"blocking":false,"blocked_by":false,"muting":false,"muting_notifications":false,"muting_expires_at":null,"requested":false,"requested_by":false,"domain_blocking":false,"endorsed":false,"note":""}"#

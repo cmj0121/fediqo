@@ -10,7 +10,7 @@ struct MastodonHostTests {
     private static let host = "m.example"
     private static let unsaid: [MastodonHostThing] = [
         .suggestions, .directory, .featuredPeople, .risingTags, .risingLinks, .announcements,
-        .longerAccount, .knownServers, .activity,
+        .longerAccount, .knownServers, .activity, .pinnedPosts,
     ]
 
     private static func says(_ document: String) -> MastodonHostSays {

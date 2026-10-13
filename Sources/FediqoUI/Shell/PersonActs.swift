@@ -69,9 +69,83 @@ struct PersonActing: Equatable {
             standing.requested = asksFirst
         case .unfollow: standing.following = false
         case .withdraw: standing.requested = false
+        case .showBoosts: standing.showsBoosts = true
+        case .hideBoosts: standing.showsBoosts = false
+        case .notify: standing.notifies = true
+        case .stopNotifying: standing.notifies = false
+        case .acceptRequest: standing.followedBy = true
+        case .refuseRequest, .removeFollower: standing.followedBy = false
         case nil: break
         }
         return standing
+    }
+
+    // MARK: - What is taken from somebody followed
+
+    /// One thing taken from somebody the reader follows, as About says it (#313): whether
+    /// their boosts are shown, or whether the reader is told of each of their posts — as the
+    /// source last said, with a press on its way drawn over it.
+    struct Narrow: Equatable, Identifiable {
+        enum Which: String, CaseIterable {
+            case boosts, notices
+        }
+
+        let which: Which
+        /// As it stands: shown, told.
+        let on: Bool
+
+        var id: String { which.rawValue }
+
+        /// What a press does: the act that turns it the other way.
+        var act: PersonAct {
+            switch which {
+            case .boosts: on ? .hideBoosts : .showBoosts
+            case .notices: on ? .stopNotifying : .notify
+            }
+        }
+
+        var symbol: String {
+            switch which {
+            case .boosts: "arrow.2.squarepath"
+            case .notices: "bell"
+            }
+        }
+
+        func name(language: DummyLanguage? = nil) -> String { PersonActing.name(act, language: language) }
+
+        /// How it stands, in words: nothing of it is said by a colour or a glyph alone.
+        func state(language: DummyLanguage? = nil) -> String {
+            L10n.t("person.narrow.\(which.rawValue).\(on ? "on" : "off")", language: language)
+        }
+
+        /// The row as it is written and read: what it is, and how it stands.
+        func words(language: DummyLanguage? = nil) -> String {
+            String(format: L10n.t("person.narrow.said", language: language), name(language: language), state(language: language))
+        }
+    }
+
+    /// What is taken from them, in the order About draws it: their boosts, a notice of each
+    /// post. **Only of somebody the reader follows** — not one only asked — **and only what
+    /// the source said**: one it left out has no row, and nothing is guessed in its place.
+    /// **A sign-in that sees and may not change who the reader follows is shown them too, as
+    /// the source said** — plain rows that take no press (`narrowsTakePress`), beside the
+    /// lock's own sentence, which goes on asking for the rest.
+    func narrows() -> [Narrow] {
+        guard let standing = shown, standing.following else { return [] }
+        return [
+            standing.showsBoosts.map { Narrow(which: .boosts, on: $0) },
+            standing.notifies.map { Narrow(which: .notices, on: $0) },
+        ].compactMap { $0 }
+    }
+
+    /// Whether a press on one of them is taken now: only from a sign-in that may change who
+    /// the reader follows, and not while another press is on its way. **What is sent rests
+    /// on this**: where it is false the rows are words, and nothing leaves for them.
+    var narrowsTakePress: Bool { changes && doing == nil }
+
+    /// What a pointer and a listener are told a press on one of them does, and where.
+    func narrowHint(language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("person.narrow.hint", language: language), source)
     }
 
     /// Whether they block the reader, as the source said: the one thing that says why it gives
@@ -113,17 +187,25 @@ struct PersonActing: Equatable {
     }
 
     /// What the page's `…` offers, in the order it lists them: stopping following, or taking a
-    /// request back. None while a press is on its way, and none the sign-in may not make.
+    /// request back; and — under the divider, since it takes something from them — having
+    /// them follow the reader no longer (#313), only where the source said they do. None while
+    /// a press is on its way, and none the sign-in may not make.
     var more: [PersonAct] {
         guard changes, doing == nil, let standing = shown else { return [] }
-        if standing.following { return [.unfollow] }
-        return standing.requested ? [.withdraw] : []
+        let own: [PersonAct] = standing.following ? [.unfollow] : standing.requested ? [.withdraw] : []
+        return own + (standing.followedBy ? [.removeFollower] : [])
     }
 
     /// Whether `act` is asked about before it is sent: unfollowing somebody who must agree to
     /// be followed, since following them again means asking again.
     func asksBefore(_ act: PersonAct) -> Bool {
-        act == .unfollow && asksFirst
+        (act == .unfollow && asksFirst) || act == .removeFollower
+    }
+
+    /// The question `act` is asked about first with.
+    @MainActor
+    func question(before act: PersonAct) -> ShellConfirmation {
+        act == .removeFollower ? ShellQuestion.about(act, named, at: source) : ShellQuestion.unfollow(named, at: source)
     }
 
     /// Whether "Try again" stands beside the line: the source could not be asked.
@@ -134,7 +216,12 @@ struct PersonActing: Equatable {
     /// The pills of how the reader stands to them, in the order they are drawn: they follow the
     /// reader, the reader follows them, has asked to, mutes them, blocks them.
     func pills(language: DummyLanguage? = nil) -> [String] {
-        guard let standing = shown else { return [] }
+        shown.map { Self.pills(of: $0, language: language) } ?? []
+    }
+
+    /// The pills of `standing`, in that order and those words: a page's, and a row's on a list
+    /// of people.
+    static func pills(of standing: PersonStanding, language: DummyLanguage? = nil) -> [String] {
         var pills: [String] = []
         if standing.followedBy { pills.append(L10n.t("person.stands.followsYou", language: language)) }
         if standing.following { pills.append(L10n.t("person.stands.following", language: language)) }
@@ -147,6 +234,63 @@ struct PersonActing: Equatable {
         }
         if standing.blocking { pills.append(L10n.t("person.stands.blocked", language: language)) }
         return pills
+    }
+
+    /// One way the reader stands to them, as the head of their page draws it: a glyph, called
+    /// by the words About says beside it.
+    struct Mark: Equatable, Identifiable {
+        let symbol: String
+        let words: String
+        var id: String { symbol }
+    }
+
+    /// The marks of how the reader stands to them, in the order the head draws them: the
+    /// reader follows them, they follow the reader, the reader has asked to, mutes them,
+    /// blocks them. **A standing that is not so has no mark**: there is no glyph for "not".
+    func marks(language: DummyLanguage? = nil) -> [Mark] {
+        shown.map { Self.marks(of: $0, language: language) } ?? []
+    }
+
+    static func marks(of standing: PersonStanding, language: DummyLanguage? = nil) -> [Mark] {
+        var marks: [Mark] = []
+        func say(_ symbol: String, _ key: String) { marks.append(Mark(symbol: symbol, words: L10n.t(key, language: language))) }
+        if standing.following { say("person.fill.checkmark", "person.stands.following") }
+        if standing.followedBy { say("person.badge.plus", "person.stands.followsYou") }
+        if standing.requested { say("person.badge.clock", "person.stands.asked") }
+        if standing.muting {
+            let muted = PersonStanding(accountID: standing.accountID, muting: true, mutedUntil: standing.mutedUntil)
+            marks.append(Mark(symbol: "speaker.slash", words: pills(of: muted, language: language).first ?? ""))
+        }
+        if standing.blocking { say("hand.raised", "person.stands.blocked") }
+        return marks
+    }
+
+    /// Whether the head of their page has anything to draw where the marks stand: a mark, the
+    /// press that asks again where the source could not be asked, or the lock of a sign-in
+    /// that holds less than following needs. Nothing while it is being asked, and nothing
+    /// where the source answered with nothing about them.
+    var standsInHead: Bool { !marks().isEmpty || offersAgain || lock != nil }
+
+    /// What the head says in full ink under the figures, for what no glyph may say: that
+    /// they block the reader, and a press that did not arrive.
+    func headWords(language: DummyLanguage? = nil) -> [String] {
+        [blockedWords(language: language), missedWords(language: language)].compactMap { $0 }
+    }
+
+    /// What a listener is read of the marks, as one element: each in words, joined.
+    static func spoken(_ marks: [Mark], language: DummyLanguage? = nil) -> String {
+        marks.map(\.words).joined(separator: L10n.t("people.row.between", language: language))
+    }
+
+    /// What About says where the source said how the reader stands and it is none of the
+    /// five; and while it is being asked.
+    func neitherWords(language: DummyLanguage? = nil) -> String? {
+        guard let shown, Self.marks(of: shown).isEmpty else { return nil }
+        return L10n.t("person.stands.neither", language: language)
+    }
+
+    func askingWords(language: DummyLanguage? = nil) -> String? {
+        stillAsked ? String(format: L10n.t("person.stands.asking", language: language), source) : nil
     }
 
     /// The sentence that they block the reader, in full ink — or nothing where they do not, or
@@ -167,7 +311,7 @@ struct PersonActing: Equatable {
 
     /// The sentence of a press that did not arrive, or nothing.
     func missedWords(language: DummyLanguage? = nil) -> String? {
-        missed.map { String(format: L10n.t(Self.key($0) + ".failed", language: language), named, source) }
+        missed.map { Self.missedWords($0, named: named, at: source, language: language) }
     }
 
     /// The word of the heading's press: to follow, or — of somebody who must agree — to ask.
@@ -185,6 +329,18 @@ struct PersonActing: Equatable {
         return String(format: L10n.t(key, language: language), named, source)
     }
 
+    /// What a press that did not arrive is said as, of an act on somebody a sentence of ours
+    /// calls `named` at `source`: the one sentence, on their page and on a row of a list.
+    static func missedWords(_ act: PersonAct, named: String, at source: String, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t(key(act) + ".failed", language: language), named, source)
+    }
+
+    /// What accepting somebody's request is called to a pointer and a listener: what it
+    /// does, to whom and where.
+    static func acceptSpoken(_ named: String, at source: String, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("person.act.accept.spoken", language: language), named, source)
+    }
+
     /// What an act is called in the page's `…`.
     static func name(_ act: PersonAct, language: DummyLanguage? = nil) -> String {
         L10n.t(key(act), language: language)
@@ -195,6 +351,11 @@ struct PersonActing: Equatable {
         case .follow: "person.badge.plus"
         case .unfollow: "person.badge.minus"
         case .withdraw: "arrow.uturn.backward"
+        case .showBoosts, .hideBoosts: "arrow.2.squarepath"
+        case .notify, .stopNotifying: "bell"
+        case .acceptRequest: "person.crop.circle.badge.checkmark"
+        case .refuseRequest: "person.crop.circle.badge.xmark"
+        case .removeFollower: "person.crop.circle.badge.minus"
         }
     }
 
@@ -203,6 +364,11 @@ struct PersonActing: Equatable {
         case .follow: "person.act.follow"
         case .unfollow: "person.act.unfollow"
         case .withdraw: "person.act.withdraw"
+        case .showBoosts, .hideBoosts: "person.act.boosts"
+        case .notify, .stopNotifying: "person.act.notify"
+        case .acceptRequest: "person.act.accept"
+        case .refuseRequest: "person.act.refuse"
+        case .removeFollower: "person.act.removeFollower"
         }
     }
 
@@ -213,24 +379,8 @@ struct PersonActing: Equatable {
         ShellMore(head: head, items: more.map { offered in
             let symbol = Self.symbol(offered), name = Self.name(offered)
             guard asksBefore(offered) else { return .plain(symbol, name) { act(offered) } }
-            return .danger(symbol, name, asks: ShellQuestion.unfollow(named, at: source)) { act(offered) }
+            return .danger(symbol, name, asks: question(before: offered)) { act(offered) }
         })
-    }
-}
-
-/// The pills of how the reader stands to somebody, on the heading's own line: each a few words
-/// of this app's on the well, as a row's source pill is.
-struct PersonStandingPills: View {
-    let pills: [String]
-
-    var body: some View {
-        if !pills.isEmpty {
-            // Wrapped where one line has no room: no pill is cut.
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: ShellSpace.tight) { ForEach(pills, id: \.self) { ShellWellPill($0) } }
-                VStack(alignment: .leading, spacing: ShellSpace.tight) { ForEach(pills, id: \.self) { ShellWellPill($0) } }
-            }
-        }
     }
 }
 
@@ -279,59 +429,18 @@ struct PersonHeadActs: View {
     }
 }
 
-/// What stands under somebody's heading about how the reader stands to them, where there is
-/// something to say that no pill says: how the sign-in stands, dim with the lock and pressed to
-/// ask; that the source could not be asked, with the press that asks again; and a press that
-/// did not arrive, in full ink.
-struct PersonStandingLines: View {
-    let acting: PersonActing
-    var onAsk: () -> Void
-    var onAgain: () -> Void
-    @Environment(\.colorScheme) private var colorScheme
-
-    /// Whether there is any line to draw.
-    static func draws(_ acting: PersonActing) -> Bool {
-        acting.lock != nil || acting.reading == .failed || acting.missed != nil
-    }
+/// The pills of how the reader stands to somebody, on a row of a list of people: each a few
+/// words of this app's on the well, as a row's source pill is.
+struct PersonStandingPills: View {
+    let pills: [String]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let words = acting.lockWords() { locked(words) }
-            if let failed = acting.failedWords() {
-                WordsThenPress(
-                    words: Text(failed).shellFont(.meta).foregroundStyle(ShellChrome.ink(colorScheme)),
-                    press: ShellLinkButton(L10n.t("person.retry"), action: onAgain).fixedSize()
-                )
+        if !pills.isEmpty {
+            // Wrapped where one line has no room: no pill is cut.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: ShellSpace.tight) { ForEach(pills, id: \.self) { ShellWellPill($0) } }
+                VStack(alignment: .leading, spacing: ShellSpace.tight) { ForEach(pills, id: \.self) { ShellWellPill($0) } }
             }
-            if let missed = acting.missedWords() {
-                Text(missed)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, ShellSpace.pad)
-                    .padding(.vertical, ShellSpace.snug)
-            }
-        }
-    }
-
-    /// How the sign-in stands, dim, after the glyph a source's row draws where its sign-in
-    /// must be asked again: the whole line is the press where it asks, and words where not.
-    @ViewBuilder
-    private func locked(_ words: String) -> some View {
-        let label = Label(words, systemImage: SourceRow.permissionSymbol)
-            .shellFont(.meta)
-            .foregroundStyle(ShellChrome.markDim(colorScheme))
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, ShellSpace.pad)
-            .padding(.vertical, ShellSpace.snug)
-        if acting.lock?.asks == true {
-            Button(action: onAsk) { label.contentShape(Rectangle()) }
-                .buttonStyle(.plain)
-                .help(L10n.t("mark.dim.askAgain"))
-        } else {
-            label
         }
     }
 }

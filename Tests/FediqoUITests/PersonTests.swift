@@ -238,7 +238,7 @@ struct PersonTests {
         for language in DummyLanguage.allCases {
             L10n.language = language
             for count in [0, 1, 7] {
-                let line = PersonPane.heldLine(count)
+                let line = PersonHeadSaid.heldLine(count)
                 #expect(line.contains("\(count)"), "\(language): \(line)")
                 #expect(!line.contains("person.held"), "\(language) has no line for the count")
             }

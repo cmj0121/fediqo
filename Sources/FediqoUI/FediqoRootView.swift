@@ -1484,17 +1484,25 @@ public struct FediqoRootView: View {
             guard let row = people.followed.row(id, of: page, in: session) else { return false }
             return openRisingRow(row.listed)
         }
-        if let person = walk.openedPerson, let entry = people.followedEntry(of: person, in: session), entry.id == id {
-            return followedPressed(entry)
+        // On About the lamp may be on the way to that list, or on another block that is a
+        // press (F9): Return presses it, and does nothing on a block that is words.
+        if let person = walk.openedPerson, people.front(of: person, in: session) == .about {
+            if let entry = people.followedEntry(of: person, in: session), entry.id == id { return followedPressed(entry) }
+            if id == RequestsEntry.id, let entry = people.requestsEntry(of: person, in: session) { return requestsPressed(entry) }
+            return people.pressAbout(id, of: person, in: session)
         }
         // On a list of people the row the lamp is on is somebody (#311): Return opens them.
         if let list = walk.openedPeople {
             guard let person = people.lists.person(id, on: list, in: session) else { return false }
             return openListed(person)
         }
-        // On somebody's page the lamp may be on a figure that counts a list (#311): Return opens it.
-        if let person = walk.openedPerson, let list = people.list(id, of: person, in: session) {
-            return openPeople(list)
+        // And on a tab of somebody's page that lists people (F9), the same: a new step, and
+        // leaving it gives their page back on that tab, the lamp on that row.
+        if let person = walk.openedPerson,
+           let list = people.list(people.front(of: person, in: session), of: person, in: session)
+        {
+            guard let listed = people.lists.person(id, on: list, in: session) else { return false }
+            return openListed(listed)
         }
         // A post read for somebody's page is no item until it is opened (#310): opening holds
         // it, and then opens it as any held post opens. One the store will not take opens nothing.
@@ -1857,7 +1865,23 @@ public struct FediqoRootView: View {
         return walk.walk(to: .person(person), from: selectedItemID)
     }
 
-    /// A list of people opened from where a source counts them (#311): one more step of the
+    /// The way to the people who ask to follow the reader, pressed on their own page (#313):
+    /// the list, one more step of the walk — or, where the line is the lock of a sign-in that
+    /// does not see who follows them and may be asked, the question that asks it.
+    private func requestsPressed(_ entry: RequestsEntry) -> Bool {
+        guard entry.locked == nil else {
+            guard entry.asks else { return false }
+            session.askFor([.follows], host: entry.list.host)
+            return true
+        }
+        // Left, the list gives the line back: the lamp is on it again, and nothing in the list is lit.
+        guard Self.canWalk(place: place, open: openLayers), walk.walk(to: .people(entry.list), from: RequestsEntry.id)
+        else { return false }
+        selectedItemID = nil
+        return true
+    }
+
+    /// A list of people opened as a page of its own — all a search found (#319): one more step of the
     /// walk, with its figure lit, so leaving the list gives the figure back (`ShellWalk.open`).
     private func openPeople(_ list: PeopleList) -> Bool {
         guard Self.canWalk(place: place, open: openLayers) else { return false }
@@ -2046,6 +2070,8 @@ public struct FediqoRootView: View {
         if case .tag = left.step { session.reload.endTag() }
         // What a list of the hashtags followed was told goes with its step (#318).
         if case .followedTags(let page) = left.step { people.followed.closed(page) }
+        // The tab in front of somebody's page goes with its last step (F9, decided 2026-10-13).
+        people.left(left.step, of: walk)
         selectedItemID = left.lamp
         returnFromErrand()
         return true
@@ -2078,6 +2104,8 @@ public struct FediqoRootView: View {
         ) else { return clearWalk() }
         if hadLink { linkReader.close() }
         for page in lists { people.followed.closed(page) }
+        // Only the tag's page is left of the walk: no person's page is in it any more.
+        people.tabs.leftAll()
         if let lamp = selectedItemID,
            !session.heldPosts(under: tag, latest: prefs.latestDate).contains(where: { $0.id == lamp }) {
             selectedItemID = nil
@@ -2112,6 +2140,7 @@ public struct FediqoRootView: View {
         // What each list of the hashtags followed was told goes with its step (#318).
         for page in walk.followedTags { people.followed.closed(page) }
         walk.clear()
+        people.tabs.leftAll()
         errand = nil
     }
 
@@ -2146,14 +2175,28 @@ public struct FediqoRootView: View {
 
     /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage, on
     /// Preferences and on Account. Elsewhere it is the platform's.
+    ///
+    /// **The walk is asked first** (F9): with somebody's page in front the tabs are that
+    /// page's, round their ring, and the timelines are not turned from under it — to change
+    /// timeline the reader leaves first. Under anything drawn over the page the key does nothing.
     private func rotatePlaceTab(by step: Int) -> Bool {
-        switch place {
+        if place == .timeline, let person = walk.openedPerson {
+            guard Self.turnsPersonTabs(open: openLayers) else { return false }
+            return people.rotate(person, by: step, lamp: &selectedItemID, in: session)
+        }
+        return switch place {
         case .timeline: session.rotateTab(by: step)
         case .usage: session.rotateUsageTab(by: step)
         case .preferences: session.rotatePreferencesTab(by: step)
         case .account: session.rotateAccountTab(by: step)
         default: false
         }
+    }
+
+    /// Whether Tab turns the tabs of somebody's page, given what is open: their page is what
+    /// is in front, with nothing drawn over it.
+    static func turnsPersonTabs(open: Set<DummyLayer>) -> Bool {
+        DummyCommand.outermost(of: open) == .person
     }
 
     /// The arrangement this window gets for the width it has (#110). See `ShellLayout`.
@@ -2339,11 +2382,11 @@ public struct FediqoRootView: View {
                 search: search,
                 people: people,
                 onOpenListed: { _ = openListed($0) },
-                onOpenPeople: { _ = openPeople($0) },
                 onOpenRising: { _ = openRising($0) },
                 onOpenRisingRow: { _ = openRisingRow($0) },
                 onOpenFound: { _ = openFound($0) },
                 onFollowed: { _ = followedPressed($0) },
+                onRequests: { _ = requestsPressed($0) },
                 onLookUp: lookUpPressed
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {

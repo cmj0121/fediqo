@@ -39,6 +39,11 @@ public struct MastodonPeople: Sendable {
         case followers(of: String)
         /// Whom they follow.
         case following(of: String)
+        /// Who asks to follow the reader (#313): the reader's own, and so asked only signed in.
+        case requests
+
+        /// Where the requests to follow the reader are listed, and under it answered.
+        static let requestsPath = "/api/v1/follow_requests"
 
         /// Where the list is asked. Nothing for an id that could not stand in a path as one
         /// segment: it came out of a stranger's answer.
@@ -46,6 +51,7 @@ public struct MastodonPeople: Sendable {
             switch self {
             case .followers(let id) where ListSubscription.isPathSegment(id): "/api/v1/accounts/\(id)/followers"
             case .following(let id) where ListSubscription.isPathSegment(id): "/api/v1/accounts/\(id)/following"
+            case .requests: Self.requestsPath
             default: nil
             }
         }
@@ -172,6 +178,18 @@ enum MastodonLink {
             return id
         }
         return nil
+    }
+
+    /// What each address the header names says for `name` in its query, whatever the address is
+    /// marked as: nothing for an address that does not say it, and no entry where the header
+    /// names no address. Read to learn which question an answer was to, never to go anywhere.
+    static func said(_ name: String, in header: String?) -> [String?] {
+        guard let header else { return [] }
+        return header.split(separator: "<", omittingEmptySubsequences: false).dropFirst().compactMap { entry -> String?? in
+            guard let close = entry.firstIndex(of: ">") else { return nil }
+            let items = URLComponents(string: String(entry[..<close]))?.queryItems ?? []
+            return .some(items.first { $0.name == name }?.value)
+        }
     }
 }
 

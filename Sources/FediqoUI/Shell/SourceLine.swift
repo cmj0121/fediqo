@@ -45,7 +45,7 @@ extension SourceWork.Purpose {
         case .serverCheck: "checkmark.seal"
         case .picture: "photo"
         case .emoji: "face.smiling"
-        case .signInCheck, .signIn: "person.badge.key"
+        case .signInCheck, .signIn: SourceRow.permissionSymbol
         case .signOut: "rectangle.portrait.and.arrow.right"
         case .write: "square.and.pencil"
         case .search: "magnifyingglass"

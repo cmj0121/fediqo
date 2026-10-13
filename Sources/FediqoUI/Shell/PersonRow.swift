@@ -20,6 +20,12 @@ import SwiftUI
 ///             @handle@host                      (pill)
 ///             the first line of their own words      […]
 ///
+/// **How the reader stands to them is pills too, after what kind of account it is** (#310,
+/// #313): the words their own page says it in, in its order, of what the row was handed — and
+/// nothing where it was handed none. Which sign-in is told, and when the source is asked, is
+/// the list's (`ShellPeoplePages`). Where a narrow page has no room for them beside the handle
+/// they stand under it, and wrap, so no pill is cut.
+///
 /// **Everything on it but the marks is a stranger's word.** The name and the handle are the
 /// ones made fit for a line where they entered (`Person.lineName`, `.lineHandle`); their own
 /// words are as many lines as they wrote, and are made one line here. The lock and the pills are
@@ -29,6 +35,9 @@ import SwiftUI
 /// named action on it, as on a notice's line.
 struct PersonRow: View {
     let person: Person
+    /// How the reader stands to them, as the source last said — or nothing: nobody asked, or
+    /// it has not said.
+    var stands: PersonStanding?
     var selected = false
     /// A press on the row: the lamp, or the opening — `DummyCommand.tapped` decides which.
     var onPress: (() -> Void)?
@@ -37,6 +46,9 @@ struct PersonRow: View {
     /// The row's `…`, where the list it stands on has something to do to a row. Nothing on a
     /// list that has not.
     var menu: NoticeRow.Menu?
+    /// Accepting their request to follow the reader (#313), where the row is of somebody who
+    /// asks: a press on the row, in words. Nothing on any other list.
+    var accept: (() -> Void)?
     /// Where a hosted row reports what it laid out and what it says. See `PersonRowProbe`.
     var probe: PersonRowProbe?
 
@@ -67,12 +79,18 @@ struct PersonRow: View {
         }
     }
 
+    /// How the reader stands to them, as pills: their page's own words, in its order.
+    static func standing(_ stands: PersonStanding?, language: DummyLanguage? = nil) -> [String] {
+        stands.map { PersonActing.pills(of: $0, language: language) } ?? []
+    }
+
     /// What a listener is read: the name, the handle, that they ask before anyone may follow,
-    /// each pill, and the first line of their words — whatever of those there is.
-    static func spoken(_ person: Person, language: DummyLanguage? = nil) -> String {
+    /// each pill, how the reader stands to them, and the first line of their words — whatever
+    /// of those there is.
+    static func spoken(_ person: Person, stands: PersonStanding? = nil, language: DummyLanguage? = nil) -> String {
         var parts = [person.lineName, person.lineHandle]
         if person.locked { parts.append(PersonSaid.locked(language: language)) }
-        parts += pills(of: person, language: language)
+        parts += pills(of: person, language: language) + standing(stands, language: language)
         if let words = firstLine(of: person) { parts.append(words) }
         return parts.filter { !$0.isEmpty }.joined(separator: L10n.t("people.row.between", language: language))
     }
@@ -85,8 +103,9 @@ struct PersonRow: View {
     // MARK: - Drawn
 
     var body: some View {
-        let heard = Self.spoken(person)
+        let heard = Self.spoken(person, stands: stands)
         let kinds = Self.pills(of: person)
+        let standing = Self.standing(stands)
         let words = Self.firstLine(of: person)
         let narrow = shellLayout == .narrow
         let _ = probe?.spoken = heard
@@ -97,20 +116,12 @@ struct PersonRow: View {
                     name
                     Spacer(minLength: 0)
                     if !narrow {
-                        pillRun(kinds)
+                        pillRun(kinds + standing)
+                        accepting
                         dots
                     }
                 }
-                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-                    Text(person.lineHandle)
-                        .shellFont(.meta)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .modifier(PersonProbed(.handle, probe: probe))
-                    Spacer(minLength: 0)
-                    if narrow { pillRun(kinds) }
-                }
+                handleLine(kinds: kinds, standing: standing, narrow: narrow)
                 if words != nil || (narrow && menu != nil) {
                     HStack(alignment: .center, spacing: ShellSpace.snug) {
                         if let words {
@@ -122,7 +133,10 @@ struct PersonRow: View {
                                 .modifier(PersonProbed(.words, probe: probe))
                         }
                         Spacer(minLength: 0)
-                        if narrow { dots }
+                        if narrow {
+                            accepting
+                            dots
+                        }
                     }
                 }
             }
@@ -142,6 +156,7 @@ struct PersonRow: View {
         .accessibilityAddTraits(onOpen == nil ? [] : .isButton)
         .accessibilityAction(.default) { onOpen?() }
         .accessibilityActions {
+            if let accept { Button(Self.acceptSpoken(person), action: accept) }
             if let menu { NoticeMenuActions(more: menu.more, asks: menu.asks) }
         }
         .modifier(NoticeRowMenu(menu: menu))
@@ -155,6 +170,52 @@ struct PersonRow: View {
                 .fill(ShellChrome.phosphor(colorScheme))
                 .frame(width: DummyItemRow.Box.lamp)
         }
+    }
+
+    /// The row's second line: their handle, and on a narrow page the pills. **With a word of
+    /// how the reader stands, beside the handle where all of it fits whole, and under it where
+    /// it does not** — wrapped there, so no pill is cut.
+    ///
+    /// **On a wide page the pills stand beside the name and have no such way down**: three or
+    /// four are the most a source says of anybody at once — what kind of account, that they
+    /// follow the reader, that the reader follows or asked, that they are muted — and with
+    /// more the name gives way and is cut at its end, the pills never.
+    @ViewBuilder
+    private func handleLine(kinds: [String], standing: [String], narrow: Bool) -> some View {
+        if narrow, !standing.isEmpty {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+                    handle.fixedSize()
+                    Spacer(minLength: 0)
+                    pillRun(kinds + standing)
+                }
+                VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                    HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+                        handle
+                        Spacer(minLength: 0)
+                        pillRun(kinds)
+                    }
+                    PersonStandingPills(pills: standing)
+                        .modifier(PersonProbed(.stands, probe: probe))
+                }
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
+                handle
+                Spacer(minLength: 0)
+                if narrow { pillRun(kinds) }
+            }
+        }
+    }
+
+    /// Their handle, one line, cut in its middle where there is no room for it whole.
+    private var handle: some View {
+        Text(person.lineHandle)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .modifier(PersonProbed(.handle, probe: probe))
     }
 
     /// Their picture as the source that listed them holds it, or the empty plate — a post
@@ -191,6 +252,21 @@ struct PersonRow: View {
                     .help(PersonSaid.locked())
                     .modifier(PersonProbed(.lock, probe: probe))
             }
+        }
+    }
+
+    /// What accepting their request is called to a pointer and a listener.
+    static func acceptSpoken(_ person: Person, language: DummyLanguage? = nil) -> String {
+        PersonActing.acceptSpoken(person.lineHandle, at: person.source.host, language: language)
+    }
+
+    /// The press that accepts their request: words, beside the row's `…`.
+    @ViewBuilder
+    private var accepting: some View {
+        if let accept {
+            ShellLinkButton(PersonActing.name(.acceptRequest), action: accept)
+                .help(Self.acceptSpoken(person))
+                .fixedSize()
         }
     }
 
@@ -243,6 +319,8 @@ struct ShellWellPill: View {
 final class PersonRowProbe {
     enum Part: Hashable {
         case face, name, lock, handle, words, pills, more
+        /// How the reader stands to them, where it stands under the handle.
+        case stands
     }
 
     static let space = "PersonRow.parts"

@@ -89,6 +89,7 @@ struct MastodonHostSaysTests {
             (.longerAccount, "/api/v1/instance/extended_description"), (.knownServers, "/api/v1/instance/peers"),
             (.activity, "/api/v1/instance/activity"), (.featuredTags, "/api/v1/accounts/\(person)/featured_tags"),
             (.featuredPeople, "/api/v1/accounts/\(person)/endorsements"),
+            (.pinnedPosts, "/api/v1/accounts/\(person)/statuses?pinned=true"),
         ]
         for (thing, path) in open {
             let answer = try await ask(path)
@@ -116,7 +117,7 @@ struct MastodonHostSaysTests {
         }
         let weeks = try await ask("/api/v1/instance/activity")
         #expect(((weeks.json as? [[String: Any]])?.first?["statuses"]) is String, "every figure a string")
-        // All ten were asked.
+        // All eleven were asked.
         #expect(Set(open.map(\.0)).union(signed.map(\.0)) == Set(MastodonHostThing.allCases))
     }
 }

@@ -73,6 +73,36 @@ struct AccountAddTests {
         #expect(!session.availability.timelineEnabled)
     }
 
+    /// Its front page names nothing and links `joinmastodon.org`, and nothing is rising there
+    /// (`200 []`) — which used to add it as a Mastodon with nothing in it. What it says of itself
+    /// is what refuses it, with the sentence every other kind is refused with.
+    @Test("A GoToSocial is refused by name from its own account of itself; store empty")
+    func refuseGoToSocialByItsOwnAccount() async {
+        let schema = "http://nodeinfo.diaspora.software/ns/schema/2.0"
+        let http = FixtureHTTP([
+            "/": .text(#"<html><body><a href="https://joinmastodon.org/servers">a server picker</a></body></html>"#),
+            "/api/v1/trends/statuses": .text("[]"),
+            "/.well-known/nodeinfo": .text(
+                #"{"links":[{"rel":"\#(schema)","href":"https://social.example/nodeinfo/2.0"}]}"#
+            ),
+            "/nodeinfo/2.0": .text(#"{"version":"2.0","software":{"name":"gotosocial","version":"0.22.2"}}"#),
+        ])
+        let session = ShellSession(http: http)
+        session.hostname = "social.example"
+        await session.add()
+        #expect(
+            session.refuse
+                == String(
+                    format: L10n.t("account.refuse.kind", language: .english),
+                    "social.example",
+                    "GoToSocial"
+                )
+        )
+        #expect(session.sources.isEmpty)
+        #expect(session.notes.isEmpty)
+        #expect(session.queries.isEmpty)
+    }
+
     @Test("Adding the same host again is a duplicate")
     func duplicateAdd() async {
         let session = ShellSession(http: FixtureHTTP([

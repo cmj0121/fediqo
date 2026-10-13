@@ -253,7 +253,7 @@ public struct Detector: Sendable {
             // this cannot.
             let html = String(decoding: data, as: UTF8.self)
             if case .named(let kind) = HTMLKind.classify(html) {
-                return kind
+                return try await byItsOwnAccount(kind, host: host)
             }
             // Judged after the software markers and before anything else, and that order is
             // deliberate: a forum that merely *sits behind* a filter still serves its own front
@@ -282,7 +282,7 @@ public struct Detector: Sendable {
         do {
             let (data, _) = try await http.data(from: instance)
             probeTalked = true
-            return Probe.kind(from: data)
+            return try await byItsOwnAccount(Probe.kind(from: data), host: host)
         } catch {
             // **The guard the comment above the fall-through has always relied on, finally
             // firing.** Written `if error is CancellationError` it never did, so a reader who
@@ -295,6 +295,117 @@ public struct Detector: Sendable {
 
         if !htmlTalked && !probeTalked { throw DetectError.unreachable }
         return .unknown
+    }
+
+    /// A host the page or the probe took for a Mastodon, asked what it calls itself.
+    ///
+    /// **Because neither of those two is the server naming itself.** A link to `joinmastodon.org`
+    /// is something any server may write to a visitor, and a `title` beside a bare `version` is
+    /// the shape of an answer, not a name. Asked 2026-10-13: a GoToSocial 0.22.2 has both — no
+    /// `generator` tag, that link in its own help text, a `version` that is a number — and was
+    /// joined as a Mastodon with nothing in it, the refusal written for its kind never reached.
+    ///
+    /// **Only an answer of Mastodon is asked about, and only one word changes it.** Every other
+    /// kind was named by the server already. And whatever is heard here that is not that word —
+    /// no answer, an answer nobody can read, a name this app has never met — leaves the host a
+    /// Mastodon as it was. Whatever a server calls itself, only that one word changes the answer:
+    /// a word not known must never be a server refused.
+    ///
+    /// Cancellation is the one thing thrown, for the reason the two reads above give.
+    private func byItsOwnAccount(_ kind: ProtocolKind, host: String) async throws -> ProtocolKind {
+        guard kind == .mastodon else { return kind }
+        return try await NodeInfo(http: http).software(of: host) == "gotosocial" ? .gotosocial : kind
+    }
+}
+
+/// What a server calls itself, in the one document where it says so by name.
+///
+/// **Node information, and not the instance document.** Both were asked of both servers on
+/// 2026-10-13: the instance document of a GoToSocial 0.22.2 names no software anywhere — its
+/// `version` is a number and its `source_url` is one more link — while its node information says
+/// `"software":{"name":"gotosocial"}` and a Mastodon 4.6.6's says `"name":"mastodon"`.
+///
+/// Two asks, as the document is published: `/.well-known/nodeinfo` lists where it is, and the
+/// address listed is read. Mastodon lists one (schema 2.0); GoToSocial lists two (2.0 and 2.1),
+/// and either carries the name.
+struct NodeInfo: Sendable {
+    struct Listing: Decodable {
+        struct Link: Decodable {
+            var rel: String?
+            var href: String?
+        }
+
+        var links: [Link]?
+    }
+
+    struct Body: Decodable {
+        struct Software: Decodable {
+            var name: String?
+        }
+
+        var software: Software?
+    }
+
+    private static let schema = "http://nodeinfo.diaspora.software/ns/schema/2."
+
+    let http: any HTTPClient
+
+    /// The name, lowercased, or nothing where it could not be read — for whatever reason.
+    func software(of host: String) async throws -> String? {
+        guard let listing = Host.httpsURL(host: host, path: "/.well-known/nodeinfo"),
+              let listed = try await read(Listing.self, from: listing),
+              let document = Self.document(listed, host: listing.host()),
+              let body = try await read(Body.self, from: document)
+        else {
+            return nil
+        }
+        return body.software?.name?.lowercased()
+    }
+
+    /// The first address listed that this device may ask: **of the host that was asked** — a
+    /// listing is a stranger's JSON, and it does not get to send this app to a server nobody
+    /// typed.
+    static func document(_ listing: Listing, host: String?) -> URL? {
+        for link in listing.links ?? [] where link.rel?.hasPrefix(schema) == true {
+            if let url = Host.fetchableURL(link.href), isOf(url, host: host) { return url }
+        }
+        return nil
+    }
+
+    /// Whether `url` is the host that was asked and nothing beside it: `https` on its own port,
+    /// that name, and nobody's name or password in front of it.
+    static func isOf(_ url: URL?, host: String?) -> Bool {
+        guard let url, let host, Host.isFetchable(url) else { return false }
+        return url.host()?.lowercased() == host.lowercased()
+            && (url.port ?? 443) == 443
+            && url.user() == nil && url.password() == nil
+    }
+
+    /// How much either answer may bring. The two servers asked sent a few hundred bytes.
+    static let ceiling = 1 << 20
+
+    /// One of the two asks, or nothing where it was not an answer of this host's, of this size,
+    /// in this shape.
+    ///
+    /// **Kept to the host twice over, because the client handed in is not always the live one.**
+    /// The live client follows a redirect to any `https` host and takes 128 MiB, so where it is
+    /// the one in hand it is told to stay on its origin and under the ceiling as it transfers.
+    /// A client wrapped by something that records or gates it cannot be told, so whatever comes
+    /// back is judged again: an answer that ended at another address, or over the ceiling, is
+    /// not this host's account of itself.
+    private func read<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T? {
+        let kept: any HTTPClient = (http as? URLSessionClient)?.capped(to: Self.ceiling).stayingOnOrigin() ?? http
+        do {
+            let (data, response) = try await kept.data(from: url)
+            guard (200 ..< 300).contains(response.statusCode),
+                  Self.isOf(response.url, host: url.host()),
+                  data.count <= Self.ceiling
+            else { return nil }
+            return try? JSONDecoder().decode(type, from: data)
+        } catch {
+            if Cancellation.happened(error) { throw CancellationError() }
+            return nil
+        }
     }
 }
 

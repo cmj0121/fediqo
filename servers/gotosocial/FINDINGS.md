@@ -41,21 +41,25 @@ in status, in who may ask, or in words.
 
 ## What this app does with it today
 
-Read off the code and run through it (`GoToSocialSaysTests`, three checks, passing). The app was
-not launched.
+Read off the code and run through it (`GoToSocialSaysTests`, three checks, passing; the first two
+entries were turned by M0, 2026-10-13). The app was not launched.
 
 - **`Detector.detect`**:
   - Mastodon 4.6.6: `.mastodon`
-  - GoToSocial 0.22.2: **`.mastodon`** — not `.gotosocial`. Its front page has no `generator` tag, and its own help text
-    links `joinmastodon.org/servers`, which is the last marker `HTMLKind.classify` takes for a Mastodon. Without that
-    link the probe would say the same: `version` is `0.22.2+git-fb2bf13` and never says "gotosocial"
-  - Where: `Detect.swift` (`HTMLKind.classify`, `Probe.kind`)
+  - GoToSocial 0.22.2: **`.gotosocial`**, since M0 (2026-10-13). Until then `.mastodon`: its front page has no
+    `generator` tag, and its own help text links `joinmastodon.org/servers`, which is the last marker
+    `HTMLKind.classify` takes for a Mastodon; without that link the probe would say the same, since `version` is
+    `0.22.2+git-fb2bf13` and never says "gotosocial". Both still say so. What names it is its node information, which
+    a host taken for a Mastodon is now asked: `/.well-known/nodeinfo` lists `/nodeinfo/2.0` and `/nodeinfo/2.1` on
+    this server (`/nodeinfo/2.0` alone on Mastodon), and the document says `"software":{"name":"gotosocial"}`
+    (`"name":"mastodon"` on Mastodon). Only that word changes the answer; any other, or none, leaves it `.mastodon`
+  - Where: `Detect.swift` (`HTMLKind.classify`, `Probe.kind`, `NodeInfo`)
 - **A person adds the host**:
   - Mastodon 4.6.6: joined, public timeline and trends read
-  - GoToSocial 0.22.2: **joined as a Mastodon, with nothing in it.** `SourceJoin` never reaches its refusal of
-    `.gotosocial` ("%@ is GoToSocial. Only Mastodon can be added this session."). `MastodonJoin.ingest` refuses only
-    when *both* reads fail: the public timeline is 401, what is rising is `200 []`, so the source is added and the store
-    is empty
+  - GoToSocial 0.22.2: **refused by name, nothing added** — "%@ is GoToSocial. Only Mastodon can be added this
+    session." Until M0 it was joined as a Mastodon with nothing in it, and that is still what a join would meet were
+    the host let through: `MastodonJoin.ingest` refuses only when *both* reads fail, the public timeline is 401 and
+    what is rising is `200 []`
   - Where: `Join.swift` (`MastodonJoin.ingest`, `SourceJoin.reads`), `ShellSession.refuseMessage`
 - **`MastodonClient.said()`**:
   - Mastodon 4.6.6: kind Mastodon, 500 characters, featured hashtags present (10), the rest unsaid
@@ -427,6 +431,108 @@ takes for "no such address" — as it is meant to. Two of the twenty word it oth
   - GoToSocial 0.22.2: 200 `[]`
   - What in the app rests on it: `EmojiCatalogueStore`
 
+### Asked later — the posts a person pinned
+
+Asked 2026-10-13 with `curl`, after the 172 and not counted among them; nobody in either seed has pinned anything, so
+posts were pinned through each server's own API and unpinned again. Kept as checks in `MastodonPinnedSaysTests.swift`
+(both suites) and as answers in `MastodonPinnedCaptures.swift`.
+
+- **`accounts/:id/statuses?pinned=true`, with no sign-in**:
+  - Mastodon 4.6.6: 200, as to anybody; a token that is none is answered as nobody is
+  - GoToSocial 0.22.2: **401**, as every read
+  - What in the app rests on it: `MastodonPerson.pinned`: read unsigned where the source allows
+- **The same, of somebody who pinned nothing; of an id nobody has**:
+  - Mastodon 4.6.6: `200 []`, no `Link`; 404 `"Record not found"`
+  - GoToSocial 0.22.2: `200 []`, no `Link`; **`200 []`**
+  - What in the app rests on it: none pinned is an empty stretch; somebody unheard of is told only on Mastodon
+- **The same, of somebody who pinned some**:
+  - Mastodon 4.6.6: all of them, **the one pinned last first**; `Link` has `rel="prev"` alone and repeats `pinned=true`
+  - GoToSocial 0.22.2: all of them, **the one pinned first first**; **no `Link` at all**
+  - What in the app rests on it: the source's order is kept, and is not newest first
+- **Whether a post says it is pinned**:
+  - Mastodon 4.6.6: `pinned` is sent **to its author alone** (`true`, and `false` on their other posts); a boost and
+    every post read by anybody else carry no such field
+  - GoToSocial 0.22.2: `pinned` on every post to everybody, about the reader: `true` to the author, **`false` to
+    anybody else on a post that is pinned**
+  - What in the app rests on it: nothing on a post is read for it — a `false` here would hide every pinned post
+- **With `limit` shorter than what is pinned**:
+  - Mastodon 4.6.6: cut; `rel="next"` names `max_id` the last listed post's id, **in a list that is not in id order**:
+    the next stretch repeats, and a pinned post with a larger id than the last listed would never come
+  - GoToSocial 0.22.2: `limit` and `max_id` are passed over: the whole answer again
+  - What in the app rests on it: no length is asked for; a next is followed, and `PostsRead` lists nothing twice
+- **A made-up word in place of `pinned`; `pinned=false`**:
+  - Mastodon 4.6.6: the ordinary newest posts; `Link` without the word, or repeating `pinned=false` as sent
+  - GoToSocial 0.22.2: the ordinary newest posts, boosts among them; `Link` says **`pinned=false`**, as on every
+    ordinary answer
+  - What in the app rests on it: how ordinary posts are told from pinned ones — an address for more that does not say
+    the word as a yes, or a boost. A server that passes the word over, names no address and lists no boost is not told
+- **`pinned=1`, `pinned=yes`**:
+  - Mastodon 4.6.6: both a yes, repeated as sent
+  - GoToSocial 0.22.2: `1` a yes; `yes` is **400** `"error parsing pinned"`
+  - What in the app rests on it: `true` is what is sent; `true` and `1` are what is believed in an address
+- **A boost pinned by who made it; somebody else's post pinned**:
+  - Mastodon 4.6.6: 422 `"A boost cannot be pinned"`; 422 `"Someone else's post cannot be pinned"`
+  - GoToSocial 0.22.2: 422 `"cannot pin boosts"`; 422, the post "does not belong to" them
+  - What in the app rests on it: an answer listing a boost is not the pinned posts; #334
+
+### Asked later — what is taken from somebody followed
+
+Asked 2026-10-13 with a short script, after the 172 and not counted among them; each follow was put back as its seed
+left it. Kept as checks in `MastodonStandingSaysTests.swift` (`whatIsTakenIsNarrowed`) and `GoToSocialSaysTests.swift`
+(`narrowsAFollow`), and as answers in `MastodonStandingCaptures.swift`.
+
+- **A follow said again with `reblogs` or `notify` alone, of somebody already followed**:
+  - Mastodon 4.6.6: 200, the whole standing (sixteen things); the word sent changes its own thing, the other stays
+  - GoToSocial 0.22.2: the same, with its fourteen things (no `languages`, no `muting_expires_at`)
+  - What in the app rests on it: `MastodonStanding.narrow` sends the one word that changed; nothing differs
+- **A follow with no word, of somebody already followed**:
+  - Mastodon 4.6.6: 200, both as they stood
+  - GoToSocial 0.22.2: the same — and somebody who had to agree, once followed, **is not asked again**
+  - What in the app rests on it: P5a: a switch pressed re-requests nobody; a plain follow resets neither
+- **The same with a word, of somebody asked and not yet agreed**:
+  - Mastodon 4.6.6: still `requested`; the word is kept on the request and said back
+  - GoToSocial 0.22.2: the same; when the other agrees, the follow has the words the request carried
+  - What in the app rests on it: nothing is drawn of it while only asked (`PersonStanding`: said of a follow alone)
+- **How the reader stands, read by a sign-in with the reading words alone; the same follow sent by it**:
+  - Mastodon 4.6.6: needs `read:follows` to be told; then told both; the follow is 403 `insufficient_scope`
+  - GoToSocial 0.22.2: told both (item 3 below); 403 `"Forbidden: token has insufficient scope permission"` (item 2)
+  - What in the app rests on it: a switch is offered only to a sign-in that may change who the reader follows
+- **Somebody not followed, read; `reblogs=perhaps`**:
+  - Mastodon 4.6.6: `showing_reblogs: false`, `notifying: false`; **read as a yes**
+  - GoToSocial 0.22.2: the same two; not asked
+  - What in the app rests on it: neither is read off anybody not followed; `true` and `false` are what is sent
+
+### Asked later — requests to follow, and removing a follower
+
+Asked 2026-10-13 with a short script, after the 172 and not counted among them. Kept as checks in
+`MastodonStandingSaysTests.swift` (`requestsAreAnswered`) and `GoToSocialSaysTests.swift` (`answersRequests`), and as
+answers in `MastodonRequestsCaptures.swift`.
+
+- **`follow_requests`, as who may change who follows them; with the reading words alone; with no sign-in**:
+  - Mastodon 4.6.6: 200, accounts; `Link` `since_id` prev, and `max_id` next only where a `limit` cut it; 403 (but
+    `read:follows` is enough to list); 401
+  - GoToSocial 0.22.2: 200, accounts; `Link` `max_id` next and `min_id` prev **always**, with `limit`; 403; 401
+  - What in the app rests on it: `MastodonPeople.List.requests`: read on by the source's own next; here a next is
+    named after the last stretch too, and reading on from it brings nobody
+- **How many ask**:
+  - Mastodon 4.6.6: only `source.follow_requests_count` in `accounts/verify_credentials`; nothing on the list
+  - GoToSocial 0.22.2: the same
+  - What in the app rests on it: the line on the reader's own page says no figure: the page does not ask that check
+- **`follow_requests/:id/authorize` · `/reject`, of somebody who asked**:
+  - Mastodon 4.6.6: 200, the whole standing; `followed_by` true · false
+  - GoToSocial 0.22.2: the same, with its fourteen things
+  - What in the app rests on it: `MastodonStanding.answer`
+- **Either again; of a request taken back; of one already answered; of somebody who never asked; of an id nobody has**:
+  - Mastodon 4.6.6: 404 `"Record not found"`, nothing changed
+  - GoToSocial 0.22.2: 404 `"Not Found"`, nothing changed
+  - What in the app rests on it: a row gone stale can only fail: the press did not arrive, and the row comes back
+- **`accounts/:id/remove_from_followers`**:
+  - Mastodon 4.6.6: 200, the whole standing with `followed_by: false`; again, or of somebody who already left, the
+    same and nothing changed; of somebody who has only asked, 200 and **the request stays**; 404 for an id nobody has
+  - GoToSocial 0.22.2: **404 `"Not Found"` always — there is no such address**, for a follower as for anybody
+  - What in the app rests on it: `MastodonStanding.removeFollower`: here the press does not arrive and says so; the
+    item is still offered (nothing says beforehand that the address is absent)
+
 ## Could not be asked, or not comparable — 11
 
 - **An app registered with a word no server knows; with no words (2)**:
@@ -457,8 +563,9 @@ its public timeline is one of them).
 
 Each names the unit of `PLAN-mastodon.md` it touches.
 
-1. **That a host the detector calls Mastodon is one.** This one is called Mastodon and joined
-   empty — P2, P10b, P16, P18 and every read "with no sign-in" would meet 401, not content.
+1. **That a host the detector calls Mastodon is one.** This one was called Mastodon and joined
+   empty until M0 asked it what it calls itself; a server that does not say is still taken for
+   one — P2, P10b, P16, P18 and every read "with no sign-in" would meet 401, not content.
 2. **That a scope refusal is recognisable.** The 403 here has no `insufficient_scope` and not
    Mastodon's sentence, and names no missing word — P4, P5b, P6a, P7, P8, P11, P17 and the
    "signed in for less" line of each would read it as any other 403.
@@ -492,3 +599,5 @@ Each names the unit of `PLAN-mastodon.md` it touches.
 15. **That a list just made can be read.** Its timeline drops the connection until somebody is
     on it — #336 (#337).
 16. **That a withdrawn post is gone on the next ask** — #327: here it answers 200 again.
+17. **That a post says whether it is pinned.** Here `pinned` is about the reader, and `false` on a
+    pinned post read by anybody but its author; Mastodon sends it to the author alone — M7, #334.

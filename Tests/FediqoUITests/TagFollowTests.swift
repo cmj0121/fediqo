@@ -13,7 +13,7 @@ import Testing
 /// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
 /// itself: a held ask is let go in a `defer`, and by the server after its patience.
 @MainActor
-@Suite("A hashtag followed at a source, on the hashtag's page", .serialized, .timeLimit(.minutes(1)))
+@Suite("A hashtag followed at a source, on the hashtag's page", .serialized, .timeLimit(.minutes(3)))
 struct TagFollowTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)

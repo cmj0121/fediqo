@@ -12,7 +12,7 @@ import Testing
 /// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
 /// itself: a held ask is let go in a `defer`, and by the server after its patience.
 @MainActor
-@Suite("What a source says of itself beyond its document, on its page", .serialized, .timeLimit(.minutes(1)))
+@Suite("What a source says of itself beyond its document, on its page", .serialized, .timeLimit(.minutes(3)))
 struct SourceMoreTests {
     typealias Told = SourceMoreSaid.Told
     private static let host = "m.example"

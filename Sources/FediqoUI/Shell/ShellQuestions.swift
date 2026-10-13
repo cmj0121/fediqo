@@ -304,7 +304,7 @@ enum ShellQuestion {
     static func bookmarks(host: String, notices: Bool = false, language: DummyLanguage? = nil) -> ShellConfirmation {
         let key = notices ? "notices.ask.actsBookmarks" : "item.bookmark.ask"
         return ShellConfirmation(
-            symbol: "bookmark",
+            symbol: SourceRow.permissionSymbol,
             title: String(format: L10n.t("item.bookmark.ask.title", language: language), host),
             line: L10n.t(key + ".line", language: language),
             help: String(format: L10n.t(key + ".detail", language: language), host),
@@ -332,14 +332,14 @@ enum ShellQuestion {
         guard grant == .unasked else {
             let key = grant != .writing ? "notices.ask.reads" : bookmarks ? "notices.ask.actsBookmarks" : "notices.ask.acts"
             return ShellConfirmation(
-                symbol: "bell", title: title, line: L10n.t(key + ".line", language: language),
+                symbol: SourceRow.permissionSymbol, title: title, line: L10n.t(key + ".line", language: language),
                 help: String(format: L10n.t(key + ".detail", language: language), host),
                 choices: [.init(yes, L10n.t("item.bookmark.ask.confirm", language: language), role: .keyed)],
                 cancel: cancel
             )
         }
         return ShellConfirmation(
-            symbol: "bell", title: title, line: L10n.t("notices.ask.choose.line", language: language),
+            symbol: SourceRow.permissionSymbol, title: title, line: L10n.t("notices.ask.choose.line", language: language),
             help: String(format: L10n.t("notices.ask.choose.detail", language: language), host),
             choices: [
                 .init(signInRead, L10n.t("notices.ask.choose.read", language: language), role: .keyed),
@@ -436,6 +436,20 @@ enum ShellQuestion {
             title: String(format: L10n.t("person.unfollow.ask.title", language: language), named, host),
             line: L10n.t("person.unfollow.ask.line", language: language), help: nil,
             choices: [.init(yes, PersonActing.name(.unfollow, language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
+    /// Refusing somebody's request to follow the reader, or removing somebody from following
+    /// them (#313): each takes something from another person, so each is asked about first
+    /// and says what it does. `named` is their handle, already made fit for a line.
+    static func about(_ act: PersonAct, _ named: String, at host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        let key = act == .removeFollower ? "person.removeFollower.ask" : "person.refuse.ask"
+        return ShellConfirmation(
+            symbol: PersonActing.symbol(act),
+            title: String(format: L10n.t(key + ".title", language: language), named, host),
+            line: L10n.t(key + ".line", language: language), help: nil,
+            choices: [.init(yes, PersonActing.name(act, language: language), role: .destructive)],
             cancel: L10n.t("board.choose.cancel", language: language)
         )
     }

@@ -9,10 +9,14 @@ import Foundation
 public struct MastodonWho: Equatable, Sendable {
     public let id: String?
     public let handle: String?
+    /// How many people ask to follow the account (#313), where the check said: **the source's
+    /// figure at that check, and nothing where it said none** — never a count of anything here.
+    public let asking: Int?
 
-    public init(id: String?, handle: String?) {
+    public init(id: String?, handle: String?, asking: Int? = nil) {
         self.id = id
         self.handle = handle
+        self.asking = asking
     }
 
     /// What the check's answer says through a sign-in at `host`: nobody, where it is no
@@ -24,10 +28,26 @@ public struct MastodonWho: Equatable, Sendable {
         struct Me: Decodable {
             let id: String?
             let acct: String?
+            let source: Mine?
+        }
+        /// What the check says of the account to its owner alone.
+        struct Mine: Decodable {
+            let followRequestsCount: Int?
+
+            enum CodingKeys: String, CodingKey {
+                case followRequestsCount = "follow_requests_count"
+            }
+
+            /// Lenient: a figure that is no number is no figure, and the rest of the check stands.
+            init(from decoder: any Decoder) throws {
+                followRequestsCount = try? decoder.container(keyedBy: CodingKeys.self).decode(Int.self, forKey: .followRequestsCount)
+            }
         }
         guard let me = try? JSONDecoder().decode(Me.self, from: body) else { return MastodonWho(id: nil, handle: nil) }
         let id = me.id.flatMap { $0.isEmpty || $0.utf8.count > MastodonOAuth.clientBytes ? nil : $0 }
-        return MastodonWho(id: id, handle: me.acct.flatMap { ownHandle($0, at: host) })
+        // Said only of an account the check named, and never a figure below nothing.
+        let asking = id == nil ? nil : me.source?.followRequestsCount.flatMap { $0 >= 0 ? $0 : nil }
+        return MastodonWho(id: id, handle: me.acct.flatMap { ownHandle($0, at: host) }, asking: asking)
     }
 
     /// The handle of the account a sign-in at `host` signs in, from the name its check gave —

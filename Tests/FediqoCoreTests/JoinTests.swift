@@ -228,6 +228,59 @@ struct JoinTests {
         #expect(await store.sources().isEmpty)
     }
 
+    /// What a GoToSocial 0.22.2 answered a stranger on 2026-10-13: a front page the classifier
+    /// takes for a Mastodon's, a public timeline it keeps (401), nothing rising (`200 []`) — the
+    /// one answer that used to be enough to add it, empty.
+    @Test("A GoToSocial is refused as one at every door, before either read, and nothing is added")
+    func refusesGoToSocialByItsOwnAccount() async throws {
+        let store = ItemStore()
+        let http = Self.gotosocialHTTP(saysWhatItIs: true)
+        await #expect(throws: JoinError.unsupportedKind(.gotosocial)) {
+            try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "social.example")
+        }
+        await #expect(throws: JoinError.unsupportedKind(.gotosocial)) {
+            try await SourceJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                .look(host: "social.example")
+        }
+        await #expect(throws: JoinError.unsupportedKind(.gotosocial)) {
+            try await MastodonJoin(http: http, store: store, catalogues: EmojiCatalogueStore())
+                .join(host: "social.example")
+        }
+        #expect(await store.sources().isEmpty)
+        #expect(await store.all().isEmpty)
+        #expect(Set(await http.paths) == ["/", "/.well-known/nodeinfo", "/nodeinfo/2.0"])
+    }
+
+    /// The other half of the same rule: the host is refused for what it says it is, and for
+    /// nothing else about it. Saying nothing, it is joined as it was before — empty.
+    @Test("The same host, its account of itself unread, is joined as it was before")
+    func aHostThatDoesNotSayIsJoinedAsBefore() async throws {
+        let store = ItemStore()
+        try await SourceJoin(
+            http: Self.gotosocialHTTP(saysWhatItIs: false), store: store, catalogues: EmojiCatalogueStore()
+        ).join(host: "social.example")
+        #expect(await store.sources().map(\.kind) == [.mastodon])
+        #expect(await store.all().isEmpty)
+    }
+
+    private static func gotosocialHTTP(saysWhatItIs: Bool) -> FixtureHTTP {
+        let schema = "http://nodeinfo.diaspora.software/ns/schema/2.0"
+        var routes: [String: FixtureHTTP.Outcome] = [
+            "/": .text(#"<html><body><a href="https://joinmastodon.org/servers">a server picker</a></body></html>"#),
+            "/api/v2/instance": .text(#"{"domain":"social.example","title":"social.example","version":"0.22.2"}"#),
+            "/api/v1/timelines/public": .text(#"{"error":"Unauthorized"}"#, status: 401),
+            "/api/v1/trends/statuses": .text("[]"),
+        ]
+        if saysWhatItIs {
+            routes["/.well-known/nodeinfo"] = .text(
+                #"{"links":[{"rel":"\#(schema)","href":"https://social.example/nodeinfo/2.0"}]}"#
+            )
+            routes["/nodeinfo/2.0"] = .text(#"{"version":"2.0","software":{"name":"gotosocial","version":"0.22.2"}}"#)
+        }
+        return FixtureHTTP(routes)
+    }
+
     @Test("Joining the same host again ingests and does not duplicate the source")
     func joinTwice() async throws {
         let store = ItemStore()

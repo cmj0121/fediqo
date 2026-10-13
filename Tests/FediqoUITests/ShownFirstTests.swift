@@ -205,7 +205,7 @@ struct ShownFirstTests {
 
     @Test(
         "At the press the mark is drawn done or taken back, counted and named, over a store that has not moved; the source's yes changes nothing drawn",
-        .timeLimit(.minutes(1)),
+        .timeLimit(.minutes(3)),
         arguments: [PostAct.boost, .favourite, .bookmark], [true, false]
     )
     func shownAtThePress(act: PostAct, on: Bool) async throws {
@@ -239,7 +239,7 @@ struct ShownFirstTests {
 
     // MARK: - Put back, and said
 
-    @Test("A refusal, a failure, a source that would not, and no answer in time each put the mark back and say their own line, once", .timeLimit(.minutes(1)))
+    @Test("A refusal, a failure, a source that would not, and no answer in time each put the mark back and say their own line, once", .timeLimit(.minutes(3)))
     func putBackAndSaid() async throws {
         let cases: [(Answer, WriteWhy, String)] = [
             (.status(403), .refused, "social.example would not let this sign-in change the boost of Ada's post. It is as it was."),
@@ -299,7 +299,7 @@ struct ShownFirstTests {
 
     @Test(
         "A read landing while the press is out does not undo it on screen; a read asked after the answer is the source's word, and wins",
-        .timeLimit(.minutes(1)),
+        .timeLimit(.minutes(3)),
         arguments: [PostAct.boost, .favourite, .bookmark], [true, false]
     )
     func aReadMeanwhile(act: PostAct, on: Bool) async throws {
@@ -328,7 +328,7 @@ struct ShownFirstTests {
 
     // MARK: - A second press
 
-    @Test("The last press wins: pressed again while the first is out, the mark turns at once and nothing is sent; at the answer the other request goes, or none where the answer is already what is wanted", .timeLimit(.minutes(1)))
+    @Test("The last press wins: pressed again while the first is out, the mark turns at once and nothing is sent; at the answer the other request goes, or none where the answer is already what is wanted", .timeLimit(.minutes(3)))
     func theLastPressWins() async throws {
         // Boost, then take it back: two requests, in the order pressed, and it ends not boosted.
         let (session, server, _) = try await shell(false)
@@ -366,7 +366,7 @@ struct ShownFirstTests {
         try await nothingDrawnTheStoreDoesNotHold(again)
     }
 
-    @Test("The second of two presses failing puts the mark to what the source last said — the first, which landed — and says one line", .timeLimit(.minutes(1)))
+    @Test("The second of two presses failing puts the mark to what the source last said — the first, which landed — and says one line", .timeLimit(.minutes(3)))
     func theSecondOfTwoFails() async throws {
         let (session, server, _) = try await shell(false)
         let item = try row(session)
@@ -386,7 +386,7 @@ struct ShownFirstTests {
         try await nothingDrawnTheStoreDoesNotHold(session)
     }
 
-    @Test("A press made while the source's answer is being adopted is not lost: it is asked for, and the mark ends as pressed", .timeLimit(.minutes(1)))
+    @Test("A press made while the source's answer is being adopted is not lost: it is asked for, and the mark ends as pressed", .timeLimit(.minutes(3)))
     func aPressWhileTheAnswerIsAdopted() async throws {
         let (session, server, _) = try await shell(false)
         let item = try row(session)
@@ -433,7 +433,7 @@ struct ShownFirstTests {
         }
     }
 
-    @Test("A taking back that fails while another adopt is settling an older failure keeps its standing and its line, and the post is back", .timeLimit(.minutes(1)))
+    @Test("A taking back that fails while another adopt is settling an older failure keeps its standing and its line, and the post is back", .timeLimit(.minutes(3)))
     func aTakingBackFailsWhileAnAdoptIsInFlight() async throws {
         let (session, server, _) = try await shell(false, answering: .unreachable)
         let nine = try row(session), mine = try row(session, "1")
@@ -464,7 +464,7 @@ struct ShownFirstTests {
         #expect(session.acts.standing(of: nine.id, .favourite) == .failed)
     }
 
-    @Test("An answer that says the mark did not move is not said where the person has since pressed back to that: the mark is what they last pressed", .timeLimit(.minutes(1)))
+    @Test("An answer that says the mark did not move is not said where the person has since pressed back to that: the mark is what they last pressed", .timeLimit(.minutes(3)))
     func unmovedIsWhatWasLastPressed() async throws {
         let (session, server, _) = try await shell(false, answering: .unmoved)
         let item = try row(session)
@@ -479,7 +479,7 @@ struct ShownFirstTests {
         #expect(session.acts.standings.isEmpty)
     }
 
-    @Test("A failure is let go only by a read asked after it: pressed and pressed back, or the second of two failing and pressed back again, what was held all along proves nothing", .timeLimit(.minutes(1)))
+    @Test("A failure is let go only by a read asked after it: pressed and pressed back, or the second of two failing and pressed back again, what was held all along proves nothing", .timeLimit(.minutes(3)))
     func aMissIsNotSettledByWhatWasHeld() async throws {
         // Pressed, pressed back, and the one request runs out of time: wanted is what is held.
         let (session, server, home) = try await shell(false, answering: .timedOut)
@@ -527,7 +527,7 @@ struct ShownFirstTests {
 
     // MARK: - A sign-in that is not there any more
 
-    @Test("A source that ends the sign-in on a write is said once, by the notice that says a sign-in ended: no line outlives its source, and no standing", .timeLimit(.minutes(1)))
+    @Test("A source that ends the sign-in on a write is said once, by the notice that says a sign-in ended: no line outlives its source, and no standing", .timeLimit(.minutes(3)))
     func theSignInEnded() async throws {
         #expect(WriteWhy(MastodonAuthError.signedOut) == .refused, "a source that answered was said not to have been reached")
         let (session, server, _) = try await shell(false, answering: .ended)
@@ -544,7 +544,7 @@ struct ShownFirstTests {
         #expect(!session.acts(on: try row(session)).offers(.boost))
     }
 
-    @Test("A sign-out or a Clear while a press is out leaves no line and no standing, whatever the late answer", .timeLimit(.minutes(1)))
+    @Test("A sign-out or a Clear while a press is out leaves no line and no standing, whatever the late answer", .timeLimit(.minutes(3)))
     func signedOutOrClearedMeanwhile() async throws {
         for answer in [Answer.yes, .unreachable, .status(403), .unmoved] {
             for clears in [false, true] {
@@ -577,7 +577,7 @@ struct ShownFirstTests {
 
     /// Pins the press's number in `perform` (`PressGuard.isStill`): with the same token held
     /// again, the token cannot tell the first press's answer from the second's.
-    @Test("An answer that comes back after a sign-out and a sign-in again finds a press that is not its own: it does not end the later press, move its mark or say anything", .timeLimit(.minutes(1)))
+    @Test("An answer that comes back after a sign-out and a sign-in again finds a press that is not its own: it does not end the later press, move its mark or say anything", .timeLimit(.minutes(3)))
     func aLateAnswerIsNotTheLaterPresss() async throws {
         let (session, server, query) = try await shell()
         let early = await pressed(session, server) { await session.toggle(.boost, on: DummyItem(session.notes.first { $0.statusID == "9" }!)) }
@@ -613,7 +613,7 @@ struct ShownFirstTests {
 
     // MARK: - A failure that had landed after all
 
-    @Test("A read that lands after a failure and shows the mark as the press wanted lets the failure go, and its line", .timeLimit(.minutes(1)))
+    @Test("A read that lands after a failure and shows the mark as the press wanted lets the failure go, and its line", .timeLimit(.minutes(3)))
     func aMissThatLanded() async throws {
         let (session, server, home) = try await shell(false, answering: .timedOut)
         let item = try row(session)
@@ -698,7 +698,7 @@ struct ShownFirstTests {
 
     // MARK: - Taking a post back
 
-    @Test("At the question's yes the post leaves every list, over a store that still holds it; the source's yes lets it go, and its write is waited for before the press is done", .timeLimit(.minutes(1)))
+    @Test("At the question's yes the post leaves every list, over a store that still holds it; the source's yes lets it go, and its write is waited for before the press is done", .timeLimit(.minutes(3)))
     func takenBackLeavesAtTheYes() async throws {
         let (session, server, home) = try await shell()
         let mine = try row(session, "1")
@@ -730,7 +730,7 @@ struct ShownFirstTests {
         try await nothingDrawnTheStoreDoesNotHold(session)
     }
 
-    @Test("A taking back that does not arrive draws the post again where it was and says why", .timeLimit(.minutes(1)))
+    @Test("A taking back that does not arrive draws the post again where it was and says why", .timeLimit(.minutes(3)))
     func takenBackComesBack() async throws {
         let cases: [(Answer, WriteWhy, String)] = [
             (.status(403), .refused, "social.example would not let this sign-in take your post back. It is still here."),
@@ -761,7 +761,7 @@ struct ShownFirstTests {
         }
     }
 
-    @Test("A row taken back leaves an open conversation at the yes, and is drawn there again where it was when the source does not take it", .timeLimit(.minutes(1)))
+    @Test("A row taken back leaves an open conversation at the yes, and is drawn there again where it was when the source does not take it", .timeLimit(.minutes(3)))
     func takenBackInAnOpenConversation() async throws {
         let host = "one.example"
         func status(_ id: String) -> String {

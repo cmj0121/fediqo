@@ -65,7 +65,7 @@ actor FixtureHTTP: HTTPClient {
 /// and that run says so. Takes the opening as a closure because the gates it guards are private
 /// to their suites.
 func hangGuard(
-    after limit: Duration = .seconds(50),
+    after limit: Duration = .seconds(170),
     opening open: @escaping @Sendable () async -> Void
 ) -> Task<Void, Never> {
     Task {

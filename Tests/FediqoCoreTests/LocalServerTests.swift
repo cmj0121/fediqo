@@ -31,6 +31,14 @@ struct LocalServerTests {
             #expect(kind == .mastodon)
         }
 
+        /// What `Detector` asks a host it took for a Mastodon. Asked 2026-10-13 of 4.6.6: one
+        /// address listed, schema 2.0, and `"software":{"name":"mastodon","version":"4.6.6"}`.
+        @Test("The Mastodon server says of itself, in its node information, that it is mastodon")
+        func mastodonSaysItIsOne() async throws {
+            try await LocalServers.requireHealthy()
+            #expect(try await NodeInfo(http: client()).software(of: LocalServers.mastodon) == "mastodon")
+        }
+
         @Test("A Mastodon host joins and its public notes land in the store")
         func mastodonJoins() async throws {
             try await LocalServers.requireHealthy()

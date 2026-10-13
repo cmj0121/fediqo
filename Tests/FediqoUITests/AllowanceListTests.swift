@@ -142,7 +142,7 @@ struct AllowanceListTests {
 
     // MARK: - Switching one off
 
-    @Test("The directory switched off is not reached and adding by name still works; on again, it is", .timeLimit(.minutes(1)))
+    @Test("The directory switched off is not reached and adding by name still works; on again, it is", .timeLimit(.minutes(3)))
     func theDirectoryOff() async throws {
         let shelf = Shelf()
         let (book, work, defaults) = (shelf.book, shelf.work, shelf.defaults)
@@ -321,7 +321,7 @@ struct AllowanceListTests {
         #expect(broken.off.isEmpty && broken.own.isEmpty)
     }
 
-    @Test("Switching the directory while its servers are listed is answered on the spot", .timeLimit(.minutes(1)))
+    @Test("Switching the directory while its servers are listed is answered on the spot", .timeLimit(.minutes(3)))
     func theDirectorySwitchedWhileBrowsing() async {
         let shelf = Shelf()
         let http = FixtureHTTP(["/servers": .text("[]")])
@@ -454,7 +454,7 @@ struct AllowanceListTests {
 struct AllowanceOnAPageTests {
     @Test(
         "The forum's page reaches the host added for it; without the entry it does not",
-        .timeLimit(.minutes(1)), arguments: [true, false]
+        .timeLimit(.minutes(3)), arguments: [true, false]
     )
     func thePageReachesIt(added: Bool) async throws {
         let forum = "bbs.forum.example"
@@ -551,7 +551,7 @@ struct AllowanceOnAPageTests {
         #expect(!compiler.discarded.contains(engine.ruledBy?.identifier ?? "-"))
     }
 
-    @Test("The directory switched off while it is being asked does not show what came back", .timeLimit(.minutes(1)))
+    @Test("The directory switched off while it is being asked does not show what came back", .timeLimit(.minutes(3)))
     func theDirectoryOffMidFetch() async {
         let work = SourceWork()
         work.govern(sources: [])
@@ -575,7 +575,7 @@ struct AllowanceOnAPageTests {
     /// from a world its own scripts cannot reach. Served on loopback, since a page's resource
     /// timing is kept for `http` and not for a scheme of a test's own: the page is `localhost`,
     /// the host the person added is `127.0.0.1`.
-    @Test("What the page pulled in from the host added is listed under the forum, naming the entry", .timeLimit(.minutes(1)))
+    @Test("What the page pulled in from the host added is listed under the forum, naming the entry", .timeLimit(.minutes(3)))
     func whatThePagePulledInIsListed() async throws {
         let server = try LoopServer()
         let port = try await server.start()

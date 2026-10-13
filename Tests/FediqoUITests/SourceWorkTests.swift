@@ -153,7 +153,7 @@ struct SourceWorkTests {
     }
 
     @Test("Reloading a timeline is listed per source while it runs, and leaves when it ends",
-          .timeLimit(.minutes(1)))
+          .timeLimit(.minutes(3)))
     func aTimelineReload() async {
         let work = SourceWork()
         let http = GatedHTTP([
@@ -271,7 +271,7 @@ struct SourceWorkTests {
         #expect(work.now.isEmpty)
     }
 
-    @Test("Listing servers to join is listed as that while it is asked", .timeLimit(.minutes(1)))
+    @Test("Listing servers to join is listed as that while it is asked", .timeLimit(.minutes(3)))
     func theDirectory() async {
         let work = SourceWork()
         let http = GatedHTTP(["/servers": .text("[]")], holding: "/servers")

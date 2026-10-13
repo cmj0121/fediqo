@@ -131,6 +131,9 @@ enum TimelineSwipe {
         case opened
         /// A page read out of a post: somebody's own, and its sideways is its own.
         case link
+        /// A page opened over it that has tabs of its own — somebody's page: its sideways is
+        /// its own too (`SwipesTabs`), the tab beside and, on the first, the way back.
+        case tabbed
     }
 
     /// What a swipe means now, or nothing where it is not heard: only under a finger, never
@@ -145,7 +148,7 @@ enum TimelineSwipe {
         switch page {
         case .timeline: return searching ? nil : .beside
         case .opened: return .back
-        case .link: return nil
+        case .link, .tabbed: return nil
         }
     }
 
@@ -160,10 +163,18 @@ enum TimelineSwipe {
     ///
     /// **With fewer than two tabs and no detail open it means nothing at all**: a page with
     /// nowhere to go is not listened on, so nothing rubber-bands and no press is cancelled.
-    static func means(touch: Bool, detail: Bool, tabs: Int, covered: Bool = false) -> Means? {
+    /// **Unless the page is one that is left** (`leaves`) — a page opened over another, whose
+    /// first tab's swipe back is the way out of it: that one has somewhere to go with one tab.
+    static func means(touch: Bool, detail: Bool, tabs: Int, leaves: Bool = false, covered: Bool = false) -> Means? {
         guard touch, !covered else { return nil }
         if detail { return .back }
-        return tabs > 1 ? .beside : nil
+        return tabs > 1 || leaves ? .beside : nil
+    }
+
+    /// Whether a swipe back on the tab at `index` leaves the page: on its first tab, where the
+    /// page is one that is left. From any other tab it goes to the tab before.
+    static func leavesPage(from index: Int?, leaves: Bool) -> Bool {
+        leaves && (index ?? 0) == 0
     }
 
     /// Which ways there is somewhere to go, for what a swipe means: a timeline's neighbours, or
@@ -266,19 +277,23 @@ struct SwipesTabs<Tab: Hashable>: ViewModifier {
     /// Whether a detail is opened over the page, and the way back out of it.
     var detail = false
     var back: () -> Void = {}
+    /// The way out of the page itself, where it is one opened over another: on its first tab
+    /// the swipe toward the trailing edge leaves it. Nothing on a page that is a place.
+    var leave: (() -> Void)? = nil
     let select: (Tab) -> Void
 
     @Environment(\.shellTouch) private var touch
     @Environment(\.shellCovered) private var covered
 
     func body(content: Content) -> some View {
-        let means = TimelineSwipe.means(touch: touch, detail: detail, tabs: tabs.count, covered: covered)
+        let means = TimelineSwipe.means(touch: touch, detail: detail, tabs: tabs.count, leaves: leave != nil, covered: covered)
         let index = tabs.firstIndex(of: selected)
         let ways = means.map { TimelineSwipe.ways($0, index: index, count: tabs.count) }
+        let leaves = means == .beside && TimelineSwipe.leavesPage(from: index, leaves: leave != nil)
         content
             .modifier(PageSwipes(
                 slide: slide, enabled: means != nil, key: means == .back ? "back" : "beside",
-                hasNext: ways?.next ?? false, hasPrevious: ways?.previous ?? false,
+                hasNext: ways?.next ?? false, hasPrevious: (ways?.previous ?? false) || leaves,
                 inFront: { means == .back ? "detail" : index.map(String.init) },
                 step: { step in
                     if means == .back {
@@ -286,7 +301,11 @@ struct SwipesTabs<Tab: Hashable>: ViewModifier {
                         back()
                         return true
                     }
-                    guard let to = TimelineSwipe.target(from: index, count: tabs.count, step: step) else { return false }
+                    guard let to = TimelineSwipe.target(from: index, count: tabs.count, step: step) else {
+                        guard step == -1, leaves, let leave else { return false }
+                        leave()
+                        return true
+                    }
                     select(tabs[to])
                     return true
                 }

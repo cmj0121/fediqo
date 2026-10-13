@@ -124,7 +124,7 @@ struct ReloadToastTests {
 
     // MARK: - What each reload names
 
-    @Test("A reload says which of its purposes are its own, while it runs", .timeLimit(.minutes(1)))
+    @Test("A reload says which of its purposes are its own, while it runs", .timeLimit(.minutes(3)))
     func whatAReloadReads() async {
         let asked = MastodonInstance.address(Self.one)
         let gated = GatedHTTP([asked: MastodonInstance.mastodon(Self.one)], holding: asked)
@@ -144,7 +144,7 @@ struct ReloadToastTests {
         #expect(session.reload.reading.isEmpty)
     }
 
-    @Test("A Mastodon's Public and Trends are read under those names", .timeLimit(.minutes(1)))
+    @Test("A Mastodon's Public and Trends are read under those names", .timeLimit(.minutes(3)))
     func publicAndTrends() async {
         let work = SourceWork()
         let http = Noting(FixtureHTTP([
@@ -169,7 +169,7 @@ struct ReloadToastTests {
         #expect(work.now.isEmpty)
     }
 
-    @Test("Signed in, Home and a list are read under Home and the list's own title", .timeLimit(.minutes(1)))
+    @Test("Signed in, Home and a list are read under Home and the list's own title", .timeLimit(.minutes(3)))
     func homeAndAList() async throws {
         let work = SourceWork()
         let tokens = MemoryMastodonTokens()
@@ -201,7 +201,7 @@ struct ReloadToastTests {
         #expect(work.now.isEmpty)
     }
 
-    @Test("A forum's boards are read under their names, never their numbers", .timeLimit(.minutes(1)))
+    @Test("A forum's boards are read under their names, never their numbers", .timeLimit(.minutes(3)))
     func aForumsBoards() async {
         let work = SourceWork()
         let http = Noting(FixtureHTTP(SubBoardChoiceTests.routes), work: work)

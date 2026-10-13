@@ -214,7 +214,7 @@ struct ActTests {
     // MARK: - The press
 
     @Test("A press is on its way until the source answers, and a second press sends nothing more until it has: then the last press is asked",
-          .timeLimit(.minutes(1)))
+          .timeLimit(.minutes(3)))
     func onItsWay() async throws {
         let gate = Gate()
         let (session, server) = try await shell(

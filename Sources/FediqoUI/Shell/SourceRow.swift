@@ -449,9 +449,14 @@ extension SourceRow {
         grant == .unasked || bookmarks == .unasked
     }
 
-    /// The permission glyph. `key.slash` is taken by forgetting a password and
-    /// `exclamationmark.triangle` by an act that failed.
-    static let permissionSymbol = "exclamationmark.lock"
+    /// The mark of a sign-in asked for more, **the one mark wherever one is** (decided
+    /// 2026-10-13): a source's row, the head of somebody's page, the lock lines on About and
+    /// over a list's rows, and how bookmarks, notices and follows stand where what is owed is
+    /// a part. It is the mark signing in wears, since asking for more is signing in again;
+    /// which part is missing is said in the word or the sentence beside it. A plain `lock`
+    /// is left to mean what is locked — an account that asks before anyone follows, a post
+    /// for followers only — and never a sign-in. `key.slash` is forgetting a password.
+    static let permissionSymbol = "person.badge.key"
 
     /// What the permission control says beyond its word — to the pointer, to VoiceOver, and at
     /// the head of the row's `…`, which is where a finger reads it. Nothing where nothing is

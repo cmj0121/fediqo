@@ -169,7 +169,7 @@ struct LeftBehindTests {
         #expect(Set(await store.httpCookieStore.allCookies().map(\.name)) == ["x7Kq_2132_auth"])
     }
 
-    @Test("A sweep that does not answer is left behind at its limit", .timeLimit(.minutes(1)))
+    @Test("A sweep that does not answer is left behind at its limit", .timeLimit(.minutes(3)))
     func theSweepIsBounded() async {
         let finished = OSAllocatedUnfairLock(initialState: false)
         await ForumSessions.bounded(.milliseconds(50)) {

@@ -5,12 +5,15 @@ import Observation
 // Somebody's page as their source says it (#310): what is asked, when, and what the page holds
 // of the answers.
 //
-// **Asked when the page opens, and when the person presses.** Opening asks who they are and
-// their newest stretch of posts — two asks, and no more: a source allows a few hundred in five
-// minutes, shared with everything else the sign-in does there, and a page is opened by one
-// press. Reading on is the foot's press; `r` and the page's "Try again" ask the same two again,
-// and a press while they are on the wire is taken and asks nothing. Nothing is asked while no
-// page is open, and nothing by itself.
+// **Asked when the page opens, when a tab is first in front, and when the person presses.**
+// Opening asks who they are, and nothing else: a source allows a few hundred in five minutes,
+// shared with everything else the sign-in does there, and a page is opened by one press.
+// **Their posts are asked for when the tab that lists them is first in front** (`postsOpened`)
+// — one stretch, and a tab never brought in front costs the source nothing. Reading on is the
+// foot's press; `r` and the page's "Try again" ask who they are again and the tab in front
+// from its top, every other tab forgetting what it held (`again`), and a press while an ask is
+// on the wire is taken and asks nothing. Nothing is asked while no page is open, and nothing
+// by itself.
 //
 // **An ask is the pages', and not the pane's.** The pane that opened a page may leave before the
 // source answers — a step back, a row pressed — and an ask that died with it would leave the
@@ -128,6 +131,36 @@ struct PageOrder {
     }
 }
 
+/// The rows last built of each page's posts, and what they were built from: each post the
+/// source gave, **drawn from what this device holds where it holds it** — so a mark pressed
+/// elsewhere, a cover lifted, a change the store took in are the ones shown — and from the
+/// page's own memory otherwise. Built once for what was read and what is held, and kept.
+@MainActor
+struct PageRows {
+    private struct Key: Equatable {
+        let read: PostsRead
+        let notes: Int
+    }
+
+    private var built: [String: (key: Key, items: [DummyItem])] = [:]
+
+    mutating func rows(of id: String, _ read: PostsRead, in session: ShellSession) -> [DummyItem] {
+        let key = Key(read: read, notes: session.notesRevision)
+        if let rows = built[id], rows.key == key { return rows.items }
+        let brought = ReblogTargets(read.posts + read.carried)
+        let items = read.posts.map { note in
+            session.heldNote(note.key.rowID).map { DummyItem($0, among: session.reblogTargets) }
+                ?? DummyItem(note, among: brought)
+        }
+        built[id] = (key, items)
+        return items
+    }
+
+    mutating func forget(_ id: String) {
+        built[id] = nil
+    }
+}
+
 /// Every person's page opened this run, by who they are.
 ///
 /// Held by the root beside the walk, and handed the session at each ask: the session's own
@@ -166,33 +199,43 @@ final class ShellPersonPages {
         var read = PostsRead()
         /// Whether a stretch of posts has answered, or failed to.
         var answered = false
-        /// Whether who they are and their newest posts are on the wire.
+        /// Whether who they are is on the wire.
         var asking = false
+        /// Whether their newest stretch of posts is.
+        var askingPosts = false
         var readingOn = false
         var footFailed = false
         /// The source stopped handing its posts on in order: the list ends where it is.
         var notPaging = false
-        /// The number of the ask or the reading-on whose answer this page awaits.
+        /// The number of the ask of who they are whose answer this page awaits.
         var awaits = 0
+        /// The number of the ask for their posts, or the reading-on, whose answer it awaits.
+        var awaitsPosts = 0
         /// How often the sign-in at its host had become another when it was last asked.
         var under = 0
 
-        /// Whether the page's two asks came to something: that they are not known, a failure,
-        /// or who they are **and** an answer about their posts. A page that is not settled and
-        /// has nothing on the wire — an ask that was stopped, before either answer or between
-        /// the two — is asked again when it is opened.
-        var settled: Bool {
-            switch reading {
-            case .asking: false
-            case .unheardOf, .failed: true
-            case .said: answered
-            }
-        }
-    }
+        /// Whether asking who they are came to something: that they are not known, a failure,
+        /// or who they are. **It waits on no posts**: those are asked for by their tab. A page
+        /// that is not settled and has nothing on the wire — an ask that was stopped — is
+        /// asked again when it is opened.
+        var settled: Bool { reading != .asking }
 
-    private struct RowsKey: Equatable {
-        let read: PostsRead
-        let notes: Int
+        /// Whether their posts are still to ask for: nothing answered, nothing on the wire,
+        /// and no stretch that did not come — that one is the foot's press to ask again.
+        var owesPosts: Bool { !answered && !askingPosts && !readingOn && !footFailed }
+
+        /// What the page held of their posts let go, so they are asked for when their tab is
+        /// next in front. `errand` is a number no ask awaits: whatever is on the wire lands
+        /// nowhere.
+        mutating func forgetPosts(_ errand: Int) {
+            read = PostsRead()
+            answered = false
+            askingPosts = false
+            readingOn = false
+            footFailed = false
+            notPaging = false
+            awaitsPosts = errand
+        }
     }
 
     /// How many pages are kept: the walk is seldom deeper, and a page left long ago is asked
@@ -202,10 +245,12 @@ final class ShellPersonPages {
     private var pages: [String: Page] = [:]
     /// The rows last built of each page, and what they were built from. Not observed: it is
     /// written while a page is drawn.
-    @ObservationIgnored private var built: [String: (key: RowsKey, items: [DummyItem])] = [:]
+    @ObservationIgnored private var built = PageRows()
     @ObservationIgnored private var order = PageOrder()
     /// The asks on the wire, by page: what a second opening waits on, and asks nothing.
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
+    /// The asks for a page's newest posts on the wire, by page.
+    @ObservationIgnored private var postAsks: [String: Task<Void, Never>] = [:]
     /// One count for every page's asks and readings-on, and for the lists' beside them.
     @ObservationIgnored private let errands: PageErrands
     /// How long one ask may take. A test shortens it.
@@ -241,6 +286,9 @@ final class ShellPersonPages {
     /// How the reader stands to whoever's page is open, and following them (#310, #313):
     /// numbered on the same count, and let go with the same reader.
     let acts: ShellPersonActs
+    /// The tabs of each page (F9): which is in front, each tab's lamp, and what they pinned —
+    /// numbered on the same count, and let go with the same reader.
+    let tabs: ShellPersonTabs
 
     init() {
         let count = PageErrands(), looks = PageReaders()
@@ -264,6 +312,10 @@ final class ShellPersonPages {
         self.followed = followed
         let acts = ShellPersonActs(errands: count, readers: looks)
         self.acts = acts
+        lists.acts = acts
+        let tabs = ShellPersonTabs(errands: count, readers: looks, hosts: hosts)
+        self.tabs = tabs
+        looks.whenChanged { [weak tabs] host in tabs?.letGo(at: host) }
         looks.whenChanged { [weak acts] host in acts?.letGo(at: host) }
         looks.whenChanged { [weak followed] host in followed?.letGo(at: host) }
         looks.whenChanged { [weak found] host in found?.letGo(at: host) }
@@ -302,8 +354,10 @@ final class ShellPersonPages {
         for (id, page) in pages where page.host == host {
             asks[id]?.cancel()
             asks[id] = nil
+            postAsks[id]?.cancel()
+            postAsks[id] = nil
             pages[id] = nil
-            built[id] = nil
+            built.forget(id)
             order.forget(id)
         }
     }
@@ -366,58 +420,31 @@ final class ShellPersonPages {
         }
         return PersonSaid(
             source: source.host, reading: page.reading, again: page.again,
-            posts: page.answered ? rows(of: who.id, page, in: session) : nil,
-            askingPosts: page.asking, foot: page.answered ? Self.foot(of: page) : nil
+            posts: page.answered ? built.rows(of: who.id, page.read, in: session) : nil,
+            asking: page.asking, askingPosts: page.askingPosts, foot: Self.foot(of: page)
         )
     }
 
+    /// What stands under their posts. **Before a stretch has answered, only that one is on
+    /// its way, or did not come**: what this device holds of theirs is drawn meanwhile, and
+    /// stays where the stretch failed.
     private static func foot(of page: Page) -> PersonSaid.Foot? {
-        if page.readingOn { return .reading }
+        if page.readingOn || (page.askingPosts && !page.answered) { return .reading }
         if page.notPaging { return .stopped }
         if page.footFailed { return .failed }
+        guard page.answered else { return nil }
         if page.read.next != nil { return .more }
         // Nothing under no posts: what stands there says the source gave none.
         return page.read.posts.isEmpty ? nil : .end
     }
 
-    /// The rows of a page: each post the source gave, **drawn from what this device holds
-    /// where it holds it** — so a mark pressed elsewhere, a cover lifted, a change the store
-    /// took in are the ones shown — and from the page's own memory otherwise.
-    private func rows(of id: String, _ page: Page, in session: ShellSession) -> [DummyItem] {
-        let key = RowsKey(read: page.read, notes: session.notesRevision)
-        if let rows = built[id], rows.key == key { return rows.items }
-        let brought = ReblogTargets(page.read.posts + page.read.carried)
-        let items = page.read.posts.map { note in
-            session.heldNote(note.key.rowID).map { DummyItem($0, among: session.reblogTargets) }
-                ?? DummyItem(note, among: brought)
-        }
-        built[id] = (key, items)
-        return items
-    }
-
-    /// The rows `j` and `k` walk on the page of `who`: the source's posts where they are what
-    /// the page draws, and what this device holds of theirs where it draws that.
-    func walked(of who: DummyPerson, in session: ShellSession) -> [DummyItem] {
+    /// The posts the Posts tab of the page of `who` draws: the source's where it has
+    /// answered, and what this device holds of theirs until then.
+    func posts(of who: DummyPerson, in session: ShellSession) -> [DummyItem] {
         said(of: who, in: session)?.posts ?? session.heldPosts(of: who)
     }
 
-    // MARK: - The lists the page opens
-
-    /// The lists the page of `who` opens (#311), in the order their figures are drawn — whom
-    /// they follow, who follows them — **as the page stands for whoever would ask now**: none
-    /// until the source has said who they are, and none on a page handed nothing.
-    func lists(of who: DummyPerson, in session: ShellSession) -> [PeopleList] {
-        let said = said(of: who, in: session)
-        // While the page draws what their own server says, the source's figures are not on it.
-        guard let person = said?.person, home.said(of: who, beside: said, in: session) == nil else { return [] }
-        return PersonSaid.counts(of: person).compactMap(\.opens)
-    }
-
-    /// The list the line `id` of the page of `who` opens, where `id` is such a line: what
-    /// Return opens with the lamp on it.
-    func list(_ id: String, of who: DummyPerson, in session: ShellSession) -> PeopleList? {
-        lists(of: who, in: session).first { $0.id == id }
-    }
+    // MARK: - On their own page
 
     /// The way to the hashtags the reader follows (#318), where the page of `who` is their own
     /// — drawn under the figures, and so only where they are: none until the source has said
@@ -428,23 +455,20 @@ final class ShellPersonPages {
         return followed.entry(on: who, in: session)
     }
 
-    /// Every row `j` and `k` walk on the page of `who`, top to bottom as it is drawn: the
-    /// figures that open a list, the way to the hashtags followed where it is a press, and
-    /// under them their posts.
-    func walkedIDs(of who: DummyPerson, in session: ShellSession) -> [String] {
-        let entry = followedEntry(of: who, in: session).flatMap { $0.presses ? [$0.id] : nil } ?? []
-        return lists(of: who, in: session).map(\.id) + entry + walked(of: who, in: session).map(\.id)
-    }
-
-    /// Where the lamp lands when it is first brought down onto the page of `who`: their first
-    /// post, as before there was anything above it. The figures stand over it, a `k` away.
-    func entry(of who: DummyPerson, in session: ShellSession) -> String? {
-        walked(of: who, in: session).first?.id
+    /// The post `rowID` names as a page of `who` read it for one of its tabs — their posts, or
+    /// the ones they pinned — and the post it boosts, where it is a boost.
+    private func note(_ rowID: String, of who: DummyPerson, in session: ShellSession) -> (note: Note, boosted: Note?)? {
+        let pinned = tabs.pinnedRead(of: who, beside: said(of: who, in: session), in: session)
+        for read in [pages[who.id]?.read, pinned].compactMap({ $0 }) {
+            guard let note = read.posts.first(where: { $0.key.rowID == rowID }) else { continue }
+            return (note, note.reblogKey.flatMap { key in read.carried.first { $0.key == key } })
+        }
+        return nil
     }
 
     /// Whether `rowID` is a post on the page of `who` that this device does not hold.
     func isOnlyOnPage(_ rowID: String, of who: DummyPerson, in session: ShellSession) -> Bool {
-        session.heldNote(rowID) == nil && pages[who.id]?.read.posts.contains { $0.key.rowID == rowID } == true
+        session.heldNote(rowID) == nil && note(rowID, of: who, in: session) != nil
     }
 
     /// Whether the page of `who` has anybody to ask again — what `r` and its mark go by.
@@ -492,20 +516,98 @@ final class ShellPersonPages {
         await begin(who, at: source, with: held, in: session)?.value
     }
 
-    /// `r` and "Try again": who they are, and their newest stretch, asked again. What the page
-    /// holds stays drawn until the answers land. **A press while an ask is on the wire asks
-    /// nothing**, as a second press of any reload asks nothing.
+    /// `r`, the bar's mark, a pull and "Try again": who they are and how the reader stands to
+    /// them asked again, and the tab in front from its top. What that tab holds stays drawn
+    /// until the answers land; **every other tab forgets what it held, and asks when it is
+    /// next in front** — once the source has said who they are again, and not before: where
+    /// it fails, or knows them no longer, nothing held changes. **A press while an ask is on
+    /// the wire asks nothing**, as a second press of any reload asks nothing.
     func again(_ who: DummyPerson, in session: ShellSession) async {
         guard let source = Self.source(of: who, in: session) else { return }
         let held = readers.look(at: source.host, in: session).held
-        if self.standing(of: who, at: source, in: session)?.asking == true { return }
+        if let page = self.standing(of: who, at: source, in: session), page.asking || page.askingPosts { return }
         await begin(who, at: source, with: held, in: session)?.value
         // And how the reader stands to them (#310), by the id the page now says they have.
         await acts.again(who, said: said(of: who, in: session), in: session)
+        // The tabs, where the source said who they are this time: one that failed, or knows
+        // them no longer, is asked nothing more for the press, and nothing held is let go.
+        guard let page = self.standing(of: who, at: source, in: session), case .said = page.reading, page.again == nil
+        else { return }
+        let front = front(of: who, in: session)
+        if front != .posts {
+            postAsks[who.id]?.cancel()
+            postAsks[who.id] = nil
+            pages[who.id]?.forgetPosts(errands.next())
+            built.forget(who.id)
+        }
+        forgetTabs(of: who, but: front, in: session)
+        await fronted(who, again: true, in: session)
     }
 
-    /// Starts the two asks of a page, and hands back the task they run in. Everything they
-    /// need is taken here, before anything waits: the source, the handle, who asks, the door.
+    /// The Posts tab of the page of `who` in front: their newest stretch is asked for, where
+    /// the source has said who they are and none was asked for yet. **Once**: brought in front
+    /// again it is drawn from what was answered; while the ask is on the wire it is waited on
+    /// and nothing more is asked; a stretch that did not come is the foot's press to ask again.
+    /// Until it answers, what this device holds of theirs stays drawn.
+    func postsOpened(_ who: DummyPerson, in session: ShellSession) async {
+        await postsAsked(who, again: false, in: session)
+    }
+
+    /// Their newest stretch asked for: where it is owed, and — `again` — where the person
+    /// pressed for it, from the top, with what the page holds drawn until it lands.
+    func postsAsked(_ who: DummyPerson, again: Bool, in session: ShellSession) async {
+        guard let source = Self.source(of: who, in: session) else { return }
+        let held = readers.look(at: source.host, in: session).held
+        guard let page = self.standing(of: who, at: source, in: session), case .said(let person) = page.reading else { return }
+        if page.askingPosts {
+            await postAsks[who.id]?.value
+            return
+        }
+        guard again || page.owesPosts else { return }
+        let id = who.id
+        let askedAs = page.askedAs
+        keep(id)
+        let errand = errands.next()
+        pages[id]?.awaitsPosts = errand
+        pages[id]?.askingPosts = true
+        // A reading-on still on the wire is this ask's to supersede: its answer will not land.
+        pages[id]?.readingOn = false
+        let through = self.door(to: source, with: held, in: session)
+        let task = Task {
+            await self.askPosts(id, of: person.accountID, through: through, at: source, as: askedAs, errand: errand, in: session)
+        }
+        postAsks[id] = task
+        await task.value
+    }
+
+    private func askPosts(
+        _ id: String, of accountID: String, through: MastodonPerson, at source: Source, as askedAs: AskedAs, errand: Int,
+        in session: ShellSession
+    ) async {
+        defer { if pages[id]?.awaitsPosts == errand { postAsks[id] = nil } }
+        do {
+            let newest = try await through.posts(of: accountID, source: source)
+            guard pages[id]?.awaitsPosts == errand else { return }
+            // Read first and written after: the two are not one access.
+            let renewed = (pages[id]?.read ?? PostsRead()).renewed(by: newest)
+            pages[id]?.read = renewed
+            pages[id]?.answered = true
+            pages[id]?.footFailed = false
+            pages[id]?.notPaging = false
+        } catch {
+            guard pages[id]?.awaitsPosts == errand else { return }
+            if !Cancellation.happened(error) {
+                Self.concluded(error, at: source, askedAs: askedAs, in: session)
+                // Who they are stands; their posts are a stretch that did not come, and what
+                // was drawn before it stays drawn.
+                pages[id]?.footFailed = true
+            }
+        }
+        pages[id]?.askingPosts = false
+    }
+
+    /// Starts the ask of who they are, and hands back the task it runs in. Everything it
+    /// needs is taken here, before anything waits: the source, the handle, who asks, the door.
     private func begin(
         _ who: DummyPerson, at source: Source, with held: MastodonToken?, in session: ShellSession
     ) -> Task<Void, Never>? {
@@ -515,7 +617,7 @@ final class ShellPersonPages {
         if pages[id]?.askedAs.isTheSame(as: askedAs) != true {
             // Nobody's page yet, or somebody else's: what was said to them is not said to this one.
             pages[id] = Page(host: source.host, askedAs: askedAs)
-            built[id] = nil
+            built.forget(id)
         }
         named(id, as: askedAs)
         // Asked through the sign-in the press has just looked at: the count is where it stands.
@@ -524,8 +626,6 @@ final class ShellPersonPages {
         let errand = errands.next()
         pages[id]?.awaits = errand
         pages[id]?.asking = true
-        // A reading-on still on the wire is this ask's to supersede: its answer will not land.
-        pages[id]?.readingOn = false
         let through = self.door(to: source, with: held, in: session)
         let task = Task {
             await self.ask(id, handle: handle, of: through, at: source, as: askedAs, errand: errand, in: session)
@@ -559,25 +659,6 @@ final class ShellPersonPages {
         guard pages[id]?.awaits == errand else { return }
         pages[id]?.reading = .said(person)
         pages[id]?.again = nil
-
-        do {
-            let newest = try await through.posts(of: person.accountID, source: source)
-            guard pages[id]?.awaits == errand else { return }
-            // Read first and written after: the two are not one access.
-            let renewed = (pages[id]?.read ?? PostsRead()).renewed(by: newest)
-            pages[id]?.read = renewed
-            pages[id]?.answered = true
-            pages[id]?.footFailed = false
-            pages[id]?.notPaging = false
-        } catch {
-            guard pages[id]?.awaits == errand else { return }
-            if !Cancellation.happened(error) {
-                Self.concluded(error, at: source, askedAs: askedAs, in: session)
-                // Who they are stands; their posts are a stretch that did not come.
-                pages[id]?.answered = true
-                pages[id]?.footFailed = true
-            }
-        }
         pages[id]?.asking = false
     }
 
@@ -595,7 +676,7 @@ final class ShellPersonPages {
             return
         }
         guard let page = self.standing(of: who, at: source, in: session),
-              !page.readingOn, !page.asking, !page.notPaging, case .said(let person) = page.reading
+              !page.readingOn, !page.asking, !page.askingPosts, !page.notPaging, case .said(let person) = page.reading
         else { return }
         // A stretch that did not come is asked again from where the page stands.
         let next = page.read.next
@@ -603,17 +684,18 @@ final class ShellPersonPages {
         let id = who.id
         let askedAs = page.askedAs
         let errand = errands.next()
-        pages[id]?.awaits = errand
+        pages[id]?.awaitsPosts = errand
         pages[id]?.readingOn = true
         pages[id]?.footFailed = false
         let through = self.door(to: source, with: looked.held, in: session)
         do {
             let stretch = try await through.posts(of: person.accountID, source: source, after: next)
-            guard pages[id]?.awaits == errand, let held = pages[id]?.read else { return }
+            guard pages[id]?.awaitsPosts == errand, let held = pages[id]?.read else { return }
             let further = next == nil ? held.renewed(by: stretch) : try held.readingOn(stretch)
             pages[id]?.read = further
+            pages[id]?.answered = true
         } catch {
-            guard pages[id]?.awaits == errand else { return }
+            guard pages[id]?.awaitsPosts == errand else { return }
             if error is PagingError {
                 pages[id]?.notPaging = true
             } else if !Cancellation.happened(error) {
@@ -641,10 +723,7 @@ final class ShellPersonPages {
                 return nil
             }
         }
-        if session.heldNote(rowID) == nil, let read = pages[who.id]?.read,
-           let note = read.posts.first(where: { $0.key.rowID == rowID })
-        {
-            let boosted = note.reblogKey.flatMap { key in read.carried.first { $0.key == key } }
+        if session.heldNote(rowID) == nil, let (note, boosted) = self.note(rowID, of: who, in: session) {
             await session.store.ingest([note] + [boosted].compactMap { $0 }, ifSourceHere: note.source.host)
             session.saveSoon()
             await session.reloadFromStore()
@@ -707,10 +786,15 @@ final class ShellPersonPages {
     /// Keeps the page `id` among the newest `kept`, letting the oldest go — but never one
     /// whose ask is still on the wire.
     private func keep(_ id: String) {
-        for gone in order.keep(id, among: Self.kept, busy: { pages[$0]?.asking == true }) {
+        let busy: (String) -> Bool = { id in
+            self.pages[id].map { $0.asking || $0.askingPosts || $0.readingOn } ?? false
+        }
+        for gone in order.keep(id, among: Self.kept, busy: busy) {
             pages[gone] = nil
-            built[gone] = nil
+            built.forget(gone)
             asks[gone] = nil
+            postAsks[gone] = nil
+            tabs.forget(gone)
         }
     }
 }

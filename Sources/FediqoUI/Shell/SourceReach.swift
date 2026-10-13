@@ -84,16 +84,16 @@ struct SourceReach {
         MastodonPost(http: wire(for: purpose, within: limit), host: host)
     }
 
-    /// Somebody a source knows and their posts, as the reader, through `door`.
+    /// Somebody a source knows, their posts and what they pinned, as the reader, through `door`.
     func person(_ door: MastodonAuthorized) -> MastodonPerson {
         MastodonPerson(door: door)
     }
 
-    /// Somebody a source knows and their posts with no token, listed as `purpose` and ended
-    /// within `limit`.
+    /// Somebody a source knows, their posts and what they pinned with no token, listed as
+    /// `purpose` and ended within `limit`.
     ///
-    /// **Under the ceiling a signed-in read has**: a person and a stretch of their posts are
-    /// small, and a stranger's server is not trusted to keep them so.
+    /// **Under the ceiling a signed-in read has**: a person, a stretch of their posts and the
+    /// posts they pinned are small, and a stranger's server is not trusted to keep them so.
     func unsignedPerson(_ host: String, for purpose: SourceWork.Purpose, within limit: Duration) -> MastodonPerson {
         MastodonPerson(http: wire(small(), for: purpose, within: limit), host: host)
     }

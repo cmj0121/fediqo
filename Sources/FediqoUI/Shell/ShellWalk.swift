@@ -134,6 +134,17 @@ struct ShellWalk: Hashable, Sendable {
 
     var isEmpty: Bool { taken.isEmpty }
 
+    /// Whether the page of the person `id` names is one of the steps taken, in front or under
+    /// another. **By who they are, as their page is kept, and not by the value a row carried**:
+    /// somebody met twice — from a post, then from a row of a list — may be two unequal
+    /// values, a name or a picture apart, and is one page.
+    func holdsPerson(_ id: String) -> Bool {
+        taken.contains { taken in
+            if case .person(let who) = taken.step { return who.id == id }
+            return false
+        }
+    }
+
     /// How far out the reader has walked. Nothing dispatches on it; it is what a test counts to
     /// say that walking in and back out left nothing behind.
     var depth: Int { taken.count }

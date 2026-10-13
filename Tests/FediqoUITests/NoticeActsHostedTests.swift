@@ -141,7 +141,7 @@ struct NoticeActsHostedTests {
         let question = ShellQuestion.part(try #require(unasked.partAsks.open), language: .english)
         #expect(question.title == "Ask b.example for your notices?")
         #expect(question.line == "Its page asks for what you allowed, and to read and dismiss notices.")
-        #expect(question.symbol == "bell" && !question.warns)
+        #expect(question.symbol == SourceRow.permissionSymbol && !question.warns)
         #expect(await quiet.asked.isEmpty, "the question itself asked the source something")
         unasked.partAsks.putDown()
 

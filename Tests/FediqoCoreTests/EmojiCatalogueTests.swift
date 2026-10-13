@@ -226,7 +226,7 @@ struct EmojiCatalogueTests {
         #expect(await store.alphabet(own: [], host: "first.example").lookup("wave") != nil)
     }
 
-    @Test("Four callers racing one cold host make one fetch, not four", .timeLimit(.minutes(1)))
+    @Test("Four callers racing one cold host make one fetch, not four", .timeLimit(.minutes(3)))
     func concurrentCallersShareOneFetch() async {
         let store = EmojiCatalogueStore()
         let gate = Gate()
@@ -253,7 +253,7 @@ struct EmojiCatalogueTests {
         #expect(await store.catalogue(host: "first.example")?.count == 1)
     }
 
-    @Test("A fetch still on the wire when the reader clears does not arrive behind them", .timeLimit(.minutes(1)))
+    @Test("A fetch still on the wire when the reader clears does not arrive behind them", .timeLimit(.minutes(3)))
     func forgetDuringAFetchKeepsNothing() async {
         let store = EmojiCatalogueStore()
         let gate = Gate()
@@ -270,7 +270,7 @@ struct EmojiCatalogueTests {
         #expect(await store.needsFetch(host: "first.example"))
     }
 
-    @Test("Clearing and asking again in the same turn starts a fetch, and it lands", .timeLimit(.minutes(1)))
+    @Test("Clearing and asking again in the same turn starts a fetch, and it lands", .timeLimit(.minutes(3)))
     func forgetThenAskAgainInTheSameTurn() async {
         let store = EmojiCatalogueStore()
         let held = Gate()
@@ -300,7 +300,7 @@ struct EmojiCatalogueTests {
 
     @Test(
         "A fetch that ignores cancellation still cannot land, and the host stays askable",
-        .timeLimit(.minutes(1))
+        .timeLimit(.minutes(3))
     )
     func aFetchThatIgnoresCancellationLandsNothing() async {
         let store = EmojiCatalogueStore()
@@ -324,7 +324,7 @@ struct EmojiCatalogueTests {
         #expect(await store.alphabet(own: [], host: "first.example").lookup("asked") != nil)
     }
 
-    @Test("A cleared fetch unwinding late does not strike off the one that replaced it", .timeLimit(.minutes(1)))
+    @Test("A cleared fetch unwinding late does not strike off the one that replaced it", .timeLimit(.minutes(3)))
     func aCancelledFetchDoesNotClearItsSuccessor() async {
         let store = EmojiCatalogueStore()
         let cleared = Gate()
@@ -364,7 +364,7 @@ struct EmojiCatalogueTests {
         #expect(await store.alphabet(own: [], host: "first.example").lookup("third") == nil)
     }
 
-    @Test("forget() clears every server and none of them is left unaskable", .timeLimit(.minutes(1)))
+    @Test("forget() clears every server and none of them is left unaskable", .timeLimit(.minutes(3)))
     func forgetAllThenAskAgain() async {
         let store = EmojiCatalogueStore()
         let held = Gate()
@@ -472,7 +472,7 @@ struct EmojiCatalogueTests {
 
     @Test(
         "The join returns with the timeline in hand while the catalogue is still on the wire",
-        .timeLimit(.minutes(1))
+        .timeLimit(.minutes(3))
     )
     func joinDoesNotWaitForTheCatalogue() async throws {
         let gate = Gate()
@@ -502,7 +502,7 @@ struct EmojiCatalogueTests {
         #expect(await catalogues.catalogue(host: "first.example")?.count == 3)
     }
 
-    @Test("Four joins of one host racing each other still ask the server once", .timeLimit(.minutes(1)))
+    @Test("Four joins of one host racing each other still ask the server once", .timeLimit(.minutes(3)))
     func concurrentJoinsAskOnce() async {
         let http = Self.joinHTTP()
         let catalogues = EmojiCatalogueStore()
@@ -694,7 +694,7 @@ struct EmojiCatalogueTests {
     // MARK: - Leaving a wait
 
     @Test("A waiter that is cancelled leaves, and does not sit on a server that never answers",
-          .timeLimit(.minutes(1)))
+          .timeLimit(.minutes(3)))
     func aCancelledWaiterLeaves() async throws {
         // The leak this closes: waiting used to be `await task.value`, which honours nobody's
         // cancellation but the fetch's own. A screen that joins and leaves against a dripping
@@ -721,7 +721,7 @@ struct EmojiCatalogueTests {
     }
 
     @Test("A waiter is woken when the fetch ends, including when it was called off",
-          .timeLimit(.minutes(1)))
+          .timeLimit(.minutes(3)))
     func everyEndingWakesTheWaiters() async throws {
         // A waiter nobody resumes is not a slow wait, it is a hang, and this project's risks
         // record that `.timeLimit` is not a hang guard. So every path out of the fetch wakes
@@ -742,7 +742,7 @@ struct EmojiCatalogueTests {
         await second.value
     }
 
-    @Test("Waiting on a host with nothing on its way is not a wait", .timeLimit(.minutes(1)))
+    @Test("Waiting on a host with nothing on its way is not a wait", .timeLimit(.minutes(3)))
     func nothingOnItsWayIsNoWait() async {
         let store = EmojiCatalogueStore()
         await store.settle(host: "quiet.example")

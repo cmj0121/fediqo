@@ -50,6 +50,21 @@ import Observation
 // limit**: a host that gives fewer in a stretch than it was asked for is cut short there, and
 // that is called the end. Absent by the host's own address, as a directory is.
 // **Nothing here tells a source not to suggest somebody**: that needs a word no sign-in holds.
+//
+// **A stretch that lands is asked about once more: how the reader stands to the people in it**
+// (#310, #313) — one ask for each eighty people of a stretch, which is one ask a stretch as
+// these lists ask for them, naming them, through the door and on the record the stretch itself
+// was asked by. **Only where a person's page would be told** (`ShellPersonActs`): the
+// source is one where somebody is followed, the reader is signed in to it and named by it, and
+// their sign-in sees who they follow; and never about the reader themselves. Otherwise nobody
+// is asked and a row is as it was. **Nobody is asked about twice**: reading on asks about the
+// new stretch only, and an ask that fails is not made again until the list is asked from the
+// top — its rows stay without a word, and nothing is said of the failure or guessed in its
+// place. **An answer is the list's and the reader's it was asked for**: it lands only on the
+// page that asked, as it was last read from the top, while that page is still whoever would
+// ask now's. Asked from the top, what the source said before stands for whoever is still
+// listed until it answers again — and then its answer is its whole word of them: whoever it
+// says nothing of has none.
 
 /// A list of people a source keeps, as a step of the walk names it: which list, of whom, at
 /// which source — and what that source said of the account when the list was opened.
@@ -65,6 +80,9 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case found
         /// The people the source suggests whoever is signed in (#315): nobody's list either.
         case suggested
+        /// The people who ask to follow whoever is signed in (#313): the reader's own, asked
+        /// only as them.
+        case requests
 
         /// The two lists that are somebody's, in the order their page counts them.
         static let ofSomebody: [Which] = [.following, .followers]
@@ -105,9 +123,20 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .following: counted = person.tally.following
         case .followers: counted = person.tally.followers
         // Not somebody's: a directory is made by `init(directoryAt:)`, and counts nobody.
-        case .directory, .found, .suggested: counted = nil
+        case .directory, .found, .suggested, .requests: counted = nil
         }
         hidden = person.hidesLists
+    }
+
+    /// The people who ask to follow whoever is signed in to the source at `host` (#313): of
+    /// no account named here, counted by nobody on the list itself, and hidden by nobody.
+    init(requestsAt host: String) {
+        which = .requests
+        self.host = host
+        accountID = ""
+        handle = ""
+        counted = nil
+        hidden = false
     }
 
     /// The people the source at `host` found for `words` (#319): of no account, counted by
@@ -153,6 +182,7 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         switch which {
         case .following: .following(of: accountID)
         case .followers: .followers(of: accountID)
+        case .requests: .requests
         case .directory, .found, .suggested: nil
         }
     }
@@ -167,7 +197,7 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         switch which {
         case .directory: .directory
         case .suggested: .suggestions
-        case .following, .followers, .found: nil
+        case .following, .followers, .found, .requests: nil
         }
     }
 }
@@ -180,11 +210,12 @@ struct DirectoryChoice: Hashable, Sendable {
 }
 
 extension ShellWalk {
-    /// A list opened from the figure that counts it, on somebody's page (#311): one more step
-    /// of the walk. **The lamp and the step in one turn**, as a row opens: the figure is lit
-    /// and is what the walk remembers, so leaving the list gives it back — pressed by a pointer
-    /// or a finger too, where the lamp was elsewhere or nowhere. A step that is not taken
-    /// moves nothing.
+    /// A list of people opened as a page of its own — all the people a search found, from the
+    /// press under its band (#319): one more step of the walk. **The lamp and the step in one
+    /// turn**, as a row opens: the line pressed is lit and is what the walk remembers, so
+    /// leaving the list gives it back — pressed by a pointer or a finger too, where the lamp
+    /// was elsewhere or nowhere. A step that is not taken moves nothing. **Whom somebody
+    /// follows and who follows them are no step**: they are tabs of that person's page (F9).
     mutating func open(_ list: PeopleList, lamp: inout String?) -> Bool {
         guard walk(to: .people(list), from: list.id) else { return false }
         lamp = list.id
@@ -232,6 +263,20 @@ final class ShellPeoplePages {
         var farthest = false
         /// The number of the ask or the reading-on whose answer this list awaits.
         var awaits = 0
+        /// Which page this is, of all made this run: a page let go and made again is another.
+        let number: Int
+        /// How the reader stands to the people listed, as the source last said, by the id it
+        /// knows each by: only whom it has said of.
+        var stands: [String: PersonStanding] = [:]
+        /// Whom the source was asked about since the list was last read from the top: nobody
+        /// is asked about twice.
+        var stood: Set<String> = []
+        /// How often the list was read from the top: what an answer about an earlier reading
+        /// is told by.
+        var round = 0
+        /// Who left the list by a press the source answered (#313) — a request answered, a
+        /// follower removed — since it was last read from the top: by the id it knows each by.
+        var gone: Set<String> = []
 
         /// Whether asking came to something. A list that is not settled and has nothing on the
         /// wire — an ask that was stopped — is asked again when it is opened.
@@ -254,6 +299,10 @@ final class ShellPeoplePages {
     @ObservationIgnored private let readers: PageReaders
     /// What this run knows each host has: where a directory's not-found is written down.
     @ObservationIgnored private let hosts: ShellHostsKnown
+    /// Where a press on a row is sent (#313): the one sequence a press on somebody's page
+    /// goes through. Handed in by whoever holds both, once both are made; it holds no way
+    /// back to these lists.
+    @ObservationIgnored var acts: ShellPersonActs?
     /// How long one ask may take. A test shortens it.
     @ObservationIgnored var deadline: Duration = .seconds(30)
     /// Another way to a source's lists, where a test reaches them by one — a wire that goes on
@@ -295,6 +344,15 @@ final class ShellPeoplePages {
         }
     }
 
+    /// One list let go, and its ask called off: somebody's page was asked again with another
+    /// tab in front (`ShellPersonPages.again`), so this one asks when it is next in front.
+    func forget(_ list: PeopleList) {
+        asks[list.id]?.cancel()
+        asks[list.id] = nil
+        pages[list.id] = nil
+        order.forget(list.id)
+    }
+
     // MARK: - What the page is handed
 
     /// The list as it stands **for whoever would ask now**, or nothing: it was never opened, or
@@ -313,7 +371,11 @@ final class ShellPeoplePages {
         let now = ShellPersonPages.askedAs(at: source.host, in: session)
         // **Whose own list this is is known by handle and no other way**: a reader the source
         // has not named — a sign-in that only reads — is not known to be looking at their own.
-        var handed = PeopleSaid(list: list, signedIn: now != .nobody, own: now == .reader(list.handle))
+        // Who asks to follow the reader is said to the reader, and drawn for nobody else.
+        if list.which == .requests, now == .nobody { return nil }
+        var handed = PeopleSaid(list: list, signedIn: now != .nobody, own: Self.isOwn(list, as: now, in: session))
+        handed.acts = Self.rowActs(of: handed, at: source, in: session)
+        handed.lock = Self.rowLock(of: handed, at: source, in: session)
         let page = self.standing(list, at: source, in: session)
         if list.isDirectory { handed.sorting = page.map { $0.wanted ?? $0.choice } ?? DirectoryChoice() }
         // The host's own word that it has no such address, as the run or this page heard it.
@@ -325,7 +387,11 @@ final class ShellPeoplePages {
         guard let page else { return handed }
         handed.reading = page.answered ? .said : page.failed ? .failed : .asking
         handed.againFailed = page.answered && page.failed
-        handed.people = page.read.people
+        handed.people = page.read.people.filter { person in
+            !page.gone.contains(person.accountID) && acts?.isLeaving(DummyPerson(person).id, at: source.host, in: session) != true
+        }
+        handed.missed = Self.missed(among: handed.people, by: acts, at: source.host)
+        handed.stands = page.stands
         handed.asking = page.asking
         handed.foot = Self.foot(of: page)
         return handed
@@ -341,6 +407,75 @@ final class ShellPeoplePages {
         if page.read.next != nil { return .more }
         // Nothing under nobody: what stands there says what the source gave.
         return page.read.people.isEmpty ? nil : .end
+    }
+
+    /// Whether `list` is the reader's own: who asks to follow them, and the two lists of the
+    /// account their sign-in is of. **By the id the source's own check gave that sign-in,
+    /// where it is held** — a handle is a name, and another account may be shown under the
+    /// same one; by the handle only where no id is held, as it always was.
+    private static func isOwn(_ list: PeopleList, as now: AskedAs, in session: ShellSession) -> Bool {
+        if list.which == .requests { return now != .nobody }
+        guard now != .nobody else { return false }
+        if let reader = session.mastodon.reader(host: list.host) { return reader.id == list.accountID }
+        return now == .reader(list.handle)
+    }
+
+    /// Which lists have rows that offer something (#313): the requests, and the reader's own
+    /// followers, at a source where somebody is followed.
+    private static func offersRows(_ said: PeopleSaid, at source: Source) -> Bool {
+        guard said.own, ShellPersonActs.offersFollowing(source) else { return false }
+        return said.list.which == .requests || said.list.which == .followers
+    }
+
+    /// How the sign-in stands where such a list's rows would offer something and it may not
+    /// change who follows whom: its place for following, or — held in part with the rest not
+    /// to be asked for — the sentence that says so, unpressed.
+    private static func rowLock(of said: PeopleSaid, at source: Source, in session: ShellSession) -> PartWords.Place? {
+        guard offersRows(said, at: source), !ShellPersonActs.changes(at: source.host, in: session) else { return nil }
+        return session.mastodon.place(.follows, host: source.host) ?? PartWords.Place(kind: .none, key: "part.ask.partly")
+    }
+
+    /// What a row of the list offers (#313), in the order it is drawn: accepting and refusing
+    /// on the requests, removing on the reader's own followers — and nothing on anybody
+    /// else's list, on any other, or to a sign-in that may not change who follows whom.
+    private static func rowActs(of said: PeopleSaid, at source: Source, in session: ShellSession) -> [PersonAct] {
+        guard offersRows(said, at: source), ShellPersonActs.changes(at: source.host, in: session) else { return [] }
+        switch said.list.which {
+        case .requests: return [.acceptRequest, .refuseRequest]
+        case .followers: return [.removeFollower]
+        case .following, .directory, .found, .suggested: return []
+        }
+    }
+
+    /// The sentence of each row whose press did not arrive, by the id the source knows them by.
+    private static func missed(among people: [Person], by acts: ShellPersonActs?, at host: String) -> [String: String] {
+        guard let acts else { return [:] }
+        var said: [String: String] = [:]
+        for person in people {
+            guard let act = acts.missedOnARow(DummyPerson(person).id) else { continue }
+            said[person.accountID] = PersonActing.missedWords(act, named: person.lineHandle, at: host)
+        }
+        return said
+    }
+
+    /// A press on the row of `person` in `list` (#313): their request accepted or refused, or
+    /// they are removed from following the reader. **Only what that list offers its rows, of
+    /// somebody it lists**; sent through the one sequence a press on somebody's page is
+    /// (`ShellPersonActs.pressRow`). The row leaves at the press, comes back where the press
+    /// did not arrive, and is gone for good once the source has answered — **where the list
+    /// is still the one pressed on, for the same reader**. One read again from the top while
+    /// the press was out was answered before the source had taken the press, and may still
+    /// list them: the answer to the press is the newer word, so they stay off it. A read that
+    /// lands after the answer is newer still, and is the list.
+    func press(_ act: PersonAct, on person: Person, of list: PeopleList, in session: ShellSession) async {
+        guard let acts, let source = ShellPersonPages.source(at: list.host, in: session),
+              let page = self.standing(list, at: source, in: session),
+              let offered = said(of: list, in: session), offered.acts.contains(act),
+              offered.people.contains(where: { $0.accountID == person.accountID })
+        else { return }
+        let done = await acts.pressRow(act, on: person, standing: page.stands[person.accountID], listed: list.which, in: session)
+        guard done, self.standing(list, at: source, in: session)?.number == page.number else { return }
+        pages[list.id]?.gone.insert(person.accountID)
     }
 
     /// The rows `j` and `k` walk on the page of `list`, by who they are.
@@ -366,6 +501,8 @@ final class ShellPeoplePages {
     func opened(_ list: PeopleList, in session: ShellSession) async {
         guard let source = ShellPersonPages.source(at: list.host, in: session) else { return }
         let held = readers.look(at: source.host, in: session).held
+        // Who asks to follow the reader is asked of the source as them, and never unsigned.
+        if list.which == .requests, held == nil { return }
         // A thing the host said it has not is not asked for by being opened.
         if let thing = list.thing, hosts.has(thing, at: source.host) == .absent { return }
         if let page = self.standing(list, at: source, in: session) {
@@ -418,7 +555,10 @@ final class ShellPeoplePages {
         let askedAs = ShellPersonPages.askedAs(at: source.host, in: session)
         if self.standing(list, at: source, in: session) == nil {
             // Nobody's list yet, or somebody else's: what was given to them is not given to this one.
-            pages[id] = Page(host: source.host, askedAs: askedAs, under: ShellPersonPages.signIns(at: source.host, in: session))
+            pages[id] = Page(
+                host: source.host, askedAs: askedAs, under: ShellPersonPages.signIns(at: source.host, in: session),
+                number: errands.next()
+            )
         }
         named(id, as: askedAs)
         keep(id)
@@ -437,7 +577,10 @@ final class ShellPeoplePages {
         let through = self.door(to: list, asked: choice, at: source, with: held, in: session)
         let round = hosts.round(at: source.host)
         let task = Task {
-            await self.ask(list, of: through, asked: choice, at: source, as: askedAs, errand: errand, round: round, in: session)
+            await self.ask(
+                list, of: through, asked: choice, at: source, as: askedAs, with: held, errand: errand, round: round,
+                in: session
+            )
         }
         asks[id] = task
         return task
@@ -445,16 +588,28 @@ final class ShellPeoplePages {
 
     private func ask(
         _ list: PeopleList, of through: Stretches, asked choice: DirectoryChoice, at source: Source,
-        as askedAs: AskedAs, errand: Int, round: Int, in session: ShellSession
+        as askedAs: AskedAs, with held: MastodonToken?, errand: Int, round: Int, in session: ShellSession
     ) async {
         let id = list.id
         defer { if pages[id]?.awaits == errand { asks[id] = nil } }
+        var reached: [Person] = []
         do {
             let first = try await through(nil)
             guard pages[id]?.awaits == errand else { return }
             // From the top: what was read before is replaced whole.
             let fresh = try PeopleRead().readingOn(first)
             pages[id]?.read = fresh
+            // And everybody in it is asked about afresh. What the source said of whoever is
+            // still listed stands until it says again.
+            let listed = Set(fresh.people.map(\.accountID))
+            let standing = pages[id]?.stands.filter { listed.contains($0.key) } ?? [:]
+            pages[id]?.stands = standing
+            pages[id]?.stood = []
+            // And a press on a row that did not arrive is said no longer: the rows are new.
+            for person in fresh.people { acts?.forgetMissedOnARow(DummyPerson(person).id) }
+            pages[id]?.gone = []
+            pages[id]?.round += 1
+            reached = fresh.people
             pages[id]?.answered = true
             pages[id]?.failed = false
             pages[id]?.footFailed = false
@@ -475,6 +630,60 @@ final class ShellPeoplePages {
         // as it was asked before.
         pages[id]?.wanted = nil
         pages[id]?.asking = false
+        await stand(to: reached, on: list, at: source, with: held, in: session)
+    }
+
+    // MARK: - How the reader stands to them
+
+    /// Whether an answer about the people of the page numbered `number`, as it was read from
+    /// the top the `round`th time, is still that page's to take: it stands **for whoever would
+    /// ask now**, and is that page and that reading of it.
+    private func isStill(_ number: Int, round: Int, of list: PeopleList, at source: Source, in session: ShellSession) -> Bool {
+        self.standing(list, at: source, in: session).map { $0.number == number && $0.round == round } ?? false
+    }
+
+    /// The stretch `people` came in has landed: the source is asked how the reader stands to
+    /// whoever of them it was not yet asked about — in one ask where they are no more than one
+    /// ask names, and in one after another where a source sent a longer stretch than that.
+    /// Nobody is asked about whom a person's page would not be told of
+    /// (`ShellPersonActs.isTold`), and nobody for a list whose reader is no longer who the
+    /// stretch was asked as.
+    ///
+    /// **An answer is the source's whole word of whoever it named**: somebody it says nothing
+    /// of — no entry, or one that cannot be read — has no word here from then on, whatever it
+    /// said of them before. An ask that fails takes nothing away.
+    private func stand(
+        to people: [Person], on list: PeopleList, at source: Source, with held: MastodonToken?,
+        in session: ShellSession
+    ) async {
+        let id = list.id
+        guard let held, let page = self.standing(list, at: source, in: session) else { return }
+        var named: [String] = []
+        for person in people where !page.stood.contains(person.accountID) && !named.contains(person.accountID) {
+            if ShellPersonActs.isTold(of: DummyPerson(person).id, at: source, in: session) { named.append(person.accountID) }
+        }
+        guard !named.isEmpty else { return }
+        pages[id]?.stood.formUnion(named)
+        let through = session.reach.standing(session.mastodon.authorized(token: held, within: deadline, for: .people))
+        var left = named[...]
+        while !left.isEmpty {
+            let asked = Array(left.prefix(MastodonStanding.most))
+            left = left.dropFirst(asked.count)
+            do {
+                let said = try await through.standings(to: asked)
+                guard isStill(page.number, round: page.round, of: list, at: source, in: session) else { return }
+                for silent in asked where said[silent] == nil { pages[id]?.stands[silent] = nil }
+                pages[id]?.stands.merge(said) { _, now in now }
+            } catch {
+                // The rows stay as they are: nothing is said of it, and nothing is drawn in its
+                // place. What it says of the sign-in is told whatever became of the list — to
+                // whoever is still the reader it was asked as, and to nobody else (`concluded`).
+                if !Cancellation.happened(error) {
+                    ShellPersonPages.concluded(error, at: source, askedAs: page.askedAs, in: session)
+                }
+                return
+            }
+        }
     }
 
     /// Whether `stretch`, asked for after `next` and which brought people and named no next, is
@@ -490,7 +699,7 @@ final class ShellPeoplePages {
         case .suggested:
             let passed = next.flatMap(MastodonSuggestions.passed) ?? 0
             return passed + stretchLength >= MastodonSuggestions.furthest
-        case .following, .followers: return false
+        case .following, .followers, .requests: return false
         }
     }
 
@@ -508,6 +717,7 @@ final class ShellPeoplePages {
         pages[list.id]?.failed = false
         pages[list.id]?.footFailed = false
         pages[list.id]?.read = PeopleRead()
+        pages[list.id]?.stands = [:]
     }
 
     /// The foot's press: the stretch after what the page holds, by the place the source named.
@@ -536,7 +746,10 @@ final class ShellPeoplePages {
         let through = self.door(to: list, asked: page.choice, at: source, with: looked.held, in: session)
         let round = hosts.round(at: source.host)
         let task = Task {
-            await self.read(list, after: next, of: through, at: source, as: askedAs, errand: errand, round: round, in: session)
+            await self.read(
+                list, after: next, of: through, at: source, as: askedAs, with: looked.held, errand: errand, round: round,
+                in: session
+            )
         }
         asks[id] = task
         await task.value
@@ -544,10 +757,11 @@ final class ShellPeoplePages {
 
     private func read(
         _ list: PeopleList, after next: String, of through: Stretches, at source: Source, as askedAs: AskedAs,
-        errand: Int, round: Int, in session: ShellSession
+        with held: MastodonToken?, errand: Int, round: Int, in session: ShellSession
     ) async {
         let id = list.id
         defer { if pages[id]?.awaits == errand { asks[id] = nil } }
+        var reached: [Person] = []
         do {
             let came = try await through(next)
             guard pages[id]?.awaits == errand, let held = pages[id]?.read else { return }
@@ -555,6 +769,7 @@ final class ShellPeoplePages {
             let further = try held.readingOn(came)
             pages[id]?.read = further
             pages[id]?.farthest = Self.stoppedShortOfTheEnd(came, of: list, after: next)
+            reached = came.people
         } catch {
             guard pages[id]?.awaits == errand else { return }
             if error is PagingError {
@@ -567,6 +782,7 @@ final class ShellPeoplePages {
             }
         }
         pages[id]?.readingOn = false
+        await stand(to: reached, on: list, at: source, with: held, in: session)
     }
 
     /// The way to the stretches of `list` at `source`. **A list of somebody's**: as the person

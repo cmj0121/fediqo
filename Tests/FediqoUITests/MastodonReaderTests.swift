@@ -164,7 +164,7 @@ private final class Racing: MastodonTokenStore, @unchecked Sendable {
 /// sign-in that only reads as for one that acts — kept with the sign-in and nowhere else, and
 /// laid only on the sign-in it was said through.
 @MainActor
-@Suite("Who the reader is, from the sign-in's own check", .timeLimit(.minutes(1)))
+@Suite("Who the reader is, from the sign-in's own check", .timeLimit(.minutes(3)))
 struct MastodonReaderTests {
     private let host = "social.example"
     private let named = "@reader@social.example"

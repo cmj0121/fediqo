@@ -1,11 +1,12 @@
 import Foundation
 
 /// A Mastodon asked for somebody it knows (#310): who they are, by the id it gives them
-/// (`/api/v1/accounts/:id`) or by their handle (`/api/v1/accounts/lookup`), and their posts, a
-/// stretch at a time (`/api/v1/accounts/:id/statuses`).
+/// (`/api/v1/accounts/:id`) or by their handle (`/api/v1/accounts/lookup`), their posts, a
+/// stretch at a time (`/api/v1/accounts/:id/statuses`), and the posts they pinned, which are
+/// asked for at that same address by one word more.
 ///
 /// **As the reader where signed in, unsigned otherwise**, as a hashtag is read (`MastodonTag`):
-/// a source gives all three to anyone. Whoever reads unsigned hands in a client that is watched
+/// a source gives all of them to anyone. Whoever reads unsigned hands in a client that is watched
 /// and admitted — in the app, `SourceReach.unsignedPerson`, never a bare `URLSessionClient()`.
 ///
 /// **Only somebody the source knows.** A handle is found where they live on the source, or
@@ -76,11 +77,86 @@ public struct MastodonPerson: Sendable {
             throw MastodonRequestError.invalidURL
         }
         let length = limit.map { [URLQueryItem(name: "limit", value: String(max(1, $0)))] } ?? []
+        return try await statuses(of: accountID, asking: length, after: next).stretch(source: source)
+    }
+
+    /// The word a stretch of posts is narrowed by to the ones they pinned.
+    static let pinnedWord = "pinned"
+
+    /// The posts the account `accountID` names has pinned, as the source lists them, or with
+    /// `next` the stretch after the one that handed it back. **The same notes as their posts
+    /// are** (`posts`), read by the same reader, so whatever draws or holds a post does both
+    /// to these.
+    ///
+    /// **None pinned is a stretch with nothing in it; nothing at all is a source that has no
+    /// such thing.** Asked of two real servers (`MastodonPinnedCaptures`): somebody who pinned
+    /// nothing answers an empty list, and so does a suspended account and somebody who blocks
+    /// the reader. A source that does not know the word answers with their ordinary newest
+    /// posts, and those are never handed back as pinned — `isThePinned` says how they are
+    /// told. Somebody the source has not heard of is `PersonReadError.unheardOf`, as for their
+    /// posts; whatever else is refused or fails is thrown as it is there.
+    ///
+    /// **In the source's order, which is not newest first.** A Mastodon lists the post pinned
+    /// last first; another server the one pinned first. Whoever keeps them keeps that order
+    /// (`PostsRead` does).
+    ///
+    /// **No length is asked for**, so that a source hands over all it has at once: a Mastodon
+    /// then names no next, holding fewer pinned posts to an account than a stretch is long.
+    /// Where a source names one all the same it is followed under the rules `posts` has — but
+    /// a Mastodon cut short names the last post's id, in a list that is not in the order of
+    /// its ids, so the stretch after it repeats some and may pass others over. Whoever reads on
+    /// keeps a `PostsRead`, which lists nothing twice and stops a source that does not page.
+    public func pinned(of accountID: String, source: Source, after next: String? = nil) async throws -> PostStretch? {
+        guard source.host == door.host, ListSubscription.isPathSegment(accountID) else {
+            throw MastodonRequestError.invalidURL
+        }
+        let asked = [URLQueryItem(name: Self.pinnedWord, value: "true")]
+        let answered = try await statuses(of: accountID, asking: asked, after: next)
+        return Self.isThePinned(answered) ? answered.stretch(source: source) : nil
+    }
+
+    /// Whether an answer to the word is the posts they pinned, and not their ordinary posts
+    /// from a source that passed the word over. Asked of two real servers, nothing on a post
+    /// says so to anyone but its author — a Mastodon sends `pinned` to the author alone, and
+    /// another server sends `false` to everybody else on a post that is pinned — so no post's
+    /// own word is read. What tells them:
+    ///
+    /// - **A boost is never pinned**: both servers refuse to pin one. An answer listing one is
+    ///   their ordinary posts.
+    /// - **The addresses the answer names for more.** A Mastodon repeats the word in each, as
+    ///   it was sent, and repeats no word it does not know; the other server names none on a
+    ///   pinned answer and says `pinned=false` in each on an ordinary one. So an address
+    ///   without the word, or with it as anything but a yes, is an answer to another question.
+    ///
+    /// An answer with nothing in it tells nothing either way, and is nobody having pinned
+    /// anything. **A source that passes the word over, names no address and lists no boost
+    /// cannot be told**, and is believed.
+    private static func isThePinned(_ answered: Answered) -> Bool {
+        guard !answered.read.contains(where: { $0.reblog != nil }) else { return false }
+        return MastodonLink.said(pinnedWord, in: answered.link).allSatisfy { ["true", "1"].contains($0?.lowercased()) }
+    }
+
+    /// One answer of the address somebody's posts are at: the posts that could be read, the
+    /// header that came with them, where it says the next stretch begins, and when it was asked.
+    private struct Answered {
+        let read: [StatusDTO]
+        let link: String?
+        let next: String?
+        let sent: ReadMoment
+
+        func stretch(source: Source) -> PostStretch {
+            let arrived = read.map { $0.arrival(source: source, categories: [], sent: sent) }
+            return PostStretch(posts: arrived.map(\.item), carried: arrived.compactMap(\.reblogged), next: next)
+        }
+    }
+
+    /// The address somebody's posts are at, asked with `asking` and from `next` on.
+    private func statuses(of accountID: String, asking: [URLQueryItem], after next: String?) async throws -> Answered {
         let sent = ReadMoment.now()
         let (body, link): (Data, String?)
         do {
             (body, link) = try await door.get(
-                path: "/api/v1/accounts/\(accountID)/statuses", query: length + (try MastodonPage.older(than: next))
+                path: "/api/v1/accounts/\(accountID)/statuses", query: asking + (try MastodonPage.older(than: next))
             )
         } catch where MastodonReading.notFound(error) {
             throw PersonReadError.unheardOf
@@ -95,8 +171,7 @@ public struct MastodonPerson: Sendable {
             throw PersonReadError.unreadable
         }
         guard onward == nil || onward != next else { throw PagingError.notPaging }
-        let arrived = read.compactMap { $0.value?.arrival(source: source, categories: [], sent: sent) }
-        return PostStretch(posts: arrived.map(\.item), carried: arrived.compactMap(\.reblogged), next: onward)
+        return Answered(read: read.compactMap(\.value), link: link, next: onward, sent: sent)
     }
 
     /// One account's answer as a person: `unheardOf` where the source knows nobody of that name

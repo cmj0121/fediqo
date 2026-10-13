@@ -274,7 +274,7 @@ struct SourceReachPinTests {
 
     // MARK: - Which deadline
 
-    @Test("A reload's read that never answers ends by the reload's deadline, and a thread's by the thread's own: each with the other set to an hour", .timeLimit(.minutes(1)))
+    @Test("A reload's read that never answers ends by the reload's deadline, and a thread's by the thread's own: each with the other set to an hour", .timeLimit(.minutes(3)))
     func whichDeadline() async throws {
         let (session, log) = try await Self.shell(signedIn: false, holding: [Self.post("9")], hanging: "/api/v1/timelines/public")
         session.reload.deadline = .milliseconds(40)

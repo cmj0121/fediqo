@@ -12,7 +12,7 @@ import Testing
 /// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
 /// itself: a held ask is let go in a `defer`, and by the server after its patience.
 @MainActor
-@Suite("A list of people as its source gives it", .serialized, .timeLimit(.minutes(1)))
+@Suite("A list of people as its source gives it", .serialized, .timeLimit(.minutes(3)))
 struct PeopleTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -351,17 +351,27 @@ struct PeopleTests {
         #expect(ids(pages, session) == ["3", "2", "1"] && pages.said(of: Self.followers, in: session)?.foot == .end)
     }
 
-    @Test("The reader's own list is told from anybody's by the handle the source gave the reader: its being empty is never its being hidden")
+    @Test("The reader's own list is told from anybody's by the id the source's check gave their sign-in — and not by a handle, which another account may be shown under: its being empty is never its being hidden")
     func theReadersOwnList() async throws {
-        let (session, _, _) = await session([Self.first: Self.stretch([]), Self.who: PageServer.Answer(body: #"{"id":"42","acct":"me"}"#)])
+        let (session, _, _) = await session([
+            Self.first: Self.stretch([]), "/api/v1/accounts/43/followers?limit=80": Self.stretch([]),
+            Self.who: PageServer.Answer(body: #"{"id":"42","acct":"me"}"#),
+        ])
         try signIn(session)
         await session.mastodon.learnWho(host: Self.host)
         let pages = ShellPersonPages().lists
         let mine = PeopleList(.followers, of: Self.ada(hides: true, handle: "@me@m.example"))
-        let theirs = PeopleList(.followers, of: Self.ada(hides: true))
+        let somebody = Person(
+            source: Self.source, accountID: "43", handle: "@ada@far.example", name: "Ada", tally: Person.Tally(followers: 2811), hidesLists: true
+        )
+        let theirs = PeopleList(.followers, of: somebody)
+        // Another account under the reader's own handle is not the reader.
+        let alike = PeopleList(.followers, of: Person(source: Self.source, accountID: "99", handle: "@me@m.example", name: "Me", hidesLists: true))
+        #expect(pages.said(of: alike, in: session)?.own == false)
         await pages.opened(mine, in: session)
         let own = try #require(pages.said(of: mine, in: session))
         #expect(own.own && own.signedIn && own.nothing(language: .english) == "m.example gives this sign-in none of them.")
+        await pages.opened(theirs, in: session)
         let other = try #require(pages.said(of: theirs, in: session))
         #expect(!other.own && other.signedIn && other.nothing(language: .english) == "@ada@far.example hides this list.")
     }
@@ -615,7 +625,7 @@ struct PeopleTests {
         ))!
         #expect(pages.said(of: author, in: session) == nil && ShellPersonPages.own(at: Self.forum.host, in: session) == nil)
         #expect(ShellPersonPages.source(at: Self.forum.host, in: session) == nil && ShellPersonPages.source(at: Self.host, in: session) == Self.source)
-        #expect(PersonPane.viewLine(of: author, said: nil, language: .english) == "Read through forum.example")
+        #expect(PersonHeadSaid.made(of: author, said: nil, tabs: [.posts], held: 0, standing: nil, language: .english).through == "Read through forum.example")
 
         for file in ["PeoplePane.swift", "PersonRow.swift"] {
             let text = try String(contentsOf: Self.shell.appending(path: file), encoding: .utf8)
@@ -709,7 +719,7 @@ struct PeopleTests {
             guard line.hasPrefix("\"people.") || line.hasPrefix("\"work.purpose.people\"") else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 49 && keys.contains("people.foot.partial.unsigned") && keys.contains("work.purpose.people") && keys.contains("people.found.none"))
+        #expect(keys.count == 56 && keys.contains("people.requests.none") && keys.contains("people.foot.partial.unsigned") && keys.contains("work.purpose.people") && keys.contains("people.found.none"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }

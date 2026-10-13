@@ -77,6 +77,8 @@ struct PersonSaid: Equatable {
     /// Their posts as the source gave them, newest first — or nothing until a stretch has
     /// answered, and then what this device holds of theirs stays drawn.
     var posts: [DummyItem]?
+    /// Whether who they are is being asked for.
+    var asking = false
     /// Whether their newest posts are being asked for.
     var askingPosts = false
     var foot: Foot?
@@ -139,7 +141,7 @@ struct PersonSaid: Equatable {
         func say(_ symbol: String, _ key: String, _ arguments: any CVarArg...) {
             lines.append(Line(symbol: symbol, words: String(format: L10n.t(key, language: language), arguments: arguments)))
         }
-        if person.suspended { say("person.slash", "person.line.suspended", source) }
+        if person.suspended { say(gone, "person.line.suspended", source) }
         if let moved = person.moved {
             say("arrow.turn.up.right", "person.line.moved", moved.lineHandle)
             lines[lines.count - 1].moved = moved
@@ -154,31 +156,6 @@ struct PersonSaid: Equatable {
         return lines
     }
 
-    /// One thing the source counts of them, as the page says it: the figure in its sentence, and
-    /// the list it counts where it counts one.
-    struct Count: Equatable, Identifiable {
-        let words: String
-        /// The list this line opens (#311): whom they follow, or who follows them. Nothing for
-        /// their posts, which are the page itself — that figure is words and no press.
-        var opens: PeopleList?
-
-        /// What the lamp stands on where it stands on this line: the list it opens, by its own name.
-        var id: String { opens?.id ?? "posts" }
-
-        /// What a listener is read of a line that opens: the figure, and what pressing it does.
-        func spoken(language: DummyLanguage? = nil) -> String {
-            opens == nil ? words : String(format: L10n.t("person.count.opens", language: language), words)
-        }
-
-        /// Whether the line is drawn, given whether a press on it is `answered`. A line that
-        /// says a figure is words worth reading with or without a press; one that only names
-        /// its list is nothing but the way to it, and with nobody to answer leads nowhere.
-        func isDrawn(answered: Bool) -> Bool {
-            guard let opens else { return true }
-            return answered || opens.counted != nil
-        }
-    }
-
     /// What the source counts of them, each figure it said and none it did not. **Its figures,
     /// and never a promise of rows**: it counts posts this reader is not given, and people a
     /// list leaves out.
@@ -190,26 +167,87 @@ struct PersonSaid: Equatable {
         ].compactMap { $0 }
     }
 
-    /// The lines of what the source counts, in the order they are drawn: their posts, whom they
-    /// follow, who follows them.
-    ///
-    /// **Both lists open whatever was counted** (#311): a figure of nothing, and a list the
-    /// account hides, are still a press — what the source gives of it, and why that may be
-    /// nobody, is the list's own page to say. Where the source said no figure for a list, the
-    /// line names the list and says none: nothing is counted on its behalf.
-    ///
-    /// **A suspended account has neither line.** Its page has said the account is gone, and
-    /// the source names it and gives nothing else: each press would lead to nobody.
-    static func counts(of person: Person, language: DummyLanguage? = nil) -> [Count] {
-        let said = counts(of: Person.Tally(posts: person.tally.posts), language: language).map { Count(words: $0) }
-        if person.suspended { return said }
-        return said + PeopleList.Which.ofSomebody.map { which in
-            let list = PeopleList(which, of: person)
-            let key = "person.count.\(which.rawValue)"
-            let words = list.counted.map { figure(key, $0, language: language) } ?? L10n.t(key + ".unsaid", language: language)
-            return Count(words: words, opens: list)
+    /// One thing the source counts of them, as the head of their page says it: the glyph of the
+    /// tab it counts, and the figure whole.
+    struct Figure: Equatable, Identifiable {
+        /// The tab whose glyph it wears, and which a press brings in front.
+        let tab: PersonTab
+        /// The figure whole, its thousands apart — or nothing where the source said none, and
+        /// then the glyph stands alone.
+        let figure: String?
+        /// The figure in its sentence, or what it would count where the source said none.
+        let words: String
+        /// Whether a press brings its tab in front: not where the page has no such tab.
+        var opens = true
+        /// Whether the account says it hides the list this counts.
+        var hidden = false
+
+        var id: String { tab.rawValue }
+
+        /// What a pointer and a listener are told it is: the figure in its sentence, and of a
+        /// list the account hides, that it is hidden.
+        func spoken(language: DummyLanguage? = nil) -> String {
+            hidden ? String(format: L10n.t("person.figure.hidden", language: language), words) : words
+        }
+
+        /// What they are told a press on it does.
+        static func hint(language: DummyLanguage? = nil) -> String {
+            L10n.t("person.figure.hint", language: language)
         }
     }
+
+    /// What the source counts of them, in the order the head draws them: their posts, who
+    /// follows them, whom they follow. **Its figures, and never a promise of rows.**
+    ///
+    /// **Each is a press that brings its tab in front, whatever was counted**: a figure of
+    /// nothing is still the way to what the source gives. Where the source said no figure the
+    /// glyph stands alone and is still that press. **A list the account hides has no tab**
+    /// (`tabs`): its figure stays as the source said it, opens nothing and says why — and one
+    /// the source did not say is then nothing at all.
+    ///
+    /// **A suspended account has neither list.** Its page has said the account is gone, and
+    /// the source names it and gives nothing else.
+    static func figures(of person: Person, tabs: [PersonTab], language: DummyLanguage? = nil) -> [Figure] {
+        func said(_ tab: PersonTab, _ counted: Int?, key: String, unsaid: String) -> Figure? {
+            let opens = tabs.contains(tab)
+            guard opens || counted != nil else { return nil }
+            return Figure(
+                tab: tab, figure: counted.map { L10n.grouped($0, language: language) },
+                words: counted.map { figure(key, $0, language: language) } ?? L10n.t(unsaid, language: language),
+                opens: opens, hidden: !opens && tab.list != nil && person.hidesLists
+            )
+        }
+        let posts = said(.posts, person.tally.posts, key: "person.count.posts", unsaid: PersonTab.posts.titleKey)
+        if person.suspended { return [posts].compactMap { $0 } }
+        return [
+            posts,
+            said(.followers, person.tally.followers, key: "person.count.followers", unsaid: "person.count.followers.unsaid"),
+            said(.following, person.tally.following, key: "person.count.following", unsaid: "person.count.following.unsaid"),
+        ].compactMap { $0 }
+    }
+
+    /// The marks of the account after their name, in the order they are drawn: that they ask
+    /// before anyone may follow, then that the source limits it, what kind of account it is,
+    /// and that they live elsewhere. Each a glyph, called by the sentence About says in words.
+    static func marks(of person: Person, source: String, language: DummyLanguage? = nil) -> [Line] {
+        let lock = person.locked ? [Line(symbol: "lock", words: locked(language: language))] : []
+        return lock + sentences(of: person, source: source, language: language)
+    }
+
+    /// The account's sentences About says in words: every line it earns but the two the page
+    /// says over every tab (`standing`).
+    static func sentences(of person: Person, source: String, language: DummyLanguage? = nil) -> [Line] {
+        lines(of: person, source: source, language: language).filter { $0.symbol != Self.gone && $0.moved == nil }
+    }
+
+    /// The line of the account the page says over every tab: that it is suspended, or else
+    /// where they moved to — the first that applies, and nothing for anybody else.
+    static func standing(of person: Person, source: String, language: DummyLanguage? = nil) -> Line? {
+        lines(of: person, source: source, language: language).first { $0.symbol == Self.gone || $0.moved != nil }
+    }
+
+    /// The glyph of an account its source suspended.
+    static let gone = "person.slash"
 
     /// A sentence about one figure, with the figure written whole and its thousands apart
     /// (`L10n.grouped`), and in the words for one where it is one and the language has them.
@@ -304,197 +342,6 @@ struct PersonHomeLineView: View {
     }
 }
 
-/// What the source says of somebody, drawn as the first rows of their page's list: so it
-/// scrolls away with their posts, and the heading above stays a face and three lines.
-struct PersonSaidBlock: View {
-    let person: Person
-    let source: String
-    /// The press beside "They moved to …": that account's page, through this same source.
-    /// Nothing where the block is drawn with nobody to answer, and then the line is words alone.
-    var onOpenMoved: ((Person.Moved) -> Void)?
-    /// The line the lamp is on, where it is on one of the counts that open a list.
-    var lit: String?
-    /// A count that opens a list, pressed (#311): that list's page. Nothing where the block is
-    /// drawn with nobody to answer, and then every count is words alone.
-    var onOpenList: ((PeopleList) -> Void)?
-    /// The way to the hashtags the reader follows, on their own page (#318), and its press.
-    var followed: FollowedTagsEntry?
-    var onFollowed: ((FollowedTagsEntry) -> Void)?
-    /// Whether an address or a hashtag in their words is a press. Not where the block is the
-    /// word of a server nobody added (`PersonHomeSaid`): there they are letters.
-    var linked = true
-
-    @Environment(\.colorScheme) private var colorScheme
-    @ShellMetric(relativeTo: .body) private var bandHeight: CGFloat = 96
-    @ShellMetric(relativeTo: .caption2) private var sealColumn: CGFloat = 16
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.step) {
-            let lines = PersonSaid.lines(of: person, source: source)
-            if !lines.isEmpty {
-                VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                    ForEach(lines) { line in
-                        let words = HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-                            Image(systemName: line.symbol).accessibilityHidden(true)
-                            Text(line.words).fixedSize(horizontal: false, vertical: true)
-                        }
-                        .shellFont(.meta)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        .accessibilityElement(children: .combine)
-                        if let moved = line.moved, let onOpenMoved {
-                            // The words, and the press under them where one line has no room
-                            // for both: neither is cut.
-                            ViewThatFits(in: .horizontal) {
-                                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
-                                    words.fixedSize()
-                                    movedPress(moved, onOpenMoved)
-                                }
-                                VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                                    words
-                                    movedPress(moved, onOpenMoved)
-                                }
-                            }
-                        } else {
-                            words
-                        }
-                    }
-                }
-            }
-            if let header = person.headerURL {
-                // The picture at the head of their profile: a low band, the source's own copy.
-                RemoteImage(
-                    url: header, tier: .deck, host: source, standing: .picture, alt: nil, speaks: false,
-                    radius: DummyItemRow.Box.plate
-                )
-                .frame(maxWidth: .infinity)
-                .frame(height: bandHeight)
-                .clipped()
-                .accessibilityHidden(true)
-            }
-            if !person.words.isEmpty {
-                EmojiText.words(person.words, emojis: person.emojis, host: source, covered: !linked)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if !person.fields.isEmpty { fields }
-            let counts = PersonSaid.counts(of: person).filter { $0.isDrawn(answered: onOpenList != nil) }
-            if !counts.isEmpty {
-                // Each figure whole, wrapped to the next line where they do not fit on one — and
-                // each a thing of its own to a listener: two of them open, and say so.
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: ShellSpace.room) { ForEach(counts) { count($0).fixedSize() } }
-                    VStack(alignment: .leading, spacing: ShellSpace.tight) { ForEach(counts) { count($0) } }
-                }
-                .shellFont(.reading)
-            }
-            if let followed, let onFollowed {
-                FollowedTagsEntryLine(entry: followed, lit: followed.id == lit, onPress: onFollowed)
-                    .shellFont(.reading)
-                    .id(followed.id)
-            }
-        }
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.step)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func count(_ count: PersonSaid.Count) -> some View {
-        PersonCountLine(count: count, lit: count.opens != nil && count.id == lit, onOpen: onOpenList)
-            .id(count.id)
-    }
-
-    private func movedPress(_ moved: Person.Moved, _ open: @escaping (Person.Moved) -> Void) -> some View {
-        ShellLinkButton(PersonSaid.openMoved()) { open(moved) }.fixedSize()
-    }
-
-    /// The fields they filled in: a label, and what stands under it.
-    ///
-    /// **The source's "checked" is a mark of ours, in a place of its own**: after the value, in
-    /// the shell's own ink, outside the run their letters and pictures are drawn in — so
-    /// nothing they wrote, a custom emoji least of all, can stand where it stands.
-    private var fields: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.snug) {
-            ForEach(Array(person.fields.enumerated()), id: \.offset) { _, field in
-                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
-                    // The seal's own column, before the label and as wide for every field: no
-                    // letter or picture of theirs is ever drawn in it.
-                    Group {
-                        if field.verifiedAt != nil {
-                            Image(systemName: "checkmark.seal.fill")
-                                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                                .help(PersonSaid.checked(source))
-                                .accessibilityLabel(PersonSaid.checked(source))
-                        } else {
-                            Color.clear.accessibilityHidden(true)
-                        }
-                    }
-                    .shellFont(.mark)
-                    .frame(width: sealColumn, alignment: .leading)
-                    VStack(alignment: .leading, spacing: ShellSpace.hair) {
-                        EmojiText(field.name, emojis: person.emojis, host: source, role: .meta)
-                            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                            .lineLimit(1)
-                        EmojiText(field.value, emojis: person.emojis, host: source, role: .meta)
-                            .foregroundStyle(ShellChrome.ink(colorScheme))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                .accessibilityElement(children: .combine)
-            }
-        }
-    }
-}
-
-/// One figure the source counts, on the line of them: words where it is their posts, and a
-/// press where it is a list of people (#311) — the figure, and the mark that says it leads on.
-///
-/// **One press opens**, by pointer or finger: it is a way to another page, as "Open their new
-/// page" is, and not a row to light first. The lamp reaches it by the keys, and then it is drawn
-/// on the lamp's wash in full ink.
-struct PersonCountLine: View {
-    let count: PersonSaid.Count
-    var lit = false
-    var onOpen: ((PeopleList) -> Void)?
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        if let list = count.opens, let onOpen {
-            Button {
-                onOpen(list)
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
-                    Text(count.words)
-                    Image(systemName: "chevron.right")
-                        .shellFont(.mark)
-                        .accessibilityHidden(true)
-                }
-                .padding(.vertical, ShellSpace.tight)
-                .padding(.horizontal, ShellSpace.snug)
-                .background(
-                    lit ? ShellChrome.floatFill(colorScheme) : .clear,
-                    in: RoundedRectangle(cornerRadius: DummyItemRow.Box.plate)
-                )
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(lit ? ShellChrome.ink(colorScheme) : ShellChrome.inkDim(colorScheme))
-            // The wash reaches past the words; the words stand where the plain figure does.
-            .padding(.horizontal, -ShellSpace.snug)
-            .animation(.easeInOut(duration: 0.18), value: lit)
-            .help(PeopleSaid.title(list))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(count.spoken())
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAddTraits(lit ? .isSelected : [])
-        } else if count.isDrawn(answered: false) {
-            Text(count.words)
-                .padding(.vertical, ShellSpace.tight)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-        }
-    }
-}
-
 /// What stands under somebody's posts: older ones to read, a stretch on its way, the end of
 /// what the source gives, or a stretch that did not come — the notices page's foot, for a list
 /// that reads on only when pressed.
@@ -545,5 +392,46 @@ struct PersonFootRow: View {
         .padding(.horizontal, ShellSpace.pad)
         .padding(.vertical, ShellSpace.step)
         .contentShape(Rectangle())
+    }
+}
+
+/// What somebody pinned at a source, as the Pinned tab of their page is handed it: where the
+/// asking has got to, and the posts as far as the tab has read them.
+///
+/// **In the source's own order**, which is not newest first, and never sorted here. **None
+/// pinned is what the source gave, said as that**: whether anything is pinned is not known
+/// until it is asked, so the tab is there either way — and a source with no such thing is
+/// said the same, in the one sentence.
+struct PersonPinnedSaid: Equatable {
+    /// The host of the source that says.
+    let source: String
+    /// Whether the source has answered: what is drawn is then its word.
+    var answered = false
+    /// Whether asking from the top last came to a failure. With nothing answered that is the
+    /// tab; with posts already given, it is said over them, and they stand.
+    var failed = false
+    var posts: [DummyItem] = []
+    var foot: PersonSaid.Foot?
+
+    /// What is said over the rows: that the pinned posts are being asked for, or could not be.
+    func stateLine(language: DummyLanguage? = nil) -> String? {
+        if failed { return String(format: L10n.t("person.pinned.failed", language: language), source) }
+        return answered ? nil : String(format: L10n.t("person.pinned.asking", language: language), source)
+    }
+
+    /// What stands where rows would, once the source has answered with none.
+    func nothing(language: DummyLanguage? = nil) -> String? {
+        guard answered, posts.isEmpty, foot == nil else { return nil }
+        return String(format: L10n.t("person.pinned.none", language: language), source)
+    }
+
+    /// What the foot says: of more to read and of the end in the tab's own words, and of a
+    /// stretch on its way, one that did not come and a source that stopped as under any posts.
+    func footWords(_ foot: PersonSaid.Foot, language: DummyLanguage? = nil) -> String {
+        switch foot {
+        case .more: L10n.t("person.pinned.foot.more", language: language)
+        case .end: String(format: L10n.t("person.pinned.foot.end", language: language), source)
+        case .reading, .failed, .stopped: foot.words(source, language: language)
+        }
     }
 }

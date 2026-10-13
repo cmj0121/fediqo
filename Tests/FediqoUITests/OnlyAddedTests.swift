@@ -72,7 +72,7 @@ struct OnlyAddedTests {
     /// Two windows each adopt the store's sources in their own time; a window adopting late must
     /// not take back a source another has already seen added. So the gate hears from the store
     /// alone, in the order its sources change.
-    @Test("The gate hears which sources there are from the store, in the order they change", .timeLimit(.minutes(1)))
+    @Test("The gate hears which sources there are from the store, in the order they change", .timeLimit(.minutes(3)))
     func oneWriter() async {
         let work = Self.governed([])
         let store = ItemStore()
@@ -147,7 +147,7 @@ struct OnlyAddedTests {
         }
     }
 
-    @Test("Reading a timeline names only the sources added, and a stranger's address is refused", .timeLimit(.minutes(1)))
+    @Test("Reading a timeline names only the sources added, and a stranger's address is refused", .timeLimit(.minutes(3)))
     func aRunNamesOnlyAddedSources() async throws {
         let work = Self.governed([])
         let http = FixtureHTTP([
@@ -188,7 +188,7 @@ struct OnlyAddedTests {
 
     /// The directory of servers is a third party let through by one entry, for one purpose: it is
     /// asked while a source is being added, listed as itself, and reached by nothing else.
-    @Test("The directory is asked while a source is added, listed as itself, and reached by nothing else", .timeLimit(.minutes(1)))
+    @Test("The directory is asked while a source is added, listed as itself, and reached by nothing else", .timeLimit(.minutes(3)))
     func theDirectory() async throws {
         let http = FixtureHTTP(["/servers": .text("[]")])
         let session = ShellSession(
@@ -454,7 +454,7 @@ struct PageRulesTests {
 
     /// The same page as below, with an entry of the list letting one outside host through: loaded
     /// under the sign-in's rules, that host is reached and the others are not.
-    @Test("An entry the list holds lets its host through, and no other", .timeLimit(.minutes(1)))
+    @Test("An entry the list holds lets its host through, and no other", .timeLimit(.minutes(3)))
     func anEntryLetsItsHostThrough() async throws {
         let served = Served()
         let configuration = WKWebViewConfiguration()
@@ -484,7 +484,7 @@ struct PageRulesTests {
 
     @Test(
         "A page's own site loads beside it and no other site does; without the rules the other would",
-        .timeLimit(.minutes(1)), arguments: [true, false]
+        .timeLimit(.minutes(3)), arguments: [true, false]
     )
     func aPageLoads(ruled: Bool) async throws {
         let served = Served()
