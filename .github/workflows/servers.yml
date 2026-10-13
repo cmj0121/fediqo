@@ -2,10 +2,20 @@ name: Servers
 
 # The rest of the check: real protocol servers, the suite against them, and a
 # release build. Pull requests keep the three jobs in ci.yml — that is what
-# green means on them. A push to a feature branch spends none of this.
+# green means on them.
+#
+# Started by hand, and by nothing else. It ran on every push to main and never
+# once passed: a hosted macOS runner is Apple silicon and will not start a VM
+# inside itself, so there is no Docker for the servers to stand in, and the job
+# fails closed before it brings one up (scripts/ci-docker.sh). A run that cannot
+# pass says nothing about the push it is drawn beside, and a mark that is always
+# red hides the day one turns red for a reason. Until a runner that can hold the
+# servers runs this, what talks to them is checked on a desk:
+# `make servers && FEDIQO_SERVERS=1 make test && make servers-down`.
+#
+# Put `push: branches: [main]` back when there is such a runner.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
