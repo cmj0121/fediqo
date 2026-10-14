@@ -851,10 +851,10 @@ struct PersonPageTests {
     @Test("The page takes the whole place: the timelines' head is not drawn over it and is over every other step; its sideways is its own — the tab beside, and on the first tab the swipe back leaves the page, as it leaves a page with one tab; a page that is a place is left by no swipe")
     func thePageAndItsSwipe() {
         #expect(!TimelinePane.headDrawn(over: .person(Self.ada)))
-        for step in [nil, ShellStep.thread("a"), .tag(PostTag("#birds")!), .rising(.tags), .link(URL(string: "https://example.org")!)] as [ShellStep?] {
+        for step in [nil, ShellStep.tag(PostTag("#birds")!), .rising(.tags), .link(URL(string: "https://example.org")!)] as [ShellStep?] {
             #expect(TimelinePane.headDrawn(over: step), "\(String(describing: step))")
         }
-        #expect(TimelinePane.page(.person(Self.ada)) == .tabbed && TimelinePane.page(.thread("a")) == .opened)
+        #expect(TimelinePane.page(.person(Self.ada)) == .tabbed && TimelinePane.page(.rising(.tags)) == .opened)
         #expect(TimelineSwipe.means(touch: true, page: .tabbed, searching: false, listShown: false, editing: false) == nil, "the timeline's swipe is not heard on it")
         #expect(TimelinePane.openedID(.person(Self.ada)) == "person:" + Self.ada.id)
 
@@ -888,13 +888,13 @@ struct PersonPageTests {
             ".task(id: ShellPersonPages.opening(person, in: session)) { await people?.opened(person, in: session) }",
             ".task(id: people?.standsOpening(to: person, in: session)) { await people?.standsOpened(to: person, in: session) }",
             ".task(id: people?.fronting(person, in: session)) { await people?.fronted(person, in: session) }",
-            "if Self.headDrawn(over: standing) {",
+            "if Self.headDrawn(over: standing, drawn: drawn) {",
         ] {
             #expect(pane.components(separatedBy: call).count == 2, "the pane has \(call) once")
         }
         let root = try String(contentsOf: ui.appending(path: "FediqoRootView.swift"), encoding: .utf8)
         for call in [
-            "if place == .timeline, let key = walk.tabKey { return rotateStepTab(key, by: step) }",
+            "if place == .timeline, let key = walk.tabKey, TimelinePane.pageDrawn(walk.standing, in: session) {\n            return rotateStepTab(key, by: step)\n        }",
             "case .person(let person):\n            guard Self.turnsPersonTabs(open: openLayers) else { return false }\n            return people.rotate(person, by: step, lamp: &selectedItemID, in: session)",
             "walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }",
             "people.followByKey(\n            place: place, open: openLayers, person: walk.openedPerson, tag: walk.openedTag, in: session",

@@ -2213,9 +2213,12 @@ public struct FediqoRootView: View {
     ///
     /// **The walk is asked first, whatever step is in front** (F9, F10): a page that answers
     /// has the key, and the timelines are not turned from under it — to change timeline the
-    /// reader leaves first.
+    /// reader leaves first. **Asked only of a page that is drawn**: a step that cannot be
+    /// drawn draws the stream under the timelines' head, and there the key is the timelines'.
     private func rotatePlaceTab(by step: Int) -> Bool {
-        if place == .timeline, let key = walk.tabKey { return rotateStepTab(key, by: step) }
+        if place == .timeline, let key = walk.tabKey, TimelinePane.pageDrawn(walk.standing, in: session) {
+            return rotateStepTab(key, by: step)
+        }
         return switch place {
         case .timeline: session.rotateTab(by: step)
         case .usage: session.rotateUsageTab(by: step)
@@ -2227,8 +2230,11 @@ public struct FediqoRootView: View {
 
     /// Tab on the page in front, as the walk answered for it. With somebody's page the tabs
     /// are that page's, round their ring; under anything drawn over the page the key does nothing.
+    /// With a page that has no tabs the key is taken, and turns nothing — under the same
+    /// condition: the page is what is in front.
     private func rotateStepTab(_ key: StepTabKey, by step: Int) -> Bool {
         switch key {
+        case .sole: return Self.pageInFront(.thread, open: openLayers)
         case .person(let person):
             guard Self.turnsPersonTabs(open: openLayers) else { return false }
             return people.rotate(person, by: step, lamp: &selectedItemID, in: session)
@@ -2238,7 +2244,13 @@ public struct FediqoRootView: View {
     /// Whether Tab turns the tabs of somebody's page, given what is open: their page is what
     /// is in front, with nothing drawn over it.
     static func turnsPersonTabs(open: Set<DummyLayer>) -> Bool {
-        DummyCommand.outermost(of: open) == .person
+        pageInFront(.person, open: open)
+    }
+
+    /// Whether the opened page `layer` is what is in front, with nothing drawn over it: the
+    /// one condition under which Tab is that page's, whatever it does there.
+    static func pageInFront(_ layer: DummyLayer, open: Set<DummyLayer>) -> Bool {
+        DummyCommand.outermost(of: open) == layer
     }
 
     /// The arrangement this window gets for the width it has (#110). See `ShellLayout`.

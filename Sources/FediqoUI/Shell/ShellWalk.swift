@@ -56,6 +56,9 @@ enum ShellStep: Hashable, Sendable {
 enum StepTabKey: Hashable, Sendable {
     /// Somebody's page: its tabs, round their ring (F9).
     case person(DummyPerson)
+    /// A page with no tabs (F10): the key is taken and does nothing — to change timeline the
+    /// reader leaves first.
+    case sole
 }
 
 extension ShellStep {
@@ -64,7 +67,8 @@ extension ShellStep {
     var tabKey: StepTabKey? {
         switch self {
         case .person(let who): .person(who)
-        case .thread, .link, .tag, .people, .rising, .foundTags, .followedTags: nil
+        case .thread: .sole
+        case .link, .tag, .people, .rising, .foundTags, .followedTags: nil
         }
     }
 }

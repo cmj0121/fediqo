@@ -70,14 +70,14 @@ struct NarrowPhoneTests {
         #expect(LeastIdeal.across(400, cap: .infinity) == 400)
     }
 
-    @Test("An opened post's head gives up the hint about a key first, then the words beside the way out")
+    @Test("An opened page's bar gives up the hint about a key first, then the words beside its marks")
     func threadHeadLadder() {
-        #expect(ThreadHead.ladder == [.whole, .unhinted, .glyphs])
-        #expect(ThreadHead.ladder.map(\.hintsKey) == [true, false, false])
-        #expect(ThreadHead.ladder.map(\.namesWayOut) == [true, true, false])
-        #expect(Set(ThreadHead.ladder) == Set(ThreadHead.allCases))
-        #expect(ThreadHead.fits(on: .narrow) == ThreadHead.ladder)
-        #expect(ThreadHead.fits(on: .wide) == nil, "a wide page's line is not fitted at all")
+        #expect(PageBarFit.ladder == [.whole, .unhinted, .glyphs])
+        #expect(PageBarFit.ladder.map(\.hintsKey) == [true, false, false])
+        #expect(PageBarFit.ladder.map(\.namesMarks) == [true, true, false])
+        #expect(Set(PageBarFit.ladder) == Set(PageBarFit.allCases))
+        #expect(PageBarFit.fits(on: .narrow) == PageBarFit.ladder)
+        #expect(PageBarFit.fits(on: .wide) == nil, "a wide page's line is not fitted at all")
     }
 
     @Test("A sheet holds a floor where it is sized by what is in it, and none where the system sizes it")
@@ -485,9 +485,9 @@ struct NarrowPhoneTests {
     // MARK: - The head of an opened post
 
     private static func head(_ layout: ShellLayout, width: CGFloat) -> CGFloat {
-        let line = ThreadHeadLine(
-            title: "Thread", onBack: {},
-            wayOut: ("Open on fixture.example", URL(string: "https://fixture.example/@ada/9")!)
+        let line = PageBar(
+            title: "Thread",
+            marks: [PageMark(symbol: ConversationSaid.wayOutSymbol, name: "Open on fixture.example", action: {})]
         )
         .environment(\.shellLayout, layout)
         .frame(width: width)

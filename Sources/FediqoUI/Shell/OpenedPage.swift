@@ -24,6 +24,9 @@ struct OpenedPageActs<Tab: ShellTab> {
     var onReload: () -> Void = {}
     /// The same, pulled for: it returns when the answers have landed.
     var onPull: () async -> Void = {}
+    /// What stops the asking the reader pressed for, while one is running: the bar's mark is
+    /// then Stop. Nothing on a page with nothing to stop.
+    var onStop: (() -> Void)?
 }
 
 /// Where a hosted frame laid its parts out, in the page's own space.
@@ -79,7 +82,7 @@ enum PageFrame {
 /// the page's own head, its tabs where it has more than one, and what is in front — the whole
 /// height of the pane, with no timeline's names over it.
 ///
-///     ‹ Back                                                   [↻]   Esc or q
+///     ‹ Back   title, where the page has no head       [marks] [↻]   Esc or q
 ///     ─────────────────────────────────────────────────────────────────────────
 ///     head — the page's own, with the page's line under it where it has one
 ///     ─────────────────────────────────────────────────────────────────────────
@@ -99,6 +102,10 @@ struct OpenedPage<Tab: ShellTab, Head: View, Front: View>: View {
     let front: Tab
     /// How far a sideways swipe has slid what is under the tabs.
     let slide: PageSlide
+    /// What the page is, said in the bar: only where the page has no head that says it.
+    var title: String?
+    /// The page's own marks in the bar, before the one that asks again.
+    var marks: [PageMark] = []
     /// What the bar's mark is called — whom it asks again — or nothing where there is nobody
     /// to ask: then the mark is absent, and a pull asks nothing.
     var reload: String?
@@ -107,7 +114,6 @@ struct OpenedPage<Tab: ShellTab, Head: View, Front: View>: View {
     /// What is in front, with what it is handed as the first rows of its list.
     @ViewBuilder var inFront: (Head?) -> Front
 
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.openedPageProbe) private var probe
 
@@ -136,27 +142,14 @@ struct OpenedPage<Tab: ShellTab, Head: View, Front: View>: View {
     }
 
     /// The way back and the way out of the page, on one line for every opened page — so a
-    /// reader who has learnt to leave one has learnt to leave them all — and, where there is
-    /// anybody to ask, the mark that asks them again.
+    /// reader who has learnt to leave one has learnt to leave them all — with the page's title
+    /// and marks where it has them and, where there is anybody to ask, the mark that asks
+    /// them again (`PageBar`).
     private var bar: some View {
-        HStack(spacing: ShellSpace.snug) {
-            ShellBackButton("person.back", action: acts.onBack)
-            Spacer()
-            if let reload {
-                Button(action: acts.onReload) {
-                    Image(systemName: ReloadMark.reload.symbol)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        .modifier(ShellGlyphBox())
-                }
-                .buttonStyle(.plain)
-                .help(reload)
-                .accessibilityLabel(reload)
-            }
-            ShellKeyHint("person.leaveHint")
-        }
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.snug)
-        .modifier(PageProbed(.bar, probe: probe))
+        PageBar(title: title, marks: marks, reload: reload, onBack: acts.onBack, onReload: acts.onReload, onStop: acts.onStop)
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.snug)
+            .modifier(PageProbed(.bar, probe: probe))
     }
 
     /// The page's tabs, as every page with tabs draws them (`ShellTabs`): a pill each on a
@@ -172,13 +165,13 @@ struct OpenedPage<Tab: ShellTab, Head: View, Front: View>: View {
 extension OpenedPage where Tab == SoleTab {
     /// A page with no tabs: its head over the one thing it shows.
     init(
-        slide: PageSlide, reload: String? = nil, onBack: @escaping () -> Void = {}, onReload: @escaping () -> Void = {},
-        onPull: @escaping () async -> Void = {}, @ViewBuilder head: @escaping () -> Head,
+        slide: PageSlide, title: String? = nil, marks: [PageMark] = [], reload: String? = nil, onBack: @escaping () -> Void = {}, onReload: @escaping () -> Void = {},
+        onPull: @escaping () async -> Void = {}, onStop: (() -> Void)? = nil, @ViewBuilder head: @escaping () -> Head,
         @ViewBuilder inFront: @escaping (Head?) -> Front
     ) {
         self.init(
-            tabs: SoleTab.tabs, front: .sole, slide: slide, reload: reload,
-            acts: OpenedPageActs(onBack: onBack, onReload: onReload, onPull: onPull), head: head, inFront: inFront
+            tabs: SoleTab.tabs, front: .sole, slide: slide, title: title, marks: marks, reload: reload,
+            acts: OpenedPageActs(onBack: onBack, onReload: onReload, onPull: onPull, onStop: onStop), head: head, inFront: inFront
         )
     }
 }

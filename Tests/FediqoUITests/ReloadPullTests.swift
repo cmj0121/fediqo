@@ -76,6 +76,19 @@ struct ReloadPullTests {
         #expect(ReloadMark.stops(at: began.addingTimeInterval(5), pressedAt: began))
         #expect(ReloadMark.stops(at: began, pressedAt: nil), "begun by a key or a pull")
         #expect(ReloadMark.settle == 0.4)
+        // The press itself, as every mark asks it: the reload mark always begins; Stop stops, or
+        // within the settle of the press that began it is not heard — to the edge, and at it.
+        #expect(ReloadMark.press(.reload, at: began, pressedAt: nil) == .begins)
+        #expect(ReloadMark.press(.reload, at: began, pressedAt: began) == .begins)
+        #expect(ReloadMark.press(.reload, at: began.addingTimeInterval(5), pressedAt: began) == .begins)
+        #expect(ReloadMark.press(.stop, at: began, pressedAt: nil) == .stops)
+        #expect(ReloadMark.press(.stop, at: began, pressedAt: began) == .unheard)
+        #expect(ReloadMark.press(.stop, at: began.addingTimeInterval(0.39), pressedAt: began) == .unheard)
+        // At the settle exactly it is heard — counted from a moment whose sum is exact.
+        let zero = Date(timeIntervalSinceReferenceDate: 0)
+        #expect(ReloadMark.press(.stop, at: zero.addingTimeInterval(ReloadMark.settle), pressedAt: zero) == .stops)
+        #expect(ReloadMark.press(.stop, at: began.addingTimeInterval(0.41), pressedAt: began) == .stops)
+        #expect(ReloadMark.press(.stop, at: began.addingTimeInterval(-1), pressedAt: began) == .unheard)
     }
 
     @Test("What a pull brings is shown at the top of the list, once; every other landing holds the place")

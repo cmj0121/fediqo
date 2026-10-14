@@ -63,11 +63,11 @@ struct OpenedPageTests {
 
     @Test("A strip of tabs is drawn only where there is more than one: with one tab or none, what is in front stands straight under the head")
     func noStripForOneTabOrNone() throws {
-        #expect(!PageFrame.stripDrawn([SoleTab]()) && !PageFrame.stripDrawn([PersonTab.posts]))
+        #expect(!PageFrame.stripDrawn(SoleTab.tabs) && !PageFrame.stripDrawn([PersonTab.posts]))
         #expect(PageFrame.stripDrawn([PersonTab.about, .posts]))
         for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 390), (.narrow, 320)] {
             let none = FrameProbe(), one = FrameProbe(), two = FrameProbe()
-            hosted(frame([SoleTab](), front: .sole, probe: none), width: width, layout: layout)
+            hosted(frame(SoleTab.tabs, front: .sole, probe: none), width: width, layout: layout)
             hosted(frame([PersonTab.posts], front: .posts, probe: one), width: width, layout: layout)
             hosted(frame([PersonTab.about, .posts], front: .posts, probe: two), width: width, layout: layout)
             let headEnds = try #require(none.head?.maxY)
@@ -87,7 +87,7 @@ struct OpenedPageTests {
         let fixed = FrameProbe(), scrolls = FrameProbe(), sole = FrameProbe()
         hosted(frame([PersonTab.about, .posts], front: .about, probe: fixed), width: 320, size: .large)
         hosted(frame([PersonTab.about, .posts], front: .about, probe: scrolls), width: 320, size: .accessibility5)
-        hosted(frame([SoleTab](), front: .sole, probe: sole), width: 320, size: .accessibility5)
+        hosted(frame(SoleTab.tabs, front: .sole, probe: sole), width: 320, size: .accessibility5)
         #expect(fixed.led == false && scrolls.led == true && sole.led == true)
         // Fixed, the head is over the strip; scrolling, it is under it and leads the list.
         let fixedHead = try #require(fixed.head), fixedFront = try #require(fixed.front)
@@ -212,11 +212,26 @@ struct OpenedPageTests {
                         AsItWas(head: page.head, tabs: page.tabs, front: front, canReload: canReload, probe: then),
                         width: width, layout: layout, scheme: scheme, size: size, probe: then
                     )
-                    #expect(now == before, "\(at): \(now) was \(before)")
+                    // **One thing moved, and only there** (F10 §2): at the largest text the bar with
+                    // its mark was a point wider than the narrowest page, and pushed the page that
+                    // far off its edge. The bar now gives up its hint about a key where it does not
+                    // fit, so it is as wide as the page and everything stands at the edge — each
+                    // part as tall and as far down as it was.
+                    let was = try #require(before[.bar])
+                    if was.width > width {
+                        #expect(layout == .narrow && PageFrame.headScrolls(at: size) && canReload && was.width < width + 1, "\(at): \(was)")
+                        #expect(Set(now.keys) == Set(before.keys), "\(at)")
+                        for (part, then) in before {
+                            let stands = try #require(now[part])
+                            #expect(stands.minX == 0 && stands.minY == then.minY && stands.height == then.height, "\(at): \(part) \(stands) was \(then)")
+                            #expect(stands.width == width, "\(at): \(part) \(stands)")
+                        }
+                    } else {
+                        #expect(now == before, "\(at): \(now) was \(before)")
+                    }
                     let bar = try #require(now[.bar]), room = try #require(now[.front])
                     #expect(bar.minY == 0 && room.maxY == 700 && room.width == width, "\(at): \(bar), \(room)")
-                    // At the largest text a bar with its mark is a point wider than the narrowest page: as it was.
-                    #expect(bar.width == width || (PageFrame.headScrolls(at: size) && bar.width < width + 1), "\(at): \(bar)")
+                    #expect(bar.minX == 0 && bar.width == width, "\(at): \(bar)")
                     #expect((now[.strip] != nil) == (page.tabs.count > 1), "\(at)")
                     if let strip = now[.strip] {
                         // The head stands between the bar and the strip — and at the largest text
@@ -312,13 +327,14 @@ struct OpenedPageTests {
         #expect(walk.tabKey == nil)
         _ = walk.walk(to: .person(Self.ada), from: nil)
         #expect(walk.tabKey == .person(Self.ada))
+        // A conversation's page has no tabs: the key is taken there, and turns nothing.
         _ = walk.walk(to: .thread("post-1"), from: "post-1")
-        #expect(walk.tabKey == nil)
+        #expect(walk.tabKey == .sole)
         _ = walk.walk(to: .person(Self.bob), from: "post-1")
         #expect(walk.tabKey == .person(Self.bob))
         let tag = try #require(PostTag("#swift"))
         for step in [
-            ShellStep.thread("post-1"), .link(URL(string: "https://example.org/")!), .tag(tag), .rising(.tags), .rising(.links),
+            ShellStep.link(URL(string: "https://example.org/")!), .tag(tag), .rising(.tags), .rising(.links),
             .foundTags(FoundTags(source: "m.example", words: "swift")), .followedTags(FollowedTags(host: "m.example")),
             .people(PeopleList(.followers, of: Person(source: Source(host: "m.example", kind: .mastodon), accountID: "42", handle: "@ada@m.example", name: "Ada"))),
         ] {
@@ -327,10 +343,10 @@ struct OpenedPageTests {
         // The root asks the walk once, before any place's own tabs, and names no page there.
         let ui = try Self.sources()
         let root = try String(contentsOf: ui.appending(path: "FediqoRootView.swift"), encoding: .utf8)
-        let asked = "private func rotatePlaceTab(by step: Int) -> Bool {\n        if place == .timeline, let key = walk.tabKey { return rotateStepTab(key, by: step) }\n        return switch place {"
+        let asked = "private func rotatePlaceTab(by step: Int) -> Bool {\n        if place == .timeline, let key = walk.tabKey, TimelinePane.pageDrawn(walk.standing, in: session) {\n            return rotateStepTab(key, by: step)\n        }\n        return switch place {"
         #expect(root.components(separatedBy: asked).count == 2)
         // The frame and the figure draw, and learn no kind of source.
-        for file in ["OpenedPage.swift", "PageFigure.swift"] {
+        for file in ["OpenedPage.swift", "PageBar.swift", "PageFigure.swift"] {
             let text = try String(contentsOf: ui.appending(path: "Shell/\(file)"), encoding: .utf8)
             #expect(DrawsNotKnowingKindTests.draws(text) && DrawsNotKnowingKindTests.kindsNamed(in: text).isEmpty, "\(file) names a kind of source")
         }
