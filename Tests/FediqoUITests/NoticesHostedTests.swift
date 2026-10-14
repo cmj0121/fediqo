@@ -148,6 +148,9 @@ struct NoticesHostedTests {
         )
         session.mastodon.refresh()
         await session.reloadFromStore()
+        // The deadline of what is asked through a sign-in, on a clock nobody turns: an ask held at
+        // a gate is not ended by one, however long the page takes to be drawn while it is held.
+        session.mastodon.deadlineSleep = TurnedClock().sleep
         session.noticeList.deadline = .seconds(5)
         return (session, server)
     }
@@ -541,6 +544,8 @@ struct NoticesHostedTests {
         )
         session.mastodon.refresh()
         await session.reloadFromStore()
+        // As `shell`: the ask held at the gate below is not ended by a deadline.
+        session.mastodon.deadlineSleep = TurnedClock().sleep
 
         let (_, before) = await hosted(session)
         #expect(rows(before).count == 2, "drawn with nobody asked")

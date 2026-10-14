@@ -130,16 +130,20 @@ struct OutboxTests {
         )
     }
 
-    /// A status as its source lists it among its writer's own, published `after` seconds from now.
+    /// A status as its source lists it among its writer's own, published `after` seconds from now —
+    /// or from `moment`, where a check writes the status before the text is asked: the two are
+    /// then counted from one moment (`maybePosted(asked:)`), and not from two reads of the clock
+    /// with the length of the fixture's own work between them.
     private static func status(
-        _ words: String, by name: String = "me", after seconds: TimeInterval = 1, answering: String? = nil, id: String = "77"
+        _ words: String, by name: String = "me", after seconds: TimeInterval = 1, from moment: Date = Date(),
+        answering: String? = nil, id: String = "77"
     ) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let reply = answering.map { #","in_reply_to_id":"\#($0)""# } ?? ""
         return """
         {"id":"\(id)","uri":"https://\(host)/users/\(name)/statuses/\(id)",
-         "created_at":"\(formatter.string(from: Date().addingTimeInterval(seconds)))","content":"<p>\(words)</p>",
+         "created_at":"\(formatter.string(from: moment.addingTimeInterval(seconds)))","content":"<p>\(words)</p>",
          "visibility":"public"\(reply),"account":{"username":"\(name)","acct":"\(name)","display_name":"\(name)"}}
         """
     }
@@ -196,6 +200,9 @@ struct OutboxTests {
             http: FixtureHTTP(), store: store, mastodon: MastodonSessions(tokens: tokens, sender: server)
         )
         session.said.announce = { _ in }
+        // The deadline of what is asked through a sign-in, on a clock nobody turns: a look or a
+        // post is ended by what its source answers, and by nothing else.
+        session.mastodon.deadlineSleep = TurnedClock().sleep
         if let saver {
             session.persist = { saves?.whole += 1; return (try? await saver.save()) != nil }
             session.persistUnsent = { saves?.texts += 1; return (try? await saver.saveUnsent()) ?? false }
@@ -983,13 +990,15 @@ struct OutboxTests {
         #expect(ShellOutbox.words("mail me@example.org") == "mailme@example.org", "an address is not a name")
     }
 
-    /// A run holding one text that may have been posted, asked at about now.
+    /// A run holding one text that may have been posted, asked at about now — or at `asked`,
+    /// where `own` holds a status written from that moment (`status(from:)`).
     private func maybePosted(
         _ words: String = "did this go", own: [String?] = [], then script: [PostServer.Answer] = [], disk: Disk? = nil,
-        holding notes: [Note] = []
+        holding notes: [Note] = [], asked: Date? = nil
     ) async throws -> (ShellSession, PostServer, ShellOutbox.Sending) {
         let server = PostServer([.error(.timedOut)] + script, own: own)
         let (session, _) = try await run(server, holding: notes, disk: disk)
+        if let asked { session.outbox.now = { asked } }
         #expect(post(words, in: session))
         await session.outbox.settled()
         return (session, server, try #require(session.outbox.sendings.first))
@@ -1067,8 +1076,9 @@ struct OutboxTests {
         let disk = Disk()
         defer { disk.remove() }
         // Among its writer's newest: a post to one person alone, an old one, and the text.
-        let own = "[\(Self.status("a word to one person", id: "60")),\(Self.status("from long ago", after: -90_000, id: "61")),\(Self.status("did this go"))]"
-        let (session, server, entry) = try await maybePosted(own: [own], disk: disk)
+        let asked = Date()
+        let own = "[\(Self.status("a word to one person", from: asked, id: "60")),\(Self.status("from long ago", after: -90_000, from: asked, id: "61")),\(Self.status("did this go", from: asked))]"
+        let (session, server, entry) = try await maybePosted(own: [own], disk: disk, asked: asked)
 
         #expect(session.outbox.again(entry.id, in: session))
         await session.outbox.settled()
@@ -1516,8 +1526,10 @@ struct OutboxTests {
         let look = Gate()
         let watchdog = watching(look, "the look among the writer's own posts, held at its source")
         defer { watchdog.cancel() }
-        let server = PostServer([.error(.timedOut)], own: ["[\(Self.status("did this go"))]"], looking: look)
+        let asked = Date()
+        let server = PostServer([.error(.timedOut)], own: ["[\(Self.status("did this go", from: asked))]"], looking: look)
         let (session, tokens) = try await run(server)
+        session.outbox.now = { asked }
         #expect(post("did this go", in: session))
         await session.outbox.settled()
         let entry = try #require(session.outbox.sendings.first)
