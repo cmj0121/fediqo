@@ -269,12 +269,15 @@ struct RoomCheckTests {
 /// A take-away or a read back (#247) holds the room limit still for as long as it runs, and no
 /// longer — `ShellSession.holdsStill`'s contract, kept by the carry flow.
 @MainActor
-@Suite("The carry flow holds the room limit still", .serialized)
+@Suite("The carry flow holds the room limit still", .serialized, .watched)
 struct CarryHoldsStillTests {
-    private func settle(_ carry: ShellCarry, until done: (ShellCarry.Step?) -> Bool) async {
-        for _ in 0..<200 where !done(carry.step) {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
+    /// Waits for the flow's step `what` names. The step lands from a task of the flow's own, so
+    /// no work is named.
+    private func settle(
+        _ carry: ShellCarry, _ what: String, sourceLocation: SourceLocation = #_sourceLocation,
+        until done: (ShellCarry.Step?) -> Bool
+    ) async {
+        await met(what, sourceLocation: sourceLocation) { done(carry.step) }
     }
 
     @Test("A take-away holds the store still from before the save to after the write, and releases when done or refused")
@@ -283,13 +286,13 @@ struct CarryHoldsStillTests {
         let carry = session.carry
         let carrier = CarryTests.FakeCarrier()
         carry.beginTakeAway(with: carrier)
-        await settle(carry) { $0 != .weighing }
+        await settle(carry, "the weighing is over") { $0 != .weighing }
         carry.chose(pictures: false)
         #expect(!session.holdsStill)
         let seen = Seen()
         carry.set(password: "open sesame", with: carrier) { seen.heldAtSave = session.holdsStill }
         #expect(session.holdsStill, "not held before the first byte moved")
-        await settle(carry) { if case .moving = $0 { true } else { false } }
+        await settle(carry, "the package is written, and waits to be moved") { if case .moving = $0 { true } else { false } }
         #expect(seen.heldAtSave == true, "the save before the write ran unheld")
         #expect(!session.holdsStill, "still held after the package was written")
         carry.dismiss()
@@ -297,10 +300,10 @@ struct CarryHoldsStillTests {
 
         carrier.refuse = PackageRefusal.wrongPassword
         carry.beginTakeAway(with: carrier)
-        await settle(carry) { $0 != .weighing }
+        await settle(carry, "the weighing is over") { $0 != .weighing }
         carry.chose(pictures: false)
         carry.set(password: "open sesame", with: carrier) {}
-        await settle(carry) { if case .refused = $0 { true } else { false } }
+        await settle(carry, "the take-away is refused") { if case .refused = $0 { true } else { false } }
         #expect(!session.holdsStill, "a refusal did not release the hold")
         carry.dismiss()
     }
@@ -311,16 +314,19 @@ struct CarryHoldsStillTests {
         let carry = session.carry
         let carrier = CarryTests.FakeCarrier()
         carry.beginTakeAway(with: carrier)
-        await settle(carry) { $0 != .weighing }
+        await settle(carry, "the weighing is over") { $0 != .weighing }
         carry.chose(pictures: false)
-        carry.set(password: "open sesame", with: carrier) { try? await Task.sleep(for: .seconds(5)) }
+        // The save sleeps on a clock nobody turns: only the dismissal, which cancels it, ends it.
+        let clock = TurnedClock()
+        let guardTask = watching("the save, asleep midway") { clock.turn() }
+        defer { guardTask.cancel() }
+        carry.set(password: "open sesame", with: carrier) { try? await clock.sleep(for: .seconds(5)) }
+        #expect(session.holdsStill)
+        await met("the take-away is midway, in its save") { clock.sleeping == 1 }
         #expect(session.holdsStill)
         carry.dismiss()
         // The running task releases as it ends, which its cancelled sleep makes now.
-        for _ in 0..<200 where session.holdsStill {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(!session.holdsStill)
+        await met("the running task releases the hold as it ends") { !session.holdsStill }
         // And with nothing running, dismiss itself releases.
         session.holdsStill = true
         carry.dismiss()

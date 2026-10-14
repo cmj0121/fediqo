@@ -9,7 +9,7 @@ import Testing
 /// Run over the memory store, whose writes are the real store's own (`TokenFiling`) over a
 /// dictionary. What the Keychain itself does with the dictionaries built here is not seen by
 /// any test: `swift test` may not touch it.
-@Suite("Where a Mastodon sign-in is kept")
+@Suite("Where a Mastodon sign-in is kept", .watched)
 struct MastodonTokenStoreTests {
     private static let host = "social.example"
     private static let reading = MastodonOAuth.scopes(writing: false)
@@ -257,13 +257,23 @@ struct MastodonTokenStoreTests {
         #expect(try held(none) == fresh)
     }
 
+    /// The store's lock is let go, whoever held it, and said where the check had left it held.
+    /// Never unlocked from here where another thread holds it: that would be undefined.
+    private static func letGo(_ lock: NSLock) {
+        guard lock.try() else {
+            Issue.record("the store's lock was still held when the test ended")
+            return
+        }
+        lock.unlock()
+    }
+
     /// A write another thread makes while a swap is between its read and its write.
     enum Other: String, CaseIterable, Sendable {
         case save, forgetHost, forgetToken, update, swap
     }
 
     @Test("A write from another thread while a swap is between its read and its write waits for the swap, and sees the swap's string and not the one before it", arguments: Other.allCases)
-    func aWriteFromAnotherThreadWaitsForTheSwap(_ other: Other) throws {
+    func aWriteFromAnotherThreadWaitsForTheSwap(_ other: Other) async throws {
         let lock = WatchedLock()
         let store = MemoryMastodonTokens(writing: lock)
         let old = Self.token("old")
@@ -272,13 +282,11 @@ struct MastodonTokenStoreTests {
         // Signalled once the other thread asks for the store's lock — or, were its write to
         // take none, once it is through. Either way the swap goes on, and the test ends.
         let atTheDoor = DispatchSemaphore(value: 0)
-        let through = DispatchSemaphore(value: 0)
+        let through = Order()
         // A store that never lets its lock go is a test that fails, and not one that never
-        // ends: each wait gives up, and the other thread is let through whatever comes of it.
-        defer {
-            if !lock.try() { Issue.record("the store's lock was still held when the test ended") }
-            lock.unlock()
-        }
+        // ends: the wait for the other thread is let go with the run's, and that thread is let
+        // through whatever comes of it.
+        defer { Self.letGo(lock) }
 
         store.betweenReadAndWrite = {
             // Once: the other thread's write may be a swap of its own.
@@ -296,7 +304,7 @@ struct MastodonTokenStoreTests {
             Thread.detachNewThread {
                 defer {
                     atTheDoor.signal()
-                    through.signal()
+                    through.note("through")
                 }
                 let said: String
                 switch other {
@@ -315,8 +323,17 @@ struct MastodonTokenStoreTests {
                 }
                 order.note(said)
             }
-            if atTheDoor.wait(timeout: .now() + 30) == .timedOut {
-                Issue.record("the other thread never came to its write")
+            // The other thread signals as it asks for the lock, and again however it ends. Looked
+            // at each second, which is how often and not how long: only the run going still
+            // gives up on it, and then this check fails, alone.
+            let waits = RunWaits.run
+            let id = waits.park("the other thread at the store's door", at: #_sourceLocation)
+            defer { waits.leave(id) }
+            while atTheDoor.wait(timeout: .now() + 1) == .timedOut {
+                guard !waits.gaveUp(id) else {
+                    Issue.record(waits.said("the other thread at the store's door"))
+                    break
+                }
             }
             order.note("writing")
         }
@@ -326,10 +343,8 @@ struct MastodonTokenStoreTests {
             Issue.record("the swap never came to its write")
             return
         }
-        guard through.wait(timeout: .now() + 30) == .success else {
-            Issue.record("the other thread's write never ended: the swap did not let the lock go")
-            return
-        }
+        // No work named: the other thread is no task, and one the swap never let through never ends.
+        guard await met("the other thread's write has ended: the swap let the lock go", until: { !through.all.isEmpty }) else { return }
         #expect(kept == true)
 
         let after = try held(store)

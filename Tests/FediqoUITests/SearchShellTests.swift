@@ -4,7 +4,7 @@ import Testing
 @testable import FediqoUI
 
 /// #32: `/` opens a search over what this device holds, and Escape gives the timeline back.
-@Suite("Searching from the timeline")
+@Suite("Searching from the timeline", .watched)
 @MainActor
 struct SearchShellTests {
     private let one = Source(host: "one.example", kind: .mastodon)
@@ -208,6 +208,8 @@ struct SearchShellTests {
         search.open(from: nil, over: [note("a", "swift")])
         _ = search.close()
         await search.indexed()
+        // Counted turns: the fold of a closed search is a task the search has let go of, and one
+        // that rightly lands nothing says nothing.
         for _ in 0..<2_000 { await Task.yield() }
         #expect(!search.isIndexed, "the fold for a closed search did not land")
     }

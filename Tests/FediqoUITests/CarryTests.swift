@@ -1,13 +1,14 @@
 import FediqoCore
 import FediqoPersistence
 import Foundation
+import Synchronization
 import Testing
 @testable import FediqoUI
 
 /// #247, #252 on the shell: the steps a take-away and a read back walk, what each question says,
 /// that both are written to the run's record under "this device", and that every word is in
 /// every language.
-@Suite("Taking away and reading back, on the shell")
+@Suite("Taking away and reading back, on the shell", .watched)
 @MainActor
 struct CarryTests {
     nonisolated private static let summary = PackageSummary(
@@ -29,7 +30,17 @@ struct CarryTests {
         private(set) var taken: [(url: URL, pictures: Bool)] = []
         private(set) var read: [(url: URL, replacing: Bool)] = []
 
-        func weigh() async throws -> PackageWeight { weight }
+        /// Where set, a weighing waits here before it answers.
+        var gate: Gate?
+        /// How many weighings were asked for, and how many have answered.
+        let weighs = Mutex<(asked: Int, answered: Int)>((0, 0))
+
+        func weigh() async throws -> PackageWeight {
+            weighs.withLock { $0.asked += 1 }
+            await gate?.wait()
+            weighs.withLock { $0.answered += 1 }
+            return weight
+        }
 
         func takeAway(
             to url: URL, key: PackageKey, pictures: Bool, contents: PackageSummary.Contents,
@@ -53,11 +64,13 @@ struct CarryTests {
         }
     }
 
-    /// Waits for the flow's next step, which lands from a task of its own.
-    private func settle(_ carry: ShellCarry, until done: (ShellCarry.Step?) -> Bool) async {
-        for _ in 0..<200 where !done(carry.step) {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
+    /// Waits for the flow's step `what` names, which lands from a task of the flow's own: nothing
+    /// here stands for that task, so no work is named.
+    private func settle(
+        _ carry: ShellCarry, _ what: String, sourceLocation: SourceLocation = #_sourceLocation,
+        until done: (ShellCarry.Step?) -> Bool
+    ) async {
+        await met(what, sourceLocation: sourceLocation) { done(carry.step) }
     }
 
     @Test("Taking away: weigh, choose pictures, set a password, write with progress, then move — and the record says this device")
@@ -66,7 +79,7 @@ struct CarryTests {
         let carry = ShellCarry(work: work)
         let carrier = FakeCarrier()
         carry.beginTakeAway(with: carrier)
-        await settle(carry) { $0 != .weighing }
+        await settle(carry, "the weighing is over") { $0 != .weighing }
         #expect(carry.step == .choosing(carrier.weight))
         #expect(carry.asking == carry.step, "the pictures question is up")
         carry.chose(pictures: true)
@@ -74,7 +87,7 @@ struct CarryTests {
         #expect(carry.ask == .set(pictures: true), "the password sheet is up")
         var saved = 0
         carry.set(password: "open sesame", with: carrier) { saved += 1 }
-        await settle(carry) { if case .moving = $0 { true } else { false } }
+        await settle(carry, "the package is written, and waits to be moved") { if case .moving = $0 { true } else { false } }
         #expect(saved == 1, "the store is written to disk before it is read")
         #expect(carrier.taken.count == 1 && carrier.taken[0].pictures)
         guard case .moving(let url) = carry.step else { Issue.record("not moving"); return }
@@ -119,20 +132,20 @@ struct CarryTests {
         carrier.weight = PackageWeight(withoutPictures: 100, withPictures: 300, free: 200, holdsStore: true)
         let carry = ShellCarry(work: SourceWork())
         carry.beginTakeAway(with: carrier)
-        await settle(carry) { $0 != .weighing }
+        await settle(carry, "the weighing is over") { $0 != .weighing }
         carry.chose(pictures: true)
         #expect(carry.step == .refused(.noRoom(needed: 300, free: 200)))
         carry.dismiss()
 
         carry.beginTakeAway(with: carrier)
-        await settle(carry) { $0 != .weighing }
+        await settle(carry, "the weighing is over") { $0 != .weighing }
         carry.chose(pictures: false)
         #expect(carry.step == .setting(pictures: false))
         carry.set(password: "", with: carrier) {}
         #expect(carry.step == .refused(.emptyPassword))
         carry.dismiss()
         carry.beginTakeAway(with: carrier)
-        await settle(carry) { $0 != .weighing }
+        await settle(carry, "the weighing is over") { $0 != .weighing }
         carry.chose(pictures: false)
         carry.set(password: "seven77", with: carrier) {}
         #expect(carry.step == .refused(.shortPassword))
@@ -149,25 +162,31 @@ struct CarryTests {
         let flow = CarryFlow(session: session)
         let carry = session.carry
         func press(_ answer: ShellConfirmAnswer) async {
-            await settle(carry) { $0 != .weighing }
+            await settle(carry, "the weighing is over") { $0 != .weighing }
             guard let asked = carry.asking else { Issue.record("nothing asked"); return }
             ShellConfirmAnswer.settle(answer, asked: asked, item: flow.asking, onChoice: flow.answer)
-            for _ in 0..<4 {
-                await Task.yield()
-                try? await Task.sleep(for: .milliseconds(10))
-            }
+        }
+        // Counted turns, for what must not have happened by the end of them: a put-away is judged
+        // one turn after the press, in a task of the flow's own, and one that does nothing says
+        // nothing.
+        func turns() async {
+            for _ in 0..<200 { await Task.yield() }
         }
         carry.beginTakeAway(with: carrier)
         await press(.choice(ShellQuestion.withoutPictures))
+        #expect(carry.step == .setting(pictures: false), "the choice took no step")
+        await turns()
         #expect(carry.step == .setting(pictures: false), "the choice was not taken as put away")
         carry.dismiss()
         carry.beginTakeAway(with: carrier)
         await press(.choice(ShellQuestion.withPictures))
+        #expect(carry.step == .refused(.noRoom(needed: 300, free: 200)), "the answer asked no refusal")
+        await turns()
         #expect(carry.step == .refused(.noRoom(needed: 300, free: 200)), "the refusal the answer asked is left up")
         carry.dismiss()
         carry.beginTakeAway(with: carrier)
         await press(.cancel)
-        #expect(carry.step == nil, "put away, it closes")
+        await met("put away, the question closes the flow") { carry.step == nil }
     }
 
     @Test("Moving cancelled or failed takes the scratch file with it")
@@ -175,10 +194,10 @@ struct CarryTests {
         let carrier = FakeCarrier()
         let carry = ShellCarry(work: SourceWork())
         carry.beginTakeAway(with: carrier)
-        await settle(carry) { $0 != .weighing }
+        await settle(carry, "the weighing is over") { $0 != .weighing }
         carry.chose(pictures: false)
         carry.set(password: "password", with: carrier) {}
-        await settle(carry) { if case .moving = $0 { true } else { false } }
+        await settle(carry, "the package is written, and waits to be moved") { if case .moving = $0 { true } else { false } }
         guard case .moving(let url) = carry.step else { Issue.record("not moving"); return }
         try Data("x".utf8).write(to: url)
         carry.moveCancelled()
@@ -196,13 +215,13 @@ struct CarryTests {
         carry.picked(file)
         #expect(carry.step == .opening(file) && carry.ask == .open(file))
         carry.open(password: "open sesame", with: carrier)
-        await settle(carry) { $0 != .weighing }
+        await settle(carry, "the weighing is over") { $0 != .weighing }
         let preview = ShellCarry.Preview(url: file, summary: Self.summary, held: true)
         #expect(carry.step == .previewing(preview))
         #expect(carry.asking == carry.step)
         var adopted = 0
         carry.confirmReadBack(with: carrier) { adopted += 1 }
-        await settle(carry) { if case .done = $0 { true } else { false } }
+        await settle(carry, "the read back is done") { if case .done = $0 { true } else { false } }
         #expect(carry.step == .done(.readBack(Self.summary)))
         #expect(adopted == 1)
         #expect(carrier.read.count == 1 && carrier.read[0].replacing, "a held store is replaced only on the person's yes")
@@ -217,7 +236,7 @@ struct CarryTests {
         let carry = ShellCarry(work: SourceWork())
         carry.picked(URL(fileURLWithPath: "/tmp/x.fediqo"))
         carry.open(password: "nope", with: carrier)
-        await settle(carry) { $0 != .weighing }
+        await settle(carry, "the weighing is over") { $0 != .weighing }
         #expect(carry.step == .refused(.package(.wrongPassword)))
         #expect(carrier.read.isEmpty)
         carry.dismiss()
@@ -240,13 +259,13 @@ struct CarryTests {
         let disk = DiskCopies(try MediaCache(directory: folder))
         carry.picked(URL(fileURLWithPath: "/tmp/x.fediqo"))
         carry.open(password: "open sesame", with: carrier)
-        await settle(carry) { $0 != .weighing }
+        await settle(carry, "the weighing is over") { $0 != .weighing }
         var adopted = 0
         carry.confirmReadBack(with: carrier, pictures: disk) { adopted += 1 }
         #expect(carry.isUp)
         carry.dismiss()
         if case .reading = carry.step {} else { Issue.record("dismissed while reading") }
-        await settle(carry) { if case .done = $0 { true } else { false } }
+        await settle(carry, "the read back is done") { if case .done = $0 { true } else { false } }
         #expect(adopted == 1)
         // The queue runs again after: a write asked now lands.
         disk.store(Data("x".utf8), host: "a.example", url: URL(string: "https://a.example/p.jpg")!)
@@ -261,23 +280,63 @@ struct CarryTests {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("fediqo-hold-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }
         let cache = try MediaCache(directory: folder)
-        let disk = DiskCopies(cache)
+        let copies = WritesSeen(cache)
+        let disk = DiskCopies(copies)
         await disk.hold()
         disk.store(Data("x".utf8), host: "a.example", url: URL(string: "https://a.example/p.jpg")!)
-        try await Task.sleep(for: .milliseconds(50))
+        // Counted turns: a queue that is held runs nothing and says nothing of it, and one that
+        // was not held would have written inside them. Kept counted: only `DiskCopies` could say
+        // the write is queued, and that would take a seam there.
+        for _ in 0..<1_000 { await Task.yield() }
         #expect(cache.bytes(host: "a.example") == 0, "nothing lands while held")
+        copies.released.withLock { $0 = true }
         disk.release()
         await disk.settled()
         #expect(cache.bytes(host: "a.example") == 1)
+        #expect(copies.writes.withLock { $0 } == [true], "the write landed before the copies were let go")
+    }
+
+    /// The copies on disk, saying of each write whether the check had let them go by then.
+    final class WritesSeen: MediaCopies, @unchecked Sendable {
+        let inner: MediaCache
+        let released = Mutex(false)
+        let writes = Mutex<[Bool]>([])
+
+        init(_ inner: MediaCache) { self.inner = inner }
+
+        func store(_ data: Data, host: String, url: URL) throws {
+            let after = released.withLock { $0 }
+            writes.withLock { $0.append(after) }
+            try inner.store(data, host: host, url: url)
+        }
+
+        func data(host: String, url: URL) -> Data? { inner.data(host: host, url: url) }
+        func remove(host: String, url: URL) { inner.remove(host: host, url: url) }
+        func forget(host: String) { inner.forget(host: host) }
+        func keepOnly(hosts: some Sequence<String>) { inner.keepOnly(hosts: hosts) }
+        func removeAll() { inner.removeAll() }
+        func bytes(host: String) -> Int { inner.bytes(host: host) }
+        func count() -> Int { inner.count() }
+        @discardableResult
+        func trim(toBytes cap: Int) -> Int { inner.trim(toBytes: cap) }
     }
 
     @Test("Dismissing while a step runs stops it, and a late answer does not land")
     func dismissCancels() async {
         let carrier = FakeCarrier()
+        let gate = Gate()
+        carrier.gate = gate
+        let guardTask = watching(gate, "the weighing, held until the flow is dismissed")
+        defer { guardTask.cancel() }
         let carry = ShellCarry(work: SourceWork())
         carry.beginTakeAway(with: carrier)
+        await met("the weighing is asked of the carrier") { carrier.weighs.withLock { $0.asked } == 1 }
         carry.dismiss()
-        await settle(carry) { _ in false }
+        #expect(carry.step == nil)
+        await gate.open()
+        await met("the carrier answers, after the dismissal") { carrier.weighs.withLock { $0.answered } == 1 }
+        // Counted turns, behind the late answer: a flow that drops it says nothing of dropping it.
+        for _ in 0..<200 { await Task.yield() }
         #expect(carry.step == nil)
     }
 

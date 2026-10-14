@@ -6,7 +6,7 @@ import Testing
 
 /// #234: Usage reads as a list of sources, each opening what it holds; its long explanations are
 /// short lines with a (?), its actions are icons, and no tab holds a list and a setting together.
-@Suite("Usage says the least first", .serialized)
+@Suite("Usage says the least first", .serialized, .watched)
 @MainActor
 struct UsageListTests {
     private static let mastodon = Source(host: "mastodon.example", kind: .mastodon)
@@ -259,7 +259,7 @@ struct UsageListTests {
         #expect(session.cleared == 0 && forums.hasPassword(host: Self.forum.host), "asking cleared something")
 
         ask.answered(ShellQuestion.yes)
-        for _ in 0..<200 where session.cleared == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        await met("the yes has cleared") { session.cleared > 0 }
         #expect(session.cleared == 1)
         #expect(!forums.hasPassword(host: Self.forum.host))
     }

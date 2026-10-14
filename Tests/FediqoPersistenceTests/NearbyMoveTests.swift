@@ -10,32 +10,79 @@ import Testing
 /// the sender's; a no on either side writes nothing; a wrong code never connects and rolls the
 /// code; a cut link resumes from what the receiver holds; an altered stream is refused by #252's
 /// checks; sign-ins only moves what signs in and nothing else.
-@Suite("Moving a store to a device nearby", .serialized)
+@Suite("Moving a store to a device nearby", .serialized, .watched)
 struct NearbyMoveTests {
     typealias Device = PackagerFixture.PackagerDevice
     typealias Event = NearbyMove.Event
 
     /// Every event one side emitted, read from any task.
     final class Watch: Sendable {
-        private let held = Mutex<[Event]>([])
-        private let task: Mutex<Task<Void, Never>?> = Mutex(nil)
+        private final class Seen: Sendable {
+            let events = Mutex<[Event]>([])
+            let over = Mutex(false)
+        }
+
+        private let seen: Seen
+        /// The reading of that side's events. It ends when the side's run does — done, refused
+        /// or stopped — and so stands for that run in a wait.
+        let work: Task<Void, Never>
 
         init(_ events: AsyncStream<Event>) {
-            task.withLock { $0 = Task { for await event in events { held.withLock { $0.append(event) } } } }
-        }
-
-        var events: [Event] { held.withLock { $0 } }
-
-        /// Waits until an event answers `test`, or fails after a while.
-        @discardableResult
-        func until(_ what: String, _ test: (Event) -> Bool) async -> Event? {
-            for _ in 0..<600 {
-                if let found = events.first(where: test) { return found }
-                try? await Task.sleep(for: .milliseconds(10))
+            let seen = Seen()
+            self.seen = seen
+            work = Task {
+                for await event in events { seen.events.withLock { $0.append(event) } }
+                seen.over.withLock { $0 = true }
             }
-            Issue.record("never saw \(what); saw \(events)")
-            return nil
         }
+
+        var events: [Event] { seen.events.withLock { $0 } }
+
+        /// Whether that side's run has ended: it says nothing more.
+        var over: Bool { seen.over.withLock { $0 } }
+
+        /// Waits until an event answers `test`, and gives up where that side's run has ended
+        /// without one.
+        @discardableResult
+        func until(
+            _ what: String, _ test: (Event) -> Bool, sourceLocation: SourceLocation = #_sourceLocation
+        ) async -> Event? {
+            guard await met(what, by: work, sourceLocation: sourceLocation, until: { events.contains(where: test) }) else {
+                Issue.record("never saw \(what); saw \(events)", sourceLocation: sourceLocation)
+                return nil
+            }
+            return events.first(where: test)
+        }
+    }
+
+    /// What a sender here waits between two tries at a dropped link, asked of a clock the check
+    /// turns.
+    static let retryDelay = Duration.milliseconds(20)
+
+    /// A clock nobody turns, for a deadline a check does not reach: it ends only when its move
+    /// is put away, and a pool too busy to run the move on time can never let it fire.
+    static let never: @Sendable () async throws -> Void = { try await TurnedClock().sleep(for: .seconds(1800)) }
+
+    /// The device holding on `link`, once a sender can see it.
+    private static func peer(
+        on link: PipeNearbyLink, heldBy held: Watch, sourceLocation: SourceLocation = #_sourceLocation
+    ) async -> NearbyPeer? {
+        await met("the receiver is listening, and seen nearby", by: held.work, sourceLocation: sourceLocation) { !link.peers.isEmpty }
+        return link.peers.first
+    }
+
+    /// Lets a sender that is waiting to try a dropped link again go on, once the receiver is
+    /// listening again: the first try then joins, at whatever pace the receiver came back.
+    /// `clock` carries the sender's retries and nothing else — its last word's deadline is on a
+    /// clock of its own — so the `drop`th wait asked of it is the one after the `drop`th drop.
+    private static func rejoin(
+        _ clock: TurnedClock, on link: PipeNearbyLink, by sent: Watch, drop: Int = 1,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) async {
+        await met("the sender waits to try again, and the receiver listens again", by: sent.work, sourceLocation: sourceLocation) {
+            clock.asked.count == drop && clock.sleeping == 1 && !link.peers.isEmpty
+        }
+        clock.turn()
     }
 
     /// A pair of devices joined by one pipe, and the two moves on them.
@@ -45,12 +92,22 @@ struct NearbyMoveTests {
         let onto: Device
         let sender: NearbyMove
         let receiver: NearbyMove
+        /// What the sender sleeps on: its wait before a dropped link is tried again, which
+        /// `rejoin` ends. The sender's last word and the receiver's offer have deadlines on
+        /// clocks nobody turns.
+        let clock = TurnedClock()
 
         init(from: Device, onto: Device) {
             self.from = from
             self.onto = onto
-            sender = NearbyMove(link: link, carrier: from.packager(), device: "a laptop", retryDelay: .milliseconds(20), retries: 20)
-            receiver = NearbyMove(link: link, carrier: onto.packager(), device: "a tablet", retryDelay: .milliseconds(20), retries: 20)
+            sender = NearbyMove(
+                link: link, carrier: from.packager(), device: "a laptop", retryDelay: NearbyMoveTests.retryDelay, retries: 20,
+                lastWordClock: NearbyMoveTests.never, sleep: clock.sleep
+            )
+            receiver = NearbyMove(
+                link: link, carrier: onto.packager(), device: "a tablet", retryDelay: NearbyMoveTests.retryDelay, retries: 20,
+                offerClock: NearbyMoveTests.never
+            )
         }
 
         func remove() {
@@ -59,15 +116,16 @@ struct NearbyMoveTests {
         }
 
         /// The receiver holding, with its code, and the peer the sender sees.
-        func hold() async -> (Watch, String, NearbyPeer) {
+        func hold(sourceLocation: SourceLocation = #_sourceLocation) async -> (Watch, String, NearbyPeer) {
             let held = Watch(await receiver.hold())
-            guard case .code(let code, _)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else {
+            let isCode: (Event) -> Bool = { if case .code = $0 { true } else { false } }
+            guard case .code(let code, _)? = await held.until("a code", isCode, sourceLocation: sourceLocation) else {
                 return (held, "", NearbyPeer(id: "", name: "", sessionID: ""))
             }
-            guard await met("the sender sees the receiver nearby", until: { !link.peers.isEmpty }) else {
+            guard let peer = await NearbyMoveTests.peer(on: link, heldBy: held, sourceLocation: sourceLocation) else {
                 return (held, code, NearbyPeer(id: "", name: "", sessionID: ""))
             }
-            return (held, code, link.peers[0])
+            return (held, code, peer)
         }
     }
 
@@ -83,17 +141,22 @@ struct NearbyMoveTests {
         if case .refused = event { true } else { false }
     }
 
-    /// Drives a whole move where both say yes, and hands back both watches.
-    private func moveWhole(_ pair: Pair, pictures: Bool, contents: PackageSummary.Contents = .whole) async -> (sent: Watch, held: Watch) {
-        let (held, code, peer) = await pair.hold()
-        #expect(peer.name == "a tablet" && NearbyCode.isWellFormed(code))
+    /// Drives a whole move where both say yes, and hands back both watches. `drops` is how
+    /// many times the link is to drop on the way: the sender is let try again after each.
+    private func moveWhole(
+        _ pair: Pair, pictures: Bool, contents: PackageSummary.Contents = .whole, drops: Int = 0,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) async -> (sent: Watch, held: Watch) {
+        let (held, code, peer) = await pair.hold(sourceLocation: sourceLocation)
+        #expect(peer.name == "a tablet" && NearbyCode.isWellFormed(code), sourceLocation: sourceLocation)
         let sent = Watch(await pair.sender.offer(to: peer, code: code, pictures: pictures, contents: contents))
-        await sent.until("the sender's question", Self.isAsking)
-        await held.until("the receiver's question", Self.isAsking)
+        await sent.until("the sender's question", Self.isAsking, sourceLocation: sourceLocation)
+        await held.until("the receiver's question", Self.isAsking, sourceLocation: sourceLocation)
         await pair.sender.answer(true)
         await pair.receiver.answer(true)
-        await sent.until("the sender done", Self.isDone)
-        await held.until("the receiver done", Self.isDone)
+        for drop in 0..<drops { await Self.rejoin(pair.clock, on: pair.link, by: sent, drop: drop + 1, sourceLocation: sourceLocation) }
+        await sent.until("the sender done", Self.isDone, sourceLocation: sourceLocation)
+        await held.until("the receiver done", Self.isDone, sourceLocation: sourceLocation)
         return (sent, held)
     }
 
@@ -133,7 +196,10 @@ struct NearbyMoveTests {
         // Nothing staged is left under the receiver's folder, and nothing more comes.
         let left = (try? FileManager.default.contentsOfDirectory(atPath: pair.onto.directory.path)) ?? []
         #expect(!left.contains { $0.hasPrefix("incoming-") }, "\(left)")
-        try await Task.sleep(for: .milliseconds(30))
+        // The sender's run has ended, and the receiver has put the move down and listens again:
+        // whatever either was going to say of this move has been said.
+        await met("the sender's run has ended", by: sent.work) { sent.over }
+        await met("the receiver listens again, the move behind it", by: held.work) { !pair.link.peers.isEmpty }
         #expect(held.events.filter(Self.isDone).count == 1 && sent.events.filter(Self.isDone).count == 1)
     }
 
@@ -272,8 +338,9 @@ struct NearbyMoveTests {
         let rolled = await held.until("a new code", { if case .code(let next, _) = $0 { next != code } else { false } })
         #expect(rolled != nil)
         #expect(!held.events.contains(where: Self.isAsking))
-        for _ in 0..<100 where pair.link.peers.first?.sessionID == peer.sessionID { try? await Task.sleep(for: .milliseconds(5)) }
-        #expect(pair.link.peers.first?.sessionID != peer.sessionID, "the session changes with the code")
+        await met("the receiver listens under a new session: the session changes with the code", by: held.work) {
+            pair.link.peers.first.map { $0.sessionID != peer.sessionID } ?? false
+        }
         #expect(await pair.onto.store.sources().isEmpty)
         await pair.receiver.stop()
     }
@@ -286,9 +353,10 @@ struct NearbyMoveTests {
         let pair = Pair(from: from, onto: try await Device())
         defer { pair.remove() }
         pair.link.cutNext(afterBytesFrames: 1)
-        let (sent, held) = await moveWhole(pair, pictures: true)
+        let (sent, held) = await moveWhole(pair, pictures: true, drops: 1)
         #expect(sent.events.contains { if case .reconnecting = $0 { true } else { false } })
         #expect(held.events.contains { if case .reconnecting = $0 { true } else { false } })
+        #expect(pair.clock.asked == [Self.retryDelay], "one wait, of the length asked, before the one try")
         // After the drop, the first progress on the receiver is what it already held, not zero.
         let moved = held.events.compactMap { if case .moving(let progress, _) = $0 { progress } else { nil } }
         let starts = moved.enumerated().filter { $0.offset > 0 && $0.element.done <= moved[$0.offset - 1].done }
@@ -312,8 +380,8 @@ struct NearbyMoveTests {
 
         let held = Watch(await receiver.hold())
         guard case .code(let code, _)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else { return }
-        for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
-        let sent = Watch(await sender.offer(to: link.peers[0], code: code, pictures: true, contents: .whole))
+        guard let peer = await Self.peer(on: link, heldBy: held) else { return }
+        let sent = Watch(await sender.offer(to: peer, code: code, pictures: true, contents: .whole))
         await sent.until("the sender's question", Self.isAsking)
         await held.until("the receiver's question", Self.isAsking)
         await sender.answer(true)
@@ -422,7 +490,7 @@ struct NearbyMoveTests {
         let pair = Pair(from: try await PackagerFixture.populated(), onto: try await Device())
         defer { pair.remove() }
         pair.link.cutNextBeforeLastWord()
-        let (sent, held) = await moveWhole(pair, pictures: false)
+        let (sent, held) = await moveWhole(pair, pictures: false, drops: 1)
         #expect(held.events.filter(Self.isDone).count == 1)
         #expect(sent.events.contains { if case .reconnecting = $0 { true } else { false } })
         #expect(sent.events.filter(Self.isDone).count == 1 && !sent.events.contains(where: Self.isRefused))
@@ -461,17 +529,26 @@ struct NearbyMoveTests {
         let receiver = NearbyMove(link: link, carrier: onto.packager(), device: "a tablet", guessCap: 3)
         let held = Watch(await receiver.hold())
         guard case .code? = await held.until("a code", { if case .code = $0 { true } else { false } }) else { return }
+        var guessed: Set<String> = []
         for _ in 0..<3 {
-            for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
-            guard let peer = link.peers.first else { break }
+            // Each guess is made at a code not guessed at yet: the listen the last guess rolled.
+            let fresh = await met("the receiver listens under a code not guessed at", by: held.work) {
+                link.peers.first.map { !guessed.contains($0.sessionID) } ?? false
+            }
+            guard fresh, let peer = link.peers.first else { break }
+            guessed.insert(peer.sessionID)
             _ = try? await link.connect(to: peer, psk: NearbyCode.psk(code: "wrong", sessionID: peer.sessionID))
-            try? await Task.sleep(for: .milliseconds(20))
         }
         #expect(await held.until("guessing", Self.isRefused) == .refused(.guessing))
         #expect(held.events.filter { if case .code = $0 { true } else { false } }.count == 3, "rolled on each guess but the last")
 
-        let quick = NearbyMove(link: link, carrier: onto.packager(), device: "a tablet", holdTimeout: .milliseconds(50))
+        let clock = TurnedClock()
+        let quick = NearbyMove(link: link, carrier: onto.packager(), device: "a tablet", holdTimeout: .milliseconds(50), sleep: clock.sleep)
         let timed = Watch(await quick.hold())
+        await met("the hold waits out its timeout", by: timed.work) { clock.sleeping == 1 }
+        #expect(clock.asked == [.milliseconds(50)], "the hold waits the time it was given, and nothing else")
+        #expect(!timed.events.contains(where: Self.isRefused), "the hold closed before its time had passed")
+        clock.turn()
         #expect(await timed.until("timed out", Self.isRefused) == .refused(.timedOut))
     }
 
@@ -514,11 +591,14 @@ struct NearbyMoveTests {
     /// Ends one period of `ticker` once something is waiting on it — and, where `again`, waits
     /// for it to be waited on again, which is the hold having looked and gone on. A clock that
     /// is waited on once, or a hold that ends at this tick, is not waited for.
-    private func endPeriod(_ ticker: Ticker, again: Bool = true) async {
-        for _ in 0..<500 where !ticker.waiting { try? await Task.sleep(for: .milliseconds(2)) }
+    /// `watch` is the side whose clock it is: a side whose run has ended waits on no clock.
+    private func endPeriod(
+        _ ticker: Ticker, of watch: Watch, again: Bool = true, sourceLocation: SourceLocation = #_sourceLocation
+    ) async {
+        await met("the clock is waited on", by: watch.work, sourceLocation: sourceLocation) { ticker.waiting }
         ticker.tick()
         guard again else { return }
-        for _ in 0..<500 where !ticker.waiting { try? await Task.sleep(for: .milliseconds(2)) }
+        await met("the clock is waited on again, its period looked at", by: watch.work, sourceLocation: sourceLocation) { ticker.waiting }
     }
 
     @Test("A hold's timeout counts only time with nobody joined: a question on screen, a move under way and a move waiting to resume never time out")
@@ -528,24 +608,31 @@ struct NearbyMoveTests {
         let link = PipeNearbyLink()
         let ticker = Ticker()
         link.cutNext(afterBytesFrames: 0)
-        let sender = NearbyMove(link: link, carrier: from.packager(), device: "a laptop", retryDelay: .milliseconds(20), retries: 50)
-        let receiver = NearbyMove(link: link, carrier: onto.packager(), device: "a tablet", holdClock: ticker.period)
+        let clock = TurnedClock()
+        let sender = NearbyMove(
+            link: link, carrier: from.packager(), device: "a laptop", retryDelay: Self.retryDelay, retries: 50,
+            lastWordClock: Self.never, sleep: clock.sleep
+        )
+        let receiver = NearbyMove(link: link, carrier: onto.packager(), device: "a tablet", holdClock: ticker.period, offerClock: Self.never)
         defer { from.remove(); onto.remove() }
         let held = Watch(await receiver.hold())
         guard case .code(let code, _)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else { return }
-        for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
-        let sent = Watch(await sender.offer(to: link.peers[0], code: code, pictures: false, contents: .whole))
+        guard let peer = await Self.peer(on: link, heldBy: held) else { return }
+        let sent = Watch(await sender.offer(to: peer, code: code, pictures: false, contents: .whole))
         await held.until("the receiver's question", Self.isAsking)
         // A period ends while the question is on screen and unanswered.
-        await endPeriod(ticker)
+        await endPeriod(ticker, of: held)
         #expect(!held.events.contains(where: Self.isRefused), "a question on screen timed out: \(held.events)")
         await sent.until("the sender's question", Self.isAsking)
         await sender.answer(true)
         await receiver.answer(true)
         // The link drops after the first frame of the package; a period ends while it waits to resume.
+        // The sender is held before its next try, so the move is still waiting when the period ends.
         await held.until("the drop", { if case .reconnecting = $0 { true } else { false } })
-        await endPeriod(ticker)
+        await endPeriod(ticker, of: held)
         #expect(!held.events.contains(where: Self.isRefused), "a move waiting to resume timed out: \(held.events)")
+        #expect(!held.events.contains(where: Self.isDone), "the move was not waiting to resume when the period ended")
+        await Self.rejoin(clock, on: link, by: sent)
         await held.until("the receiver done", Self.isDone)
         await sent.until("the sender done", Self.isDone)
         #expect(await onto.store.snapshot().notes.count == 3)
@@ -557,21 +644,25 @@ struct NearbyMoveTests {
         let onto = try await Device()
         let link = PipeNearbyLink()
         let ticker = Ticker()
-        let sender = NearbyMove(link: link, carrier: from.packager(), device: "a laptop", retryDelay: .milliseconds(20), retries: 5)
+        // Never turned: a visitor that walked away is not back before it is put away.
+        let clock = TurnedClock()
+        let sender = NearbyMove(
+            link: link, carrier: from.packager(), device: "a laptop", retryDelay: Self.retryDelay, retries: 5, sleep: clock.sleep
+        )
         let receiver = NearbyMove(link: link, carrier: onto.packager(), device: "a tablet", holdClock: ticker.period)
         defer { from.remove(); onto.remove() }
         let held = Watch(await receiver.hold())
         guard case .code(let code, _)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else { return }
-        for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
-        _ = Watch(await sender.offer(to: link.peers[0], code: code, pictures: false, contents: .whole))
+        guard let peer = await Self.peer(on: link, heldBy: held) else { return }
+        _ = Watch(await sender.offer(to: peer, code: code, pictures: false, contents: .whole))
         await held.until("the receiver's question", Self.isAsking)
-        await endPeriod(ticker)
+        await endPeriod(ticker, of: held)
         #expect(!held.events.contains(where: Self.isRefused))
         // The visitor walks away before anyone answers.
         link.cut()
         await sender.stop()
         await held.until("back to the code", { _ in held.events.filter { if case .code = $0 { true } else { false } }.count == 2 })
-        await endPeriod(ticker, again: false)
+        await endPeriod(ticker, of: held, again: false)
         #expect(await held.until("timed out", Self.isRefused) == .refused(.timedOut))
     }
 
@@ -587,8 +678,7 @@ struct NearbyMoveTests {
         )
         let held = Watch(await receiver.hold())
         guard case .code(let code, _)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else { return }
-        for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
-        let peer = link.peers[0]
+        guard let peer = await Self.peer(on: link, heldBy: held) else { return }
         let psk = NearbyCode.psk(code: code, sessionID: peer.sessionID)
         // A visitor with the code joins, proves it, and then says nothing.
         let connection = try await link.connect(to: peer, psk: psk)
@@ -598,14 +688,14 @@ struct NearbyMoveTests {
         )
         await held.until("joined", { $0 == .joined })
         // While it is joined, a period of the hold's timeout does not count.
-        await endPeriod(holdTicks)
+        await endPeriod(holdTicks, of: held)
         #expect(!held.events.contains(where: Self.isRefused), "a joined visitor timed out before its deadline: \(held.events)")
+        #expect(link.peers.isEmpty, "the hold listened while a visitor was joined")
         // The offer's deadline passes: it is let go as a drop, and the listen comes back.
-        await endPeriod(offerTicks, again: false)
-        for _ in 0..<500 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(2)) }
-        #expect(!link.peers.isEmpty, "the hold listens again")
+        await endPeriod(offerTicks, of: held, again: false)
+        await met("the hold listens again", by: held.work) { !link.peers.isEmpty }
         // Now nobody is there: the next period closes the hold.
-        await endPeriod(holdTicks, again: false)
+        await endPeriod(holdTicks, of: held, again: false)
         #expect(await held.until("timed out", Self.isRefused) == .refused(.timedOut))
     }
 
@@ -648,14 +738,14 @@ struct NearbyMoveTests {
         let receiver = NearbyMove(link: link, carrier: slow, device: "a tablet")
         let held = Watch(await receiver.hold())
         guard case .code(let code, _)? = await held.until("a code", { if case .code = $0 { true } else { false } }) else { return }
-        for _ in 0..<100 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
-        let sent = Watch(await sender.offer(to: link.peers[0], code: code, pictures: false, contents: .whole))
+        guard let peer = await Self.peer(on: link, heldBy: held) else { return }
+        let sent = Watch(await sender.offer(to: peer, code: code, pictures: false, contents: .whole))
         await sent.until("the sender's question", Self.isAsking)
         await held.until("the receiver's question", Self.isAsking)
         await sender.answer(true)
         await receiver.answer(true)
         await sent.until("the sender settling", { if case .settling = $0 { true } else { false } })
-        await endPeriod(ticks, again: false)
+        await endPeriod(ticks, of: sent, again: false)
         #expect(await sent.until("unsure", Self.isRefused) == .refused(.unsure))
         slow.open()
         await held.until("the receiver done", Self.isDone)
@@ -673,21 +763,22 @@ struct NearbyMoveTests {
         // The sender walks out of reach while the receiver's question is up.
         pair.link.cut()
         await pair.sender.stop()
-        for _ in 0..<300 where held.events.filter({ if case .code = $0 { true } else { false } }).count < 2 {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
+        await held.until("back to the code", { _ in held.events.filter { if case .code = $0 { true } else { false } }.count == 2 })
         let codes = held.events.compactMap { if case .code(let next, _) = $0 { next } else { nil } }
         #expect(codes == [code, code], "back to the code, the same one: \(held.events)")
         // A late yes lands on no question.
         await pair.receiver.answer(true)
         // A fresh offer is asked about, and waits.
-        for _ in 0..<100 where pair.link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
-        let again = NearbyMove(link: pair.link, carrier: pair.from.packager(), device: "a laptop", retryDelay: .milliseconds(20), retries: 5)
-        sent = Watch(await again.offer(to: pair.link.peers[0], code: code, pictures: false, contents: .whole))
+        guard let listening = await Self.peer(on: pair.link, heldBy: held) else { return }
+        let again = NearbyMove(link: pair.link, carrier: pair.from.packager(), device: "a laptop", retryDelay: Self.retryDelay, retries: 5)
+        sent = Watch(await again.offer(to: listening, code: code, pictures: false, contents: .whole))
         await sent.until("the sender's question", Self.isAsking)
         await again.answer(true)
         await held.until("asked again", { held.events.filter(Self.isAsking).count == 2 && Self.isAsking($0) })
-        try await Task.sleep(for: .milliseconds(100))
+        // Counted turns, behind the question being up again: a receiver waiting for its person
+        // says nothing of waiting, and one that took the stale yes would have gone on inside them.
+        // Kept counted: that wait is inside `NearbyMove`, and naming it would take a seam there.
+        for _ in 0..<1_000 { await Task.yield() }
         #expect(!held.events.contains { if case .moving = $0 { true } else { false } }, "nothing moves on the stale yes")
         await pair.receiver.answer(true)
         await held.until("done", Self.isDone)
