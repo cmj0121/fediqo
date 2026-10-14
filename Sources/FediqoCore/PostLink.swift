@@ -215,8 +215,9 @@ public extension PostLink {
 }
 
 public extension EmojiRun {
-    /// A post's own words, cut into letters, pictures, the addresses they were written with and
-    /// the tags the author marked.
+    /// A post's own words, cut into letters, pictures, the addresses they were written with,
+    /// the tags the author marked and the people its source says it mentions (`mentions`, each
+    /// a whole handle — #310). With nobody listed, the words name nobody.
     ///
     /// **Prose, and only prose.** A name, a handle and a spoiler line are labels a stranger chose
     /// and go through `CustomEmoji.runs` instead: a person may call themselves
@@ -227,8 +228,8 @@ public extension EmojiRun {
     /// **Everything between two marks goes back through `CustomEmoji.runs`**, so a shortcode
     /// beside a tag is still a picture, and the cut concatenated is the words exactly — which is
     /// what lets `EmojiText` read a line aloud from its cut rather than scanning it twice.
-    static func prose(in text: String, emojis: [CustomEmoji]) -> [EmojiRun] {
-        let marks = marks(in: text)
+    static func prose(in text: String, emojis: [CustomEmoji], mentions: [String] = []) -> [EmojiRun] {
+        let marks = marks(in: text, mentions: mentions)
         guard !marks.isEmpty else { return CustomEmoji.runs(in: text, from: emojis) }
 
         var runs: [EmojiRun] = []
@@ -246,23 +247,33 @@ public extension EmojiRun {
         return runs
     }
 
-    /// The addresses and the tags in a line, in the order they were written, never overlapping.
+    /// The addresses, the tags and the mentions in a line, in the order they were written, never
+    /// overlapping.
     ///
     /// **An address is found first and keeps every character it was written with.** A `#` is
     /// legal in an address and `https://example.test/#top` opens a tag by the tag rule alone —
     /// the `/` before it is not a letter — so a tag that overlaps an address is not a tag. The
     /// other way round would cut the address short and draw a pill in the middle of a link, and
-    /// the address is the stronger claim: it is the one the reader can follow.
-    internal static func marks(in text: String) -> [(range: Range<String.Index>, run: EmojiRun)] {
+    /// the address is the stronger claim: it is the one the reader can follow. An `@` is legal in
+    /// an address too — a person's page is written `https://example.test/@ada` — so a mention
+    /// gives way to an address the same way. A tag and a mention cannot overlap: neither is
+    /// written with the other's mark.
+    internal static func marks(
+        in text: String, mentions: [String] = []
+    ) -> [(range: Range<String.Index>, run: EmojiRun)] {
         // `https://` has a colon in it, so a line with no colon has no address — no scan, and
         // that is most lines. `PostTag.spans` makes the same check for `#` itself.
         let links = text.utf8.contains(UInt8(ascii: ":")) ? PostLink.spans(in: text) : []
         let tags = PostTag.spans(in: text).filter { tag in
             !links.contains { $0.range.overlaps(tag.range) }
         }
-        if tags.isEmpty { return links.map { ($0.range, .link($0.link)) } }
-        if links.isEmpty { return tags.map { ($0.range, .tag($0.tag)) } }
-        return (links.map { ($0.range, EmojiRun.link($0.link)) } + tags.map { ($0.range, EmojiRun.tag($0.tag)) })
+        let named = PostMention.spans(in: text, among: mentions).filter { mention in
+            !links.contains { $0.range.overlaps(mention.range) }
+        }
+        if tags.isEmpty && named.isEmpty { return links.map { ($0.range, .link($0.link)) } }
+        if links.isEmpty && named.isEmpty { return tags.map { ($0.range, .tag($0.tag)) } }
+        return (links.map { ($0.range, EmojiRun.link($0.link)) } + tags.map { ($0.range, EmojiRun.tag($0.tag)) }
+            + named.map { ($0.range, EmojiRun.mention($0.mention)) })
             .sorted { $0.range.lowerBound < $1.range.lowerBound }
     }
 }

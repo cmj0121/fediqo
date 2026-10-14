@@ -72,8 +72,10 @@ struct TimelineSwipeTests {
         // The page is what the walk stands on, and nothing about what the timeline has to draw:
         // an empty one, one still reading and one that failed are all the timeline's own page.
         #expect(TimelinePane.page(nil) == .timeline)
-        #expect(TimelinePane.page(.thread("a")) == .opened)
-        if let tag = PostTag("fediqo") { #expect(TimelinePane.page(.tag(tag)) == .opened) }
+        // A conversation's page is the frame's (F10); the stream drawn where it cannot be is left as before.
+        #expect(TimelinePane.page(.thread("a")) == .tabbed && TimelinePane.page(.thread("a"), drawn: false) == .opened)
+        // A hashtag's page is the frame's too (F10): its sideways is its own.
+        if let tag = PostTag("fediqo") { #expect(TimelinePane.page(.tag(tag)) == .tabbed) }
         #expect(TimelinePane.page(.link(URL(string: "https://fixture.example/")!)) == .link)
         #expect(TimelinePane.openedID(.thread("a")) == "thread:a" && TimelinePane.openedID(nil) == nil)
     }

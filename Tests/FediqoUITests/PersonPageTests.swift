@@ -37,10 +37,10 @@ enum HostedPersonPage {
 /// turned and the page left, what it says in each language, and that it lays out.
 ///
 /// **No check here waits on the clock.** Each waits on an ask arriving at `PageServer` or on
-/// the call that made it returning; a held ask is let go by the check, and by the server after
-/// its patience.
+/// the call that made it returning; a held ask is let go by the check, and by a guard when the
+/// run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("Somebody's page, a page of its own", .serialized, .timeLimit(.minutes(3)))
+@Suite("Somebody's page, a page of its own", .serialized, .watched)
 struct PersonPageTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -91,6 +91,7 @@ struct PersonPageTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: server)
         )
+        session.deadlinesUnturned()
         session.work = SourceWork()
         for source in [Self.source, Self.forum] { await session.store.add(source) }
         session.sources = await session.store.sources()
@@ -142,7 +143,7 @@ struct PersonPageTests {
         #expect(ShellPersonTabs.tabs(said: troubled, own: false) == PersonTab.allCases)
 
         // A strip only where there is more than one tab, and the names and glyphs each tab has.
-        #expect(!PersonPage.stripDrawn([.posts]) && PersonPage.stripDrawn([.about, .posts]))
+        #expect(!PageFrame.stripDrawn([PersonTab.posts]) && PageFrame.stripDrawn([PersonTab.about, .posts]))
         #expect(PersonTab.allCases.map(\.symbol) == ["person.text.rectangle", "person.line.dotted.person", "person.2", "pin", "text.bubble"])
         #expect(PersonTab.allCases.map { L10n.t($0.titleKey, language: .english) } == ["About", "Following", "Followers", "Pinned", "Posts"])
         #expect(PersonTab.allCases.map { L10n.t($0.titleKey, language: .taiwanese) } == ["關於", "跟隨中", "跟隨者", "釘選", "貼文"])
@@ -199,7 +200,7 @@ struct PersonPageTests {
         #expect(figures.map(\.figure) == ["1,204", "2,811", "310"])
         #expect(figures.map(\.words) == ["1,204 posts", "2,811 followers", "Follows 310"])
         #expect(figures.allSatisfy { $0.opens && !$0.hidden } && figures.map { $0.spoken(language: en) } == figures.map(\.words))
-        #expect(PersonSaid.Figure.hint(language: en) == "Shows it on this page" && PersonSaid.Figure.hint(language: .taiwanese) == "在這一頁顯示")
+        #expect(PageFigure.hint(language: en) == "Shows it on this page" && PageFigure.hint(language: .taiwanese) == "在這一頁顯示")
         let large = Person(source: Self.source, accountID: "1", handle: "@a@m.example", name: "a", tally: Person.Tally(followers: 3_000_000_000))
         #expect(PersonSaid.figures(of: large, tabs: all, language: en).map(\.figure) == [nil, "3,000,000,000", nil], "never shortened, never made up")
 
@@ -401,8 +402,10 @@ struct PersonPageTests {
         await pages.opened(Self.ada, in: session)
 
         await server.hold(Self.statuses)
+        let statusesGuard = watching("the ask of \(Self.statuses), held at its server") { await server.release(Self.statuses) }
+        defer { statusesGuard.cancel() }
         let fronted = Task { await bring(.posts, in: pages, session) }
-        await server.arrival(of: Self.statuses)
+        await server.arrival(of: Self.statuses, by: fronted)
         let out = try #require(pages.said(of: Self.ada, in: session))
         #expect(out.askingPosts && out.posts == nil && out.foot == .reading)
         #expect(pages.walked(of: Self.ada, in: session) == held, "what is held stays drawn, and is what the keys walk")
@@ -509,8 +512,10 @@ struct PersonPageTests {
 
         // A press while an ask is out asks nothing.
         await server.hold(Self.lookup)
+        let lookupGuard = watching("the ask of \(Self.lookup), held at its server") { await server.release(Self.lookup) }
+        defer { lookupGuard.cancel() }
         let pressed = Task { await pages.again(Self.ada, in: session) }
-        await server.arrival(of: Self.lookup, times: 5)
+        await server.arrival(of: Self.lookup, times: 5, by: pressed)
         let out = await asked(server).count
         for _ in 0..<3 { await pages.again(Self.ada, in: session) }
         #expect(await asked(server).count == out)
@@ -596,8 +601,10 @@ struct PersonPageTests {
 
         // A reading-on of theirs still out when the next reader comes: its answer lands nowhere.
         await server.hold(more)
+        let moreGuard = watching("the ask of \(more), held at its server") { await server.release(more) }
+        defer { moreGuard.cancel() }
         let reading = Task { await pages.pinnedReadOn(Self.ada, in: session) }
-        await server.arrival(of: more)
+        await server.arrival(of: more, by: reading)
         #expect(pages.pinned(of: Self.ada, in: session)?.foot == .reading)
         try signIn(session, as: "third")
         await pages.opened(Self.ada, in: session)
@@ -608,12 +615,14 @@ struct PersonPageTests {
 
         // And an ask from the top still out: the reader before is answered late, and to nobody.
         await server.hold(Self.pinned)
+        let pinnedGuard = watching("the ask of \(Self.pinned), held at its server") { await server.release(Self.pinned) }
+        defer { pinnedGuard.cancel() }
         let theirsOut = Task { await pages.fronted(Self.ada, in: session) }
-        await server.arrival(of: Self.pinned, times: 3)
+        await server.arrival(of: Self.pinned, times: 3, by: theirsOut)
         try signIn(session, as: "fourth")
         await pages.opened(Self.ada, in: session)
         let fourth = Task { await pages.fronted(Self.ada, in: session) }
-        await server.arrival(of: Self.pinned, times: 4)
+        await server.arrival(of: Self.pinned, times: 4, by: fourth)
         await server.releaseOne(Self.pinned)
         await theirsOut.value
         #expect(pages.pinned(of: Self.ada, in: session)?.answered == false, "the third reader's answer is not the fourth's")
@@ -848,13 +857,23 @@ struct PersonPageTests {
         #expect(PersonActing.marks(of: standing, language: .taiwanese).map(\.words) == PersonActing.marks(of: standing, language: .taiwanese).map(\.words).filter { !$0.isEmpty })
     }
 
-    @Test("The page takes the whole place: the timelines' head is not drawn over it and is over every other step; its sideways is its own — the tab beside, and on the first tab the swipe back leaves the page, as it leaves a page with one tab; a page that is a place is left by no swipe")
+    @Test("The page takes the whole place: the timelines' head is not drawn over it, nor over any page opened over the stream — only over the stream and a step that cannot be drawn; its sideways is its own — the tab beside, and on the first tab the swipe back leaves the page, as it leaves a page with one tab; a page that is a place is left by no swipe")
     func thePageAndItsSwipe() {
         #expect(!TimelinePane.headDrawn(over: .person(Self.ada)))
-        for step in [nil, ShellStep.thread("a"), .tag(PostTag("#birds")!), .rising(.tags), .link(URL(string: "https://example.org")!)] as [ShellStep?] {
+        // Every other step is a page of its own now (F10): the head is over the stream alone, and
+        // over a step that cannot be drawn, which draws the stream — left by the swipe as before.
+        for step in [nil, .link(URL(string: "https://example.org")!)] as [ShellStep?] {
             #expect(TimelinePane.headDrawn(over: step), "\(String(describing: step))")
         }
-        #expect(TimelinePane.page(.person(Self.ada)) == .tabbed && TimelinePane.page(.thread("a")) == .opened)
+        let found = FoundAt(source: "m.example", words: "swift", gave: FoundWhich.allCases)
+        for step in [
+            ShellStep.thread("post"), .people(PeopleList(directoryAt: "m.example")), .rising(.tags), .found(found, .tags),
+            .followedTags(FollowedTags(host: "m.example")),
+        ] {
+            #expect(!TimelinePane.headDrawn(over: step) && TimelinePane.headDrawn(over: step, drawn: false), "\(step)")
+            #expect(TimelinePane.page(step) == .tabbed && TimelinePane.page(step, drawn: false) == .opened, "\(step)")
+        }
+        #expect(TimelinePane.page(.person(Self.ada)) == .tabbed)
         #expect(TimelineSwipe.means(touch: true, page: .tabbed, searching: false, listShown: false, editing: false) == nil, "the timeline's swipe is not heard on it")
         #expect(TimelinePane.openedID(.person(Self.ada)) == "person:" + Self.ada.id)
 
@@ -864,7 +883,9 @@ struct PersonPageTests {
         #expect(TimelineSwipe.means(touch: true, detail: false, tabs: 1) == nil && TimelineSwipe.means(touch: false, detail: false, tabs: 5, leaves: true) == nil)
         #expect(TimelineSwipe.means(touch: true, detail: false, tabs: 5, leaves: true, covered: true) == nil)
         #expect(TimelineSwipe.leavesPage(from: 0, leaves: true) && !TimelineSwipe.leavesPage(from: 1, leaves: true))
-        #expect(!TimelineSwipe.leavesPage(from: 0, leaves: false) && TimelineSwipe.leavesPage(from: nil, leaves: true))
+        #expect(!TimelineSwipe.leavesPage(from: 0, leaves: false))
+        // With no tab in front there is nothing a swipe began on, and it is never acted on: it does not leave.
+        #expect(!TimelineSwipe.leavesPage(from: nil, leaves: true) && !TimelineSwipe.completes(startedOn: TimelineSwipe.tabInFront(.beside, index: nil), inFront: nil))
         // From any other tab the swipe back is the tab before.
         #expect(TimelineSwipe.target(from: 1, count: 5, step: -1) == 0 && TimelineSwipe.target(from: 0, count: 5, step: -1) == nil)
     }
@@ -886,13 +907,14 @@ struct PersonPageTests {
             ".task(id: ShellPersonPages.opening(person, in: session)) { await people?.opened(person, in: session) }",
             ".task(id: people?.standsOpening(to: person, in: session)) { await people?.standsOpened(to: person, in: session) }",
             ".task(id: people?.fronting(person, in: session)) { await people?.fronted(person, in: session) }",
-            "if Self.headDrawn(over: standing) {",
+            "if Self.headDrawn(over: standing, drawn: drawn) {",
         ] {
             #expect(pane.components(separatedBy: call).count == 2, "the pane has \(call) once")
         }
         let root = try String(contentsOf: ui.appending(path: "FediqoRootView.swift"), encoding: .utf8)
         for call in [
-            "if place == .timeline, let person = walk.openedPerson {\n            guard Self.turnsPersonTabs(open: openLayers) else { return false }\n            return people.rotate(person, by: step, lamp: &selectedItemID, in: session)",
+            "if place == .timeline, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: standingDrawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }",
+            "case .person(let person):\n            guard Self.turnsPersonTabs(open: openLayers) else { return false }\n            return people.rotate(person, by: step, lamp: &selectedItemID, in: session)",
             "walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }",
             "people.followByKey(\n            place: place, open: openLayers, person: walk.openedPerson, tag: walk.openedTag, in: session",
         ] {
@@ -1036,7 +1058,7 @@ struct PersonPageTests {
                         // At the largest text the head is a row of the tab's list: where that list
                         // is lazy it may not be laid out with no window, and then nothing is said.
                         guard !probe.frames.isEmpty else {
-                            #expect(PersonPage.headScrolls(at: size), "the head was not laid out: \(at)")
+                            #expect(PageFrame.headScrolls(at: size), "the head was not laid out: \(at)")
                             continue
                         }
                         #expect(probe.width > 0 && probe.width <= width - 2 * ShellSpace.pad + 0.5, "\(at)")
@@ -1054,8 +1076,8 @@ struct PersonPageTests {
                 }
             }
         }
-        #expect(PersonPage.headScrolls(at: .accessibility1) && PersonPage.headScrolls(at: .accessibility5))
-        #expect(!PersonPage.headScrolls(at: .xxxLarge) && !PersonPage.headScrolls(at: .large))
+        #expect(PageFrame.headScrolls(at: .accessibility1) && PageFrame.headScrolls(at: .accessibility5))
+        #expect(!PageFrame.headScrolls(at: .xxxLarge) && !PageFrame.headScrolls(at: .large))
     }
 
     @Test("A forum author's page is the bar, the heading it always had and what this device holds: no strip, no figure, no mark of how anybody stands, no mark in the bar; and what stands where its posts would is about this device")
@@ -1066,7 +1088,7 @@ struct PersonPageTests {
         ))!
         let tabs = ShellPersonTabs.tabs(said: nil, own: false)
         let head = PersonHeadSaid.made(of: author, said: nil, tabs: tabs, held: 2, standing: nil, language: .english)
-        #expect(tabs == [.posts] && !PersonPage.stripDrawn(tabs))
+        #expect(tabs == [.posts] && !PageFrame.stripDrawn(tabs))
         #expect(head.through == "Read through forum.example" && head.held == "2 posts here" && head.whose == nil)
         #expect(head.figures.isEmpty && head.marks.isEmpty && head.standing == nil)
         #expect(head.spoken(language: .english) == "bob, Read through forum.example")

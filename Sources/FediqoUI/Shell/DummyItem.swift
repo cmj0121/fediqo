@@ -180,6 +180,10 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
     /// quietly rewriting somebody's post. The reading server's catalogue is the fallback behind
     /// these, and `EmojiAlphabet` is the only thing that puts the two in that order.
     public let emojis: [CustomEmoji]
+    /// Whom the source says the post mentions (#310) — `Note.mentions`, carried so the words
+    /// are drawn with them wherever the row is. A reblog's row carries the reblogged post's, as
+    /// it carries its words.
+    public var mentions: [String] = []
     public let counts: DummyCounts
     public let marks: DummyMarks
     /// The post this one quotes (#214), carried so every place a row is drawn draws the quote
@@ -550,6 +554,7 @@ public struct DummyItem: Identifiable, Hashable, Sendable {
         sensitive = note.sensitive
         spoiler = note.spoiler
         emojis = note.emojis
+        mentions = note.mentions
         counts = DummyCounts(
             replies: note.counts.replies,
             reblogs: note.counts.reblogs,

@@ -83,28 +83,15 @@ struct PersonPageRows {
     var onOpenThread: (String) -> Void
 }
 
-/// Somebody, opened: a page of its own (F9). A way back, who they are, the page's line, its
-/// tabs, and the tab in front — the whole height of the pane, with no timeline's names over it.
-///
-///     ‹ Back                                                   [↻]   Esc or q
-///     ─────────────────────────────────────────────────────────────────────────
-///     head — `PersonHead`
-///     ─────────────────────────────────────────────────────────────────────────
-///     They moved to @alice@new.example.                  Open their new page
-///     ─────────────────────────────────────────────────────────────────────────
-///     (About)  (Following)  (Followers)  (Pinned)  (Posts)
-///     ─────────────────────────────────────────────────────────────────────────
-///     the tab in front
+/// Somebody, opened: a page of its own (F9), drawn in the frame every opened page stands in
+/// (`OpenedPage`). Who they are and the page's line are its head; its tabs and the tab in
+/// front are what the frame is handed.
 ///
 /// **It is handed everything it draws** — which tabs there are, which is in front, and each
 /// part's own value — and asks nothing: which tabs a page has is decided where the source is
 /// asked (`ShellPersonTabs`), and which kind of source this is is never looked at here. **A
 /// page handed one tab draws no strip**: a forum author's page is the bar, the heading it
 /// always had, and what this device holds of theirs.
-///
-/// **At an accessibility text size the head and the line are the first rows of every tab's
-/// list**, and scroll away with it: fixed, they would fill a small screen. The bar and the
-/// tabs stay.
 struct PersonPage: View {
     let person: DummyPerson
     let tabs: [PersonTab]
@@ -134,13 +121,6 @@ struct PersonPage: View {
     var acts = PersonPageActs()
 
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.dynamicTypeSize) private var typeSize
-
-    /// Whether the head scrolls away with the tab in front, at `size`.
-    static func headScrolls(at size: DynamicTypeSize) -> Bool { size.isAccessibilitySize }
-
-    /// Whether the strip of tabs is drawn: only where there is more than one.
-    static func stripDrawn(_ tabs: [PersonTab]) -> Bool { tabs.count > 1 }
 
     /// What the bar's mark is called: whom it asks again.
     static func reloadName(_ source: String, language: DummyLanguage? = nil) -> String {
@@ -156,55 +136,21 @@ struct PersonPage: View {
     private var homeOverTabs: PersonHomeLine? { said?.reading == .unheardOf ? home : nil }
 
     var body: some View {
-        let scrolls = Self.headScrolls(at: typeSize)
-        VStack(alignment: .leading, spacing: 0) {
-            bar
-            ShellRule()
-            if !scrolls { heading }
-            if Self.stripDrawn(tabs) {
-                strip
-                ShellRule()
-            }
-            inFront { if scrolls { heading } }
-                // One list per tab, so a tab brought in front is drawn afresh at its own lamp.
-                .id(front)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .modifier(Slid(slide: slide))
-                .modifier(PullsToReload(offered: { canReload }, reload: {}, settled: acts.onPull))
-        }
-        // A sideways swipe goes to the tab beside; on the first it leaves the page.
-        .modifier(SwipesTabs(slide: slide, tabs: tabs, selected: front, leave: acts.onBack, select: acts.onTab))
-    }
-
-    /// The way back and the way out of the page, on the line the thread pane puts them on —
-    /// one bar, so a reader who has learnt to leave a conversation has learnt to leave this —
-    /// and, where there is anybody to ask, the mark that asks them again.
-    private var bar: some View {
-        HStack(spacing: ShellSpace.snug) {
-            ShellBackButton("person.back", action: acts.onBack)
-            Spacer()
-            if canReload {
-                let name = Self.reloadName(head.whose ?? person.host)
-                Button(action: acts.onReload) {
-                    Image(systemName: ReloadMark.reload.symbol)
-                        .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                        .modifier(ShellGlyphBox())
-                }
-                .buttonStyle(.plain)
-                .help(name)
-                .accessibilityLabel(name)
-            }
-            ShellKeyHint("person.leaveHint")
-        }
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.snug)
+        OpenedPage(
+            tabs: tabs, front: front, slide: slide,
+            // Whom the bar's mark asks again, where there is anybody to ask.
+            reload: canReload ? Self.reloadName(head.whose ?? person.host) : nil,
+            acts: OpenedPageActs(onBack: acts.onBack, onTab: acts.onTab, onReload: acts.onReload, onPull: acts.onPull),
+            head: { heading },
+            inFront: { lead in inFront { lead } }
+        )
     }
 
     /// Who they are, and under it the page's line where there is one.
     @ViewBuilder
     private var heading: some View {
         PersonHead(
-            head: head, front: Self.stripDrawn(tabs) ? front : nil, onTab: acts.onTab, onAct: acts.onAct,
+            head: head, front: PageFrame.stripDrawn(tabs) ? front : nil, onTab: acts.onTab, onAct: acts.onAct,
             onAskFollows: acts.onAskFollows, onStandingAgain: acts.onStandingAgain
         )
         ShellRule()
@@ -242,14 +188,6 @@ struct PersonPage: View {
                 .padding(.vertical, ShellSpace.snug)
         }
         if let homeOverTabs { PersonHomeLineView(line: homeOverTabs, onPress: acts.onHome) }
-    }
-
-    /// The page's tabs, as every page with tabs draws them (`ShellTabs`): a pill each on a
-    /// wide page, and on a narrow one the tab in front by name with a dot for each.
-    private var strip: some View {
-        ShellTabs(tabs, selected: front, slide: slide, onSelect: acts.onTab)
-            .padding(.horizontal, ShellSpace.pad)
-            .padding(.vertical, ShellSpace.snug)
     }
 
     /// The tab in front, with `lead` as the first rows of its list.

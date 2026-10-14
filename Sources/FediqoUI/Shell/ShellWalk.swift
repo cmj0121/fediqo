@@ -41,14 +41,83 @@ enum ShellStep: Hashable, Sendable {
     /// timeline that reads what is rising. A hashtag's row opens that hashtag's page, and
     /// leaving it gives the row back: both are the walk's own.
     case rising(RisingWhich)
-    /// All the hashtags one source found for a search's words (#319), opened from the press
-    /// under its band. A hashtag's row opens that hashtag's page, and leaving it gives the row
-    /// back: both are the walk's own.
-    case foundTags(FoundTags)
+    /// What one source found for a search's words (#319): its people and its hashtags, one
+    /// page with a tab for each (F10), opened from either press for all of one kind under its
+    /// bands, on that kind's tab. A row opens that person's or that hashtag's page, and leaving
+    /// it gives the row back: both are the walk's own.
+    case found(FoundAt, FoundWhich)
     /// The hashtags the reader follows at one source (#318), opened from its line on their own
     /// page there. A hashtag's row opens that hashtag's page, and leaving it gives the row
     /// back: both are the walk's own.
     case followedTags(FollowedTags)
+}
+
+/// Whose the Tab key is with a step in front (F10): the page's own, asked of the walk before
+/// the timelines are turned.
+enum StepTabKey: Hashable, Sendable {
+    /// Somebody's page: its tabs, round their ring (F9).
+    case person(DummyPerson)
+    /// A hashtag's page (F10): Posts and About where it has both, round their ring — and
+    /// taken, turning nothing, where it has its posts alone.
+    case tag(PostTag)
+    /// What is rising (F10): Hashtags and Links where its sources have both, round their
+    /// ring — the tab is the step's own value, turned in place (`ShellWalk.turned(to:)`) — and
+    /// taken, turning nothing, where they have one.
+    case rising(RisingWhich)
+    /// What a search found at a source (F10): People and Hashtags where it gave both, round
+    /// their ring — the tab is the step's own value, turned in place — and taken, turning
+    /// nothing, where it gave one.
+    case found(FoundAt, FoundWhich)
+    /// A page with no tabs (F10): the key is taken and does nothing — to change timeline the
+    /// reader leaves first — while the page, drawn as `layer`, is what is in front.
+    case sole(DummyLayer)
+}
+
+extension ShellStep {
+    /// The layer this step is drawn as, among what is open (`DummyLayer`): the hashtags a
+    /// search found and those followed are drawn as rising's are, and the people it found as a
+    /// list of people is — by the tab of what it found that is in front.
+    var layer: DummyLayer {
+        switch self {
+        case .person: .person
+        case .tag: .tag
+        case .people, .found(_, .people): .people
+        case .rising, .found(_, .tags), .followedTags: .rising
+        case .thread: .thread
+        case .link: .link
+        }
+    }
+
+    /// What Tab turns with this step in front, or nothing where the step has no answer of
+    /// its own and the key is the timelines'.
+    var tabKey: StepTabKey? {
+        switch self {
+        case .person(let who): .person(who)
+        case .thread: .sole(.thread)
+        case .people: .sole(.people)
+        case .followedTags: .sole(.rising)
+        case .tag(let tag): .tag(tag)
+        case .rising(let which): .rising(which)
+        case .found(let at, let which): .found(at, which)
+        case .link: nil
+        }
+    }
+
+    /// Whether `other` is another value of the same kind of step — what a tab turned in place
+    /// may turn to (`ShellWalk.turned(to:)`): `.rising(.tags)` and `.rising(.links)` are, and
+    /// so are the two tabs of what a search found; a hashtag's page and a person's are not.
+    func isKind(of other: ShellStep) -> Bool {
+        switch self {
+        case .person: if case .person = other { true } else { false }
+        case .thread: if case .thread = other { true } else { false }
+        case .link: if case .link = other { true } else { false }
+        case .tag: if case .tag = other { true } else { false }
+        case .people: if case .people = other { true } else { false }
+        case .rising: if case .rising = other { true } else { false }
+        case .found: if case .found = other { true } else { false }
+        case .followedTags: if case .followedTags = other { true } else { false }
+        }
+    }
 }
 
 /// How far the reader has walked from the stream, and what each step is owed when it is left.
@@ -98,10 +167,14 @@ struct ShellWalk: Hashable, Sendable {
         return tag
     }
 
-    /// The list of people in front, where one is (#311).
+    /// The list of people in front, where one is (#311) — a list opened on its own, or the
+    /// people a search found, where the page of what it found stands on their tab (F10).
     var openedPeople: PeopleList? {
-        guard case .people(let list) = standing else { return nil }
-        return list
+        switch standing {
+        case .people(let list): list
+        case .found(let at, .people): at.people
+        default: nil
+        }
     }
 
     /// The page read out of a post that is in front, where one is (#169).
@@ -134,6 +207,9 @@ struct ShellWalk: Hashable, Sendable {
 
     var isEmpty: Bool { taken.isEmpty }
 
+    /// What Tab turns with the step in front (`ShellStep.tabKey`): nothing on the stream.
+    var tabKey: StepTabKey? { standing?.tabKey }
+
     /// Whether the page of the person `id` names is one of the steps taken, in front or under
     /// another. **By who they are, as their page is kept, and not by the value a row carried**:
     /// somebody met twice — from a post, then from a row of a list — may be two unequal
@@ -141,6 +217,15 @@ struct ShellWalk: Hashable, Sendable {
     func holdsPerson(_ id: String) -> Bool {
         taken.contains { taken in
             if case .person(let who) = taken.step { return who.id == id }
+            return false
+        }
+    }
+
+    /// Whether the page of `tag` is one of the steps taken, in front or under another — by
+    /// the hashtag as its page is kept, whatever case it was written in where it was pressed.
+    func holdsTag(_ tag: PostTag) -> Bool {
+        taken.contains { taken in
+            if case .tag(let held) = taken.step { return HeldUnderTag.same(held, tag) }
             return false
         }
     }
@@ -158,6 +243,25 @@ struct ShellWalk: Hashable, Sendable {
     mutating func walk(to step: ShellStep, from lamp: String?) -> Bool {
         if taken.last?.step == step { return false }
         taken.append(Taken(step: step, lamp: lamp))
+        return true
+    }
+
+    /// A tab that is the step's own value, brought in front (F10): the step in front is
+    /// replaced where it stands. Whether anything changed.
+    ///
+    /// **A tab is not a step.** The row the lamp goes back to stays the one the page was
+    /// opened from, and the walk is no deeper: leaving never passes through the other tab.
+    ///
+    /// **Only for a tab of the page in front** — the same kind of step, another of its own
+    /// values (`.rising(.tags)` to `.rising(.links)`); it is not a way to another page, and
+    /// **a step of another kind is refused** (`ShellStep.isKind(of:)`). Nothing is turned on
+    /// the stream, to the step already in front, or to the step beneath: that would stand the
+    /// reader twice on one step, which `walk(to:)` refuses.
+    @discardableResult
+    mutating func turned(to step: ShellStep) -> Bool {
+        guard let last = taken.last, last.step != step, last.step.isKind(of: step) else { return false }
+        if taken.count > 1, taken[taken.count - 2].step == step { return false }
+        taken[taken.count - 1] = Taken(step: step, lamp: last.lamp)
         return true
     }
 

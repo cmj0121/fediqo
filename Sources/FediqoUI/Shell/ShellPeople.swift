@@ -209,20 +209,6 @@ struct DirectoryChoice: Hashable, Sendable {
     var localOnly = false
 }
 
-extension ShellWalk {
-    /// A list of people opened as a page of its own — all the people a search found, from the
-    /// press under its band (#319): one more step of the walk. **The lamp and the step in one
-    /// turn**, as a row opens: the line pressed is lit and is what the walk remembers, so
-    /// leaving the list gives it back — pressed by a pointer or a finger too, where the lamp
-    /// was elsewhere or nowhere. A step that is not taken moves nothing. **Whom somebody
-    /// follows and who follows them are no step**: they are tabs of that person's page (F9).
-    mutating func open(_ list: PeopleList, lamp: inout String?) -> Bool {
-        guard walk(to: .people(list), from: list.id) else { return false }
-        lamp = list.id
-        return true
-    }
-}
-
 /// Every list of people opened this run, by which list it is.
 ///
 /// Held by `ShellPersonPages`, on its count of asks, and handed the session at each ask: the
@@ -290,6 +276,11 @@ final class ShellPeoplePages {
     static let stretchLength = 80
 
     private var pages: [String: Page] = [:]
+    /// The account check at each host whose count of who asks to follow the reader a request
+    /// answered here has made old (`MastodonSessions.askingCheck`). **Kept for the host, not
+    /// the page**: a page let go and made again does not bring the old figure back; the next
+    /// check does, with its own.
+    private var askingOld: [String: Int] = [:]
     @ObservationIgnored private var order = PageOrder()
     /// The one ask on the wire for each list — from the top, or a reading-on.
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
@@ -377,6 +368,13 @@ final class ShellPeoplePages {
         handed.acts = Self.rowActs(of: handed, at: source, in: session)
         handed.lock = Self.rowLock(of: handed, at: source, in: session)
         let page = self.standing(list, at: source, in: session)
+        // How many ask is the source's word only where the sign-in's account check said it: the
+        // figure the way to this list carried, said again over it, and never worked out from rows.
+        // **Only while it holds**: once a request is answered here it is old until the check
+        // runs again, and it is not counted down — the next check may already count the answer.
+        if list.which == .requests, askingOld[source.host] != session.mastodon.askingCheck(host: source.host) {
+            handed.tally = session.mastodon.asking(host: source.host)
+        }
         if list.isDirectory { handed.sorting = page.map { $0.wanted ?? $0.choice } ?? DirectoryChoice() }
         // The host's own word that it has no such address, as the run or this page heard it.
         if let thing = list.thing, page?.absent == true || hosts.has(thing, at: source.host) == .absent {
@@ -474,7 +472,10 @@ final class ShellPeoplePages {
               offered.people.contains(where: { $0.accountID == person.accountID })
         else { return }
         let done = await acts.pressRow(act, on: person, standing: page.stands[person.accountID], listed: list.which, in: session)
-        guard done, self.standing(list, at: source, in: session)?.number == page.number else { return }
+        guard done else { return }
+        // Answered: the count of who asks is old, whichever page now stands for the list.
+        if list.which == .requests { askingOld[source.host] = session.mastodon.askingCheck(host: source.host) }
+        guard self.standing(list, at: source, in: session)?.number == page.number else { return }
         pages[list.id]?.gone.insert(person.accountID)
     }
 
@@ -486,6 +487,17 @@ final class ShellPeoplePages {
     /// The person on the row `id` of `list`, where the list as it is drawn holds them.
     func person(_ id: String, on list: PeopleList, in session: ShellSession) -> Person? {
         said(of: list, in: session)?.people.first { $0.id == id }
+    }
+
+    /// Whether the people a search found at `list`'s source can be answered to whoever would
+    /// ask now: their list can be said, somebody is signed in there — a search is answered to
+    /// nobody else — and that sign-in's own words do not say it may not search. **One whose
+    /// words were never written down is not known to lack it**, as the look-up reads a sign-in
+    /// (`ShellSearchFound.note`). With none of that, a tab of them could only ever say it could
+    /// not be asked.
+    func searchable(_ list: PeopleList, in session: ShellSession) -> Bool {
+        guard let said = said(of: list, in: session), said.signedIn else { return false }
+        return session.mastodon.heldParts[list.host.lowercased()]?.scopes.map(MastodonOAuth.searches) ?? true
     }
 
     /// Whether the page of `list` has anybody to ask again — what `r` and its mark go by.

@@ -11,7 +11,7 @@ import Testing
 ///
 /// Every wait here is on an ask arriving or being let go (`PageServer`), and is tied to the
 /// work that made the ask: a held ask is let go in a `defer`, and by a guard when the run has
-/// gone still — never by `PageServer`'s own patience, which every hold here turns off.
+/// gone still.
 @MainActor
 @Suite("What a source says of itself beyond its document, on its page", .serialized, .watched)
 struct SourceMoreTests {
@@ -71,8 +71,7 @@ struct SourceMoreTests {
         more.hosts.reaching = { MastodonClient(http: server, host: $0) }
     }
 
-    /// Waits until `ask` has arrived at `server` `times` times, by the work that was to send it
-    /// — and not by `PageServer.arrival`, which gives up by a clock.
+    /// Waits until `ask` has arrived at `server` `times` times, by the work that was to send it.
     private func arrival(
         of ask: String, at server: PageServer, times: Int = 1, by work: Task<Void, Never>,
         sourceLocation: SourceLocation = #_sourceLocation
@@ -208,7 +207,7 @@ struct SourceMoreTests {
     func theAskOutlivesTheSheet() async throws {
         let (session, server, _) = await session(Self.served())
         let more = ShellPersonPages().more
-        await server.hold(Self.activity, lettingGoByItself: false)
+        await server.hold(Self.activity)
         defer { Task { await server.release(Self.activity) } }
         let activityGuard = watching("the ask of \(Self.activity), held at its server") { await server.release(Self.activity) }
         defer { activityGuard.cancel() }
@@ -224,7 +223,7 @@ struct SourceMoreTests {
         await sheet.value
         #expect(more.said(at: Self.host, in: session) == Self.opened)
 
-        await server.hold(Self.servers, lettingGoByItself: false)
+        await server.hold(Self.servers)
         defer { Task { await server.release(Self.servers) } }
         let serversGuard = watching("the ask of \(Self.servers), held at its server") { await server.release(Self.servers) }
         defer { serversGuard.cancel() }
@@ -257,7 +256,7 @@ struct SourceMoreTests {
         let (session, server, _) = await session(Self.served([Self.account: Self.off]))
         let more = ShellPersonPages().more
         bare(more, server)
-        await server.hold(Self.account, lettingGoByItself: false)
+        await server.hold(Self.account)
         defer { Task { await server.release(Self.account) } }
         let accountGuard = watching("the ask of \(Self.account), held at its server") { await server.release(Self.account) }
         defer { accountGuard.cancel() }
@@ -277,7 +276,7 @@ struct SourceMoreTests {
         await signed.value
         #expect(more.said(at: Self.host, in: session) == Self.signedIn(Self.opened))
 
-        await server.hold(Self.servers, lettingGoByItself: false)
+        await server.hold(Self.servers)
         defer { Task { await server.release(Self.servers) } }
         let serversGuard = watching("the ask of \(Self.servers), held at its server") { await server.release(Self.servers) }
         defer { serversGuard.cancel() }
@@ -301,7 +300,7 @@ struct SourceMoreTests {
         await hosts.hear(Self.host, in: session)
         #expect(!hosts.heard(Self.host), "a document that did not come is not heard")
         await server.answer(Self.document, PageServer.Answer(body: #"{"domain":"m.example","version":"4.6.6","configuration":{"accounts":{"max_featured_tags":0}}}"#))
-        await server.hold(Self.document, lettingGoByItself: false)
+        await server.hold(Self.document)
         defer { Task { await server.release(Self.document) } }
         let documentGuard = watching("the ask of \(Self.document), held at its server") { await server.release(Self.document) }
         defer { documentGuard.cancel() }
@@ -321,7 +320,7 @@ struct SourceMoreTests {
         hosts.reaching = { MastodonClient(http: server, host: $0) }
         hosts.askAfresh(Self.host)
         #expect(!hosts.heard(Self.host) && hosts.has(.featuredTags, at: Self.host) == .unsaid)
-        await server.hold(Self.document, lettingGoByItself: false)
+        await server.hold(Self.document)
         let late = Task { await hosts.hear(Self.host, in: session) }
         await arrival(of: Self.document, at: server, times: 3, by: late)
         hosts.notFound(.activity, at: Self.host, round: hosts.round(at: Self.host))

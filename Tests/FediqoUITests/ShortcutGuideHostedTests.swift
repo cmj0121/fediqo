@@ -59,11 +59,17 @@ struct ShortcutGuideHostedTests {
     /// the room on each side. Those lines sat together on the old Timeline tab too, which was
     /// at least as wide. Asserted as a bound so it cannot grow unnoticed.
     @Test("At the floor the plate narrows, and keeps its edges inside the window")
-    func thePlateNarrowsAtTheFloor() {
+    func thePlateNarrowsAtTheFloor() throws {
         let offered = ShellLayout.floor - 2 * ShellSpace.room
         let narrow = size(of: ShortcutGuide.Plate(tab: .constant(.read), onClose: {}), offered: offered)
         #expect(narrow.width < ShortcutGuide.Metrics.plate.width)
         #expect(narrow.width <= ShellLayout.floor - ShellSpace.room, "the plate is \(narrow.width) wide")
+        // The longest row — what Tab does, two sentences since F10 — wraps, and does not widen its tab.
+        let tabs = try #require(DummyShortcut.all.first { $0.commands.contains(.nextTab) }).group
+        let inner = ShortcutGuide.Metrics.plate.width - 2 * ShellSpace.pad
+        let roomy = size(of: ShortcutGuide.Page(group: tabs), offered: inner)
+        let tight = size(of: ShortcutGuide.Page(group: tabs), offered: offered - 2 * ShellSpace.pad)
+        #expect(tight.width <= offered - 2 * ShellSpace.pad && tight.height > roomy.height, "\(tight) at the floor, \(roomy) with room")
     }
 }
 #endif

@@ -545,7 +545,10 @@ public struct DummyShortcut: Identifiable, Hashable, Sendable {
     public var counterpart: String? = nil
 
     public var id: String { name }
-    public var detail: String { L10n.t("shortcut.\(name)") }
+    public var detail: String { words() }
+
+    /// What the line says, in `language` — the app's where none is named.
+    func words(language: DummyLanguage? = nil) -> String { L10n.t("shortcut.\(name)", language: language) }
 
     static func lines(in group: DummyShortcutGroup) -> [DummyShortcut] {
         all.filter { $0.group == group }

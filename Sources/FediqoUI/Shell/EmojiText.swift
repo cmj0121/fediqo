@@ -39,6 +39,9 @@ struct EmojiText: View {
     /// Whether this line is a post's **own words** rather than a label somebody chose. Only prose
     /// grows links — see the two initialisers below.
     let linked: Bool
+    /// Whom the source says these words mention (#310), each a whole handle: the only people a
+    /// mention in them is read as. Empty on a label, and wherever a source lists nobody.
+    let mentions: [String]
 
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.displayScale) private var displayScale
@@ -55,6 +58,9 @@ struct EmojiText: View {
     /// the shell, where a tag stays the label #123 drew.
     @Environment(\.shellTags) private var tags
     @Environment(\.shellRow) private var row
+    /// Where a press on a mention goes (#310). Nothing outside the shell, where somebody
+    /// mentioned stays the letters they were written with.
+    @Environment(\.shellMentions) private var naming
     /// The hosts still on this device (#250): a line read through one that has gone asks for no
     /// pictures, and draws its names as written. See `RemoteImage.isHere`.
     @Environment(\.shellSourcesHere) private var sourcesHere
@@ -76,7 +82,7 @@ struct EmojiText: View {
     /// which a call site has to ask for by name.
     init(_ text: String, emojis: [CustomEmoji], host: String, role: EmojiTextRole = .body,
          cache: EmojiCache = .shared) {
-        self.init(text, emojis: emojis, host: host, role: role, cache: cache, linked: false)
+        self.init(text, emojis: emojis, host: host, role: role, cache: cache, linked: false, mentions: [])
     }
 
     /// A post's **own words** — the one line on a row that the author wrote as writing rather
@@ -88,18 +94,23 @@ struct EmojiText: View {
     /// The role is `.body` and is not a parameter. Prose is prose; a name set in the body scale
     /// would be the type scale being decided at a call site, and the roles this view offers are
     /// the three places a stranger's words are drawn.
-    init(prose text: String, emojis: [CustomEmoji], host: String, cache: EmojiCache = .shared) {
-        self.init(text, emojis: emojis, host: host, role: .body, cache: cache, linked: true)
+    ///
+    /// `mentions` is whom the source says the post mentions (#310). **Handed in, never read out
+    /// of the words**: with nobody listed, an `@word` is letters.
+    init(prose text: String, emojis: [CustomEmoji], host: String, mentions: [String] = [],
+         cache: EmojiCache = .shared) {
+        self.init(text, emojis: emojis, host: host, role: .body, cache: cache, linked: true, mentions: mentions)
     }
 
     private init(_ text: String, emojis: [CustomEmoji], host: String, role: EmojiTextRole,
-                 cache: EmojiCache, linked: Bool) {
+                 cache: EmojiCache, linked: Bool, mentions: [String]) {
         self.text = text
         self.emojis = emojis
         self.host = host
         self.role = role
         self.cache = cache
         self.linked = linked
+        self.mentions = mentions
     }
 
     /// A post's own words, drawn as prose where the reader can read them and as plain letters
@@ -116,10 +127,10 @@ struct EmojiText: View {
     /// The role is `.body` either way, which is what keeps the cover the same shape as the words
     /// under it: this chooses which cut the line is drawn from, never what size it is set in.
     static func words(_ text: String, emojis: [CustomEmoji], host: String,
-                      covered: Bool) -> EmojiText {
+                      covered: Bool, mentions: [String] = []) -> EmojiText {
         covered
             ? EmojiText(text, emojis: emojis, host: host)
-            : EmojiText(prose: text, emojis: emojis, host: host)
+            : EmojiText(prose: text, emojis: emojis, host: host, mentions: mentions)
     }
 
     var body: some View {
@@ -135,16 +146,19 @@ struct EmojiText: View {
         let ink = ShellChrome.selectInk(colorScheme)
         // A tag takes the control's ink once a press opens something (#124), and only then.
         let tagInk: Color? = tags == nil ? nil : ink
+        // Somebody mentioned is a press once it opens their page (#310), and only then.
+        let named = naming == nil ? [] : Self.mentions(in: cut)
+        let nameInk: Color? = naming == nil ? nil : ink
         let plate = ShellChrome.well(colorScheme)
 
         Group {
             if let clock = Self.clock(for: pictures, reduceMotion: reduceMotion) {
                 TimelineView(.periodic(from: .now, by: clock)) { instant in
                     Self.line(cut, pictures, at: instant.date.timeIntervalSinceReferenceDate,
-                              baseline: baseline, linkInk: ink, tagInk: tagInk)
+                              baseline: baseline, linkInk: ink, tagInk: tagInk, nameInk: nameInk)
                 }
             } else {
-                Self.line(cut, pictures, at: 0, baseline: baseline, linkInk: ink, tagInk: tagInk)
+                Self.line(cut, pictures, at: 0, baseline: baseline, linkInk: ink, tagInk: tagInk, nameInk: nameInk)
             }
         }
         // Only where a pill is drawn: a line with no tag keeps the system's own drawing.
@@ -162,10 +176,12 @@ struct EmojiText: View {
         .accessibilityActions {
             LinkWays(links: links, reader: reader, browser: openURL, source: host)
             TagWays(tags: tagged, pressing: tags, row: row)
+            MentionWays(mentions: named, pressing: naming, source: host, row: row)
         }
         .modifier(ProseLinks(
             links: links, reader: reader, browser: openURL, source: host,
-            tags: tags == nil ? [] : tagged, pressing: tags, row: row
+            tags: tags == nil ? [] : tagged, pressing: tags, row: row,
+            mentions: named, naming: naming
         ))
         .task(id: Asking(request: request, here: RemoteImage.isHere(host, among: sourcesHere))) {
             guard RemoteImage.isHere(host, among: sourcesHere) else { return }
@@ -183,6 +199,14 @@ struct EmojiText: View {
     static func tags(in cut: [EmojiRun]) -> [PostTag] {
         cut.compactMap { run in
             if case .tag(let tag) = run { return tag }
+            return nil
+        }
+    }
+
+    /// The people a cut names, in the order they were written.
+    static func mentions(in cut: [EmojiRun]) -> [PostMention] {
+        cut.compactMap { run in
+            if case .mention(let mention) = run { return mention }
             return nil
         }
     }
@@ -223,7 +247,9 @@ struct EmojiText: View {
     /// words, the label cut everywhere else. Both are remembered by the cache.
     @MainActor
     private var cut: [EmojiRun] {
-        linked ? cache.proseRuns(in: text, from: emojis) : cache.runs(in: text, from: emojis)
+        linked
+            ? cache.proseRuns(in: text, from: emojis, mentions: mentions)
+            : cache.runs(in: text, from: emojis)
     }
 
     /// What a screen reader is given for this line — see `spoken(_:)`.
@@ -249,6 +275,7 @@ struct EmojiText: View {
             case .link(let link): spoken += link.text
             case .emoji(let emoji): spoken += ":\(emoji.shortcode):"
             case .tag(let tag): spoken += String(format: L10n.t("post.tag.spoken"), tag.name)
+            case .mention(let mention): spoken += mention.text
             }
         })
     }
@@ -277,7 +304,8 @@ struct EmojiText: View {
     /// build can be compared against an expected `Text` without a screen.
     static func line(_ cut: [EmojiRun], _ pictures: [String: EmojiCache.Frames],
                      at instant: TimeInterval, baseline: CGFloat,
-                     linkInk: Color = .accentColor, tagInk: Color? = nil) -> Text {
+                     linkInk: Color = .accentColor, tagInk: Color? = nil,
+                     nameInk: Color? = nil) -> Text {
         cut.reduce(Text(verbatim: "")) { line, run in
             switch run {
             case .text(let words):
@@ -286,6 +314,8 @@ struct EmojiText: View {
                 return line + Self.drawn(link, in: linkInk)
             case .tag(let tag):
                 return line + Self.drawn(tag, ink: tagInk)
+            case .mention(let mention):
+                return line + Self.drawn(mention, ink: nameInk)
             case .emoji(let emoji):
                 // Until the picture is here the shortcode stands in for it, which is what the
                 // reader would have seen anyway and is never a blank.
@@ -357,6 +387,21 @@ struct EmojiText: View {
         letters.link = url
         letters.foregroundColor = ink
         return Text(letters).customAttribute(PostTagMark())
+    }
+
+    /// Somebody mentioned, drawn as the press they are (#310): the letters as written, in the
+    /// control's ink **and underlined** — the `@` is on every `@word`, so the ink alone would be
+    /// the only thing telling a press from letters. With no `ink` there is nothing a press
+    /// opens, and they are the letters and nothing more.
+    static func drawn(_ mention: PostMention, ink: Color? = nil) -> Text {
+        guard let ink, let url = ShellMentions.url(for: mention.handle) else {
+            return Text(verbatim: mention.text)
+        }
+        var letters = AttributedString(mention.text)
+        letters.link = url
+        letters.foregroundColor = ink
+        letters.underlineStyle = .single
+        return Text(letters)
     }
 
     /// The room inside a tag's plate, each side: `U+202F NARROW NO-BREAK SPACE`.
@@ -568,13 +613,16 @@ private struct ProseLinks: ViewModifier {
     var tags: [PostTag] = []
     var pressing: ShellTags?
     var row: String?
+    /// The people the line names, where a press on one opens their page (#310), and where it goes.
+    var mentions: [PostMention] = []
+    var naming: ShellMentions?
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if links.isEmpty && tags.isEmpty {
+        if links.isEmpty && tags.isEmpty && mentions.isEmpty {
             content
         } else if links.isEmpty {
-            // Only tags: the press, and no menu — a tag has no browser to be opened in.
+            // Only tags and people: the press, and no menu — neither has a browser to be opened in.
             content.environment(\.openURL, press)
         } else {
             content
@@ -593,12 +641,16 @@ private struct ProseLinks: ViewModifier {
         }
     }
 
-    /// What a press on the words means: a tag's page for a tag (#124), and for an address the
-    /// reader in the app.
+    /// What a press on the words means: a tag's page for a tag (#124), their page for somebody
+    /// mentioned (#310), and for an address the reader in the app.
     private var press: OpenURLAction {
         OpenURLAction { url in
             if let tag = ShellTags.tag(in: url) {
                 return pressing?.press(tag, from: row) == true ? .handled : .discarded
+            }
+            // Only somebody this line names, asked of the source it was read through.
+            if let opened = ShellMentions.answer(url, among: mentions, at: source, from: row, by: naming) {
+                return opened ? .handled : .discarded
             }
             // **Decision 9 once more, at the one place a press becomes a navigation.**
             // Everything drawn as a link came through `PostLink` and is already checked;

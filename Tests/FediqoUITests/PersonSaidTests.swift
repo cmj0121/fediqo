@@ -9,10 +9,9 @@ import Testing
 /// remembers what it was asked and as whom. **An ask it holds waits until it is let go**, and
 /// says when it arrived — the seam a test waits on, in place of a clock.
 ///
-/// **And every wait here ends by itself.** No check waits on the clock: each waits on an ask
-/// arriving or being let go. But a wait for something that never comes — the code under test
-/// broken so that an ask is never made, or never answered — must fail the check and not park
-/// the run, so a held ask is let go, and a wait for an arrival given up, after `patience`.
+/// **It has no patience of its own** (#346). A held ask waits until the check lets it go, and a
+/// check that holds one arms a `watching` guard that lets it go where the run goes still; a wait
+/// for an arrival is a `met`, given up when the work that was to send it has ended without it.
 actor PageServer: HTTPClient, HTTPSender {
     struct Answer: Sendable {
         var body: String
@@ -27,11 +26,7 @@ actor PageServer: HTTPClient, HTTPSender {
     private(set) var bearers: [String] = []
     private var held: Set<String> = []
     private var gates: [String: [CheckedContinuation<Void, Never>]] = [:]
-    private var arrivals: [String: [CheckedContinuation<Void, Never>]] = [:]
     private var arrived: [String: Int] = [:]
-    private var gaveUp: Set<String> = []
-    /// How long a held ask is held, and an arrival waited for, before the seam ends by itself.
-    static let patience: Duration = .seconds(15)
 
     init(_ routes: [String: Answer]) {
         self.routes = routes
@@ -41,15 +36,9 @@ actor PageServer: HTTPClient, HTTPSender {
         routes[ask] = answer
     }
 
-    /// Every later ask of `ask` waits until `release` — and, unless `lettingGoByItself` is
-    /// false, until its patience has passed. A check that says false arms a guard of its own.
-    func hold(_ ask: String, lettingGoByItself: Bool = true) {
+    /// Every later ask of `ask` waits until `release`. A check that holds one arms a guard.
+    func hold(_ ask: String) {
         held.insert(ask)
-        guard lettingGoByItself else { return }
-        Task {
-            try? await Task.sleep(for: Self.patience)
-            self.release(ask)
-        }
     }
 
     /// Lets the ask of `ask` that has waited longest go, and goes on holding the rest.
@@ -65,23 +54,20 @@ actor PageServer: HTTPClient, HTTPSender {
         for gate in gates.removeValue(forKey: ask) ?? [] { gate.resume() }
     }
 
-    /// Returns once `ask` has arrived `times` times.
-    func arrival(of ask: String, times: Int = 1) async {
-        guard arrived[ask, default: 0] < times, !gaveUp.contains(ask) else { return }
-        Task {
-            try? await Task.sleep(for: Self.patience)
-            self.giveUp(on: ask)
-        }
-        await withCheckedContinuation { arrivals[ask, default: []].append($0) }
-        await arrival(of: ask, times: times)
+    /// How many times `ask` has arrived.
+    func arrivals(of ask: String) -> Int {
+        arrived[ask, default: 0]
     }
 
-    /// An arrival that never came: whoever waits on it goes on, and the check they are in fails
-    /// on what it then finds.
-    private func giveUp(on ask: String) {
-        guard !(arrivals[ask] ?? []).isEmpty else { return }
-        gaveUp.insert(ask)
-        for waiting in arrivals.removeValue(forKey: ask) ?? [] { waiting.resume() }
+    /// Waits until `ask` has arrived `times` times, and gives up where `work` — what was to send
+    /// it — has ended without it.
+    func arrival(
+        of ask: String, times: Int = 1, by work: any Ending,
+        isolation: isolated (any Actor)? = #isolation, sourceLocation: SourceLocation = #_sourceLocation
+    ) async {
+        await met("the ask of \(ask) has arrived at its server, \(times) in all", by: work, sourceLocation: sourceLocation) {
+            await self.arrivals(of: ask) >= times
+        }
     }
 
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
@@ -94,7 +80,6 @@ actor PageServer: HTTPClient, HTTPSender {
         asked.append(ask)
         bearers.append(request.value(forHTTPHeaderField: "Authorization") ?? "")
         arrived[ask, default: 0] += 1
-        for waiting in arrivals.removeValue(forKey: ask) ?? [] { waiting.resume() }
         if held.contains(ask) { await withCheckedContinuation { gates[ask, default: []].append($0) } }
         guard let answer = routes[ask] else { throw URLError(.notConnectedToInternet) }
         if answer.cancelled { throw URLError(.cancelled) }
@@ -109,7 +94,7 @@ actor PageServer: HTTPClient, HTTPSender {
 /// says in each state — and that the page of somebody whose source is not asked who people are
 /// is the page it was.
 @MainActor
-@Suite("Somebody's page as their source says it", .serialized, .timeLimit(.minutes(3)))
+@Suite("Somebody's page as their source says it", .serialized, .watched)
 struct PersonSaidTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -156,6 +141,7 @@ struct PersonSaidTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: server)
         )
+        session.deadlinesUnturned()
         let work = SourceWork()
         session.work = work
         for source in [Self.source, Self.forum] { await session.store.add(source) }
@@ -291,8 +277,10 @@ struct PersonSaidTests {
         let (session, server, _) = await session(Self.served())
         let pages = ShellPersonPages()
         await server.hold(Self.lookup)
+        let lookupGuard = watching("the ask of \(Self.lookup), held at its server") { await server.release(Self.lookup) }
+        defer { lookupGuard.cancel() }
         let pane = Task { await pages.openedOnPosts(Self.ada, in: session) }
-        await server.arrival(of: Self.lookup)
+        await server.arrival(of: Self.lookup, by: pane)
         pane.cancel()
         #expect(pages.said(of: Self.ada, in: session)?.reading == .asking)
 
@@ -336,8 +324,10 @@ struct PersonSaidTests {
         let (session, server, _) = await session(Self.served(["\(Self.statuses)?max_id=7": Self.stretch([6, 5], next: 5)]))
         let pages = ShellPersonPages()
         await server.hold(Self.lookup)
+        let lookupGuard = watching("the ask of \(Self.lookup), held at its server") { await server.release(Self.lookup) }
+        defer { lookupGuard.cancel() }
         let opening = Task { await pages.openedOnPosts(Self.ada, in: session) }
-        await server.arrival(of: Self.lookup)
+        await server.arrival(of: Self.lookup, by: opening)
         for _ in 0..<3 { await pages.again(Self.ada, in: session) }
         await pages.readOn(Self.ada, in: session)
         #expect(await server.asked == [Self.lookup], "one ask on the wire, and nothing beside it")
@@ -348,7 +338,7 @@ struct PersonSaidTests {
         // Older posts are not asked for while the page is being asked again.
         await server.hold(Self.lookup)
         let asking = Task { await pages.again(Self.ada, in: session) }
-        await server.arrival(of: Self.lookup, times: 2)
+        await server.arrival(of: Self.lookup, times: 2, by: asking)
         await pages.readOn(Self.ada, in: session)
         #expect(await server.asked == [Self.lookup, Self.statuses, Self.lookup])
         await server.release(Self.lookup)
@@ -358,8 +348,10 @@ struct PersonSaidTests {
         // `r` during a reading-on.
         let older = "\(Self.statuses)?max_id=7"
         await server.hold(older)
+        let olderGuard = watching("the ask of \(older), held at its server") { await server.release(older) }
+        defer { olderGuard.cancel() }
         let reading = Task { await pages.readOn(Self.ada, in: session) }
-        await server.arrival(of: older)
+        await server.arrival(of: older, by: reading)
         #expect(pages.said(of: Self.ada, in: session)?.foot == .reading)
         await pages.readOn(Self.ada, in: session)
         #expect(await server.asked.count == 5, "one stretch at a time")
@@ -384,8 +376,10 @@ struct PersonSaidTests {
 
         // Nobody asks who they are, and the answer is slow.
         await server.hold(Self.lookup)
+        let lookupGuard = watching("the ask of \(Self.lookup), held at its server") { await server.release(Self.lookup) }
+        defer { lookupGuard.cancel() }
         let unsigned = Task { await pages.openedOnPosts(Self.ada, in: session) }
-        await server.arrival(of: Self.lookup)
+        await server.arrival(of: Self.lookup, by: unsigned)
 
         // The reader signs in meanwhile: nobody's page is not theirs, and theirs is asked as them.
         let token = MastodonToken(host: Self.host, accessToken: "tok", clientID: "c", clientSecret: "s")
@@ -393,7 +387,7 @@ struct PersonSaidTests {
         session.mastodon.refresh()
         #expect(ShellPersonPages.askedAs(at: Self.host, in: session) == .reader(nil))
         let signed = Task { await pages.openedOnPosts(Self.ada, in: session) }
-        await server.arrival(of: Self.lookup, times: 2)
+        await server.arrival(of: Self.lookup, times: 2, by: signed)
         // Nobody's answer comes late: it lands nowhere, and their posts are not asked for it.
         await server.releaseOne(Self.lookup)
         await unsigned.value
@@ -425,15 +419,17 @@ struct PersonSaidTests {
         // The reader asks again, and signs out while their posts are on the wire.
         await server.answer(Self.statuses, Self.stretch([12, 9]))
         await server.hold(Self.statuses)
+        let statusesGuard = watching("the ask of \(Self.statuses), held at its server") { await server.release(Self.statuses) }
+        defer { statusesGuard.cancel() }
         let asked = await server.asked.filter { $0 == Self.statuses }.count
         let reader = Task { await pages.again(Self.ada, in: session) }
-        await server.arrival(of: Self.statuses, times: asked + 1)
+        await server.arrival(of: Self.statuses, times: asked + 1, by: reader)
         _ = try session.mastodon.tokens.forget(token)
         session.mastodon.refresh()
         #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking), "the reader's page is not nobody's")
         await pages.readOn(Self.ada, in: session)
         let nobody = Task { await pages.openedOnPosts(Self.ada, in: session) }
-        await server.arrival(of: Self.statuses, times: asked + 2)
+        await server.arrival(of: Self.statuses, times: asked + 2, by: nobody)
         // The reader's posts come late — and are not shown to nobody.
         await server.releaseOne(Self.statuses)
         await reader.value
@@ -455,8 +451,10 @@ struct PersonSaidTests {
             session.mastodon.refresh()
             let pages = ShellPersonPages()
             await server.hold(Self.lookup)
+            let lookupGuard = watching("the ask of \(Self.lookup), held at its server") { await server.release(Self.lookup) }
+            defer { lookupGuard.cancel() }
             let asking = Task { await pages.openedOnPosts(Self.ada, in: session) }
-            await server.arrival(of: Self.lookup)
+            await server.arrival(of: Self.lookup, by: asking)
             if gone {
                 // The reader signs out while the ask is out; the same token is then kept again
                 // by another road, which this session has not looked at.
@@ -583,7 +581,8 @@ struct PersonSaidTests {
         #expect(ShellPersonPages.askedAs(at: Self.host, in: session) == .reader(nil), "no handle tells them apart")
         await server.answer(Self.statuses, Self.stretch([5, 4]))
         await pages.readOn(Self.ada, in: session)
-        await server.arrival(of: Self.lookup, times: 2)
+        // No `by:`: the press hands the ask to a task of the pages' own and does not wait on it.
+        await met("the second reader's press has asked who they are afresh") { await server.arrivals(of: Self.lookup) >= 2 }
         #expect(await server.asked.filter { $0 == Self.lookup }.count == 2, "the press itself asks the page afresh")
         await pages.openedOnPosts(Self.ada, in: session)
         #expect(await server.asked == [Self.lookup, Self.statuses, Self.lookup, Self.statuses])
@@ -614,11 +613,13 @@ struct PersonSaidTests {
         try signIn(session, as: "first")
         await server.hold(Self.lookup)
         defer { Task { await server.release(Self.lookup) } }
+        let lookupGuard = watching("the ask of \(Self.lookup), held at its server") { await server.release(Self.lookup) }
+        defer { lookupGuard.cancel() }
         let first = Task { await pages.openedOnPosts(Self.ada, in: session) }
-        await server.arrival(of: Self.lookup)
+        await server.arrival(of: Self.lookup, by: first)
         try signIn(session, as: "second")
         let second = Task { await pages.openedOnPosts(Self.ada, in: session) }
-        await server.arrival(of: Self.lookup, times: 2)
+        await server.arrival(of: Self.lookup, times: 2, by: second)
         await server.releaseOne(Self.lookup)
         await first.value
         #expect(pages.said(of: Self.ada, in: session) == PersonSaid(source: Self.host, reading: .asking, asking: true))
@@ -676,6 +677,7 @@ struct PersonSaidTests {
         let off = CalledOff()
         let door = CancellableDoor(server, heard: off)
         let session = ShellSession(http: door, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: door))
+        session.deadlinesUnturned()
         session.work = SourceWork()
         await session.store.add(Self.source)
         session.sources = await session.store.sources()
@@ -683,8 +685,10 @@ struct PersonSaidTests {
         try signIn(session, as: "first")
         await server.hold(Self.lookup)
         defer { Task { await server.release(Self.lookup) } }
+        let lookupGuard = watching("the ask of \(Self.lookup), held at its server") { await server.release(Self.lookup) }
+        defer { lookupGuard.cancel() }
         let reader = Task { await pages.openedOnPosts(Self.ada, in: session) }
-        await server.arrival(of: Self.lookup)
+        await server.arrival(of: Self.lookup, by: reader)
         let held = try #require(try session.mastodon.tokens.token(host: Self.host))
         _ = try session.mastodon.tokens.forget(held)
         session.mastodon.refresh()
@@ -1099,23 +1103,18 @@ extension ShellPersonPages {
 /// Hears which asks were walked away from while they were out.
 actor CalledOff {
     private(set) var asks: [String] = []
-    private var waiting: [CheckedContinuation<Void, Never>] = []
 
     func heard(_ ask: String) {
         asks.append(ask)
-        for one in waiting { one.resume() }
-        waiting = []
     }
 
-    /// Returns once an ask was called off — or, so a broken build fails and does not park, after
-    /// the server's patience.
-    func wait() async {
-        guard asks.isEmpty else { return }
-        Task {
-            try? await Task.sleep(for: PageServer.patience)
-            self.heard("nothing was called off")
-        }
-        await withCheckedContinuation { waiting.append($0) }
+    /// Waits until an ask was called off. **No `by:`**: what calls it off goes on, and it is told
+    /// here from a task the cancellation starts on its own, which nothing can name — while the
+    /// ask itself stays held, so neither ends first.
+    func wait(
+        isolation: isolated (any Actor)? = #isolation, sourceLocation: SourceLocation = #_sourceLocation
+    ) async {
+        await met("an ask still out was called off", sourceLocation: sourceLocation) { await !self.asks.isEmpty }
     }
 }
 

@@ -369,42 +369,8 @@ struct PersonHead: View {
         }
     }
 
-    @ViewBuilder
     private func figure(_ counted: PersonSaid.Figure) -> some View {
-        let lit = counted.opens && counted.tab == front
-        let drawn = HStack(spacing: ShellSpace.tight) {
-            Image(systemName: counted.tab.symbol)
-                .symbolVariant(lit ? .fill : .none)
-                .accessibilityHidden(true)
-            if let said = counted.figure { Text(said).fixedSize(horizontal: false, vertical: true) }
-        }
-        .shellFont(.meta, weight: lit ? .semibold : .regular)
-        if counted.opens {
-            Button { onTab(counted.tab) } label: {
-                drawn
-                    .foregroundStyle(lit ? ShellChrome.selectInk(colorScheme) : ShellChrome.inkDim(colorScheme))
-                    .padding(.horizontal, ShellSpace.snug)
-                    .padding(.vertical, ShellSpace.tight)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(lit ? ShellChrome.selectFill(colorScheme) : ShellChrome.well(colorScheme))
-                    )
-                    .contentShape(Capsule(style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .help(ShellIconButton.hover(name: counted.spoken(), help: PersonSaid.Figure.hint()))
-            .accessibilityLabel(counted.spoken())
-            .accessibilityHint(PersonSaid.Figure.hint())
-            .accessibilityAddTraits(lit ? .isSelected : [])
-        } else {
-            // A figure that opens nothing: words on no well, and no press.
-            drawn
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .padding(.vertical, ShellSpace.tight)
-                .help(counted.spoken())
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(counted.spoken())
-        }
+        PageFigureView(figure: counted.drawn(front: front)) { onTab(counted.tab) }
     }
 
     // MARK: - How the reader stands

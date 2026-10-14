@@ -28,7 +28,8 @@ import SwiftUI
 // **Only of a source that says who people are** — the one fact per kind there is, read where
 // a person's page reads it. A forum is asked as it always was, has no band and no press.
 
-/// The hashtags one source found for some words, as a step of the walk names their page.
+/// The hashtags one source found for some words, as the tab of the page of what it found
+/// names them (`FoundAt.tags`).
 struct FoundTags: Hashable, Sendable, Identifiable {
     /// The host of the source that found them.
     let source: String
@@ -45,9 +46,10 @@ struct FoundTags: Hashable, Sendable, Identifiable {
 enum SearchFoundRow: Hashable, Sendable, Identifiable {
     case person(Person)
     case tag(RisingTag, source: String)
-    /// All the people the source found: a list like any other, asked when it opens.
+    /// All the people the source found: the page of what it found, on People — a list like
+    /// any other, asked when that tab first comes in front.
     case allPeople(PeopleList, given: Int)
-    /// All the hashtags the source's answer held.
+    /// All the hashtags the source's answer held: the same page, on Hashtags.
     case allTags(FoundTags, given: Int)
 
     /// **A person's row is that person, and a list's press is that list**: what opening either
@@ -135,22 +137,12 @@ struct SearchBands: Equatable, Identifiable {
     }
 }
 
-/// The page of all the hashtags one source's answer held, as it is handed them.
+/// The tab of all the hashtags one source's answer held, as it is handed them.
 struct FoundTagsSaid: Equatable {
     let page: FoundTags
     let tags: [RisingTag]
 
     var rows: [SearchFoundRow] { tags.map { .tag($0, source: page.source) } }
-
-    static func title(_ page: FoundTags, language: DummyLanguage? = nil) -> String {
-        String(format: L10n.t("search.tags.title", language: language), page.source)
-    }
-
-    /// The one line under the title: what was asked. **What was typed is set in a sentence of
-    /// ours**, cut and made one line.
-    static func headLine(_ page: FoundTags, language: DummyLanguage? = nil) -> String {
-        String(format: L10n.t("search.found.line", language: language), page.lineWords)
-    }
 
     /// What stands under the rows: that these are what one answer held — and, where it held
     /// as many as an answer holds, that the source may have found more.
@@ -183,10 +175,11 @@ struct SearchLookUpLine: Equatable {
 }
 
 extension ShellWalk {
-    /// The page of the hashtags a source found in front, where one is (#319).
+    /// The hashtags a source found in front, where the page of what it found stands on their
+    /// tab (#319, F10).
     var openedFoundTags: FoundTags? {
-        guard case .foundTags(let page) = standing else { return nil }
-        return page
+        guard case .found(let at, .tags) = standing else { return nil }
+        return at.tags
     }
 }
 
@@ -241,15 +234,22 @@ final class ShellSearchFound {
     @ObservationIgnored private var looking: Task<Void, Never>?
     @ObservationIgnored private let errands: PageErrands
     @ObservationIgnored private let readers: PageReaders
+    /// The lists of people opened this run: where the people a source found are asked, as
+    /// the page of what it found shows them on its first tab.
+    @ObservationIgnored let lists: ShellPeoplePages
+    /// Where the lamp stood on each tab of the page of what a source found when the tab was
+    /// left. Not observed: it is read only as a tab is brought in front.
+    @ObservationIgnored var lamps: [FoundWhich: String] = [:]
     /// How long the look-up may take. A test shortens it.
     @ObservationIgnored var deadline: Duration = .seconds(30)
     /// Another way to a source's search, where a test reaches it by one — a wire that goes on
     /// answering an ask that was called off, as a transfer already ended does. Nothing in the app.
     @ObservationIgnored var reaching: ((MastodonToken) -> MastodonSearch)?
 
-    init(errands: PageErrands, readers: PageReaders) {
+    init(errands: PageErrands, readers: PageReaders, lists: ShellPeoplePages) {
         self.errands = errands
         self.readers = readers
+        self.lists = lists
     }
 
     /// Everything of `host` let go, and a look-up through it called off: its reader is no
@@ -314,6 +314,10 @@ final class ShellSearchFound {
         held = [:]
     }
 
+    /// Whether the source at `host` is not known this run to refuse its sign-in search — by
+    /// that sign-in's own words, or by its answer.
+    func searches(at host: String) -> Bool { !withoutSearch.contains(host) }
+
     /// The search closed, or its field emptied: its bands go, and so does a look-up — called
     /// off where it is still out.
     func closed() {
@@ -365,14 +369,19 @@ final class ShellSearchFound {
         said(for: pattern, in: session).lazy.flatMap(\.rows).first { $0.id == id }
     }
 
-    /// The page of all the hashtags a source's answer held, or nothing: the answer is gone,
+    /// The answer a source gave for the words `page` names, or nothing: the answer is gone,
     /// was for other words, or was given to somebody else.
-    func said(of page: FoundTags, in session: ShellSession) -> FoundTagsSaid? {
+    func bands(of page: FoundTags, in session: ShellSession) -> SearchBands? {
         guard let found = held[page.source], found.bands.words == page.words,
               ShellPersonPages.source(at: page.source, in: session) != nil,
               found.askedAs.isTheSame(as: ShellPersonPages.askedAs(at: page.source, in: session))
         else { return nil }
-        return FoundTagsSaid(page: page, tags: found.bands.tags)
+        return found.bands
+    }
+
+    /// All the hashtags a source's answer held, or nothing where the answer is not (`bands`).
+    func said(of page: FoundTags, in session: ShellSession) -> FoundTagsSaid? {
+        bands(of: page, in: session).map { FoundTagsSaid(page: page, tags: $0.tags) }
     }
 
     func walked(_ page: FoundTags, in session: ShellSession) -> [String] {
@@ -685,97 +694,5 @@ struct SearchFoundRowView: View {
         .accessibilityLabel(SearchBands.spoken(row) ?? SearchBands.all(given))
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(.default, onOpen)
-    }
-}
-
-/// The page of all the hashtags one source's answer held: a way back, whose answer it is and
-/// to what, and the hashtags as the page of rising hashtags draws them.
-///
-/// **A step of the walk like that page**, drawn from what the search already holds: nothing is
-/// asked by opening it.
-struct FoundTagsPane: View {
-    let said: FoundTagsSaid
-    @Binding var selectedID: String?
-    var onOpen: (SearchFoundRow) -> Void
-    var jumpToTop: Int = 0
-    var onBack: () -> Void
-
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.shellTouch) private var touch
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: ShellSpace.snug) {
-                ShellBackButton("person.back", action: onBack)
-                Spacer()
-                ShellKeyHint("person.leaveHint")
-            }
-            .padding(.horizontal, ShellSpace.pad)
-            .padding(.vertical, ShellSpace.snug)
-            ShellRule()
-            head
-            ShellRule()
-            list
-        }
-    }
-
-    private var head: some View {
-        VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            Text(FoundTagsSaid.title(said.page))
-                .shellFont(.name)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-            Text(FoundTagsSaid.headLine(said.page))
-                .shellFont(.meta)
-                .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.step)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-    }
-
-    private var list: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(said.rows) { row in
-                        SearchFoundRowView(
-                            row: row, selected: row.id == selectedID,
-                            onPress: {
-                                switch DummyCommand.tapped(row.id, selected: selectedID, touch: touch) {
-                                case .select: selectedID = row.id
-                                case .open: onOpen(row)
-                                }
-                            },
-                            onOpen: { onOpen(row) }
-                        )
-                        .id(row.id)
-                        ShellRule()
-                    }
-                    Text(said.foot())
-                        .shellFont(.meta)
-                        .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(ShellSpace.pad)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .scrollIndicators(.never)
-            .clearsFloatingCorner()
-            .onAppear {
-                if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
-            }
-            .onChange(of: selectedID) { _, id in
-                guard let id else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
-            }
-            .onChange(of: jumpToTop) { _, _ in
-                guard let first = said.rows.first else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(first.id, anchor: .top) }
-            }
-        }
     }
 }

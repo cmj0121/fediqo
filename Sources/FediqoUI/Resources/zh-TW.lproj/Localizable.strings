@@ -77,7 +77,7 @@
 "shortcut.group.act" = "動作";
 "shortcut.group.app" = "App";
 "shortcut.landing" = "從啟動重新載入";
-"shortcut.tabs" = "輪換這一頁的分頁";
+"shortcut.tabs" = "輪換眼前這一頁的分頁——時間軸，或某人的頁面、主題標籤頁、正在竄升的、搜尋找到的那一頁的分頁。討論串、一份名單和你追蹤的主題標籤沒有分頁，在那裡這個鍵不做任何事：先離開那一頁，才能換時間軸";
 "shortcut.pages" = "輪換左側的地方";
 "shortcut.posts" = "在這份清單裡移動";
 "shortcut.top" = "到這串的頂端";
@@ -103,9 +103,6 @@
 "shortcut.search" = "搜尋這台裝置上的貼文";
 
 "thread.title" = "討論串";
-"thread.replies" = "回覆";
-"thread.back" = "返回";
-"thread.leaveHint" = "Esc 或 q";
 "item.reply.one.body" = "同一台機器。留在這裡。";
 "item.reply.two.body" = "這樣清單還是一條流。";
 "item.reply.up.body" = "在這之前：引起這則的問題。";
@@ -957,6 +954,11 @@
 "tag.asking" = "正在向 %1$@ 詢問 %2$@…";
 "tag.failed" = "無法向 %1$@ 詢問 %2$@。";
 "tag.retry" = "再試一次";
+"tag.retry.spoken" = "再向 %1$@ 詢問 %2$@";
+"tag.again.spoken" = "再問 %2$@ 一次你是否追蹤 %1$@";
+"tag.tab.posts" = "貼文";
+"tag.tab.about" = "關於";
+"tag.stands.followed" = "已在 %@ 追蹤";
 "tag.none" = "這台裝置上還沒有 %@ 底下的貼文。";
 "tag.reach.asked" = "問了 %@。";
 "tag.reach.partial" = "沒有問，因為這個時間軸只顯示它們送來的一部分：%@。";
@@ -1775,6 +1777,10 @@
 "rising.use.one" = "今天：貼文 %1$@、人數 %2$@。";
 "rising.unsaid" = "沒有說";
 "rising.link.leads" = "通往 %@";
+"rising.title" = "正在竄升的";
+"rising.tab.tags" = "主題標籤";
+"rising.tab.links" = "連結";
+"rising.reload" = "再問各來源一次";
 "shortcut.rising" = "在「趨勢」打開各來源上竄升的主題標籤";
 "search.band.people" = "人 · %@";
 "search.band.tags" = "主題標籤 · %@";
@@ -1783,11 +1789,12 @@
 "search.band.first" = "前 %@ 項";
 "search.band.all.people" = "%1$@：%2$@ 找到的人。";
 "search.band.all.tags" = "%1$@：%2$@ 找到的主題標籤。";
-"search.tags.title" = "%@ 找到的主題標籤";
 "search.found.line" = "它對「%@」的回答。";
+"search.found.title" = "%@ 找到的";
+"search.found.tab.people" = "人";
+"search.found.tab.tags" = "主題標籤";
 "search.tags.foot.end" = "這是 %1$@ 找到的全部 %2$@ 個主題標籤。";
 "search.tags.foot.first" = "這是 %1$@ 找到的前 %2$@ 個主題標籤，也是一次回答最多能帶的數量。它可能還找到更多：多輸入幾個字可以縮小範圍。";
-"people.title.found" = "%@ 找到的人";
 "people.found.asking" = "正在向 %@ 詢問它找到的人…";
 "people.found.failed" = "無法向 %@ 詢問它找到的人。";
 "people.found.none" = "%@ 沒有為這些字找到任何人。";

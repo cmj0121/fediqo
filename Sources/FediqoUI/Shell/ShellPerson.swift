@@ -303,7 +303,7 @@ final class ShellPersonPages {
         self.rising = rising
         let you = ShellYouThere(errands: count, readers: looks)
         self.you = you
-        let found = ShellSearchFound(errands: count, readers: looks)
+        let found = ShellSearchFound(errands: count, readers: looks, lists: lists)
         self.found = found
         home = ShellPersonHome(errands: count)
         let tags = ShellTagFollow(errands: count, readers: looks)

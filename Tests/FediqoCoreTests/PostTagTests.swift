@@ -128,6 +128,7 @@ struct PostTagTests {
             case .link(let link): link.text
             case .emoji(let emoji): ":\(emoji.shortcode):"
             case .tag(let tag): tag.text
+            case .mention(let mention): mention.text
             }
         }.joined()
         #expect(rebuilt == text)

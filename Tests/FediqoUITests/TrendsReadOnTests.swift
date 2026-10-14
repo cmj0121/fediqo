@@ -11,7 +11,7 @@ import Testing
 /// left as they were. What it cannot: the line at the bottom of the timeline drawn in light and
 /// dark, on a Mac and a phone.
 @MainActor
-@Suite("Reading on through what is rising")
+@Suite("Reading on through what is rising", .watched)
 struct TrendsReadOnTests {
     private static let one = "one.example"
     private static let two = "two.example"
@@ -48,6 +48,7 @@ struct TrendsReadOnTests {
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: ActServer([:])),
             posts: ForumPosts(http: http)
         )
+        session.deadlinesUnturned()
         await session.reloadFromStore()
         session.timelineID = .trends
         return session
@@ -273,6 +274,7 @@ struct TrendsReadOnTests {
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: ActServer([:])),
             posts: ForumPosts(http: http)
         )
+        session.deadlinesUnturned()
         await session.reloadFromStore()
         session.timelineID = .trends
         await session.reload.timeline(.trends, in: session)
@@ -291,7 +293,7 @@ struct TrendsReadOnTests {
             Self.address(Self.one, offset: 40): Self.stretch(Self.one, Array(61...80)),
             MastodonInstance.address(Self.one): MastodonInstance.mastodon(Self.one),
         ], holding: Self.address(Self.one))
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the source's top, held on the wire")
         defer { watchdog.cancel() }
         let session = await shell(http, hosts: [Self.one])
         await session.reload.timeline(.trends, in: session)
@@ -301,7 +303,7 @@ struct TrendsReadOnTests {
         // r, held on the wire at the source's top, and stopped there by the reader.
         await http.arm()
         let reload = Task { await session.reload.timeline(.trends, in: session) }
-        #expect(await spun { await http.holding })
+        await met("the source's top is held on the wire", by: reload) { await http.holding }
         #expect(session.reload.stop())
         await http.gate.open()
         await reload.value

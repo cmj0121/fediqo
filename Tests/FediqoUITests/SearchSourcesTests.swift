@@ -10,7 +10,7 @@ import Testing
 /// what is asserted is what the reader is shown. The sources answer through a signed-in door that
 /// is a fixture; nothing here touches a network.
 @MainActor
-@Suite("A search asks the sources of the timeline in front")
+@Suite("A search asks the sources of the timeline in front", .watched)
 struct SearchSourcesTests {
     private static let one = "one.example"
     private static let two = "two.example"
@@ -65,6 +65,7 @@ struct SearchSourcesTests {
             http: http, store: store, mastodon: MastodonSessions(tokens: tokens, sender: sender),
             posts: ForumPosts(http: http)
         )
+        session.deadlinesUnturned()
         await session.reloadFromStore()
         return session
     }
@@ -180,6 +181,7 @@ struct SearchSourcesTests {
             http: FixtureHTTP([:]), store: relaunched,
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: Searchable([:]))
         )
+        offline.deadlinesUnturned()
         await offline.reloadFromStore()
         let search = await searching("cats", in: offline)
         #expect(found(search, in: offline) == [Self.local.key.rowID, Self.foundKey.rowID])
@@ -191,13 +193,13 @@ struct SearchSourcesTests {
         let server = Searchable(
             [Self.one: Self.found, Self.two: #"{"statuses":[]}"#], failing: [Self.two], holding: true
         )
-        let guardTask = hangGuard(server.gate)
+        let guardTask = watching(server.gate, "the searches of both sources, held on the wire")
         defer { guardTask.cancel() }
         let session = try await shell(server, signedIn: [Self.one, Self.two])
         let search = await searching("cats", in: session)
 
         let asking = Task { await session.reload.search("cats", timeline: .all, in: session) }
-        #expect(await spun { await server.asked.count == 2 })
+        await met("both sources are asked", by: asking) { await server.asked.count == 2 }
         #expect(session.reload.running)
         #expect(session.reload.line == "Searching one.example, two.example…")
         let toast = TimelineToast.shown(
@@ -237,11 +239,11 @@ struct SearchSourcesTests {
     @Test("Closing the search ends its ask: nothing it had not brought lands, and what it said goes")
     func closingEndsTheAsk() async throws {
         let server = Searchable([Self.one: Self.found], holding: true)
-        let guardTask = hangGuard(server.gate)
+        let guardTask = watching(server.gate, "the search, held on the wire")
         defer { guardTask.cancel() }
         let session = try await shell(server)
         let asking = Task { await session.reload.search("cats", timeline: .all, in: session) }
-        #expect(await spun { await server.asked.count == 1 })
+        await met("the source is asked", by: asking) { await server.asked.count == 1 }
         session.reload.endSearch()
         await asking.value
         #expect(!session.reload.running)
@@ -249,6 +251,9 @@ struct SearchSourcesTests {
         #expect(session.reload.reach == nil)
         #expect(session.reload.line == nil)
         await server.gate.open()
+        // No `by:`: the read that was ended is the reload's own task, which no check can name.
+        await met("the search ended is answered at the wire") { await server.answered == 1 }
+        // Counted: what the ended read does with that answer is in that unnamed task too.
         for _ in 0..<2_000 { await Task.yield() }
         #expect(await session.store.note(Self.foundKey) == nil)
     }
@@ -431,6 +436,8 @@ private actor Searchable: HTTPSender {
     let gate = Gate()
     private(set) var asked: [String] = []
     private(set) var queries: [[URLQueryItem]] = []
+    /// How many held searches have been let go and answered.
+    private(set) var answered = 0
 
     init(
         _ bodies: [String: String], failing: Set<String> = [], refusing: Set<String> = [], holding: Bool = false
@@ -447,7 +454,10 @@ private actor Searchable: HTTPSender {
         guard url.path == "/api/v2/search", let body = bodies[host] else { throw FixtureHTTPError.unmapped }
         asked.append(host)
         queries.append(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
-        if holding { await gate.wait() }
+        if holding {
+            await gate.wait()
+            answered += 1
+        }
         let status = refusing.contains(host) ? 403 : failing.contains(host) ? 500 : 200
         // A refusal for want of search, as a real server words it.
         let said = refusing.contains(host) ? #"{"error":"This action is outside the authorized scopes"}"# : body

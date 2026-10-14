@@ -55,42 +55,6 @@ actor FixtureHTTP: HTTPClient {
     }
 }
 
-/// Waits for a condition, and **gives up rather than spinning for ever**.
-///
-/// A bare `while !x { await Task.yield() }` survives `.timeLimit` — yielding does not throw on
-/// cancellation — so a press that stopped setting the flag it spins on would **hang the suite
-/// instead of failing it**, and a hung suite reports nothing at all. This returns `false` on the
-/// bound so the call site can say what went unmet.
-///
-/// **Here rather than private to one suite.** It was written in `JoinStageTests` with that
-/// argument in its doc, while three sites in `BoardChoiceTests` spun unbounded — the rationale
-/// was written down but not reachable from the file that needed it. Target-visible, beside
-/// `FixtureHTTP`, is the fix.
-///
-/// The bound is generous by orders of magnitude on purpose: a press needs its `Task` only to be
-/// *scheduled* to set its flag, so a real one trips in single digits and only a broken one
-/// reaches the end.
-///
-/// **The predicate is `async`** so an actor's own state can be the condition — `await http.asks
-/// == 1`, which is the only way to ask whether a request has actually reached the wire. A sync
-/// closure still passes unchanged, so `{ session.checking }` reads as before.
-///
-/// **`checking` and "on the wire" are not the same instant.** A press sets its progress report
-/// before it calls out, so a test that spins on `checking` and then reads a request count is
-/// reading it one hop too early. Spin on the count when the count is what you mean.
-///
-/// **A new check says `met` (#346)**, which is this with a name for what is waited for and no
-/// count of turns: a count is a clock that runs faster on a faster machine. This stays until
-/// every site that says it has been given that name.
-@MainActor
-func spun(_ limit: Int = 100_000, until condition: @MainActor () async -> Bool) async -> Bool {
-    for _ in 0..<limit {
-        if await condition() { return true }
-        await Task.yield()
-    }
-    return false
-}
-
 /// A fixture that holds one address until the test says otherwise.
 ///
 /// **Here rather than private to one suite.** Four suites had written their own; the two in this
@@ -156,17 +120,6 @@ enum MastodonInstance {
 
     /// Still a Mastodon, which is every host in a suite that is not about migration.
     static func mastodon(_ host: String) -> FixtureHTTP.Outcome { says("4.3.1", host: host) }
-}
-
-/// `watching(_:_:)` under the name it had while it kept a clock of its own (#346) — fifty seconds,
-/// then a hundred and seventy, and each time shorter than some honest run. It keeps none now:
-/// the gate is opened by the run going still, and by nothing else.
-///
-/// **Here until every site that says it has been given a name for what it holds.** A new check
-/// says `watching(gate, "what is held")`, so that a run which does reach the guard says which
-/// gate it was.
-func hangGuard(_ gate: Gate, sourceLocation: SourceLocation = #_sourceLocation) -> Task<Void, Never> {
-    watching(gate, sourceLocation: sourceLocation)
 }
 
 extension Note {

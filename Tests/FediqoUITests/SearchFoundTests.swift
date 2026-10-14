@@ -9,10 +9,11 @@ import Testing
 /// answer carries, as bands over the posts — and somebody looked up through a source by their
 /// address, at a press and never without one. And that a forum is searched as it always was.
 ///
-/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
-/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+/// Every wait here is on an ask arriving or being let go (`PageServer`), tied to the work that
+/// made the ask where a check can name it: a held ask is let go by the check, and by a guard
+/// when the run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("What a search finds beside posts, and somebody looked up through a source", .serialized, .timeLimit(.minutes(3)))
+@Suite("What a search finds beside posts, and somebody looked up through a source", .serialized, .watched)
 struct SearchFoundTests {
     private static let one = "m.example", two = "n.example"
     private static let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 34, name: "Dev")])
@@ -72,6 +73,7 @@ struct SearchFoundTests {
         let session = ShellSession(
             http: router, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: router)
         )
+        session.deadlinesUnturned()
         let work = SourceWork()
         session.work = work
         session.mastodon.work = work
@@ -196,8 +198,10 @@ struct SearchFoundTests {
         let server = try #require(servers[Self.one]), found = ShellPersonPages().found
         await server.hold(Self.returned("cats"))
         defer { Task { await server.release(Self.returned("cats")) } }
+        let returnedCatsGuard = watching("the ask of \(Self.returned("cats")), held at its server") { await server.release(Self.returned("cats")) }
+        defer { returnedCatsGuard.cancel() }
         let first = Task { await session.reload.search("cats", timeline: .all, found: found, in: session) }
-        await server.arrival(of: Self.returned("cats"))
+        await server.arrival(of: Self.returned("cats"), by: first)
         #expect(session.reload.asking.contains(.search) && found.said(for: "cats", in: session).isEmpty)
 
         await session.reload.search("dogs", timeline: .all, found: found, in: session)
@@ -251,8 +255,10 @@ struct SearchFoundTests {
         let server = try #require(servers[Self.one]), found = ShellPersonPages().found
         await server.hold(Self.returned("cats"))
         defer { Task { await server.release(Self.returned("cats")) } }
+        let returnedCatsGuard = watching("the ask of \(Self.returned("cats")), held at its server") { await server.release(Self.returned("cats")) }
+        defer { returnedCatsGuard.cancel() }
         let first = Task { await session.reload.search("cats", timeline: .all, found: found, in: session) }
-        await server.arrival(of: Self.returned("cats"))
+        await server.arrival(of: Self.returned("cats"), by: first)
         // A Return that waited for the index, made again: the ask on the wire is let run.
         await session.reload.search("cats", timeline: .all, found: found, in: session)
         #expect(await server.asked.count == 1)
@@ -277,8 +283,10 @@ struct SearchFoundTests {
         let server = try #require(servers[Self.one]), pages = ShellPersonPages(), found = pages.found
         await server.hold(Self.returned("cats"))
         defer { Task { await server.release(Self.returned("cats")) } }
+        let returnedCatsGuard = watching("the ask of \(Self.returned("cats")), held at its server") { await server.release(Self.returned("cats")) }
+        defer { returnedCatsGuard.cancel() }
         let first = Task { await session.reload.search("cats", timeline: .all, found: found, in: session) }
-        await server.arrival(of: Self.returned("cats"))
+        await server.arrival(of: Self.returned("cats"), by: first)
         // Another account at the same source, which the source has named no more than the first.
         try signIn(session, as: "other")
         await server.release(Self.returned("cats"))
@@ -384,13 +392,20 @@ struct SearchFoundTests {
         let held = Self.lookedUp("@far@elsewhere.example")
         await server.hold(held)
         defer { Task { await server.release(held) } }
+        let heldGuard = watching("the ask of \(held), held at its server") { await server.release(held) }
+        defer { heldGuard.cancel() }
         let first = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await server.arrival(of: held)
+        await server.arrival(of: held, by: first)
         let asking = try #require(found.line(typed: "@far@elsewhere.example", in: session))
         #expect(found.looked(Self.address) == .asking && asking.press == nil && asking.words == "Asking m.example to look @far@elsewhere.example up…")
         // Pressed again while it is out: the second press waits on the first, and asks nothing.
-        let second = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await Task.yield()
+        // A press runs, with no wait, up to where it finds the look-up out.
+        var pressedAgain = false
+        let second = Task {
+            pressedAgain = true
+            await found.lookUp(Self.address, through: Self.one, in: session)
+        }
+        await met("the second press is made, the first look-up still out", by: second) { pressedAgain }
         await server.release(held)
         await first.value
         await second.value
@@ -404,7 +419,7 @@ struct SearchFoundTests {
         found.closed()
         await server.hold(held)
         let slow = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await server.arrival(of: held, times: 2)
+        await server.arrival(of: held, times: 2, by: slow)
         await found.lookUp(near, through: Self.one, in: session)
         guard case .found(let other) = found.looked(near) else {
             Issue.record("the second address was not found")
@@ -421,7 +436,7 @@ struct SearchFoundTests {
         found.closed()
         await server.hold(held)
         let deaf = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await server.arrival(of: held, times: 3)
+        await server.arrival(of: held, times: 3, by: deaf)
         await found.lookUp(near, through: Self.one, in: session)
         await server.release(held)
         await deaf.value
@@ -432,7 +447,7 @@ struct SearchFoundTests {
         await server.answer(held, PageServer.Answer(body: "", status: 500))
         await server.hold(held)
         let failing = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await server.arrival(of: held, times: 4)
+        await server.arrival(of: held, times: 4, by: failing)
         await found.lookUp(near, through: Self.one, in: session)
         await server.release(held)
         await failing.value
@@ -442,7 +457,7 @@ struct SearchFoundTests {
         await server.answer(held, Self.far)
         await server.hold(held)
         let closing = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await server.arrival(of: held, times: 5)
+        await server.arrival(of: held, times: 5, by: closing)
         found.closed()
         #expect(found.looked(Self.address) == nil && found.line(typed: "@far@elsewhere.example", in: session)?.press == .lookUp(Self.address, through: Self.one))
         await server.release(held)
@@ -457,8 +472,10 @@ struct SearchFoundTests {
         let held = Self.lookedUp("@far@elsewhere.example")
         await server.hold(held)
         defer { Task { await server.release(held) } }
+        let heldGuard = watching("the ask of \(held), held at its server") { await server.release(held) }
+        defer { heldGuard.cancel() }
         let first = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await server.arrival(of: held)
+        await server.arrival(of: held, by: first)
         try signIn(session, as: "other")
         await server.release(held)
         await first.value
@@ -525,10 +542,12 @@ struct SearchFoundTests {
         let offer = SearchLookUpLine.Press.lookUp(Self.address, through: Self.one)
         await server.hold(Self.returned("cats"))
         defer { Task { await server.release(Self.returned("cats")) } }
+        let returnedCatsGuard = watching("the ask of \(Self.returned("cats")), held at its server") { await server.release(Self.returned("cats")) }
+        defer { returnedCatsGuard.cancel() }
         defer { Task { await server.release(wire) } }
 
         let returned = Task { await session.reload.search("cats", timeline: .all, found: found, in: session) }
-        await server.arrival(of: Self.returned("cats"))
+        await server.arrival(of: Self.returned("cats"), by: returned)
         try signIn(session, as: "second")
         await server.release(Self.returned("cats"))
         await returned.value
@@ -545,8 +564,10 @@ struct SearchFoundTests {
         for (round, answer) in late.enumerated() {
             await server.answer(wire, answer)
             await server.hold(wire)
+            let wireGuard = watching("the ask of \(wire), held at its server") { await server.release(wire) }
+            defer { wireGuard.cancel() }
             let asked = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-            await server.arrival(of: wire, times: round + 1)
+            await server.arrival(of: wire, times: round + 1, by: asked)
             try signIn(session, as: "later\(round)")
             await server.release(wire)
             await asked.value
@@ -658,7 +679,7 @@ struct SearchFoundTests {
         let server = try #require(servers[Self.one]), pages = ShellPersonPages()
         let list = PeopleList(foundAt: Self.one, words: "cats")
         #expect(list.id != PeopleList(foundAt: Self.one, words: "dogs").id && list.id != PeopleList(directoryAt: Self.one).id)
-        #expect(PeopleSaid.title(list, language: .english) == "People m.example found" && PeopleSaid.counts(list, language: .english) == "Its answer to “cats”.")
+        #expect(PeopleSaid.counts(list, language: .english) == nil)
         #expect(pages.lists.said(of: list, in: session)?.stateLine(language: .english) == "Asking m.example for the people it found…")
         await pages.lists.opened(list, in: session)
         #expect(await server.asked == [Self.people("cats")])
@@ -687,7 +708,8 @@ struct SearchFoundTests {
         let before = await server.asked.count
         let tags = try #require(found.said(of: page, in: session))
         #expect(tags.tags.count == 40 && found.walked(page, in: session).count == 40 && found.row(tags.rows[39].id, of: page, in: session) == tags.rows[39])
-        #expect(FoundTagsSaid.title(page, language: .english) == "Hashtags m.example found" && FoundTagsSaid.headLine(page, language: .english) == "Its answer to “cats”.")
+        let at = FoundAt(source: Self.one, words: "cats", gave: FoundWhich.allCases)
+        #expect(FoundAt.title(Self.one, language: .english) == "What m.example found" && at.headLine(language: .english) == "Its answer to “cats”.")
         #expect(tags.foot(language: .english).hasPrefix("These are the first 40 hashtags m.example found, the most one answer holds."))
         #expect(FoundTagsSaid(page: page, tags: Array(tags.tags.prefix(5))).foot(language: .english) == "These are all 5 hashtags m.example found.")
         #expect(found.said(of: FoundTags(source: Self.one, words: "dogs"), in: session) == nil)
@@ -742,9 +764,10 @@ struct SearchFoundTests {
 
         var walk = ShellWalk()
         let page = FoundTags(source: Self.one, words: "a\u{202E}b\nc")
-        #expect(walk.walk(to: .foundTags(page), from: page.id) && walk.openedFoundTags == page && walk.openedRising == nil)
-        let named: String = "found:\(page.id)"
-        #expect(TimelinePane.page(walk.standing) == .opened && TimelinePane.openedID(walk.standing) == named)
+        let at = FoundAt(source: page.source, words: page.words, gave: [.tags])
+        #expect(walk.walk(to: .found(at, .tags), from: page.id) && walk.openedFoundTags == page && walk.openedRising == nil)
+        let named: String = "found:\(at.id)\u{1e}tags"
+        #expect(TimelinePane.page(walk.standing) == .tabbed && TimelinePane.openedID(walk.standing) == named)
         var jump = 0
         var lit: String?
         #expect(FediqoRootView.jumpedToTop(in: ["t1", "t2"], standing: walk.standing, place: .timeline, selected: &lit, jump: &jump) && lit == "t1")
@@ -762,12 +785,12 @@ struct SearchFoundTests {
     func writtenInEveryLanguage() throws {
         let resources = Self.shell.deletingLastPathComponent().appending(path: "Resources")
         let english = try String(contentsOf: resources.appending(path: "en.lproj/Localizable.strings"), encoding: .utf8)
-        let ours = ["\"search.band.", "\"search.tags.", "\"search.found.", "\"search.lookup.", "\"people.found.", "\"people.title.found\"", "\"work.purpose.lookUp\""]
+        let ours = ["\"search.band.", "\"search.tags.", "\"search.found.", "\"search.lookup.", "\"people.found.", "\"work.purpose.lookUp\""]
         let keys = english.split(separator: "\n").compactMap { line -> String? in
             guard ours.contains(where: line.hasPrefix) else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 27 && keys.contains("search.lookup.found.other") && keys.contains("search.lookup.offer") && keys.contains("people.found.none"))
+        #expect(keys.count == 28 && keys.contains("search.lookup.found.other") && keys.contains("search.lookup.offer") && keys.contains("people.found.none"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }
@@ -826,7 +849,8 @@ struct SearchFoundTests {
         for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 320)] {
             for count in [5, 40] {
                 let said = FoundTagsSaid(page: FoundTags(source: Self.one, words: long), tags: (1...count).map { RisingTag(tag: PostTag("#t\($0)")!) })
-                let pane = FoundTagsPane(said: said, selectedID: .constant(said.rows.first?.id), onOpen: { _ in }, onBack: {})
+                let at = FoundAt(source: Self.one, words: long, gave: [.tags])
+                let pane = FoundPage(said: FoundSaid(at: at, tabs: [.tags], which: .tags, tags: said), selectedID: .constant(said.rows.first?.id))
                     .environment(\.shellLayout, layout)
                 let hosted = NSHostingView(rootView: pane.frame(width: width, height: 700))
                 hosted.layoutSubtreeIfNeeded()

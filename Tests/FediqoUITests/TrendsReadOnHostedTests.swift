@@ -20,7 +20,7 @@ import Testing
 ///
 /// **It gives the main actor back between passes**, for `TimelinePlacesHostedTests`' reasons, and
 /// sets no language.
-@Suite("What is rising read on from the pane asks a bounded number of times, hosted", .serialized)
+@Suite("What is rising read on from the pane asks a bounded number of times, hosted", .serialized, .watched)
 @MainActor
 struct TrendsReadOnHostedTests {
     nonisolated private static let one = "one.example"
@@ -127,6 +127,7 @@ struct TrendsReadOnHostedTests {
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: ActServer([:])),
             timelines: WrittenTimelineStore(defaults: PaneDefaults())
         )
+        session.deadlinesUnturned()
         await session.reloadFromStore()
         session.timelineID = .trends
         let view = NSHostingView(rootView: Host(session: session, search: ShellSearch()))
@@ -149,12 +150,17 @@ struct TrendsReadOnHostedTests {
 
     /// The pane turned until it has asked at least once and nothing is out, then turned `more`
     /// times again with no row added and no key pressed. The asks made by then.
-    private func asks(_ session: ShellSession, _ http: Rising, _ view: NSView, thenTurned more: Int = 40) async -> [Int] {
-        let asked = await spun(5_000) {
+    ///
+    /// No `by:`: a row's `onAppear` asks, and the run loop is turned here, by the check. The
+    /// turns after are counted: an ask that must not come has nothing to be waited for by.
+    private func asks(
+        _ session: ShellSession, _ http: Rising, _ view: NSView, thenTurned more: Int = 40,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) async -> [Int] {
+        await met("the premise: a row coming into view asked for more, and nothing is out", sourceLocation: sourceLocation) {
             await settle(view)
             return await !http.offsets.isEmpty && session.reload.asking.isEmpty
         }
-        #expect(asked, "the premise: a row coming into view asked for more")
         for _ in 0 ..< more { await settle(view) }
         #expect(session.reload.asking.isEmpty, "nothing is still out")
         return await http.offsets
@@ -179,6 +185,7 @@ struct TrendsReadOnHostedTests {
         #expect(rows(session) == Self.held, "nothing landed")
         #expect(session.reload.trendsEnded(of: .trends, in: session).isEmpty, "a failure is not the source's end")
 
+        // Counted: an ask that must not come has nothing to be waited for by.
         for _ in 0 ..< 60 { await settle(view) }
         #expect(await http.offsets == first, "failing, it did not ask again with no new row and no press")
         await nothingElseLooped(http)
@@ -187,15 +194,16 @@ struct TrendsReadOnHostedTests {
     @Test("A source answering every ask with its top again is asked twice — the top, and once further in — and then no more")
     func aSourceThatRepeatsItsTop() async throws {
         let (session, http, view) = await pane(.repeatsItsTop)
-        let done = await spun(5_000) {
+        // No `by:`: the rows' `onAppear` asks, and the run loop is turned here, by the check.
+        await met("the same stretch come twice is the source having no more") {
             await settle(view)
             return !session.reload.trendsEnded(of: .trends, in: session).isEmpty && session.reload.asking.isEmpty
         }
-        #expect(done, "the same stretch come twice is the source having no more")
         let first = await http.offsets
         #expect(first == [0, MastodonClient.trendsStretch], "the rows that landed came into view and asked once more")
         #expect(rows(session) == MastodonClient.trendsStretch, "the stretch landed once")
 
+        // Counted: an ask that must not come has nothing to be waited for by.
         for _ in 0 ..< 60 { await settle(view) }
         #expect(await http.offsets == first, "ended, it is not asked again — the foot coming into view asks nothing")
         #expect(rows(session) == MastodonClient.trendsStretch)
@@ -210,6 +218,7 @@ struct TrendsReadOnHostedTests {
         #expect(session.reload.trendsEnded(of: .trends, in: session) == [Self.one], "a short stretch is the end")
         #expect(rows(session) == Self.held, "what was held is what there is")
 
+        // Counted: an ask that must not come has nothing to be waited for by.
         for _ in 0 ..< 60 { await settle(view) }
         #expect(await http.offsets == first, "the foot drawn, and the redraw it caused, asked nothing")
         await nothingElseLooped(http)

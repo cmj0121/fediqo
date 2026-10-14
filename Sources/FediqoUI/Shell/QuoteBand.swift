@@ -328,7 +328,7 @@ struct QuoteCard: View {
     }
 
     private var words: some View {
-        EmojiText.words(post.body, emojis: post.emojis, host: host, covered: false)
+        EmojiText.words(post.body, emojis: post.emojis, host: host, covered: false, mentions: post.mentions)
             .foregroundStyle(ShellChrome.inkDim(colorScheme))
             .fixedSize(horizontal: false, vertical: true)
     }

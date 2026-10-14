@@ -485,6 +485,13 @@ public struct Note: Identifiable, Hashable, Sendable {
     public let spoiler: String?
     /// The pictures this post is partly written in, one per shortcode.
     public let emojis: [CustomEmoji]
+    /// Whom the source says this post mentions (#310), each a whole handle as `handle` is, in
+    /// the order it listed them. Empty where it listed nobody — and on a source that says no
+    /// such thing, a forum among them. Held to `PostMention.bounded`.
+    ///
+    /// **The only thing a mention in the words is read by** (`PostMention.spans`): the words
+    /// alone name nobody. It goes where the words go — a later wording brings its own.
+    public let mentions: [String]
     public let url: URL?
     /// What the source last counted of answers, boosts and favourites, each nothing where it
     /// never said. Kept with the row (#208): a figure of the moment it was read, and still the
@@ -632,6 +639,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         sensitive: Bool? = nil,
         spoiler: String? = nil,
         emojis: [CustomEmoji] = [],
+        mentions: [String] = [],
         url: URL? = nil,
         counts: Counts = Counts(),
         statusID: String? = nil,
@@ -674,6 +682,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         let attachments = post ? attachments : []
         let sensitive = post ? sensitive : nil
         let spoiler = post ? spoiler : nil
+        let mentions = post ? PostMention.bounded(mentions) : []
         let url = post ? url : nil
         let counts = post ? counts : Counts()
         let opening = post ? opening : nil
@@ -701,6 +710,7 @@ public struct Note: Identifiable, Hashable, Sendable {
         self.sensitive = sensitive
         self.spoiler = spoiler
         self.emojis = emojis
+        self.mentions = mentions
         self.url = url
         self.counts = counts
         self.statusID = statusID
@@ -790,7 +800,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             favourited: taking.contains(.favourited) ? stale.favourited ?? favourited : favourited,
             bookmarked: taking.contains(.bookmarked) ? stale.bookmarked ?? bookmarked : bookmarked,
             audience: audience, avatarURL: avatarURL, attachments: attachments,
-            sensitive: sensitive, spoiler: spoiler, emojis: emojis, url: url,
+            sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions, url: url,
             counts: stale.counts.filled(from: counts), statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
             kept: kept, editedAt: editedAt, earlier: earlier, language: language,
@@ -820,7 +830,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             favourited: favourited, bookmarked: bookmarked, audience: later.audience ?? audience,
             avatarURL: later.avatarURL ?? avatarURL, attachments: later.attachments,
             sensitive: later.sensitive ?? sensitive, spoiler: later.spoiler ?? spoiler,
-            emojis: later.emojis, url: url, counts: counts, statusID: statusID, opening: opening,
+            emojis: later.emojis, mentions: later.mentions, url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
             kept: kept, editedAt: later.editedAt, earlier: later.earlier(after: was),
             // The language the post says it is in **now**, nothing included: a post changed to
@@ -863,7 +873,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             // always sends its cover line, empty where there is none, so a nil spoiler here is a
             // source that has no such idea — and a cover the author took off reads as "" and wins.
             audience: audience ?? held.audience, avatarURL: avatarURL, attachments: attachments,
-            sensitive: sensitive ?? held.sensitive, spoiler: spoiler ?? held.spoiler, emojis: emojis,
+            sensitive: sensitive ?? held.sensitive, spoiler: spoiler ?? held.spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts.filled(from: held.counts),
             statusID: statusID ?? held.statusID,
             // A read of the row that says nothing of its opening post — a board listing, which
@@ -934,7 +944,13 @@ public struct Note: Identifiable, Hashable, Sendable {
             bookmarked: stale ? bookmarked : other.bookmarked ?? bookmarked,
             audience: audience ?? other.audience, avatarURL: avatarURL, attachments: attachments,
             sensitive: sensitive ?? other.sensitive, spoiler: spoiler ?? other.spoiler,
-            emojis: emojis, url: url, counts: counts,
+            emojis: emojis,
+            // Whom it mentions, where this row says nobody (#310): what the other copy says, so
+            // a row kept before that was kept learns it. **Unless the other is the earlier
+            // copy**: nobody is then this row's answer — a post changed to mention nobody — and
+            // an older copy's list is not put back on it.
+            mentions: mentions.isEmpty && !other.isEarlier(than: self) ? other.mentions : mentions,
+            url: url, counts: counts,
             statusID: statusID ?? other.statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed,
             kept: kept, editedAt: editedAt, earlier: earlier, language: language ?? other.language,
@@ -951,7 +967,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             board: board, postedAt: postedAt, categories: categories,
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: nil,
             favourited: nil, bookmarked: nil, audience: audience, avatarURL: avatarURL,
-            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
+            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
             editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
@@ -965,7 +981,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             board: board, postedAt: postedAt, categories: categories,
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
             favourited: favourited, bookmarked: bookmarked, audience: audience, avatarURL: avatarURL,
-            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
+            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
             editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
@@ -980,7 +996,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             board: board, postedAt: postedAt, categories: categories,
             boostedBy: boostedBy, boosterHandle: boosterHandle, boosted: boosted,
             favourited: favourited, bookmarked: bookmarked, audience: audience, avatarURL: avatarURL,
-            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis,
+            attachments: attachments, sensitive: sensitive, spoiler: spoiler, emojis: emojis, mentions: mentions,
             url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
             editedAt: editedAt, earlier: earlier, language: language, refs: references, refsDue: refsDue
@@ -995,7 +1011,7 @@ public struct Note: Identifiable, Hashable, Sendable {
             board: board, postedAt: postedAt, categories: categories,
             boosted: boosted, favourited: favourited, bookmarked: bookmarked, audience: audience,
             avatarURL: avatarURL, attachments: attachments, sensitive: sensitive, spoiler: spoiler,
-            emojis: emojis, url: url, counts: counts, statusID: statusID, opening: opening,
+            emojis: emojis, mentions: mentions, url: url, counts: counts, statusID: statusID, opening: opening,
             goneSince: goneSince, gaps: gaps, listed: listed, kept: kept,
             editedAt: editedAt, earlier: earlier, language: language, refs: refs, refsDue: refsDue
         )

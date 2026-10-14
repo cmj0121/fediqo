@@ -82,8 +82,14 @@ struct PeopleSaid: Equatable {
     static func title(_ list: PeopleList, language: DummyLanguage? = nil) -> String {
         String(
             format: L10n.t("people.title.\(list.which.rawValue)", language: language),
-            list.readByCount || list.which == .requests ? list.host : list.lineHandle
+            titleNamesHost(list) ? list.host : list.lineHandle
         )
+    }
+
+    /// Whether the title names the source that keeps the list — nobody's list, or the
+    /// reader's own requests — and not whose list it is.
+    static func titleNamesHost(_ list: PeopleList) -> Bool {
+        list.readByCount || list.which == .requests
     }
 
     /// What an order of a directory is called, in the control that chooses it.
@@ -117,11 +123,44 @@ struct PeopleSaid: Equatable {
     /// directory, and it is not being asked from the top.
     var choosesSorting: Bool { sorting != nil && reading != .absent && !asking }
 
+    /// How many the source counts in the list as it said since the list was opened, where that
+    /// is newer than the list's own figure: who ask to follow the reader, as the sign-in's
+    /// account check last said — **and only while it holds**: nothing once a request has been
+    /// answered here. Nothing on any other list.
+    var tally: Int?
+
+    /// What the source counts in the list, where it said one: **never nought**, which would
+    /// be a figure where the rows already say there is nobody.
+    var counted: Int? { (tally ?? list.counted).flatMap { $0 > 0 ? $0 : nil } }
+
+    static let figureSymbol = "person.2"
+
+    /// The head's figure: the source's count, a glyph and the number on no well, opening
+    /// nothing (F10 §10, 6) — its sentence told to a pointer and a listener. Nothing where the
+    /// source said none. **Its sentence names the source only where the title does not**: who
+    /// asks to follow the reader is said as the way to the list says it.
+    func figure(language: DummyLanguage? = nil) -> PageFigure? {
+        counted.map {
+            PageFigure(
+                symbol: Self.figureSymbol, figure: L10n.grouped($0, language: language),
+                spoken: list.which == .requests
+                    ? PersonSaid.figure("people.requests.entry.count", $0, language: language)
+                    : String(format: L10n.t("people.counts", language: language), source, L10n.grouped($0, language: language)),
+                opens: false
+            )
+        }
+    }
+
+    /// The sentence under the title: how a directory is read — nothing on a list whose source
+    /// counts it, which says so by its figure. What a search was asked is said by the head of
+    /// the page of what it found (`FoundHead`), whose tab the people it found are.
+    func line(language: DummyLanguage? = nil) -> String? {
+        sorting.map { Self.sortingLine($0, source: source, language: language) }
+    }
+
     /// What the source counts in the list, where it said: its figure, said as its figure.
     static func counts(_ list: PeopleList, language: DummyLanguage? = nil) -> String? {
-        // The people a search found are counted by nobody: the line says what was asked.
-        if list.which == .found { return String(format: L10n.t("search.found.line", language: language), list.lineWords) }
-        return list.counted.map {
+        list.counted.map {
             String(format: L10n.t("people.counts", language: language), list.host, L10n.grouped($0, language: language))
         }
     }
@@ -270,19 +309,33 @@ struct PeopleSaid: Equatable {
     }
 }
 
-/// A list of people, opened: a way back, whose list it is and what its source counts, and the
-/// people the source gave — the person page's shape, for a page of people.
+/// A list of people, opened: a page of its own (F10) — the directory, the people suggested,
+/// who asks to follow the reader — drawn in the frame every opened page stands in
+/// (`OpenedPage`), with no tabs. The people a search found are a tab of the page of what it
+/// found (`FoundPage`), drawn by the same rows. Its bar holds the way back and the mark that
+/// asks the source again; its head says whose list it is, which source keeps it and what that
+/// source counts; under them are the people the source gave.
 ///
-/// **A step of the walk like that page**, so the way back, the lamp and the row given back on
-/// leaving somebody's page are the walk's own. It draws what it is handed and asks nothing: the
-/// asking is `ShellPeoplePages`'s, and which kind of source this is is never looked at here.
+/// **A step of the walk like somebody's page**, so the way back, the lamp and the row given
+/// back on leaving somebody's page are the walk's own. It draws what it is handed and asks
+/// nothing: the asking is `ShellPeoplePages`'s, and which kind of source this is is never
+/// looked at here. **At an accessibility text size the head is the list's first rows**, and
+/// scrolls away with it.
 struct PeoplePane: View {
     let said: PeopleSaid
     @Binding var selectedID: String?
+    /// How far a sideways swipe has slid the list.
+    var slide = PageSlide()
+    /// Whether the source can be asked again: what `r` goes by, and the bar's mark with it.
+    var canReload = false
     /// A row opened: that person's page, answered by the root under the walk's own rule.
     var onOpen: (Person) -> Void
     /// "Try again": the list asked from the top.
     var onAskAgain: () -> Void = {}
+    /// The bar's mark: what `r` does.
+    var onReload: () -> Void = {}
+    /// The same, pulled for: it returns when the answer has landed.
+    var onPull: () async -> Void = {}
     /// The foot's press: the next stretch.
     var onReadOn: () -> Void = {}
     /// A directory's order chosen, or only the people who live there: asked from the top.
@@ -294,32 +347,30 @@ struct PeoplePane: View {
     var jumpToTop: Int = 0
     var onBack: () -> Void
 
+    /// What the bar's mark is called — the source it asks — or nothing where it cannot be
+    /// asked: then there is no mark, and a pull asks nothing.
+    static func reloadName(of said: PeopleSaid, canReload: Bool, language: DummyLanguage? = nil) -> String? {
+        canReload ? PersonPage.reloadName(said.source, language: language) : nil
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            bar
-            ShellRule()
-            PeopleHead(list: said.list, sorting: said.sorting, chooses: said.choosesSorting, onChoose: onChoose)
-            ShellRule()
-            list
-        }
+        OpenedPage(
+            slide: slide, reload: Self.reloadName(of: said, canReload: canReload), onBack: onBack, onReload: onReload,
+            onPull: onPull,
+            head: {
+                PeopleHead(said: said, onChoose: onChoose)
+                ShellRule()
+            },
+            inFront: { lead in list { lead } }
+        )
     }
 
-    /// The person page's own bar: one way back for every step of the walk.
-    private var bar: some View {
-        HStack(spacing: ShellSpace.snug) {
-            ShellBackButton("person.back", action: onBack)
-            Spacer()
-            ShellKeyHint("person.leaveHint")
-        }
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.snug)
-    }
-
-    /// The people the source gave, as the one list a tab of somebody's page draws too.
-    private var list: some View {
+    /// The people the source gave, as the one list a tab of somebody's page draws too: led by
+    /// the head where it scrolls away.
+    private func list<Lead: View>(@ViewBuilder lead: () -> Lead) -> some View {
         PeopleRows(
             said: said, selectedID: $selectedID, onOpen: onOpen, onAskAgain: onAskAgain, onReadOn: onReadOn,
-            onAct: onAct, onAsk: onAsk, jumpToTop: jumpToTop
+            onAct: onAct, onAsk: onAsk, jumpToTop: jumpToTop, lead: lead
         )
     }
 
@@ -349,7 +400,8 @@ struct PeoplePane: View {
 }
 
 /// The head of a list of people: whose list this is and which source keeps it, and under them
-/// what that source counts — said as its figure, in its name, since the rows below may be fewer.
+/// what that source counts — its figure (`PageFigure`), a glyph and the number opening
+/// nothing, only where it said one, since the rows below may be fewer.
 ///
 /// **A directory's head says how it is being read, and holds the one control that chooses**
 /// (#315): where a list of somebody's has the source's count, a directory has a sentence — in
@@ -357,12 +409,12 @@ struct PeoplePane: View {
 /// the order in force. The sentence and the title are the heading a listener hears; the menu
 /// is an element of its own after it.
 struct PeopleHead: View {
-    let list: PeopleList
-    var sorting: DirectoryChoice?
-    /// Whether the control takes a press: not while the directory is being asked from the top.
-    var chooses = true
+    let said: PeopleSaid
     var onChoose: (DirectoryChoice) -> Void = { _ in }
     @Environment(\.colorScheme) private var colorScheme
+
+    private var list: PeopleList { said.list }
+    private var sorting: DirectoryChoice? { said.sorting }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
@@ -371,21 +423,25 @@ struct PeopleHead: View {
                     .shellFont(.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
-                if let figure = sorting.map({ PeopleSaid.sortingLine($0, source: list.host) }) ?? PeopleSaid.counts(list) {
-                    Text(figure)
+                if let line = said.line() {
+                    Text(line)
                         .shellFont(.reading)
                         .foregroundStyle(ShellChrome.inkDim(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let figure = said.figure() { PageFigureView(figure: figure) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .modifier(HeadElement(alone: sorting != nil))
             if let sorting {
                 DirectoryChoiceMenu(choice: sorting, source: list.host, onChoose: onChoose)
-                    .disabled(!chooses)
+                    .disabled(!said.choosesSorting)
                     .fixedSize()
             } else {
-                ShellWellPill(list.host).fixedSize()
+                ShellWellPill(list.host)
+                    .fixedSize()
+                    // Heard once: where the title already names the source, the pill is not said again.
+                    .accessibilityHidden(PeopleSaid.titleNamesHost(list))
             }
         }
         .padding(.horizontal, ShellSpace.pad)

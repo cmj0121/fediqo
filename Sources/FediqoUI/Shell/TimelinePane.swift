@@ -77,12 +77,17 @@ struct TimelinePane: View {
     /// One of the two ways at the head of the timeline that reads what is rising, pressed
     /// (#320), answered by the root: the page of rising hashtags or links is a step of the walk.
     var onOpenRising: (RisingWhich) -> Void = { _ in }
+    /// A tab of that page pressed or swiped to, answered by the root: the step turned in place.
+    var onTurnRising: (RisingWhich) -> Void = { _ in }
     /// A row of such a page opened, answered by the root: a hashtag's page, or a link through
     /// the door a post's link goes through.
     var onOpenRisingRow: (RisingRow) -> Void = { _ in }
     /// A row of what a search found at a source opened (#319), answered by the root: somebody's
     /// page, a hashtag's, or the page of all of one kind.
     var onOpenFound: (SearchFoundRow) -> Void = { _ in }
+    /// A tab of the page of what a source found pressed or swiped to, answered by the root:
+    /// the step turned in place (F10).
+    var onTurnFound: (FoundWhich) -> Void = { _ in }
     /// The way to the hashtags followed, pressed on the reader's own page (#318).
     var onFollowed: (FollowedTagsEntry) -> Void = { _ in }
     /// The way to the people who ask to follow the reader, pressed there (#313).
@@ -142,10 +147,15 @@ struct TimelinePane: View {
     }
 
     var body: some View {
+        // What is drawn of the step in front, asked once a pass: the head, the page and the
+        // swipe all read this one answer.
+        let shown = Self.drawn(standing, of: people, in: session)
+        let root = shown.root, listed = shown.list, drawn = shown.drawn
         VStack(alignment: .leading, spacing: 0) {
-            // **Somebody's page is a page of its own** (F9): it takes the pane's whole height,
-            // and the timelines' names, the search and the reload are not drawn over it.
-            if Self.headDrawn(over: standing) {
+            // **Somebody's page is a page of its own** (F9), **and every page opened over the
+            // stream** (F10): each takes the pane's whole height, and the timelines' names, the
+            // search and the reload are not drawn over it.
+            if Self.headDrawn(over: standing, drawn: drawn) {
                 header
                     .padding(.horizontal, ShellSpace.pad)
                     .padding(.top, ShellSpace.step)
@@ -165,184 +175,44 @@ struct TimelinePane: View {
             case .person(let person):
                 personPage(person)
             case .tag(let tag):
-                TagPane(
-                    tag: tag,
-                    items: session.heldPosts(under: tag, latest: prefs.latestDate),
-                    // What the ask says only where it is this tag's: another tag's, or one left
-                    // behind, is not this page's to say.
-                    asking: session.reload.tagAsk?.tag == tag ? session.reload.tagAsking : [],
-                    failed: session.reload.tagAsk?.tag == tag ? session.reload.tagFailed : [],
-                    reach: session.reload.tagAsk?.tag == tag ? session.reload.tagAsk?.reach.sentence : nil,
-                    // Whether the reader follows it at each source they are signed in to (#318).
-                    follows: people?.tags.lines(of: tag, in: session) ?? [],
-                    onFollow: { line in
-                        Task {
-                            if line.offers == .again {
-                                await people?.tags.again(tag, at: line.host, in: session)
-                            } else {
-                                await people?.tags.press(tag, at: line.host, in: session)
-                            }
-                        }
-                    },
-                    onAskFollows: { host in session.askFor([.follows], host: host) },
-                    catalogues: session.emoji,
-                    catalogueSettled: false,
-                    posts: session.posts,
-                    selectedID: $selectedID,
-                    acting: acting,
-                    decks: $decks,
-                    playback: playback,
-                    onPlayRow: onPlayRow,
-                    onViewRow: onViewRow,
-                    onTurnRow: onTurnRow,
-                    onOpenThread: onOpenThread,
-                    onOpenPerson: onOpenPerson,
-                    // Asked again of the timeline in front, as the press asked it.
-                    onRetry: {
-                        let timeline = session.currentTimeline
-                        Task { await session.reload.tag(tag, timeline: timeline, in: session) }
-                    },
-                    jumpToTop: jumpToTop,
-                    onBack: onBack
-                )
-                .id(HeldUnderTag.folded(tag))
-                // **The ask is the page coming in front**: each source whose sign-in holds
-                // follows, once. And who asks, and what they hold, is part of which opening it
-                // is: a sign-in given follows opens the page again, and it is read — never acted.
-                .task(id: people?.tags.opening(tag, in: session)) { await people?.tags.opened(tag, in: session) }
-                // What a source said of a hashtag is held only while its page is in front.
-                .onDisappear { people?.tags.closed(tag) }
+                tagPage(tag)
             case .people(let list):
                 // A list whose source is no longer one that says who people are — removed since
                 // — draws the stream instead, as a conversation no longer held does.
-                if let people, let said = people.lists.said(of: list, in: session) {
-                    PeoplePane(
-                        said: said,
-                        selectedID: $selectedID,
-                        onOpen: onOpenListed,
-                        onAskAgain: { Task { await people.lists.again(list, in: session) } },
-                        onReadOn: { Task { await people.lists.readOn(list, in: session) } },
-                        onChoose: { choice in Task { await people.lists.choose(choice, for: list, in: session) } },
-                        onAct: { act, person in Task { await people.lists.press(act, on: person, of: list, in: session) } },
-                        onAsk: { session.askFor([PersonAct.removeFollower.needs], host: list.host) },
-                        jumpToTop: jumpToTop,
-                        onBack: onBack
-                    )
-                    // One pane per list, so a second list opened from inside one draws afresh.
-                    .id(list.id)
-                    // **The ask is the page opening**, once a list a run: its first stretch, of
-                    // the source that keeps it and nobody else. Nothing reads on unpressed.
-                    .task(id: ShellPeoplePages.opening(list, in: session)) { await people.lists.opened(list, in: session) }
+                if let people, let listed {
+                    peoplePage(list, said: listed, in: people)
                 } else {
                     underneath
                 }
             case .rising(let which):
-                // No source with such a page — the last one removed since — draws the stream.
-                if let rising = people?.rising, let said = rising.said(which, in: session) {
-                    RisingPane(
-                        said: said,
-                        selectedID: $selectedID,
-                        onOpen: onOpenRisingRow,
-                        onAskAgain: { host in Task { await rising.again(which, at: host, in: session) } },
-                        jumpToTop: jumpToTop,
-                        onBack: onBack
-                    )
-                    .id(which)
-                    // **The ask is the page opening**, once a run for each source: one stretch
-                    // of what is rising there, of that source and nobody else.
-                    .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
+                // No source with a ranking of any tab — the last one removed since — draws the
+                // stream; one left with a ranking of the other tab only, that tab.
+                if let people, let rising = shown.rising {
+                    risingPage(rising, standing: which, in: people.rising)
                 } else {
                     underneath
                 }
-            case .foundTags(let page):
-                // An answer no longer held — another Return, the search closed — draws the stream.
-                if let said = people?.found.said(of: page, in: session) {
-                    FoundTagsPane(said: said, selectedID: $selectedID, onOpen: onOpenFound, jumpToTop: jumpToTop, onBack: onBack)
-                        .id(page.id)
+            case .found(_, let which):
+                // Neither kind left to draw — the answer no longer held and its people no longer
+                // asked of a source that says who people are — draws the stream; one left, that one.
+                if let people, let found = shown.found {
+                    foundPage(found, standing: which, in: people)
                 } else {
                     underneath
                 }
             case .followedTags(let page):
                 // No such list to draw — the sign-in ended, or sees who is followed no longer,
                 // or its source was removed — draws the stream instead.
-                if let followed = people?.followed, let said = followed.said(of: page, in: session) {
-                    FollowedTagsPane(
-                        said: said,
-                        selectedID: $selectedID,
-                        onOpen: onOpenRisingRow,
-                        onAskAgain: { Task { await followed.again(page, in: session) } },
-                        onReadOn: { Task { await followed.readOn(page, in: session) } },
-                        onAct: { row in Task { await followed.press(row.id, on: page, in: session) } },
-                        onAsk: { session.askFor([.follows], host: page.host) },
-                        jumpToTop: jumpToTop,
-                        onBack: onBack
-                    )
-                    .id(page.id)
-                    // **The ask is the page opening**, once a list a run: its first stretch, as
-                    // the reader. And who asks is part of which opening it is. Nothing reads on
-                    // unpressed.
-                    .task(id: followed.opening(page, in: session)) { await followed.opened(page, in: session) }
+                if let followed = people?.followed, let said = shown.followed {
+                    followedPage(page, said: said, in: followed)
                 } else {
                     underneath
                 }
-            case .thread(let id):
+            case .thread:
                 // A root this device no longer holds draws the stream instead, which is the same
                 // answer the pane gave when it looked the root up among the timeline's own rows.
-                if let opened = session.held(id) {
-                    DummyThreadPane(
-                        root: opened,
-                        catalogues: session.emoji,
-                        catalogueSettled: settledHosts.contains(opened.source.host),
-                        posts: session.posts,
-                        conversations: session.conversations,
-                        onAskAround: { Task { await session.conversations.again(opened, in: session) } },
-                        onReadFurther: { Task { await session.conversations.press(opened, in: session) } },
-                        onReachFurther: { appeared in
-                            Task { await session.conversations.reached(opened, appeared: appeared, in: session) }
-                        },
-                        // A ranked blog's standing, read here where the session is (#209).
-                        blog: session.blogs.reading(of: opened),
-                        onReadBlog: { Task { await session.blogs.again(opened) } },
-                        // The password is handed on and not kept (#213).
-                        onUnlockBlog: { password in Task { await session.blogs.unlock(opened, password: password) } },
-                        onSignIn: { Task { await session.signIn(host: opened.source.host) } },
-                        selectedID: $selectedID,
-                        // Inside the conversation the answer mark opens the answer (#108).
-                        acting: { acting($0, inside: opened) },
-                        decks: $decks,
-                        playback: playback,
-                        onPlayRow: onPlayRow,
-                        onViewRow: onViewRow,
-                        onTurnRow: onTurnRow,
-                        onOpenThread: onOpenThread,
-                        onOpenPerson: onOpenPerson,
-                        jumpToTop: jumpToTop,
-                        onBack: onBack
-                    )
-                    // Pulled down, the conversation is read again as `r` reads it there (#307):
-                    // the pull reaches the pane's own list from here.
-                    .modifier(PullsToReload(
-                        offered: { ReloadMark.pulls(canReload: ways.canReload, searching: false) },
-                        reload: ways.onReload, settled: { await session.reload.settled(.thread) }
-                    ))
-                    // One pane per thread, so going back from a nested one draws its parent
-                    // afresh.
-                    .id(opened.id)
-                    // **The ask is the pane opening** — #90, and since #198 for a forum topic's
-                    // replies too. A thread is what the reader has just pressed Return on, so
-                    // nothing asks them a second time for a thing they have already said they
-                    // want; asked once per post per run, so reopening draws what is already held.
-                    // And from here it is the thread in front, which the wait asks again.
-                    .task(id: opened.id) { await session.reload.opened(opened, in: session) }
-                    // What `r` last said about this thread goes with it (#175): the timeline under
-                    // it does not go on saying a thread nobody is reading could not be reloaded.
-                    // And a page still on its way for it stops (#177): nobody is reading on. Nor
-                    // is it asked again on the wait any more (#198).
-                    .onDisappear {
-                        session.reload.forget(.thread)
-                        session.reload.left(opened)
-                        session.stopReadingFurther(of: opened)
-                    }
+                if let root {
+                    conversationPage(root)
                 } else {
                     underneath
                 }
@@ -358,10 +228,10 @@ struct TimelinePane: View {
         }
         // **A sideways swipe, heard on the pane and begun under its head** (#305): whatever it draws —
         // posts, or that there are none — and whichever page is in front. On the timeline it
-        // goes to the one beside; on a post or a tag opened over it, it goes back; on somebody's page it is that page's own.
+        // goes to the one beside; on a list opened over it, it goes back; on somebody's page, a conversation's or a hashtag's it is that page's own.
         // What follows the finger stays inside the pane: not over the rail on a wide page.
         .modifier(SwipesSideways(
-            session: session, slide: slide, touch: touch, page: Self.page(standing),
+            session: session, slide: slide, touch: touch, page: Self.page(standing, drawn: drawn),
             opened: Self.openedID(standing), searching: searching, back: onBack
         ))
         .modifier(HoldsSlide(holds: touch))
@@ -570,21 +440,83 @@ struct TimelinePane: View {
 
     /// What is in front, as far as a sideways swipe cares (#305): the timeline itself, a page
     /// opened over it, or a page read out of a post, which is somebody's own.
-    static func page(_ standing: ShellStep?) -> TimelineSwipe.Page {
+    static func page(_ standing: ShellStep?, drawn: Bool = true) -> TimelineSwipe.Page {
         switch standing {
-        // Somebody's page has tabs of its own, and its sideways is theirs (F9).
-        case .person: .tabbed
-        case .tag, .people, .rising, .foundTags, .followedTags, .thread: .opened
+        // Somebody's page has tabs of its own, and its sideways is theirs (F9); a hashtag's
+        // is the frame's too, with tabs or with none (F10).
+        case .person, .tag: .tabbed
+        // A conversation's page is the frame's, and its sideways the frame's (F10) — where it
+        // is drawn; over the stream drawn in its stead the swipe goes back, as it did.
+        // So is a list of people's (F10), where it is drawn, and what is rising's.
+        // And what a search found at a source, and the hashtags followed.
+        case .thread, .people, .rising, .found, .followedTags: drawn ? .tabbed : .opened
         case .link: .link
         case nil: .timeline
         }
     }
 
     /// Whether the timelines' head — their names, the search, the reload — is drawn over what
-    /// the reader stands on: over everything but somebody's page, which is a page of its own.
-    static func headDrawn(over standing: ShellStep?) -> Bool {
-        if case .person = standing { return false }
-        return true
+    /// the reader stands on: not over somebody's page, a conversation's, a hashtag's, a list
+    /// of people's, what is rising, what a search found nor the hashtags followed, each a page
+    /// of its own. **Asked of what is drawn, not of the step alone** (F10 §1): any of those
+    /// that cannot be drawn (`drawn` false) draws the stream, and the head is over that.
+    static func headDrawn(over standing: ShellStep?, drawn: Bool = true) -> Bool {
+        switch standing {
+        case .person, .tag: false
+        case .thread, .people, .rising, .found, .followedTags: !drawn
+        case .link, nil: true
+        }
+    }
+
+    /// Whether the search field is drawn at the pane's foot: where a search is `open` and the
+    /// timelines' head is drawn (`headDrawn`), and nowhere else. The field is the stream's, as
+    /// the head is, so a page opened over a search's results — a page about one thing — takes the
+    /// whole place without it (F10); the search stays open behind the page, as it was, and its
+    /// field is drawn again when the walk leaves the page (`ShellSearch.appeared`).
+    static func searchFieldDrawn(open: Bool, over standing: ShellStep?, drawn: Bool) -> Bool {
+        open && headDrawn(over: standing, drawn: drawn)
+    }
+
+    /// What is drawn of the step in front: the post a conversation is around, where this device
+    /// still holds it; the list a list of people's page is handed, where it can be said; what
+    /// the tab of what is rising in front is handed, where a source has a ranking of it; and
+    /// whether the step's page is drawn at all. A conversation whose post is no longer held, a
+    /// list nobody can say — its source gone, nobody signed in to see it — or a tab no source
+    /// ranks any more is not, and the stream is drawn in its stead.
+    ///
+    /// **The one decision of what is drawn**: the pane's body, its head and its swipe, and the
+    /// root asked what Tab and `r` do, all ask it here, handed the same things.
+    struct Drawn {
+        var root: DummyItem?
+        var list: PeopleSaid?
+        var rising: RisingSaid?
+        /// What the tab of what a search found in front is handed, where any tab is left.
+        var found: FoundSaid?
+        /// What the list of the hashtags followed is handed, where the sign-in still sees it.
+        var followed: FollowedTagsSaid?
+        var drawn: Bool
+    }
+
+    static func drawn(_ standing: ShellStep?, of people: ShellPersonPages?, in session: ShellSession) -> Drawn {
+        switch standing {
+        case .thread(let id):
+            let root = session.held(id)
+            return Drawn(root: root, drawn: root != nil)
+        case .people(let list):
+            let said = people?.lists.said(of: list, in: session)
+            return Drawn(list: said, drawn: said != nil)
+        case .rising(let which):
+            let said = people?.rising.drawn(at: which, in: session)
+            return Drawn(rising: said, drawn: said != nil)
+        case .found(let at, let which):
+            let said = people?.found.drawn(at, at: which, in: session)
+            return Drawn(found: said, drawn: said != nil)
+        case .followedTags(let page):
+            let said = people?.followed.said(of: page, in: session)
+            return Drawn(followed: said, drawn: said != nil)
+        case .person, .tag, .link, nil:
+            return Drawn(drawn: true)
+        }
     }
 
     /// Somebody's page (F9): handed which tabs it has, which is in front and each part's own
@@ -690,6 +622,262 @@ struct TimelinePane: View {
         )
     }
 
+    /// A conversation's page (F10): the whole height of the pane, in the frame every opened
+    /// page stands in, with what its bar says worked out from the post it is around.
+    private func conversationPage(_ opened: DummyItem) -> some View {
+        ConversationPage(
+            said: ConversationSaid.made(of: opened, blog: session.blogs.reading(of: opened) != nil, canReload: ways.canReload),
+            slide: session.slide("thread"),
+            onBack: onBack,
+            onReload: ways.onReload,
+            // Pulled down, the conversation is read again as `r` reads it there (#307).
+            onPull: {
+                await PullsToReload.pull(offered: true, reload: ways.onReload, settled: { await session.reload.settled(.thread) })
+            },
+            // While a read the reader pressed for runs, the bar's mark stops it (#307).
+            onStop: session.reload.stoppable ? { session.reload.stop() } : nil,
+            rows: { titleRow in
+                DummyThreadPane(
+                    root: opened,
+                    catalogues: session.emoji,
+                    catalogueSettled: settledHosts.contains(opened.source.host),
+                    posts: session.posts,
+                    conversations: session.conversations,
+                    onAskAround: { Task { await session.conversations.again(opened, in: session) } },
+                    onReadFurther: { Task { await session.conversations.press(opened, in: session) } },
+                    onReachFurther: { appeared in
+                        Task { await session.conversations.reached(opened, appeared: appeared, in: session) }
+                    },
+                    // A ranked blog's standing, read here where the session is (#209).
+                    blog: session.blogs.reading(of: opened),
+                    onReadBlog: { Task { await session.blogs.again(opened) } },
+                    // The password is handed on and not kept (#213).
+                    onUnlockBlog: { password in Task { await session.blogs.unlock(opened, password: password) } },
+                    onSignIn: { Task { await session.signIn(host: opened.source.host) } },
+                    selectedID: $selectedID,
+                    // Inside the conversation the answer mark opens the answer (#108).
+                    acting: { acting($0, inside: opened) },
+                    decks: $decks,
+                    playback: playback,
+                    onPlayRow: onPlayRow,
+                    onViewRow: onViewRow,
+                    onTurnRow: onTurnRow,
+                    onOpenThread: onOpenThread,
+                    onOpenPerson: onOpenPerson,
+                    jumpToTop: jumpToTop,
+                    titleRow: titleRow
+                )
+            }
+        )
+        // One pane per thread, so going back from a nested one draws its parent
+        // afresh.
+        .id(opened.id)
+        // **The ask is the pane opening** — #90, and since #198 for a forum topic's
+        // replies too. A thread is what the reader has just pressed Return on, so
+        // nothing asks them a second time for a thing they have already said they
+        // want; asked once per post per run, so reopening draws what is already held.
+        // And from here it is the thread in front, which the wait asks again.
+        .task(id: opened.id) { await session.reload.opened(opened, in: session) }
+        // What `r` last said about this thread goes with it (#175): the timeline under
+        // it does not go on saying a thread nobody is reading could not be reloaded.
+        // And a page still on its way for it stops (#177): nobody is reading on. Nor
+        // is it asked again on the wait any more (#198).
+        .onDisappear {
+            session.reload.forget(.thread)
+            session.reload.left(opened)
+            session.stopReadingFurther(of: opened)
+        }
+    }
+
+    /// A list of people's page (F10): the whole height of the pane, in the frame every opened
+    /// page stands in, with no tabs, handed what its source said — worked out where the source
+    /// is asked, and nothing here looks at which kind of source it is.
+    private func peoplePage(_ list: PeopleList, said: PeopleSaid, in people: ShellPersonPages) -> some View {
+        PeoplePane(
+            said: said,
+            selectedID: $selectedID,
+            slide: session.slide("people"),
+            canReload: ways.canReload,
+            onOpen: onOpenListed,
+            onAskAgain: { Task { await people.lists.again(list, in: session) } },
+            onReload: ways.onReload,
+            // Pulled down, the list is asked from the top as `r` asks it.
+            onPull: { await people.lists.again(list, in: session) },
+            onReadOn: { Task { await people.lists.readOn(list, in: session) } },
+            onChoose: { choice in Task { await people.lists.choose(choice, for: list, in: session) } },
+            onAct: { act, person in Task { await people.lists.press(act, on: person, of: list, in: session) } },
+            onAsk: { session.askFor([PersonAct.removeFollower.needs], host: list.host) },
+            jumpToTop: jumpToTop,
+            onBack: onBack
+        )
+        // One pane per list, so a second list opened from inside one draws afresh.
+        .id(list.id)
+        // **The ask is the page opening**, once a list a run: its first stretch, of the source
+        // that keeps it and nobody else. Nothing reads on unpressed.
+        .task(id: ShellPeoplePages.opening(list, in: session)) { await people.lists.opened(list, in: session) }
+    }
+
+    /// What is rising (F10): the whole height of the pane, in the frame every opened page stands
+    /// in, handed its tabs and what the tab in front says — worked out where the sources are
+    /// asked. Its bar's mark is where `r` asks the sources again; **never Stop** — its asks are
+    /// not the timeline's reload, and a Stop here would stop one running out of sight.
+    ///
+    /// The walk stood on `standing`'s tab: where the page draws the other one — no source ranks
+    /// `standing` any more — the walk is turned to it, so Tab, the keys and leaving all stand on
+    /// the tab that is drawn.
+    private func risingPage(_ said: RisingSaid, standing: RisingWhich, in rising: ShellRising) -> some View {
+        let which = said.which
+        return RisingPage(
+            said: said,
+            tabs: rising.tabs(in: session),
+            selectedID: $selectedID,
+            slide: session.slide("rising"),
+            reload: RisingPage.reloadName(canReload: ways.canReload),
+            acts: RisingPage.acts(
+                onBack: onBack,
+                onTab: onTurnRising,
+                onReload: ways.onReload,
+                // Pulled down, the sources are asked again as `r` asks them.
+                onPull: { await rising.again(which, in: session) }
+            ),
+            onOpen: onOpenRisingRow,
+            onAskAgain: { host in Task { await rising.again(which, at: host, in: session) } },
+            jumpToTop: jumpToTop
+        )
+        // **A tab asks when it first comes in front**, once a run for each source: one stretch
+        // of what is rising there, of that source and nobody else. A tab never in front has
+        // asked nothing.
+        .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
+        .onChange(of: which != standing, initial: true) { _, fell in
+            if fell { onTurnRising(which) }
+        }
+    }
+
+    /// What a search found at a source (F10): the whole height of the pane, in the frame every
+    /// opened page stands in, handed its tabs and what the tab in front lists — worked out where
+    /// the answer is held. Its bar's mark is on People alone, where `r` asks the source for the
+    /// people again; **never Stop**, as on what is rising.
+    ///
+    /// The walk stood on `standing`'s tab: where the page draws the other one — that tab lost
+    /// everything its source gave — the walk is turned to it, so Tab, the keys and leaving all
+    /// stand on the tab that is drawn.
+    private func foundPage(_ said: FoundSaid, standing: FoundWhich, in people: ShellPersonPages) -> some View {
+        let lists = people.lists, list = said.at.people, which = said.which
+        return FoundPage(
+            said: said,
+            selectedID: $selectedID,
+            slide: session.slide("found"),
+            reload: FoundPage.reloadName(of: said, canReload: ways.canReload),
+            acts: FoundPage.acts(
+                onBack: onBack,
+                onTab: onTurnFound,
+                onReload: ways.onReload,
+                // Pulled down on People, the list is asked from the top as `r` asks it.
+                onPull: { await lists.again(list, in: session) }
+            ),
+            onOpenPerson: onOpenListed,
+            onOpenRow: onOpenFound,
+            onAskAgain: { Task { await lists.again(list, in: session) } },
+            onReadOn: { Task { await lists.readOn(list, in: session) } },
+            onAct: { act, person in Task { await lists.press(act, on: person, of: list, in: session) } },
+            onAsk: { session.askFor([PersonAct.removeFollower.needs], host: list.host) },
+            jumpToTop: jumpToTop
+        )
+        // One page per source's answer, so another opened from inside one draws afresh.
+        .id(said.at.id)
+        // **The people are asked when their tab first comes in front**, once a run, as the list
+        // of them opened on its own was; the hashtags ask nothing. A tab never in front has
+        // asked nothing.
+        .task(id: which == .people ? ShellPeoplePages.opening(list, in: session) : nil) {
+            if which == .people { await lists.opened(list, in: session) }
+        }
+        .onChange(of: which != standing, initial: true) { _, fell in
+            if fell { onTurnFound(which) }
+        }
+    }
+
+    /// The hashtags followed (F10): the whole height of the pane, in the frame every opened page
+    /// stands in, with no tabs, handed what its source listed. Its bar's mark is where `r` asks
+    /// the list again from the top; **never Stop**, as on what is rising.
+    private func followedPage(_ page: FollowedTags, said: FollowedTagsSaid, in followed: ShellFollowedTags) -> some View {
+        FollowedTagsPane(
+            said: said,
+            selectedID: $selectedID,
+            slide: session.slide("followed"),
+            reload: FollowedTagsPane.reloadName(of: said, canReload: ways.canReload),
+            onOpen: onOpenRisingRow,
+            onAskAgain: { Task { await followed.again(page, in: session) } },
+            onReload: ways.onReload,
+            // Pulled down, the list is asked from the top as `r` asks it.
+            onPull: { await followed.again(page, in: session) },
+            onReadOn: { Task { await followed.readOn(page, in: session) } },
+            onAct: { row in Task { await followed.press(row.id, on: page, in: session) } },
+            onAsk: { session.askFor([.follows], host: page.host) },
+            jumpToTop: jumpToTop,
+            onBack: onBack
+        )
+        .id(page.id)
+        // **The ask is the page opening**, once a list a run: its first stretch, as the reader.
+        // And who asks is part of which opening it is. Nothing reads on unpressed.
+        .task(id: followed.opening(page, in: session)) { await followed.opened(page, in: session) }
+    }
+
+    /// A hashtag's page (F10): the whole height of the pane, in the frame every opened page
+    /// stands in, handed which tabs it has, which is in front and what its head says — all of
+    /// them worked out where its sources are asked, and nothing here looks at which kind of
+    /// source any of them is.
+    private func tagPage(_ tag: PostTag) -> some View {
+        let items = session.heldPosts(under: tag, latest: prefs.latestDate)
+        return TagPane(
+            // Whether the reader follows it at each source they are signed in to (#318), and
+            // so whether the page has an About; with nobody to ask, its posts alone.
+            said: people?.tags.said(of: tag, held: items.count, in: session)
+                ?? TagPageSaid.made(of: tag, held: items.count, follows: [], front: nil, in: session),
+            items: items,
+            slide: session.slide("tag"),
+            acts: TagPageActs(
+                onBack: onBack,
+                onTab: { tab in _ = people?.tags.turn(tag, to: tab, lamp: &selectedID, in: session) },
+                // The head's Follow only ever follows, as `l` does.
+                onHeadFollow: { line in _ = people?.tags.pressed(line, only: true, in: session) },
+                onFollow: { line in _ = people?.tags.pressed(line, in: session) },
+                onAskFollows: { host in session.askFor([.follows], host: host) },
+                // Asked again of the timeline in front, as the press asked it.
+                onRetry: {
+                    let timeline = session.currentTimeline
+                    Task { await session.reload.tag(tag, timeline: timeline, in: session) }
+                }
+            ),
+            catalogues: session.emoji,
+            catalogueSettled: false,
+            posts: session.posts,
+            selectedID: $selectedID,
+            acting: acting,
+            decks: $decks,
+            playback: playback,
+            onPlayRow: onPlayRow,
+            onViewRow: onViewRow,
+            onTurnRow: onTurnRow,
+            onOpenThread: onOpenThread,
+            onOpenPerson: onOpenPerson,
+            jumpToTop: jumpToTop
+        )
+        .id(HeldUnderTag.folded(tag))
+        // **The ask is the page coming in front**: each source whose sign-in holds
+        // follows, once. And who asks, and what they hold, is part of which opening it
+        // is: a sign-in given follows opens the page again, and it is read — never acted.
+        // **Asked for the page and not for About**: the head's mark needs the answer, and
+        // About, brought in front, asks nothing more.
+        .task(id: people?.tags.opening(tag, in: session)) { await people?.tags.opened(tag, in: session) }
+        // What a source said of a hashtag is held only while its page is in front.
+        .onDisappear { people?.tags.closed(tag) }
+        // About gone from under the reader — the sign-in ended: the page is its posts, and
+        // the lamp is on no block that is no longer there.
+        .onChange(of: people?.tags.tabs(of: tag, in: session)) { _, _ in
+            people?.tags.tabsChanged(tag, lamp: &selectedID, in: session)
+        }
+    }
+
     /// A name for the page opened, so a swipe begun on one is not acted on over another.
     static func openedID(_ standing: ShellStep?) -> String? {
         switch standing {
@@ -698,7 +886,7 @@ struct TimelinePane: View {
         case .tag(let tag): "tag:" + String(describing: tag)
         case .people(let list): "people:" + list.id
         case .rising(let which): "rising:" + which.rawValue
-        case .foundTags(let page): "found:" + page.id
+        case .found(let at, let which): "found:" + at.id + "\u{1e}" + which.rawValue
         case .followedTags(let page): "followed:" + page.id
         case .link, nil: nil
         }
@@ -1046,6 +1234,13 @@ struct TimelinePane: View {
                     }
                     .scrollIndicators(.never)
                     .modifier(FingerRoom(given: false))
+                    // The head is drawn afresh when a page of its own is left: the row is
+                    // brought to the timeline in front as it appears, not only as that changes.
+                    // A tick later: a row just built has not laid out the name to scroll to.
+                    .onAppear {
+                        guard let query = session.timelineID else { return }
+                        Task { @MainActor in proxy.scrollTo(query.id) }
+                    }
                     .onChange(of: session.timelineID) { _, query in
                         guard let query else { return }
                         withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(query.id) }
@@ -1152,13 +1347,12 @@ struct TimelinePane: View {
     private var reloadMark: some View {
         if let shown = ReloadMark.shown(canReload: ways.canReload, stoppable: session.reload.stoppable) {
             ShellIconButton(shown.symbol, name: shown.name) {
-                switch shown {
-                case .reload:
+                switch ReloadMark.press(shown, at: Date(), pressedAt: reloadPressed) {
+                case .begins:
                     reloadPressed = Date()
                     ways.onReload()
-                case .stop:
-                    guard ReloadMark.stops(at: Date(), pressedAt: reloadPressed) else { return }
-                    session.reload.stop()
+                case .stops: session.reload.stop()
+                case .unheard: break
                 }
             }
         }
@@ -1481,6 +1675,26 @@ enum ReloadMark: Equatable, Sendable {
     static func stops(at now: Date, pressedAt: Date?) -> Bool {
         guard let pressedAt else { return true }
         return now.timeIntervalSince(pressedAt) >= settle
+    }
+
+    /// What a press on the mark does, shown as `shown`.
+    enum Press: Equatable, Sendable {
+        /// It begins a reload: whoever draws the mark writes down when, and asks.
+        case begins
+        /// It stops the one running.
+        case stops
+        /// It is Stop pressed within `settle` of the press that began the reload: not heard.
+        case unheard
+    }
+
+    /// What a press at `now` on the mark shown as `shown` does, the mark last pressed to begin
+    /// a reload at `pressedAt`. **The one place this is decided**, for every mark there is: a
+    /// timeline's, the notices', and an opened page's.
+    static func press(_ shown: ReloadMark, at now: Date, pressedAt: Date?) -> Press {
+        switch shown {
+        case .reload: .begins
+        case .stop: stops(at: now, pressedAt: pressedAt) ? .stops : .unheard
+        }
     }
 
     /// Whether pulling the list down reads it again: exactly where the mark is offered, and

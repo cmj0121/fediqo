@@ -680,6 +680,8 @@ struct StatusDTO: Decodable, Sendable {
             sensitive: subject.sensitive,
             spoiler: subject.spoilerText,
             emojis: Self.emojis(of: subject),
+            // Whom the status says it mentions, each spelled as an author's handle is (#310).
+            mentions: subject.mentions?.map { Self.handle($0.acct, host: host) } ?? [],
             // **Decision 9's rule, at the field it had been missed at.** The avatar two lines up,
             // the attachments and the emoji all go through `Host.fetchableURL`; this one went
             // through bare `URL(string:)`, so `javascript:`, `data:` and `file:///` all survived

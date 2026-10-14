@@ -9,10 +9,11 @@ import Testing
 /// handed in each state, what its row says — and that a source which is not asked who people
 /// are has no such page.
 ///
-/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
-/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+/// Every wait here is on an ask arriving or being let go (`PageServer`), tied to the work that
+/// made the ask where a check can name it: a held ask is let go by the check, and by a guard
+/// when the run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("A list of people as its source gives it", .serialized, .timeLimit(.minutes(3)))
+@Suite("A list of people as its source gives it", .serialized, .watched)
 struct PeopleTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -50,6 +51,7 @@ struct PeopleTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: server)
         )
+        session.deadlinesUnturned()
         let work = SourceWork()
         session.work = work
         for source in [Self.source, Self.forum] { await session.store.add(source) }
@@ -175,8 +177,10 @@ struct PeopleTests {
         let (session, server, _) = await session([Self.first: Self.stretch([3, 2, 1])])
         let pages = ShellPersonPages().lists
         await server.hold(Self.first)
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let pane = Task { await pages.opened(Self.followers, in: session) }
-        await server.arrival(of: Self.first)
+        await server.arrival(of: Self.first, by: pane)
         pane.cancel()
         #expect(pages.said(of: Self.followers, in: session)?.reading == .asking && pages.said(of: Self.followers, in: session)?.asking == true)
 
@@ -217,8 +221,10 @@ struct PeopleTests {
         ])
         let pages = ShellPersonPages().lists
         await server.hold(Self.first)
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let opening = Task { await pages.opened(Self.followers, in: session) }
-        await server.arrival(of: Self.first)
+        await server.arrival(of: Self.first, by: opening)
         for _ in 0..<3 { await pages.again(Self.followers, in: session) }
         await pages.readOn(Self.followers, in: session)
         #expect(await server.asked == [Self.first], "one ask on the wire, and nothing beside it")
@@ -228,8 +234,10 @@ struct PeopleTests {
         // The foot pressed twice: one stretch.
         await server.hold(Self.after(19))
         defer { Task { await server.release(Self.after(19)) } }
+        let after19Guard = watching("the ask of \(Self.after(19)), held at its server") { await server.release(Self.after(19)) }
+        defer { after19Guard.cancel() }
         let reading = Task { await pages.readOn(Self.followers, in: session) }
-        await server.arrival(of: Self.after(19))
+        await server.arrival(of: Self.after(19), by: reading)
         #expect(pages.said(of: Self.followers, in: session)?.foot == .reading)
         await pages.readOn(Self.followers, in: session)
         #expect(await server.asked == [Self.first, Self.after(19)], "one stretch at a time")
@@ -241,7 +249,7 @@ struct PeopleTests {
         #expect(said.people.map(\.accountID) == ["3", "2"] && said.foot == .more, "the foot is no longer Reading")
         // The foot pressed again, while the stretch called off has still not come back.
         let second = Task { await pages.readOn(Self.followers, in: session) }
-        await server.arrival(of: Self.after(19), times: 2)
+        await server.arrival(of: Self.after(19), times: 2, by: second)
         await server.releaseOne(Self.after(19))
         await reading.value
         #expect(ids(pages, session) == ["3", "2"], "what the stretch called off brings late does not land")
@@ -256,7 +264,7 @@ struct PeopleTests {
         defer { Task { await server.release(Self.first) } }
         let before = await server.asked.count
         let asking = Task { await pages.again(Self.followers, in: session) }
-        await server.arrival(of: Self.first, times: 3)
+        await server.arrival(of: Self.first, times: 3, by: asking)
         #expect(pages.said(of: Self.followers, in: session)?.asking == true && ids(pages, session).count == 3, "what it gave stays drawn meanwhile")
         await pages.readOn(Self.followers, in: session)
         #expect(await server.asked.count == before + 1)
@@ -293,14 +301,17 @@ struct PeopleTests {
         let calledOff = CalledOff()
         let door = CancellableDoor(server, heard: calledOff)
         let bare = ShellSession(http: door, store: plain.store, mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: door))
+        bare.deadlinesUnturned()
         bare.work = SourceWork()
         bare.sources = plain.sources
         let lists = ShellPersonPages().lists
         await lists.opened(Self.followers, in: bare)
         await server.hold(Self.after(19))
         defer { Task { await server.release(Self.after(19)) } }
+        let after19Guard = watching("the ask of \(Self.after(19)), held at its server") { await server.release(Self.after(19)) }
+        defer { after19Guard.cancel() }
         let reading = Task { await lists.readOn(Self.followers, in: bare) }
-        await server.arrival(of: Self.after(19))
+        await server.arrival(of: Self.after(19), by: reading)
         await lists.again(Self.followers, in: bare)
         await calledOff.wait()
         #expect(await calledOff.asks == [Self.after(19)], "the stretch, and not the ask from the top")
@@ -317,11 +328,13 @@ struct PeopleTests {
         pages.reaching = { _ in MastodonPeople(http: server, host: Self.host) }
         await server.hold(Self.first)
         defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let unsigned = Task { await pages.opened(Self.followers, in: session) }
-        await server.arrival(of: Self.first)
+        await server.arrival(of: Self.first, by: unsigned)
         try signIn(session)
         let signed = Task { await pages.opened(Self.followers, in: session) }
-        await server.arrival(of: Self.first, times: 2)
+        await server.arrival(of: Self.first, times: 2, by: signed)
         await server.answer(Self.first, Self.stretch([9, 8, 7]))
         await server.releaseOne(Self.first)
         await unsigned.value
@@ -335,11 +348,13 @@ struct PeopleTests {
         // A stretch superseded by asking again, and then by a stretch of the list asked again.
         await server.hold(Self.after(19))
         defer { Task { await server.release(Self.after(19)) } }
+        let after19Guard = watching("the ask of \(Self.after(19)), held at its server") { await server.release(Self.after(19)) }
+        defer { after19Guard.cancel() }
         let old = Task { await pages.readOn(Self.followers, in: session) }
-        await server.arrival(of: Self.after(19))
+        await server.arrival(of: Self.after(19), by: old)
         await pages.again(Self.followers, in: session)
         let new = Task { await pages.readOn(Self.followers, in: session) }
-        await server.arrival(of: Self.after(19), times: 2)
+        await server.arrival(of: Self.after(19), times: 2, by: new)
         await server.answer(Self.after(19), Self.stretch([6, 5], next: 4))
         await server.releaseOne(Self.after(19))
         await old.value
@@ -385,13 +400,15 @@ struct PeopleTests {
         let pages = ShellPersonPages().lists
         await server.hold(Self.first)
         defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let unsigned = Task { await pages.opened(Self.followers, in: session) }
-        await server.arrival(of: Self.first)
+        await server.arrival(of: Self.first, by: unsigned)
 
         try signIn(session)
         #expect(pages.said(of: Self.followers, in: session) == PeopleSaid(list: Self.followers, signedIn: true), "nobody's list is not the reader's")
         let signed = Task { await pages.opened(Self.followers, in: session) }
-        await server.arrival(of: Self.first, times: 2)
+        await server.arrival(of: Self.first, times: 2, by: signed)
         // Nobody's answer comes late: it lands nowhere.
         await server.releaseOne(Self.first)
         await unsigned.value
@@ -417,8 +434,10 @@ struct PeopleTests {
         // The reader reads on, and signs out while the stretch is out.
         await server.hold(Self.after(19))
         defer { Task { await server.release(Self.after(19)) } }
+        let after19Guard = watching("the ask of \(Self.after(19)), held at its server") { await server.release(Self.after(19)) }
+        defer { after19Guard.cancel() }
         let reader = Task { await pages.readOn(Self.followers, in: session) }
-        await server.arrival(of: Self.after(19))
+        await server.arrival(of: Self.after(19), by: reader)
         _ = try session.mastodon.tokens.forget(Self.token)
         session.mastodon.refresh()
         #expect(pages.said(of: Self.followers, in: session) == PeopleSaid(list: Self.followers), "the reader's list is not nobody's")
@@ -458,7 +477,8 @@ struct PeopleTests {
         #expect(ShellPersonPages.askedAs(at: Self.host, in: session) == .reader(nil), "no handle tells them apart")
         await server.answer(Self.first, Self.stretch([9, 8], next: 23))
         await pages.readOn(Self.followers, in: session)
-        await server.arrival(of: Self.first, times: 2)
+        // No `by:`: the press hands the ask to a task of the lists' own and does not wait on it.
+        await met("the second reader's press has asked the list afresh") { await server.arrivals(of: Self.first) >= 2 }
         #expect(await server.asked == [Self.first, Self.first], "the press itself asks the list afresh")
         await pages.opened(Self.followers, in: session)
         #expect(await server.asked == [Self.first, Self.first] && ids(pages, session) == ["9", "8"])
@@ -474,8 +494,10 @@ struct PeopleTests {
         try signIn(session, as: "fourth")
         await server.hold(Self.first)
         defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let asking = Task { await pages.again(Self.followers, in: session) }
-        await server.arrival(of: Self.first, times: 4)
+        await server.arrival(of: Self.first, times: 4, by: asking)
         #expect(ids(pages, session).isEmpty, "the third's rows are not drawn while the fourth's are asked for")
         await server.release(Self.first)
         await asking.value
@@ -488,6 +510,7 @@ struct PeopleTests {
         let off = CalledOff()
         let door = CancellableDoor(server, heard: off)
         let session = ShellSession(http: door, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: door))
+        session.deadlinesUnturned()
         session.work = SourceWork()
         await session.store.add(Self.source)
         session.sources = await session.store.sources()
@@ -496,8 +519,10 @@ struct PeopleTests {
         await pages.opened(Self.followers, in: session)
         await server.hold(Self.after(19))
         defer { Task { await server.release(Self.after(19)) } }
+        let after19Guard = watching("the ask of \(Self.after(19)), held at its server") { await server.release(Self.after(19)) }
+        defer { after19Guard.cancel() }
         let first = Task { await pages.readOn(Self.followers, in: session) }
-        await server.arrival(of: Self.after(19))
+        await server.arrival(of: Self.after(19), by: first)
 
         try signIn(session, as: "second")
         await pages.opened(Self.followers, in: session)
@@ -512,13 +537,15 @@ struct PeopleTests {
         // Signed out with an ask out: it is called off, and the list is nobody's afresh.
         await server.hold(Self.first)
         defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let again = Task { await pages.again(Self.followers, in: session) }
-        await server.arrival(of: Self.first, times: 3)
+        await server.arrival(of: Self.first, times: 3, by: again)
         let held = try #require(try session.mastodon.tokens.token(host: Self.host))
         _ = try session.mastodon.tokens.forget(held)
         session.mastodon.refresh()
         let nobody = Task { await pages.opened(Self.followers, in: session) }
-        await server.arrival(of: Self.first, times: 4)
+        await server.arrival(of: Self.first, times: 4, by: nobody)
         #expect(await off.asks == [Self.after(19), Self.first])
         await server.release(Self.first)
         await again.value
@@ -535,8 +562,10 @@ struct PeopleTests {
             try signIn(session)
             let pages = ShellPersonPages().lists
             await server.hold(Self.first)
+            let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+            defer { firstGuard.cancel() }
             let asking = Task { await pages.opened(Self.followers, in: session) }
-            await server.arrival(of: Self.first)
+            await server.arrival(of: Self.first, by: asking)
             if gone {
                 _ = try session.mastodon.tokens.forget(Self.token)
                 session.mastodon.refresh()
@@ -586,8 +615,10 @@ struct PeopleTests {
         let held = "/api/v1/accounts/100/followers?limit=80"
         await server.hold(held)
         defer { Task { await server.release(held) } }
+        let heldGuard = watching("the ask of \(held), held at its server") { await server.release(held) }
+        defer { heldGuard.cancel() }
         let slow = Task { await pages.opened(lists[0], in: session) }
-        await server.arrival(of: held)
+        await server.arrival(of: held, by: slow)
         for list in lists.dropFirst() { await pages.opened(list, in: session) }
         #expect(pages.said(of: lists[0], in: session)?.asking == true, "the oldest, still asked, is kept")
         await server.release(held)
@@ -719,7 +750,7 @@ struct PeopleTests {
             guard line.hasPrefix("\"people.") || line.hasPrefix("\"work.purpose.people\"") else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 56 && keys.contains("people.requests.none") && keys.contains("people.foot.partial.unsigned") && keys.contains("work.purpose.people") && keys.contains("people.found.none"))
+        #expect(keys.count == 55 && keys.contains("people.requests.none") && keys.contains("people.foot.partial.unsigned") && keys.contains("work.purpose.people") && keys.contains("people.found.none"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }
@@ -800,7 +831,7 @@ struct PeopleTests {
         let jumped = FediqoRootView.jumpedToTop(in: ["first", "second"], standing: .people(Self.followers), place: .timeline, selected: &lamp, jump: &jump)
         #expect(jumped && lamp == "first" && jump == 1)
         #expect(FediqoRootView.moved(in: ["first", "second"], from: "first", by: 1, open: [.people, .selection]) == "second")
-        #expect(TimelinePane.page(.people(Self.followers)) == .opened && TimelinePane.openedID(.people(Self.followers)) == "people:" + Self.followers.id)
+        #expect(TimelinePane.page(.people(Self.followers)) == .tabbed && TimelinePane.page(.people(Self.followers), drawn: false) == .opened && TimelinePane.openedID(.people(Self.followers)) == "people:" + Self.followers.id)
     }
 
     // MARK: - Laid out
@@ -863,7 +894,7 @@ struct PeopleTests {
     @Test("The head is laid out to its width and never past it: across a phone a handle too long for one line wraps and the head grows taller for it, and the figure's line is there only where the source said one — and the page itself, in each state it has, is built and laid out without a trap")
     func thePageLaidOut() {
         func head(_ list: PeopleList, _ width: CGFloat) -> CGSize {
-            let hosted = NSHostingView(rootView: PeopleHead(list: list).frame(width: width))
+            let hosted = NSHostingView(rootView: PeopleHead(said: PeopleSaid(list: list)).frame(width: width))
             hosted.layoutSubtreeIfNeeded()
             return hosted.fittingSize
         }

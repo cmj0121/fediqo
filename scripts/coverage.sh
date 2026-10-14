@@ -19,12 +19,8 @@ cd "$(dirname "$0")/.."
 # Pin to Package.resolved when there is one, so a run never quietly
 # resolves a newer dependency. A dummy with no packages has no file.
 #
-# One test at a time. A runner builds every test target into one process, and with a few
-# thousand tests started together -- most of them bound to the one main actor -- each step of
-# a test waits behind every other test's. The tests that guard against a hang by the clock
-# (fifty seconds, a minute) then ran out of it without anything being wrong: forty-five
-# failed that way on a run where nothing else did. Taken one at a time they have the machine
-# to themselves, and the run is a minute longer. `make test` on a desk stays as it was.
+# Every test at once, as on a desk: no check guards against a hang by the clock any more
+# (#346), so a run that is slow is only slow.
 #
 # What the run says is kept in a file and what matters of it is said afterwards. Left to
 # write straight to a runner's log, the run's output stopped a few seconds in and the step
@@ -35,7 +31,7 @@ RUN_LOG="$(mktemp -t fediqo-tests)"
 RESOLVED=()
 [ -f Package.resolved ] && RESOLVED=(--only-use-versions-from-resolved-file)
 set +e
-swift test --no-parallel --enable-code-coverage ${RESOLVED[@]+"${RESOLVED[@]}"} > "$RUN_LOG" 2>&1
+swift test --enable-code-coverage ${RESOLVED[@]+"${RESOLVED[@]}"} > "$RUN_LOG" 2>&1
 TEST_CODE=$?
 set -e
 grep -vE '^◇ |^✔ (Test|Suite)|^↳ ' "$RUN_LOG" | tail -300 || true

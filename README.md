@@ -221,9 +221,9 @@ text being sent is not put away by any of that: it goes when it lands, or at its
 
 All and Trends are built in. Beside them you write your own. The header is `+`, then the
 tabs, then the rule for the one in front. Tab goes All, Trends, then yours, in the order you
-gave them; while somebody's page is in front it turns that page's tabs instead — see Reading,
-below. `e` opens the editor for the selected timeline; on All or Trends it says they
-cannot be edited. Double-click or long-press a tab to edit it. To add one, press `+`. In the
+gave them; while an opened page is in front it turns that page's tabs instead, or does nothing
+on a page with none — see Reading, below. `e` opens the editor for the selected timeline; on
+All or Trends it says they cannot be edited. Double-click or long-press a tab to edit it. To add one, press `+`. In the
 editor you name, reorder, and remove a timeline, and the editor shows its own keys. Edits
 apply on Done; Esc leaves the timeline as it was. Your timelines stay on this device across a
 relaunch. A change this device would not keep is said on the strip at the foot of the page:
@@ -466,24 +466,27 @@ on Preferences, and the question before removing says which it will do.
 
 | Key | What it does                                                    |
 | --- | --------------------------------------------------------------- |
-| `r` | reload the selected timeline, or the open post and its thread   |
+| `r` | reload the selected timeline, or ask the page in front again    |
 | `e` | write or change the selected timeline                           |
 | `/` | search the posts this device holds                              |
 | `l` | follow whoever's page, or the hashtag whose page, is in front   |
-| Tab | on somebody's page, the tab beside; ⇧Tab the one before        |
+| `h` | on Trends, open what is rising on your sources                  |
+| Tab | on an opened page, the tab beside; ⇧Tab the one before         |
 | `?` | show the keys list                                              |
 
 `r` asks exactly the sources the selected timeline draws from. All asks every source; Trends
 asks the sources that have trends, for their trends; a timeline you wrote asks the sources
 and categories its rules name, and a rule for every source asks every source. With a post
 open, `r` reloads that post and its thread, from any source, and not the timeline under it.
+On any other opened page it asks again what that page shows, where the page can be asked again.
 Pressing `r` again while a reload runs does not start a second one; Esc stops it. A source that fails says
 so, and the others still land. The selected post stays selected.
 
 `l` is the press on Follow on the page in front, and it only ever follows. On somebody's page
 it follows them, or asks to where they must agree. On a hashtag's page it follows the hashtag
 at the first of your sources that offers it. Unfollowing is never a key: it is behind the
-three dots on a person's page, and on the hashtag's own line.
+three dots on a person's page, on a hashtag's About, and behind the three dots of its row
+among the hashtags you follow.
 
 Reading toward the end of a timeline asks its sources for the next stretch, with no key
 pressed. On Trends that is the next stretch of what is rising on each Mastodon source: what
@@ -501,7 +504,8 @@ characters, including none, and `?` for exactly one. Every other character stand
 there is no regex, operator, field prefix, or quoting. Case, and full-width against
 half-width, do not change what is found. As you type, the posts this device holds are
 searched. Return also asks the sources of the timeline in front that can be searched. What is
-found is in time order. Clearing the field returns to the timeline.
+found is in time order. Clearing the field returns to the timeline. While an opened page is
+in front the field stands aside; leaving the page brings it back as it was.
 
 A reblog is a row of its own. Its first line says who reblogged and, at its far end, when —
 the time the row stands at. Under it is the post itself: its author's face and name, and
@@ -527,6 +531,9 @@ through none. A post held from before reblogs were rows, which arrived as a rebl
 where it was and says it arrived as a reblog by that person, until a timeline brings that
 reblog again; from then the reblog is the row that timeline shows, and the post is shown by
 it only where it also arrives on its own.
+
+A mention of somebody in a post's words opens their page too, where the source said the post
+mentions them; a name it did not list stays plain text.
 
 Somebody's page takes the whole place: nothing of the timelines stands over it. Its head
 says who they are and which source the page is read through, and carries three figures —
@@ -608,6 +615,30 @@ with no sign-in, or at a forum.
 
 One thing is not here. Following somebody on another server is not settled by the press: the
 page reads the source again, and says "asked" until their server agrees.
+
+Every other page opened over the timelines is drawn as somebody's page is. It takes the
+whole place, under a bar of its own: Back, its title, and asking again where the page can be
+asked, which is Stop while a read runs where that read can be stopped. A figure is a mark and a
+number; one that brings its tab in front is a press, and one that opens nothing is not, and says
+what it counts to a pointer and to VoiceOver. What a kind of source does not have is not drawn.
+
+| Page                            | Tabs                                                  |
+| ------------------------------- | ----------------------------------------------------- |
+| a conversation                  | none                                                  |
+| a hashtag                       | Posts · About, where a signed-in source keeps follows |
+| a list of people opened alone   | none                                                  |
+| what is rising                  | Hashtags · Links, the one pressed in front            |
+| what a search found at a source | People · Hashtags, the one pressed in front           |
+| the hashtags you follow         | none                                                  |
+
+A hashtag's head counts the posts this device holds under it and marks each source that says
+you follow it; About says how it stands at each of them, with Follow or Unfollow, and a hashtag
+read where nothing keeps follows is one list. What is rising opens from Trends, by `h` or the
+line at its head, and a tab never brought in front asks nothing. What a search found opens from
+either "All" press under the search's results; People is there only where a sign-in at that
+source may search. A kind of which a source gave none has no tab, and a page left with one tab
+draws no strip. On a page with no tabs Tab does nothing: leave the page to change timeline. Esc
+or `q` leaves any of them in one press, from any tab.
 
 What a post refers to is read for it. When a post first arrives and the post it answers is
 not on this device — or a post it quotes that did not come with it — Fediqo asks the source
@@ -801,10 +832,10 @@ and one its source does not offer is grey and says why. The dots open what press
 opens; taking back a post of your own is there and nowhere else, and asks first. A timeline you come back to
 is where you left it.
 
-Pull a timeline down to read it again. While it reads, the reload mark is Stop. Press the top
-of the screen to go to the top of the list. On an opened post, person or tag, or a row's detail, a
-sideways swipe goes back; on a page with tabs it goes to the tab beside. Somebody's page has
-tabs, and on its first the swipe back leaves the page.
+Pull a timeline down to read it again, or an opened page that can be asked again. While a timeline
+reads, the reload mark is Stop. Press the top of the screen to go to the top of the list. On an
+opened page with no tabs, or a row's detail, a sideways swipe goes back; on a page with tabs it
+goes to the tab beside, and on its first tab the swipe back leaves the page.
 
 On Notices, one press on a notice opens what it is about, and pulling the list down reads the
 notices again. Holding a notice, or pressing the three dots on its line, offers to dismiss it.

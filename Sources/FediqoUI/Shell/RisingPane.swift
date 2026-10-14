@@ -18,9 +18,14 @@ import SwiftUI
 extension RisingSaid {
     // MARK: - Words
 
-    /// What the page is called, and what its way in at the head of the timeline says.
+    /// What each way in at the head of the timeline says: the page, opened on that tab.
     static func title(_ which: RisingWhich, language: DummyLanguage? = nil) -> String {
         L10n.t("rising.title.\(which.rawValue)", language: language)
+    }
+
+    /// What the page is called, whichever tab is in front.
+    static func pageTitle(language: DummyLanguage? = nil) -> String {
+        L10n.t("rising.title", language: language)
     }
 
     /// The one line under the title: whose ranking this is.
@@ -86,6 +91,12 @@ extension RisingSaid.Band {
     /// Whether the line under the source's name offers the press that asks it again: after a
     /// failure, and where an ask was stopped before it answered.
     var offersAgain: Bool { reading == .failed || reading == .stopped }
+
+    /// That press: its words as drawn, which are its name to a listener and to Voice Control,
+    /// and whom it asks, told after them — two bands' "Try again" are not one press.
+    func again(language: DummyLanguage? = nil) -> (words: String, hint: String) {
+        (L10n.t("person.retry", language: language), PersonPage.reloadName(source, language: language))
+    }
 }
 
 /// The line at the head of the timeline that reads what is rising: the two ways on, each a
@@ -120,13 +131,13 @@ struct RisingLine: View {
     }
 }
 
-/// A page of what is rising, opened: a way back, what the page is, and under one band a source
-/// what that source says is rising on it — the person page's shape, for the same reason.
+/// The tab of what is rising in front: under one band a source what that source says is rising
+/// on it, led by the page's head where the head scrolls away (`RisingPage`).
 ///
-/// **A step of the walk like that page**, so the way back, the lamp and the row given back on
-/// leaving a hashtag's page are the walk's own. It draws what it is handed and asks nothing:
-/// the asking is `ShellRising`'s, and which kind of source this is is never looked at here.
-struct RisingPane: View {
+/// **A tab of a step of the walk**, so the way back, the lamp and the row given back on leaving
+/// a hashtag's page are the walk's own. It draws what it is handed and asks nothing: the asking
+/// is `ShellRising`'s, and which kind of source this is is never looked at here.
+struct RisingPane<Lead: View>: View {
     let said: RisingSaid
     @Binding var selectedID: String?
     /// A row opened, answered by the root: a hashtag's page, or a link through the door a
@@ -135,37 +146,18 @@ struct RisingPane: View {
     /// A band's "Try again": that source asked again.
     var onAskAgain: (String) -> Void = { _ in }
     var jumpToTop: Int = 0
-    var onBack: () -> Void
+    /// The page's head, where it is the first rows of the list.
+    @ViewBuilder var lead: Lead
 
     @Environment(\.colorScheme) private var colorScheme
     /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
     @Environment(\.shellTouch) private var touch
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            bar
-            ShellRule()
-            RisingHead(which: said.which)
-            ShellRule()
-            list
-        }
-    }
-
-    /// The person page's own bar: one way back for every step of the walk.
-    private var bar: some View {
-        HStack(spacing: ShellSpace.snug) {
-            ShellBackButton("person.back", action: onBack)
-            Spacer()
-            ShellKeyHint("person.leaveHint")
-        }
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.snug)
-    }
-
-    private var list: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    lead
                     ForEach(said.bands) { band in
                         ShellBandHead(band.source, pinned: true)
                         if let line = band.stateLine(said.which) {
@@ -205,9 +197,13 @@ struct RisingPane: View {
                 .foregroundStyle(band.reading == .failed ? ShellChrome.ink(colorScheme) : ShellChrome.inkFaint(colorScheme)),
             press: Group {
                 if band.offersAgain {
-                    ShellLinkButton(L10n.t("person.retry")) { onAskAgain(band.source) }
+                    let again = band.again()
+                    ShellLinkButton(again.words) { onAskAgain(band.source) }
                         .disabled(band.asking)
                         .fixedSize()
+                        // Called by its words, as Voice Control hears them; whom it asks, told after.
+                        .accessibilityHint(again.hint)
+                        .help(again.hint)
                 }
             }
         )
@@ -230,14 +226,14 @@ struct RisingPane: View {
     }
 }
 
-/// The head of a page of what is rising: what the page is, and whose ranking it shows.
+/// The head of the page of what is rising: what the page is, and whose ranking it shows —
+/// said once, whichever tab is in front.
 struct RisingHead: View {
-    let which: RisingWhich
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShellSpace.tight) {
-            Text(RisingSaid.title(which))
+            Text(RisingSaid.pageTitle())
                 .shellFont(.name)
                 .foregroundStyle(ShellChrome.ink(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)

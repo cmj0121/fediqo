@@ -11,10 +11,11 @@ import Testing
 /// that telling the source not to suggest somebody is a dim line that sends nothing. And that
 /// a source which is not asked who people are has no such page and no line to one.
 ///
-/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
-/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+/// Every wait here is on an ask arriving or being let go (`PageServer`), tied to the work that
+/// made the ask where a check can name it: a held ask is let go by the check, and by a guard
+/// when the run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("The people a source suggests", .serialized, .timeLimit(.minutes(3)))
+@Suite("The people a source suggests", .serialized, .watched)
 struct SuggestedTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -36,6 +37,7 @@ struct SuggestedTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: server)
         )
+        session.deadlinesUnturned()
         let work = SourceWork()
         session.work = work
         for source in [Self.source, Self.forum] { await session.store.add(source) }
@@ -127,8 +129,10 @@ struct SuggestedTests {
         #expect(pages.said(of: Self.suggested, in: session)?.foot == .more)
         await server.hold(Self.after(80))
         defer { Task { await server.release(Self.after(80)) } }
+        let after80Guard = watching("the ask of \(Self.after(80)), held at its server") { await server.release(Self.after(80)) }
+        defer { after80Guard.cancel() }
         let press = Task { await pages.readOn(Self.suggested, in: session) }
-        await server.arrival(of: Self.after(80))
+        await server.arrival(of: Self.after(80), by: press)
         #expect(pages.said(of: Self.suggested, in: session)?.foot == .reading)
         await pages.readOn(Self.suggested, in: session)
         #expect(await server.asked == [Self.first, Self.after(80)], "one on the wire, and no second")
@@ -222,8 +226,10 @@ struct SuggestedTests {
         // Replaced while the list is being asked.
         await server.hold(Self.first)
         defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let out = Task { await pages.opened(Self.suggested, in: session) }
-        await server.arrival(of: Self.first)
+        await server.arrival(of: Self.first, by: out)
         try signIn(session, as: "other")
         await server.release(Self.first)
         await out.value
@@ -235,7 +241,7 @@ struct SuggestedTests {
         // Ended while it is being asked from the top.
         await server.hold(Self.first)
         let top = Task { await pages.again(Self.suggested, in: session) }
-        await server.arrival(of: Self.first, times: 3)
+        await server.arrival(of: Self.first, times: 3, by: top)
         try signOut(session)
         await server.release(Self.first)
         await top.value
@@ -245,7 +251,7 @@ struct SuggestedTests {
         try signIn(session, as: "third")
         await server.hold(Self.first)
         let gone = Task { await pages.opened(Self.suggested, in: session) }
-        await server.arrival(of: Self.first, times: 4)
+        await server.arrival(of: Self.first, times: 4, by: gone)
         session.sources = session.sources.filter { $0.host != Self.host }
         #expect(pages.said(of: Self.suggested, in: session) == nil)
         await server.release(Self.first)
@@ -316,8 +322,10 @@ struct SuggestedTests {
         let hosts = all.more.hosts
         await server.hold(Self.first)
         defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let out = Task { await all.lists.opened(Self.suggested, in: session) }
-        await server.arrival(of: Self.first)
+        await server.arrival(of: Self.first, by: out)
         // "Ask again" on the source's page, while the ask is out.
         hosts.askAfresh(Self.host)
         await server.release(Self.first)
@@ -500,7 +508,7 @@ struct SuggestedTests {
                 #expect(size(pane, width, scheme).width == width, "\(said.reading) at \(width)")
             }
             let long = PeopleList(suggestedAt: "a-rather-long-name-of-a-server.a-rather-long-instance-name.example")
-            #expect(size(PeopleHead(list: long), width, scheme).width == width)
+            #expect(size(PeopleHead(said: PeopleSaid(list: long)), width, scheme).width == width)
         }
         // A row with a menu is a row with its `…`: drawn, and laid out within the row.
         let probe = PersonRowProbe()

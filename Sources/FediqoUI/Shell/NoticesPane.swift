@@ -315,13 +315,12 @@ struct NoticesPane: View {
     private var reloadMark: some View {
         if let shown = ReloadMark.shown(canReload: canReload, stoppable: list.isReading) {
             ShellIconButton(shown.symbol, name: Self.reloadName(shown)) {
-                switch shown {
-                case .reload:
+                switch ReloadMark.press(shown, at: Date(), pressedAt: reloadPressed) {
+                case .begins:
                     reloadPressed = Date()
                     onReload()
-                case .stop:
-                    guard ReloadMark.stops(at: Date(), pressedAt: reloadPressed) else { return }
-                    list.stop()
+                case .stops: list.stop()
+                case .unheard: break
                 }
             }
         }

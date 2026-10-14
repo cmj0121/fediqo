@@ -77,7 +77,7 @@
 "shortcut.group.act" = "Act";
 "shortcut.group.app" = "App";
 "shortcut.landing" = "Reload from the launch";
-"shortcut.tabs" = "Rotate this page's tabs";
+"shortcut.tabs" = "Turn the tabs of the page in front — the timelines, or those of somebody's page, a hashtag, what is rising or what a search found. A conversation, a list of people and the hashtags you follow have none, and there it does nothing: leave the page to change timeline";
 "shortcut.pages" = "Rotate the places";
 "shortcut.posts" = "Move in this list";
 "shortcut.top" = "Top of this thread";
@@ -103,9 +103,6 @@
 "shortcut.search" = "Search the posts this device holds";
 
 "thread.title" = "Thread";
-"thread.replies" = "Replies";
-"thread.back" = "Back";
-"thread.leaveHint" = "Esc or q";
 "item.reply.one.body" = "Same machine. Keep it here.";
 "item.reply.two.body" = "Then the list stays one stream.";
 "item.reply.up.body" = "Before this: the question that started it.";
@@ -978,6 +975,11 @@
 "tag.asking" = "Asking %1$@ for %2$@…";
 "tag.failed" = "Could not ask %1$@ for %2$@.";
 "tag.retry" = "Try again";
+"tag.retry.spoken" = "Ask %1$@ again for %2$@";
+"tag.again.spoken" = "Ask %2$@ again whether you follow %1$@";
+"tag.tab.posts" = "Posts";
+"tag.tab.about" = "About";
+"tag.stands.followed" = "Followed at %@";
 "tag.none" = "Nothing under %@ has reached this device.";
 "tag.reach.asked" = "Asked %@.";
 "tag.reach.partial" = "Not asked, as this timeline shows only some of what they send: %@.";
@@ -1820,6 +1822,10 @@
 "rising.use.one" = "Posts %1$@, people %2$@, today.";
 "rising.unsaid" = "not said";
 "rising.link.leads" = "leads to %@";
+"rising.title" = "What is rising";
+"rising.tab.tags" = "Hashtags";
+"rising.tab.links" = "Links";
+"rising.reload" = "Ask the sources again";
 "shortcut.rising" = "On Trends, open the hashtags rising on your sources";
 "search.band.people" = "People · %@";
 "search.band.tags" = "Hashtags · %@";
@@ -1828,11 +1834,12 @@
 "search.band.first" = "The first %@";
 "search.band.all.people" = "%1$@: the people %2$@ found.";
 "search.band.all.tags" = "%1$@: the hashtags %2$@ found.";
-"search.tags.title" = "Hashtags %@ found";
 "search.found.line" = "Its answer to “%@”.";
+"search.found.title" = "What %@ found";
+"search.found.tab.people" = "People";
+"search.found.tab.tags" = "Hashtags";
 "search.tags.foot.end" = "These are all %2$@ hashtags %1$@ found.";
 "search.tags.foot.first" = "These are the first %2$@ hashtags %1$@ found, the most one answer holds. It may have found more: type more of the name to narrow them.";
-"people.title.found" = "People %@ found";
 "people.found.asking" = "Asking %@ for the people it found…";
 "people.found.failed" = "Could not ask %@ for the people it found.";
 "people.found.none" = "%@ found nobody for these words.";

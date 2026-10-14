@@ -7,10 +7,11 @@ import Testing
 /// how that way stands for each sign-in, what is asked for it and when, how it reads on to its
 /// end, and how a row unfollows through the hashtag page's own press.
 ///
-/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
-/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+/// Every wait here is on an ask arriving or being let go (`PageServer`), tied to the work that
+/// made the ask where a check can name it: a held ask is let go by the check, and by a guard
+/// when the run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("The hashtags followed at a source, as a list", .serialized, .timeLimit(.minutes(3)))
+@Suite("The hashtags followed at a source, as a list", .serialized, .watched)
 struct FollowedTagsTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -76,6 +77,7 @@ struct FollowedTagsTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: tokens, sender: server)
         )
+        session.deadlinesUnturned()
         let work = SourceWork()
         session.work = work
         session.mastodon.work = work
@@ -363,9 +365,11 @@ struct FollowedTagsTests {
         #expect(FollowedTagsSaid.name(of: .act(false), on: before, language: .english) == "Unfollow")
 
         await server.hold(Self.unfollow(name))
+        let unfollowNameGuard = watching("the ask of \(Self.unfollow(name)), held at its server") { await server.release(Self.unfollow(name)) }
+        defer { unfollowNameGuard.cancel() }
         let pressed = Task { await list.press(before.id, on: Self.page, in: session) }
         defer { Task { await server.release(Self.unfollow(name)) } }
-        await server.arrival(of: Self.unfollow(name))
+        await server.arrival(of: Self.unfollow(name), by: pressed)
         let doing = try #require(row(name, of: list, in: session))
         #expect(doing.standing == .doing(false), "shown first")
         #expect(doing.words(language: .english) == "At m.example: unfollowing…")
@@ -515,9 +519,11 @@ struct FollowedTagsTests {
         let pressed = try #require(row(name, of: list, in: session))
 
         await server.hold(Self.first)
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let again = Task { await list.again(Self.page, in: session) }
         defer { Task { await server.release(Self.first) } }
-        await server.arrival(of: Self.first, times: 2)
+        await server.arrival(of: Self.first, times: 2, by: again)
         // The press lands while the read — which still lists the hashtag — is on its way.
         await list.press(pressed.id, on: Self.page, in: session)
         #expect(row(name, of: list, in: session)?.standing == .unfollowed)
@@ -553,9 +559,11 @@ struct FollowedTagsTests {
         // The read is taken while it is not followed, and lands after it is followed again.
         await server.answer(Self.first, Self.stretch(Array(Self.names[1 ..< 3])))
         await server.hold(Self.first)
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let again = Task { await list.again(Self.page, in: session) }
         defer { Task { await server.release(Self.first) } }
-        await server.arrival(of: Self.first, times: 2)
+        await server.arrival(of: Self.first, times: 2, by: again)
         await list.press(pressed.id, on: Self.page, in: session)
         await server.release(Self.first)
         await again.value
@@ -577,8 +585,10 @@ struct FollowedTagsTests {
 
         await server.hold(Self.after(12))
         defer { Task { await server.release(Self.after(12)) } }
+        let after12Guard = watching("the ask of \(Self.after(12)), held at its server") { await server.release(Self.after(12)) }
+        defer { after12Guard.cancel() }
         let one = Task { await list.readOn(Self.page, in: session) }
-        await server.arrival(of: Self.after(12))
+        await server.arrival(of: Self.after(12), by: one)
         #expect(list.said(of: Self.page, in: session)?.foot == .reading)
         await list.readOn(Self.page, in: session)
         #expect(await asked(server) == [Self.first, Self.after(12)], "pressed twice: one ask")
@@ -597,7 +607,7 @@ struct FollowedTagsTests {
         await list.again(Self.page, in: session)
         await server.hold(Self.after(12))
         let late = Task { await list.readOn(Self.page, in: session) }
-        await server.arrival(of: Self.after(12), times: 2)
+        await server.arrival(of: Self.after(12), times: 2, by: late)
         list.closed(Self.page)
         #expect(list.said(of: Self.page, in: session)?.reading == .asking, "nothing of a page left is drawn")
         await server.release(Self.after(12))
@@ -618,8 +628,10 @@ struct FollowedTagsTests {
         // Replaced while a stretch is out.
         await server.hold(Self.after(12))
         defer { Task { await server.release(Self.after(12)) } }
+        let after12Guard = watching("the ask of \(Self.after(12)), held at its server") { await server.release(Self.after(12)) }
+        defer { after12Guard.cancel() }
         let late = Task { await list.readOn(Self.page, in: session) }
-        await server.arrival(of: Self.after(12))
+        await server.arrival(of: Self.after(12), by: late)
         try signIn(session, as: "other")
         #expect(shown(list, in: session).isEmpty, "not drawn for the next reader")
         #expect(list.said(of: Self.page, in: session)?.reading == .asking)
@@ -636,9 +648,11 @@ struct FollowedTagsTests {
         // Ended while the top is being asked.
         await server.hold(Self.first)
         defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let times = await asked(server).filter { $0 == Self.first }.count
         let top = Task { await list.again(Self.page, in: session) }
-        await server.arrival(of: Self.first, times: times + 1)
+        await server.arrival(of: Self.first, times: times + 1, by: top)
         try signOut(session)
         #expect(list.said(of: Self.page, in: session) == nil, "no sign-in: no such page")
         await server.release(Self.first)
@@ -651,7 +665,7 @@ struct FollowedTagsTests {
         await server.hold(Self.after(12))
         let stretches = await asked(server).filter { $0 == Self.after(12) }.count
         let gone = Task { await list.readOn(Self.page, in: session) }
-        await server.arrival(of: Self.after(12), times: stretches + 1)
+        await server.arrival(of: Self.after(12), times: stretches + 1, by: gone)
         session.sources = session.sources.filter { $0.host != Self.host }
         await server.release(Self.after(12))
         await gone.value
@@ -663,7 +677,7 @@ struct FollowedTagsTests {
         await server.hold(Self.first)
         let firsts = await asked(server).filter { $0 == Self.first }.count
         let fromTop = Task { await list.again(Self.page, in: session) }
-        await server.arrival(of: Self.first, times: firsts + 1)
+        await server.arrival(of: Self.first, times: firsts + 1, by: fromTop)
         session.sources = session.sources.filter { $0.host != Self.host }
         await server.release(Self.first)
         await fromTop.value
@@ -683,7 +697,9 @@ struct FollowedTagsTests {
         #expect(walk.openedFollowedTags == Self.page)
         #expect(!walk.open(Self.page, lamp: &lamp), "a step onto the list in front is no step")
         #expect(walk.depth == 1)
-        #expect(TimelinePane.page(walk.standing) == .opened)
+        // A page of its own (F10): its sideways is the frame's where it is drawn, and goes back
+        // over the stream drawn where it cannot be.
+        #expect(TimelinePane.page(walk.standing) == .tabbed && TimelinePane.page(walk.standing, drawn: false) == .opened)
         let named: String = "followed:" + Self.page.id
         #expect(TimelinePane.openedID(walk.standing) == named)
         #expect(walk.followedTags == [Self.page])

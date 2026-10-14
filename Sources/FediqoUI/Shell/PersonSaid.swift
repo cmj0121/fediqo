@@ -190,9 +190,9 @@ struct PersonSaid: Equatable {
             hidden ? String(format: L10n.t("person.figure.hidden", language: language), words) : words
         }
 
-        /// What they are told a press on it does.
-        static func hint(language: DummyLanguage? = nil) -> String {
-            L10n.t("person.figure.hint", language: language)
+        /// How the head draws it with `front` in front: lit only where it opens that tab.
+        func drawn(front: PersonTab?, language: DummyLanguage? = nil) -> PageFigure {
+            PageFigure(symbol: tab.symbol, figure: figure, spoken: spoken(language: language), opens: opens, lit: tab == front)
         }
     }
 
