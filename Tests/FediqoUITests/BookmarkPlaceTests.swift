@@ -8,7 +8,7 @@ import Testing
 /// line: on a post's mark and in its menu, and on the source row's permission control. The
 /// mark is dim whatever the standing; what it says, and what a press does, is the standing's.
 @MainActor
-@Suite("Bookmarks say how the sign-in stands to them, as every part does")
+@Suite("Bookmarks say how the sign-in stands to them, as every part does", .watched)
 struct BookmarkPlaceTests {
     private typealias S = PartServer
     private let host = "social.example"
@@ -339,7 +339,8 @@ struct BookmarkPlaceTests {
         await server.hold(S.check, at: gate)
         #expect(session.askBookmarks(host: host))
         session.partAsks.answer(try #require(session.partAsks.open), through: page, in: session)
-        #expect(await spun { await server.waiting.contains(S.check) })
+        let asking = Task { await session.partAsks.landed(host: host) }
+        await met("the ask is held at the first thing it sends", by: asking) { await server.waiting.contains(S.check) }
 
         #expect(session.mastodon.bookmarkPlace(host: host) == PartWords.Place(kind: .asking, key: "part.ask.asking"))
         let during = handed(item, in: session)

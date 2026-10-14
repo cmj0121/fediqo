@@ -34,6 +34,7 @@ private actor RegisteringHost: HTTPSender {
     private let withheld: String?
     /// The client id every registration is answered with, where it is not the usual one.
     private let client: String?
+    private let never = TurnedClock()
     private var heldList = false
     private var heldApp = false
     private(set) var requests: [URLRequest] = []
@@ -93,7 +94,8 @@ private actor RegisteringHost: HTTPSender {
                 return answer(try JSONSerialization.data(withJSONObject: ["scopes_supported": words]), from: URL(string: address)!)
             case .unreachable: throw URLError(.notConnectedToInternet)
             case .slow(let words):
-                try await Task.sleep(for: .seconds(5))
+                // Asleep on a clock nobody turns: it answers only where its ask is given up on.
+                try await never.sleep(for: .seconds(5))
                 return answer(try JSONSerialization.data(withJSONObject: ["scopes_supported": words]))
             }
         case "/api/v1/apps":
@@ -159,7 +161,7 @@ private final class RegisteredPage: OAuthBrowser {
 /// refusal and a page with no way back cost, and what a registration an earlier build made is
 /// left as. The words and the list's reading are `MastodonRegistrationTests`' in the Core suite.
 @MainActor
-@Suite("Registering this app at a Mastodon")
+@Suite("Registering this app at a Mastodon", .watched)
 struct MastodonRegisteringTests {
     private let host = "social.example"
     private static let whole = MastodonRegistration.superset()
@@ -295,9 +297,16 @@ struct MastodonRegisteringTests {
     func aSlowList() async throws {
         let server = RegisteringHost(list: .slow(MastodonPart.reading.words))
         let (mastodon, tokens) = sessions(server)
-        mastodon.wordListWait = .milliseconds(20)
+        let clock = TurnedClock()
+        mastodon.deadlineSleep = clock.sleep
 
-        let failure = await mastodon.signIn(host: host, through: RegisteredPage(), writing: true)
+        let signing = Task { await mastodon.signIn(host: host, through: RegisteredPage(), writing: true) }
+        await met("the list is out, and its wait has begun", by: signing) {
+            await server.listAsks == 1 && clock.sleeping == 1
+        }
+        #expect(clock.asked == [mastodon.wordListWait], "the list was waited for some other time than the one said")
+        clock.turn()
+        let failure = await signing.value
 
         #expect(failure == nil)
         #expect(await server.registered == [Self.whole], "a list that came too late took words away")
@@ -571,13 +580,12 @@ struct MastodonRegisteringTests {
 
         // A page on the registration kept from before, held open…
         let pressing = Task { await mastodon.signIn(host: host, through: slow, writing: false) }
-        let up = await spun { slow.scopes.count == 1 }
+        await met("the page on the kept registration is up", by: pressing) { slow.scopes.count == 1 }
         // …while a sign-in that wants more than it holds makes another, and finishes.
         let other = await mastodon.signIn(host: host, through: RegisteredPage(), writing: true)
         await gate.open()
         let failure = await pressing.value
 
-        #expect(up, "the page never opened")
         #expect(other == nil)
         #expect(failure == nil)
         #expect(slow.clients == ["cid-old"])
@@ -733,9 +741,8 @@ struct MastodonRegisteringTests {
 
         // Removed: the sign-out is not kept waiting, and the host may be asked again.
         let removing = Task { await mastodon.signOut(host: host, forgettingApp: true) }
-        let removed = await spun { !mastodon.stranded(host: host) }
+        await met("the host may be asked again, the sign-out not kept waiting", by: removing) { !mastodon.stranded(host: host) }
         await removing.value
-        #expect(removed, "the sign-out waited, or the host is still not asked")
 
         let page = RegisteredPage()
         #expect(await mastodon.signIn(host: host, through: page, writing: true) == nil)
@@ -832,12 +839,11 @@ struct MastodonRegisteringTests {
         let page = RegisteredPage()
 
         let pressing = Task { await mastodon.signIn(host: host, through: page, writing: true) }
-        let out = await spun { await server.listAsks == 1 }
+        await met("the ask for the host's list is out", by: pressing) { await server.listAsks == 1 }
         await mastodon.signOut(host: host, forgettingApp: removed)
         await gate.open()
         let failure = await pressing.value
 
-        #expect(out, "the ask never went out")
         #expect(failure == nil)
         #expect(await server.registered.isEmpty, "a registration was spent on a source the person let go of")
         #expect(page.scopes.isEmpty)
@@ -855,12 +861,11 @@ struct MastodonRegisteringTests {
         let page = RegisteredPage()
 
         let pressing = Task { await mastodon.signIn(host: host, through: page, writing: true) }
-        let out = await spun { await server.registered.count == 1 }
+        await met("the registration is out", by: pressing) { await server.registered.count == 1 }
         await mastodon.signOut(host: host, forgettingApp: removed)
         await gate.open()
         let failure = await pressing.value
 
-        #expect(out, "the ask never went out")
         #expect(failure == nil)
         #expect(page.scopes.isEmpty, "a page opened on a source the person let go of")
         #expect(try tokens.app(host: host) == (removed ? nil : app), "a registration landed after the person let go")
@@ -883,12 +888,11 @@ struct MastodonRegisteringTests {
         let page = RegisteredPage(answer, gate: gate)
 
         let pressing = Task { await mastodon.signIn(host: host, through: page, writing: true) }
-        let up = await spun { page.scopes.count == 1 }
+        await met("the page is up", by: pressing) { page.scopes.count == 1 }
         await mastodon.signOut(host: host, forgettingApp: true)
         await gate.open()
         let failure = await pressing.value
 
-        #expect(up, "the page never opened")
         #expect(failure == nil, "something was said under a row that is gone")
         #expect(try tokens.app(host: host) == nil)
         // Added again and signed in to: asked as a host nothing is known of.
@@ -906,7 +910,7 @@ struct MastodonRegisteringTests {
         let slow = RegisteredPage(.close)
 
         let pressing = Task { await mastodon.signIn(host: host, through: slow, writing: true) }
-        let out = await spun { await server.registered.count == 1 }
+        await met("the registration is out", by: pressing) { await server.registered.count == 1 }
         // The first registration is out; another sign-in on the same source finishes meanwhile.
         let quick = RegisteredPage()
         let other = await mastodon.signIn(host: host, through: quick, writing: true)
@@ -914,7 +918,6 @@ struct MastodonRegisteringTests {
         await gate.open()
         let failure = await pressing.value
 
-        #expect(out, "the ask never went out")
         #expect(other == nil)
         #expect(failure == nil)
         #expect(quick.clients == ["cid-1"] && slow.clients == ["cid-2"])
@@ -931,12 +934,11 @@ struct MastodonRegisteringTests {
         let slow = RegisteredPage()
 
         let pressing = Task { await mastodon.signIn(host: host, through: slow, writing: false) }
-        let out = await spun { await server.listAsks == 1 }
+        await met("the ask for the host's list is out", by: pressing) { await server.listAsks == 1 }
         let other = await mastodon.signIn(host: host, through: RegisteredPage(), writing: true)
         await gate.open()
         let failure = await pressing.value
 
-        #expect(out, "the ask never went out")
         #expect(other == nil)
         #expect(failure == nil)
         #expect(await server.registered == [Self.whole], "two sign-ins at once registered twice")

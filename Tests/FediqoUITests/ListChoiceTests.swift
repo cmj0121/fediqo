@@ -71,7 +71,7 @@ private final class Approve: OAuthBrowser {
 }
 
 @MainActor
-@Suite("Home and your lists")
+@Suite("Home and your lists", .watched)
 struct ListChoiceTests {
     private let host = "social.example"
     private static let friends = ListSubscription(id: "42", name: "Friends")
@@ -176,9 +176,11 @@ struct ListChoiceTests {
     @Test("A read stopped by a sign-out, a Clear or a Remove brings nothing back", arguments: Stop.allCases)
     func stopped(by stop: Stop) async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "Home's read, held on the wire")
+        defer { guardTask.cancel() }
         let (session, server, _) = try await shell(gates: ["/api/v1/timelines/home": gate])
         let reading = Task { await session.readAsYou(host: host) }
-        #expect(await spun { await server.paths.contains("/api/v1/timelines/home") })
+        await met("Home's read is on the wire", by: reading) { await server.paths.contains("/api/v1/timelines/home") }
         switch stop {
         case .signOut: await session.signOut(host: host)
         case .clear: await session.clear(host: host)
@@ -206,7 +208,7 @@ struct ListChoiceTests {
         session.sources = await session.store.sources()
 
         let choosing = Task { await session.changeLists(host: other) }
-        #expect(await spun { await server.paths.contains("/api/v1/lists") })
+        await met("the other row's lists are asked for", by: choosing) { await server.paths.contains("/api/v1/lists") }
         let theirs = session.progress
         #expect(theirs?.owner == .row(host: other))
         await session.readAsYou(host: host)

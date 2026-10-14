@@ -157,7 +157,7 @@ private final class Page: OAuthBrowser {
 }
 
 @MainActor
-@Suite("Signing in to a Mastodon source")
+@Suite("Signing in to a Mastodon source", .watched)
 struct MastodonSignInTests {
     private let host = "social.example"
     private let forum = "bbs.example.org"
@@ -506,7 +506,7 @@ struct MastodonSignInTests {
         let gate = Gate()
         let page = Page(gate: gate)
         let pressing = Task { await session.signIn(host: host, through: page) }
-        #expect(await spun { page.opened == 1 })
+        await met("the source's page is up", by: pressing) { page.opened == 1 }
         await session.remove(host: host)
         await gate.open()
         await pressing.value
@@ -1180,7 +1180,7 @@ struct MastodonSignInTests {
         let gate = Gate()
         let page = Page(.invalidScope, gate: gate)
         let pressing = Task { await session.signIn(host: host, through: page, writing: true) }
-        #expect(await spun { page.opened == 1 })
+        await met("the source's page is up", by: pressing) { page.opened == 1 }
         await session.mastodon.signOut(host: host, forgettingApp: true)
         await gate.open()
         await pressing.value
@@ -1245,9 +1245,10 @@ struct MastodonSignInTests {
         defer { Task { await gate.open() } }
         // Not caught, the first revoke would be the sign-out's own below, held with nobody left
         // to open the gate: opened here, so the check fails and does not park.
-        let caught = await spun { await server.holding }
+        let caught = await met("the revoke of the token that could not be kept is held at the source", by: pressing) {
+            await server.holding
+        }
         if !caught { await gate.open() }
-        #expect(caught, "no revoke of the token that could not be kept went out")
         // The new token's revoke is on the wire; the reader signs out meanwhile.
         #expect(session.isSignedIn(host: host), "the earlier sign-in was not put back before the wait")
         await session.signOut(host: host)
@@ -1404,7 +1405,7 @@ struct MastodonSignInTests {
             let page = Page(gate: gate)
             let pressing = Task { await sessions.signIn(host: host, through: page) }
             defer { Task { await gate.open() } }
-            #expect(await spun { page.opened == 1 })
+            await met("the source's page is up", by: pressing) { page.opened == 1 }
             await sessions.signOut(host: host)
             #expect(await server.revoked == [held], "the sign-out did not end what the person asked to end")
             await gate.open()
@@ -1449,7 +1450,7 @@ struct MastodonSignInTests {
         let page = Page(gate: gate)
         let pressing = Task { await sessions.signIn(host: host, through: page) }
         defer { Task { await gate.open() } }
-        #expect(await spun { page.opened == 1 })
+        await met("the source's page is up", by: pressing) { page.opened == 1 }
         await sessions.signOut(host: host)
         await gate.open()
         _ = await pressing.value
@@ -1479,7 +1480,7 @@ struct MastodonSignInTests {
         let page = Page(gate: gate)
         let pressing = Task { await sessions.signIn(host: host, through: page) }
         defer { Task { await gate.open() } }
-        #expect(await spun { page.opened == 1 })
+        await met("the source's page is up", by: pressing) { page.opened == 1 }
         await sessions.signOut(host: host)
         await gate.open()
         _ = await pressing.value

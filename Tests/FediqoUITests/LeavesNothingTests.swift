@@ -15,7 +15,7 @@ import WebKit
 /// Every test builds its own `SourceWork`, stores and caches; nothing here touches the app's
 /// shared ones, the Keychain, the network or the language of the shell.
 @MainActor
-@Suite("Signing out or removing leaves nothing", .serialized)
+@Suite("Signing out or removing leaves nothing", .serialized, .watched)
 struct LeavesNothingTests {
     private static let gone = "gone.example"
     private static let kept = "kept.example"
@@ -56,13 +56,12 @@ struct LeavesNothingTests {
 
     // MARK: - Removing stops what is on its way
 
-    @Test("A reload on its way to a removed source asks nothing more of it, and names no failure for it",
-          .timeLimit(.minutes(3)))
+    @Test("A reload on its way to a removed source asks nothing more of it, and names no failure for it")
     func aReloadOnItsWay() async {
         let work = SourceWork()
         // The public timeline is held on the wire; its trends would be asked right after it.
         let http = GatedHTTP(Self.mastodonRoutes(Self.gone), holding: "/api/v1/timelines/public")
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the public timeline, held on the wire")
         defer { watchdog.cancel() }
         let store = ItemStore()
         await store.add(Source(host: Self.gone, kind: .mastodon))
@@ -70,7 +69,7 @@ struct LeavesNothingTests {
         await session.reloadFromStore()
 
         let reloading = Task { await session.reload.held(in: session) }
-        #expect(await spun { await http.asks == 1 }, "the premise: the read is on the wire")
+        await met("the premise: the read is on the wire", by: reloading) { await http.asks == 1 }
         let before = Self.acts(work, for: Self.gone).count
         #expect(before >= 1)
 
@@ -83,12 +82,12 @@ struct LeavesNothingTests {
         #expect(session.reload.failures[.held]?.contains(Self.gone) != true)
     }
 
-    @Test("A forum's next board is not read once the forum is removed", .timeLimit(.minutes(3)))
+    @Test("A forum's next board is not read once the forum is removed")
     func aForumsNextBoard() async {
         let work = SourceWork()
         let host = SubBoardChoiceTests.host
         let http = GatedHTTP(SubBoardChoiceTests.routes, holding: SubBoardChoiceTests.read(434))
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the forum's first board, held on the wire")
         defer { watchdog.cancel() }
         let store = ItemStore()
         await store.add(Source(host: host, kind: .discuz, boards: [
@@ -98,7 +97,7 @@ struct LeavesNothingTests {
         await session.reloadFromStore()
 
         let reloading = Task { await session.reload.timeline(.all, in: session) }
-        #expect(await spun { await http.asks == 1 }, "the premise: the first board is on the wire")
+        await met("the premise: the first board is on the wire", by: reloading) { await http.asks == 1 }
         let before = Self.acts(work, for: host).count
 
         await session.remove(host: host)
@@ -109,8 +108,7 @@ struct LeavesNothingTests {
         #expect(Self.acts(work, for: host).count == before)
     }
 
-    @Test("The wait asks nothing of a removed source, round after round, and asks it again once it is added back",
-          .timeLimit(.minutes(3)))
+    @Test("The wait asks nothing of a removed source, round after round, and asks it again once it is added back")
     func theWait() async {
         let work = SourceWork()
         let http = FixtureHTTP(Self.mastodonRoutes(Self.gone).merging(Self.mastodonRoutes(Self.kept)) { a, _ in a })
@@ -168,20 +166,23 @@ struct LeavesNothingTests {
 
     // MARK: - Removing stops what is queued
 
-    @Test("A picture queued for a removed source never goes out", .timeLimit(.minutes(3)))
+    @Test("A picture queued for a removed source never goes out")
     func aQueuedPicture() async {
         let work = SourceWork()
         let http = Parking()
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the pictures that fill every slot, held on the wire")
         defer { watchdog.cancel() }
         let pictures = ShellPictures(http: http)
         pictures.work = work
         let filling = (0..<ShellPictures.maxInFlight).map { index in
             Task { await pictures.fetch(Self.address("kept-\(index)"), scale: 2, tier: .deck, host: Self.kept) }
         }
-        #expect(await spun { await http.asked.count == ShellPictures.maxInFlight }, "the premise: every slot is taken")
+        let filled = Task { for task in filling { await task.value } }
+        await met("the premise: every slot is taken", by: filled) { await http.asked.count == ShellPictures.maxInFlight }
         let queued = Task { await pictures.fetch(Self.address("gone"), scale: 2, tier: .deck, host: Self.gone) }
-        #expect(await spun { pictures.isFetching(Self.address("gone"), scale: 2, tier: .deck) }, "the premise: it is queued")
+        await met("the premise: the picture is queued", by: queued) {
+            pictures.isFetching(Self.address("gone"), scale: 2, tier: .deck)
+        }
 
         pictures.forget(host: Self.gone)
         await http.gate.open()
@@ -193,11 +194,11 @@ struct LeavesNothingTests {
         #expect(Self.acts(work, for: Self.kept).count == ShellPictures.maxInFlight)
     }
 
-    @Test("An emoji queued for a removed source never goes out", .timeLimit(.minutes(3)))
+    @Test("An emoji queued for a removed source never goes out")
     func aQueuedEmoji() async {
         let work = SourceWork()
         let http = Parking()
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the emoji that fill every slot, held on the wire")
         defer { watchdog.cancel() }
         let emojis = EmojiCache(http: http)
         emojis.work = work
@@ -210,9 +211,11 @@ struct LeavesNothingTests {
         let filling = Task {
             await emojis.fetch(request(Self.kept, (0..<EmojiCache.maxInFlight).map { "kept\($0)" }))
         }
-        #expect(await spun { await http.asked.count == EmojiCache.maxInFlight }, "the premise: every slot is taken")
+        await met("the premise: every slot is taken", by: filling) { await http.asked.count == EmojiCache.maxInFlight }
         let queued = Task { await emojis.fetch(request(Self.gone, ["gone"])) }
-        #expect(await spun { emojis.isDownloading(Self.address("gone"), for: Self.gone) }, "the premise: it is queued")
+        await met("the premise: the emoji is queued", by: queued) {
+            emojis.isDownloading(Self.address("gone"), for: Self.gone)
+        }
 
         emojis.forget(host: Self.gone)
         await http.gate.open()
@@ -223,20 +226,23 @@ struct LeavesNothingTests {
         #expect(Self.acts(work, for: Self.gone).isEmpty)
     }
 
-    @Test("A forum post queued for a removed forum never goes out", .timeLimit(.minutes(3)))
+    @Test("A forum post queued for a removed forum never goes out")
     func aQueuedForumPost() async {
         let work = SourceWork()
         let http = Parking()
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the posts that fill every slot, held on the wire")
         defer { watchdog.cancel() }
         let posts = ForumPosts(http: http)
         posts.work = work
         let filling = (0..<ForumPosts.maxInFlight).map { index in
             Task { await posts.fetch(ForumThreadRef(host: Self.kept, tid: index + 1)) }
         }
-        #expect(await spun { await http.asked.count == ForumPosts.maxInFlight }, "the premise: every slot is taken")
+        let filled = Task { for task in filling { await task.value } }
+        await met("the premise: every slot is taken", by: filled) { await http.asked.count == ForumPosts.maxInFlight }
         let queued = Task { await posts.fetch(ForumThreadRef(host: Self.gone, tid: 99)) }
-        #expect(await spun { posts.isFetching(ForumThreadRef(host: Self.gone, tid: 99)) }, "the premise: it is queued")
+        await met("the premise: the post is queued", by: queued) {
+            posts.isFetching(ForumThreadRef(host: Self.gone, tid: 99))
+        }
 
         posts.forget(host: Self.gone)
         await http.gate.open()
@@ -249,8 +255,7 @@ struct LeavesNothingTests {
 
     // MARK: - Nothing left that can sign in
 
-    @Test("A forum's launch sign-in still running is ended by a sign-out, and signs nothing back in",
-          .timeLimit(.minutes(3)))
+    @Test("A forum's launch sign-in still running is ended by a sign-out, and signs nothing back in")
     func aLaunchSignIn() async throws {
         let credentials = MemoryCredentials()
         try credentials.save(ForumCredential(host: Self.gone, username: "reader", password: "p"))
@@ -258,7 +263,7 @@ struct LeavesNothingTests {
         let work = SourceWork()
         forums.work = work
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the launch sign-in's attempt")
         defer { watchdog.cancel() }
 
         forums.signInAgain(hosts: [Self.gone]) { _ in
@@ -275,7 +280,8 @@ struct LeavesNothingTests {
         #expect(!forums.isSigningInAgain(host: Self.gone))
         await gate.open()
         // The attempt returns once the gate opens; wait until its task has finished with it.
-        #expect(await spun { work.now.isEmpty }, "the launch sign-in never settled")
+        // No `by:`: the launch sign-in is a task the sessions start for themselves.
+        await met("the launch sign-in has settled") { work.now.isEmpty }
         #expect(!landed.done, "a sign-in was announced after the sign-out")
 
         #expect(!forums.reachedSignIn(host: Self.gone), "the sign-in landed after the sign-out")
@@ -340,8 +346,7 @@ struct LeavesNothingTests {
         #expect(jar.cookies?.map(\.domain) == ["blog.shared.example"])
     }
 
-    @Test("A reload that starts while a Remove is still under way asks nothing of the source",
-          .timeLimit(.minutes(3)))
+    @Test("A reload that starts while a Remove is still under way asks nothing of the source")
     func aReloadInsideTheRemove() async {
         let work = SourceWork()
         let http = FixtureHTTP(Self.mastodonRoutes(Self.gone).merging(Self.mastodonRoutes(Self.kept)) { a, _ in a })
@@ -368,12 +373,11 @@ struct LeavesNothingTests {
         #expect(!Self.acts(work, for: Self.kept).isEmpty, "the premise: the reload ran")
     }
 
-    @Test("An emoji two sources wait on still comes for the one left when the other is removed",
-          .timeLimit(.minutes(3)))
+    @Test("An emoji two sources wait on still comes for the one left when the other is removed")
     func aSharedEmoji() async {
         let work = SourceWork()
         let http = Parking(answering: EmojiFixture.gif(delays: [0.1, 0.1]))
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the emoji that fill every slot, held on the wire")
         defer { watchdog.cancel() }
         let emojis = EmojiCache(http: http)
         emojis.work = work
@@ -386,12 +390,16 @@ struct LeavesNothingTests {
         let filling = Task {
             await emojis.fetch(request("third.example", (0..<EmojiCache.maxInFlight).map { "fill\($0)" }))
         }
-        #expect(await spun { await http.asked.count == EmojiCache.maxInFlight }, "the premise: every slot is taken")
+        await met("the premise: every slot is taken", by: filling) { await http.asked.count == EmojiCache.maxInFlight }
         let first = Task { await emojis.fetch(request(Self.gone, ["wave"])) }
-        #expect(await spun { emojis.isDownloading(Self.address("wave"), for: Self.gone) })
+        await met("the removed source's emoji is queued", by: first) {
+            emojis.isDownloading(Self.address("wave"), for: Self.gone)
+        }
         emojis.forget(host: Self.gone)
         let second = Task { await emojis.fetch(request(Self.kept, ["wave"])) }
-        #expect(await spun { emojis.isDownloading(Self.address("wave"), for: Self.kept) })
+        await met("the kept source's emoji is queued", by: second) {
+            emojis.isDownloading(Self.address("wave"), for: Self.kept)
+        }
 
         await http.gate.open()
         await filling.value

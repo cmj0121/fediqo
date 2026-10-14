@@ -42,7 +42,7 @@ private final class DarkTokens: MastodonTokenStore, @unchecked Sendable {
 /// a file in a folder of its own, the file is opened again, and a second session is made over
 /// what it read. Every interleaving is pinned by a gate the test opens; no clock is waited for.
 @MainActor
-@Suite("Notices held on this device: drawn first, read after, and let go from the disk")
+@Suite("Notices held on this device: drawn first, read after, and let go from the disk", .watched)
 struct NoticesHeldTests {
     private typealias F = NoticeActFixture
     private static let a = F.a
@@ -164,14 +164,14 @@ struct NoticesHeldTests {
         #expect(NoticesPane.foot(in: again.session) == .more, "never an instruction to wait for a source nobody has asked")
 
         let reading = Task { await list.read(in: again.session) }
-        #expect(await spun { await again.server.asked.count == 2 })
+        await met("both sources are asked", by: reading) { await again.server.asked.count == 2 }
         #expect(await again.server.asked.sorted() == [F.get(Self.a), F.get(Self.b)], "each asked the way it answered last run")
         #expect(ids(list.lines) == ["a4", "b8", "a3"], "what is held stays drawn while they are asked")
         #expect(list.readingHosts == [Self.a, Self.b])
         #expect(NoticesPane.foot(in: again.session) == .asking, "nobody is named above, so nobody is waited for")
 
         await gateA.open()
-        #expect(await spun { list.standing(host: Self.a) == .read })
+        await met("the first source has been read", by: reading) { list.standing(host: Self.a) == .read }
         #expect(ids(list.lines) == ["a5", "a4", "b8", "a3"], "joined as a reload joins: the new line above, the rest where they were")
         await gateB.open()
         await reading.value
@@ -192,7 +192,7 @@ struct NoticesHeldTests {
         #expect(again.list.lines.isEmpty, "the premise: nothing has adopted the store")
 
         let reading = Task { await again.list.read(in: again.session) }
-        #expect(await spun { await again.server.count(F.get(Self.a)) == 1 })
+        await met("the page's request has left", by: reading) { await again.server.count(F.get(Self.a)) == 1 }
 
         #expect(ids(again.list.lines) == ["a4", "b8", "a3"])
         await gate.open()
@@ -216,7 +216,7 @@ struct NoticesHeldTests {
         #expect(ids(again.list.lines) == ["a4", "a3"])
 
         let reading = Task { await again.list.read(in: again.session) }
-        #expect(await spun { again.list.standing(host: Self.a) == .read })
+        await met("the source held before has been read", by: reading) { again.list.standing(host: Self.a) == .read }
         #expect(ids(again.list.lines) == ["a4", "a3"], "nothing drawn is taken back, and nothing of B is drawn before it has said where it stops")
         await gate.open()
         await reading.value
@@ -303,10 +303,13 @@ struct NoticesHeldTests {
         await list.kept()
         let following = Task { await here.session.followStore() }
         defer { following.cancel() }
-        #expect(await spun { list.lines.first?.post != nil }, "a read brings it back where the source still serves it")
+        // No `by:` in these two: the follower is the work, and it never ends.
+        await met("a read has brought the post back where the source still serves it") {
+            list.lines.first?.post != nil
+        }
         let again = try #require(list.lines.first?.post)
         await here.session.store.forget(again.key)
-        #expect(await spun { list.lines.first?.post == nil })
+        await met("the list has taken the store's word that the post is gone") { list.lines.first?.post == nil }
         #expect(ids(list.lines) == ["a4", "a3"], "the lines stay")
     }
 
@@ -359,7 +362,7 @@ struct NoticesHeldTests {
         await here.server.set(F.get(Self.a), .fails(gate, .notConnectedToInternet))
 
         let reading = Task { await list.read(in: here.session) }
-        #expect(await spun { await here.server.count(F.get(Self.a)) == 2 })
+        await met("the second read is out", by: reading) { await here.server.count(F.get(Self.a)) == 2 }
         await here.session.store.forget(post.key)
         await here.session.reloadFromStore()
         #expect(list.lines.first?.post == nil, "the premise: taken while the read is out")
@@ -538,6 +541,8 @@ struct NoticesHeldTests {
         // flight, and has read the store, before the removal goes on.
         let following = Task { await again.session.followStore() }
         defer { following.cancel() }
+        // Counted turns: the follower says nothing of having begun to listen, so there is no
+        // point to wait for; a run where it has not yet checks the removal with no adopt beside it.
         for _ in 0..<200 { await Task.yield() }
 
         await again.session.remove(host: Self.a)
@@ -598,6 +603,8 @@ struct NoticesHeldTests {
         try await firstRun(in: dir, Self.two, tokens: tokens)
         let again = try await run(in: dir, Self.two, tokens: tokens)
         let gate = Gate()
+        let guardTask = watching(gate, "the first sweep, held at its write")
+        defer { guardTask.cancel() }
         var writing = false
         let saver = again.saver
         again.session.persist = {
@@ -610,13 +617,15 @@ struct NoticesHeldTests {
         try tokens.forget(host: Self.a)
         again.session.mastodon.refresh()
         let first = Task { await again.session.forgetReaderMarksDue() }
-        #expect(await spun { writing })
+        await met("the first sweep is held at its write", by: first) { writing }
 
         var done = false
         let second = Task {
             await again.session.forgetReaderMarksDue()
             done = true
         }
+        // Counted turns, behind that wait: a sweep that waits on the one writing is parked on its
+        // task, and nothing says it has got there.
         for _ in 0..<2_000 { await Task.yield() }
         #expect(!done, "the second caller was told while the first was still writing")
         #expect(try disk(dir, holds: "Ada-Four"), "the premise: not written yet")
@@ -721,7 +730,7 @@ struct NoticesHeldTests {
         let four = try #require(list.lines.first)
 
         let act = Task { await list.acts.dismiss(four, in: here.session) }
-        #expect(await spun { !ids(list.lines).contains("a4") }, "off the screen at the yes")
+        await met("the notice is off the screen at the yes", by: act) { !ids(list.lines).contains("a4") }
         #expect(try disk(dir, holds: "Ada-Four"), "and nothing on this device moved before the source answered")
         await gate.open()
         await act.value

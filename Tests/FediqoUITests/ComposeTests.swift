@@ -58,7 +58,7 @@ private actor WriteServer: HTTPSender {
 }
 
 /// You write a post from Fediqo, and it lands in the timeline it belongs to (#56).
-@Suite("Writing a post from the shell")
+@Suite("Writing a post from the shell", .watched)
 @MainActor
 struct ComposeTests {
     init() {
@@ -232,7 +232,7 @@ struct ComposeTests {
     @Test("A draft typed after the press is untouched by the landing")
     func lateSuccessClearsOnlyTheSnapshot() async throws {
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held on the wire")
         defer { watchdog.cancel() }
         let (session, server, _) = try await shell(
             scopes: writing,
@@ -243,7 +243,8 @@ struct ComposeTests {
         session.prepareCompose()
         session.composeDraft = "hello"
         #expect(session.send())
-        #expect(await spun { await server.paths.contains("/api/v1/statuses") })
+        let sending = Task { await session.outbox.settled() }
+        await met("the post is on the wire", by: sending) { await server.paths.contains("/api/v1/statuses") }
         session.composeDraft = "newer"
         await gate.open()
         await session.outbox.settled()

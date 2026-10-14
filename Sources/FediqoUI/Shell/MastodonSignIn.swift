@@ -953,6 +953,9 @@ public final class MastodonSessions {
     /// How long a host's own list of words is waited for before the registration is asked
     /// without it.
     @ObservationIgnored var wordListWait: Duration = .seconds(8)
+    /// What every deadline built here is waited on (`Deadline`) — the word list's wait, and a
+    /// door's `within:`: `Task.sleep` but for a test, which turns it by hand.
+    @ObservationIgnored var deadlineSleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
 
     /// The host's own list of the scope words it knows, asked once a run and with no sign-in;
     /// nothing where it gave none in time (`MastodonOAuth.listedWords`). Listed among the
@@ -960,7 +963,7 @@ public final class MastodonSessions {
     private func listedWords(host: String) async -> Set<String>? {
         if let known = registering.list(host) { return known }
         let watched = WatchedHTTP(sender: SourceReach.wordList(sender), for: .signIn, in: work)
-        let asked = MastodonOAuth(host: host, sender: Deadline(watched as any HTTPSender, within: wordListWait))
+        let asked = MastodonOAuth(host: host, sender: Deadline(watched as any HTTPSender, within: wordListWait, sleep: deadlineSleep))
         guard let listed = await asked.listedWords() else { return nil }
         registering.learnt(listed, of: host)
         return listed
@@ -2038,7 +2041,7 @@ public final class MastodonSessions {
         name: SourceWork.Name? = nil
     ) -> MastodonAuthorized {
         let watched = WatchedHTTP(sender: sender, for: purpose, name: name, in: work)
-        let wire: any HTTPSender = limit.map { Deadline(watched as any HTTPSender, within: $0) } ?? watched
+        let wire: any HTTPSender = limit.map { Deadline(watched as any HTTPSender, within: $0, sleep: deadlineSleep) } ?? watched
         return MastodonAuthorized(token: token, sender: wire, store: tokens, endings: endings)
     }
 

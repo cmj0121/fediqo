@@ -10,7 +10,7 @@ import Testing
 /// What a test can reach: the row the session draws from, before the reload lands and after, for
 /// each of the three marks put and taken back; and the next reload, asked afterwards, being
 /// taken. What it cannot: the mark drawn on a Mac and a phone, in light and dark.
-@Suite("A press is not undone by a reload already on its way")
+@Suite("A press is not undone by a reload already on its way", .watched)
 @MainActor
 struct ActBeforeReadLandsTests {
     private static let host = "social.example"
@@ -112,7 +112,6 @@ struct ActBeforeReadLandsTests {
 
     @Test(
         "The mark a press set is still drawn when a reload asked before the press lands after it — put or taken back; and the next reload is the source's word",
-        .timeLimit(.minutes(3)),
         arguments: [PostAct.favourite, .boost, .bookmark], [true, false]
     )
     func aReloadOnItsWay(act: PostAct, on: Bool) async throws {
@@ -121,11 +120,11 @@ struct ActBeforeReadLandsTests {
         let asked = await server.homeAsks
 
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the reload of Home, held on the wire")
         defer { watchdog.cancel() }
         await server.hold(gate)
         let reloading = Task { await session.reload.timeline(home, in: session) }
-        #expect(await spun { await server.homeAsks == asked + 1 }, "the reload is on the wire")
+        await met("the reload is on the wire", by: reloading) { await server.homeAsks == asked + 1 }
 
         await session.toggle(act, on: DummyItem(try #require(session.notes.first)))
         #expect(await server.acts == ["\(act) \(on)"], "the premise: the press went, the way it was meant")
@@ -148,10 +147,7 @@ struct ActBeforeReadLandsTests {
         return [row?.favourited, row?.boosted, row?.bookmarked]
     }
 
-    @Test(
-        "A reload on its way when the reader signs out brings none of their marks back; the next sign-in's reload says its own",
-        .timeLimit(.minutes(3))
-    )
+    @Test("A reload on its way when the reader signs out brings none of their marks back; the next sign-in's reload says its own")
     func aReloadOnItsWayAtSignOut() async throws {
         let tokens = MemoryMastodonTokens()
         let (session, server, home) = try await shell(true, tokens: tokens)
@@ -159,11 +155,11 @@ struct ActBeforeReadLandsTests {
         let asked = await server.homeAsks
 
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the reload of Home, held on the wire")
         defer { watchdog.cancel() }
         await server.hold(gate)
         let reloading = Task { await session.reload.timeline(home, in: session) }
-        #expect(await spun { await server.homeAsks == asked + 1 }, "the reload is on the wire")
+        await met("the reload is on the wire", by: reloading) { await server.homeAsks == asked + 1 }
 
         await session.signOut(host: Self.host)
         #expect(await marks(session) == [nil, nil, nil], "the premise: signing out took the marks off")

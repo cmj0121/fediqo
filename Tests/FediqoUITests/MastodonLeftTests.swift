@@ -234,7 +234,7 @@ private final class LeftKeychain: MastodonTokenStore, @unchecked Sendable {
 /// #347, Decision 9: a sign-in a wider one took the place of is left live at its source and
 /// written down, and everything this device holds or left there ends when the person signs out.
 @MainActor
-@Suite("What this device left at a source")
+@Suite("What this device left at a source", .watched)
 struct MastodonLeftTests {
     private let host = "social.example"
     private static let acting = MastodonOAuth.scopes(writing: true)
@@ -245,6 +245,8 @@ struct MastodonLeftTests {
         let source = LeftSource(tokens: tokens, host: host)
         let sessions = MastodonSessions(tokens: store ?? tokens, sender: source)
         sessions.clock = LeftClock()
+        // A door's deadline, on a clock nobody turns: no check here waits for one to pass.
+        sessions.deadlineSleep = TurnedClock().sleep
         return (sessions, source, tokens)
     }
 
@@ -478,7 +480,7 @@ struct MastodonLeftTests {
         let page = LeftPage(gate: gate)
         let pressing = Task { await made.sessions.signIn(host: host, through: page, writing: true) }
         defer { Task { await gate.open() } }
-        #expect(await spun { page.opened == 1 })
+        await met("the source's page is up", by: pressing) { page.opened == 1 }
         await made.sessions.signOut(host: host)
         await gate.open()
         #expect(await pressing.value == nil)
@@ -1041,9 +1043,8 @@ struct MastodonLeftTests {
         defer { Task { await gate.open() } }
         // Not caught, the ask this waits for was never sent, and the next one would wait at the
         // gate with nobody left to open it: opened here, so the check fails and does not park.
-        let caught = await spun { await made.source.holding }
+        let caught = await met("the fresh token's check is held at the source", by: pressing) { await made.source.holding }
         if !caught { await gate.open() }
-        #expect(caught)
         #expect(try states(made) == [.left, .pending])
 
         await made.sessions.signOut(host: host, forgettingApp: removing)
@@ -1067,9 +1068,8 @@ struct MastodonLeftTests {
         defer { Task { await gate.open() } }
         // Not caught, the ask this waits for was never sent, and the next one would wait at the
         // gate with nobody left to open it: opened here, so the check fails and does not park.
-        let caught = await spun { await made.source.holding }
+        let caught = await met("the fresh token's check is held at the source", by: pressing) { await made.source.holding }
         if !caught { await gate.open() }
-        #expect(caught)
 
         made.sessions.cameToFront()
         await made.sessions.leftSettled()
@@ -1091,9 +1091,9 @@ struct MastodonLeftTests {
         defer { Task { await gate.open() } }
         // Not caught, the ask this waits for was never sent, and the next one would wait at the
         // gate with nobody left to open it: opened here, so the check fails and does not park.
-        let caught = await spun { await made.source.holding }
+        let goingThrough = Task { await made.sessions.leftSettled() }
+        let caught = await met("the owed end is held at the source", by: goingThrough) { await made.source.holding }
         if !caught { await gate.open() }
-        #expect(caught)
 
         // The second finds the first still at it, and asks nothing of its own.
         await made.sessions.settleLeft()
@@ -1113,9 +1113,9 @@ struct MastodonLeftTests {
         defer { Task { await gate.open() } }
         // Not caught, the ask this waits for was never sent, and the next one would wait at the
         // gate with nobody left to open it: opened here, so the check fails and does not park.
-        let caught = await spun { await made.source.holding }
+        let goingThrough = Task { await made.sessions.leftSettled() }
+        let caught = await met("the owed end is held at the source", by: goingThrough) { await made.source.holding }
         if !caught { await gate.open() }
-        #expect(caught)
 
         for _ in 0..<5 { made.sessions.cameToFront() }
         await gate.open()
@@ -1220,9 +1220,9 @@ struct MastodonLeftTests {
         defer { Task { await gate.open() } }
         // Not caught, the ask this waits for was never sent, and the next one would wait at the
         // gate with nobody left to open it: opened here, so the check fails and does not park.
-        let caught = await spun { await made.source.holding }
+        let goingThrough = Task { await made.sessions.leftSettled() }
+        let caught = await met("the owed end is held at the source", by: goingThrough) { await made.source.holding }
         if !caught { await gate.open() }
-        #expect(caught)
 
         await made.sessions.signOut(host: host)
         #expect(try held(made) == nil)
@@ -1246,9 +1246,8 @@ struct MastodonLeftTests {
         defer { Task { await gate.open() } }
         // Not caught, the ask this waits for was never sent, and the next one would wait at the
         // gate with nobody left to open it: opened here, so the check fails and does not park.
-        let caught = await spun { await made.source.holding }
+        let caught = await met("the ask to end the token is held at the source", by: narrowing) { await made.source.holding }
         if !caught { await gate.open() }
-        #expect(caught)
         #expect(try held(made) == "tok-3")
         await gate.open()
         #expect(await narrowing.value == nil)
@@ -1712,6 +1711,8 @@ struct MastodonLeftTests {
         // back waits where it is until the session has had its turn.
         let (reached, reach) = AsyncStream<Void>.makeStream()
         let resume = DispatchSemaphore(value: 0)
+        // Signalled however the check ends, so a `#require` that throws leaves no thread blocked.
+        defer { resume.signal() }
         let folder = carry.folders[1].path
         let seam = SeamTokens(inner: made.tokens) {
             try? FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder)
@@ -1900,6 +1901,8 @@ struct MastodonLeftTests {
         try await carry.takeAway(host: host, .whole)
         let (reached, reach) = AsyncStream<Void>.makeStream()
         let resume = DispatchSemaphore(value: 0)
+        // Signalled however the check ends, so a `#require` that throws leaves no thread blocked.
+        defer { resume.signal() }
         let folder = carry.folders[1].path
         let seam = SeamTokens(inner: made.tokens) {
             try? FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder)

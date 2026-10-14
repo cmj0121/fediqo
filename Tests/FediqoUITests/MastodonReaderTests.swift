@@ -5,8 +5,9 @@ import Testing
 
 /// A Mastodon as a sign-in meets it — a registration, a trade, the account check, the ask to
 /// end a sign-in — that says who each token signs in, and can hold one account check until a
-/// test lets it go. **A held check is let go by itself after `patience`**, and so is a wait
-/// for one that never arrives: a regression fails the check it is in and parks nothing.
+/// test lets it go. **A held check has no clock of its own**: the check that holds it arms a
+/// guard that lets it go when the run has gone still, and waits for it to arrive by the work
+/// that was to send it.
 private actor ReaderSource: HTTPClient, HTTPSender {
     struct Sent: Sendable, Equatable {
         let host: String
@@ -15,15 +16,14 @@ private actor ReaderSource: HTTPClient, HTTPSender {
     }
 
     static let check = "/api/v1/accounts/verify_credentials"
-    static let patience: Duration = .seconds(15)
 
     private var saying: [String: (status: Int, body: String)] = [:]
     private var handedBack: [String] = []
     private var issued = 0
     private var holdsNext = false
     private var heldCheck: [CheckedContinuation<Void, Never>] = []
-    private var awaited: [CheckedContinuation<Void, Never>] = []
-    private var arrived = false
+    /// Whether the held check has arrived.
+    private(set) var arrived = false
     private(set) var sent: [Sent] = []
 
     var checks: Int { sent.count { $0.path == Self.check } }
@@ -40,23 +40,10 @@ private actor ReaderSource: HTTPClient, HTTPSender {
     func holdNextCheck() {
         holdsNext = true
         arrived = false
-        Task {
-            try? await Task.sleep(for: Self.patience)
-            self.release()
-        }
-    }
-
-    /// Returns once the held check has arrived — or was given up on.
-    func checkArrived() async {
-        if arrived { return }
-        await withCheckedContinuation { awaited.append($0) }
     }
 
     func release() {
         holdsNext = false
-        arrived = true
-        for waiting in awaited { waiting.resume() }
-        awaited = []
         for check in heldCheck { check.resume() }
         heldCheck = []
     }
@@ -87,8 +74,6 @@ private actor ReaderSource: HTTPClient, HTTPSender {
             if holdsNext {
                 holdsNext = false
                 arrived = true
-                for waiting in awaited { waiting.resume() }
-                awaited = []
                 await withCheckedContinuation { heldCheck.append($0) }
             }
             let said = saying[bearer ?? ""] ?? (200, #"{"id":"1","acct":"reader"}"#)
@@ -164,7 +149,7 @@ private final class Racing: MastodonTokenStore, @unchecked Sendable {
 /// sign-in that only reads as for one that acts — kept with the sign-in and nowhere else, and
 /// laid only on the sign-in it was said through.
 @MainActor
-@Suite("Who the reader is, from the sign-in's own check", .timeLimit(.minutes(3)))
+@Suite("Who the reader is, from the sign-in's own check", .watched)
 struct MastodonReaderTests {
     private let host = "social.example"
     private let named = "@reader@social.example"
@@ -173,7 +158,10 @@ struct MastodonReaderTests {
 
     private func fresh(_ tokens: MemoryMastodonTokens = MemoryMastodonTokens()) -> Made {
         let source = ReaderSource()
-        return (MastodonSessions(tokens: tokens, sender: source), source, tokens)
+        let sessions = MastodonSessions(tokens: tokens, sender: source)
+        // A door's deadline, on a clock nobody turns: no check here waits for one to pass.
+        sessions.deadlineSleep = TurnedClock().sleep
+        return (sessions, source, tokens)
     }
 
     /// A sign-in kept by an earlier run, with nothing said yet of whose it is.
@@ -307,9 +295,14 @@ struct MastodonReaderTests {
     func aLateAnswerLandsOnNobodyElse(meanwhile: Meanwhile) async throws {
         let made = try kept()
         await made.source.holdNextCheck()
+        let guardTask = watching("the account check, held at the source") { [source = made.source] in await source.release() }
+        defer { guardTask.cancel() }
         let asking = Task { await made.sessions.learnWho(host: host) }
         defer { Task { await made.source.release() } }
-        await made.source.checkArrived()
+        // Not arrived, the check this holds was never sent, and the next one sent would wait in
+        // its place with nobody to let it go: let go here, so the check fails and does not park.
+        let arrived = await met("the account check has arrived at the source", by: asking) { await made.source.arrived }
+        if !arrived { await made.source.release() }
 
         let tokens = made.tokens
         let other = token("tok-pkg")
@@ -363,9 +356,14 @@ struct MastodonReaderTests {
         let made = try kept()
         await made.source.says("tok-old", #"{"acct":"reader"}"#)
         await made.source.holdNextCheck()
+        let guardTask = watching("the account check, held at the source") { [source = made.source] in await source.release() }
+        defer { guardTask.cancel() }
         let asking = Task { await made.sessions.learnWho(host: host) }
         defer { Task { await made.source.release() } }
-        await made.source.checkArrived()
+        // Not arrived, the check this holds was never sent, and the next one sent would wait in
+        // its place with nobody to let it go: let go here, so the check fails and does not park.
+        let arrived = await met("the account check has arrived at the source", by: asking) { await made.source.arrived }
+        if !arrived { await made.source.release() }
         try made.tokens.save(token("tok-pkg"))
         await made.source.release()
         await asking.value
@@ -380,6 +378,7 @@ struct MastodonReaderTests {
         let racing = Racing(tokens)
         let source = ReaderSource()
         let sessions = MastodonSessions(tokens: racing, sender: source)
+        sessions.deadlineSleep = TurnedClock().sleep
         let other = token("tok-pkg")
         racing.beforeUpdate = { try? tokens.save(other) }
         await sessions.learnWho(host: host)
@@ -398,6 +397,7 @@ struct MastodonReaderTests {
         let racing = Racing(tokens)
         let source = ReaderSource()
         let sessions = MastodonSessions(tokens: racing, sender: source)
+        sessions.deadlineSleep = TurnedClock().sleep
         let other = token("tok-pkg")
         racing.afterSwap = { try? tokens.save(other) }
         await source.says("tok-pkg", #"{"id":"2","acct":"other"}"#)
@@ -454,6 +454,7 @@ struct MastodonReaderTests {
         let racing = Racing(tokens)
         let source = ReaderSource()
         let sessions = MastodonSessions(tokens: racing, sender: source)
+        sessions.deadlineSleep = TurnedClock().sleep
         #expect(await sessions.signIn(host: host, through: ReaderPage()) == nil)
         #expect(sessions.handles[host] == named)
 
