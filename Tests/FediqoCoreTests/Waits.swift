@@ -15,6 +15,12 @@ import Testing
 //
 // - A gate the check holds: `let guardTask = watching(gate, "the boost, held on the wire")` and
 //   `defer { guardTask.cancel() }` — what `hangGuard(gate)` was, with a name.
+// - **A guard is cancelled in `defer`, never inline.** A `guardTask.cancel()` written after the
+//   body is not reached when a `#require` before it throws, and the guard is then parked for the
+//   rest of the process: a wait nobody will leave, in every list the run writes from then on.
+// - **A `.timeLimit` left beside a converted guard goes in the same change.** The guard's bound
+//   is now the run's — five minutes of stillness — so the time limit is the shorter of the two:
+//   it ends the check first, by the clock the conversion was there to take away.
 // - Waiting for a thing: `await met("the reload is on the wire", by: running) { await http.asks == 1 }`
 //   — what `#expect(await spun { … })` was. **Name `by:` wherever a `Task`, or anything else that
 //   is an `Ending`, stands for the work**: the wait then fails the moment that work has ended
@@ -56,10 +62,17 @@ import Testing
 /// *no* wait in the run has been entered or left: a run that is slow goes on moving, and only one
 /// that has stopped goes still.
 ///
-/// **Counted in looks that were made, not in time that went by.** A thread wakes every `tick`
-/// and counts one more look in which nothing had moved. A machine put to sleep, or a process
-/// stopped in a debugger, makes no looks — so an hour of either is not an hour of stillness, as
-/// it would be to a clock read before and after.
+/// **Counted in looks that were made, not by a clock read before and after.** The watchdog is
+/// a thread of its own that sleeps a `tick` — one second — and then looks. A busy machine does
+/// not hold it back: under load a tick is still about a second, so the bound is about five
+/// minutes however slow the run is. The looks stop only where the whole process is stopped — the
+/// machine asleep, a debugger — and an hour of either is not an hour of stillness.
+///
+/// **What moves the run is a wait entered or left, and nothing else.** A `met` looking at its
+/// condition again is deliberately not movement: a `met` with no `by:`, on a line that is
+/// broken, looks for ever, and a run that counted its looks would never go still. What follows
+/// from that: a healthy check can be let go, and in one way only — if no wait anywhere in the
+/// process is entered or left for the whole bound.
 ///
 /// **What it does when the run has gone still**, in two steps:
 ///
@@ -264,7 +277,8 @@ final class RunWaits: @unchecked Sendable {
             while true {
                 Thread.sleep(forTimeInterval: tick)
                 guard let self else { return }
-                self.look()
+                // A thread that never ends never empties a pool of its own accord.
+                autoreleasepool { self.look() }
             }
         }
         thread.name = "the run's waits"
@@ -284,7 +298,7 @@ final class RunWaits: @unchecked Sendable {
             kept["quiet"] = quiet
             guard quiet >= looks else { return }
             kept["quiet"] = 0
-            let list = all.map { "  - \(Self.parked($0.entry))" }.joined(separator: "\n")
+            let list = all.map { "\(Self.listed)\(Self.parked($0.entry))" }.joined(separator: "\n")
             let fresh = all.filter { $0.entry["released"] == nil }
             if fresh.isEmpty {
                 over = "The run has not moved for \(still) more, with these let go and parked still:\n\(list)\n"
@@ -301,6 +315,10 @@ final class RunWaits: @unchecked Sendable {
         for release in releases { release.start() }
         if let over { end(over) }
     }
+
+    /// How every line of the list begins. `scripts/coverage.sh` picks the list out of a run's
+    /// output by it, so it is something no other line of a run begins with.
+    static let listed = "  parked wait: "
 
     /// How the last line a run ended here writes begins. `scripts/coverage.sh` looks for it, to
     /// say of a run that died this way that it did, and what it had been waiting for.
@@ -508,6 +526,11 @@ func watching(
 /// is cancelled — which ends anything that was waiting on a sleep or a request — and a failure
 /// is recorded at its own declaration. Where cancelling does not end it, `RunWaits` ends the run
 /// and names it.
+///
+/// **A `met` that hangs inside a watched check is two failures, not one.** Both are parked, and
+/// both are let go together: the wait records its own at the line that asked, and the check
+/// records one at its declaration. And once the check has been given up on, whatever its body
+/// went on to throw is dropped — the failure at the declaration is said in its place.
 ///
 /// **Why a check needs it though its waits are all `met`**: a check can be parked where no
 /// helper of this file is — awaiting the very call it is checking. Nothing would name that one.

@@ -207,7 +207,7 @@ struct WaitsTests {
             await looking.value
         }
         #expect(found.count == 1)
-        #expect(said(found.first) == "gave up waiting for an answer nobody sends: nothing the run waits for had moved for 300.0 seconds")
+        #expect(said(found.first) == "gave up waiting for an answer nobody sends: nothing the run waits for had moved for \(Self.still)")
         #expect(found.first?.sourceLocation?.line == line.all.first)
     }
 
@@ -264,13 +264,13 @@ struct WaitsTests {
         Self.look(waits)
         #expect(released.all == [1] && waits.gaveUp(stuck))
         #expect(said.all.count == 1, "every wait parked is written out as it is let go")
-        #expect(said.all.first?.contains("  - an actor that is blocked — \(#fileID):\(line)") == true)
+        #expect(said.all.first?.contains("\(RunWaits.listed)an actor that is blocked — \(#fileID):\(line)") == true)
         Self.look(waits, Self.looks - 1)
         #expect(ended.all.isEmpty)
         waits.look()
         #expect(ended.all.count == 1)
         let lines = ended.all.first?.split(separator: "\n").map(String.init) ?? []
-        #expect(lines.contains { $0.hasPrefix("  - an actor that is blocked — \(#fileID):\(line)") })
+        #expect(lines.contains { $0.hasPrefix("\(RunWaits.listed)an actor that is blocked — \(#fileID):\(line)") })
         #expect(lines.last?.hasPrefix("Ending it. ") == true, "what scripts/coverage.sh looks for")
         #expect(released.all == [1], "it is let go once")
 
@@ -282,13 +282,16 @@ struct WaitsTests {
         #expect(never.all.isEmpty)
     }
 
-    @Test("The script that runs the checks on a runner knows the last line of a run ended here")
+    @Test("The script that runs the checks on a runner knows the last line of a run ended here, and the lines of its list from every other line of a run")
     func theScriptKnowsTheLastLine() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let script = try String(contentsOf: root.appendingPathComponent("scripts/coverage.sh"), encoding: .utf8)
         #expect(RunWaits.lastWords == "Ending it.")
         #expect(script.contains(#"'^Ending it\.'"#))
+        #expect(RunWaits.listed == "  parked wait: ")
+        #expect(script.contains(#"'^The run has not moved|^  parked wait: |^Ending it\.'"#))
+        #expect(!script.contains("^  - "), "a mark any line of a run may begin with")
     }
 
     @Test("The bound is watched by a thread of its own, which nobody has to turn")
@@ -329,6 +332,63 @@ struct WaitsTests {
         #expect(theirs.parked.isEmpty && ended.all.isEmpty)
     }
 
+    /// Everything in a list that is not one of Foundation's own objects, each said by where it
+    /// is and what it is.
+    private static func strangers(in kept: NSMutableDictionary) -> [String] {
+        func strange(_ value: Any, _ kinds: [AnyClass]) -> Bool {
+            !kinds.contains { (value as AnyObject).isKind(of: $0) }
+        }
+        objc_sync_enter(kept)
+        defer { objc_sync_exit(kept) }
+        var found: [String] = []
+        for (key, value) in kept {
+            if strange(key, [NSString.self]) { found.append("the key \(key)") }
+            if strange(value, [NSString.self, NSNumber.self, NSMutableDictionary.self]) {
+                found.append("\(key): \(type(of: value))")
+            }
+        }
+        for (id, entry) in kept["entries"] as? NSMutableDictionary ?? [:] {
+            guard !strange(id, [NSNumber.self]), let entry = entry as? NSMutableDictionary else {
+                found.append("the entry \(id): \(type(of: entry))")
+                continue
+            }
+            for (key, value) in entry {
+                if strange(key, [NSString.self]) { found.append("the key \(key) of entry \(id)") }
+                if strange(value, [NSString.self, NSNumber.self, BlockOperation.self]) {
+                    found.append("\(key) of entry \(id): \(type(of: value))")
+                }
+            }
+        }
+        return found
+    }
+
+    @Test("Nothing in the run's list is a thing of one copy's own: every key and value, of the list and of each wait in it, is one of Foundation's objects")
+    func nothingOfOneCopysOwn() {
+        // On a desk each test target is a process of its own, and a Swift class, struct or
+        // closure kept in the list would be read back by the copy that put it there. Where one
+        // process holds all three copies it is another copy's, and reads as nothing — so it is
+        // looked for here, in the run's own list, with a wait parked that has everything a wait
+        // can have.
+        let id = RunWaits.run.park("a wait with something to let go of", at: #_sourceLocation) {}
+        defer { RunWaits.run.leave(id) }
+        let kept = RunWaits.processWide()
+        #expect((kept["entries"] as? NSMutableDictionary)?[id] != nil, "the wait is in the list that is walked")
+        #expect(Self.strangers(in: kept) == [])
+
+        // And the walk knows a stranger when one is there.
+        struct Mine {}
+        final class Own {}
+        let list = NSMutableDictionary()
+        let (waits, _) = waits(keptIn: list)
+        let other = waits.park("another", at: #_sourceLocation) {}
+        #expect(Self.strangers(in: list) == [])
+        let entry = (list["entries"] as? NSMutableDictionary)?[other] as? NSMutableDictionary
+        list["a struct"] = Mine()
+        entry?["a class"] = Own()
+        entry?["a closure"] = { @Sendable in }
+        #expect(Self.strangers(in: list).count == 3)
+    }
+
     @Test("How long the run may be still is five minutes, or what a person said in seconds: a second at the least, and nothing that is not a number of seconds")
     func patience() {
         #expect(RunWaits.patience(said: nil) == .seconds(300))
@@ -359,7 +419,7 @@ struct WaitsTests {
             await looking.value
         }
         #expect(found.count == 1)
-        #expect(said(found.first) == "gave up waiting for the boost, held on the wire: nothing the run waits for had moved for 300.0 seconds")
+        #expect(said(found.first) == "gave up waiting for the boost, held on the wire: nothing the run waits for had moved for \(Self.still)")
         #expect(found.first?.sourceLocation?.line == line.all.first)
     }
 

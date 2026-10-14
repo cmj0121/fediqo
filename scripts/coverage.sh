@@ -50,7 +50,7 @@ if [ "$TEST_CODE" -ne 0 ]; then
     # waiting for is the whole of what it has to say, and is said here as that.
     if grep -qE '^Ending it\.' "$RUN_LOG"; then
         echo "the run went still and was ended; what it was waiting for:"
-        grep -E '^The run has not moved|^  - |^Ending it\.' "$RUN_LOG" | tail -200 || true
+        grep -E '^The run has not moved|^  parked wait: |^Ending it\.' "$RUN_LOG" | tail -200 || true
         echo
     fi
     echo "the tests failed (swift test exited $TEST_CODE); each issue, as it was recorded:"
