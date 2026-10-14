@@ -800,7 +800,7 @@ struct PeopleTests {
         let jumped = FediqoRootView.jumpedToTop(in: ["first", "second"], standing: .people(Self.followers), place: .timeline, selected: &lamp, jump: &jump)
         #expect(jumped && lamp == "first" && jump == 1)
         #expect(FediqoRootView.moved(in: ["first", "second"], from: "first", by: 1, open: [.people, .selection]) == "second")
-        #expect(TimelinePane.page(.people(Self.followers)) == .opened && TimelinePane.openedID(.people(Self.followers)) == "people:" + Self.followers.id)
+        #expect(TimelinePane.page(.people(Self.followers)) == .tabbed && TimelinePane.page(.people(Self.followers), drawn: false) == .opened && TimelinePane.openedID(.people(Self.followers)) == "people:" + Self.followers.id)
     }
 
     // MARK: - Laid out
@@ -863,7 +863,7 @@ struct PeopleTests {
     @Test("The head is laid out to its width and never past it: across a phone a handle too long for one line wraps and the head grows taller for it, and the figure's line is there only where the source said one — and the page itself, in each state it has, is built and laid out without a trap")
     func thePageLaidOut() {
         func head(_ list: PeopleList, _ width: CGFloat) -> CGSize {
-            let hosted = NSHostingView(rootView: PeopleHead(list: list).frame(width: width))
+            let hosted = NSHostingView(rootView: PeopleHead(said: PeopleSaid(list: list)).frame(width: width))
             hosted.layoutSubtreeIfNeeded()
             return hosted.fittingSize
         }

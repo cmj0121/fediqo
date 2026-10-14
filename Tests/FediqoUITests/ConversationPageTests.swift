@@ -238,7 +238,7 @@ struct ConversationPageTests {
             "if Self.headDrawn(over: standing, drawn: drawn) {",
             "page: Self.page(standing, drawn: drawn),",
             "if let root {\n                    conversationPage(root)\n                } else {\n                    underneath",
-            "let root = Self.drawnRoot(standing, in: session)\n        let drawn = Self.pageDrawn(standing, root: root)\n        VStack(alignment: .leading, spacing: 0) {",
+            "let shown = Self.drawn(standing, of: people, in: session)\n        let root = shown.root, listed = shown.list, drawn = shown.drawn\n        VStack(alignment: .leading, spacing: 0) {",
             // The names of the timelines are brought to the one in front as the head is drawn again.
             ".onAppear {\n                        guard let query = session.timelineID else { return }\n                        Task { @MainActor in proxy.scrollTo(query.id) }\n                    }",
             // Asked as it opens and let go as it is left, as it was.
@@ -266,7 +266,7 @@ struct ConversationPageTests {
         var walk = ShellWalk()
         _ = walk.walk(to: .person(DummyPerson(handle: "@ada@m.example", host: "m.example")!), from: "row-1")
         _ = walk.walk(to: .thread("post-9"), from: "row-7")
-        #expect(walk.tabKey == .sole && ShellStep.thread("post-9").tabKey == .sole)
+        #expect(walk.tabKey == .sole(.thread) && ShellStep.thread("post-9").tabKey == .sole(.thread))
         let before = walk
         // The key is the page's only while nothing is drawn over it — the one rule somebody's page has.
         #expect(FediqoRootView.pageInFront(.thread, open: [.thread, .selection]))
@@ -275,7 +275,7 @@ struct ConversationPageTests {
         #expect(!FediqoRootView.turnsPersonTabs(open: [.viewer, .person]))
         let root = try String(contentsOf: Self.sources().appending(path: "FediqoRootView.swift"), encoding: .utf8)
         for call in [
-            "switch key {\n        case .sole: return Self.pageInFront(.thread, open: openLayers)\n",
+            "if case .sole(let layer) = key, !pageInFront(layer, open: open) { return .covered }",
             "static func turnsPersonTabs(open: Set<DummyLayer>) -> Bool {\n        pageInFront(.person, open: open)",
         ] {
             #expect(root.components(separatedBy: call).count == 2, "the root has \(call) once")
@@ -301,24 +301,24 @@ struct ConversationPageTests {
         let held = DummyItem(note).id
         #expect(session.held(held) != nil)
         let here = ShellStep.thread(held), gone = ShellStep.thread("https://m.example/users/ada/statuses/withdrawn")
-        #expect(TimelinePane.pageDrawn(here, in: session) && !TimelinePane.pageDrawn(gone, in: session))
-        #expect(TimelinePane.pageDrawn(nil, in: session) && TimelinePane.pageDrawn(.rising(.tags), in: session))
+        func drawn(_ step: ShellStep?) -> TimelinePane.Drawn { TimelinePane.drawn(step, of: nil, in: session) }
+        #expect(drawn(here).drawn && !drawn(gone).drawn)
+        #expect(drawn(nil).drawn && drawn(.rising(.tags)).drawn)
         // Drawn: no head of the timelines, the page's own swipe, and the key the page's.
-        #expect(!TimelinePane.headDrawn(over: here, drawn: TimelinePane.pageDrawn(here, in: session)))
+        #expect(!TimelinePane.headDrawn(over: here, drawn: drawn(here).drawn))
         // Not drawn: the head, the swipe that goes back — and the key the timelines'.
-        let drawn = TimelinePane.pageDrawn(gone, in: session)
-        #expect(TimelinePane.headDrawn(over: gone, drawn: drawn) && TimelinePane.page(gone, drawn: drawn) == .opened)
-        #expect(gone.tabKey == .sole, "the step still answers; the root asks what is drawn before it listens")
+        let undrawn = drawn(gone).drawn
+        #expect(TimelinePane.headDrawn(over: gone, drawn: undrawn) && TimelinePane.page(gone, drawn: undrawn) == .opened)
+        #expect(gone.tabKey == .sole(.thread), "the step still answers; the root asks what is drawn before it listens")
         let root = try String(contentsOf: Self.sources().appending(path: "FediqoRootView.swift"), encoding: .utf8)
-        let asked = "if place == .timeline, let key = walk.tabKey, TimelinePane.pageDrawn(walk.standing, in: session) {\n            return rotateStepTab(key, by: step)\n        }\n        return switch place {\n        case .timeline: session.rotateTab(by: step)"
+        let asked = "if place == .timeline, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: TimelinePane.drawn(walk.standing, of: people, in: session).drawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }\n        return switch place {\n        case .timeline: session.rotateTab(by: step)"
         #expect(root.components(separatedBy: asked).count == 2, "the root asks what is drawn, and else turns the timelines")
         let pane = try String(contentsOf: Self.sources().appending(path: "Shell/TimelinePane.swift"), encoding: .utf8)
         // One look-up of the post, in one function: the pane's body and the root both go through it.
         #expect(pane.components(separatedBy: "session.held(").count == 2, "the pane looks a post up to draw it in one place")
-        #expect(pane.contains("static func drawnRoot(_ standing: ShellStep?, in session: ShellSession) -> DummyItem? {\n        if case .thread(let id) = standing { return session.held(id) }"))
-        #expect(pane.components(separatedBy: "drawnRoot(standing, in: session)").count == 3, "asked once in the body, and once for the root's Tab")
-        #expect(TimelinePane.drawnRoot(here, in: session)?.id == held && TimelinePane.drawnRoot(gone, in: session) == nil)
-        #expect(TimelinePane.drawnRoot(nil, in: session) == nil && TimelinePane.pageDrawn(nil, root: nil) && !TimelinePane.pageDrawn(gone, root: nil))
+        #expect(pane.contains("case .thread(let id):\n            let root = session.held(id)\n            return Drawn(root: root, drawn: root != nil)"))
+        #expect(pane.components(separatedBy: "Self.drawn(standing, of: people, in: session)").count == 2, "asked once in the body")
+        #expect(drawn(here).root?.id == held && drawn(gone).root == nil && drawn(nil).root == nil)
     }
 
     @Test("The keys guide says what Tab does on an opened page with no tabs, in each language; the bar's words are the ones every opened page has")

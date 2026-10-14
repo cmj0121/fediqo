@@ -329,7 +329,7 @@ struct OpenedPageTests {
         #expect(walk.tabKey == .person(Self.ada))
         // A conversation's page has no tabs: the key is taken there, and turns nothing.
         _ = walk.walk(to: .thread("post-1"), from: "post-1")
-        #expect(walk.tabKey == .sole)
+        #expect(walk.tabKey == .sole(.thread))
         _ = walk.walk(to: .person(Self.bob), from: "post-1")
         #expect(walk.tabKey == .person(Self.bob))
         let tag = try #require(PostTag("#swift"))
@@ -338,14 +338,13 @@ struct OpenedPageTests {
         for step in [
             ShellStep.link(URL(string: "https://example.org/")!), .rising(.tags), .rising(.links),
             .foundTags(FoundTags(source: "m.example", words: "swift")), .followedTags(FollowedTags(host: "m.example")),
-            .people(PeopleList(.followers, of: Person(source: Source(host: "m.example", kind: .mastodon), accountID: "42", handle: "@ada@m.example", name: "Ada"))),
         ] {
             #expect(step.tabKey == nil, "\(step)")
         }
         // The root asks the walk once, before any place's own tabs, and names no page there.
         let ui = try Self.sources()
         let root = try String(contentsOf: ui.appending(path: "FediqoRootView.swift"), encoding: .utf8)
-        let asked = "private func rotatePlaceTab(by step: Int) -> Bool {\n        if place == .timeline, let key = walk.tabKey, TimelinePane.pageDrawn(walk.standing, in: session) {\n            return rotateStepTab(key, by: step)\n        }\n        return switch place {"
+        let asked = "private func rotatePlaceTab(by step: Int) -> Bool {\n        if place == .timeline, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: TimelinePane.drawn(walk.standing, of: people, in: session).drawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }\n        return switch place {"
         #expect(root.components(separatedBy: asked).count == 2)
         // The frame and the figure draw, and learn no kind of source.
         for file in ["OpenedPage.swift", "PageBar.swift", "PageFigure.swift"] {

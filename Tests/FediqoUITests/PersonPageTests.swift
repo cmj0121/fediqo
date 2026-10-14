@@ -894,7 +894,7 @@ struct PersonPageTests {
         }
         let root = try String(contentsOf: ui.appending(path: "FediqoRootView.swift"), encoding: .utf8)
         for call in [
-            "if place == .timeline, let key = walk.tabKey, TimelinePane.pageDrawn(walk.standing, in: session) {\n            return rotateStepTab(key, by: step)\n        }",
+            "if place == .timeline, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: TimelinePane.drawn(walk.standing, of: people, in: session).drawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }",
             "case .person(let person):\n            guard Self.turnsPersonTabs(open: openLayers) else { return false }\n            return people.rotate(person, by: step, lamp: &selectedItemID, in: session)",
             "walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }",
             "people.followByKey(\n            place: place, open: openLayers, person: walk.openedPerson, tag: walk.openedTag, in: session",

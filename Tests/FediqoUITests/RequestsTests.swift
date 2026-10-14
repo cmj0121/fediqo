@@ -117,7 +117,7 @@ struct RequestsTests {
         let said = try #require(lists.said(of: Self.requests, in: session))
         #expect(said.people.map(\.accountID) == ["3", "4"] && said.stands.count == 2 && said.own)
         #expect(said.acts == [.acceptRequest, .refuseRequest] && said.accepts && said.dangerous == [.refuseRequest])
-        #expect(PeopleSaid.counts(Self.requests) == nil, "how many ask is said nowhere on the list")
+        #expect(PeopleSaid.counts(Self.requests) == nil, "the list itself counts nobody: how many ask is the account check's figure (`PeopleSaid.tally`)")
 
         // The row's `…`: refusing, which asks first and says what it does.
         var pressed: [PersonAct] = []

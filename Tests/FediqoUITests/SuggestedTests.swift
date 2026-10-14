@@ -500,7 +500,7 @@ struct SuggestedTests {
                 #expect(size(pane, width, scheme).width == width, "\(said.reading) at \(width)")
             }
             let long = PeopleList(suggestedAt: "a-rather-long-name-of-a-server.a-rather-long-instance-name.example")
-            #expect(size(PeopleHead(list: long), width, scheme).width == width)
+            #expect(size(PeopleHead(said: PeopleSaid(list: long)), width, scheme).width == width)
         }
         // A row with a menu is a row with its `…`: drawn, and laid out within the row.
         let probe = PersonRowProbe()

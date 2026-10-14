@@ -166,6 +166,9 @@ public final class MastodonSessions {
     @ObservationIgnored private var readers: [String: Reader] = [:]
     /// Moved when `readers` is, so a page drawn from `reader(host:)` is drawn again.
     private var readersLearnt = 0
+    /// How many account checks have answered at each host this run: what tells a figure of
+    /// `asking` said after something was answered from one said before it.
+    @ObservationIgnored private var askingChecks: [String: Int] = [:]
 
     /// Who is signed in at `host`, where its source has said — **through the sign-in held
     /// now**. Read off the sign-in itself, where it was written down with it (`signIn`, `name`),
@@ -197,6 +200,14 @@ public final class MastodonSessions {
         let host = raw.lowercased()
         guard let held = token(host: host), let reader = readers[host], held.accessToken == reader.accessToken else { return nil }
         return reader.asking
+    }
+
+    /// Which account check at `host` this run `asking` is the word of: one more each time the
+    /// check answers, so whoever saw a figure grow old by its own press knows when a newer one
+    /// has come.
+    func askingCheck(host raw: String) -> Int {
+        _ = readersLearnt
+        return askingChecks[raw.lowercased(), default: 0]
     }
 
     /// How many sign-ins are on their way at each host: a sign-in made and not yet kept is
@@ -1059,6 +1070,7 @@ public final class MastodonSessions {
         }
         if who.handle != handles[host] { handles[host] = who.handle }
         readers[host] = who.id.map { Reader(id: $0, handle: who.handle, accessToken: asked.accessToken, asking: who.asking) }
+        askingChecks[host, default: 0] += 1
         readersLearnt += 1
     }
 

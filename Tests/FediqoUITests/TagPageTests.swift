@@ -472,7 +472,7 @@ struct TagPageTests {
     @Test("With a hashtag in front the timelines' head is not drawn and the sideways swipe is the page's own: with two tabs it goes to the tab beside and on the first leaves, and with its posts alone it leaves; nothing on the page asks again from its bar")
     func theTimelinesHeadIsNotDrawn() throws {
         let step = ShellStep.tag(Self.swift)
-        #expect(!TimelinePane.headDrawn(over: step) && TimelinePane.pageDrawn(step, root: nil), "a hashtag's page can always be drawn")
+        #expect(!TimelinePane.headDrawn(over: step) && TimelinePane.drawn(step, of: nil, in: ShellSession(http: FixtureHTTP([:]), store: ItemStore())).drawn, "a hashtag's page can always be drawn")
         #expect(TimelinePane.page(step) == .tabbed)
         #expect(TimelineSwipe.means(touch: true, page: TimelinePane.page(step), searching: false, listShown: false, editing: false) == nil, "the timeline's swipe is not heard on it")
         let lines = [Self.line(.said(true))]

@@ -556,12 +556,12 @@ struct DirectoryTests {
             for said in states {
                 let pane = PeoplePane(said: said, selectedID: .constant(nil), onOpen: { _ in }, onBack: {})
                 #expect(size(pane, width, scheme).width == width, "\(said.reading) at \(width)")
-                let head = PeopleHead(list: said.list, sorting: said.sorting, chooses: said.choosesSorting)
+                let head = PeopleHead(said: said)
                 let drawn = size(head, width, scheme)
                 #expect(drawn.width == width && drawn.height > 0)
             }
             let long = PeopleList(directoryAt: "a-rather-long-name-of-a-server.a-rather-long-instance-name.example")
-            #expect(size(PeopleHead(list: long, sorting: DirectoryChoice(order: .new, localOnly: true)), width, scheme).width == width)
+            #expect(size(PeopleHead(said: PeopleSaid(list: long, sorting: DirectoryChoice(order: .new, localOnly: true))), width, scheme).width == width)
         }
     }
 }

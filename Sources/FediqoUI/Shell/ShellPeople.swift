@@ -290,6 +290,11 @@ final class ShellPeoplePages {
     static let stretchLength = 80
 
     private var pages: [String: Page] = [:]
+    /// The account check at each host whose count of who asks to follow the reader a request
+    /// answered here has made old (`MastodonSessions.askingCheck`). **Kept for the host, not
+    /// the page**: a page let go and made again does not bring the old figure back; the next
+    /// check does, with its own.
+    private var askingOld: [String: Int] = [:]
     @ObservationIgnored private var order = PageOrder()
     /// The one ask on the wire for each list — from the top, or a reading-on.
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
@@ -377,6 +382,13 @@ final class ShellPeoplePages {
         handed.acts = Self.rowActs(of: handed, at: source, in: session)
         handed.lock = Self.rowLock(of: handed, at: source, in: session)
         let page = self.standing(list, at: source, in: session)
+        // How many ask is the source's word only where the sign-in's account check said it: the
+        // figure the way to this list carried, said again over it, and never worked out from rows.
+        // **Only while it holds**: once a request is answered here it is old until the check
+        // runs again, and it is not counted down — the next check may already count the answer.
+        if list.which == .requests, askingOld[source.host] != session.mastodon.askingCheck(host: source.host) {
+            handed.tally = session.mastodon.asking(host: source.host)
+        }
         if list.isDirectory { handed.sorting = page.map { $0.wanted ?? $0.choice } ?? DirectoryChoice() }
         // The host's own word that it has no such address, as the run or this page heard it.
         if let thing = list.thing, page?.absent == true || hosts.has(thing, at: source.host) == .absent {
@@ -474,7 +486,10 @@ final class ShellPeoplePages {
               offered.people.contains(where: { $0.accountID == person.accountID })
         else { return }
         let done = await acts.pressRow(act, on: person, standing: page.stands[person.accountID], listed: list.which, in: session)
-        guard done, self.standing(list, at: source, in: session)?.number == page.number else { return }
+        guard done else { return }
+        // Answered: the count of who asks is old, whichever page now stands for the list.
+        if list.which == .requests { askingOld[source.host] = session.mastodon.askingCheck(host: source.host) }
+        guard self.standing(list, at: source, in: session)?.number == page.number else { return }
         pages[list.id]?.gone.insert(person.accountID)
     }
 

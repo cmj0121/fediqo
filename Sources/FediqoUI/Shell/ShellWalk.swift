@@ -60,19 +60,33 @@ enum StepTabKey: Hashable, Sendable {
     /// taken, turning nothing, where it has its posts alone.
     case tag(PostTag)
     /// A page with no tabs (F10): the key is taken and does nothing — to change timeline the
-    /// reader leaves first.
-    case sole
+    /// reader leaves first — while the page, drawn as `layer`, is what is in front.
+    case sole(DummyLayer)
 }
 
 extension ShellStep {
+    /// The layer this step is drawn as, among what is open (`DummyLayer`): the hashtags a
+    /// search found and those followed are drawn as rising's are.
+    var layer: DummyLayer {
+        switch self {
+        case .person: .person
+        case .tag: .tag
+        case .people: .people
+        case .rising, .foundTags, .followedTags: .rising
+        case .thread: .thread
+        case .link: .link
+        }
+    }
+
     /// What Tab turns with this step in front, or nothing where the step has no answer of
     /// its own and the key is the timelines'.
     var tabKey: StepTabKey? {
         switch self {
         case .person(let who): .person(who)
-        case .thread: .sole
+        case .thread: .sole(.thread)
+        case .people: .sole(.people)
         case .tag(let tag): .tag(tag)
-        case .link, .people, .rising, .foundTags, .followedTags: nil
+        case .link, .rising, .foundTags, .followedTags: nil
         }
     }
 }

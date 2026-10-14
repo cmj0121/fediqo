@@ -91,12 +91,22 @@ struct PeopleRows<Lead: View>: View {
                 ),
             press: Group {
                 if said.offersAgain {
-                    ShellLinkButton(L10n.t(said.reading == .absent ? "source.more.again" : "person.retry"), action: onAskAgain)
+                    let again = Self.again(said)
+                    ShellLinkButton(again.words, action: onAskAgain)
                         .disabled(said.asking)
                         .fixedSize()
+                        // Called by its words, as Voice Control hears them; whom it asks, told after.
+                        .accessibilityHint(again.hint)
                 }
             }
         )
+    }
+
+    /// The press that asks the list again beside a failure: its words as drawn, which are its
+    /// name to a listener and to Voice Control, and whom it asks, told after them.
+    static func again(_ said: PeopleSaid, language: DummyLanguage? = nil) -> (words: String, hint: String) {
+        (L10n.t(said.reading == .absent ? "source.more.again" : "person.retry", language: language),
+         PersonPage.reloadName(said.source, language: language))
     }
 
     /// One of them. A press lights the row, and a second on the row it is already on opens

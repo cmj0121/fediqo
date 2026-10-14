@@ -1584,35 +1584,49 @@ public struct FediqoRootView: View {
         return walk.openedPerson.map { people.canAskAgain($0, in: session) } ?? false
     }
 
+    /// What is open, as far as what is drawn goes: a step in front whose page cannot be drawn
+    /// (`TimelinePane.drawn`) is not, since the stream is drawn in its stead — so `r`, its mark
+    /// and a pull answer for the stream there, as Tab does (`stepTab`). For every page alike.
+    static func drawnLayers(_ open: Set<DummyLayer>, standing: ShellStep?, drawn: Bool) -> Set<DummyLayer> {
+        guard !drawn, let standing else { return open }
+        return open.subtracting([standing.layer])
+    }
+
+    /// `drawnLayers` of what is open now.
+    private var reloadLayers: Set<DummyLayer> {
+        Self.drawnLayers(openLayers, standing: walk.standing, drawn: TimelinePane.drawn(walk.standing, of: people, in: session).drawn)
+    }
+
     /// `r`: the open thread, or else the selected timeline — and only on what the reader can see,
     /// so not under the viewer, the keys list or the timeline editor. A second press while the
     /// same one runs is taken and does nothing (`ShellReload.press`); Esc is what stops it.
     private func reload() -> Bool {
         if place == .notices { return readNotices() }
+        let open = reloadLayers
         guard Self.canReload(
             place: place,
             editing: session.editing != nil,
             hasSources: !session.sources.isEmpty,
-            open: openLayers,
+            open: open,
             personAsked: personAsked
         ) else { return false }
         // On somebody's page `r` asks their source again: who they are, and their newest posts.
-        if DummyCommand.outermost(of: openLayers) == .person, let person = walk.openedPerson {
+        if DummyCommand.outermost(of: open) == .person, let person = walk.openedPerson {
             Task { await people.again(person, in: session) }
             return true
         }
         // On a list of people `r` asks the source for it again, from the top (#311).
-        if DummyCommand.outermost(of: openLayers) == .people, let list = walk.openedPeople {
+        if DummyCommand.outermost(of: open) == .people, let list = walk.openedPeople {
             Task { await people.lists.again(list, in: session) }
             return true
         }
         // On a page of what is rising `r` asks every source of it again (#320).
-        if DummyCommand.outermost(of: openLayers) == .rising, let which = walk.openedRising {
+        if DummyCommand.outermost(of: open) == .rising, let which = walk.openedRising {
             Task { await people.rising.again(which, in: session) }
             return true
         }
         // On the list of the hashtags followed `r` asks its source for it again, from the top (#318).
-        if DummyCommand.outermost(of: openLayers) == .rising, let page = walk.openedFollowedTags {
+        if DummyCommand.outermost(of: open) == .rising, let page = walk.openedFollowedTags {
             Task { await people.followed.again(page, in: session) }
             return true
         }
@@ -2250,8 +2264,12 @@ public struct FediqoRootView: View {
     /// reader leaves first. **Asked only of a page that is drawn**: a step that cannot be
     /// drawn draws the stream under the timelines' head, and there the key is the timelines'.
     private func rotatePlaceTab(by step: Int) -> Bool {
-        if place == .timeline, let key = walk.tabKey, TimelinePane.pageDrawn(walk.standing, in: session) {
-            return rotateStepTab(key, by: step)
+        if place == .timeline, let key = walk.tabKey {
+            switch Self.stepTab(key, drawn: TimelinePane.drawn(walk.standing, of: people, in: session).drawn, open: openLayers) {
+            case .page: return rotateStepTab(key, by: step)
+            case .covered: return false
+            case .timelines: break
+            }
         }
         return switch place {
         case .timeline: session.rotateTab(by: step)
@@ -2262,14 +2280,33 @@ public struct FediqoRootView: View {
         }
     }
 
+    /// Whose Tab is with a step in front, as the walk answered for it (`key`).
+    enum StepTab: Equatable, Sendable {
+        /// The page's: its tabs turned, or — on a page with none — taken, turning nothing.
+        case page
+        /// Nobody's: something is drawn over a page with no tabs.
+        case covered
+        /// The timelines': the step's page is not drawn, and the stream is, under their head.
+        case timelines
+    }
+
+    /// Whose Tab is with the step `key` answers for in front, drawn or not (`TimelinePane.drawn`),
+    /// under what is `open`. Somebody's page and a hashtag's say for themselves whether they
+    /// are covered (`rotateStepTab`).
+    static func stepTab(_ key: StepTabKey, drawn: Bool, open: Set<DummyLayer>) -> StepTab {
+        guard drawn else { return .timelines }
+        if case .sole(let layer) = key, !pageInFront(layer, open: open) { return .covered }
+        return .page
+    }
+
     /// Tab on the page in front, as the walk answered for it. With somebody's page the tabs
     /// are that page's, round their ring; under anything drawn over the page the key does nothing.
-    /// With a page that has no tabs the key is taken, and turns nothing — under the same
-    /// condition: the page is what is in front. A hashtag's page is either: its two tabs where
-    /// it has them, and taken all the same where it has its posts alone.
+    /// With a page that has no tabs the key is taken, and turns nothing (`stepTab` said it is
+    /// in front). A hashtag's page is either: its two tabs where it has them, and taken all
+    /// the same where it has its posts alone.
     private func rotateStepTab(_ key: StepTabKey, by step: Int) -> Bool {
         switch key {
-        case .sole: return Self.pageInFront(.thread, open: openLayers)
+        case .sole: return true
         case .tag(let tag):
             return people.tags.rotate(
                 tag, by: step, covered: !Self.pageInFront(.tag, open: openLayers), lamp: &selectedItemID, in: session
@@ -2467,7 +2504,7 @@ public struct FediqoRootView: View {
                         place: place,
                         editing: session.editing != nil,
                         hasSources: !session.sources.isEmpty,
-                        open: openLayers,
+                        open: reloadLayers,
                         personAsked: personAsked
                     ),
                     onReload: { _ = reload() }
