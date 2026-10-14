@@ -1518,14 +1518,21 @@ struct PullsToReload: ViewModifier {
     }
 
     /// One pull: nothing where a reload is not offered; else the press, and then the wait.
-    static func pull(offered: Bool, reload: () -> Void, settled: () async -> Void) async {
+    /// `sleep` is `Task.sleep` but for a test, which turns it by hand.
+    static func pull(
+        offered: Bool, reload: () -> Void, settled: () async -> Void,
+        sleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) async {
         guard offered else { return }
         reload()
         // The press starts its read on the next turn; the wait must not look before it has.
         await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
+        try? await sleep(Self.lead)
         await settled()
     }
+
+    /// How long a pull gives its press to have begun its read, before it waits for the read.
+    static let lead: Duration = .milliseconds(50)
 }
 
 /// The one asker for the menus of the rows a pane lists: it hands every row under it the way to

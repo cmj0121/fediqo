@@ -1387,17 +1387,27 @@ struct Deadline: HTTPClient, HTTPSender {
     private let get: (@Sendable (URL) async throws -> (Data, HTTPURLResponse))?
     private let sender: (any HTTPSender)?
     private let limit: Duration
+    /// What `limit` is waited on: `Task.sleep` but for a test, which turns it by hand.
+    private let sleep: @Sendable (Duration) async throws -> Void
 
-    init(_ inner: any HTTPClient, within limit: Duration) {
+    init(
+        _ inner: any HTTPClient, within limit: Duration,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) {
         get = { try await inner.data(from: $0) }
         sender = nil
         self.limit = limit
+        self.sleep = sleep
     }
 
-    init(_ inner: any HTTPSender, within limit: Duration) {
+    init(
+        _ inner: any HTTPSender, within limit: Duration,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) {
         get = nil
         sender = inner
         self.limit = limit
+        self.sleep = sleep
     }
 
     /// **Nothing leaves once the work asking has been stopped** (#221): a read that goes on to
@@ -1406,22 +1416,23 @@ struct Deadline: HTTPClient, HTTPSender {
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         try Task.checkCancellation()
         guard let get else { return try await send(URLRequest(url: url)) }
-        return try await Self.within(limit) { try await get(url) }
+        return try await Self.within(limit, sleep: sleep) { try await get(url) }
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         try Task.checkCancellation()
         guard let sender else { throw URLError(.unsupportedURL) }
-        return try await Self.within(limit) { try await sender.send(request) }
+        return try await Self.within(limit, sleep: sleep) { try await sender.send(request) }
     }
 
     private static func within<T: Sendable>(
-        _ limit: Duration, _ work: @escaping @Sendable () async throws -> T
+        _ limit: Duration, sleep: @escaping @Sendable (Duration) async throws -> Void,
+        _ work: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask { try await work() }
             group.addTask {
-                try await Task.sleep(for: limit)
+                try await sleep(limit)
                 throw URLError(.timedOut)
             }
             defer { group.cancelAll() }

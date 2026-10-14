@@ -95,6 +95,9 @@ final class ShellSession {
     /// reads, joins and writes this session starts are put on it while they run; the caches and
     /// sign-ins it holds carry their own, the same one in the app. A test hands in another.
     @ObservationIgnored var work: SourceWork = .shared
+    /// What this session's asks wait their deadlines on (`SourceReach.sleep`): `Task.sleep` but
+    /// for a test.
+    @ObservationIgnored var deadlineSleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     /// The line each source's loads wait in (#293): what items refer to, read without anybody
     /// asking, and so held to a pace per source. Letting a source go — removed, cleared, signed
     /// out — drops what waits in its line. A test hands in one with a clock it turns.

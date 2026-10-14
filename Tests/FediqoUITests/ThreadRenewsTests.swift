@@ -7,7 +7,7 @@ import Testing
 /// one wait while it stays open — landed in the store first, drawn from what the store holds,
 /// said at its own foot, and ended as the thread is left.
 @MainActor
-@Suite("An open thread renews itself")
+@Suite("An open thread renews itself", .watched)
 struct ThreadRenewsTests {
     init() {
         L10n.language = .english
@@ -224,15 +224,16 @@ struct ThreadRenewsTests {
         let window = ShellSession(http: other, store: store, posts: ForumPosts(http: other))
         await window.reloadFromStore()
         await window.conversations.open(item, in: window)
-        #expect(await spun { Self.bodies(session, item) == ["answer 10, edited", "answer 11"] },
-                "the new words, in the thread nobody read again here")
+        await met("the new words are drawn in the thread nobody read again here", by: following) {
+            Self.bodies(session, item) == ["answer 10, edited", "answer 11"]
+        }
 
         // And a read that heard its source say an answer is gone (#179).
         let gone = NoteKey(host: Self.host, id: "https://\(Self.host)/users/ada/statuses/11")
         await window.markGone(gone)
-        #expect(await spun {
+        await met("the answer is marked gone, in its place", by: following) {
             session.conversations.conversation(around: item).descendants.last?.item.goneSince != nil
-        }, "marked, in its place")
+        }
         #expect(Self.bodies(session, item) == ["answer 10, edited", "answer 11"], "and nothing moved")
     }
 
@@ -276,8 +277,10 @@ struct ThreadRenewsTests {
 
         // A renewal caught on the wire, and the thread left under it.
         await http.hold(Self.threadPath)
+        let guardTask = watching("the renewal, held on the wire") { await http.release() }
+        defer { guardTask.cancel() }
         let renewing = Task { await session.reload.renew(in: session) }
-        #expect(await spun { await Self.threadAsks(http) == 2 })
+        await met("the renewal has asked for the thread", by: renewing) { await Self.threadAsks(http) == 2 }
         #expect(!session.reload.running, "the toast is not the thread's")
         #expect(!session.reload.stop(), "Esc is not spent on a renewal nobody pressed for")
         await http.answer(Self.threadPath, with: Self.context([Self.status("14", answering: "9")]))
@@ -303,8 +306,10 @@ struct ThreadRenewsTests {
         let (session, item) = await conversationShell(http)
         await session.reload.opened(item, in: session)
         await http.hold("/api/v1/timelines/public")
+        let guardTask = watching("the timeline's reload, held on the wire") { await http.release() }
+        defer { guardTask.cancel() }
         let pressed = Task { await session.reload.timeline(.all, in: session) }
-        #expect(await spun { await http.parked })
+        await met("the timeline's reload is on the wire", by: pressed) { await http.parked }
         await session.reload.renew(in: session)
         #expect(await Self.threadAsks(http) == 1, "a forum is never asked twice at once, nor anything else")
         await http.release()
@@ -321,16 +326,18 @@ struct ThreadRenewsTests {
         let item = DummyItem(Self.root)
         await window.reload.opened(item, in: window)
 
-        // The other window's loop is running, and never reaches its wait.
+        // The other window's loop is running, and never reaches its wait: it sleeps on a clock
+        // nobody turns.
         let started = Counter()
+        let never = TurnedClock()
         let windowLoop = Task {
-            await window.reload.keepAsking(every: .seconds(60), in: window) { _ in
+            await window.reload.keepAsking(every: .seconds(60), in: window) {
                 started.count += 1
-                try await Task.sleep(for: .seconds(3_600))
+                try await never.sleep(for: $0)
             }
         }
         await oneWait(keeper) {
-            _ = await spun { started.count == 1 }
+            await met("the other window's loop is at its wait", by: windowLoop) { started.count == 1 }
         }
         #expect(await Self.threadAsks(http) == 2, "asked on the keeper's round, through its own window")
         windowLoop.cancel()
@@ -416,8 +423,10 @@ struct ThreadRenewsTests {
         let (session, topic) = await forumShell(http)
         await session.reload.opened(topic, in: session)
         await http.hold(Self.page(1))
+        let guardTask = watching("the renewal, held on the wire") { await http.release() }
+        defer { guardTask.cancel() }
         let renewing = Task { await session.reload.renew(in: session) }
-        #expect(await spun { await http.parked })
+        await met("the renewal is on the wire", by: renewing) { await http.parked }
         #expect(!session.stopReadingFurther(), "Esc is not spent on it")
         #expect(!session.posts.isHeldBack(Self.ref))
         await http.release()
@@ -431,13 +440,16 @@ struct ThreadRenewsTests {
         let (session, topic) = await forumShell(http)
         await session.reload.opened(topic, in: session)
         await http.hold(Self.page(1))
+        let guardTask = watching("the renewal, held on the wire") { await http.release() }
+        defer { guardTask.cancel() }
         let renewing = Task { await session.reload.renew(in: session) }
-        #expect(await spun { await http.parked })
+        await met("the renewal is on the wire", by: renewing) { await http.parked }
         session.reload.press(thread: topic, timeline: .all, in: session)
-        #expect(await spun { !session.reload.asking.contains(.renew) }, "the renewal ended as r began")
+        await met("the renewal has ended as r began", by: renewing) { !session.reload.asking.contains(.renew) }
         await http.release()
         await renewing.value
-        #expect(await spun { !session.reload.asking.contains(.thread) })
+        // No `by:`: `r`'s read is a task of the press's own making, which nothing here can name.
+        await met("r's own read of the thread has ended") { !session.reload.asking.contains(.thread) }
     }
 
     @Test("A failed renewal of a topic nobody answered says so at its foot, and so does a lone post's")
@@ -499,13 +511,16 @@ struct ThreadRenewsTests {
         ]))
 
         let started = Counter()
+        let never = TurnedClock()
         let secondLoop = Task {
-            await second.reload.keepAsking(every: .seconds(60), in: second) { _ in
+            await second.reload.keepAsking(every: .seconds(60), in: second) {
                 started.count += 1
-                try await Task.sleep(for: .seconds(3_600))
+                try await never.sleep(for: $0)
             }
         }
-        await oneWait(first) { _ = await spun { started.count == 1 } }
+        await oneWait(first) {
+            await met("the second window's loop is at its wait", by: secondLoop) { started.count == 1 }
+        }
         secondLoop.cancel()
         await secondLoop.value
         #expect(await Self.threadAsks(http) == 3, "one ask for the thread, not one per window")
@@ -522,13 +537,15 @@ struct ThreadRenewsTests {
         let (session, item) = await conversationShell(http)
         await session.reload.opened(item, in: session)
         await http.hold(Self.threadPath)
+        let guardTask = watching("the renewal, held on the wire") { await http.release() }
+        defer { guardTask.cancel() }
         let renewing = Task { await session.reload.renew(in: session) }
-        #expect(await spun { await http.parked })
+        await met("the renewal is on the wire", by: renewing) { await http.parked }
         await http.answer(Self.threadPath, with: Self.context([
             Self.status("10", answering: "9"), Self.status("11", answering: "9"), Self.status("16", answering: "9"),
         ]))
         let pressed = Task { await session.reload.thread(item, in: session) }
-        #expect(await spun { await Self.threadAsks(http) == 3 }, "r asks the thread itself")
+        await met("r has asked for the thread itself", by: pressed) { await Self.threadAsks(http) == 3 }
         await http.release()
         await renewing.value
         await pressed.value
@@ -545,8 +562,10 @@ struct ThreadRenewsTests {
         #expect(session.conversations.further(of: item.id) == .failed(.unreachable))
         await alone.answer(Self.threadPath, with: Self.context([]))
         await alone.hold(Self.threadPath)
+        let guardAlone = watching("the lone post's thread, held on the wire") { await alone.release() }
+        defer { guardAlone.cancel() }
         let pressed = Task { await session.conversations.press(item, in: session) }
-        #expect(await spun { await alone.parked })
+        await met("the press's ask is on the wire", by: pressed) { await alone.parked }
         #expect(session.conversations.further(of: item.id) == .coming)
         #expect(ThreadFoot.underNobody(session.conversations.further(of: item.id)!))
         await alone.release()
@@ -560,8 +579,10 @@ struct ThreadRenewsTests {
 
         // A plain wait: asked, and no foot says so — nothing flickers under the notice.
         await http.hold(Self.page(1))
+        let guardTask = watching("the topic's page, held on the wire") { await http.release() }
+        defer { guardTask.cancel() }
         let renewing = Task { await forum.reload.renew(in: forum) }
-        #expect(await spun { await Self.pageAsks(http) == 2 })
+        await met("the renewal has asked for the page", by: renewing) { await Self.pageAsks(http) == 2 }
         #expect(forum.posts.further(of: Self.ref).map(ThreadFoot.underNobody) != true)
         await http.release()
         await renewing.value
@@ -575,7 +596,7 @@ struct ThreadRenewsTests {
         await http.answer(Self.page(1), with: .text(Self.post(1, floor: 1)))
         await http.hold(Self.page(1))
         let retrying = Task { await forum.reload.renew(in: forum) }
-        #expect(await spun { await Self.pageAsks(http) == 4 })
+        await met("the renewal has asked for the page again", by: retrying) { await Self.pageAsks(http) == 4 }
         #expect(forum.posts.further(of: Self.ref) == .coming)
         #expect(ThreadFoot.underNobody(forum.posts.further(of: Self.ref)!))
         await http.release()

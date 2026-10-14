@@ -364,6 +364,8 @@ final class ForumPosts {
     /// Where each page read is shown while it is on the wire (#164) — as the opening post or as
     /// the replies, which only this knows. The app's own; a test hands in another.
     @ObservationIgnored var work: SourceWork = .shared
+    /// What a read's deadline is waited on (`SourceReach.sleep`): `Task.sleep` but for a test.
+    @ObservationIgnored var deadlineSleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
 
     init(http: any HTTPClient = ForumPosts.live, through forums: ForumSessions? = nil) {
         self.http = http
@@ -1010,7 +1012,7 @@ final class ForumPosts {
     /// `readTransport` rather than `transport`, because `transport(host:)` would *build* one for
     /// every host and this app does not start a web process for a host that never needed it.
     private func client(for host: String, part: Part, within limit: Duration?) -> DiscuzClient {
-        SourceReach(http: http, work: work, forums: forums)
+        SourceReach(http: http, work: work, forums: forums, sleep: deadlineSleep)
             .discuz(host, for: part == .opening ? .forumPost : .forumReplies, within: limit)
     }
 

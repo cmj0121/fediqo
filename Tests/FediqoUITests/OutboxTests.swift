@@ -112,7 +112,7 @@ private actor PostServer: HTTPSender {
 /// mid-request, the file read while it is, a second run over what the first left, the strip
 /// hosted at 600 and 320 points. What it cannot: the sheet sliding away, a process really
 /// killed, and VoiceOver walking the strip.
-@Suite("A post and an answer are shown first and sent after")
+@Suite("A post and an answer are shown first and sent after", .watched)
 @MainActor
 struct OutboxTests {
     init() {
@@ -210,6 +210,13 @@ struct OutboxTests {
         return (session, tokens)
     }
 
+    /// What `session`'s outbox has begun, as work a wait can be tied to: over when every send,
+    /// look, write and discard begun by now has ended, so a wait for something one of them was
+    /// to do gives up as soon as none of them is left to do it.
+    private func sending(_ session: ShellSession) -> Task<Void, Never> {
+        Task { await session.outbox.settled() }
+    }
+
     private func post(_ words: String, to host: String = host, in session: ShellSession) -> Bool {
         session.composeHost = host
         session.composeDraft = words
@@ -231,7 +238,7 @@ struct OutboxTests {
     @Test("The press returns with the text taken and the draft empty while the source has not answered: nothing is drawn as a post, a line says it is being sent, and no sheet or question is up")
     func thePressWaitsForNothing() async throws {
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer(holding: [0: gate])
         let (session, _) = try await run(server)
@@ -250,7 +257,7 @@ struct OutboxTests {
         #expect(heard == ["Sending your post to social.example…"])
         #expect(!session.raisesOverPages)
 
-        #expect(await spun { await server.posts.count == 1 })
+        await met("the post is at its source", by: sending(session)) { await server.posts.count == 1 }
         #expect(session.outbox.sendings.first?.standing == .onItsWay)
         #expect(session.notes.isEmpty, "no row is made up for a post its source has not named (#282)")
         #expect(presses(try #require(session.outbox.sendings.first), in: session).isEmpty, "nothing to press while it is out")
@@ -267,7 +274,7 @@ struct OutboxTests {
         let disk = Disk()
         defer { disk.remove() }
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer(holding: [0: gate])
         let saves = Saves()
@@ -275,7 +282,7 @@ struct OutboxTests {
         let whole = saves.whole
 
         #expect(post("persimmon-lantern words", in: session))
-        #expect(await spun { await server.posts.count == 1 })
+        await met("the post is at its source", by: sending(session)) { await server.posts.count == 1 }
 
         // The request is held at the source: this is the moment a crash would be.
         let held = try disk.texts()
@@ -433,15 +440,15 @@ struct OutboxTests {
         let disk = Disk()
         defer { disk.remove() }
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         // The first run: one on the wire and one behind it, and then it is gone without a word.
         let first = PostServer(holding: [0: gate])
         let (before, _) = try await run(first, disk: disk)
         #expect(post("was on the wire", in: before))
         #expect(post("was waiting its turn", in: before))
-        #expect(await spun { await first.posts.count == 1 })
-        #expect(await spun { (try? disk.texts().count) == 2 })
+        await met("the first post is at its source", by: sending(before)) { await first.posts.count == 1 }
+        await met("both texts are in the file", by: sending(before)) { (try? disk.texts().count) == 2 }
         #expect(try disk.texts().map(\.standing) == [.asked, .fresh])
         let asked = try #require(before.outbox.sendings.first?.id)
 
@@ -471,7 +478,8 @@ struct OutboxTests {
         let disk = Disk()
         defer { disk.remove() }
         let gate = Gate(), elsewhere = Gate()
-        let watchdog = hangGuard(gate), second = hangGuard(elsewhere)
+        let watchdog = watching(gate, "the first post, held at its source")
+        let second = watching(elsewhere, "the post to the other source, held there")
         defer { watchdog.cancel(); second.cancel() }
         // By turn: the first to the source is held and then fails; the other source's is held too.
         let server = PostServer([.http(422)], holding: [0: gate], elsewhere: elsewhere)
@@ -481,15 +489,15 @@ struct OutboxTests {
         #expect(post("second", in: session))
         #expect(post("elsewhere", to: Self.other, in: session))
         #expect(session.composeDraft.isEmpty)
-        #expect(await spun { await server.posts.count == 2 })
+        await met("one post is at each source", by: sending(session)) { await server.posts.count == 2 }
 
         #expect(Set(await server.posts.map { $0.url?.host }) == [Self.host, Self.other], "one on the wire a source")
         #expect(session.outbox.sendings.map(\.standing) == [.onItsWay, .waiting, .onItsWay])
-        #expect(await spun { (try? disk.texts().count) == 3 })
+        await met("all three texts are in the file", by: sending(session)) { (try? disk.texts().count) == 3 }
         #expect(try disk.texts().map(\.text) == ["first", "second", "elsewhere"], "the one that waits is written too")
 
         await gate.open()
-        #expect(await spun { await server.posts.count == 3 })
+        await met("the second post is at its source", by: sending(session)) { await server.posts.count == 3 }
         await elsewhere.open()
         await session.outbox.settled()
         #expect(await server.texts.filter { $0 != "elsewhere" } == ["first", "second"], "in the order written")
@@ -503,14 +511,14 @@ struct OutboxTests {
     @Test("A text is sent only as who wrote it: with somebody else signed in at its source it waits, naming both, with nothing to press but Copy and Discard — and the writer signed in again, under whatever sign-in, sends it under the key it had")
     func onlyAsWhoWroteIt() async throws {
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer(holding: [0: gate])
         let (session, tokens) = try await run(server)
 
         #expect(post("first", in: session))
         #expect(post("written as me", in: session))
-        #expect(await spun { await server.posts.count == 1 })
+        await met("the first post is at its source", by: sending(session)) { await server.posts.count == 1 }
         // Somebody else signs in at the same source while the second waits its turn.
         try tokens.save(Self.token(Self.host, "tok-2"))
         session.mastodon.refresh()
@@ -689,7 +697,7 @@ struct OutboxTests {
     @Test("An answer is taken at the press — its draft, its reach and the sheet go — said as being sent to whom it answers, and laid into the conversation when it lands")
     func anAnswerIsTaken() async throws {
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer(holding: [0: gate])
         let (session, _) = try await run(server, holding: [Self.root()])
@@ -744,7 +752,7 @@ struct OutboxTests {
     @Test("An answer that waited behind another, and whose post was marked gone before its turn, is not sent")
     func goneBeforeItsTurn() async throws {
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer(holding: [0: gate])
         let (session, _) = try await run(server, holding: [Self.root()])
@@ -754,7 +762,9 @@ struct OutboxTests {
         let target = try #require(session.answering)
         session.answerDrafts[target.id] = "@ada behind"
         #expect(session.send(answer: target))
-        #expect(await spun { await server.posts.count == 1 })
+        await met("the post ahead of the answer is at its source", by: sending(session)) {
+            await server.posts.count == 1
+        }
 
         await session.markGone(Self.root().key, at: Date(timeIntervalSince1970: 1_700_000_100))
         await gate.open()
@@ -847,7 +857,7 @@ struct OutboxTests {
     @Test("A text too long for its source, or one that is out, is not sent from its sheet")
     func notSentFromTheSheet() async throws {
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer([.error(.notConnectedToInternet)], holding: [1: gate])
         let (session, _) = try await run(server)
@@ -861,7 +871,7 @@ struct OutboxTests {
         #expect(session.editingUnsent != nil, "the sheet stays")
         session.outbox.write(id, text: "short")
         #expect(session.send(unsent: id))
-        #expect(await spun { await server.posts.count == 2 })
+        await met("the text is at its source again", by: sending(session)) { await server.posts.count == 2 }
         #expect(!session.outbox.edit(id, in: session), "nothing opens on a text that is out")
         #expect(!session.send(unsent: id))
         await gate.open()
@@ -895,13 +905,14 @@ struct OutboxTests {
 
         // The write that takes it off the disk, held: until it returns the line still stands.
         let write = Gate()
-        let guardWrite = hangGuard(write)
+        let guardWrite = watching(write, "the write that takes the text off the disk, held")
         defer { guardWrite.cancel() }
         let texts = session.persistUnsent
-        session.persistUnsent = { await write.wait(); return await texts?() ?? false }
+        var writing = false
+        session.persistUnsent = { writing = true; await write.wait(); return await texts?() ?? false }
         session.discardingUnsent = nil
         session.outbox.discardSoon(entry.id, in: session)
-        for _ in 0..<50 { await Task.yield() }
+        await met("the discard has begun its write", by: sending(session)) { writing }
         #expect(session.outbox.sendings.count == 1, "not said gone while the file still holds its words")
         #expect(try disk.holds("quince-harbour"))
 
@@ -1156,7 +1167,7 @@ struct OutboxTests {
         let server = PostServer()
         let (session, tokens) = try await run(server)
         let write = Gate()
-        let watchdog = hangGuard(write)
+        let watchdog = watching(write, "the write of the text as asked, held")
         defer { watchdog.cancel() }
         var writes = 0
         // The first write is the text as taken; the second is it as asked, held here.
@@ -1166,7 +1177,7 @@ struct OutboxTests {
             return true
         }
         #expect(post("pressed as me", in: session))
-        #expect(await spun { writes == 2 })
+        await met("the text is being written down as asked", by: sending(session)) { writes == 2 }
         try tokens.save(Self.token(Self.host, "tok-2"))
         session.mastodon.refresh()
         await session.mastodon.learnWho(host: Self.host)
@@ -1185,12 +1196,12 @@ struct OutboxTests {
         let disk = Disk()
         defer { disk.remove() }
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer([.error(.timedOut), .error(.notConnectedToInternet)], holding: [0: gate])
         let (session, _) = try await run(server, hosts: [Self.host, Self.other], disk: disk)
         #expect(post("on the wire as its source goes", in: session))
-        #expect(await spun { await server.posts.count == 1 })
+        await met("the post is at its source", by: sending(session)) { await server.posts.count == 1 }
 
         await session.remove(host: Self.host)
         #expect(session.outbox.sendings.isEmpty)
@@ -1207,11 +1218,12 @@ struct OutboxTests {
         await other.outbox.settled()
         let id = try #require(other.outbox.sendings.first?.id)
         let write = Gate()
-        let second = hangGuard(write)
+        let second = watching(write, "the write that takes the text off the disk, held")
         defer { second.cancel() }
-        other.persistUnsent = { await write.wait(); return true }
+        var writing = false
+        other.persistUnsent = { writing = true; await write.wait(); return true }
         other.outbox.discardSoon(id, in: other)
-        for _ in 0..<50 { await Task.yield() }
+        await met("the discard has begun its write", by: sending(other)) { writing }
         #expect(!other.outbox.again(id, in: other))
         #expect(!other.outbox.edit(id, in: other))
         await write.open()
@@ -1408,7 +1420,7 @@ struct OutboxTests {
         let server = PostServer()
         let (session, _) = try await run(server, hosts: [Self.host, Self.other], disk: disk)
         let hold = Gate()
-        let watchdog = hangGuard(hold)
+        let watchdog = watching(hold, "the text's own write, held before it reaches the store")
         defer { watchdog.cancel() }
         session.outbox.holding = { await hold.wait() }
         // What the store held of the texts at each write made after Remove said it was done.
@@ -1421,7 +1433,9 @@ struct OutboxTests {
         }
         #expect(post("yarrow-field, held before its write", in: session))
         // Its send has taken the write to wait on: Remove finds none to wait for.
-        #expect(await spun { session.outbox.sendings.first?.standing == .onItsWay })
+        await met("the text's send has taken its write to wait on", by: sending(session)) {
+            session.outbox.sendings.first?.standing == .onItsWay
+        }
 
         await session.remove(host: Self.host)
         done = true
@@ -1500,7 +1514,7 @@ struct OutboxTests {
     @Test("A sign-in replaced while a text is looked for among its writer's posts — the same account under another sign-in — takes in nothing the look read: the text stays as it was, and the person is asked before anything is sent")
     func replacedDuringTheLook() async throws {
         let look = Gate()
-        let watchdog = hangGuard(look)
+        let watchdog = watching(look, "the look among the writer's own posts, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer([.error(.timedOut)], own: ["[\(Self.status("did this go"))]"], looking: look)
         let (session, tokens) = try await run(server)
@@ -1510,7 +1524,7 @@ struct OutboxTests {
         let revision = await session.store.revision
 
         #expect(session.outbox.again(entry.id, in: session))
-        #expect(await spun { await server.looks == 1 })
+        await met("the text is looked for among its writer's posts", by: sending(session)) { await server.looks == 1 }
         try tokens.save(Self.token(Self.host, "tok-3", knownAs: "1"))
         session.mastodon.refresh()
         #expect(session.outbox.hold(entry, in: session) == nil, "the premise: the writer still, by the id")
@@ -1560,7 +1574,9 @@ struct OutboxTests {
         await first.outbox.discard(drawn.id, in: first)
 
         #expect(first.outbox.sendings.isEmpty)
-        #expect(await spun { second.outbox.sendings.isEmpty }, "the second window still offers a text the first discarded")
+        await met("the second window has let go of the text the first discarded", by: following) {
+            second.outbox.sendings.isEmpty
+        }
         #expect(try disk.texts().isEmpty)
         #expect(await server.posts.count == 1)
     }
@@ -1568,7 +1584,7 @@ struct OutboxTests {
     @Test("A text that lands through one window is drawn as on its way in the other while it is out, with nothing to press, and is gone from both when it lands")
     func landedInOneWindowIsGoneInTheOther() async throws {
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer([.error(.notConnectedToInternet), .yes], holding: [1: gate])
         let (first, _) = try await run(server)
@@ -1581,24 +1597,30 @@ struct OutboxTests {
         #expect(second.outbox.sendings.first?.standing == .failed(.unreachable))
 
         #expect(first.outbox.again(id, in: first))
-        #expect(await spun { await server.posts.count == 2 })
+        await met("the text is at its source again", by: sending(first)) { await server.posts.count == 2 }
         // The request is held at the source: the other window says so, and offers nothing.
-        #expect(await spun { second.outbox.sendings.first?.standing == .onItsWay })
+        await met("the second window draws the text as on its way", by: following) {
+            second.outbox.sendings.first?.standing == .onItsWay
+        }
         #expect(presses(try #require(second.outbox.sendings.first), in: second).isEmpty)
         #expect(!second.outbox.again(id, in: second) && !second.outbox.edit(id, in: second))
 
         await gate.open()
         await first.outbox.settled()
         #expect(first.outbox.sendings.isEmpty)
-        #expect(await spun { second.outbox.sendings.isEmpty }, "the second window still holds a text that landed")
-        #expect(await spun { second.notes.map(\.body) == ["hello twice"] })
+        await met("the second window has let go of the text that landed", by: following) {
+            second.outbox.sendings.isEmpty
+        }
+        await met("the second window draws the post that landed", by: following) {
+            second.notes.map(\.body) == ["hello twice"]
+        }
         #expect(await server.posts.count == 2)
     }
 
     @Test("Send again pressed in two windows, the second while the first's request is on the wire and before it has heard: one request leaves, and the second draws the text as on its way")
     func sendAgainInTwoWindowsSendsOnce() async throws {
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer([.error(.notConnectedToInternet), .yes], holding: [1: gate])
         let (first, _) = try await run(server)
@@ -1608,7 +1630,7 @@ struct OutboxTests {
         let id = try #require(second.outbox.sendings.first?.id)
 
         #expect(first.outbox.again(id, in: first))
-        #expect(await spun { await server.posts.count == 2 })
+        await met("the text is at its source again", by: sending(first)) { await server.posts.count == 2 }
         // Held at the source, and the second window has not looked at the store since: its
         // line still says it was not sent, with Send again live.
         #expect(second.outbox.sendings.first?.standing == .failed(.unreachable))
@@ -1631,7 +1653,7 @@ struct OutboxTests {
     @Test("A text that may have been posted, sent again from two windows at once — each looked, neither found it, and the first's request is on the wire: the store gives the sending to one, and the other sends nothing")
     func theStoreGivesTheSendingToOne() async throws {
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer([.http(500), .yes, .yes], holding: [1: gate], own: ["[]", "[]"])
         let (first, _) = try await run(server)
@@ -1642,7 +1664,7 @@ struct OutboxTests {
         #expect(second.outbox.sendings.first?.standing == .unconfirmed && second.outbox.mayHaveBeenPosted(id))
 
         #expect(first.outbox.again(id, in: first))
-        #expect(await spun { await server.posts.count == 2 })
+        await met("the text is at its source again", by: sending(first)) { await server.posts.count == 2 }
         // Held at the source. What the store holds of the text is what the second window
         // already has — asked, as it was — so nothing but who is sending it says it is out.
         #expect(await first.store.unsentHeld() == [try #require(second.outbox.sendings.first?.unsent)])
@@ -1717,7 +1739,7 @@ struct OutboxTests {
     @Test("Discard in a window that has not heard another is sending the text: nothing is discarded under the request, and the line is drawn as on its way")
     func aTextBeingSentElsewhereIsNotDiscarded() async throws {
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer([.error(.notConnectedToInternet), .yes], holding: [1: gate])
         let (first, _) = try await run(server)
@@ -1727,7 +1749,7 @@ struct OutboxTests {
         let id = try #require(second.outbox.sendings.first?.id)
 
         #expect(first.outbox.again(id, in: first))
-        #expect(await spun { await server.posts.count == 2 })
+        await met("the text is at its source again", by: sending(first)) { await server.posts.count == 2 }
         await second.outbox.discard(id, in: second)
 
         #expect(await first.store.unsentHeld().map(\.id) == [id], "discarded while its request was on the wire")
@@ -1742,7 +1764,7 @@ struct OutboxTests {
     @Test("A sheet open on a text in one window closes when another window starts sending it, and what was typed there is in the sheet again where the text comes back as not sent")
     func aSheetOnATextSentElsewhereCloses() async throws {
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer([.error(.notConnectedToInternet), .http(422)], holding: [1: gate])
         let (first, _) = try await run(server)
@@ -1755,7 +1777,7 @@ struct OutboxTests {
         #expect(second.editingUnsent?.id == id)
 
         #expect(first.outbox.again(id, in: first))
-        #expect(await spun { await server.posts.count == 2 })
+        await met("the text is at its source again", by: sending(first)) { await server.posts.count == 2 }
         await second.reloadFromStore()
 
         #expect(second.editingUnsent == nil, "a sheet whose Send can send nothing stays up")
@@ -1847,7 +1869,7 @@ struct OutboxTests {
 
     private func hosted(
         _ session: ShellSession, width: CGFloat, layout: ShellLayout, type: DynamicTypeSize = .large, corner: CGSize = .zero
-    ) -> SaidProbe {
+    ) async -> SaidProbe {
         let probe = SaidProbe()
         let view = NSHostingView(
             rootView: Page(session: session)
@@ -1857,10 +1879,19 @@ struct OutboxTests {
                 .dynamicTypeSize(type)
         )
         view.frame = NSRect(x: 0, y: 0, width: width, height: 700)
-        for _ in 0..<3 {
+        // Laid out and the run loop turned, until the strip has said where it drew itself and a
+        // turn more moves nothing in it. No `by:`: the run loop is turned here, by the check.
+        func turned() -> [SaidProbe.Part: CGRect] {
             view.layoutSubtreeIfNeeded()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            RunLoop.main.run(mode: .default, before: .distantPast)
             view.layoutSubtreeIfNeeded()
+            return probe.frames
+        }
+        var last = turned()
+        await met("the strip is drawn, and a turn more moves nothing in it") {
+            let now = turned()
+            defer { last = now }
+            return !now.isEmpty && now == last
         }
         return probe
     }
@@ -1890,13 +1921,13 @@ struct OutboxTests {
           arguments: [ShellLayout.wide, .narrow])
     func drawnInTheStrip(_ layout: ShellLayout) async throws {
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the post, held at its source")
         defer { watchdog.cancel() }
         let server = PostServer(holding: [0: gate])
         let (sending, _) = try await run(server)
         #expect(post("on its way", in: sending))
         let width: CGFloat = layout == .wide ? 600 : 320
-        let out = hosted(sending, width: width, layout: layout)
+        let out = await hosted(sending, width: width, layout: layout)
         let outName = StripLine.id(try #require(sending.outbox.sendings.first?.id))
         #expect(out.frames[.line(outName)] != nil && out.frames[.words(outName)] != nil)
         #expect(OutboxWords.Press.allCases.allSatisfy { out.frames[.press(outName, $0)] == nil })
@@ -1905,7 +1936,7 @@ struct OutboxTests {
         await sending.outbox.settled()
 
         let (session, entry) = try await failedOnce()
-        let probe = hosted(session, width: width, layout: layout)
+        let probe = await hosted(session, width: width, layout: layout)
         let name = StripLine.id(entry.id)
         let line = try #require(probe.frames[.line(name)])
         for press in [OutboxWords.Press.again, .edit, .discard] {
@@ -1927,7 +1958,7 @@ struct OutboxTests {
         let width: CGFloat = 320
         let corner = FediqoRootView.composeCorner(canCompose: true)
         let (session, entry) = try await failedOnce(host: "a-rather-long-instance-name.example")
-        let probe = hosted(session, width: width, layout: .narrow, type: type, corner: corner)
+        let probe = await hosted(session, width: width, layout: .narrow, type: type, corner: corner)
         let name = StripLine.id(entry.id)
 
         let edge = width - corner.width
