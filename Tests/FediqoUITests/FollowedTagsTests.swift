@@ -683,7 +683,9 @@ struct FollowedTagsTests {
         #expect(walk.openedFollowedTags == Self.page)
         #expect(!walk.open(Self.page, lamp: &lamp), "a step onto the list in front is no step")
         #expect(walk.depth == 1)
-        #expect(TimelinePane.page(walk.standing) == .opened)
+        // A page of its own (F10): its sideways is the frame's where it is drawn, and goes back
+        // over the stream drawn where it cannot be.
+        #expect(TimelinePane.page(walk.standing) == .tabbed && TimelinePane.page(walk.standing, drawn: false) == .opened)
         let named: String = "followed:" + Self.page.id
         #expect(TimelinePane.openedID(walk.standing) == named)
         #expect(walk.followedTags == [Self.page])

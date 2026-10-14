@@ -95,10 +95,11 @@ extension ShellStep {
         case .person(let who): .person(who)
         case .thread: .sole(.thread)
         case .people: .sole(.people)
+        case .followedTags: .sole(.rising)
         case .tag(let tag): .tag(tag)
         case .rising(let which): .rising(which)
         case .found(let at, let which): .found(at, which)
-        case .link, .followedTags: nil
+        case .link: nil
         }
     }
 

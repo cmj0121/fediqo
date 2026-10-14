@@ -152,9 +152,9 @@ struct TimelinePane: View {
         let shown = Self.drawn(standing, of: people, in: session)
         let root = shown.root, listed = shown.list, drawn = shown.drawn
         VStack(alignment: .leading, spacing: 0) {
-            // **Somebody's page is a page of its own** (F9), **and a conversation's, a
-            // hashtag's and a list of people's** (F10): each takes the pane's whole height, and
-            // the timelines' names, the search and the reload are not drawn over it.
+            // **Somebody's page is a page of its own** (F9), **and every page opened over the
+            // stream** (F10): each takes the pane's whole height, and the timelines' names, the
+            // search and the reload are not drawn over it.
             if Self.headDrawn(over: standing, drawn: drawn) {
                 header
                     .padding(.horizontal, ShellSpace.pad)
@@ -203,23 +203,8 @@ struct TimelinePane: View {
             case .followedTags(let page):
                 // No such list to draw — the sign-in ended, or sees who is followed no longer,
                 // or its source was removed — draws the stream instead.
-                if let followed = people?.followed, let said = followed.said(of: page, in: session) {
-                    FollowedTagsPane(
-                        said: said,
-                        selectedID: $selectedID,
-                        onOpen: onOpenRisingRow,
-                        onAskAgain: { Task { await followed.again(page, in: session) } },
-                        onReadOn: { Task { await followed.readOn(page, in: session) } },
-                        onAct: { row in Task { await followed.press(row.id, on: page, in: session) } },
-                        onAsk: { session.askFor([.follows], host: page.host) },
-                        jumpToTop: jumpToTop,
-                        onBack: onBack
-                    )
-                    .id(page.id)
-                    // **The ask is the page opening**, once a list a run: its first stretch, as
-                    // the reader. And who asks is part of which opening it is. Nothing reads on
-                    // unpressed.
-                    .task(id: followed.opening(page, in: session)) { await followed.opened(page, in: session) }
+                if let followed = people?.followed, let said = shown.followed {
+                    followedPage(page, said: said, in: followed)
                 } else {
                     underneath
                 }
@@ -463,9 +448,8 @@ struct TimelinePane: View {
         // A conversation's page is the frame's, and its sideways the frame's (F10) — where it
         // is drawn; over the stream drawn in its stead the swipe goes back, as it did.
         // So is a list of people's (F10), where it is drawn, and what is rising's.
-        // And what a search found at a source.
-        case .thread, .people, .rising, .found: drawn ? .tabbed : .opened
-        case .followedTags: .opened
+        // And what a search found at a source, and the hashtags followed.
+        case .thread, .people, .rising, .found, .followedTags: drawn ? .tabbed : .opened
         case .link: .link
         case nil: .timeline
         }
@@ -473,14 +457,14 @@ struct TimelinePane: View {
 
     /// Whether the timelines' head — their names, the search, the reload — is drawn over what
     /// the reader stands on: not over somebody's page, a conversation's, a hashtag's, a list
-    /// of people's, what is rising nor what a search found, each a page of its own. **Asked of
-    /// what is drawn, not of the step alone** (F10 §1): any of those that cannot be drawn
-    /// (`drawn` false) draws the stream, and the head is over that.
+    /// of people's, what is rising, what a search found nor the hashtags followed, each a page
+    /// of its own. **Asked of what is drawn, not of the step alone** (F10 §1): any of those
+    /// that cannot be drawn (`drawn` false) draws the stream, and the head is over that.
     static func headDrawn(over standing: ShellStep?, drawn: Bool = true) -> Bool {
         switch standing {
         case .person, .tag: false
-        case .thread, .people, .rising, .found: !drawn
-        case .followedTags, .link, nil: true
+        case .thread, .people, .rising, .found, .followedTags: !drawn
+        case .link, nil: true
         }
     }
 
@@ -499,6 +483,8 @@ struct TimelinePane: View {
         var rising: RisingSaid?
         /// What the tab of what a search found in front is handed, where any tab is left.
         var found: FoundSaid?
+        /// What the list of the hashtags followed is handed, where the sign-in still sees it.
+        var followed: FollowedTagsSaid?
         var drawn: Bool
     }
 
@@ -516,7 +502,10 @@ struct TimelinePane: View {
         case .found(let at, let which):
             let said = people?.found.drawn(at, at: which, in: session)
             return Drawn(found: said, drawn: said != nil)
-        case .person, .tag, .followedTags, .link, nil:
+        case .followedTags(let page):
+            let said = people?.followed.said(of: page, in: session)
+            return Drawn(followed: said, drawn: said != nil)
+        case .person, .tag, .link, nil:
             return Drawn(drawn: true)
         }
     }
@@ -796,6 +785,32 @@ struct TimelinePane: View {
         .onChange(of: which != standing, initial: true) { _, fell in
             if fell { onTurnFound(which) }
         }
+    }
+
+    /// The hashtags followed (F10): the whole height of the pane, in the frame every opened page
+    /// stands in, with no tabs, handed what its source listed. Its bar's mark is where `r` asks
+    /// the list again from the top; **never Stop**, as on what is rising.
+    private func followedPage(_ page: FollowedTags, said: FollowedTagsSaid, in followed: ShellFollowedTags) -> some View {
+        FollowedTagsPane(
+            said: said,
+            selectedID: $selectedID,
+            slide: session.slide("followed"),
+            reload: FollowedTagsPane.reloadName(of: said, canReload: ways.canReload),
+            onOpen: onOpenRisingRow,
+            onAskAgain: { Task { await followed.again(page, in: session) } },
+            onReload: ways.onReload,
+            // Pulled down, the list is asked from the top as `r` asks it.
+            onPull: { await followed.again(page, in: session) },
+            onReadOn: { Task { await followed.readOn(page, in: session) } },
+            onAct: { row in Task { await followed.press(row.id, on: page, in: session) } },
+            onAsk: { session.askFor([.follows], host: page.host) },
+            jumpToTop: jumpToTop,
+            onBack: onBack
+        )
+        .id(page.id)
+        // **The ask is the page opening**, once a list a run: its first stretch, as the reader.
+        // And who asks is part of which opening it is. Nothing reads on unpressed.
+        .task(id: followed.opening(page, in: session)) { await followed.opened(page, in: session) }
     }
 
     /// A hashtag's page (F10): the whole height of the pane, in the frame every opened page

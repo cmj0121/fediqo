@@ -340,11 +340,10 @@ struct OpenedPageTests {
         // And so does what a search found (F10).
         let found = FoundAt(source: "m.example", words: "swift", gave: FoundWhich.allCases)
         #expect(ShellStep.found(found, .tags).tabKey == .found(found, .tags))
-        for step in [
-            ShellStep.link(URL(string: "https://example.org/")!), .followedTags(FollowedTags(host: "m.example")),
-        ] {
-            #expect(step.tabKey == nil, "\(step)")
-        }
+        // The hashtags followed have no tabs: the key is taken there, as on a conversation (F10).
+        #expect(ShellStep.followedTags(FollowedTags(host: "m.example")).tabKey == .sole(.rising))
+        // A page read out of a post is no page of its own here: it has no answer.
+        #expect(ShellStep.link(URL(string: "https://example.org/")!).tabKey == nil)
         // The root asks the walk once, before any place's own tabs, and names no page there.
         let ui = try Self.sources()
         let root = try String(contentsOf: ui.appending(path: "FediqoRootView.swift"), encoding: .utf8)

@@ -848,16 +848,23 @@ struct PersonPageTests {
         #expect(PersonActing.marks(of: standing, language: .taiwanese).map(\.words) == PersonActing.marks(of: standing, language: .taiwanese).map(\.words).filter { !$0.isEmpty })
     }
 
-    @Test("The page takes the whole place: the timelines' head is not drawn over it and is over every other step; its sideways is its own — the tab beside, and on the first tab the swipe back leaves the page, as it leaves a page with one tab; a page that is a place is left by no swipe")
+    @Test("The page takes the whole place: the timelines' head is not drawn over it, nor over any page opened over the stream — only over the stream and a step that cannot be drawn; its sideways is its own — the tab beside, and on the first tab the swipe back leaves the page, as it leaves a page with one tab; a page that is a place is left by no swipe")
     func thePageAndItsSwipe() {
         #expect(!TimelinePane.headDrawn(over: .person(Self.ada)))
-        // What is rising and what a search found are pages of their own now (F10): a step still
-        // under the head stands in for them.
-        let found = ShellStep.followedTags(FollowedTags(host: "m.example"))
-        for step in [nil, found, .link(URL(string: "https://example.org")!)] as [ShellStep?] {
+        // Every other step is a page of its own now (F10): the head is over the stream alone, and
+        // over a step that cannot be drawn, which draws the stream — left by the swipe as before.
+        for step in [nil, .link(URL(string: "https://example.org")!)] as [ShellStep?] {
             #expect(TimelinePane.headDrawn(over: step), "\(String(describing: step))")
         }
-        #expect(TimelinePane.page(.person(Self.ada)) == .tabbed && TimelinePane.page(found) == .opened)
+        let found = FoundAt(source: "m.example", words: "swift", gave: FoundWhich.allCases)
+        for step in [
+            ShellStep.thread("post"), .people(PeopleList(directoryAt: "m.example")), .rising(.tags), .found(found, .tags),
+            .followedTags(FollowedTags(host: "m.example")),
+        ] {
+            #expect(!TimelinePane.headDrawn(over: step) && TimelinePane.headDrawn(over: step, drawn: false), "\(step)")
+            #expect(TimelinePane.page(step) == .tabbed && TimelinePane.page(step, drawn: false) == .opened, "\(step)")
+        }
+        #expect(TimelinePane.page(.person(Self.ada)) == .tabbed)
         #expect(TimelineSwipe.means(touch: true, page: .tabbed, searching: false, listShown: false, editing: false) == nil, "the timeline's swipe is not heard on it")
         #expect(TimelinePane.openedID(.person(Self.ada)) == "person:" + Self.ada.id)
 
