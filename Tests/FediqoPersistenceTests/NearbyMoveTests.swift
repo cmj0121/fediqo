@@ -662,6 +662,8 @@ struct NearbyMoveTests {
         link.cut()
         await sender.stop()
         await held.until("back to the code", { _ in held.events.filter { if case .code = $0 { true } else { false } }.count == 2 })
+        // The code is said again before the hold counts nobody as there; it listens only after.
+        await met("the hold listens again", by: held.work) { !link.peers.isEmpty }
         await endPeriod(ticker, of: held, again: false)
         #expect(await held.until("timed out", Self.isRefused) == .refused(.timedOut))
     }
