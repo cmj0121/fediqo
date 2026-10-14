@@ -9,7 +9,7 @@ import Testing
 ///
 /// A read "on its way" is made here by taking its moment (`ReadMoment.now()`) before the act and
 /// handing its copy to the store after — which is all a read on its way is to the store.
-@Suite("An act is not undone by a read already on its way")
+@Suite("An act is not undone by a read already on its way", .watched)
 struct ActOutrunsReadTests {
     private let host = MastodonFixture.host
     private let source = Source(host: MastodonFixture.host, kind: .mastodon)
@@ -279,6 +279,7 @@ struct ActOutrunsReadTests {
     private actor HeldActs: HTTPSender {
         private let answers: [String: String]
         private var waiting: [String: CheckedContinuation<Void, Never>] = [:]
+        private var opened = false
 
         init(_ answers: [String: String]) { self.answers = answers }
 
@@ -287,9 +288,16 @@ struct ActOutrunsReadTests {
 
         func release(_ path: String) { waiting.removeValue(forKey: path)?.resume() }
 
+        /// Holds nothing any more, now or later: a hang guard's.
+        func open() {
+            opened = true
+            for held in waiting.values { held.resume() }
+            waiting = [:]
+        }
+
         func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
             let url = try #require(request.url)
-            await withCheckedContinuation { waiting[url.path] = $0 }
+            if !opened { await withCheckedContinuation { waiting[url.path] = $0 } }
             let body = try #require(answers[url.path])
             return (Data(body.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
         }
@@ -299,7 +307,6 @@ struct ActOutrunsReadTests {
 
     @Test(
         "Two acts on one post out at once both end as pressed, whichever answer lands first — each answer is the word on its own act only",
-        .timeLimit(.minutes(3)),
         arguments: Order.allCases
     )
     func twoActsAtOnce(landing order: Order) async throws {
@@ -321,13 +328,11 @@ struct ActOutrunsReadTests {
         )
         let row = try #require(await store.all().first)
 
+        let guardTask = watching("the two acts, held on the wire") { await server.open() }
+        defer { guardTask.cancel() }
         let favouriting = Task { try await write.favourite(row, on: true) }
         let bookmarking = Task { try await write.bookmark(row, on: true) }
-        var both = false
-        for _ in 0 ..< 100_000 where !both {
-            both = await server.parked == 2
-            if !both { await Task.yield() }
-        }
+        let both = await met("both acts are on the wire", by: favouriting, bookmarking) { await server.parked == 2 }
         try #require(both, "the premise: both acts are on the wire")
 
         switch order {

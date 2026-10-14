@@ -227,6 +227,9 @@ public final class ForumSessions {
     /// Where a launch's signing in again is shown while it runs (#164). The app's own; a test
     /// hands in another.
     @ObservationIgnored var work: SourceWork = .shared
+    /// What the limits here are waited on (`bounded`, `settled(host:within:)`): `Task.sleep` but
+    /// for a test, which turns it by hand.
+    @ObservationIgnored var limitSleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
 
     @ObservationIgnored private var engines: [String: ForumWebEngine] = [:]
     @ObservationIgnored private let makeStore: () -> WKWebsiteDataStore
@@ -738,9 +741,10 @@ public final class ForumSessions {
     /// is read before the sign-in lands is read again when it does — `ForumPosts.signedIn`.
     func settled(host: String, within limit: Duration = ForumSessions.launchHold) async {
         guard let running = relaunching[host.lowercased()] else { return }
+        let sleep = limitSleep
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await running.value }
-            group.addTask { try? await Task.sleep(for: limit) }
+            group.addTask { try? await sleep(limit) }
             await group.next()
             group.cancelAll()
         }
@@ -793,7 +797,7 @@ public final class ForumSessions {
     /// holds nothing this run put there, and is left unopened.
     public func leaveNothing(keeping hosts: [String], within limit: Duration) async {
         guard sourcesRead, let madeStore else { return }
-        await Self.bounded(limit) { await ForumWebEngine.sweep(madeStore, keeping: hosts) }
+        await Self.bounded(limit, sleep: limitSleep) { await ForumWebEngine.sweep(madeStore, keeping: hosts) }
     }
 
     /// Drops only what WebKit copied of what it fetched (`ForumWebEngine.cache`), as the app goes
@@ -801,7 +805,7 @@ public final class ForumSessions {
     /// password manager, a code on another app — is still there when they come back.
     public func dropCache(within limit: Duration) async {
         guard let madeStore else { return }
-        await Self.bounded(limit) {
+        await Self.bounded(limit, sleep: limitSleep) {
             await madeStore.removeData(ofTypes: ForumWebEngine.cache, modifiedSince: .distantPast)
         }
     }
@@ -814,14 +818,18 @@ public final class ForumSessions {
         let store = dataStore
         // Bounded like a quit's: a WebKit that stops answering holds the forum's reads up for
         // `limit` at most, not for the run.
+        let sleep = limitSleep
         sweeping = Task {
-            await Self.bounded(limit) { await ForumWebEngine.sweep(store, keeping: hosts) }
+            await Self.bounded(limit, sleep: sleep) { await ForumWebEngine.sweep(store, keeping: hosts) }
         }
     }
 
     /// Waits for `work`, or for `limit`, whichever is first. Past it the work is left running.
+    /// `sleep` is `Task.sleep` but for a test, which turns it by hand.
     static func bounded(
-        _ limit: Duration, _ work: @escaping @MainActor @Sendable () async -> Void
+        _ limit: Duration,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        _ work: @escaping @MainActor @Sendable () async -> Void
     ) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let once = OSAllocatedUnfairLock<CheckedContinuation<Void, Never>?>(initialState: continuation)
@@ -832,7 +840,7 @@ public final class ForumSessions {
                 }?.resume()
             }
             let timer = Task.detached {
-                try? await Task.sleep(for: limit)
+                try? await sleep(limit)
                 finish()
             }
             Task { @MainActor in

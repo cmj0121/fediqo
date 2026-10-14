@@ -20,7 +20,7 @@ import Testing
 /// flattens a lazy stack's children on a running app.
 ///
 /// Few layouts, one at a time: `FoldHostedTests`' reason.
-@Suite("The foot of a thread asks only when reached, hosted", .serialized)
+@Suite("The foot of a thread asks only when reached, hosted", .serialized, .watched)
 @MainActor
 struct ThreadFootHostedTests {
     @Observable
@@ -53,13 +53,26 @@ struct ThreadFootHostedTests {
     /// loop may not be turned from an async context.
     private static func pump(_ view: NSView) {
         view.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date())
+        RunLoop.main.run(mode: .default, before: .distantPast)
     }
 
-    private static func settle(_ view: NSView) async {
-        for _ in 0..<3 {
+    /// How many looks in a row must find the foot as the look before left it.
+    private static let looks = 20
+
+    /// Turns the run loop until what the foot was told is the same for `looks` looks in a row.
+    /// No `by:`: the run loop is turned here, by the check. Counted looks, because what a hosted
+    /// view does when its words change is nothing a check can name — so where a check then says
+    /// the foot was told something, it has waited for that first, by name.
+    private static func settle(_ view: NSView, _ foot: Foot) async {
+        var last: [Bool]?
+        var asks = 0
+        var same = 0
+        await met("the foot is drawn, and \(looks) turns more tell it nothing") {
             pump(view)
-            await Task.yield()
+            same = foot.reaches == last && foot.asks == asks ? same + 1 : 0
+            last = foot.reaches
+            asks = foot.asks
+            return same >= looks
         }
     }
 
@@ -68,21 +81,29 @@ struct ThreadFootHostedTests {
         let foot = Foot()
         let view = NSHostingView(rootView: Harness(foot: foot))
         view.frame = NSRect(x: 0, y: 0, width: 480, height: 200)
-        await Self.settle(view)
+        await met("the foot has come into view") {
+            Self.pump(view)
+            return !foot.reaches.isEmpty
+        }
+        await Self.settle(view, foot)
         #expect(foot.reaches == [true], "coming into view is the one automatic ask")
 
         foot.said = .coming
-        await Self.settle(view)
+        await Self.settle(view, foot)
         foot.said = .held
-        await Self.settle(view)
+        await Self.settle(view, foot)
         #expect(foot.reaches == [true], "held after a stop is not the foot coming into view")
         #expect(foot.asks == 0)
 
         // Pressed, it reads on; a page that lands under it while it is in view asks for the next.
         foot.said = .coming
-        await Self.settle(view)
+        await Self.settle(view, foot)
         foot.said = .more
-        await Self.settle(view)
+        await met("the foot says a page landed under it") {
+            Self.pump(view)
+            return foot.reaches.count > 1
+        }
+        await Self.settle(view, foot)
         #expect(foot.reaches == [true, false], "still in view, so a landed page reads on")
     }
 }

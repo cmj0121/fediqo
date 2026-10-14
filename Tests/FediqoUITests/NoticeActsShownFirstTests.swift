@@ -12,7 +12,7 @@ import Testing
 /// Every interleaving is pinned by a gate the test opens, and the guard each one turns on is
 /// named in its test.
 @MainActor
-@Suite("Acting on notices, shown first: the yes, and what the source's answer then does")
+@Suite("Acting on notices, shown first: the yes, and what the source's answer then does", .watched)
 struct NoticeActsShownFirstTests {
     private typealias F = NoticeActFixture
     private static let a = F.a
@@ -145,13 +145,15 @@ struct NoticeActsShownFirstTests {
           arguments: Act.allCases)
     func leavesAtTheYes(_ act: Act) async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the act, held on the wire")
+        defer { guardTask.cancel() }
         let (session, server, _) = try await two([act.path: .held(gate, "{}")])
         let heard = hearing(session)
         let list = session.noticeList, acts = list.acts
         let eve = try #require(acts.requests[Self.a]?.first)
 
         let task = try start(act, in: session)
-        #expect(await spun { await server.count(act.path) == 1 })
+        await met("the act is on the wire", by: task) { await server.count(act.path) == 1 }
         expectGone(act, in: session)
         #expect(acts.acting.count == 1)
 
@@ -199,11 +201,13 @@ struct NoticeActsShownFirstTests {
           arguments: Act.allCases, Cause.allCases)
     func everyFailureBringsItBack(_ act: Act, _ cause: Cause) async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the act, held on the wire")
+        defer { guardTask.cancel() }
         let (session, server, _) = try await two([act.path: cause.outcome(gate)])
         let heard = hearing(session)
 
         let task = try start(act, in: session)
-        #expect(await spun { await server.count(act.path) == 1 })
+        await met("the act is on the wire", by: task) { await server.count(act.path) == 1 }
         expectGone(act, in: session)
         #expect(session.said.lines.isEmpty, "said before the source answered")
 
@@ -230,10 +234,12 @@ struct NoticeActsShownFirstTests {
           arguments: Act.allCases, [200, 403])
     func aReplacedSignInDrawsItAgain(_ act: Act, _ status: Int) async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the act, held on the wire")
+        defer { guardTask.cancel() }
         let (session, server, tokens) = try await two([act.path: .held(gate, "{}", status)])
         let heard = hearing(session)
         let task = try start(act, in: session)
-        #expect(await spun { await server.count(act.path) == 1 })
+        await met("the act is on the wire", by: task) { await server.count(act.path) == 1 }
         try tokens.save(F.token(Self.a, scopes: F.acts, access: "tok-other"))
 
         await gate.open()
@@ -249,10 +255,12 @@ struct NoticeActsShownFirstTests {
     func aReadLandsMeanwhile() async throws {
         for status in [200, 503] {
             let gate = Gate()
+            let guardTask = watching(gate, "the act, held on the wire")
+            defer { guardTask.cancel() }
             let (session, server, _) = try await two([Self.dismiss4: .held(gate, "{}", status)])
             let list = session.noticeList
             let task = try start(.dismiss, in: session)
-            #expect(await spun { await server.count(Self.dismiss4) == 1 })
+            await met("the dismissal is on the wire", by: task) { await server.count(Self.dismiss4) == 1 }
 
             // The source still names the line, and one newer.
             await server.set(F.get(Self.a), F.page(
@@ -275,15 +283,19 @@ struct NoticeActsShownFirstTests {
     @Test("A read sent between the yes and the source's answer, landing after it and still naming the line, does not bring it back")
     func aReadSentBeforeTheAnswerIsOutrun() async throws {
         let answer = Gate(), reading = Gate()
+        let answerGuard = watching(answer, "the act's answer, held on the wire")
+        defer { answerGuard.cancel() }
+        let readingGuard = watching(reading, "the read, held on the wire")
+        defer { readingGuard.cancel() }
         let (session, server, _) = try await two([Self.dismiss4: .held(answer, "{}")])
         let list = session.noticeList
         let task = try start(.dismiss, in: session)
-        #expect(await spun { await server.count(Self.dismiss4) == 1 })
+        await met("the dismissal is on the wire", by: task) { await server.count(Self.dismiss4) == 1 }
 
         await server.set(F.get(Self.a), .held(reading, "[" + [F.one(4, by: "Ada", minutes: 2), F.one(3, "follow", by: "Bo", minutes: 9)].joined(separator: ",") + "]"))
         let asked = await server.count(F.get(Self.a))
         let read = Task { await list.read(in: session) }
-        #expect(await spun { await server.count(F.get(Self.a)) == asked + 1 })
+        await met("the read of a is on the wire", by: read) { await server.count(F.get(Self.a)) == asked + 1 }
 
         await answer.open()
         await task.value
@@ -299,15 +311,19 @@ struct NoticeActsShownFirstTests {
     @Test("A read sent before its source dismissed everything, landing after, brings none of its lines back; the next read is the source's word")
     func aReadOutrunByDismissingAll() async throws {
         let answer = Gate(), reading = Gate()
+        let answerGuard = watching(answer, "the act's answer, held on the wire")
+        defer { answerGuard.cancel() }
+        let readingGuard = watching(reading, "the read, held on the wire")
+        defer { readingGuard.cancel() }
         let (session, server, _) = try await two([Self.clear: .held(answer, "{}")])
         let list = session.noticeList
         let task = try start(.dismissAll, in: session)
-        #expect(await spun { await server.count(Self.clear) == 1 })
+        await met("the clearing of a's notices is on the wire", by: task) { await server.count(Self.clear) == 1 }
 
         await server.set(F.get(Self.a), .held(reading, "[" + [F.one(4, by: "Ada", minutes: 2), F.one(3, "follow", by: "Bo", minutes: 9)].joined(separator: ",") + "]"))
         let asked = await server.count(F.get(Self.a))
         let read = Task { await list.read(in: session) }
-        #expect(await spun { await server.count(F.get(Self.a)) == asked + 1 })
+        await met("the read of a is on the wire", by: read) { await server.count(F.get(Self.a)) == asked + 1 }
 
         await answer.open()
         await task.value
@@ -327,14 +343,18 @@ struct NoticeActsShownFirstTests {
           arguments: [Act.dismiss, .dismissAll])
     func aFailedReadDoesNotPutItBack(_ act: Act) async throws {
         let answer = Gate(), reading = Gate()
+        let answerGuard = watching(answer, "the act's answer, held on the wire")
+        defer { answerGuard.cancel() }
+        let readingGuard = watching(reading, "the read, held on the wire")
+        defer { readingGuard.cancel() }
         let (session, server, _) = try await two([act.path: .held(answer, "{}")])
         let list = session.noticeList
         let task = try start(act, in: session)
-        #expect(await spun { await server.count(act.path) == 1 })
+        await met("the act is on the wire", by: task) { await server.count(act.path) == 1 }
         await server.set(F.get(Self.a), .held(reading, "{}", 503))
         let asked = await server.count(F.get(Self.a))
         let read = Task { await list.read(in: session) }
-        #expect(await spun { await server.count(F.get(Self.a)) == asked + 1 })
+        await met("the read of a is on the wire", by: read) { await server.count(F.get(Self.a)) == asked + 1 }
 
         await answer.open()
         await task.value
@@ -378,11 +398,13 @@ struct NoticeActsShownFirstTests {
     @Test("A dismissal that fails after a read has shown the line gone at its source says nothing: nothing is still here")
     func aFailureOfALineSinceGoneSaysNothing() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the act, held on the wire")
+        defer { guardTask.cancel() }
         let (session, server, _) = try await two([Self.dismiss4: .held(gate, "{}", 503)])
         let list = session.noticeList
         let heard = hearing(session)
         let task = try start(.dismiss, in: session)
-        #expect(await spun { await server.count(Self.dismiss4) == 1 })
+        await met("the dismissal is on the wire", by: task) { await server.count(Self.dismiss4) == 1 }
         await server.set(F.get(Self.a), F.page(F.one(3, "follow", by: "Bo", minutes: 9)))
         await list.read(in: session)
         #expect(ids(list.reaches[Self.a]?.notices ?? []) == ["a3"])
@@ -398,6 +420,10 @@ struct NoticeActsShownFirstTests {
     @Test("While another source's first stretch is on the wire, a dismissed line still leaves at the yes and is drawn again where it was on a failure")
     func aLineLeavesAndReturnsWhileTheListIsHeldStill() async throws {
         let first = Gate(), answer = Gate()
+        let firstGuard = watching(first, "b's first stretch, held on the wire")
+        defer { firstGuard.cancel() }
+        let answerGuard = watching(answer, "the act's answer, held on the wire")
+        defer { answerGuard.cancel() }
         let (session, server, tokens) = try await F.shell([
             F.get(Self.a): Self.top,
             F.get(Self.b): .held(first, "[" + F.one(8, "mention", by: "Cy", minutes: 5) + "]"),
@@ -411,11 +437,13 @@ struct NoticeActsShownFirstTests {
         try tokens.save(F.token(Self.b, scopes: F.reads))
         session.mastodon.refresh()
         let read = Task { await list.read(in: session) }
-        #expect(await spun { await server.count(F.get(Self.b)) == 1 && list.standing(host: Self.a) == .read })
+        await met("b's first stretch is on the wire, and a is read", by: read) {
+            await server.count(F.get(Self.b)) == 1 && list.standing(host: Self.a) == .read
+        }
         #expect(list.reaches[Self.b]?.isOnFirstStretch == true)
 
         let task = try start(.dismiss, in: session)
-        #expect(await spun { await server.count(Self.dismiss4) == 1 })
+        await met("the dismissal is on the wire", by: task) { await server.count(Self.dismiss4) == 1 }
         #expect(ids(list.lines) == ["a3"], "the line stayed drawn after the yes")
         await answer.open()
         await task.value
@@ -434,11 +462,13 @@ struct NoticeActsShownFirstTests {
     func lettingGoOfTheSourceMidFlight(_ act: Act, _ clears: Bool) async throws {
         for cause in [Cause.declined, .unconfirmed] {
             let gate = Gate()
+            let guardTask = watching(gate, "the act, held on the wire")
+            defer { guardTask.cancel() }
             let (session, server, _) = try await two([act.path: cause.outcome(gate)])
             let heard = hearing(session)
             let list = session.noticeList, acts = list.acts
             let task = try start(act, in: session)
-            #expect(await spun { await server.count(act.path) == 1 })
+            await met("the act is on the wire", by: task) { await server.count(act.path) == 1 }
 
             if clears { await session.clear(host: Self.a) } else { await session.signOut(host: Self.a) }
             #expect(acts.acting.isEmpty, "\(cause): an act stayed out to a source let go of")
@@ -457,10 +487,14 @@ struct NoticeActsShownFirstTests {
     @Test("An answer that comes back after a sign-out and a sign-in again finds an entry that is not its own: it does not end the later press, take its line or say anything")
     func aLateAnswerIsNotTheLaterPresss() async throws {
         let first = Gate(), second = Gate()
+        let firstGuard = watching(first, "the first press's answer, held on the wire")
+        defer { firstGuard.cancel() }
+        let secondGuard = watching(second, "the second press's answer, held on the wire")
+        defer { secondGuard.cancel() }
         let (session, server, tokens) = try await two([Self.dismiss4: .held(first, "{}")])
         let list = session.noticeList, acts = list.acts
         let early = try start(.dismiss, in: session)
-        #expect(await spun { await server.count(Self.dismiss4) == 1 })
+        await met("the dismissal is on the wire", by: early) { await server.count(Self.dismiss4) == 1 }
 
         await session.signOut(host: Self.a)
         try tokens.save(F.token(Self.a, scopes: F.acts))
@@ -470,7 +504,7 @@ struct NoticeActsShownFirstTests {
 
         await server.set(Self.dismiss4, .held(second, "{}", 503))
         let late = try start(.dismiss, in: session)
-        #expect(await spun { await server.count(Self.dismiss4) == 2 })
+        await met("the second press's dismissal is on the wire", by: late) { await server.count(Self.dismiss4) == 2 }
         let name = try line("a4", in: session).id
 
         await first.open()
@@ -492,6 +526,10 @@ struct NoticeActsShownFirstTests {
     @Test("Two dismissals out at one source: each is hidden and settled by its own answer, and one landing does not take down what is said of the other")
     func twoDismissalsAtOnce() async throws {
         let four = Gate(), three = Gate()
+        let fourGuard = watching(four, "the dismissal of a4, held on the wire")
+        defer { fourGuard.cancel() }
+        let threeGuard = watching(three, "the dismissal of a3, held on the wire")
+        defer { threeGuard.cancel() }
         let (session, server, _) = try await two([
             Self.dismiss4: .held(four, "{}", 503), Self.dismiss3: .held(three, "{}"),
         ])
@@ -499,7 +537,7 @@ struct NoticeActsShownFirstTests {
         let a4 = try line("a4", in: session), a3 = try line("a3", in: session)
         let first = Task { await acts.dismiss(a4, in: session) }
         let second = Task { await acts.dismiss(a3, in: session) }
-        #expect(await spun { await server.posts.count == 2 })
+        await met("both dismissals are on the wire", by: first, second) { await server.posts.count == 2 }
         #expect(ids(list.lines) == ["b8"] && acts.acting == [a4.id, a3.id])
 
         await four.open()
@@ -626,10 +664,14 @@ struct NoticeActsShownFirstTests {
         // The one fails first, then all lands: said while true, taken down once all went.
         do {
             let one = Gate(), all = Gate()
+            let oneGuard = watching(one, "the dismissal, held on the wire")
+            defer { oneGuard.cancel() }
+            let allGuard = watching(all, "the clearing, held on the wire")
+            defer { allGuard.cancel() }
             let (session, server, _) = try await two([Self.dismiss4: .held(one, "{}", 503), Self.clear: .held(all, "{}")])
             let list = session.noticeList
             let single = try start(.dismiss, in: session), every = try start(.dismissAll, in: session)
-            #expect(await spun { await server.posts.count == 2 })
+            await met("the dismissal and the clearing are both on the wire", by: single, every) { await server.posts.count == 2 }
             #expect(ids(list.lines) == ["b8"])
             await one.open()
             await single.value
@@ -643,10 +685,14 @@ struct NoticeActsShownFirstTests {
         // All lands first, then the one fails: there is nothing left to say it of.
         do {
             let one = Gate(), all = Gate()
+            let oneGuard = watching(one, "the dismissal, held on the wire")
+            defer { oneGuard.cancel() }
+            let allGuard = watching(all, "the clearing, held on the wire")
+            defer { allGuard.cancel() }
             let (session, server, _) = try await two([Self.dismiss4: .held(one, "{}", 503), Self.clear: .held(all, "{}")])
             let list = session.noticeList
             let single = try start(.dismiss, in: session), every = try start(.dismissAll, in: session)
-            #expect(await spun { await server.posts.count == 2 })
+            await met("the dismissal and the clearing are both on the wire", by: single, every) { await server.posts.count == 2 }
             await all.open()
             await every.value
             await one.open()
@@ -656,10 +702,14 @@ struct NoticeActsShownFirstTests {
         // All fails while the one is still out, and the one then lands.
         do {
             let one = Gate(), all = Gate()
+            let oneGuard = watching(one, "the dismissal, held on the wire")
+            defer { oneGuard.cancel() }
+            let allGuard = watching(all, "the clearing, held on the wire")
+            defer { allGuard.cancel() }
             let (session, server, _) = try await two([Self.dismiss4: .held(one, "{}"), Self.clear: .held(all, "{}", 403)])
             let list = session.noticeList
             let single = try start(.dismiss, in: session), every = try start(.dismissAll, in: session)
-            #expect(await spun { await server.posts.count == 2 })
+            await met("the dismissal and the clearing are both on the wire", by: single, every) { await server.posts.count == 2 }
             await all.open()
             await every.value
             #expect(ids(list.lines) == ["b8", "a3"], "a line whose own dismissal is still out was drawn")
@@ -674,9 +724,11 @@ struct NoticeActsShownFirstTests {
     @Test("The same act asked twice while it is out is sent once")
     func theSameActTwiceIsSentOnce() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the act, held on the wire")
+        defer { guardTask.cancel() }
         let (session, server, _) = try await two([Self.dismiss4: .held(gate, "{}")])
         let first = try start(.dismiss, in: session)
-        #expect(await spun { await server.count(Self.dismiss4) == 1 })
+        await met("the dismissal is on the wire", by: first) { await server.count(Self.dismiss4) == 1 }
         try await start(.dismiss, in: session).value
         #expect(await server.count(Self.dismiss4) == 1 && session.noticeList.acts.acting.count == 1)
         await gate.open()
@@ -690,6 +742,8 @@ struct NoticeActsShownFirstTests {
     @Test("A reading of what a source holds back, sent before it let a request go and landing after, does not list that request again")
     func aStaleReadingOfRequestsIsNotTaken() async throws {
         let reading = Gate()
+        let readingGuard = watching(reading, "the read, held on the wire")
+        defer { readingGuard.cancel() }
         let go = F.post(Self.a, Self.requests + "/71/dismiss")
         let (session, server, _) = try await two([go: .body("{}")])
         let acts = session.noticeList.acts
@@ -697,7 +751,7 @@ struct NoticeActsShownFirstTests {
         await server.set(F.get(Self.a, Self.requests), .held(reading, both))
         let asked = await server.count(F.get(Self.a, Self.requests))
         let read = Task { await acts.open(host: Self.a, in: session) }
-        #expect(await spun { await server.count(F.get(Self.a, Self.requests)) == asked + 1 })
+        await met("the reading of what a holds back is on the wire", by: read) { await server.count(F.get(Self.a, Self.requests)) == asked + 1 }
 
         try await start(.letGo, in: session).value
         #expect(acts.requests[Self.a]?.map(\.requestID) == ["72"])
@@ -716,13 +770,15 @@ struct NoticeActsShownFirstTests {
     @Test("A look at what a source holds back, sent before it let a request go and landing after, does not put the count back")
     func aStaleLookIsNotTaken() async throws {
         let looking = Gate()
+        let lookingGuard = watching(looking, "the look, held on the wire")
+        defer { lookingGuard.cancel() }
         let go = F.post(Self.a, Self.requests + "/71/dismiss")
         let (session, server, _) = try await two([go: .body("{}")])
         let acts = session.noticeList.acts
         await server.set(F.get(Self.a, Self.policy), .held(looking, #"{"summary":{"pending_requests_count":2,"pending_notifications_count":4}}"#))
         let asked = await server.count(F.get(Self.a, Self.policy))
         let look = Task { await acts.look(in: session) }
-        #expect(await spun { await server.count(F.get(Self.a, Self.policy)) == asked + 1 })
+        await met("the look at what a holds back is on the wire", by: look) { await server.count(F.get(Self.a, Self.policy)) == asked + 1 }
 
         try await start(.letGo, in: session).value
         #expect(acts.held(host: Self.a) == NoticesHeld(requests: 1, notices: 1))
@@ -740,6 +796,8 @@ struct NoticeActsShownFirstTests {
     @Test("The last request leaving takes the held-back line off the page at the yes, and a failure draws it again, still open")
     func theLastRequestLeaving() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the act, held on the wire")
+        defer { guardTask.cancel() }
         let through = F.post(Self.a, Self.requests + "/71/accept")
         let (session, server, _) = try await two([
             F.get(Self.a, Self.policy): F.policy(requests: 1, notices: 3),
@@ -749,7 +807,7 @@ struct NoticeActsShownFirstTests {
         let acts = session.noticeList.acts
         #expect(acts.shownHolders == [Self.a])
         let task = try start(.letThrough, in: session)
-        #expect(await spun { await server.count(through) == 1 })
+        await met("the request let through is on the wire", by: task) { await server.count(through) == 1 }
         #expect(acts.shownHolders.isEmpty && acts.shownHeld(host: Self.a) == nil, "a source was said to hold what is on its way out")
         #expect(acts.held(host: Self.a) != nil && acts.opened == [Self.a])
 
@@ -764,6 +822,8 @@ struct NoticeActsShownFirstTests {
     @Test("While a line is hidden the floor, how far each source was read, the bound and its full line are as they were, and the count of what the kinds leave out is of what is drawn")
     func countsWhileHidden() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the act, held on the wire")
+        defer { guardTask.cancel() }
         let (session, server, _) = try await F.shell([
             F.get(Self.a): Self.top,
             F.get(Self.b): F.page(F.one(8, "mention", by: "Cy", minutes: 5)),
@@ -781,7 +841,7 @@ struct NoticeActsShownFirstTests {
         #expect(narrowed() == drawn)
 
         let task = try start(.dismiss, in: session)
-        #expect(await spun { await server.count(Self.dismiss4) == 1 })
+        await met("the dismissal is on the wire", by: task) { await server.count(Self.dismiss4) == 1 }
         #expect(!list.lines.contains { $0.newestID == "4" } && list.lines.count == drawn - 1)
         #expect(list.fullHosts == [Self.a, Self.b] && list.isFull, "a hidden line made a source held to its bound look read whole")
         #expect(list.floor == floor && list.reaches[Self.a]?.reached == reached)
@@ -841,16 +901,20 @@ struct NoticeActsShownFirstTests {
     @Test("The list says which lines are on their way out by the person's own yes, and no others")
     func whatIsLeaving() async throws {
         let one = Gate(), all = Gate()
+        let oneGuard = watching(one, "the dismissal, held on the wire")
+        defer { oneGuard.cancel() }
+        let allGuard = watching(all, "the clearing, held on the wire")
+        defer { allGuard.cancel() }
         let (session, server, _) = try await two([Self.dismiss4: .held(one, "{}", 503), Self.clear: .held(all, "{}", 503)])
         let list = session.noticeList
         let a4 = try line("a4", in: session).id, a3 = try line("a3", in: session).id, b8 = try line("b8", in: session).id
         #expect(![a4, a3, b8].contains(where: list.leftAtYes))
 
         let single = try start(.dismiss, in: session)
-        #expect(await spun { await server.count(Self.dismiss4) == 1 })
+        await met("the dismissal is on the wire", by: single) { await server.count(Self.dismiss4) == 1 }
         #expect(list.leftAtYes(a4) && !list.leftAtYes(a3) && !list.leftAtYes(b8))
         let every = try start(.dismissAll, in: session)
-        #expect(await spun { await server.count(Self.clear) == 1 })
+        await met("the clearing of a's notices is on the wire", by: every) { await server.count(Self.clear) == 1 }
         #expect(list.leftAtYes(a4) && list.leftAtYes(a3) && !list.leftAtYes(b8))
 
         await one.open()

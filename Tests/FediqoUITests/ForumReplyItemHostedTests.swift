@@ -14,7 +14,7 @@ import Testing
 /// — that the scroll came to rest on it, how the lit reply looks in light and dark, on a Mac and
 /// a phone — is a running app's.
 @MainActor
-@Suite("A forum's replies stand in the timelines where the forum dates them, hosted", .serialized)
+@Suite("A forum's replies stand in the timelines where the forum dates them, hosted", .serialized, .watched)
 struct ForumReplyItemHostedTests {
     private static let host = "forum.test"
     private static let forum = Source(host: host, kind: .discuz, boards: [BoardSubscription(fid: 2, name: "Dev")])
@@ -127,8 +127,11 @@ struct ForumReplyItemHostedTests {
 
     private static func pump(_ view: NSView) {
         view.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date())
+        RunLoop.main.run(mode: .default, before: .distantPast)
     }
+
+    /// How many looks in a row must find the rows where the look before left them.
+    private static let looks = 20
 
     @Test("The topic opened from a reply's row draws that reply under the id its timeline row has, so it is the one found and brought into view — once the replies are drawn, and not before")
     func theReplyIsInTheTopic() async throws {
@@ -153,9 +156,17 @@ struct ForumReplyItemHostedTests {
         let probe = ThreadPaneProbe()
         let view = NSHostingView(rootView: Host(session: session, root: root, probe: probe, selected: Self.rowID(4)))
         view.frame = NSRect(x: 0, y: 0, width: 520, height: 2_400)
-        for _ in 0..<3 {
+        // No `by:`: the run loop is turned here, by the check. Counted looks behind the rows
+        // being drawn, because what a hosted pane does to place them is nothing a check can name.
+        let rows = [root.id] + [2, 3, 4].map(Self.rowID)
+        var last: [CGRect?] = []
+        var same = 0
+        await met("the topic and its replies are drawn, and \(Self.looks) turns more move none of them") {
             Self.pump(view)
-            await Task.yield()
+            let now = rows.map { probe.frames[.row($0)] }
+            same = !now.contains(nil) && now == last ? same + 1 : 0
+            last = now
+            return same >= Self.looks
         }
         let topic = try #require(probe.frames[.row(root.id)])
         let frames = try [2, 3, 4].map { try #require(probe.frames[.row(Self.rowID($0))], "reply \($0) is drawn under its own row's id") }

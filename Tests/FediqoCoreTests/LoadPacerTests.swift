@@ -19,7 +19,6 @@ final class HandClock: PacerClock, @unchecked Sendable {
         var passed: TimeInterval = 0
         var date: Date
         var sleepers: [Sleeper] = []
-        var watchers: [(until: TimeInterval, seen: CheckedContinuation<Void, Never>)] = []
         var abandoned = false
     }
 
@@ -36,20 +35,16 @@ final class HandClock: PacerClock, @unchecked Sendable {
         let id = UUID()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (wake: CheckedContinuation<Void, any Error>) in
-                let seen: [CheckedContinuation<Void, Never>] = state.withLockUnchecked { state in
+                state.withLockUnchecked { state in
                     if moment <= state.passed || Task.isCancelled || state.abandoned {
                         // Abandoned, the clock runs to whatever is waited for: nobody waiting
                         // "until then" finds it is still before then, and waits again for ever.
                         if state.abandoned { state.passed = max(state.passed, moment) }
                         wake.resume()
-                        return []
+                        return
                     }
                     state.sleepers.append(Sleeper(id: id, until: moment, wake: wake))
-                    let ready = state.watchers.filter { abs($0.until - moment) < 0.001 }.map(\.seen)
-                    state.watchers.removeAll { abs($0.until - moment) < 0.001 }
-                    return ready
                 }
-                for watcher in seen { watcher.resume() }
             }
         } onCancel: {
             let woken = state.withLockUnchecked { state -> Sleeper? in
@@ -61,16 +56,14 @@ final class HandClock: PacerClock, @unchecked Sendable {
         try Task.checkCancellation()
     }
 
-    /// Returns once something is asleep on this clock until exactly `seconds` from now.
-    func sleeping(for seconds: TimeInterval) async {
-        await withCheckedContinuation { (seen: CheckedContinuation<Void, Never>) in
-            let already = state.withLockUnchecked { state -> Bool in
-                let until = state.passed + seconds
-                if state.abandoned || state.sleepers.contains(where: { abs($0.until - until) < 0.001 }) { return true }
-                state.watchers.append((until, seen))
-                return false
+    /// Returns once something is asleep on this clock until exactly `seconds` from now. No `by:`:
+    /// who goes to sleep on it is a task of the pacer's own.
+    func sleeping(for seconds: TimeInterval, sourceLocation: SourceLocation = #_sourceLocation) async {
+        let until = elapsed() + seconds
+        await met("something is asleep on the clock for \(seconds) seconds", sourceLocation: sourceLocation) {
+            state.withLockUnchecked { state in
+                state.abandoned || state.sleepers.contains { abs($0.until - until) < 0.001 }
             }
-            if already { seen.resume() }
         }
     }
 
@@ -96,14 +89,13 @@ final class HandClock: PacerClock, @unchecked Sendable {
     /// Stops being a clock: everybody asleep is woken, everybody watching is told, and nothing
     /// waits on it again. What a hang guard does to a test that lost its place.
     func abandon() {
-        let (sleepers, watchers) = state.withLockUnchecked { state in
+        let sleepers = state.withLockUnchecked { state in
             state.abandoned = true
             state.passed = state.sleepers.map(\.until).max().map { max($0, state.passed) } ?? state.passed
-            defer { state.sleepers = []; state.watchers = [] }
-            return (state.sleepers, state.watchers.map(\.seen))
+            defer { state.sleepers = [] }
+            return state.sleepers
         }
         for sleeper in sleepers { sleeper.wake.resume() }
-        for watcher in watchers { watcher.resume() }
     }
 }
 
@@ -115,7 +107,6 @@ actor LoadWire {
     private(set) var tries: [(id: String, at: TimeInterval)] = []
     private var held: Set<String> = []
     private var holding: [String: CheckedContinuation<Void, Never>] = [:]
-    private var watchers: [(count: Int, seen: CheckedContinuation<Void, Never>)] = []
     private var abandoned = false
 
     /// Lets everything through and tells everybody waiting: a hang guard's, as `HandClock.abandon`.
@@ -124,8 +115,6 @@ actor LoadWire {
         held = []
         for held in holding.values { held.resume() }
         holding = [:]
-        for watcher in watchers { watcher.seen.resume() }
-        watchers = []
     }
 
     init(_ clock: HandClock) {
@@ -143,17 +132,18 @@ actor LoadWire {
     var ids: [String] { tries.map(\.id) }
     var times: [TimeInterval] { tries.map(\.at) }
 
-    /// Returns once `count` tries have been asked.
-    func asked(_ count: Int) async {
-        guard tries.count < count, !abandoned else { return }
-        await withCheckedContinuation { watchers.append((count, $0)) }
+    /// Whether `count` tries have been asked, or nothing is waited for here any more.
+    private func has(asked count: Int) -> Bool { tries.count >= count || abandoned }
+
+    /// Returns once `count` tries have been asked. No `by:`: who asks is a task of the pacer's own.
+    nonisolated func asked(_ count: Int, sourceLocation: SourceLocation = #_sourceLocation) async {
+        await met("the source has been asked \(count) times", sourceLocation: sourceLocation) {
+            await self.has(asked: count)
+        }
     }
 
     func answer(_ id: String) async -> LoadAnswer {
         tries.append((id, clock.elapsed()))
-        let ready = watchers.filter { $0.count <= tries.count }
-        watchers.removeAll { $0.count <= tries.count }
-        for watcher in ready { watcher.seen.resume() }
         if held.contains(id), !abandoned { await withCheckedContinuation { holding[id] = $0 } }
         guard var answers = scripted[id], !answers.isEmpty else { return .answered() }
         let next = answers.count > 1 ? answers.removeFirst() : answers[0]
@@ -173,7 +163,7 @@ actor LoadWire {
 /// Every test turns the clock by hand and waits for the pacer to be asleep until a moment the
 /// test names, or for a try to have been asked: nothing sleeps, and nothing is given a time to
 /// finish in.
-@Suite("A source's loads wait their turn")
+@Suite("A source's loads wait their turn", .watched)
 struct LoadPacerTests {
     private static let host = "one.example"
     /// The pace as the limits state it, so no test here says the figure but the one that is about it.
@@ -181,11 +171,13 @@ struct LoadPacerTests {
 
     /// A pacer on a clock the test turns, a wire to ask, and a hang guard already armed.
     ///
-    /// **The guard is not a clock** (`hangGuard`'s rule, and its fifty seconds). Every wait here
-    /// is for the pacer to do something; a pacer that never does it would park the test for
-    /// good, so past any honest wait the guard says so, lets everything through, and the test
-    /// ends failed rather than never.
-    private func made(_ change: (inout LoadLimits) -> Void = { _ in }) -> (LoadPacer, HandClock, LoadWire) {
+    /// **The guard has no clock of its own** (`watching`). Every wait here is for the pacer to do
+    /// something; a pacer that never does it would park the test for good, so where the run has
+    /// gone still the guard says so, lets everything through, and the test ends failed rather
+    /// than never. Whoever calls this cancels it as the test ends: `defer { guards.cancel() }`.
+    private func made(
+        sourceLocation: SourceLocation = #_sourceLocation, _ change: (inout LoadLimits) -> Void = { _ in }
+    ) -> (LoadPacer, HandClock, LoadWire) {
         var limits = LoadLimits()
         // A try's deadline is a sleeper on the clock too, for as long as the try is out. Kept
         // well clear of every other figure here, so a test waiting for "asleep for thirty
@@ -194,13 +186,13 @@ struct LoadPacerTests {
         change(&limits)
         let clock = HandClock()
         let wire = LoadWire(clock)
-        guards.arm(clock, wire)
+        guards.arm(clock, wire, sourceLocation: sourceLocation)
         return (LoadPacer(limits: limits, clock: clock), clock, wire)
     }
 
     private let guards = Guards()
 
-    /// The hang guards of one test, cancelled as the test's value goes.
+    /// The hang guards of one test.
     private final class Guards: @unchecked Sendable {
         private let tasks = OSAllocatedUnfairLock(uncheckedState: [Task<Void, Never>]())
         private let tickets = OSAllocatedUnfairLock(uncheckedState: [LoadTicket]())
@@ -209,27 +201,21 @@ struct LoadPacerTests {
         /// pacer never ends it — so a test waiting on it fails rather than parks.
         func watch(_ ticket: LoadTicket) { tickets.withLockUnchecked { $0.append(ticket) } }
 
-        func arm(_ clock: HandClock, _ wire: LoadWire) {
-            // **`[weak self]`, or the guard is never cancelled.** The task is what `deinit` below
-            // cancels, and a task that holds `self` keeps `self` from ever reaching `deinit`: every
-            // guard then ran its fifty seconds and recorded its issue against a test that had
-            // passed. Nobody saw it where this target's tests are a process of their own that is
-            // over in seconds; a runner that runs every target in one process, for longer than
-            // fifty seconds, failed all of them.
-            let task = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(50))
-                guard !Task.isCancelled else { return }
-                Issue.record("watchdog let everything through; the test lost its synchronisation")
+        func arm(_ clock: HandClock, _ wire: LoadWire, sourceLocation: SourceLocation = #_sourceLocation) {
+            // **`[weak self]`**: a guard that holds `self` keeps the tickets of a test that is
+            // over for as long as the run has not gone still.
+            let task = watching("the pacer's loads, on a clock and a wire nobody turned", sourceLocation: sourceLocation) { [weak self] in
                 clock.abandon()
                 await wire.abandon()
-                // After everything was let through and had its chance to end for itself.
-                try? await Task.sleep(for: .seconds(1))
+                // After everything was let through and had its chance to end for itself. Counted
+                // turns: a pacer that has lost its place has no end to wait for.
+                for _ in 0..<1_000 { await Task.yield() }
                 for ticket in self?.tickets.withLockUnchecked({ $0 }) ?? [] { ticket.finish(.notTaken(.already)) }
             }
             tasks.withLockUnchecked { $0.append(task) }
         }
 
-        deinit { for task in tasks.withLockUnchecked({ $0 }) { task.cancel() } }
+        func cancel() { for task in tasks.withLockUnchecked({ $0 }) { task.cancel() } }
     }
 
     /// Takes a load into the line — it is in, in the order asked, by the time this returns —
@@ -266,6 +252,7 @@ struct LoadPacerTests {
     @Test("Loads of one source start no closer than the pace apart, in the order they were asked; turning the clock short of it starts nothing")
     func spacedApart() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         var ends: [LoadTicket] = []
         for id in ["a", "b", "c"] { ends.append(try await asking(pacer, wire, id)) }
         await wire.asked(1)
@@ -288,6 +275,7 @@ struct LoadPacerTests {
     @Test("The pace is one number: set to five seconds, loads start five seconds apart")
     func thePaceIsOneNumber() async throws {
         let (pacer, clock, wire) = made { $0.interval = 5 }
+        defer { guards.cancel() }
         var ends: [LoadTicket] = []
         for id in ["a", "b", "c"] { ends.append(try await asking(pacer, wire, id)) }
         for asked in 1...2 {
@@ -302,6 +290,7 @@ struct LoadPacerTests {
     @Test("Setting the date back makes no wait longer: the pace is counted in seconds that only pass")
     func theDateSetBack() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         let ends = [try await asking(pacer, wire, "a"), try await asking(pacer, wire, "b")]
         await wire.asked(1)
         await clock.sleeping(for: Self.pace)
@@ -314,6 +303,7 @@ struct LoadPacerTests {
     @Test("One load of a source is on the wire at a time: while it is, no amount of time starts the next")
     func oneAtATime() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         await wire.hold("a")
         let first = try await asking(pacer, wire, "a"), second = try await asking(pacer, wire, "b")
         await wire.asked(1)
@@ -330,6 +320,7 @@ struct LoadPacerTests {
     @Test("Each source has its own line: one held on the wire holds up nothing asked of another")
     func perSource() async throws {
         let (pacer, _, wire) = made()
+        defer { guards.cancel() }
         await wire.hold("slow")
         let held = try await asking(pacer, wire, "slow", of: "slow.example")
         await wire.asked(1)
@@ -344,6 +335,7 @@ struct LoadPacerTests {
     @Test("The line never grows past its bound: a thousand asked at once leave one stretch waiting and one on the wire, and every other is told at once that it was not taken")
     func neverUnbounded() async throws {
         let (pacer, _, wire) = made()
+        defer { guards.cancel() }
         await wire.hold("0")
         let first = try await asking(pacer, wire, "0")
         await wire.asked(1)
@@ -371,6 +363,7 @@ struct LoadPacerTests {
     @Test("A run asks one source only so many times, every try counted: past that a load is not taken, and one already taken is not tried again")
     func spentForTheRun() async throws {
         let (pacer, clock, wire) = made { $0.perRun = 4 }
+        defer { guards.cancel() }
         await wire.script("a", [.failed, .failed, .answered()])
         let first = try await asking(pacer, wire, "a"), second = try await asking(pacer, wire, "b")
         // a: three tries, thirty then sixty seconds apart; b: the fourth.
@@ -393,6 +386,7 @@ struct LoadPacerTests {
     @Test("A load whose next try would be past the run's share is given up, not tried")
     func aRetryPastTheShare() async throws {
         let (pacer, clock, wire) = made { $0.perRun = 2 }
+        defer { guards.cancel() }
         await wire.script("a", [.failed])
         let end = try await asking(pacer, wire, "a")
         await wire.asked(1)
@@ -410,6 +404,7 @@ struct LoadPacerTests {
     @Test("Told to slow down and when to ask again, the load is tried again then — not at the pace, not at the backoff — and ends done")
     func retryAfter() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         await wire.script("a", [.slowDown(SourceWord(retryAfter: clock.wall().addingTimeInterval(90))), .answered()])
         let end = try await asking(pacer, wire, "a")
         await wire.asked(1)
@@ -425,6 +420,7 @@ struct LoadPacerTests {
     func slowDownWithoutATime() async throws {
         for sooner in [false, true] {
             let (pacer, clock, wire) = made()
+            defer { guards.cancel() }
             let word = sooner ? SourceWord(retryAfter: clock.wall().addingTimeInterval(5)) : nil
             await wire.script("a", [.slowDown(word), .answered()])
             let end = try await asking(pacer, wire, "a")
@@ -439,6 +435,7 @@ struct LoadPacerTests {
     @Test("A source that says to wait longer than a load waits is taken at its word: it is not asked again this run, what was waiting is told, and nothing more is taken until the reader asks")
     func toldToWaitTooLong() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         await wire.script("a", [.slowDown(SourceWord(retryAfter: clock.wall().addingTimeInterval(3_600)))])
         await wire.hold("a")
         let first = try await asking(pacer, wire, "a")
@@ -458,6 +455,7 @@ struct LoadPacerTests {
     @Test("Where the source says how much of its allowance is left and little is, the next load waits for it to be renewed; with plenty left it keeps the pace")
     func allowance() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         let reset = clock.wall().addingTimeInterval(200)
         await wire.script("a", [.answered(SourceWord(remaining: 75, limit: 300, reset: reset))])
         await wire.script("b", [.answered(SourceWord(remaining: 290, limit: 300, reset: reset.addingTimeInterval(300)))])
@@ -479,6 +477,7 @@ struct LoadPacerTests {
     @Test("An allowance all but spent that renews further off than a load waits rests the source for the run: the answer that said so is taken, and nothing more is asked")
     func allowanceFarOff() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         await wire.script("a", [.answered(SourceWord(remaining: 0, limit: 300, reset: clock.wall().addingTimeInterval(86_400)))])
         let first = try await asking(pacer, wire, "a"), second = try await asking(pacer, wire, "b")
         #expect(await first.end() == .done)
@@ -498,6 +497,7 @@ struct LoadPacerTests {
     @Test("A load that fails is tried again after a wait that doubles, three times in all, and then given up; the load behind it waits out the same quiet")
     func backsOffAndGivesUp() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         await wire.script("a", [.failed])
         let first = try await asking(pacer, wire, "a"), second = try await asking(pacer, wire, "b")
         await wire.asked(1)
@@ -522,6 +522,7 @@ struct LoadPacerTests {
     @Test("A source that fails five tries in a row is given up for the run: the load on the wire and every one waiting are told, and no more is asked of it")
     func givenUpForTheRun() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         for id in ["a", "b", "c"] { await wire.script(id, [.failed]) }
         var ends: [LoadTicket] = []
         for id in ["a", "b", "c"] { ends.append(try await asking(pacer, wire, id)) }
@@ -543,6 +544,7 @@ struct LoadPacerTests {
     @Test("A try that never comes back is a failed try at the deadline: the slot is free, the load is tried again and then given up, and the next load goes — while the first request is still open")
     func aTryThatNeverReturns() async throws {
         let (pacer, clock, wire) = made { $0.deadline = LoadLimits().deadline }
+        defer { guards.cancel() }
         await wire.hold("a")
         let first = try await asking(pacer, wire, "a"), second = try await asking(pacer, wire, "b")
         // Three tries of thirty seconds each, with the backoff between.
@@ -568,6 +570,7 @@ struct LoadPacerTests {
     @Test("Letting a source go ends what waits and what is on the wire at once — nobody waits for a request that may never come back — and forgets what was known of it: added again, it is asked from the start")
     func letGo() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         await wire.script("a", [.failed, .answered()])
         await wire.hold("a")
         let first = try await asking(pacer, wire, "a"), second = try await asking(pacer, wire, "b")
@@ -586,6 +589,7 @@ struct LoadPacerTests {
     @Test("Letting a source go while its next load waits its turn wakes nothing later: the wait ends with the line")
     func letGoWhileWaitingItsTurn() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         let ends = [try await asking(pacer, wire, "a"), try await asking(pacer, wire, "b")]
         await wire.asked(1)
         await clock.sleeping(for: Self.pace)
@@ -600,6 +604,7 @@ struct LoadPacerTests {
     @Test("A waiting load can be taken back: it is never asked; one on the wire, or one not there, cannot")
     func withdrawn() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         await wire.hold("a")
         let first = try await asking(pacer, wire, "a")
         let second = try await asking(pacer, wire, "b"), third = try await asking(pacer, wire, "c")
@@ -621,6 +626,7 @@ struct LoadPacerTests {
     @Test("Whoever waits for a load and is cancelled takes it back with them, where it has not been asked yet")
     func theWaiterCancelled() async throws {
         let (pacer, _, wire) = made()
+        defer { guards.cancel() }
         await wire.hold("a")
         let first = try await asking(pacer, wire, "a")
         await wire.asked(1)
@@ -636,6 +642,7 @@ struct LoadPacerTests {
     @Test("A waiting load can be moved to the front: it is the next asked, at the same pace; the rest keep their order")
     func promoted() async throws {
         let (pacer, clock, wire) = made()
+        defer { guards.cancel() }
         await wire.hold("a")
         var ends = [try await asking(pacer, wire, "a")]
         for id in ["b", "c", "d"] { ends.append(try await asking(pacer, wire, id)) }

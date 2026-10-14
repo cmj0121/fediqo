@@ -13,7 +13,7 @@ import WebKit
 /// browser's store at launch and at the run's end — against real copies on disk and real cookies,
 /// and the app's source handing each of them whether the store was read. What it cannot: the app
 /// launched with its store held by another copy.
-@Suite("A run that did not read the store sweeps nothing by its sources", .serialized)
+@Suite("A run that did not read the store sweeps nothing by its sources", .serialized, .watched)
 @MainActor
 struct StoreNotReadSweepsTests {
     private static let root = URL(fileURLWithPath: #filePath)
@@ -80,6 +80,8 @@ struct StoreNotReadSweepsTests {
         let store = await browser()
         let unread = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
         unread.sourcesRead = false
+        // The limits, on a clock nobody turns: a sweep that is slow is not left behind by one.
+        unread.limitSleep = TurnedClock().sleep
         unread.sweepAtLaunch(keeping: [], onDisk: true, within: .seconds(5))
         #expect(unread.sweeping == nil, "a launch with no store swept the browser's store")
         _ = unread.dataStore
@@ -87,6 +89,7 @@ struct StoreNotReadSweepsTests {
         #expect(await store.httpCookieStore.allCookies().count == 3, "a quit with no store took every sign-in")
 
         let read = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
+        read.limitSleep = TurnedClock().sleep
         #expect(read.sourcesRead, "read unless said otherwise")
         _ = read.dataStore
         await read.leaveNothing(keeping: ["bbs.example.org"], within: .seconds(5))

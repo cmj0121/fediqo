@@ -4,64 +4,35 @@ import Synchronization
 import Testing
 @testable import FediqoPersistence
 
-@Suite("A read back inside the saver's queue") struct SaverExclusiveTests {
+@Suite("A read back inside the saver's queue", .watched) struct SaverExclusiveTests {
     @Test("What runs exclusively runs after every save before it and before every save after")
     func exclusively() async throws {
         let store = ItemStore()
         let order = Order()
-        let gate = FirstWriteGate()
+        // The first write waits at it; the one after the commit finds it open.
+        let gate = Gate()
+        let guardTask = watching(gate, "the first save's write")
+        defer { guardTask.cancel() }
         let saver = StoreSaver(store: store, write: { _, _, _ in
             order.add("save")
-            await gate.passOnce()
+            await gate.wait()
         })
         await store.add(Source(host: "a.example", kind: .mastodon))
         // The first save is under way — its write has begun and is held — when the commit is asked.
         let first = Task { try await saver.save() }
-        await gate.entered()
+        await met("the first save's write has begun", by: first) { order.all == ["save"] }
         let commit = Task { try await saver.exclusively { order.add("commit"); return 7 } }
-        await Task.yield()
+        // Counted turns: a commit that waits its turn in the saver's queue says nothing of
+        // waiting, and one that did not wait would have run inside them.
+        for _ in 0..<1_000 { await Task.yield() }
         #expect(order.all == ["save"], "the commit waits for the save under way")
-        gate.open()
+        await gate.open()
         let result = try await commit.value
         try await first.value
         await store.add(Source(host: "b.example", kind: .mastodon))
         try await saver.save()
         #expect(result == 7)
         #expect(order.all == ["save", "commit", "save"])
-    }
-}
-
-/// A door the first write waits at, and the test opens.
-private actor FirstWriteGate {
-    private var passed = false
-    private var opened = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-    private var watchers: [CheckedContinuation<Void, Never>] = []
-
-    /// The first caller waits until `open`; every later one passes.
-    func passOnce() async {
-        guard !passed else { return }
-        passed = true
-        for watcher in watchers { watcher.resume() }
-        watchers = []
-        guard !opened else { return }
-        await withCheckedContinuation { waiters.append($0) }
-    }
-
-    /// Returns once the first caller is waiting.
-    func entered() async {
-        guard !passed else { return }
-        await withCheckedContinuation { watchers.append($0) }
-    }
-
-    nonisolated func open() {
-        Task { await self.release() }
-    }
-
-    private func release() {
-        opened = true
-        for waiter in waiters { waiter.resume() }
-        waiters = []
     }
 }
 
@@ -72,7 +43,7 @@ private final class Order: @unchecked Sendable {
     var all: [String] { lock.withLock { lines } }
 }
 
-@Suite("The one save")
+@Suite("The one save", .watched)
 struct StoreSaverTests {
     private let origin = Date(timeIntervalSince1970: 1_700_000_000)
     private let alpha = Source(host: "alpha.test", kind: .mastodon)
@@ -91,22 +62,10 @@ struct StoreSaverTests {
 
     private struct Refused: Error {}
 
-    /// A door a test holds shut until it chooses to open it: no sleeps, so what runs first is
-    /// what the test said runs first.
-    private actor Gate {
-        private var isOpen = false
-        private var waiters: [CheckedContinuation<Void, Never>] = []
-
-        func wait() async {
-            if isOpen { return }
-            await withCheckedContinuation { waiters.append($0) }
-        }
-
-        func open() {
-            isOpen = true
-            waiters.forEach { $0.resume() }
-            waiters = []
-        }
+    /// A flush's deadline on a clock nobody turns: a write that is slow, or held, is not given
+    /// up on by one.
+    private static func flushed(_ saver: StoreSaver) async -> StoreSaver.Outcome {
+        await saver.flush(deadline: StoreSaver.deadline, sleep: TurnedClock().sleep)
     }
 
     /// Which notes each write carried, in the order the writes landed.
@@ -124,13 +83,15 @@ struct StoreSaverTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = try StoreFile(at: dir)
         let store = ItemStore(sources: [alpha], notes: [note("1", from: alpha)])
-        let entered = Gate()
+        let begun = Order()
         let release = Gate()
+        let guardTask = watching(release, "the first save's write")
+        defer { guardTask.cancel() }
         let landed = Landed()
         let calls = Mutexed()
         let saver = StoreSaver(store: store) { sources, notes, _ in
             if calls.next() == 1 {
-                await entered.open()
+                begun.add("first")
                 await release.wait()
             }
             try await file.save(sources: sources, notes: notes)
@@ -138,7 +99,7 @@ struct StoreSaverTests {
         }
 
         let first = Task { try await saver.save() }
-        await entered.wait()
+        await met("the first save's write has begun", by: first) { begun.all == ["first"] }
         await store.ingest([note("2", from: alpha)])
         let second = Task { try await saver.save() }
         await release.open()
@@ -165,20 +126,22 @@ struct StoreSaverTests {
 
     @Test("Saves asked for while one is held run after it, and write what the store holds then")
     func savesWhileOneIsHeld() async throws {
-        let entered = Gate()
+        let begun = Order()
         let release = Gate()
+        let guardTask = watching(release, "the first save's write")
+        defer { guardTask.cancel() }
         let landed = Landed()
         let calls = Mutexed()
         let store = ItemStore(sources: [alpha], notes: [note("1", from: alpha)])
         let saver = StoreSaver(store: store) { _, notes, _ in
             if calls.next() == 1 {
-                await entered.open()
+                begun.add("first")
                 await release.wait()
             }
             _ = await landed.record(notes)
         }
         let first = Task { try await saver.save() }
-        await entered.wait()
+        await met("the first save's write has begun", by: first) { begun.all == ["first"] }
         await store.ingest([note("2", from: alpha)])
         let waiting = (0..<3).map { _ in Task { try await saver.save() } }
         await release.open()
@@ -204,7 +167,25 @@ struct StoreSaverTests {
     func noIndexSavesNothing() async throws {
         let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: []), file: nil)
         try await saver.save()
-        #expect(await saver.flush() == .saved)
+        #expect(await Self.flushed(saver) == .saved)
+    }
+
+    /// No check here calls the flush the app calls, because its deadline is a real one and a
+    /// real one can win on a machine that is busy enough (#203). So what it does is read: it is
+    /// the flush every check above turns by hand, handed `Task.sleep` and nothing of its own.
+    @Test("The flush the app calls is the one these checks turn, waiting its deadline on the real clock")
+    func theAppsFlushIsTheSame() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("Sources/FediqoPersistence/StoreSaver.swift"), encoding: .utf8
+        )
+        let squeezed = source.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(squeezed.contains(
+            "public nonisolated func flush(deadline: Duration = StoreSaver.deadline) async -> Outcome { "
+                + "await flush(deadline: deadline) { try await Task.sleep(for: $0) } }"
+        ))
+        #expect(StoreSaver.deadline == .seconds(3))
     }
 
     @Test("What a save wrote is what the next launch opens: the store before the quit")
@@ -214,7 +195,7 @@ struct StoreSaverTests {
         let store = ItemStore(sources: [alpha, beta], notes: [note("1", from: alpha), note("2", from: beta)])
         let saver = StoreSaver(store: store, file: StoreFile.open(at: dir).file)
         // The round trip, not the quit's deadline: a shared runner stretches this write past 3 s (#203).
-        #expect(await saver.flush(deadline: .seconds(60)) == .saved)
+        #expect(await Self.flushed(saver) == .saved)
 
         let before = await store.snapshot()
         let opened = StoreFile.open(at: dir)
@@ -228,34 +209,53 @@ struct StoreSaverTests {
     @Test("A flush answers only once the write has landed")
     func flushWaitsForTheWrite() async {
         let release = Gate()
+        let guardTask = watching(release, "the write the flush waits for")
+        defer { guardTask.cancel() }
+        let begun = Order()
         let landed = Landed()
         let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [note("1", from: alpha)])) { _, notes, _ in
+            begun.add("write")
             await release.wait()
             _ = await landed.record(notes)
         }
-        let flush = Task { await saver.flush(deadline: .seconds(60)) }
+        let flush = Task { await Self.flushed(saver) }
+        await met("the flush's write is held", by: flush) { begun.all == ["write"] }
+        #expect(await landed.writes.isEmpty)
         await release.open()
         #expect(await flush.value == .saved)
         #expect(await landed.writes == [["1"]])
     }
 
-    /// **A hang guard, not a clock.** The write is still hanging when the flush answers — its
-    /// gate opens only after — so answering `.timedOut` at all is the deadline, not the write,
-    /// ending it. How soon after 50 ms it answers is how soon the deadline's own task gets a
-    /// thread, which on a shared runner with every other suite at work took six seconds (#203).
-    /// A flush that did wait for the write would never answer, and the time limit says so.
-    @Test("A write that hangs does not hold a flush past the deadline", .timeLimit(.minutes(3)))
+    /// **The deadline is turned by hand.** The write is still hanging when the flush answers —
+    /// its gate opens only after — so answering `.timedOut` at all is the deadline, not the
+    /// write, ending it; and the deadline waited on is the one the flush was handed. A flush that
+    /// did wait for the write would never answer, and the suite's watch says so.
+    @Test("A write that hangs does not hold a flush past the deadline")
     func flushTimesOut() async {
         let never = Gate()
-        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _, _ in await never.wait() }
-        #expect(await saver.flush(deadline: .milliseconds(50)) == .timedOut)
+        let guardTask = watching(never, "the write that hangs")
+        defer { guardTask.cancel() }
+        let begun = Order()
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _, _ in
+            begun.add("write")
+            await never.wait()
+        }
+        let clock = TurnedClock()
+        let deadline: Duration = .milliseconds(4_321)
+        let flush = Task { await saver.flush(deadline: deadline, sleep: clock.sleep) }
+        await met("the write hangs, and the flush's deadline is being waited on", by: flush) {
+            begun.all == ["write"] && clock.sleeping == 1
+        }
+        #expect(clock.asked == [deadline], "the deadline the flush was handed, and nothing else")
+        clock.turn()
+        #expect(await flush.value == .timedOut)
         await never.open()
     }
 
     @Test("A write that fails still lets a flush answer, and says so")
     func flushReportsFailure() async {
         let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _, _ in throw Refused() }
-        #expect(await saver.flush(deadline: .seconds(60)) == .failed)
+        #expect(await Self.flushed(saver) == .failed)
     }
 
     /// Which parts a save wrote, in the order they landed.
@@ -285,13 +285,13 @@ struct StoreSaverTests {
             }
         )
 
-        #expect(await saver.flush(deadline: .seconds(60)) == .failed, "a save that left a part unwritten said it saved")
+        #expect(await Self.flushed(saver) == .failed, "a save that left a part unwritten said it saved")
         let other = failing == "notices" ? "texts:1" : "notices:1"
         #expect(await parts.wrote == [other, "items:1"], "the part that failed kept another from the file")
 
         // Nothing moved since: the parts that landed are not written again, and the one that did not is.
         broken.withLock { $0 = false }
-        #expect(await saver.flush(deadline: .seconds(60)) == .saved)
+        #expect(await Self.flushed(saver) == .saved)
         #expect(await parts.wrote == [other, "items:1", failing == "notices" ? "notices:1" : "texts:1"])
     }
 }

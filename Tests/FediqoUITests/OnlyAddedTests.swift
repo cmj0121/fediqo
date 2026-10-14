@@ -13,7 +13,7 @@ import WebKit
 /// leaves, by the reader before a page moves and by the player before a film plays; a client used
 /// without the gate in front of it is refused on the wire (`Outward`).
 @MainActor
-@Suite("Only what the person added is reached")
+@Suite("Only what the person added is reached", .watched)
 struct OnlyAddedTests {
     private static let source = "one.example"
     private static let stranger = "tracker.example"
@@ -72,7 +72,7 @@ struct OnlyAddedTests {
     /// Two windows each adopt the store's sources in their own time; a window adopting late must
     /// not take back a source another has already seen added. So the gate hears from the store
     /// alone, in the order its sources change.
-    @Test("The gate hears which sources there are from the store, in the order they change", .timeLimit(.minutes(3)))
+    @Test("The gate hears which sources there are from the store, in the order they change")
     func oneWriter() async {
         let work = Self.governed([])
         let store = ItemStore()
@@ -147,7 +147,7 @@ struct OnlyAddedTests {
         }
     }
 
-    @Test("Reading a timeline names only the sources added, and a stranger's address is refused", .timeLimit(.minutes(3)))
+    @Test("Reading a timeline names only the sources added, and a stranger's address is refused")
     func aRunNamesOnlyAddedSources() async throws {
         let work = Self.governed([])
         let http = FixtureHTTP([
@@ -188,7 +188,7 @@ struct OnlyAddedTests {
 
     /// The directory of servers is a third party let through by one entry, for one purpose: it is
     /// asked while a source is being added, listed as itself, and reached by nothing else.
-    @Test("The directory is asked while a source is added, listed as itself, and reached by nothing else", .timeLimit(.minutes(3)))
+    @Test("The directory is asked while a source is added, listed as itself, and reached by nothing else")
     func theDirectory() async throws {
         let http = FixtureHTTP(["/servers": .text("[]")])
         let session = ShellSession(
@@ -410,7 +410,7 @@ struct OnlyAddedTests {
 /// Loaded for real, off screen, through a scheme of this test's own — so every load the page makes
 /// comes to `Served`, and nothing reaches a network.
 @MainActor
-@Suite("A page shown in the app reaches no third party", .serialized)
+@Suite("A page shown in the app reaches no third party", .serialized, .watched)
 struct PageRulesTests {
     @Test("The rules are built from the list: a link page lets nothing through, a forum Cloudflare, a sign-in its checks")
     func theRules() throws {
@@ -454,7 +454,7 @@ struct PageRulesTests {
 
     /// The same page as below, with an entry of the list letting one outside host through: loaded
     /// under the sign-in's rules, that host is reached and the others are not.
-    @Test("An entry the list holds lets its host through, and no other", .timeLimit(.minutes(3)))
+    @Test("An entry the list holds lets its host through, and no other")
     func anEntryLetsItsHostThrough() async throws {
         let served = Served()
         let configuration = WKWebViewConfiguration()
@@ -473,18 +473,27 @@ struct PageRulesTests {
         configuration.userContentController.add(rules)
         let view = WKWebView(frame: .init(x: 0, y: 0, width: 400, height: 400), configuration: configuration)
         view.load(URLRequest(url: URL(string: "\(Served.scheme)://bbs.forum.example/thread")!))
-        for _ in 0..<400 where !served.hosts.contains("cdn.example") {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        try await Task.sleep(for: .milliseconds(300))
+        await Self.loaded(view, served, asking: "cdn.example")
         #expect(served.hosts.contains("cdn.example"), "the entry's host is let through")
         #expect(!served.hosts.contains("tracker.example"), "and nothing else is")
         _ = view
     }
 
+    /// Waits until the page has asked `host` and has loaded. No `by:`: the load is the web
+    /// view's own, in a process of its own. A page has loaded when everything it asks for has
+    /// been answered or refused, so what it has not asked for by then it does not ask for.
+    private static func loaded(
+        _ view: WKWebView, _ served: Served, asking host: String, sourceLocation: SourceLocation = #_sourceLocation
+    ) async {
+        await met("the page has asked \(host), and has loaded", sourceLocation: sourceLocation) {
+            guard served.hosts.contains(host), !view.isLoading else { return false }
+            return (try? await view.evaluateJavaScript("document.readyState")) as? String == "complete"
+        }
+    }
+
     @Test(
         "A page's own site loads beside it and no other site does; without the rules the other would",
-        .timeLimit(.minutes(3)), arguments: [true, false]
+        arguments: [true, false]
     )
     func aPageLoads(ruled: Bool) async throws {
         let served = Served()
@@ -496,11 +505,8 @@ struct PageRulesTests {
         }
         let view = WKWebView(frame: .init(x: 0, y: 0, width: 400, height: 400), configuration: configuration)
         view.load(URLRequest(url: URL(string: "\(Served.scheme)://bbs.forum.example/thread")!))
-        for _ in 0..<400 where !served.hosts.contains("static.forum.example") {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        // The page's own picture came; what the page asked of the others had every chance to.
-        try await Task.sleep(for: .milliseconds(300))
+        // The page's own picture came, and what the page asked of the others has been asked.
+        await Self.loaded(view, served, asking: "static.forum.example")
         #expect(served.hosts.contains("bbs.forum.example"))
         #expect(served.hosts.contains("static.forum.example"), "the page's own site is read")
         let strangers = served.hosts.intersection(["tracker.example", "cdn.example"])

@@ -25,6 +25,11 @@ actor NoticeActServer: HTTPSender {
     private var issued = 0
     /// The sign-ins this server gives its own account of, where it is asked for one.
     private var held: MemoryMastodonTokens?
+    /// How many requests held at a gate were given up on by whoever asked — a deadline passed, a
+    /// read stopped — while they were held.
+    private(set) var givenUp = 0
+
+    private func giveUp() { givenUp += 1 }
 
     func tells(of held: MemoryMastodonTokens) {
         self.held = held
@@ -56,7 +61,11 @@ actor NoticeActServer: HTTPSender {
         case .body(let body)?: return answer(body)
         case .status(let status)?: return answer(#"{"error":"no"}"#, status)
         case .held(let gate, let body, let status)?:
-            await gate.wait()
+            await withTaskCancellationHandler {
+                await gate.wait()
+            } onCancel: {
+                Task { await self.giveUp() }
+            }
             return answer(body, status)
         case .fails(let gate, let code)?:
             await gate?.wait()
@@ -192,6 +201,9 @@ enum NoticeActFixture {
         )
         session.mastodon.refresh()
         await session.reloadFromStore()
+        // The deadline of what is asked through a sign-in, on a clock nobody turns: an ask held at
+        // a gate is not ended by one.
+        session.mastodon.deadlineSleep = TurnedClock().sleep
         session.noticeList.deadline = .seconds(5)
         return (session, server, tokens)
     }
@@ -201,7 +213,7 @@ enum NoticeActFixture {
 /// one and all, and what a source holds back. Every path here ends in what the session holds
 /// and what the source was asked; how each is drawn is `NoticeActsHostedTests`.
 @MainActor
-@Suite("Acting on notices: the ask, dismissing, and what a source holds back")
+@Suite("Acting on notices: the ask, dismissing, and what a source holds back", .watched)
 struct NoticeActsTests {
     private typealias F = NoticeActFixture
     private static let a = F.a
@@ -554,13 +566,15 @@ struct NoticeActsTests {
     @Test("A dismissed line leaves what is drawn at the yes, and what is held only once its source has answered")
     func dismissedOnlyAfterTheAnswer() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the dismissal, held on the wire")
+        defer { guardTask.cancel() }
         let dismiss = F.post(Self.a, "/api/v1/notifications/4/dismiss")
         let (session, server, _) = try await two([dismiss: .held(gate, "{}")])
         let acts = session.noticeList.acts
         let notice = try line("a4", in: session)
 
         let task = Task { await acts.dismiss(notice, in: session) }
-        #expect(await spun { await server.count(dismiss) == 1 })
+        await met("the dismissal is on the wire", by: task) { await server.count(dismiss) == 1 }
         #expect(ids(session.noticeList.lines) == ["b8", "a3"], "the line was drawn after the yes")
         #expect(session.noticeList.reaches[Self.a]?.notices.contains { $0.id == notice.id } == true, "it left what is held before the source answered")
         #expect(acts.acting == [notice.id])
@@ -657,12 +671,14 @@ struct NoticeActsTests {
         let dismiss = F.post(Self.a, "/api/v1/notifications/4/dismiss")
         for (status, replaced) in [(200, true), (403, true), (503, true), (200, false)] {
             let gate = Gate()
+            let guardTask = watching(gate, "the dismissal, held on the wire")
+            defer { guardTask.cancel() }
             let (session, server, tokens) = try await two([dismiss: .held(gate, "{}", status)])
             let acts = session.noticeList.acts
             let notice = try line("a4", in: session)
 
             let task = Task { await acts.dismiss(notice, in: session) }
-            #expect(await spun { await server.count(dismiss) == 1 })
+            await met("the dismissal is on the wire", by: task) { await server.count(dismiss) == 1 }
             if replaced {
                 try tokens.save(F.token(Self.a, scopes: F.acts, access: "tok-other"))
             } else {
@@ -699,9 +715,11 @@ struct NoticeActsTests {
         let notice = try line("a4", in: session)
         // The next read of a is asked before the dismissal, and answers after it.
         let gate = Gate()
+        let guardTask = watching(gate, "the read of a, held on the wire")
+        defer { guardTask.cancel() }
         await server.set(F.get(Self.a), .held(gate, "[" + [F.one(5, by: "Di", minutes: 1), F.one(4, by: "Ada", minutes: 2), F.one(3, "follow", by: "Bo", minutes: 9)].joined(separator: ",") + "]"))
         let read = Task { await list.read(in: session) }
-        #expect(await spun { await server.count(F.get(Self.a)) == 2 })
+        await met("the read of a is on the wire", by: read) { await server.count(F.get(Self.a)) == 2 }
 
         await list.acts.dismiss(notice, in: session)
         #expect(!list.lines.contains { $0.id == notice.id })
@@ -713,9 +731,11 @@ struct NoticeActsTests {
         // And a read stopped instead of answered does not put it back either.
         let (other, asked, _) = try await two([dismiss: .body("{}")])
         let closed = Gate()
+        let closedGuard = watching(closed, "the read to be stopped, held on the wire")
+        defer { closedGuard.cancel() }
         await asked.set(F.get(Self.a), .held(closed, "[]"))
         let stopped = Task { await other.noticeList.read(in: other) }
-        #expect(await spun { await asked.count(F.get(Self.a)) == 2 })
+        await met("the read to be stopped is on the wire", by: stopped) { await asked.count(F.get(Self.a)) == 2 }
         await other.noticeList.acts.dismiss(try line("a4", in: other), in: other)
         #expect(other.noticeList.stop())
         await closed.open()
@@ -728,12 +748,14 @@ struct NoticeActsTests {
     @Test("Dismissing all asks one source once; its lines leave what is drawn at the yes and what is held once it answers; the other source's stand")
     func dismissAllTakesOneSourcesLines() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the clearing of a's notices, held on the wire")
+        defer { guardTask.cancel() }
         let clear = F.post(Self.a, "/api/v1/notifications/clear")
         let (session, server, _) = try await two([clear: .held(gate, "{}")])
         let acts = session.noticeList.acts
 
         let task = Task { await acts.dismissAll(host: Self.a, in: session) }
-        #expect(await spun { await server.count(clear) == 1 })
+        await met("the clearing of a's notices is on the wire", by: task) { await server.count(clear) == 1 }
         #expect(ids(session.noticeList.lines) == ["b8"], "the source's lines were drawn after the yes")
         #expect(session.noticeList.reaches[Self.a]?.notices.count == 2, "they left what is held before the source answered")
         #expect(acts.acting == [ShellNoticeActs.all(Self.a)])
@@ -770,10 +792,12 @@ struct NoticeActsTests {
     @Test("Dismissing all for a sign-in since replaced changes nothing")
     func dismissAllForAReplacedSignIn() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the clearing of a's notices, held on the wire")
+        defer { guardTask.cancel() }
         let clear = F.post(Self.a, "/api/v1/notifications/clear")
         let (session, server, tokens) = try await two([clear: .held(gate, "{}")])
         let task = Task { await session.noticeList.acts.dismissAll(host: Self.a, in: session) }
-        #expect(await spun { await server.count(clear) == 1 })
+        await met("the clearing of a's notices is on the wire", by: task) { await server.count(clear) == 1 }
         try tokens.save(F.token(Self.a, scopes: F.acts, access: "tok-other"))
         await gate.open()
         await task.value
@@ -930,13 +954,15 @@ struct NoticeActsTests {
     @Test("A request let through leaves what is listed at the yes and what is held once the source answers, and is then said to be on its way until a later read shows its notices")
     func letThroughIsOnItsWay() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the request let through, held on the wire")
+        defer { guardTask.cancel() }
         let accept = F.post(Self.a, Self.requests + "/71/accept")
         let (session, server, _) = try await holding([accept: .held(gate, "{}")])
         let acts = session.noticeList.acts
         let eve = try #require(acts.requests[Self.a]?.first)
 
         let task = Task { await acts.letThrough(eve, in: session) }
-        #expect(await spun { await server.count(accept) == 1 })
+        await met("the request let through is on the wire", by: task) { await server.count(accept) == 1 }
         #expect(acts.requests[Self.a]?.count == 2 && acts.onItsWay.isEmpty, "it moved in what is held before the source answered")
 
         await gate.open()
@@ -1018,6 +1044,8 @@ struct NoticeActsTests {
         // A request that says it is another source's is not sent to this source's door.
         let accept = F.post(Self.a, Self.requests + "/71/accept")
         let gate = Gate()
+        let guardTask = watching(gate, "the request let through, held on the wire")
+        defer { guardTask.cancel() }
         let (session, server, tokens) = try await holding([accept: .held(gate, "{}")])
         let acts = session.noticeList.acts
         let eve = try #require(acts.requests[Self.a]?.first)
@@ -1030,7 +1058,7 @@ struct NoticeActsTests {
 
         // An answer for a sign-in since replaced changes nothing.
         let task = Task { await acts.letThrough(eve, in: session) }
-        #expect(await spun { await server.count(accept) == 1 })
+        await met("the request let through is on the wire", by: task) { await server.count(accept) == 1 }
         try tokens.save(F.token(Self.a, scopes: F.acts, access: "tok-other"))
         await gate.open()
         await task.value
@@ -1077,15 +1105,25 @@ struct NoticeActsTests {
     @Test("A dismissal that runs out of time is said as not confirmed, and the line is drawn again until a read says")
     func aDismissalOutOfTime() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the dismissal, held on the wire")
+        defer { guardTask.cancel() }
         let dismiss = F.post(Self.a, "/api/v1/notifications/4/dismiss")
         let (session, server, _) = try await two([dismiss: .held(gate, "{}")])
-        session.noticeList.deadline = .milliseconds(50)
+        // The deadline, on a clock this check turns.
+        let clock = TurnedClock()
+        let deadline: Duration = .milliseconds(4_321)
+        session.mastodon.deadlineSleep = clock.sleep
+        session.noticeList.deadline = deadline
 
         let notice = try line("a4", in: session)
         let task = Task { await session.noticeList.acts.dismiss(notice, in: session) }
-        #expect(await spun { await server.count(dismiss) == 1 })
+        await met("the dismissal is on the wire, its deadline waited on", by: task) {
+            await server.count(dismiss) == 1 && clock.sleeping == 1
+        }
+        #expect(clock.asked == [deadline], "the deadline the notices were given, and nothing else")
         // Past the deadline, and only then does the source get round to answering.
-        try await Task.sleep(for: .milliseconds(200))
+        clock.turn()
+        await met("the dismissal is given up on at its deadline", by: task) { await server.givenUp == 1 }
         await gate.open()
         await task.value
 
