@@ -303,7 +303,8 @@ struct ConversationPageTests {
         let here = ShellStep.thread(held), gone = ShellStep.thread("https://m.example/users/ada/statuses/withdrawn")
         func drawn(_ step: ShellStep?) -> TimelinePane.Drawn { TimelinePane.drawn(step, of: nil, in: session) }
         #expect(drawn(here).drawn && !drawn(gone).drawn)
-        #expect(drawn(nil).drawn && drawn(.rising(.tags)).drawn)
+        // What is rising is drawn only where somebody says what it is (F10): with nobody, the stream.
+        #expect(drawn(nil).drawn && !drawn(.rising(.tags)).drawn)
         // Drawn: no head of the timelines, the page's own swipe, and the key the page's.
         #expect(!TimelinePane.headDrawn(over: here, drawn: drawn(here).drawn))
         // Not drawn: the head, the swipe that goes back — and the key the timelines'.

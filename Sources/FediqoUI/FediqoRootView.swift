@@ -1964,6 +1964,16 @@ public struct FediqoRootView: View {
         return walk.walk(to: .rising(which), from: selectedItemID)
     }
 
+    /// A tab of that page pressed or swiped to: the step turned in place, no step more (F10).
+    private func turnRising(to which: RisingWhich) -> Bool {
+        people.rising.turn(&walk, to: which, lamp: &selectedItemID, in: session)
+    }
+
+    /// `turnRising`, as the pane hands a tab over: whether it turned is nobody's to read there.
+    private func risingTurned(_ which: RisingWhich) {
+        _ = turnRising(to: which)
+    }
+
     /// `h`: the rising hashtags, where the stream they are offered over is in front.
     private func openRisingByKey() -> Bool {
         guard people.rising.opensByKey(place: place, open: openLayers, timeline: session.currentTimeline, in: session)
@@ -2187,6 +2197,7 @@ public struct FediqoRootView: View {
         // other hashtag's.
         people.tabs.leftAll()
         people.tags.leftAll(but: tag)
+        people.rising.left()
         let held = session.heldPosts(under: tag, latest: prefs.latestDate).map(\.id)
         let lamp = Self.lampOverSwitch(selectedItemID, aboutInFront: !people.tags.front(of: tag, in: session).listsPosts, held: held)
         if lamp != selectedItemID { selectedItemID = lamp }
@@ -2224,6 +2235,7 @@ public struct FediqoRootView: View {
         walk.clear()
         people.tabs.leftAll()
         people.tags.leftAll()
+        people.rising.left()
         errand = nil
     }
 
@@ -2310,6 +2322,10 @@ public struct FediqoRootView: View {
         case .tag(let tag):
             return people.tags.rotate(
                 tag, by: step, covered: !Self.pageInFront(.tag, open: openLayers), lamp: &selectedItemID, in: session
+            )
+        case .rising:
+            return people.rising.rotate(
+                &walk, by: step, covered: !Self.pageInFront(.rising, open: openLayers), lamp: &selectedItemID, in: session
             )
         case .person(let person):
             guard Self.turnsPersonTabs(open: openLayers) else { return false }
@@ -2513,6 +2529,7 @@ public struct FediqoRootView: View {
                 people: people,
                 onOpenListed: { _ = openListed($0) },
                 onOpenRising: { _ = openRising($0) },
+                onTurnRising: risingTurned,
                 onOpenRisingRow: { _ = openRisingRow($0) },
                 onOpenFound: { _ = openFound($0) },
                 onFollowed: { _ = followedPressed($0) },

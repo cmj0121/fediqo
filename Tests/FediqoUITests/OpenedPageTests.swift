@@ -335,8 +335,10 @@ struct OpenedPageTests {
         let tag = try #require(PostTag("#swift"))
         // A hashtag's page answers for itself: its tabs where it has two, and taken where one.
         #expect(ShellStep.tag(tag).tabKey == .tag(tag))
+        // What is rising answers with its tab, the step's own value (F10).
+        #expect(ShellStep.rising(.links).tabKey == .rising(.links))
         for step in [
-            ShellStep.link(URL(string: "https://example.org/")!), .rising(.tags), .rising(.links),
+            ShellStep.link(URL(string: "https://example.org/")!),
             .foundTags(FoundTags(source: "m.example", words: "swift")), .followedTags(FollowedTags(host: "m.example")),
         ] {
             #expect(step.tabKey == nil, "\(step)")

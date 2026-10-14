@@ -38,24 +38,14 @@ enum TagTab: String, ShellTab, CaseIterable, Sendable {
     /// a conversation. About's are blocks, and no post's key acts on one.
     var listsPosts: Bool { self == .posts }
 
-    /// What Tab or ⇧Tab does on a hashtag's page.
-    enum Keyed: Equatable, Sendable {
-        /// That tab is brought in front.
-        case turn(TagTab)
-        /// The key is the page's, and turns nothing: the page has its posts alone.
-        case taken
-        /// Something is drawn over the page: the key is not the page's at all.
-        case unheard
-    }
+    /// What Tab or ⇧Tab does on a hashtag's page: taken, turning nothing, where it has its
+    /// posts alone.
+    typealias Keyed = PageKeyed<TagTab>
 
-    /// What the key does on a page with `tabs` and `front` in front, `step` on or back —
-    /// **the one place it is decided.** Round the ring where there are two; taken, turning
-    /// nothing, where there is one, so the timelines are never turned from under the page;
-    /// and nothing at all while the page is `covered`.
+    /// What the key does on a page with `tabs` and `front` in front, as every page with tabs
+    /// decides it (`PageFrame.keyed`).
     static func keyed(_ tabs: [TagTab], front: TagTab, by step: Int, covered: Bool) -> Keyed {
-        if covered { return .unheard }
-        guard tabs.count > 1 else { return .taken }
-        return .turn(DummyCommand.advanced(tabs, from: front, by: step))
+        PageFrame.keyed(tabs, front: front, by: step, covered: covered)
     }
 
     /// What becomes of the tab kept in front and of the lamp when the page's tabs change
@@ -70,7 +60,7 @@ enum TagTab: String, ShellTab, CaseIterable, Sendable {
     /// and no lamp where it is not: a post's id is never carried onto About, a block's never
     /// onto the posts, and a post the timeline in front no longer shows is not lit.
     static func lamp(_ kept: String?, among walked: [String]) -> String? {
-        kept.flatMap { walked.contains($0) ? $0 : nil }
+        PageFrame.lamp(kept, among: walked)
     }
 }
 

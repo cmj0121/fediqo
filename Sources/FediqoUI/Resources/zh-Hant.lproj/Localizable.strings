@@ -1778,6 +1778,10 @@
 "rising.use.one" = "今天：貼文 %1$@、人數 %2$@。";
 "rising.unsaid" = "沒有說";
 "rising.link.leads" = "通往 %@";
+"rising.title" = "正在竄升的";
+"rising.tab.tags" = "主題標籤";
+"rising.tab.links" = "連結";
+"rising.reload" = "再問各來源一次";
 "shortcut.rising" = "在「趨勢」打開各來源上竄升的主題標籤";
 "search.band.people" = "人 · %@";
 "search.band.tags" = "主題標籤 · %@";

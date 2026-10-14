@@ -1823,6 +1823,10 @@
 "rising.use.one" = "Posts %1$@, people %2$@, today.";
 "rising.unsaid" = "not said";
 "rising.link.leads" = "leads to %@";
+"rising.title" = "What is rising";
+"rising.tab.tags" = "Hashtags";
+"rising.tab.links" = "Links";
+"rising.reload" = "Ask the sources again";
 "shortcut.rising" = "On Trends, open the hashtags rising on your sources";
 "search.band.people" = "People · %@";
 "search.band.tags" = "Hashtags · %@";

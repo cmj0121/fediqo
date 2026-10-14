@@ -372,9 +372,10 @@ extension ShellPersonPages {
     /// their steps goes.
     ///
     /// **A hashtag's page keeps its tab the same way** (F10), and forgets it with the last of
-    /// its steps.
+    /// its steps. **And what is rising its tabs' lamps** — its tab in front is the step's own.
     func left(_ step: ShellStep, of walk: ShellWalk) {
         if case .tag(let tag) = step, !walk.holdsTag(tag) { tags.left(tag) }
+        if case .rising = step { rising.left() }
         guard case .person(let who) = step, !walk.holdsPerson(who.id) else { return }
         tabs.left(who.id)
     }

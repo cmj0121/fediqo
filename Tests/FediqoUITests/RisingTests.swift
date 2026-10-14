@@ -342,7 +342,9 @@ struct RisingTests {
         #expect(DummyCommand.walk.contains(.rising) && DummyCommand.canWalk(whenOpen: [.rising]) && DummyCommand.canLightRow(whenOpen: [.rising]))
         #expect(!DummyCommand.canEditTimeline(whenOpen: [.rising]) && DummyCommand.outermost(of: [.rising, .selection]) == .rising)
         #expect(FediqoRootView.escapeSees([.rising, .selection], place: .usage) == [.selection])
-        #expect(TimelinePane.page(.rising(.tags)) == .opened && TimelinePane.openedID(.rising(.links)) == "rising:links")
+        // The page is the frame's, and its swipe the frame's, where it is drawn (F10).
+        #expect(TimelinePane.page(.rising(.tags)) == .tabbed && TimelinePane.page(.rising(.tags), drawn: false) == .opened)
+        #expect(TimelinePane.openedID(.rising(.links)) == "rising:links")
         #expect(FediqoRootView.canReload(place: .timeline, editing: false, hasSources: true, open: [.rising], personAsked: true))
         #expect(!FediqoRootView.canReload(place: .timeline, editing: false, hasSources: true, open: [.rising]))
         #expect(!FediqoRootView.canSearch(place: .timeline, open: [.rising]))
@@ -412,7 +414,8 @@ struct RisingTests {
             else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 16 && keys.contains("rising.use.two") && keys.contains("work.purpose.rising") && keys.contains("shortcut.expand"))
+        // Four more since F10: the one page's title, its two tabs and its bar's mark.
+        #expect(keys.count == 20 && keys.contains("rising.use.two") && keys.contains("work.purpose.rising") && keys.contains("shortcut.expand"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }
@@ -458,7 +461,7 @@ struct RisingTests {
             #expect(tall >= short && tall < short * 3, "a link's words are held to their lines at \(width): \(tall) against \(short)")
             #expect(size(RisingRowView(row: bare), width).height < short)
             #expect(size(RisingLine(onOpen: { _ in }), width, scheme: scheme).width == width)
-            #expect(size(RisingHead(which: .links), width, scheme: scheme).width == width)
+            #expect(size(RisingHead(), width, scheme: scheme).width == width)
         }
         let states = [
             RisingSaid(which: .tags, bands: [RisingSaid.Band(source: Self.one), RisingSaid.Band(source: Self.two, reading: .failed)]),
@@ -470,7 +473,8 @@ struct RisingTests {
         ]
         for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 320)] {
             for said in states {
-                let pane = RisingPane(said: said, selectedID: .constant(said.rows.first?.id), onOpen: { _ in }, onBack: {})
+                // The page as one page now draws them (F10): the tab in front in the frame.
+                let pane = RisingPage(said: said, tabs: RisingWhich.allCases, selectedID: .constant(said.rows.first?.id))
                     .environment(\.shellLayout, layout)
                 let hosted = NSHostingView(rootView: pane.frame(width: width, height: 700))
                 hosted.layoutSubtreeIfNeeded()

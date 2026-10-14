@@ -77,6 +77,8 @@ struct TimelinePane: View {
     /// One of the two ways at the head of the timeline that reads what is rising, pressed
     /// (#320), answered by the root: the page of rising hashtags or links is a step of the walk.
     var onOpenRising: (RisingWhich) -> Void = { _ in }
+    /// A tab of that page pressed or swiped to, answered by the root: the step turned in place.
+    var onTurnRising: (RisingWhich) -> Void = { _ in }
     /// A row of such a page opened, answered by the root: a hashtag's page, or a link through
     /// the door a post's link goes through.
     var onOpenRisingRow: (RisingRow) -> Void = { _ in }
@@ -180,20 +182,10 @@ struct TimelinePane: View {
                     underneath
                 }
             case .rising(let which):
-                // No source with such a page — the last one removed since — draws the stream.
-                if let rising = people?.rising, let said = rising.said(which, in: session) {
-                    RisingPane(
-                        said: said,
-                        selectedID: $selectedID,
-                        onOpen: onOpenRisingRow,
-                        onAskAgain: { host in Task { await rising.again(which, at: host, in: session) } },
-                        jumpToTop: jumpToTop,
-                        onBack: onBack
-                    )
-                    .id(which)
-                    // **The ask is the page opening**, once a run for each source: one stretch
-                    // of what is rising there, of that source and nobody else.
-                    .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
+                // No source with a ranking of any tab — the last one removed since — draws the
+                // stream; one left with a ranking of the other tab only, that tab.
+                if let people, let rising = shown.rising {
+                    risingPage(rising, standing: which, in: people.rising)
                 } else {
                     underneath
                 }
@@ -467,38 +459,40 @@ struct TimelinePane: View {
         case .person, .tag: .tabbed
         // A conversation's page is the frame's, and its sideways the frame's (F10) — where it
         // is drawn; over the stream drawn in its stead the swipe goes back, as it did.
-        // So is a list of people's (F10), where it is drawn.
-        case .thread, .people: drawn ? .tabbed : .opened
-        case .rising, .foundTags, .followedTags: .opened
+        // So is a list of people's (F10), where it is drawn, and what is rising's.
+        case .thread, .people, .rising: drawn ? .tabbed : .opened
+        case .foundTags, .followedTags: .opened
         case .link: .link
         case nil: .timeline
         }
     }
 
     /// Whether the timelines' head — their names, the search, the reload — is drawn over what
-    /// the reader stands on: not over somebody's page, a conversation's, a hashtag's nor a list
-    /// of people's, each a page of its own. **Asked of what is drawn, not of the step alone**
-    /// (F10 §1): a conversation or a list that cannot be drawn (`drawn` false) draws the
-    /// stream, and the head is over that.
+    /// the reader stands on: not over somebody's page, a conversation's, a hashtag's, a list
+    /// of people's nor what is rising, each a page of its own. **Asked of what is drawn, not of
+    /// the step alone** (F10 §1): a conversation, a list or what is rising that cannot be drawn
+    /// (`drawn` false) draws the stream, and the head is over that.
     static func headDrawn(over standing: ShellStep?, drawn: Bool = true) -> Bool {
         switch standing {
         case .person, .tag: false
-        case .thread, .people: !drawn
-        case .rising, .foundTags, .followedTags, .link, nil: true
+        case .thread, .people, .rising: !drawn
+        case .foundTags, .followedTags, .link, nil: true
         }
     }
 
     /// What is drawn of the step in front: the post a conversation is around, where this device
-    /// still holds it; the list a list of people's page is handed, where it can be said; and
-    /// whether the step's page is drawn at all. A conversation whose post is no longer held, or
-    /// a list nobody can say — its source gone, nobody signed in to see it — is not, and the
-    /// stream is drawn in its stead.
+    /// still holds it; the list a list of people's page is handed, where it can be said; what
+    /// the tab of what is rising in front is handed, where a source has a ranking of it; and
+    /// whether the step's page is drawn at all. A conversation whose post is no longer held, a
+    /// list nobody can say — its source gone, nobody signed in to see it — or a tab no source
+    /// ranks any more is not, and the stream is drawn in its stead.
     ///
     /// **The one decision of what is drawn**: the pane's body, its head and its swipe, and the
     /// root asked what Tab and `r` do, all ask it here, handed the same things.
     struct Drawn {
         var root: DummyItem?
         var list: PeopleSaid?
+        var rising: RisingSaid?
         var drawn: Bool
     }
 
@@ -510,7 +504,10 @@ struct TimelinePane: View {
         case .people(let list):
             let said = people?.lists.said(of: list, in: session)
             return Drawn(list: said, drawn: said != nil)
-        case .person, .tag, .rising, .foundTags, .followedTags, .link, nil:
+        case .rising(let which):
+            let said = people?.rising.drawn(at: which, in: session)
+            return Drawn(rising: said, drawn: said != nil)
+        case .person, .tag, .foundTags, .followedTags, .link, nil:
             return Drawn(drawn: true)
         }
     }
@@ -711,6 +708,42 @@ struct TimelinePane: View {
         // **The ask is the page opening**, once a list a run: its first stretch, of the source
         // that keeps it and nobody else. Nothing reads on unpressed.
         .task(id: ShellPeoplePages.opening(list, in: session)) { await people.lists.opened(list, in: session) }
+    }
+
+    /// What is rising (F10): the whole height of the pane, in the frame every opened page stands
+    /// in, handed its tabs and what the tab in front says — worked out where the sources are
+    /// asked. Its bar's mark is where `r` asks the sources again; **never Stop** — its asks are
+    /// not the timeline's reload, and a Stop here would stop one running out of sight.
+    ///
+    /// The walk stood on `standing`'s tab: where the page draws the other one — no source ranks
+    /// `standing` any more — the walk is turned to it, so Tab, the keys and leaving all stand on
+    /// the tab that is drawn.
+    private func risingPage(_ said: RisingSaid, standing: RisingWhich, in rising: ShellRising) -> some View {
+        let which = said.which
+        return RisingPage(
+            said: said,
+            tabs: rising.tabs(in: session),
+            selectedID: $selectedID,
+            slide: session.slide("rising"),
+            reload: RisingPage.reloadName(canReload: ways.canReload),
+            acts: RisingPage.acts(
+                onBack: onBack,
+                onTab: onTurnRising,
+                onReload: ways.onReload,
+                // Pulled down, the sources are asked again as `r` asks them.
+                onPull: { await rising.again(which, in: session) }
+            ),
+            onOpen: onOpenRisingRow,
+            onAskAgain: { host in Task { await rising.again(which, at: host, in: session) } },
+            jumpToTop: jumpToTop
+        )
+        // **A tab asks when it first comes in front**, once a run for each source: one stretch
+        // of what is rising there, of that source and nobody else. A tab never in front has
+        // asked nothing.
+        .task(id: rising.opening(which, in: session)) { await rising.opened(which, in: session) }
+        .onChange(of: which != standing, initial: true) { _, fell in
+            if fell { onTurnRising(which) }
+        }
     }
 
     /// A hashtag's page (F10): the whole height of the pane, in the frame every opened page

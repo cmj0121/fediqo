@@ -76,7 +76,35 @@ enum PageFrame {
 
     /// Whether the strip of tabs is drawn: only where there is more than one.
     static func stripDrawn<Tab>(_ tabs: [Tab]) -> Bool { tabs.count > 1 }
+
+    /// The lamp a tab is handed back, where it is still on one of the rows that tab walks —
+    /// and no lamp where it is not.
+    static func lamp(_ kept: String?, among walked: [String]) -> String? {
+        kept.flatMap { walked.contains($0) ? $0 : nil }
+    }
+
+    /// What Tab or ⇧Tab does on a page with `tabs` and `front` in front, `step` on or back —
+    /// **the one place it is decided, for every page that has tabs.** Round the ring where
+    /// there are two or more; taken, turning nothing, where there is one, so the timelines are
+    /// never turned from under the page; and nothing at all while the page is `covered`.
+    static func keyed<Tab: Equatable>(_ tabs: [Tab], front: Tab, by step: Int, covered: Bool) -> PageKeyed<Tab> {
+        if covered { return .unheard }
+        guard tabs.count > 1 else { return .taken }
+        return .turn(DummyCommand.advanced(tabs, from: front, by: step))
+    }
 }
+
+/// What Tab or ⇧Tab does on an opened page (`PageFrame.keyed`).
+enum PageKeyed<Tab: Equatable>: Equatable {
+    /// That tab is brought in front.
+    case turn(Tab)
+    /// The key is the page's, and turns nothing: the page has one tab.
+    case taken
+    /// Something is drawn over the page: the key is not the page's at all.
+    case unheard
+}
+
+extension PageKeyed: Sendable where Tab: Sendable {}
 
 /// A page opened over the stream (F10): the frame every one of them stands in — a way back,
 /// the page's own head, its tabs where it has more than one, and what is in front — the whole

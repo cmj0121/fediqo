@@ -59,6 +59,10 @@ enum StepTabKey: Hashable, Sendable {
     /// A hashtag's page (F10): Posts and About where it has both, round their ring — and
     /// taken, turning nothing, where it has its posts alone.
     case tag(PostTag)
+    /// What is rising (F10): Hashtags and Links where its sources have both, round their
+    /// ring — the tab is the step's own value, turned in place (`ShellWalk.turned(to:)`) — and
+    /// taken, turning nothing, where they have one.
+    case rising(RisingWhich)
     /// A page with no tabs (F10): the key is taken and does nothing — to change timeline the
     /// reader leaves first — while the page, drawn as `layer`, is what is in front.
     case sole(DummyLayer)
@@ -86,7 +90,24 @@ extension ShellStep {
         case .thread: .sole(.thread)
         case .people: .sole(.people)
         case .tag(let tag): .tag(tag)
-        case .link, .rising, .foundTags, .followedTags: nil
+        case .rising(let which): .rising(which)
+        case .link, .foundTags, .followedTags: nil
+        }
+    }
+
+    /// Whether `other` is another value of the same kind of step — what a tab turned in place
+    /// may turn to (`ShellWalk.turned(to:)`): `.rising(.tags)` and `.rising(.links)` are, a
+    /// hashtag's page and a person's are not.
+    func isKind(of other: ShellStep) -> Bool {
+        switch self {
+        case .person: if case .person = other { true } else { false }
+        case .thread: if case .thread = other { true } else { false }
+        case .link: if case .link = other { true } else { false }
+        case .tag: if case .tag = other { true } else { false }
+        case .people: if case .people = other { true } else { false }
+        case .rising: if case .rising = other { true } else { false }
+        case .foundTags: if case .foundTags = other { true } else { false }
+        case .followedTags: if case .followedTags = other { true } else { false }
         }
     }
 }
@@ -220,12 +241,13 @@ struct ShellWalk: Hashable, Sendable {
     /// opened from, and the walk is no deeper: leaving never passes through the other tab.
     ///
     /// **Only for a tab of the page in front** — the same kind of step, another of its own
-    /// values (`.rising(.tags)` to `.rising(.links)`); it is not a way to another page.
-    /// Nothing is turned on the stream, to the step already in front, or to the step
-    /// beneath: that would stand the reader twice on one step, which `walk(to:)` refuses.
+    /// values (`.rising(.tags)` to `.rising(.links)`); it is not a way to another page, and
+    /// **a step of another kind is refused** (`ShellStep.isKind(of:)`). Nothing is turned on
+    /// the stream, to the step already in front, or to the step beneath: that would stand the
+    /// reader twice on one step, which `walk(to:)` refuses.
     @discardableResult
     mutating func turned(to step: ShellStep) -> Bool {
-        guard let last = taken.last, last.step != step else { return false }
+        guard let last = taken.last, last.step != step, last.step.isKind(of: step) else { return false }
         if taken.count > 1, taken[taken.count - 2].step == step { return false }
         taken[taken.count - 1] = Taken(step: step, lamp: last.lamp)
         return true
