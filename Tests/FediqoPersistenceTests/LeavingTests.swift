@@ -113,10 +113,13 @@ struct LeavingTests {
             writeUnsent: { _ in record.note("words written") },
             writeNotices: { _ in record.note("notices written") }
         )
+        // The clock stands still: however long a slow run holds the write, the ten seconds are
+        // not what this check is about (`theRestIsSkipped` is).
+        let began = ContinuousClock.now
         let leaving = Task { @MainActor in
             await Leaving.leave(
                 holding: grant, decide: { record.note("decided what is saved") }, saver: saver, protected: .always,
-                then: { record.note("the rest of leaving") }
+                clock: { began }, then: { record.note("the rest of leaving") }
             )
             held.leavingIsOver()
         }

@@ -54,15 +54,6 @@ actor FixtureHTTP: HTTPClient {
     }
 }
 
-/// `watching(_:opening:)` under the name it had while it kept a clock of its own (#346). It keeps
-/// none now: what it guards is opened by the run going still, and by nothing else. Here until
-/// every site that says it has been given a name for what it holds.
-func hangGuard(
-    sourceLocation: SourceLocation = #_sourceLocation, opening open: @escaping @Sendable () async -> Void
-) -> Task<Void, Never> {
-    watching(sourceLocation: sourceLocation, opening: open)
-}
-
 extension Note {
     /// This note as a read sent just now brought it (#291): what a note made by hand has to say
     /// for itself before the store takes its word on what the reader did.
