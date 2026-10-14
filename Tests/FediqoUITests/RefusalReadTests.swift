@@ -18,7 +18,7 @@ import Testing
 /// The notices below are the real install's (`DiscuzRefusalCaptures`, in Core's tests), cut to
 /// the container that says why.
 @MainActor
-@Suite("A forum's refusals, read in the app")
+@Suite("A forum's refusals, read in the app", .watched)
 struct RefusalReadTests {
     private static let host = "discuz.localhost"
     private static let source = Source(host: host, kind: .discuz)
@@ -216,6 +216,8 @@ struct RefusalReadTests {
         let http = LockedBlog(form: Self.passwordForm, blog: Self.blogPage)
         let session = await Self.session(http)
         let gate = Gate()
+        let guardTask = watching(gate, "the password, on its way")
+        defer { guardTask.cancel() }
         let sent = Sent()
         session.blogs.unlocking = { host, page, password in
             await sent.note(host: host, page: page, password: password)
@@ -226,7 +228,7 @@ struct RefusalReadTests {
         let row = try #require(session.held(Self.rowID))
 
         let first = Task { await session.blogs.unlock(row, password: Self.password) }
-        #expect(await spun { session.blogs.reading(of: row) == .locked(.trying) })
+        await met("the password is on its way", by: first) { session.blogs.reading(of: row) == .locked(.trying) }
         #expect(!(await session.blogs.unlock(row, password: Self.password)))
         await gate.open()
         _ = await first.value
@@ -297,6 +299,8 @@ struct RefusalReadTests {
         let http = LockedBlog(form: Self.passwordForm, blog: Self.blogPage)
         let session = await Self.session(http)
         let gate = Gate()
+        let guardTask = watching(gate, "the password, on its way")
+        defer { guardTask.cancel() }
         let sent = Sent()
         session.blogs.unlocking = { host, page, password in
             await sent.note(host: host, page: page, password: password)
@@ -308,7 +312,7 @@ struct RefusalReadTests {
         let row = try #require(session.held(Self.rowID))
 
         let first = Task { await session.blogs.unlock(row, password: Self.password) }
-        #expect(await spun { session.blogs.reading(of: row) == .locked(.trying) })
+        await met("the password is on its way", by: first) { session.blogs.reading(of: row) == .locked(.trying) }
         session.blogs.signedIn(host: Self.host)
         session.blogs.forget(host: Self.host)
         #expect(session.blogs.reading(of: row) == .locked(.trying))
@@ -348,13 +352,15 @@ struct RefusalReadTests {
 
         // `r` asks again, and that read is held on the wire with the form in hand.
         await http.hold()
+        let guardTask = watching("the read asked again, held on the wire") { await http.release() }
+        defer { guardTask.cancel() }
         let stale = Task { await session.blogs.again(row) }
-        #expect(await spun { await http.waiting })
+        await met("the read asked again is held on the wire", by: stale) { await http.waiting }
         session.blogs.unlocking = { _, _, password in
             if password == Self.password { await http.open() }
         }
         let unlocked = Task { await session.blogs.unlock(row, password: Self.password) }
-        #expect(await spun { session.blogs.reading(of: row) == .locked(.trying) })
+        await met("the password is on its way", by: unlocked) { session.blogs.reading(of: row) == .locked(.trying) }
         await http.release()
         _ = await stale.value
         #expect(await unlocked.value, "the stale form did not read as a wrong password")
@@ -380,7 +386,8 @@ struct RefusalReadTests {
         // The sign-in lands; the blog is read again as the member the reader now is.
         await http.open()
         session.blogs.signedIn(host: Self.host)
-        #expect(await spun { session.blogs.reading(of: row) == .read })
+        // No `by:`: a sign-in landing reads the blog again in a task of the blogs' own.
+        await met("the blog is read as the member the reader now is") { session.blogs.reading(of: row) == .read }
         await session.reloadFromStore()
         #expect(session.held(Self.rowID)?.body == "The locked words.")
     }
@@ -391,6 +398,8 @@ struct RefusalReadTests {
         let session = await Self.session(http)
         await session.reload.opened(try #require(session.held(Self.rowID)), in: session)
         session.blogs.signedIn(host: Self.host)
+        // Counted turns: a sign-in that reads again does so in a task of the blogs' own, and one
+        // that rightly reads nothing starts none — there is no end to wait for.
         for _ in 0..<50 { await Task.yield() }
         #expect(await http.requested.count == 1)
         #expect(session.blogs.reading(of: try #require(session.held(Self.rowID))) == .absent(.refusal(.gone)))

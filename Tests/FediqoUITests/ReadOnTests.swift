@@ -94,7 +94,7 @@ actor TimelineServer: HTTPClient {
 /// drawn in light and dark on a Mac and a phone, a finger or VoiceOver on it — those live in a
 /// lazy stack.
 @MainActor
-@Suite("A timeline read again reads on from where this device left it")
+@Suite("A timeline read again reads on from where this device left it", .watched)
 struct ReadOnTests {
     private static let one = "one.example"
     private static let source = Source(host: one, kind: .mastodon)
@@ -120,6 +120,8 @@ struct ReadOnTests {
             http: server, store: store,
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: ActServer([:]))
         )
+        // A read's deadline, on a clock nobody turns: a read held at the gate is not ended by one.
+        session.deadlineSleep = TurnedClock().sleep
         await session.reloadFromStore()
         return session
     }
@@ -237,15 +239,18 @@ struct ReadOnTests {
         #expect(drawn(session).first == 209)
 
         await server.hold("max_id")
-        let guardTask = hangGuard(server.gate)
+        let guardTask = watching(server.gate, "the ask for more, held on the wire")
         defer { guardTask.cancel() }
         let more = Task { await session.reload.more(.all, in: session) }
-        #expect(await spun { await server.parked == 1 })
+        await met("the ask for more is held on the wire", by: more) { await server.parked == 1 }
         await session.reload.readOn(Self.stretch, in: session)
         #expect(session.reload.asking == [.more], "not dropped, and not beside the other")
         await server.gate.open()
         await more.value
-        #expect(await spun { drawn(session).first == 300 && session.reload.asking.isEmpty }, "read on once that one ended")
+        // No `by:`: the place kept is read by a task the reload starts for itself.
+        await met("the place is read on once the ask for more ended") {
+            drawn(session).first == 300 && session.reload.asking.isEmpty
+        }
     }
 
     @Test("A place waiting is not read once the timeline in front no longer says more belong there")
@@ -256,14 +261,16 @@ struct ReadOnTests {
         await session.reload.timeline(.all, in: session)
 
         await server.hold("max_id")
-        let guardTask = hangGuard(server.gate)
+        let guardTask = watching(server.gate, "the ask for more, held on the wire")
         defer { guardTask.cancel() }
         let more = Task { await session.reload.more(.all, in: session) }
-        #expect(await spun { await server.parked == 1 })
+        await met("the ask for more is held on the wire", by: more) { await server.parked == 1 }
         await session.reload.readOn(Self.stretch, in: session)
         session.timelineID = .trends
         await server.gate.open()
         await more.value
+        // Counted turns, behind the ask for more having ended: the place kept is looked at by a
+        // task the reload starts for itself, which says nothing where it finds nothing to read.
         for _ in 0..<200 { await Task.yield() }
         #expect(session.reload.asking.isEmpty)
         #expect(await server.cursors.filter { $0 == "min_id=208" }.isEmpty, "Trends reads no public timeline")
@@ -277,14 +284,16 @@ struct ReadOnTests {
         await session.reload.timeline(.all, in: session)
 
         await server.hold("min_id=208")
-        let guardTask = hangGuard(server.gate)
+        let guardTask = watching(server.gate, "r's read, held on the wire")
         defer { guardTask.cancel() }
         let reload = Task { await session.reload.timeline(.all, in: session) }
-        #expect(await spun { await server.parked == 1 })
+        await met("r's read is held on the wire", by: reload) { await server.parked == 1 }
         await session.reload.readOn(Self.stretch, in: session)
         #expect(session.reload.asking == [.timeline])
         await server.gate.open()
         await reload.value
+        // Counted turns, behind r having ended: nothing was kept to read, so a read begun all the
+        // same would be a task of the reload's own, with no end to wait for.
         for _ in 0..<200 { await Task.yield() }
         #expect(drawn(session).first == 300)
         #expect(await server.cursors.filter { $0 == "min_id=208" }.count == 1, "asked once, by r")

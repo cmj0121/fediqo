@@ -9,10 +9,11 @@ import Testing
 /// what is asked for it and when, and what the block says in each state — only where the
 /// reader is signed in, as whoever is signed in, and never of a forum.
 ///
-/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
-/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+/// Every wait here is on an ask arriving or being let go (`PageServer`), and is tied to the
+/// work that made the ask: a held ask is let go in a `defer`, and by a guard when the run has
+/// gone still — never by `PageServer`'s own patience, which every hold here turns off.
 @MainActor
-@Suite("What the person set at a source, on that source's page", .serialized, .timeLimit(.minutes(3)))
+@Suite("What the person set at a source, on that source's page", .serialized, .watched)
 struct YouThereTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -34,10 +35,24 @@ struct YouThereTests {
         )
         let work = SourceWork()
         session.work = work
+        // An ask's deadline, on a clock nobody turns: an ask held at its server is not ended by
+        // one, and no check here waits for one to pass.
+        session.deadlineSleep = TurnedClock().sleep
         session.mastodon.work = work
         for source in [Self.source, Self.forum] { await session.store.add(source) }
         session.sources = await session.store.sources()
         return (session, server, work)
+    }
+
+    /// Waits until `ask` has arrived at `server` `times` times, by the work that was to send it
+    /// — and not by `PageServer.arrival`, which gives up by a clock.
+    private func arrival(
+        of ask: String, at server: PageServer, times: Int = 1, by work: Task<Void, Never>,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) async {
+        await met("the ask of \(ask) has arrived at its server, \(times) in all", by: work, sourceLocation: sourceLocation) {
+            await server.asked.count { $0 == ask } >= times
+        }
     }
 
     private func signOut(_ session: ShellSession) throws {
@@ -178,10 +193,12 @@ struct YouThereTests {
         #expect(await server.asked.count == 1, "a failure is not asked again by opening")
 
         await server.answer(Self.asked, Self.set())
-        await server.hold(Self.asked)
+        await server.hold(Self.asked, lettingGoByItself: false)
         defer { Task { await server.release(Self.asked) } }
+        let askedGuard = watching("the ask of \(Self.asked), held at its server") { await server.release(Self.asked) }
+        defer { askedGuard.cancel() }
         let press = Task { await you.again(Self.host, in: session) }
-        await server.arrival(of: Self.asked, times: 2)
+        await arrival(of: Self.asked, at: server, times: 2, by: press)
         #expect(you.said(at: Self.host, in: session) == YouThereSaid(source: Self.host, reading: .failed, asking: true))
         await you.again(Self.host, in: session)
         let visit = Task { await you.opened(Self.host, in: session) }
@@ -220,10 +237,12 @@ struct YouThereTests {
         let (session, server, _) = await session([Self.asked: Self.set()])
         try signIn(session)
         let you = ShellPersonPages().you
-        await server.hold(Self.asked)
+        await server.hold(Self.asked, lettingGoByItself: false)
         defer { Task { await server.release(Self.asked) } }
+        let askedGuard = watching("the ask of \(Self.asked), held at its server") { await server.release(Self.asked) }
+        defer { askedGuard.cancel() }
         let first = Task { await you.opened(Self.host, in: session) }
-        await server.arrival(of: Self.asked)
+        await arrival(of: Self.asked, at: server, by: first)
         #expect(you.said(at: Self.host, in: session) == YouThereSaid(source: Self.host, asking: true))
         let second = Task { await you.opened(Self.host, in: session) }
         await server.release(Self.asked)
@@ -243,10 +262,12 @@ struct YouThereTests {
             let you = ShellPersonPages().you
             bare(you, [first, second])
             try signIn(session, as: "one")
-            await first.hold(Self.asked)
+            await first.hold(Self.asked, lettingGoByItself: false)
             defer { Task { await first.release(Self.asked) } }
+            let askedGuard = watching("the ask of \(Self.asked), held at its server") { await first.release(Self.asked) }
+            defer { askedGuard.cancel() }
             let before = Task { await you.opened(Self.host, in: session) }
-            await first.arrival(of: Self.asked)
+            await arrival(of: Self.asked, at: first, by: before)
             #expect(you.said(at: Self.host, in: session)?.asking == true)
 
             try signIn(session, as: "two")
@@ -268,10 +289,12 @@ struct YouThereTests {
         let you = ShellPersonPages().you
         bare(you, [first, second])
         try signIn(session, as: "one")
-        await first.hold(Self.asked)
+        await first.hold(Self.asked, lettingGoByItself: false)
         defer { Task { await first.release(Self.asked) } }
+        let askedGuard = watching("the ask of \(Self.asked), held at its server") { await first.release(Self.asked) }
+        defer { askedGuard.cancel() }
         let before = Task { await you.opened(Self.host, in: session) }
-        await first.arrival(of: Self.asked)
+        await arrival(of: Self.asked, at: first, by: before)
         try signOut(session)
         #expect(you.said(at: Self.host, in: session) == nil)
         await first.release(Self.asked)

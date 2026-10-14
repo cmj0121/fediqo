@@ -37,10 +37,11 @@ struct ReachDoor: HTTPClient, HTTPSender {
     let door: String
     let log: ReachLog
     var routes: [String: String] = [:]
-    /// A path that answers only after three seconds, unless whoever asked gives up first: for
-    /// seeing which deadline ends a read. Slow and not silent, so a read bounded by the wrong
-    /// deadline is a pin that fails, not a run that hangs.
+    /// A path that does not answer until whoever asked gives up: for seeing which deadline ends
+    /// a read. It is asleep on `asleep`, which no check turns — only the guard of a check whose
+    /// read was bounded by the wrong deadline, so that pin fails and the run does not hang.
     var hanging: String?
+    var asleep = TurnedClock()
     /// Told each path as its request goes out, before it is answered: for a pin that changes
     /// something between two requests of one read.
     var onRequest: (@Sendable (String) async -> Void)?
@@ -55,7 +56,7 @@ struct ReachDoor: HTTPClient, HTTPSender {
         await onRequest?(url.path + (url.query.map { "?" + $0 } ?? ""))
         var body = routes[url.path] ?? "[]"
         if let hanging, url.path == hanging {
-            try await Task.sleep(for: .seconds(3))
+            try await asleep.sleep(for: .seconds(3))
             body = url.path.hasSuffix("/context") ? #"{"ancestors":[],"descendants":[\#(SourceReachPinTests.late)]}"# : "[\(SourceReachPinTests.late)]"
         }
         return (Data(body.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
@@ -70,7 +71,7 @@ struct ReachDoor: HTTPClient, HTTPSender {
 /// **Written against the code while each call site still built its own client**, and unchanged
 /// since: so gathering the building into one place is shown here to have moved nothing.
 @MainActor
-@Suite("Each source is reached as it was")
+@Suite("Each source is reached as it was", .watched)
 struct SourceReachPinTests {
     private static let m = "m.example"
     private static let z = "z.example"
@@ -102,7 +103,7 @@ struct SourceReachPinTests {
     /// A session on a Mastodon, a Discuz! and a Discourse, signed in to the Mastodon or not,
     /// whose every request is noted.
     private static func shell(
-        signedIn: Bool, holding notes: [Note] = [], hanging: String? = nil
+        signedIn: Bool, holding notes: [Note] = [], hanging: String? = nil, on asleep: TurnedClock = TurnedClock()
     ) async throws -> (ShellSession, ReachLog) {
         let work = SourceWork()
         let log = ReachLog(work: work)
@@ -110,8 +111,8 @@ struct SourceReachPinTests {
         if signedIn {
             try tokens.save(MastodonToken(host: m, accessToken: "tok", clientID: "c", clientSecret: "s", scopes: MastodonOAuth.scopes(writing: true)))
         }
-        let plain = ReachDoor(door: "plain", log: log, routes: routes, hanging: hanging)
-        let signed = ReachDoor(door: "signed", log: log, routes: routes, hanging: hanging)
+        let plain = ReachDoor(door: "plain", log: log, routes: routes, hanging: hanging, asleep: asleep)
+        let signed = ReachDoor(door: "signed", log: log, routes: routes, hanging: hanging, asleep: asleep)
         let sessions = MastodonSessions(tokens: tokens, sender: signed)
         sessions.work = work
         let store = ItemStore(sources: [mastodon, discuz, discourse], notes: notes)
@@ -274,20 +275,73 @@ struct SourceReachPinTests {
 
     // MARK: - Which deadline
 
-    @Test("A reload's read that never answers ends by the reload's deadline, and a thread's by the thread's own: each with the other set to an hour", .timeLimit(.minutes(3)))
+    /// What a session's deadlines are waited on here: one of exactly `length` on `due`, which
+    /// the check turns, and one of any other length on `never`, which nobody turns. So a read
+    /// that ends was ended by a deadline of that length, and by no other.
+    private static func deadlines(
+        of length: Duration, on due: TurnedClock, others never: TurnedClock
+    ) -> @Sendable (Duration) async throws -> Void {
+        { wait in try await (wait == length ? due : never).sleep(for: wait) }
+    }
+
+    /// Runs `read` to its end with one of its requests asleep on `hung`: once that request is
+    /// out, `due` is turned for as long as the read goes on — a deadline's sleep is asked for
+    /// beside its request, and neither says which came first.
+    private static func givenUpOn(
+        _ what: String, hung: TurnedClock, due: TurnedClock, sourceLocation: SourceLocation = #_sourceLocation,
+        _ read: @escaping @MainActor () async -> Void
+    ) async {
+        var over = false
+        let reading = Task {
+            await read()
+            over = true
+        }
+        await met(what, by: reading, sourceLocation: sourceLocation) {
+            if hung.sleeping == 1 { due.turn() }
+            return over
+        }
+    }
+
+    @Test("A reload's read that never answers ends by the reload's deadline, and a thread's by the thread's own: each with the other set to an hour")
     func whichDeadline() async throws {
-        let (session, log) = try await Self.shell(signedIn: false, holding: [Self.post("9")], hanging: "/api/v1/timelines/public")
-        session.reload.deadline = .milliseconds(40)
-        session.conversations.deadline = .seconds(3_600)
-        await session.reload.timeline(.all, in: session)
+        let hour = Duration.seconds(3_600)
+        let hung = TurnedClock(), due = TurnedClock(), never = TurnedClock()
+        // Where a read is bounded by the wrong deadline nothing here ends it: the guard does.
+        let guardTask = watching("a read that never answers, bounded by a deadline nobody turns") {
+            hung.turn()
+            never.turn()
+        }
+        defer { guardTask.cancel() }
+        let (session, log) = try await Self.shell(
+            signedIn: false, holding: [Self.post("9")], hanging: "/api/v1/timelines/public", on: hung
+        )
+        session.deadlineSleep = Self.deadlines(of: .seconds(41), on: due, others: never)
+        session.reload.deadline = .seconds(41)
+        session.conversations.deadline = hour
+        await Self.givenUpOn("the reload's read is given up on, the reload's deadline turned", hung: hung, due: due) {
+            await session.reload.timeline(.all, in: session)
+        }
         #expect(Self.only(Self.m, log.take()).contains("plain no token m.example/api/v1/timelines/public | timeline Public"))
+        #expect(due.asked.contains(.seconds(41)) && !never.asked.contains(hour), "the reload's read waited on a deadline that is not the reload's")
         #expect(!session.notes.contains { $0.statusID == "77" }, "the read was given up on by the reload's deadline, not waited for")
 
-        let (opening, _) = try await Self.shell(signedIn: false, holding: [Self.post("9")], hanging: "/api/v1/statuses/9/context")
-        opening.reload.deadline = .seconds(3_600)
-        opening.conversations.deadline = .milliseconds(40)
+        let stuck = TurnedClock(), own = TurnedClock(), others = TurnedClock()
+        let openingGuard = watching("a thread's read that never answers, bounded by a deadline nobody turns") {
+            stuck.turn()
+            others.turn()
+        }
+        defer { openingGuard.cancel() }
+        let (opening, _) = try await Self.shell(
+            signedIn: false, holding: [Self.post("9")], hanging: "/api/v1/statuses/9/context", on: stuck
+        )
+        opening.deadlineSleep = Self.deadlines(of: .seconds(43), on: own, others: others)
+        opening.reload.deadline = hour
+        opening.conversations.deadline = .seconds(43)
         let row = try #require(opening.held(Self.post("9").key.rowID))
-        await opening.conversations.open(row, in: opening)
+        await Self.givenUpOn("the thread's read is given up on, the thread's deadline turned", hung: stuck, due: own) {
+            await opening.conversations.open(row, in: opening)
+        }
+        #expect(own.asked.contains(.seconds(43)) && !others.asked.contains(hour), "the thread's read waited on a deadline that is not the thread's")
         #expect(opening.conversations.standing(of: row.id) == .absent(.unreachable), "given up on by the thread's own deadline")
         #expect(opening.conversations.conversation(around: row).descendants.isEmpty)
     }

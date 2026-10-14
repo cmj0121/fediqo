@@ -222,7 +222,7 @@ private final class WatchedTokens: MastodonTokenStore, @unchecked Sendable {
 /// registration a sign-in asks on with and without notices, what is carried and what a sign-out
 /// forgets, and a refusal. The question put before the page opens is the notices page's.
 @MainActor
-@Suite("A sign-in and the notices it may read")
+@Suite("A sign-in and the notices it may read", .watched)
 struct SignInNoticesTests {
     private let host = "social.example"
     private static let reading = MastodonOAuth.reading
@@ -246,7 +246,11 @@ struct SignInNoticesTests {
         if let app {
             try tokens.save(MastodonApp(host: host, clientID: "cid", clientSecret: "csecret", scopes: app))
         }
-        return (MastodonSessions(tokens: tokens, sender: server), server, tokens)
+        let mastodon = MastodonSessions(tokens: tokens, sender: server)
+        // A door's deadline, on a clock nobody turns: a sign-in held at a gate is not ended by
+        // one, and no check here waits for one to pass.
+        mastodon.deadlineSleep = TurnedClock().sleep
+        return (mastodon, server, tokens)
     }
 
     @Test("A sign-in made before notices were asked for is one to be asked — for notices, and for nothing else")
@@ -392,10 +396,12 @@ struct SignInNoticesTests {
         let (mastodon, server, tokens) = try sessions(holding: .some(Self.reading), asked: Self.reading)
         try tokens.save(heldApp)
         let gate = Gate()
+        let guardTask = watching(gate, "the page for more, up")
+        defer { guardTask.cancel() }
         let page = NoticePage(closes: true, gate: gate)
 
         let pressing = Task { await mastodon.signIn(host: host, through: page, writing: true) }
-        #expect(await spun { page.scopes.count == 1 })
+        await met("the page for more is up", by: pressing) { page.scopes.count == 1 }
         // That page is up; another sign-in on the same source finishes meanwhile.
         #expect(await mastodon.signIn(host: host, through: NoticePage(), writing: true) == nil)
         let made = try #require(try tokens.app(host: host))
@@ -446,11 +452,14 @@ struct SignInNoticesTests {
             }
             let tokens = WatchedTokens(held)
             let mastodon = MastodonSessions(tokens: tokens, sender: NoticeServer())
+            mastodon.deadlineSleep = TurnedClock().sleep
             let gate = Gate()
+            let guardTask = watching(gate, "the sign-in's page, up")
+            defer { guardTask.cancel() }
             let page = NoticePage(gate: gate)
 
             let pressing = Task { await mastodon.signIn(host: host, through: page, writing: true) }
-            #expect(await spun { page.scopes.count == 1 })
+            await met("the sign-in's page is up", by: pressing) { page.scopes.count == 1 }
             #expect(tokens.reads == 1, "the sign-in held was read other than once before the page opened, holding \(holding ?? "nothing")")
             #expect(page.scopes == [MastodonOAuth.scopes(writing: true, notices: MastodonOAuth.notices(holding))])
             await gate.open()
@@ -479,12 +488,14 @@ struct SignInNoticesTests {
     func carriedFromTheSignInJustKept() async throws {
         let allowed = MastodonOAuth.scopes(writing: true, notices: true)
         let gate = Gate()
+        let guardTask = watching(gate, "the ask to forget the old token, held at the source")
+        defer { guardTask.cancel() }
         let server = NoticeServer(holdingRevoke: gate)
         let (mastodon, _, tokens) = try sessions(holding: .some(allowed), asked: allowed, server: server)
 
         // The reader leaves notices out; the new sign-in is kept, and the old one's revoke is out.
         let narrowing = Task { await mastodon.signIn(host: host, through: NoticePage(), writing: true, noticesSaid: false) }
-        #expect(await spun { await server.holding })
+        await met("the ask to forget the old token is held at the source", by: narrowing) { await server.holding }
         #expect(try tokens.token(host: host)?.scopes == Self.acting)
 
         let page = NoticePage()

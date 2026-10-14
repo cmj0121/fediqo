@@ -9,10 +9,11 @@ import Testing
 /// it knows and how busy it has been, when, and what the page is handed and says in each state
 /// — and that a source which is not asked who people are is handed nothing and asked nothing.
 ///
-/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
-/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+/// Every wait here is on an ask arriving or being let go (`PageServer`), and is tied to the
+/// work that made the ask: a held ask is let go in a `defer`, and by a guard when the run has
+/// gone still — never by `PageServer`'s own patience, which every hold here turns off.
 @MainActor
-@Suite("What a source says of itself beyond its document, on its page", .serialized, .timeLimit(.minutes(3)))
+@Suite("What a source says of itself beyond its document, on its page", .serialized, .watched)
 struct SourceMoreTests {
     typealias Told = SourceMoreSaid.Told
     private static let host = "m.example"
@@ -46,6 +47,9 @@ struct SourceMoreTests {
         )
         let work = SourceWork()
         session.work = work
+        // An ask's deadline, on a clock nobody turns: an ask held at its server is not ended by
+        // one, and no check here waits for one to pass.
+        session.deadlineSleep = TurnedClock().sleep
         for source in [Self.source, Self.forum] { await session.store.add(source) }
         session.sources = await session.store.sources()
         return (session, server, work)
@@ -65,6 +69,17 @@ struct SourceMoreTests {
     private func bare(_ more: ShellSourceMore, _ server: PageServer) {
         more.reaching = { MastodonHostMore(http: server, host: $0) }
         more.hosts.reaching = { MastodonClient(http: server, host: $0) }
+    }
+
+    /// Waits until `ask` has arrived at `server` `times` times, by the work that was to send it
+    /// — and not by `PageServer.arrival`, which gives up by a clock.
+    private func arrival(
+        of ask: String, at server: PageServer, times: Int = 1, by work: Task<Void, Never>,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) async {
+        await met("the ask of \(ask) has arrived at its server, \(times) in all", by: work, sourceLocation: sourceLocation) {
+            await server.asked.count { $0 == ask } >= times
+        }
     }
 
     private func count(_ server: PageServer, _ ask: String) async -> Int {
@@ -193,10 +208,12 @@ struct SourceMoreTests {
     func theAskOutlivesTheSheet() async throws {
         let (session, server, _) = await session(Self.served())
         let more = ShellPersonPages().more
-        await server.hold(Self.activity)
+        await server.hold(Self.activity, lettingGoByItself: false)
         defer { Task { await server.release(Self.activity) } }
+        let activityGuard = watching("the ask of \(Self.activity), held at its server") { await server.release(Self.activity) }
+        defer { activityGuard.cancel() }
         let sheet = Task { await more.opened(Self.host, in: session) }
-        await server.arrival(of: Self.activity)
+        await arrival(of: Self.activity, at: server, by: sheet)
         #expect(more.said(at: Self.host, in: session)?.asking == true && more.said(at: Self.host, in: session)?.weeks == .waiting)
         sheet.cancel()
         let second = Task { await more.opened(Self.host, in: session) }
@@ -207,10 +224,12 @@ struct SourceMoreTests {
         await sheet.value
         #expect(more.said(at: Self.host, in: session) == Self.opened)
 
-        await server.hold(Self.servers)
+        await server.hold(Self.servers, lettingGoByItself: false)
         defer { Task { await server.release(Self.servers) } }
+        let serversGuard = watching("the ask of \(Self.servers), held at its server") { await server.release(Self.servers) }
+        defer { serversGuard.cancel() }
         let press = Task { await more.servers(Self.host, in: session) }
-        await server.arrival(of: Self.servers)
+        await arrival(of: Self.servers, at: server, by: press)
         #expect(more.said(at: Self.host, in: session)?.askingServers == true)
         press.cancel()
         let again = Task { await more.servers(Self.host, in: session) }
@@ -238,14 +257,16 @@ struct SourceMoreTests {
         let (session, server, _) = await session(Self.served([Self.account: Self.off]))
         let more = ShellPersonPages().more
         bare(more, server)
-        await server.hold(Self.account)
+        await server.hold(Self.account, lettingGoByItself: false)
         defer { Task { await server.release(Self.account) } }
+        let accountGuard = watching("the ask of \(Self.account), held at its server") { await server.release(Self.account) }
+        defer { accountGuard.cancel() }
         let unsigned = Task { await more.opened(Self.host, in: session) }
-        await server.arrival(of: Self.account)
+        await arrival(of: Self.account, at: server, by: unsigned)
         try signIn(session)
         #expect(more.said(at: Self.host, in: session) == Self.signedIn(SourceMoreSaid(source: Self.host)), "nobody's answers are not the reader's")
         let signed = Task { await more.opened(Self.host, in: session) }
-        await server.arrival(of: Self.account, times: 2)
+        await arrival(of: Self.account, at: server, times: 2, by: signed)
         await server.releaseOne(Self.account)
         await unsigned.value
         #expect(more.hosts.has(.longerAccount, at: Self.host) == .unsaid, "a late not-found makes nothing absent")
@@ -256,10 +277,12 @@ struct SourceMoreTests {
         await signed.value
         #expect(more.said(at: Self.host, in: session) == Self.signedIn(Self.opened))
 
-        await server.hold(Self.servers)
+        await server.hold(Self.servers, lettingGoByItself: false)
         defer { Task { await server.release(Self.servers) } }
+        let serversGuard = watching("the ask of \(Self.servers), held at its server") { await server.release(Self.servers) }
+        defer { serversGuard.cancel() }
         let press = Task { await more.servers(Self.host, in: session) }
-        await server.arrival(of: Self.servers)
+        await arrival(of: Self.servers, at: server, by: press)
         try signIn(session, as: "another")
         await more.opened(Self.host, in: session)
         #expect(more.said(at: Self.host, in: session)?.askingServers == false, "a sign-in change lets the ask go")
@@ -278,10 +301,12 @@ struct SourceMoreTests {
         await hosts.hear(Self.host, in: session)
         #expect(!hosts.heard(Self.host), "a document that did not come is not heard")
         await server.answer(Self.document, PageServer.Answer(body: #"{"domain":"m.example","version":"4.6.6","configuration":{"accounts":{"max_featured_tags":0}}}"#))
-        await server.hold(Self.document)
+        await server.hold(Self.document, lettingGoByItself: false)
         defer { Task { await server.release(Self.document) } }
+        let documentGuard = watching("the ask of \(Self.document), held at its server") { await server.release(Self.document) }
+        defer { documentGuard.cancel() }
         let first = Task { await hosts.hear(Self.host, in: session) }
-        await server.arrival(of: Self.document, times: 2)
+        await arrival(of: Self.document, at: server, times: 2, by: first)
         let second = Task { await hosts.hear("M.Example", in: session) }
         await server.release(Self.document)
         await first.value
@@ -296,9 +321,9 @@ struct SourceMoreTests {
         hosts.reaching = { MastodonClient(http: server, host: $0) }
         hosts.askAfresh(Self.host)
         #expect(!hosts.heard(Self.host) && hosts.has(.featuredTags, at: Self.host) == .unsaid)
-        await server.hold(Self.document)
+        await server.hold(Self.document, lettingGoByItself: false)
         let late = Task { await hosts.hear(Self.host, in: session) }
-        await server.arrival(of: Self.document, times: 3)
+        await arrival(of: Self.document, at: server, times: 3, by: late)
         hosts.notFound(.activity, at: Self.host, round: hosts.round(at: Self.host))
         hosts.askAfresh(Self.host)
         #expect(hosts.has(.activity, at: Self.host) == .unsaid)

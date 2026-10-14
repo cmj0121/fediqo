@@ -41,9 +41,11 @@ actor PageServer: HTTPClient, HTTPSender {
         routes[ask] = answer
     }
 
-    /// Every later ask of `ask` waits until `release`.
-    func hold(_ ask: String) {
+    /// Every later ask of `ask` waits until `release` — and, unless `lettingGoByItself` is
+    /// false, until its patience has passed. A check that says false arms a guard of its own.
+    func hold(_ ask: String, lettingGoByItself: Bool = true) {
         held.insert(ask)
+        guard lettingGoByItself else { return }
         Task {
             try? await Task.sleep(for: Self.patience)
             self.release(ask)

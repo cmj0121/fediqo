@@ -11,7 +11,7 @@ import Testing
 /// none of this needs SwiftUI stood up — which is the point: this milestone has twice shipped a
 /// rule that was right and a caller that no test could reach, so the wiring is driven too.
 @MainActor
-@Suite("The source page")
+@Suite("The source page", .watched)
 struct SourcePageTests {
     private static let forum = "install-c.example"
     private static let micro = "first.example"
@@ -32,19 +32,22 @@ struct SourcePageTests {
     /// used to hand-set it, and what both of them actually wanted was this.
     private func gatedSession() -> (ShellSession, GatedHTTP) {
         let http = GatedHTTP(["/": .text("<html><body></body></html>")], holding: "/")
-        return (ShellSession(http: http, store: ItemStore()), http)
+        let session = ShellSession(http: http, store: ItemStore())
+        // A look's deadline, on a clock nobody turns: a look held at the gate is not ended by one.
+        session.deadlineSleep = TurnedClock().sleep
+        return (session, http)
     }
 
     /// Starts a look and returns once it is **provably** parked on the wire, with the task to
-    /// await after the gate opens. `hangGuard` is the standing pattern: `.timeLimit` does not
-    /// rescue a task parked on a continuation.
+    /// await after the gate opens, and the guard of its gate — **which whoever calls cancels in
+    /// a `defer`**, on the line after.
     private func heldLook(
-        _ session: ShellSession, _ http: GatedHTTP, host: String
+        _ session: ShellSession, _ http: GatedHTTP, host: String, sourceLocation: SourceLocation = #_sourceLocation
     ) async -> (Task<Void, Never>, Task<Void, Never>) {
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the look, held on the wire", sourceLocation: sourceLocation)
         session.hostname = host
         let look = Task { await session.add() }
-        #expect(await spun { session.checking }, "the look never reached the wire")
+        await met("the look has reached the wire", by: look, sourceLocation: sourceLocation) { session.checking }
         return (look, watchdog)
     }
 
@@ -574,10 +577,7 @@ struct SourcePageTests {
     /// The other side of the same term, and the reason it still exists. A preview in the sheet
     /// covers the page, so a second look started behind it would replace a stage the reader cannot
     /// see — PLAN risk 8, which this split must not undo.
-    @Test(
-        "The field is out of the reader's hands behind a sheet, and only behind a sheet",
-        .timeLimit(.minutes(3))
-    )
+    @Test("The field is out of the reader's hands behind a sheet, and only behind a sheet")
     func theFieldIsDisabledOnlyWhereTheReaderCannotSeePastTheStage() async {
         let (session, http) = gatedSession()
         let pane = AccountPane(session: session)
@@ -603,11 +603,11 @@ struct SourcePageTests {
 
         session.stage = nil
         let (look, watchdog) = await heldLook(session, http, host: Self.micro)
+        defer { watchdog.cancel() }
         #expect(pane.busy, "something on the wire still takes the top half out of the reader's hands")
 
         await http.gate.open()
         await look.value
-        watchdog.cancel()
     }
 
     /// The same control, refusing the same way `add` refuses, so nothing had to be re-guarded when
@@ -695,7 +695,8 @@ struct SourcePageTests {
         // One question an act: the menu's own. Nothing on the root asks beside it.
         // Any answer but the yes changes nothing.
         asked[1].answered("not the yes")
-        await Task.yield()
+        // Counted turns: any answer but the yes starts nothing, so there is no end to wait for.
+        for _ in 0..<50 { await Task.yield() }
         #expect(session.sources.count == 2)
 
         // And the confirms, which are where the two acts actually differ.
@@ -1320,10 +1321,7 @@ struct SourcePageTests {
     /// row pressed while an inline preview is open would delete a screen the reader is part-way
     /// through — which is exactly the boards control's argument, and it must be the same predicate
     /// rather than a second one.
-    @Test(
-        "A row's press is refused exactly when its controls are, and by the same rule",
-        .timeLimit(.minutes(3))
-    )
+    @Test("A row's press is refused exactly when its controls are, and by the same rule")
     func theRowsPressObeysTheSameRuleItsControlsDo() async {
         let (session, http) = gatedSession()
         let source = Source(host: Self.micro, kind: .mastodon)
@@ -1341,12 +1339,12 @@ struct SourcePageTests {
         // A host the list does not already hold, so the look actually starts: `add` refuses a
         // duplicate, and a refused press puts nothing on the wire to be caught mid-flight.
         let (look, watchdog) = await heldLook(session, http, host: "elsewhere.example")
+        defer { watchdog.cancel() }
         session.openSource(host: Self.micro)
         #expect(session.stage == nil, "a row pressed mid-errand opened a sheet over it")
 
         await http.gate.open()
         await look.value
-        watchdog.cancel()
         // The look's own outcome is not what this test is about — only that the errand has ended.
         session.stage = nil
         session.refuse = nil

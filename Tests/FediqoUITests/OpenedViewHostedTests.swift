@@ -14,7 +14,7 @@ import Testing
 /// **What a hosted pane cannot say** — how it looks in light and dark, on a Mac and a phone,
 /// under VoiceOver — is a running app's. Few layouts, one at a time: `FoldHostedTests`' reason.
 @MainActor
-@Suite("Opening an item shows what it refers to and what refers to it, hosted", .serialized)
+@Suite("Opening an item shows what it refers to and what refers to it, hosted", .serialized, .watched)
 struct OpenedViewHostedTests {
     private static let host = "social.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -122,18 +122,35 @@ struct OpenedViewHostedTests {
         let probe = ThreadPaneProbe()
         let view = NSHostingView(rootView: Host(session: session, root: root, probe: probe))
         view.frame = NSRect(x: 0, y: 0, width: 520, height: 2_400)
-        for _ in 0..<3 {
-            pump(view)
-            await Task.yield()
-        }
+        await still(view) { probe.frames.isEmpty ? nil : probe.frames }
         return (probe, { probe.frames[.row(NoteKey(host: host, id: name($0)).rowID)] })
     }
 
     /// A layout and one turn of the run loop that does not wait — a synchronous hop, since the
     /// run loop may not be turned from an async context.
-    private static func pump(_ view: NSView) {
+    private static func settle(_ view: NSView) {
         view.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date())
+        RunLoop.main.run(mode: .default, before: .distantPast)
+        view.layoutSubtreeIfNeeded()
+    }
+
+    /// How many looks in a row must find the pane as the look before left it.
+    private static let looks = 20
+
+    /// Lays `view` out and turns the run loop until `drawn` says something, and has said the same
+    /// for `looks` looks in a row — the main actor given away between them. No `by:`: the run
+    /// loop is turned here, by the check. Counted turns, because a hosted pane's own tasks are
+    /// nothing a check can name.
+    private static func still<Seen: Equatable>(_ view: NSView, _ drawn: () -> Seen?) async {
+        var last: Seen?
+        var same = 0
+        await met("the pane is drawn, and \(looks) turns more move nothing in it") {
+            settle(view)
+            let now = drawn()
+            same = now != nil && now == last ? same + 1 : 0
+            last = now
+            return same >= looks
+        }
     }
 
     private static func said(_ missing: QuoteBand.Loading?, _ language: DummyLanguage = .english) -> String? {
@@ -147,7 +164,7 @@ struct OpenedViewHostedTests {
         let http = GatedHTTP([
             "/api/v1/statuses/6": .text(Self.status("6", answering: "5")), Self.threadPath: .fail,
         ], holding: "/api/v1/statuses/6")
-        let guardTask = hangGuard(http.gate)
+        let guardTask = watching(http.gate, "the post this answers, held on the wire")
         defer { guardTask.cancel() }
         let session = await Self.shell(http)
         await session.store.ingest(
