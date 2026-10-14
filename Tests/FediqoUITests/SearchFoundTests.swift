@@ -658,7 +658,7 @@ struct SearchFoundTests {
         let server = try #require(servers[Self.one]), pages = ShellPersonPages()
         let list = PeopleList(foundAt: Self.one, words: "cats")
         #expect(list.id != PeopleList(foundAt: Self.one, words: "dogs").id && list.id != PeopleList(directoryAt: Self.one).id)
-        #expect(PeopleSaid.title(list, language: .english) == "People m.example found" && PeopleSaid.counts(list, language: .english) == "Its answer to “cats”.")
+        #expect(PeopleSaid.counts(list, language: .english) == nil)
         #expect(pages.lists.said(of: list, in: session)?.stateLine(language: .english) == "Asking m.example for the people it found…")
         await pages.lists.opened(list, in: session)
         #expect(await server.asked == [Self.people("cats")])
@@ -687,7 +687,8 @@ struct SearchFoundTests {
         let before = await server.asked.count
         let tags = try #require(found.said(of: page, in: session))
         #expect(tags.tags.count == 40 && found.walked(page, in: session).count == 40 && found.row(tags.rows[39].id, of: page, in: session) == tags.rows[39])
-        #expect(FoundTagsSaid.title(page, language: .english) == "Hashtags m.example found" && FoundTagsSaid.headLine(page, language: .english) == "Its answer to “cats”.")
+        let at = FoundAt(source: Self.one, words: "cats", gave: FoundWhich.allCases)
+        #expect(FoundAt.title(Self.one, language: .english) == "What m.example found" && at.headLine(language: .english) == "Its answer to “cats”.")
         #expect(tags.foot(language: .english).hasPrefix("These are the first 40 hashtags m.example found, the most one answer holds."))
         #expect(FoundTagsSaid(page: page, tags: Array(tags.tags.prefix(5))).foot(language: .english) == "These are all 5 hashtags m.example found.")
         #expect(found.said(of: FoundTags(source: Self.one, words: "dogs"), in: session) == nil)
@@ -742,9 +743,10 @@ struct SearchFoundTests {
 
         var walk = ShellWalk()
         let page = FoundTags(source: Self.one, words: "a\u{202E}b\nc")
-        #expect(walk.walk(to: .foundTags(page), from: page.id) && walk.openedFoundTags == page && walk.openedRising == nil)
-        let named: String = "found:\(page.id)"
-        #expect(TimelinePane.page(walk.standing) == .opened && TimelinePane.openedID(walk.standing) == named)
+        let at = FoundAt(source: page.source, words: page.words, gave: [.tags])
+        #expect(walk.walk(to: .found(at, .tags), from: page.id) && walk.openedFoundTags == page && walk.openedRising == nil)
+        let named: String = "found:\(at.id)\u{1e}tags"
+        #expect(TimelinePane.page(walk.standing) == .tabbed && TimelinePane.openedID(walk.standing) == named)
         var jump = 0
         var lit: String?
         #expect(FediqoRootView.jumpedToTop(in: ["t1", "t2"], standing: walk.standing, place: .timeline, selected: &lit, jump: &jump) && lit == "t1")
@@ -762,12 +764,12 @@ struct SearchFoundTests {
     func writtenInEveryLanguage() throws {
         let resources = Self.shell.deletingLastPathComponent().appending(path: "Resources")
         let english = try String(contentsOf: resources.appending(path: "en.lproj/Localizable.strings"), encoding: .utf8)
-        let ours = ["\"search.band.", "\"search.tags.", "\"search.found.", "\"search.lookup.", "\"people.found.", "\"people.title.found\"", "\"work.purpose.lookUp\""]
+        let ours = ["\"search.band.", "\"search.tags.", "\"search.found.", "\"search.lookup.", "\"people.found.", "\"work.purpose.lookUp\""]
         let keys = english.split(separator: "\n").compactMap { line -> String? in
             guard ours.contains(where: line.hasPrefix) else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 27 && keys.contains("search.lookup.found.other") && keys.contains("search.lookup.offer") && keys.contains("people.found.none"))
+        #expect(keys.count == 28 && keys.contains("search.lookup.found.other") && keys.contains("search.lookup.offer") && keys.contains("people.found.none"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }
@@ -826,7 +828,8 @@ struct SearchFoundTests {
         for (layout, width) in [(ShellLayout.wide, CGFloat(720)), (.narrow, 320)] {
             for count in [5, 40] {
                 let said = FoundTagsSaid(page: FoundTags(source: Self.one, words: long), tags: (1...count).map { RisingTag(tag: PostTag("#t\($0)")!) })
-                let pane = FoundTagsPane(said: said, selectedID: .constant(said.rows.first?.id), onOpen: { _ in }, onBack: {})
+                let at = FoundAt(source: Self.one, words: long, gave: [.tags])
+                let pane = FoundPage(said: FoundSaid(at: at, tabs: [.tags], which: .tags, tags: said), selectedID: .constant(said.rows.first?.id))
                     .environment(\.shellLayout, layout)
                 let hosted = NSHostingView(rootView: pane.frame(width: width, height: 700))
                 hosted.layoutSubtreeIfNeeded()

@@ -1163,8 +1163,8 @@ public struct FediqoRootView: View {
         // Nor has a page of what is rising: its rows are hashtags and links.
         case .rising:
             return []
-        // Nor has the page of the hashtags a search found, or of the ones the reader follows.
-        case .foundTags, .followedTags:
+        // Nor has the page of what a search found, or the list of the hashtags the reader follows.
+        case .found, .followedTags:
             return []
         case .thread(let opened):
             guard let item = session.held(opened) else { return streamItems }
@@ -1235,7 +1235,7 @@ public struct FediqoRootView: View {
         // A page read out of a post is somebody else's page, and its top is its own business.
         case .link:
             return false
-        case .person, .tag, .people, .rising, .foundTags, .followedTags, .thread, nil:
+        case .person, .tag, .people, .rising, .found, .followedTags, .thread, nil:
             guard let first = rows?.first else { return false }
             selected = first
         }
@@ -1938,13 +1938,6 @@ public struct FediqoRootView: View {
         return true
     }
 
-    /// A list of people opened as a page of its own — all a search found (#319): one more step of the
-    /// walk, with its figure lit, so leaving the list gives the figure back (`ShellWalk.open`).
-    private func openPeople(_ list: PeopleList) -> Bool {
-        guard Self.canWalk(place: place, open: openLayers) else { return false }
-        return walk.open(list, lamp: &selectedItemID)
-    }
-
     /// A row of such a list opened: that person's page. **The lamp and the step in one turn**,
     /// as a post's row opens (`openThread`): the row is lit and is what the walk remembers, so
     /// leaving their page gives it back — under a finger too, where nothing was lit before.
@@ -2018,8 +2011,8 @@ public struct FediqoRootView: View {
     // MARK: - What a search found at the sources — #319
 
     /// A row of what a source found, opened. **The lamp and the step in one turn**, as every
-    /// row opens: somebody's page, a hashtag's page, the list of all the people found, or the
-    /// page of all the hashtags.
+    /// row opens: somebody's page, a hashtag's page, or the page of what that source found on
+    /// the tab of the kind pressed for (F10) — so leaving it gives the press back.
     private func openFound(_ row: SearchFoundRow) -> Bool {
         switch row {
         case .person(let person):
@@ -2031,13 +2024,18 @@ public struct FediqoRootView: View {
             let opened = openTag(tag.tag, from: row.id)
             if !opened { selectedItemID = before }
             return opened
-        case .allPeople(let list, _):
-            return openPeople(list)
-        case .allTags(let page, _):
-            guard Self.canWalk(place: place, open: openLayers), walk.walk(to: .foundTags(page), from: row.id) else { return false }
+        case .allPeople, .allTags:
+            guard Self.canWalk(place: place, open: openLayers), let step = people.found.step(opening: row, in: session),
+                  walk.walk(to: step, from: row.id)
+            else { return false }
             selectedItemID = row.id
             return true
         }
+    }
+
+    /// A tab of that page pressed or swiped to: the step turned in place, no step more (F10).
+    private func foundTurned(_ which: FoundWhich) {
+        people.found.turn(&walk, to: which, lamp: &selectedItemID, in: session)
     }
 
     /// The press about looking somebody up through a source: the source asked, or the page of
@@ -2198,6 +2196,7 @@ public struct FediqoRootView: View {
         people.tabs.leftAll()
         people.tags.leftAll(but: tag)
         people.rising.left()
+        people.found.left()
         let held = session.heldPosts(under: tag, latest: prefs.latestDate).map(\.id)
         let lamp = Self.lampOverSwitch(selectedItemID, aboutInFront: !people.tags.front(of: tag, in: session).listsPosts, held: held)
         if lamp != selectedItemID { selectedItemID = lamp }
@@ -2236,6 +2235,7 @@ public struct FediqoRootView: View {
         people.tabs.leftAll()
         people.tags.leftAll()
         people.rising.left()
+        people.found.left()
         errand = nil
     }
 
@@ -2326,6 +2326,11 @@ public struct FediqoRootView: View {
         case .rising:
             return people.rising.rotate(
                 &walk, by: step, covered: !Self.pageInFront(.rising, open: openLayers), lamp: &selectedItemID, in: session
+            )
+        case .found(let at, let which):
+            let layer = ShellStep.found(at, which).layer
+            return people.found.rotate(
+                &walk, by: step, covered: !Self.pageInFront(layer, open: openLayers), lamp: &selectedItemID, in: session
             )
         case .person(let person):
             guard Self.turnsPersonTabs(open: openLayers) else { return false }
@@ -2532,6 +2537,7 @@ public struct FediqoRootView: View {
                 onTurnRising: risingTurned,
                 onOpenRisingRow: { _ = openRisingRow($0) },
                 onOpenFound: { _ = openFound($0) },
+                onTurnFound: foundTurned,
                 onFollowed: { _ = followedPressed($0) },
                 onRequests: { _ = requestsPressed($0) },
                 onLookUp: lookUpPressed

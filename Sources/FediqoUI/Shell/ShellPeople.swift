@@ -209,20 +209,6 @@ struct DirectoryChoice: Hashable, Sendable {
     var localOnly = false
 }
 
-extension ShellWalk {
-    /// A list of people opened as a page of its own — all the people a search found, from the
-    /// press under its band (#319): one more step of the walk. **The lamp and the step in one
-    /// turn**, as a row opens: the line pressed is lit and is what the walk remembers, so
-    /// leaving the list gives it back — pressed by a pointer or a finger too, where the lamp
-    /// was elsewhere or nowhere. A step that is not taken moves nothing. **Whom somebody
-    /// follows and who follows them are no step**: they are tabs of that person's page (F9).
-    mutating func open(_ list: PeopleList, lamp: inout String?) -> Bool {
-        guard walk(to: .people(list), from: list.id) else { return false }
-        lamp = list.id
-        return true
-    }
-}
-
 /// Every list of people opened this run, by which list it is.
 ///
 /// Held by `ShellPersonPages`, on its count of asks, and handed the session at each ask: the
@@ -501,6 +487,17 @@ final class ShellPeoplePages {
     /// The person on the row `id` of `list`, where the list as it is drawn holds them.
     func person(_ id: String, on list: PeopleList, in session: ShellSession) -> Person? {
         said(of: list, in: session)?.people.first { $0.id == id }
+    }
+
+    /// Whether the people a search found at `list`'s source can be answered to whoever would
+    /// ask now: their list can be said, somebody is signed in there — a search is answered to
+    /// nobody else — and that sign-in's own words do not say it may not search. **One whose
+    /// words were never written down is not known to lack it**, as the look-up reads a sign-in
+    /// (`ShellSearchFound.note`). With none of that, a tab of them could only ever say it could
+    /// not be asked.
+    func searchable(_ list: PeopleList, in session: ShellSession) -> Bool {
+        guard let said = said(of: list, in: session), said.signedIn else { return false }
+        return session.mastodon.heldParts[list.host.lowercased()]?.scopes.map(MastodonOAuth.searches) ?? true
     }
 
     /// Whether the page of `list` has anybody to ask again — what `r` and its mark go by.

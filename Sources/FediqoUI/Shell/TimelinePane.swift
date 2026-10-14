@@ -85,6 +85,9 @@ struct TimelinePane: View {
     /// A row of what a search found at a source opened (#319), answered by the root: somebody's
     /// page, a hashtag's, or the page of all of one kind.
     var onOpenFound: (SearchFoundRow) -> Void = { _ in }
+    /// A tab of the page of what a source found pressed or swiped to, answered by the root:
+    /// the step turned in place (F10).
+    var onTurnFound: (FoundWhich) -> Void = { _ in }
     /// The way to the hashtags followed, pressed on the reader's own page (#318).
     var onFollowed: (FollowedTagsEntry) -> Void = { _ in }
     /// The way to the people who ask to follow the reader, pressed there (#313).
@@ -189,11 +192,11 @@ struct TimelinePane: View {
                 } else {
                     underneath
                 }
-            case .foundTags(let page):
-                // An answer no longer held — another Return, the search closed — draws the stream.
-                if let said = people?.found.said(of: page, in: session) {
-                    FoundTagsPane(said: said, selectedID: $selectedID, onOpen: onOpenFound, jumpToTop: jumpToTop, onBack: onBack)
-                        .id(page.id)
+            case .found(_, let which):
+                // Neither kind left to draw — the answer no longer held and its people no longer
+                // asked of a source that says who people are — draws the stream; one left, that one.
+                if let people, let found = shown.found {
+                    foundPage(found, standing: which, in: people)
                 } else {
                     underneath
                 }
@@ -460,8 +463,9 @@ struct TimelinePane: View {
         // A conversation's page is the frame's, and its sideways the frame's (F10) — where it
         // is drawn; over the stream drawn in its stead the swipe goes back, as it did.
         // So is a list of people's (F10), where it is drawn, and what is rising's.
-        case .thread, .people, .rising: drawn ? .tabbed : .opened
-        case .foundTags, .followedTags: .opened
+        // And what a search found at a source.
+        case .thread, .people, .rising, .found: drawn ? .tabbed : .opened
+        case .followedTags: .opened
         case .link: .link
         case nil: .timeline
         }
@@ -469,14 +473,14 @@ struct TimelinePane: View {
 
     /// Whether the timelines' head — their names, the search, the reload — is drawn over what
     /// the reader stands on: not over somebody's page, a conversation's, a hashtag's, a list
-    /// of people's nor what is rising, each a page of its own. **Asked of what is drawn, not of
-    /// the step alone** (F10 §1): a conversation, a list or what is rising that cannot be drawn
+    /// of people's, what is rising nor what a search found, each a page of its own. **Asked of
+    /// what is drawn, not of the step alone** (F10 §1): any of those that cannot be drawn
     /// (`drawn` false) draws the stream, and the head is over that.
     static func headDrawn(over standing: ShellStep?, drawn: Bool = true) -> Bool {
         switch standing {
         case .person, .tag: false
-        case .thread, .people, .rising: !drawn
-        case .foundTags, .followedTags, .link, nil: true
+        case .thread, .people, .rising, .found: !drawn
+        case .followedTags, .link, nil: true
         }
     }
 
@@ -493,6 +497,8 @@ struct TimelinePane: View {
         var root: DummyItem?
         var list: PeopleSaid?
         var rising: RisingSaid?
+        /// What the tab of what a search found in front is handed, where any tab is left.
+        var found: FoundSaid?
         var drawn: Bool
     }
 
@@ -507,7 +513,10 @@ struct TimelinePane: View {
         case .rising(let which):
             let said = people?.rising.drawn(at: which, in: session)
             return Drawn(rising: said, drawn: said != nil)
-        case .person, .tag, .foundTags, .followedTags, .link, nil:
+        case .found(let at, let which):
+            let said = people?.found.drawn(at, at: which, in: session)
+            return Drawn(found: said, drawn: said != nil)
+        case .person, .tag, .followedTags, .link, nil:
             return Drawn(drawn: true)
         }
     }
@@ -746,6 +755,49 @@ struct TimelinePane: View {
         }
     }
 
+    /// What a search found at a source (F10): the whole height of the pane, in the frame every
+    /// opened page stands in, handed its tabs and what the tab in front lists — worked out where
+    /// the answer is held. Its bar's mark is on People alone, where `r` asks the source for the
+    /// people again; **never Stop**, as on what is rising.
+    ///
+    /// The walk stood on `standing`'s tab: where the page draws the other one — that tab lost
+    /// everything its source gave — the walk is turned to it, so Tab, the keys and leaving all
+    /// stand on the tab that is drawn.
+    private func foundPage(_ said: FoundSaid, standing: FoundWhich, in people: ShellPersonPages) -> some View {
+        let lists = people.lists, list = said.at.people, which = said.which
+        return FoundPage(
+            said: said,
+            selectedID: $selectedID,
+            slide: session.slide("found"),
+            reload: FoundPage.reloadName(of: said, canReload: ways.canReload),
+            acts: FoundPage.acts(
+                onBack: onBack,
+                onTab: onTurnFound,
+                onReload: ways.onReload,
+                // Pulled down on People, the list is asked from the top as `r` asks it.
+                onPull: { await lists.again(list, in: session) }
+            ),
+            onOpenPerson: onOpenListed,
+            onOpenRow: onOpenFound,
+            onAskAgain: { Task { await lists.again(list, in: session) } },
+            onReadOn: { Task { await lists.readOn(list, in: session) } },
+            onAct: { act, person in Task { await lists.press(act, on: person, of: list, in: session) } },
+            onAsk: { session.askFor([PersonAct.removeFollower.needs], host: list.host) },
+            jumpToTop: jumpToTop
+        )
+        // One page per source's answer, so another opened from inside one draws afresh.
+        .id(said.at.id)
+        // **The people are asked when their tab first comes in front**, once a run, as the list
+        // of them opened on its own was; the hashtags ask nothing. A tab never in front has
+        // asked nothing.
+        .task(id: which == .people ? ShellPeoplePages.opening(list, in: session) : nil) {
+            if which == .people { await lists.opened(list, in: session) }
+        }
+        .onChange(of: which != standing, initial: true) { _, fell in
+            if fell { onTurnFound(which) }
+        }
+    }
+
     /// A hashtag's page (F10): the whole height of the pane, in the frame every opened page
     /// stands in, handed which tabs it has, which is in front and what its head says — all of
     /// them worked out where its sources are asked, and nothing here looks at which kind of
@@ -810,7 +862,7 @@ struct TimelinePane: View {
         case .tag(let tag): "tag:" + String(describing: tag)
         case .people(let list): "people:" + list.id
         case .rising(let which): "rising:" + which.rawValue
-        case .foundTags(let page): "found:" + page.id
+        case .found(let at, let which): "found:" + at.id + "\u{1e}" + which.rawValue
         case .followedTags(let page): "followed:" + page.id
         case .link, nil: nil
         }

@@ -62,13 +62,12 @@ struct PeoplePageTests {
         #expect(PeopleSaid(list: Self.followers).figure(language: en)?.figure == "2,811")
     }
 
-    @Test("Under the title a directory says how it is read and the people a search found what it was asked; a list its source counts has no sentence, its figure says it")
+    @Test("Under the title a directory says how it is read; a list its source counts has no sentence, its figure says it — and the people a search found have none, the head of the page of what it found says what it was asked")
     func theLineUnderTheTitle() {
         let en = DummyLanguage.english
         let choice = DirectoryChoice(order: .new, localOnly: true)
         #expect(PeopleSaid(list: Self.directory, sorting: choice).line(language: en) == PeopleSaid.sortingLine(choice, source: Self.host, language: en))
-        #expect(PeopleSaid(list: Self.found).line(language: en) == "Its answer to “cats”.")
-        for list in [Self.suggested, Self.requests, Self.followers] {
+        for list in [Self.suggested, Self.requests, Self.followers, Self.found] {
             #expect(PeopleSaid(list: list).line(language: en) == nil, "\(list.which)")
         }
     }
@@ -176,8 +175,8 @@ struct PeoplePageTests {
     func tabIsTakenAndLeavingIsOneStep() {
         var walk = ShellWalk()
         _ = walk.walk(to: .person(DummyPerson(handle: "@me@m.example", host: Self.host)!), from: "row-1")
-        var lamp: String? = "about.requests"
-        #expect(walk.open(Self.requests, lamp: &lamp))
+        let opened = walk.walk(to: .people(Self.requests), from: Self.requests.id)
+        #expect(opened)
         #expect(walk.tabKey == .sole(.people) && ShellStep.people(Self.found).tabKey == .sole(.people))
         #expect(FediqoRootView.stepTab(.sole(.people), drawn: true, open: [.people, .selection]) == .page)
         #expect(FediqoRootView.stepTab(.sole(.people), drawn: true, open: [.viewer, .people]) == .covered)
@@ -227,7 +226,6 @@ struct PeoplePageTests {
             ("the people suggested", PeopleSaid(list: Self.suggested, signedIn: true, reading: .said, people: Self.given, foot: .farthest)),
             ("who asks, counted", counted),
             ("who asks, locked", PeopleSaid(list: Self.requests, signedIn: true, own: true, reading: .said, lock: PartWords.Place(kind: .none, key: "part.ask.partly"))),
-            ("the people found", PeopleSaid(list: Self.found, reading: .failed)),
             ("a directory the host has not", PeopleSaid(list: Self.directory, reading: .absent, sorting: DirectoryChoice())),
         ]
         for scheme in [ColorScheme.light, .dark] {

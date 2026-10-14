@@ -337,9 +337,11 @@ struct OpenedPageTests {
         #expect(ShellStep.tag(tag).tabKey == .tag(tag))
         // What is rising answers with its tab, the step's own value (F10).
         #expect(ShellStep.rising(.links).tabKey == .rising(.links))
+        // And so does what a search found (F10).
+        let found = FoundAt(source: "m.example", words: "swift", gave: FoundWhich.allCases)
+        #expect(ShellStep.found(found, .tags).tabKey == .found(found, .tags))
         for step in [
-            ShellStep.link(URL(string: "https://example.org/")!),
-            .foundTags(FoundTags(source: "m.example", words: "swift")), .followedTags(FollowedTags(host: "m.example")),
+            ShellStep.link(URL(string: "https://example.org/")!), .followedTags(FollowedTags(host: "m.example")),
         ] {
             #expect(step.tabKey == nil, "\(step)")
         }

@@ -41,10 +41,11 @@ enum ShellStep: Hashable, Sendable {
     /// timeline that reads what is rising. A hashtag's row opens that hashtag's page, and
     /// leaving it gives the row back: both are the walk's own.
     case rising(RisingWhich)
-    /// All the hashtags one source found for a search's words (#319), opened from the press
-    /// under its band. A hashtag's row opens that hashtag's page, and leaving it gives the row
-    /// back: both are the walk's own.
-    case foundTags(FoundTags)
+    /// What one source found for a search's words (#319): its people and its hashtags, one
+    /// page with a tab for each (F10), opened from either press for all of one kind under its
+    /// bands, on that kind's tab. A row opens that person's or that hashtag's page, and leaving
+    /// it gives the row back: both are the walk's own.
+    case found(FoundAt, FoundWhich)
     /// The hashtags the reader follows at one source (#318), opened from its line on their own
     /// page there. A hashtag's row opens that hashtag's page, and leaving it gives the row
     /// back: both are the walk's own.
@@ -63,6 +64,10 @@ enum StepTabKey: Hashable, Sendable {
     /// ring — the tab is the step's own value, turned in place (`ShellWalk.turned(to:)`) — and
     /// taken, turning nothing, where they have one.
     case rising(RisingWhich)
+    /// What a search found at a source (F10): People and Hashtags where it gave both, round
+    /// their ring — the tab is the step's own value, turned in place — and taken, turning
+    /// nothing, where it gave one.
+    case found(FoundAt, FoundWhich)
     /// A page with no tabs (F10): the key is taken and does nothing — to change timeline the
     /// reader leaves first — while the page, drawn as `layer`, is what is in front.
     case sole(DummyLayer)
@@ -70,13 +75,14 @@ enum StepTabKey: Hashable, Sendable {
 
 extension ShellStep {
     /// The layer this step is drawn as, among what is open (`DummyLayer`): the hashtags a
-    /// search found and those followed are drawn as rising's are.
+    /// search found and those followed are drawn as rising's are, and the people it found as a
+    /// list of people is — by the tab of what it found that is in front.
     var layer: DummyLayer {
         switch self {
         case .person: .person
         case .tag: .tag
-        case .people: .people
-        case .rising, .foundTags, .followedTags: .rising
+        case .people, .found(_, .people): .people
+        case .rising, .found(_, .tags), .followedTags: .rising
         case .thread: .thread
         case .link: .link
         }
@@ -91,13 +97,14 @@ extension ShellStep {
         case .people: .sole(.people)
         case .tag(let tag): .tag(tag)
         case .rising(let which): .rising(which)
-        case .link, .foundTags, .followedTags: nil
+        case .found(let at, let which): .found(at, which)
+        case .link, .followedTags: nil
         }
     }
 
     /// Whether `other` is another value of the same kind of step — what a tab turned in place
-    /// may turn to (`ShellWalk.turned(to:)`): `.rising(.tags)` and `.rising(.links)` are, a
-    /// hashtag's page and a person's are not.
+    /// may turn to (`ShellWalk.turned(to:)`): `.rising(.tags)` and `.rising(.links)` are, and
+    /// so are the two tabs of what a search found; a hashtag's page and a person's are not.
     func isKind(of other: ShellStep) -> Bool {
         switch self {
         case .person: if case .person = other { true } else { false }
@@ -106,7 +113,7 @@ extension ShellStep {
         case .tag: if case .tag = other { true } else { false }
         case .people: if case .people = other { true } else { false }
         case .rising: if case .rising = other { true } else { false }
-        case .foundTags: if case .foundTags = other { true } else { false }
+        case .found: if case .found = other { true } else { false }
         case .followedTags: if case .followedTags = other { true } else { false }
         }
     }
@@ -159,10 +166,14 @@ struct ShellWalk: Hashable, Sendable {
         return tag
     }
 
-    /// The list of people in front, where one is (#311).
+    /// The list of people in front, where one is (#311) — a list opened on its own, or the
+    /// people a search found, where the page of what it found stands on their tab (F10).
     var openedPeople: PeopleList? {
-        guard case .people(let list) = standing else { return nil }
-        return list
+        switch standing {
+        case .people(let list): list
+        case .found(let at, .people): at.people
+        default: nil
+        }
     }
 
     /// The page read out of a post that is in front, where one is (#169).

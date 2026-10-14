@@ -851,8 +851,9 @@ struct PersonPageTests {
     @Test("The page takes the whole place: the timelines' head is not drawn over it and is over every other step; its sideways is its own — the tab beside, and on the first tab the swipe back leaves the page, as it leaves a page with one tab; a page that is a place is left by no swipe")
     func thePageAndItsSwipe() {
         #expect(!TimelinePane.headDrawn(over: .person(Self.ada)))
-        // What is rising is a page of its own now (F10): a step still under the head stands in for it.
-        let found = ShellStep.foundTags(FoundTags(source: "m.example", words: "swift"))
+        // What is rising and what a search found are pages of their own now (F10): a step still
+        // under the head stands in for them.
+        let found = ShellStep.followedTags(FollowedTags(host: "m.example"))
         for step in [nil, found, .link(URL(string: "https://example.org")!)] as [ShellStep?] {
             #expect(TimelinePane.headDrawn(over: step), "\(String(describing: step))")
         }

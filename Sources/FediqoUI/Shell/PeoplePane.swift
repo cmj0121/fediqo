@@ -151,18 +151,16 @@ struct PeopleSaid: Equatable {
         }
     }
 
-    /// The sentence under the title: how a directory is read, or what a search was asked —
-    /// nothing on a list whose source counts it, which says so by its figure.
+    /// The sentence under the title: how a directory is read — nothing on a list whose source
+    /// counts it, which says so by its figure. What a search was asked is said by the head of
+    /// the page of what it found (`FoundHead`), whose tab the people it found are.
     func line(language: DummyLanguage? = nil) -> String? {
-        if let sorting { return Self.sortingLine(sorting, source: source, language: language) }
-        return list.which == .found ? Self.counts(list, language: language) : nil
+        sorting.map { Self.sortingLine($0, source: source, language: language) }
     }
 
     /// What the source counts in the list, where it said: its figure, said as its figure.
     static func counts(_ list: PeopleList, language: DummyLanguage? = nil) -> String? {
-        // The people a search found are counted by nobody: the line says what was asked.
-        if list.which == .found { return String(format: L10n.t("search.found.line", language: language), list.lineWords) }
-        return list.counted.map {
+        list.counted.map {
             String(format: L10n.t("people.counts", language: language), list.host, L10n.grouped($0, language: language))
         }
     }
@@ -312,8 +310,9 @@ struct PeopleSaid: Equatable {
 }
 
 /// A list of people, opened: a page of its own (F10) — the directory, the people suggested,
-/// who asks to follow the reader, the people a search found — drawn in the frame every opened
-/// page stands in (`OpenedPage`), with no tabs. Its bar holds the way back and the mark that
+/// who asks to follow the reader — drawn in the frame every opened page stands in
+/// (`OpenedPage`), with no tabs. The people a search found are a tab of the page of what it
+/// found (`FoundPage`), drawn by the same rows. Its bar holds the way back and the mark that
 /// asks the source again; its head says whose list it is, which source keeps it and what that
 /// source counts; under them are the people the source gave.
 ///
@@ -408,7 +407,7 @@ struct PeoplePane: View {
 /// (#315): where a list of somebody's has the source's count, a directory has a sentence — in
 /// which order, and whether only of the people who live there — and beside it a menu named by
 /// the order in force. The sentence and the title are the heading a listener hears; the menu
-/// is an element of its own after it. The people a search found have the words it was asked.
+/// is an element of its own after it.
 struct PeopleHead: View {
     let said: PeopleSaid
     var onChoose: (DirectoryChoice) -> Void = { _ in }

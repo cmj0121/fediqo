@@ -1835,11 +1835,12 @@
 "search.band.first" = "The first %@";
 "search.band.all.people" = "%1$@: the people %2$@ found.";
 "search.band.all.tags" = "%1$@: the hashtags %2$@ found.";
-"search.tags.title" = "Hashtags %@ found";
 "search.found.line" = "Its answer to “%@”.";
+"search.found.title" = "What %@ found";
+"search.found.tab.people" = "People";
+"search.found.tab.tags" = "Hashtags";
 "search.tags.foot.end" = "These are all %2$@ hashtags %1$@ found.";
 "search.tags.foot.first" = "These are the first %2$@ hashtags %1$@ found, the most one answer holds. It may have found more: type more of the name to narrow them.";
-"people.title.found" = "People %@ found";
 "people.found.asking" = "Asking %@ for the people it found…";
 "people.found.failed" = "Could not ask %@ for the people it found.";
 "people.found.none" = "%@ found nobody for these words.";

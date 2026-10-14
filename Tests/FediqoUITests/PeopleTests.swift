@@ -719,7 +719,7 @@ struct PeopleTests {
             guard line.hasPrefix("\"people.") || line.hasPrefix("\"work.purpose.people\"") else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 56 && keys.contains("people.requests.none") && keys.contains("people.foot.partial.unsigned") && keys.contains("work.purpose.people") && keys.contains("people.found.none"))
+        #expect(keys.count == 55 && keys.contains("people.requests.none") && keys.contains("people.foot.partial.unsigned") && keys.contains("work.purpose.people") && keys.contains("people.found.none"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }

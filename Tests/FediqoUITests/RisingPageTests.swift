@@ -54,7 +54,7 @@ struct RisingPageTests {
         let steps: [ShellStep] = [
             .person(ada), .thread("post"), .link(URL(string: "https://example.org/")!), .tag(tag),
             .people(PeopleList(directoryAt: Self.one)), .rising(.tags),
-            .foundTags(FoundTags(source: Self.one, words: "swift")), .followedTags(FollowedTags(host: Self.one)),
+            .found(FoundAt(source: Self.one, words: "swift", gave: FoundWhich.allCases), .people), .followedTags(FollowedTags(host: Self.one)),
         ]
         for (i, step) in steps.enumerated() {
             for (j, beside) in steps.enumerated() {

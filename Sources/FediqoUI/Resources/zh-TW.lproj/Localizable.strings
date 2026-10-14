@@ -1790,11 +1790,12 @@
 "search.band.first" = "前 %@ 項";
 "search.band.all.people" = "%1$@：%2$@ 找到的人。";
 "search.band.all.tags" = "%1$@：%2$@ 找到的主題標籤。";
-"search.tags.title" = "%@ 找到的主題標籤";
 "search.found.line" = "它對「%@」的回答。";
+"search.found.title" = "%@ 找到的";
+"search.found.tab.people" = "人";
+"search.found.tab.tags" = "主題標籤";
 "search.tags.foot.end" = "這是 %1$@ 找到的全部 %2$@ 個主題標籤。";
 "search.tags.foot.first" = "這是 %1$@ 找到的前 %2$@ 個主題標籤，也是一次回答最多能帶的數量。它可能還找到更多：多輸入幾個字可以縮小範圍。";
-"people.title.found" = "%@ 找到的人";
 "people.found.asking" = "正在向 %@ 詢問它找到的人…";
 "people.found.failed" = "無法向 %@ 詢問它找到的人。";
 "people.found.none" = "%@ 沒有為這些字找到任何人。";
