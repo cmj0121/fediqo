@@ -33,11 +33,12 @@ struct YouThereTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: server)
         )
+        // Every deadline an ask waits on, on a clock nobody turns: an ask held at its server is not
+        // ended by one — what is asked through the sign-in included — and no check here waits for
+        // one to pass.
+        session.deadlinesUnturned()
         let work = SourceWork()
         session.work = work
-        // An ask's deadline, on a clock nobody turns: an ask held at its server is not ended by
-        // one, and no check here waits for one to pass.
-        session.deadlineSleep = TurnedClock().sleep
         session.mastodon.work = work
         for source in [Self.source, Self.forum] { await session.store.add(source) }
         session.sources = await session.store.sources()

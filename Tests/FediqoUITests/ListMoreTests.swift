@@ -85,6 +85,7 @@ struct ListMoreTests {
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: ActServer([:])),
             posts: ForumPosts(http: http)
         )
+        session.deadlinesUnturned()
         await session.reloadFromStore()
         return session
     }

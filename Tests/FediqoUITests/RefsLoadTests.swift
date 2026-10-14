@@ -82,6 +82,7 @@ struct RefsLoadTests {
         let work = SourceWork()
         work.govern(sources: [host])
         let session = ShellSession(http: unsigned, store: store, mastodon: MastodonSessions(tokens: tokens, sender: server))
+        session.deadlinesUnturned()
         session.work = work
         session.loads = LoadPacer(limits: limits, clock: StillClock())
         session.mastodon.refresh()

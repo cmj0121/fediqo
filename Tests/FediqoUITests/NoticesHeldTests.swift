@@ -112,6 +112,7 @@ struct NoticesHeldTests {
         let session = ShellSession(
             http: FixtureHTTP(), store: store, mastodon: MastodonSessions(tokens: tokens, sender: server)
         )
+        session.deadlinesUnturned()
         let saver = StoreSaver(store: store, file: file)
         session.persist = { (try? await saver.save()) != nil }
         session.mastodon.refresh()

@@ -32,6 +32,7 @@ struct ForumSignInPageTests {
     static func load(_ html: String, in engine: ForumWebEngine) async throws {
         engine.view.loadHTMLString(html, baseURL: URL(string: "https://bbs.example/member.php"))
         // No `by:`: the load is the web view's own, in a process of its own.
+        // Under extreme load (94–250) that process may not settle it before the run goes still.
         await met("the page has settled") {
             guard !engine.view.isLoading else { return false }
             return (try? await engine.view.evaluateJavaScript("document.readyState")) as? String == "complete"

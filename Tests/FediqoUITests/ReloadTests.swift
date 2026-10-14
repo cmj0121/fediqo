@@ -137,6 +137,7 @@ struct ReloadTests {
         let session = ShellSession(
             http: wire, store: store, mastodon: mastodon, posts: ForumPosts(http: wire)
         )
+        session.deadlinesUnturned()
         // Its own list of what is on the wire, so a check can ask whether anything of its is.
         session.work = SourceWork()
         await session.reloadFromStore()
