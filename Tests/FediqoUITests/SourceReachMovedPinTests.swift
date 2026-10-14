@@ -11,7 +11,7 @@ import Testing
 /// **Written after the building of clients was gathered into one place, and run unchanged
 /// against the code from before it**, where every one of these passes too.
 @MainActor
-@Suite("Each source is reached as it was, further down")
+@Suite("Each source is reached as it was, further down", .watched)
 struct SourceReachMovedPinTests {
     private static let m = "m.example"
     private static let z = "z.example"
@@ -65,6 +65,7 @@ struct SourceReachMovedPinTests {
         session.work = work
         session.posts.work = work
         session.blogs.work = work
+        session.deadlinesUnturned()
         session.mastodon.refresh()
         await session.reloadFromStore()
         _ = log.take()
@@ -181,7 +182,6 @@ struct SourceReachMovedPinTests {
             }
         )
         #expect(!forums.readsThroughEngine(host: Self.z), "the premise: not signed in as the reload begins")
-        session.reload.deadline = .seconds(2)
         await session.reload.timeline(.all, in: session)
         #expect(forums.readsThroughEngine(host: Self.z), "the premise: signed in by the time the second board is read")
         #expect(log.take() == [

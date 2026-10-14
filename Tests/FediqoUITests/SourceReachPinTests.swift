@@ -98,7 +98,13 @@ struct SourceReachPinTests {
         "/api/v2/instance": #"{"domain":"m.example","version":"4.6.6","configuration":{"statuses":{"max_characters":500}}}"#,
         "/api/v1/statuses": status, "/api/v1/statuses/9/favourite": status, "/api/v1/statuses/8": status,
         "/api/v1/accounts/verify_credentials": #"{"id":"1","username":"me","acct":"me"}"#,
+        // A Discourse's listings are answered, and readably. Its section names are asked beside
+        // a listing, and a listing that cannot be read ends the read at once and takes that ask
+        // back: whether it had been made yet was then a matter of which ran first, and on a
+        // loaded machine the section names were sometimes never asked for at all.
+        "/latest.json": discourseListing, "/tag/cats.json": discourseListing,
     ]
+    private static let discourseListing = #"{"users":[],"topic_list":{"topics":[]}}"#
 
     /// A session on a Mastodon, a Discuz! and a Discourse, signed in to the Mastodon or not,
     /// whose every request is noted.
@@ -120,6 +126,7 @@ struct SourceReachPinTests {
         session.work = work
         session.posts.work = work
         session.blogs.work = work
+        session.deadlinesUnturned()
         var limits = LoadLimits()
         limits.interval = 0
         limits.backoff = 0
