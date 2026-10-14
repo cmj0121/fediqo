@@ -11,7 +11,7 @@ import Testing
 ///
 /// Every wait here is on an ask arriving or being let go (`PageServer`), and is tied to the
 /// press that made the ask: a held ask is let go in a `defer`, and by a guard when the run has
-/// gone still — never by `PageServer`'s own patience, which every hold here turns off.
+/// gone still.
 @MainActor
 @Suite("The server somebody lives on, asked at a press", .serialized, .watched)
 struct PersonHomeTests {
@@ -96,7 +96,7 @@ struct PersonHomeTests {
     }
 
     /// Waits until `ask` has arrived at `server` `times` times, by the press that was to send
-    /// it — and not by `PageServer.arrival`, which gives up by a clock.
+    /// it.
     private static func arrival(
         of ask: String, at server: PageServer, times: Int = 1, by press: Task<Void, Never>,
         sourceLocation: SourceLocation = #_sourceLocation
@@ -399,7 +399,7 @@ struct PersonHomeTests {
         let pages = shell.pages, session = shell.session, home = try shell.server(Self.home), asked = Self.lookup("far")
         await pages.opened(Self.far, in: session)
         await pages.opened(Self.near, in: session)
-        await home.hold(asked, lettingGoByItself: false)
+        await home.hold(asked)
         defer { Task { await home.release(asked) } }
         let guardTask = watching("the ask of their own server, held there") { await home.release(asked) }
         defer { guardTask.cancel() }
@@ -422,7 +422,7 @@ struct PersonHomeTests {
         #expect(pages.homeSaid(of: Self.far, in: session) != nil)
 
         // The way back pressed while a further ask is out.
-        await home.hold(asked, lettingGoByItself: false)
+        await home.hold(asked)
         await pages.homePressed(.back, on: Self.far, in: session)
         let backed = Task { await pages.homePressed(.ask, on: Self.far, in: session) }
         await Self.arrival(of: asked, at: home, times: 2, by: backed)
@@ -435,7 +435,7 @@ struct PersonHomeTests {
 
         // From here over a wire that answers whole and late whatever became of the ask.
         pages.home.reaching = { host in MastodonPersonHome(http: home, host: host) }
-        await home.hold(asked, lettingGoByItself: false)
+        await home.hold(asked)
         let left = Task { await pages.homePressed(.ask, on: Self.far, in: session) }
         await Self.arrival(of: asked, at: home, times: 3, by: left)
         pages.home.letGo(of: Self.far)
@@ -446,7 +446,7 @@ struct PersonHomeTests {
 
         // Another person's press while this one is out.
         let theirs = try shell.server(Self.other)
-        await home.hold(asked, lettingGoByItself: false)
+        await home.hold(asked)
         let slow = Task { await pages.homePressed(.ask, on: Self.far, in: session) }
         await Self.arrival(of: asked, at: home, times: 4, by: slow)
         pages.home.reaching = { host in MastodonPersonHome(http: host == Self.home ? home : theirs, host: host) }
@@ -459,7 +459,7 @@ struct PersonHomeTests {
 
         // The same with a failure come late.
         await home.answer(asked, PageServer.Answer(body: "", status: 500))
-        await home.hold(asked, lettingGoByItself: false)
+        await home.hold(asked)
         let failing = Task { await pages.homePressed(.ask, on: Self.far, in: session) }
         await Self.arrival(of: asked, at: home, times: 5, by: failing)
         await pages.homePressed(.ask, on: Self.near, in: session)
@@ -469,7 +469,7 @@ struct PersonHomeTests {
 
         // And with the wire saying, late, that the ask was walked away from.
         await home.answer(asked, PageServer.Answer(body: "", cancelled: true))
-        await home.hold(asked, lettingGoByItself: false)
+        await home.hold(asked)
         let walked = Task { await pages.homePressed(.ask, on: Self.far, in: session) }
         await Self.arrival(of: asked, at: home, times: 6, by: walked)
         await pages.homePressed(.ask, on: Self.near, in: session)
@@ -479,7 +479,7 @@ struct PersonHomeTests {
 
         // The source the page is of removed while the ask is out.
         await home.answer(asked, Self.whole("far"))
-        await home.hold(asked, lettingGoByItself: false)
+        await home.hold(asked)
         let removed = Task { await pages.homePressed(.ask, on: Self.far, in: session) }
         await Self.arrival(of: asked, at: home, times: 7, by: removed)
         #expect(pages.home.stands(for: Self.far) == .asking)
@@ -510,7 +510,7 @@ struct PersonHomeTests {
         // Switched off while an ask is out.
         shell.work.allow(Allowance.standing)
         await pages.homePressed(.back, on: Self.far, in: session)
-        await home.hold(asked, lettingGoByItself: false)
+        await home.hold(asked)
         defer { Task { await home.release(asked) } }
         let guardTask = watching("the ask of their own server, held there") { await home.release(asked) }
         defer { guardTask.cancel() }

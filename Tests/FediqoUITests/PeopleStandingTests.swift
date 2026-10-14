@@ -9,10 +9,11 @@ import Testing
 /// last said — what is asked for it, of whom and when, where nobody is asked, what a failure
 /// leaves, whose an answer is, and how the row draws it.
 ///
-/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
-/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+/// Every wait here is on an ask arriving or being let go (`PageServer`), tied to the work that
+/// made the ask where a check can name it: a held ask is let go by the check, and by a guard
+/// when the run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("How the reader stands to the people on a list", .serialized, .timeLimit(.minutes(3)))
+@Suite("How the reader stands to the people on a list", .serialized, .watched)
 struct PeopleStandingTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -65,6 +66,7 @@ struct PeopleStandingTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: server)
         )
+        session.deadlinesUnturned()
         let work = SourceWork()
         session.work = work
         session.mastodon.work = work
@@ -171,8 +173,10 @@ struct PeopleStandingTests {
 
         await server.hold(Self.stands([4, 3, 2, 1]))
         defer { Task { await server.release(Self.stands([4, 3, 2, 1])) } }
+        let stands4321Guard = watching("the ask of \(Self.stands([4, 3, 2, 1])), held at its server") { await server.release(Self.stands([4, 3, 2, 1])) }
+        defer { stands4321Guard.cancel() }
         let again = Task { await pages.again(Self.followers, in: session) }
-        await server.arrival(of: Self.stands([4, 3, 2, 1]), times: 2)
+        await server.arrival(of: Self.stands([4, 3, 2, 1]), times: 2, by: again)
         #expect(stands(pages, session) == before, "until the source answers again")
         // No entry for one, an entry that leaves a part out for another, and a new word of a third.
         let partial = Self.standing(4, muting: true).replacingOccurrences(of: #""following":false,"#, with: "")
@@ -289,8 +293,10 @@ struct PeopleStandingTests {
         let pages = ShellPersonPages().lists
         await server.hold(Self.stands([3, 2, 1]))
         defer { Task { await server.release(Self.stands([3, 2, 1])) } }
+        let stands321Guard = watching("the ask of \(Self.stands([3, 2, 1])), held at its server") { await server.release(Self.stands([3, 2, 1])) }
+        defer { stands321Guard.cancel() }
         let opening = Task { await pages.opened(Self.followers, in: session) }
-        await server.arrival(of: Self.stands([3, 2, 1]))
+        await server.arrival(of: Self.stands([3, 2, 1]), by: opening)
         #expect(pages.said(of: Self.followers, in: session) == asIs)
         await server.release(Self.stands([3, 2, 1]))
         await opening.value
@@ -309,12 +315,14 @@ struct PeopleStandingTests {
         let pages = ShellPersonPages().lists
         await server.hold(Self.stands([3, 2, 1]))
         defer { Task { await server.release(Self.stands([3, 2, 1])) } }
+        let stands321Guard = watching("the ask of \(Self.stands([3, 2, 1])), held at its server") { await server.release(Self.stands([3, 2, 1])) }
+        defer { stands321Guard.cancel() }
         let old = Task { await pages.opened(Self.followers, in: session) }
-        await server.arrival(of: Self.stands([3, 2, 1]))
+        await server.arrival(of: Self.stands([3, 2, 1]), by: old)
         // Reading on takes the list's one ask over, so the first stretch's is called off by nobody.
         await pages.readOn(Self.followers, in: session)
         let new = Task { await pages.again(Self.followers, in: session) }
-        await server.arrival(of: Self.stands([3, 2, 1]), times: 2)
+        await server.arrival(of: Self.stands([3, 2, 1]), times: 2, by: new)
 
         await server.answer(Self.stands([3, 2, 1]), Self.said(Self.standing(3, followedBy: true)))
         await server.releaseOne(Self.stands([3, 2, 1]))
@@ -337,13 +345,15 @@ struct PeopleStandingTests {
         let pages = ShellPersonPages().lists
         await server.hold(Self.stands([3, 2, 1]))
         defer { Task { await server.release(Self.stands([3, 2, 1])) } }
+        let stands321Guard = watching("the ask of \(Self.stands([3, 2, 1])), held at its server") { await server.release(Self.stands([3, 2, 1])) }
+        defer { stands321Guard.cancel() }
         let old = Task { await pages.opened(Self.followers, in: session) }
-        await server.arrival(of: Self.stands([3, 2, 1]))
+        await server.arrival(of: Self.stands([3, 2, 1]), by: old)
         await pages.readOn(Self.followers, in: session)
 
         try await signIn(session, as: "second")
         let new = Task { await pages.opened(Self.followers, in: session) }
-        await server.arrival(of: Self.stands([3, 2, 1]), times: 2)
+        await server.arrival(of: Self.stands([3, 2, 1]), times: 2, by: new)
         #expect(await server.bearers.last == "Bearer second")
         await server.answer(Self.stands([3, 2, 1]), Self.said(Self.standing(3, followedBy: true)))
         await server.releaseOne(Self.stands([3, 2, 1]))
@@ -363,8 +373,10 @@ struct PeopleStandingTests {
         let lists = ShellPersonPages().lists
         await late.hold(Self.first)
         defer { Task { await late.release(Self.first) } }
+        let lateFirstGuard = watching("the ask of \(Self.first), held at its server") { await late.release(Self.first) }
+        defer { lateFirstGuard.cancel() }
         let opening = Task { await lists.opened(Self.followers, in: other) }
-        await late.arrival(of: Self.first)
+        await late.arrival(of: Self.first, by: opening)
         try await signIn(other, as: "second")
         await late.release(Self.first)
         await opening.value
@@ -382,11 +394,13 @@ struct PeopleStandingTests {
         let pages = ShellPersonPages().lists
         await server.hold(Self.stands([3, 2, 1]))
         defer { Task { await server.release(Self.stands([3, 2, 1])) } }
+        let stands321Guard = watching("the ask of \(Self.stands([3, 2, 1])), held at its server") { await server.release(Self.stands([3, 2, 1])) }
+        defer { stands321Guard.cancel() }
         let old = Task { await pages.opened(Self.followers, in: session) }
-        await server.arrival(of: Self.stands([3, 2, 1]))
+        await server.arrival(of: Self.stands([3, 2, 1]), by: old)
         await pages.readOn(Self.followers, in: session)
         let new = Task { await pages.again(Self.followers, in: session) }
-        await server.arrival(of: Self.stands([3, 2, 1]), times: 2)
+        await server.arrival(of: Self.stands([3, 2, 1]), times: 2, by: new)
         #expect(session.mastodon.ended.isEmpty)
 
         let refused = PageServer.Answer(body: #"{"error":"The access token was revoked"}"#, status: 401)

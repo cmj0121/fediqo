@@ -54,6 +54,7 @@ struct TagPressTests {
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: NoSender()),
             posts: ForumPosts(http: http)
         )
+        session.deadlinesUnturned()
         await session.reloadFromStore()
         return session
     }
@@ -95,10 +96,11 @@ struct TagPressTests {
         await session.reload.tag(Self.swift, timeline: .all, in: session)
         #expect(await http.requested.map(\.absoluteString) == [Self.tagAddress], "the forum is not asked")
         #expect(session.reload.tagAsk?.reach.asked == [Self.one])
-        #expect(await spun { session.heldPosts(under: Self.swift, latest: nil).count == 2 }, "renewed with no press")
+        // No `by:` here or below: the page is renewed by the store's follower, which never ends.
+        await met("the tag's page is renewed with no press, to two posts") { session.heldPosts(under: Self.swift, latest: nil).count == 2 }
         #expect(session.heldPosts(under: Self.swift, latest: nil).first?.id == Self.fromTheWire.rowID)
         #expect(await session.store.note(Self.fromTheWire)?.categories.isEmpty == true, "the store's answer, through no category")
-        #expect(await spun { session.notes.contains { $0.key == Self.fromTheWire } }, "All grew by what the tag brought")
+        await met("All grows by what the tag brought") { session.notes.contains { $0.key == Self.fromTheWire } }
         #expect(session.held(Self.fromTheWire.rowID) != nil, "and it opens its conversation")
         #expect(session.reload.tagFailed.isEmpty)
         #expect(!session.reload.running, "said on the tag's page, not in the toast")
@@ -163,6 +165,9 @@ struct TagPressTests {
         await asking.value
         #expect(session.reload.tagAsk == nil)
         await gated.gate.open()
+        // No `by:`: the read that was ended is the reload's own task, which no check can name.
+        await met("the ask ended is answered past the gate") { await gated.requested().contains(Self.tagAddress) }
+        // Counted: what the ended read does with that answer is in that unnamed task too.
         for _ in 0..<2_000 { await Task.yield() }
         #expect(await session.store.note(Self.fromTheWire) == nil)
     }

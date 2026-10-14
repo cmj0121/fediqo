@@ -7,7 +7,7 @@ import Testing
 /// it is the end — landed in the store first, there with the network off, and never moving the
 /// post being read.
 @MainActor
-@Suite("A thread read to its end")
+@Suite("A thread read to its end", .watched)
 struct ThreadToEndTests {
     init() {
         L10n.language = .english
@@ -58,6 +58,7 @@ struct ThreadToEndTests {
             postedAt: Date(timeIntervalSince1970: 0), categories: [.public]
         )])
         let session = ShellSession(http: http, store: store, posts: ForumPosts(http: http))
+        session.deadlinesUnturned()
         await session.reloadFromStore()
         return session
     }
@@ -150,6 +151,7 @@ struct ThreadToEndTests {
         // Another run on the same store, with nothing answering.
         let dark = FixtureHTTP(Self.threePages.mapValues { _ in .fail })
         let offline = ShellSession(http: dark, store: store, posts: ForumPosts(http: dark))
+        offline.deadlinesUnturned()
         await offline.reloadFromStore()
 
         await offline.posts.recall(Self.ref)
@@ -234,6 +236,7 @@ struct ThreadToEndTests {
         )
         await store.ingest([held])
         let session = ShellSession(http: http, store: store, posts: ForumPosts(http: http))
+        session.deadlinesUnturned()
         await session.reloadFromStore()
         return (session, DummyItem(held))
     }
@@ -360,6 +363,7 @@ struct ThreadToEndTests {
 
         let dark = Scripted([Self.threadPath: .fail])
         let offline = ShellSession(http: dark, store: store, posts: ForumPosts(http: dark))
+        offline.deadlinesUnturned()
         await offline.reloadFromStore()
         await offline.conversations.open(item, in: offline)
 
@@ -453,13 +457,13 @@ struct ThreadToEndTests {
     @Test("A page stopped on its way lands nothing, and the foot is as it was")
     func aStoppedPageLandsNothing() async {
         let http = GatedHTTP(Self.threePages, holding: Self.page(2))
-        let guardian = hangGuard(http.gate)
+        let guardian = watching(http.gate, "the thread's page two, held on the wire")
         defer { guardian.cancel() }
         let session = await forumShell(http)
         await session.posts.fetchReplies(Self.ref)
 
         let reading = Task { await session.posts.more(Self.ref) }
-        #expect(await spun { await http.reached })
+        await met("the thread's page two reaches the wire", by: reading) { await http.reached }
         #expect(session.stopReadingFurther(), "Esc has something to stop")
         await http.gate.open()
         await reading.value
@@ -508,12 +512,12 @@ struct ThreadToEndTests {
     @Test("Closing one thread stops its own page, and not the one opened in its place")
     func closingStopsOnlyItsOwn() async {
         let http = GatedHTTP(Self.threePages, holding: Self.page(2))
-        let guardian = hangGuard(http.gate)
+        let guardian = watching(http.gate, "the thread's page two, held on the wire")
         defer { guardian.cancel() }
         let session = await forumShell(http)
         await session.posts.fetchReplies(Self.ref)
         let reading = Task { await session.posts.more(Self.ref) }
-        #expect(await spun { await http.reached })
+        await met("the thread's page two reaches the wire", by: reading) { await http.reached }
 
         // Another thread's pane closing reaches nothing of this one.
         let other = DummyItem(Note(
@@ -531,12 +535,12 @@ struct ThreadToEndTests {
     @Test("A stopped foot reads on when pressed, or when s is")
     func aStoppedFootReadsOnWhenPressed() async {
         let http = GatedHTTP(Self.threePages, holding: Self.page(2))
-        let guardian = hangGuard(http.gate)
+        let guardian = watching(http.gate, "the thread's page two, held on the wire")
         defer { guardian.cancel() }
         let session = await forumShell(http)
         await session.posts.fetchReplies(Self.ref)
         let reading = Task { await session.posts.more(Self.ref) }
-        #expect(await spun { await http.reached })
+        await met("the thread's page two reaches the wire", by: reading) { await http.reached }
         session.stopReadingFurther()
         await http.gate.open()
         await reading.value

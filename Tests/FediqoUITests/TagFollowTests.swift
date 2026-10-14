@@ -10,10 +10,11 @@ import Testing
 /// for it and when, how a press is guarded, and what stands there where the sign-in was not
 /// given who the reader follows.
 ///
-/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
-/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+/// Every wait here is on an ask arriving or being let go (`PageServer`), tied to the work that
+/// made the ask where a check can name it: a held ask is let go by the check, and by a guard
+/// when the run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("A hashtag followed at a source, on the hashtag's page", .serialized, .timeLimit(.minutes(3)))
+@Suite("A hashtag followed at a source, on the hashtag's page", .serialized, .watched)
 struct TagFollowTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -39,6 +40,7 @@ struct TagFollowTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: server)
         )
+        session.deadlinesUnturned()
         let work = SourceWork()
         session.work = work
         session.mastodon.work = work
@@ -208,6 +210,7 @@ struct TagFollowTests {
         let session = ShellSession(
             http: FixtureHTTP(), store: ItemStore(), mastodon: MastodonSessions(tokens: tokens, sender: server)
         )
+        session.deadlinesUnturned()
         await session.store.add(Source(host: host, kind: .mastodon))
         session.sources = await session.store.sources()
         session.mastodon.refresh()
@@ -246,9 +249,11 @@ struct TagFollowTests {
         #expect(tags.lines(of: Self.swift, in: session).first?.offers == .follow)
 
         await server.hold(Self.follow)
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await tags.press(Self.swift, at: Self.host, in: session) }
         defer { Task { await server.release(Self.follow) } }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
         #expect(tags.lines(of: Self.swift, in: session) == line(.doing(true)), "shown first")
         #expect(tags.lines(of: Self.swift, in: session).first?.offers == nil)
         // A second press, and a third, while the first is out: nothing more is sent.
@@ -329,8 +334,10 @@ struct TagFollowTests {
         await server.answer(Self.asked, Self.said(true))
         await server.hold(Self.asked)
         defer { Task { await server.release(Self.asked) } }
+        let askedGuard = watching("the ask of \(Self.asked), held at its server") { await server.release(Self.asked) }
+        defer { askedGuard.cancel() }
         let again = Task { await tags.again(Self.swift, at: Self.host, in: session) }
-        await server.arrival(of: Self.asked, times: 2)
+        await server.arrival(of: Self.asked, times: 2, by: again)
         #expect(tags.lines(of: Self.swift, in: session) == line(.asking))
         await tags.again(Self.swift, at: Self.host, in: session)
         #expect(await server.asked.count == 2, "one ask at a time")
@@ -351,8 +358,10 @@ struct TagFollowTests {
         await tags.opened(Self.swift, in: session)
         await server.hold(Self.follow)
         defer { Task { await server.release(Self.follow) } }
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await tags.press(Self.swift, at: Self.host, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
 
         try signIn(session, as: "other")
         #expect(tags.lines(of: Self.swift, in: session) == line(.asking), "another reader: nothing of the first is drawn")
@@ -366,12 +375,12 @@ struct TagFollowTests {
         // A press of this reader's still out, another signs in and presses: theirs goes too.
         await server.hold(Self.follow)
         let earlier = Task { await tags.press(Self.swift, at: Self.host, in: session) }
-        await server.arrival(of: Self.follow, times: 2)
+        await server.arrival(of: Self.follow, times: 2, by: earlier)
         try signIn(session, as: "third")
         await tags.opened(Self.swift, in: session)
         #expect(tags.lines(of: Self.swift, in: session) == line(.said(false)))
         let theirs = Task { await tags.press(Self.swift, at: Self.host, in: session) }
-        await server.arrival(of: Self.follow, times: 3)
+        await server.arrival(of: Self.follow, times: 3, by: theirs)
         #expect(await server.asked.filter { $0 == Self.follow }.count == 3, "the first reader's press does not stand in the way")
         #expect(tags.lines(of: Self.swift, in: session) == line(.doing(true)))
         await server.release(Self.follow)
@@ -384,8 +393,10 @@ struct TagFollowTests {
         await server.answer(Self.unfollow, Self.said(false))
         await server.hold(Self.unfollow)
         defer { Task { await server.release(Self.unfollow) } }
+        let unfollowGuard = watching("the ask of \(Self.unfollow), held at its server") { await server.release(Self.unfollow) }
+        defer { unfollowGuard.cancel() }
         let unseen = Task { await tags.press(Self.swift, at: Self.host, in: session) }
-        await server.arrival(of: Self.unfollow)
+        await server.arrival(of: Self.unfollow, by: unseen)
         #expect(await server.asked.last == Self.unfollow)
         let held = try #require(try session.mastodon.tokens.token(host: Self.host))
         _ = try session.mastodon.tokens.forget(held)
@@ -403,7 +414,7 @@ struct TagFollowTests {
         await server.answer(Self.follow, Self.down)
         await server.hold(Self.follow)
         let failing = Task { await tags.press(Self.swift, at: Self.host, in: session) }
-        await server.arrival(of: Self.follow, times: 4)
+        await server.arrival(of: Self.follow, times: 4, by: failing)
         #expect(await server.asked.filter { $0 == Self.follow }.count == 4)
         try signOut(session)
         await server.release(Self.follow)
@@ -425,8 +436,10 @@ struct TagFollowTests {
         await tags.opened(Self.swift, in: session)
         await server.hold(Self.follow)
         defer { Task { await server.release(Self.follow) } }
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let early = Task { await tags.press(Self.swift, at: Self.host, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: early)
 
         // Another reader looks at the page, and then the first is back with the token they had.
         try signIn(session, as: "other")
@@ -435,7 +448,7 @@ struct TagFollowTests {
         await tags.opened(Self.swift, in: session)
         #expect(tags.lines(of: Self.swift, in: session) == line(.said(false)), "the premise: the first press went with its sign-in")
         let late = Task { await tags.press(Self.swift, at: Self.host, in: session) }
-        await server.arrival(of: Self.follow, times: 2)
+        await server.arrival(of: Self.follow, times: 2, by: late)
         #expect(await server.asked.filter { $0 == Self.follow }.count == 2)
         #expect(tags.lines(of: Self.swift, in: session) == line(.doing(true)))
 
@@ -461,15 +474,19 @@ struct TagFollowTests {
         await tags.opened(Self.swift, in: session)
         await server.hold(Self.follow)
         defer { Task { await server.release(Self.follow) } }
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await tags.press(Self.swift, at: Self.host, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
 
         tags.closed(Self.swift)
         // Opened again: a read goes out, and is held on its way.
         await server.hold(Self.asked)
         defer { Task { await server.release(Self.asked) } }
+        let askedGuard = watching("the ask of \(Self.asked), held at its server") { await server.release(Self.asked) }
+        defer { askedGuard.cancel() }
         let reopened = Task { await tags.opened(Self.swift, in: session) }
-        await server.arrival(of: Self.asked, times: 2)
+        await server.arrival(of: Self.asked, times: 2, by: reopened)
         #expect(tags.lines(of: Self.swift, in: session) == line(.doing(true)), "the press is still out, and reads so")
         await tags.press(Self.swift, at: Self.host, in: session)
         #expect(await server.asked.filter { $0 == Self.follow }.count == 1, "one act per hashtag at a time")
@@ -477,7 +494,8 @@ struct TagFollowTests {
         // The press lands: it is written to no page, and the page is asked afresh.
         await server.release(Self.follow)
         await pressed.value
-        await server.arrival(of: Self.asked, times: 3)
+        // No `by:`: the read afresh is the pages' own task, begun once the press has landed.
+        await met("the hashtag is asked afresh once the press landed") { await server.arrivals(of: Self.asked) >= 3 }
         #expect(await server.asked.filter { $0 == Self.asked }.count == 3, "asked afresh once the press landed")
         #expect(tags.lines(of: Self.swift, in: session) == line(.asking))
         // The read that was on its way before the press landed says what was true then.
@@ -493,8 +511,10 @@ struct TagFollowTests {
         await server.answer(Self.unfollow, Self.down)
         await server.hold(Self.unfollow)
         defer { Task { await server.release(Self.unfollow) } }
+        let unfollowGuard = watching("the ask of \(Self.unfollow), held at its server") { await server.release(Self.unfollow) }
+        defer { unfollowGuard.cancel() }
         let failing = Task { await tags.press(Self.swift, at: Self.host, in: session) }
-        await server.arrival(of: Self.unfollow)
+        await server.arrival(of: Self.unfollow, by: failing)
         tags.closed(Self.swift)
         await server.release(Self.unfollow)
         await failing.value
@@ -510,8 +530,10 @@ struct TagFollowTests {
         await tags.opened(Self.swift, in: session)
         await server.hold(Self.follow)
         defer { Task { await server.release(Self.follow) } }
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await tags.press(Self.swift, at: Self.host, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
 
         tags.closed(Self.swift)
         // Opened again, and answered at once: not followed, as was true before the press landed.
@@ -522,9 +544,12 @@ struct TagFollowTests {
         // The press lands, and the read begun after it is held on its way.
         await server.hold(Self.asked)
         defer { Task { await server.release(Self.asked) } }
+        let askedGuard = watching("the ask of \(Self.asked), held at its server") { await server.release(Self.asked) }
+        defer { askedGuard.cancel() }
         await server.release(Self.follow)
         await pressed.value
-        await server.arrival(of: Self.asked, times: 3)
+        // No `by:`: the read afresh is the pages' own task, begun once the press has landed.
+        await met("the hashtag is asked afresh once the press landed") { await server.arrivals(of: Self.asked) >= 3 }
         #expect(await server.asked.filter { $0 == Self.asked }.count == 3, "asked afresh once the press landed")
         #expect(tags.lines(of: Self.swift, in: session) == line(.asking), "what was read before the press landed is not said after it")
         #expect(tags.lines(of: Self.swift, in: session).first?.offers == nil)
@@ -578,8 +603,10 @@ struct TagFollowTests {
         await tags.opened(rust, in: session)
         await server.hold(Self.follow)
         defer { Task { await server.release(Self.follow) } }
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await tags.press(Self.swift, at: Self.host, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
         #expect(tags.lines(of: rust, in: session).map(\.standing) == [.said(false)])
         await server.release(Self.follow)
         await pressed.value
@@ -594,8 +621,10 @@ struct TagFollowTests {
         let tags = ShellPersonPages().tags
         await server.hold(Self.asked)
         defer { Task { await server.release(Self.asked) } }
+        let askedGuard = watching("the ask of \(Self.asked), held at its server") { await server.release(Self.asked) }
+        defer { askedGuard.cancel() }
         let opened = Task { await tags.opened(Self.swift, in: session) }
-        await server.arrival(of: Self.asked)
+        await server.arrival(of: Self.asked, by: opened)
         session.sources = [Self.forum]
         #expect(tags.lines(of: Self.swift, in: session).isEmpty)
         await server.release(Self.asked)

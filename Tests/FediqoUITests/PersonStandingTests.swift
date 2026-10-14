@@ -10,10 +10,11 @@ import Testing
 /// is guarded against a read on its way, and what stands there where the sign-in was not given
 /// who the reader follows.
 ///
-/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
-/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+/// Every wait here is on an ask arriving or being let go (`PageServer`), tied to the work that
+/// made the ask where a check can name it: a held ask is let go by the check, and by a guard
+/// when the run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("How the reader stands to somebody, and following them, on their page", .serialized, .timeLimit(.minutes(3)))
+@Suite("How the reader stands to somebody, and following them, on their page", .serialized, .watched)
 struct PersonStandingTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -59,6 +60,7 @@ struct PersonStandingTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: server)
         )
+        session.deadlinesUnturned()
         let work = SourceWork()
         session.work = work
         session.mastodon.work = work
@@ -197,8 +199,10 @@ struct PersonStandingTests {
 
             await server.hold(Self.stands)
             defer { Task { await server.release(Self.stands) } }
+            let standsGuard = watching("the ask of \(Self.stands), held at its server") { await server.release(Self.stands) }
+            defer { standsGuard.cancel() }
             let opening = Task { await acts.opened(Self.ada, said: page, in: session) }
-            await server.arrival(of: Self.stands)
+            await server.arrival(of: Self.stands, by: opening)
             #expect(acts.acting(of: Self.ada, said: page, in: session)?.reading == .asking)
             #expect(line() == nil, "the ask is out: no sentence yet")
 
@@ -370,8 +374,10 @@ struct PersonStandingTests {
 
         await server.hold(Self.follow)
         defer { Task { await server.release(Self.follow) } }
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await acts.press(.follow, on: Self.ada, said: page, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
         let out = try #require(acts.acting(of: Self.ada, said: page, in: session))
         #expect(out.doing == .follow && out.pills(language: .english) == ["You follow them"], "shown at the press")
         #expect(out.press == nil && out.more.isEmpty, "and nothing more is offered while it is out")
@@ -413,8 +419,10 @@ struct PersonStandingTests {
 
         await server.hold(Self.follow)
         defer { Task { await server.release(Self.follow) } }
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await acts.press(.follow, on: Self.ada, said: page, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
         #expect(acts.acting(of: Self.ada, said: page, in: session)?.pills(language: .english) == ["Asked"], "asked, at the press")
         await server.release(Self.follow)
         await pressed.value
@@ -476,8 +484,10 @@ struct PersonStandingTests {
         await held.answer(Self.stands, Self.said(Self.standing(requested: true)))
         await held.hold(Self.stands)
         defer { Task { await held.release(Self.stands) } }
+        let heldStandsGuard = watching("the ask of \(Self.stands), held at its server") { await held.release(Self.stands) }
+        defer { heldStandsGuard.cancel() }
         let pressed = Task { await again.press(.follow, on: far, said: page, in: other) }
-        await held.arrival(of: Self.stands, times: 2)
+        await held.arrival(of: Self.stands, times: 2, by: pressed)
         let out = try #require(again.acting(of: far, said: page, in: other))
         #expect(out.doing == .follow && out.press == nil && out.more.isEmpty, "still the press: no Unfollow over what nobody said")
         #expect(out.reading == .said(PersonStanding(accountID: "42")), "what the press was answered is written nowhere")
@@ -548,8 +558,10 @@ struct PersonStandingTests {
 
         await server.hold(Self.stands)
         defer { Task { await server.release(Self.stands) } }
+        let standsGuard = watching("the ask of \(Self.stands), held at its server") { await server.release(Self.stands) }
+        defer { standsGuard.cancel() }
         let reading = Task { await acts.again(Self.ada, said: page, in: session) }
-        await server.arrival(of: Self.stands, times: 2)
+        await server.arrival(of: Self.stands, times: 2, by: reading)
         #expect(acts.acting(of: Self.ada, said: page, in: session)?.press == .follow, "what it said before stays drawn, and pressed")
 
         await acts.press(.follow, on: Self.ada, said: page, in: session)
@@ -577,8 +589,10 @@ struct PersonStandingTests {
 
         await server.hold(Self.follow)
         defer { Task { await server.release(Self.follow) } }
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await acts.press(.follow, on: Self.ada, said: page, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
         await acts.again(Self.ada, said: page, in: session)
         #expect(await asked(server) == [Self.stands, Self.follow, Self.stands], "the read went, and answered not followed")
         let out = try #require(acts.acting(of: Self.ada, said: page, in: session))
@@ -634,8 +648,10 @@ struct PersonStandingTests {
         await acts.opened(Self.ada, said: page, in: session)
         await server.hold(Self.follow)
         defer { Task { await server.release(Self.follow) } }
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await acts.press(.follow, on: Self.ada, said: page, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
 
         try await signIn(session, as: "second")
         let next = try #require(acts.acting(of: Self.ada, said: page, in: session))
@@ -658,8 +674,10 @@ struct PersonStandingTests {
         await acts.opened(Self.ada, said: page, in: session)
         await server.hold(Self.follow)
         defer { Task { await server.release(Self.follow) } }
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await acts.press(.follow, on: Self.ada, said: page, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
 
         // Somebody else, whose look lets the press go — and then the first reader again, under
         // the very token the press went with, on a page made since.
@@ -689,8 +707,10 @@ struct PersonStandingTests {
         await acts.opened(Self.ada, said: page, in: session)
         await server.hold(Self.follow)
         defer { Task { await server.release(Self.follow) } }
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await acts.press(.follow, on: Self.ada, said: page, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
 
         // The token swapped under the session, as another window's sign-in does: no look at
         // it, no page opened, and what the session last knew of the sign-in unchanged.
@@ -792,12 +812,13 @@ struct PersonStandingTests {
 
         // A hashtag's page: followed at the source whose line offers it.
         #expect(key(.timeline, [.tag], tag: swift))
-        await server.arrival(of: Self.tagFollow)
+        // No `by:` here or below: a key hands its press to a task of the pages' own.
+        await met("the key's follow of the hashtag has arrived at its server") { await server.arrivals(of: Self.tagFollow) >= 1 }
         #expect(await asked(server) == before + [Self.tagFollow])
 
         // Somebody's page, a row of it lit.
         #expect(key(.timeline, [.person, .selection], person: Self.ada))
-        await server.arrival(of: Self.follow)
+        await met("the key's follow of the person has arrived at its server") { await server.arrivals(of: Self.follow) >= 1 }
         #expect(await asked(server) == before + [Self.tagFollow, Self.follow])
     }
 
@@ -915,8 +936,10 @@ struct PersonStandingTests {
         #expect(await asked(server) == [Self.stands], "nothing is sent for a switch that already stands so")
 
         await server.hold(Self.follow)
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await acts.press(.hideBoosts, on: Self.ada, said: page, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
         let out = try #require(acts.acting(of: Self.ada, said: page, in: session))
         #expect(out.doing == .hideBoosts && out.narrows().map(\.on) == [false, false] && !out.narrowsTakePress)
         #expect(out.more.isEmpty && out.press == nil, "one request out a person")
@@ -1036,13 +1059,15 @@ struct PersonStandingTests {
 
         // The reader changes while the read is out: nothing is sent for them, and nothing written.
         await server.hold(Self.stands)
+        let standsGuard = watching("the ask of \(Self.stands), held at its server") { await server.release(Self.stands) }
+        defer { standsGuard.cancel() }
         let pressed = Task { await acts.press(.showBoosts, on: Self.ada, said: page, in: session) }
-        await server.arrival(of: Self.stands, times: 4)
+        await server.arrival(of: Self.stands, times: 4, by: pressed)
         try await signIn(session, as: "second")
         #expect(acts.acting(of: Self.ada, said: page, in: session)?.reading == .asking)
         // The next reader's page opens, which is the look that lets the first's press go.
         let opening = Task { await acts.opened(Self.ada, said: page, in: session) }
-        await server.arrival(of: Self.stands, times: 5)
+        await server.arrival(of: Self.stands, times: 5, by: opening)
         await server.release(Self.stands)
         await pressed.value
         await opening.value
@@ -1074,8 +1099,10 @@ struct PersonStandingTests {
         let acts = acts(), page = try Self.page()
         await acts.opened(Self.ada, said: page, in: session)
         await server.hold(Self.follow)
+        let followGuard = watching("the ask of \(Self.follow), held at its server") { await server.release(Self.follow) }
+        defer { followGuard.cancel() }
         let pressed = Task { await acts.press(.hideBoosts, on: Self.ada, said: page, in: session) }
-        await server.arrival(of: Self.follow)
+        await server.arrival(of: Self.follow, by: pressed)
         try await signIn(session, as: "second")
         let next = try #require(acts.acting(of: Self.ada, said: page, in: session))
         #expect(next.reading == .asking && next.doing == nil && next.narrows().isEmpty, "the first reader's press is not the second's")
@@ -1099,8 +1126,11 @@ struct PersonStandingTests {
         await pages.standsOpened(to: Self.ada, in: shell)
         #expect(pages.walkedIDs(of: Self.ada, in: shell).suffix(2) == ["about.boosts", "about.notices"])
         await wire.hold(Self.follow)
+        let wireFollowGuard = watching("the ask of \(Self.follow), held at its server") { await wire.release(Self.follow) }
+        defer { wireFollowGuard.cancel() }
         #expect(pages.pressAbout("about.notices", of: Self.ada, in: shell))
-        await wire.arrival(of: Self.follow)
+        // No `by:`: the press hands its ask to a task of the pages' own.
+        await met("the press on About's row has arrived at its server") { await wire.arrivals(of: Self.follow) >= 1 }
         #expect(pages.stands(to: Self.ada, in: shell)?.doing == .notify)
         #expect(!pages.pressAbout("about.boosts", of: Self.ada, in: shell), "a press is out: the other row takes none")
         await wire.release(Self.follow)

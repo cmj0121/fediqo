@@ -24,10 +24,11 @@ struct ServersByHost: HTTPClient, HTTPSender {
 /// it, when, what the pages are handed and say in each state — one band a source, never merged
 /// — and that a source which is not asked who people are has no band, and is asked nothing.
 ///
-/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
-/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+/// Every wait here is on an ask arriving or being let go (`PageServer`), tied to the work that
+/// made the ask where a check can name it: a held ask is let go by the check, and by a guard
+/// when the run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("The hashtags and links rising on the sources", .serialized, .timeLimit(.minutes(3)))
+@Suite("The hashtags and links rising on the sources", .serialized, .watched)
 struct RisingTests {
     private static let one = "m.example", two = "n.example"
     private static let forum = Source(host: "forum.example", kind: .discuz)
@@ -60,6 +61,7 @@ struct RisingTests {
         let session = ShellSession(
             http: router, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: router)
         )
+        session.deadlinesUnturned()
         let work = SourceWork()
         session.work = work
         let joined = sources ?? [Source(host: Self.one, kind: .mastodon), Source(host: Self.two, kind: .mastodon), Self.forum]
@@ -184,9 +186,13 @@ struct RisingTests {
         let rising = ShellPersonPages().rising
         await first.hold(Self.tags)
         defer { Task { await first.release(Self.tags) } }
+        let firstTagsGuard = watching("the ask of \(Self.tags), held at its server") { await first.release(Self.tags) }
+        defer { firstTagsGuard.cancel() }
         let pane = Task { await rising.opened(.tags, in: session) }
-        await first.arrival(of: Self.tags)
-        await servers[Self.two]?.arrival(of: Self.tags)
+        await first.arrival(of: Self.tags, by: pane)
+        // No `by:`: the pane that asks the source beside it is held on the first, and ends after.
+        let second = try #require(servers[Self.two])
+        await met("the source beside the held one is asked") { await second.arrivals(of: Self.tags) >= 1 }
         pane.cancel()
         let again = Task { await rising.opened(.tags, in: session) }
         await rising.again(.tags, at: Self.one, in: session)
@@ -229,13 +235,15 @@ struct RisingTests {
             rising.reaching = { host in MastodonRising(http: ServersByHost(servers: servers), host: host) }
             await first.hold(Self.tags)
             defer { Task { await first.release(Self.tags) } }
+            let firstTagsGuard = watching("the ask of \(Self.tags), held at its server") { await first.release(Self.tags) }
+            defer { firstTagsGuard.cancel() }
             let unsigned = Task { await rising.opened(.tags, in: session) }
-            await first.arrival(of: Self.tags)
+            await first.arrival(of: Self.tags, by: unsigned)
 
             try signIn(session)
             #expect(bands(rising, .tags, session)[0] == RisingSaid.Band(source: Self.one), "nobody's band is not the reader's")
             let signed = Task { await rising.opened(.tags, in: session) }
-            await first.arrival(of: Self.tags, times: 2)
+            await first.arrival(of: Self.tags, times: 2, by: signed)
             await first.releaseOne(Self.tags)
             await unsigned.value
             let between = bands(rising, .tags, session)

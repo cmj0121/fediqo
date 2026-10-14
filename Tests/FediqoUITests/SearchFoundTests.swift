@@ -9,10 +9,11 @@ import Testing
 /// answer carries, as bands over the posts — and somebody looked up through a source by their
 /// address, at a press and never without one. And that a forum is searched as it always was.
 ///
-/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
-/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+/// Every wait here is on an ask arriving or being let go (`PageServer`), tied to the work that
+/// made the ask where a check can name it: a held ask is let go by the check, and by a guard
+/// when the run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("What a search finds beside posts, and somebody looked up through a source", .serialized, .timeLimit(.minutes(3)))
+@Suite("What a search finds beside posts, and somebody looked up through a source", .serialized, .watched)
 struct SearchFoundTests {
     private static let one = "m.example", two = "n.example"
     private static let forum = Source(host: "forum.example", kind: .discuz, boards: [BoardSubscription(fid: 34, name: "Dev")])
@@ -72,6 +73,7 @@ struct SearchFoundTests {
         let session = ShellSession(
             http: router, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: router)
         )
+        session.deadlinesUnturned()
         let work = SourceWork()
         session.work = work
         session.mastodon.work = work
@@ -196,8 +198,10 @@ struct SearchFoundTests {
         let server = try #require(servers[Self.one]), found = ShellPersonPages().found
         await server.hold(Self.returned("cats"))
         defer { Task { await server.release(Self.returned("cats")) } }
+        let returnedCatsGuard = watching("the ask of \(Self.returned("cats")), held at its server") { await server.release(Self.returned("cats")) }
+        defer { returnedCatsGuard.cancel() }
         let first = Task { await session.reload.search("cats", timeline: .all, found: found, in: session) }
-        await server.arrival(of: Self.returned("cats"))
+        await server.arrival(of: Self.returned("cats"), by: first)
         #expect(session.reload.asking.contains(.search) && found.said(for: "cats", in: session).isEmpty)
 
         await session.reload.search("dogs", timeline: .all, found: found, in: session)
@@ -251,8 +255,10 @@ struct SearchFoundTests {
         let server = try #require(servers[Self.one]), found = ShellPersonPages().found
         await server.hold(Self.returned("cats"))
         defer { Task { await server.release(Self.returned("cats")) } }
+        let returnedCatsGuard = watching("the ask of \(Self.returned("cats")), held at its server") { await server.release(Self.returned("cats")) }
+        defer { returnedCatsGuard.cancel() }
         let first = Task { await session.reload.search("cats", timeline: .all, found: found, in: session) }
-        await server.arrival(of: Self.returned("cats"))
+        await server.arrival(of: Self.returned("cats"), by: first)
         // A Return that waited for the index, made again: the ask on the wire is let run.
         await session.reload.search("cats", timeline: .all, found: found, in: session)
         #expect(await server.asked.count == 1)
@@ -277,8 +283,10 @@ struct SearchFoundTests {
         let server = try #require(servers[Self.one]), pages = ShellPersonPages(), found = pages.found
         await server.hold(Self.returned("cats"))
         defer { Task { await server.release(Self.returned("cats")) } }
+        let returnedCatsGuard = watching("the ask of \(Self.returned("cats")), held at its server") { await server.release(Self.returned("cats")) }
+        defer { returnedCatsGuard.cancel() }
         let first = Task { await session.reload.search("cats", timeline: .all, found: found, in: session) }
-        await server.arrival(of: Self.returned("cats"))
+        await server.arrival(of: Self.returned("cats"), by: first)
         // Another account at the same source, which the source has named no more than the first.
         try signIn(session, as: "other")
         await server.release(Self.returned("cats"))
@@ -384,13 +392,20 @@ struct SearchFoundTests {
         let held = Self.lookedUp("@far@elsewhere.example")
         await server.hold(held)
         defer { Task { await server.release(held) } }
+        let heldGuard = watching("the ask of \(held), held at its server") { await server.release(held) }
+        defer { heldGuard.cancel() }
         let first = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await server.arrival(of: held)
+        await server.arrival(of: held, by: first)
         let asking = try #require(found.line(typed: "@far@elsewhere.example", in: session))
         #expect(found.looked(Self.address) == .asking && asking.press == nil && asking.words == "Asking m.example to look @far@elsewhere.example up…")
         // Pressed again while it is out: the second press waits on the first, and asks nothing.
-        let second = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await Task.yield()
+        // A press runs, with no wait, up to where it finds the look-up out.
+        var pressedAgain = false
+        let second = Task {
+            pressedAgain = true
+            await found.lookUp(Self.address, through: Self.one, in: session)
+        }
+        await met("the second press is made, the first look-up still out", by: second) { pressedAgain }
         await server.release(held)
         await first.value
         await second.value
@@ -404,7 +419,7 @@ struct SearchFoundTests {
         found.closed()
         await server.hold(held)
         let slow = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await server.arrival(of: held, times: 2)
+        await server.arrival(of: held, times: 2, by: slow)
         await found.lookUp(near, through: Self.one, in: session)
         guard case .found(let other) = found.looked(near) else {
             Issue.record("the second address was not found")
@@ -421,7 +436,7 @@ struct SearchFoundTests {
         found.closed()
         await server.hold(held)
         let deaf = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await server.arrival(of: held, times: 3)
+        await server.arrival(of: held, times: 3, by: deaf)
         await found.lookUp(near, through: Self.one, in: session)
         await server.release(held)
         await deaf.value
@@ -432,7 +447,7 @@ struct SearchFoundTests {
         await server.answer(held, PageServer.Answer(body: "", status: 500))
         await server.hold(held)
         let failing = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await server.arrival(of: held, times: 4)
+        await server.arrival(of: held, times: 4, by: failing)
         await found.lookUp(near, through: Self.one, in: session)
         await server.release(held)
         await failing.value
@@ -442,7 +457,7 @@ struct SearchFoundTests {
         await server.answer(held, Self.far)
         await server.hold(held)
         let closing = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await server.arrival(of: held, times: 5)
+        await server.arrival(of: held, times: 5, by: closing)
         found.closed()
         #expect(found.looked(Self.address) == nil && found.line(typed: "@far@elsewhere.example", in: session)?.press == .lookUp(Self.address, through: Self.one))
         await server.release(held)
@@ -457,8 +472,10 @@ struct SearchFoundTests {
         let held = Self.lookedUp("@far@elsewhere.example")
         await server.hold(held)
         defer { Task { await server.release(held) } }
+        let heldGuard = watching("the ask of \(held), held at its server") { await server.release(held) }
+        defer { heldGuard.cancel() }
         let first = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-        await server.arrival(of: held)
+        await server.arrival(of: held, by: first)
         try signIn(session, as: "other")
         await server.release(held)
         await first.value
@@ -525,10 +542,12 @@ struct SearchFoundTests {
         let offer = SearchLookUpLine.Press.lookUp(Self.address, through: Self.one)
         await server.hold(Self.returned("cats"))
         defer { Task { await server.release(Self.returned("cats")) } }
+        let returnedCatsGuard = watching("the ask of \(Self.returned("cats")), held at its server") { await server.release(Self.returned("cats")) }
+        defer { returnedCatsGuard.cancel() }
         defer { Task { await server.release(wire) } }
 
         let returned = Task { await session.reload.search("cats", timeline: .all, found: found, in: session) }
-        await server.arrival(of: Self.returned("cats"))
+        await server.arrival(of: Self.returned("cats"), by: returned)
         try signIn(session, as: "second")
         await server.release(Self.returned("cats"))
         await returned.value
@@ -545,8 +564,10 @@ struct SearchFoundTests {
         for (round, answer) in late.enumerated() {
             await server.answer(wire, answer)
             await server.hold(wire)
+            let wireGuard = watching("the ask of \(wire), held at its server") { await server.release(wire) }
+            defer { wireGuard.cancel() }
             let asked = Task { await found.lookUp(Self.address, through: Self.one, in: session) }
-            await server.arrival(of: wire, times: round + 1)
+            await server.arrival(of: wire, times: round + 1, by: asked)
             try signIn(session, as: "later\(round)")
             await server.release(wire)
             await asked.value

@@ -10,10 +10,11 @@ import Testing
 /// the host has none, and where it is opened from. And that a source which is not asked who
 /// people are has no such page and no line to one.
 ///
-/// Every wait here is on an ask arriving or being let go (`PageServer`), and each ends by
-/// itself: a held ask is let go in a `defer`, and by the server after its patience.
+/// Every wait here is on an ask arriving or being let go (`PageServer`), tied to the work that
+/// made the ask where a check can name it: a held ask is let go by the check, and by a guard
+/// when the run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("A source's directory of people", .serialized, .timeLimit(.minutes(3)))
+@Suite("A source's directory of people", .serialized, .watched)
 struct DirectoryTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -36,6 +37,7 @@ struct DirectoryTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: server)
         )
+        session.deadlinesUnturned()
         let work = SourceWork()
         session.work = work
         for source in [Self.source, Self.forum] { await session.store.add(source) }
@@ -104,8 +106,10 @@ struct DirectoryTests {
         await pages.opened(Self.directory, in: session)
         await server.hold(Self.after(3))
         defer { Task { await server.release(Self.after(3)) } }
+        let after3Guard = watching("the ask of \(Self.after(3)), held at its server") { await server.release(Self.after(3)) }
+        defer { after3Guard.cancel() }
         let press = Task { await pages.readOn(Self.directory, in: session) }
-        await server.arrival(of: Self.after(3))
+        await server.arrival(of: Self.after(3), by: press)
         #expect(pages.said(of: Self.directory, in: session)?.foot == .reading)
         await pages.readOn(Self.directory, in: session)
         #expect(await server.asked == [Self.first, Self.after(3)], "one on the wire, and no second")
@@ -167,8 +171,10 @@ struct DirectoryTests {
         let hosts = all.more.hosts
         await server.hold(Self.first)
         defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let out = Task { await all.lists.opened(Self.directory, in: session) }
-        await server.arrival(of: Self.first)
+        await server.arrival(of: Self.first, by: out)
         // "Ask again" on the source's page, while the directory's ask is out.
         hosts.askAfresh(Self.host)
         await server.release(Self.first)
@@ -249,8 +255,10 @@ struct DirectoryTests {
         let new = DirectoryChoice(order: .new)
         await server.hold(Self.first)
         defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let opening = Task { await pages.opened(Self.directory, in: session) }
-        await server.arrival(of: Self.first)
+        await server.arrival(of: Self.first, by: opening)
         #expect(pages.said(of: Self.directory, in: session)?.choosesSorting == false)
         await pages.choose(new, for: Self.directory, in: session)
         await pages.again(Self.directory, in: session)
@@ -261,8 +269,10 @@ struct DirectoryTests {
 
         await server.hold(Self.after(3))
         defer { Task { await server.release(Self.after(3)) } }
+        let after3Guard = watching("the ask of \(Self.after(3)), held at its server") { await server.release(Self.after(3)) }
+        defer { after3Guard.cancel() }
         let reading = Task { await pages.readOn(Self.directory, in: session) }
-        await server.arrival(of: Self.after(3))
+        await server.arrival(of: Self.after(3), by: reading)
         await pages.choose(new, for: Self.directory, in: session)
         let chosen = try #require(pages.said(of: Self.directory, in: session))
         #expect(chosen.people.map(\.accountID) == ["7", "8"] && chosen.foot == .more && chosen.sorting == new)
@@ -274,7 +284,7 @@ struct DirectoryTests {
         // While a choice is being asked for, the control says the choice and takes no press; who stood stays drawn.
         await server.hold(Self.first)
         let back = Task { await pages.choose(DirectoryChoice(), for: Self.directory, in: session) }
-        await server.arrival(of: Self.first, times: 2)
+        await server.arrival(of: Self.first, times: 2, by: back)
         let between = try #require(pages.said(of: Self.directory, in: session))
         #expect(between.sorting == DirectoryChoice() && between.asking && !between.choosesSorting)
         #expect(between.people.map(\.accountID) == ["7", "8"])
@@ -307,8 +317,10 @@ struct DirectoryTests {
         await server.answer(Self.first, PageServer.Answer(body: "", status: 500))
         await server.hold(Self.first)
         defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
         let retry = Task { await pages.again(Self.directory, in: session) }
-        await server.arrival(of: Self.first, times: 2)
+        await server.arrival(of: Self.first, times: 2, by: retry)
         #expect(pages.said(of: Self.directory, in: session)?.reading == .asking, "while the ask is out, nothing is said of what was heard before")
         await server.release(Self.first)
         await retry.value
@@ -369,8 +381,10 @@ struct DirectoryTests {
         pages.reachingDirectory = { MastodonDirectory(http: wires.next(), host: $0.host) }
         await off.hold(Self.first)
         defer { Task { await off.release(Self.first) } }
+        let offFirstGuard = watching("the ask of \(Self.first), held at its server") { await off.release(Self.first) }
+        defer { offFirstGuard.cancel() }
         let before = Task { await pages.opened(Self.directory, in: session) }
-        await off.arrival(of: Self.first)
+        await off.arrival(of: Self.first, by: before)
 
         try signIn(session)
         await pages.opened(Self.directory, in: session)
@@ -404,7 +418,9 @@ struct DirectoryTests {
         let big = #"[{"id":"1","acct":"a","note":"\#(String(repeating: "w", count: SourceReach.smallBody))"}]"#
         let http = FixtureHTTP(["/api/v1/directory": .text(big)])
         let work = SourceWork()
-        let reader = SourceReach(http: http, work: work).unsignedDirectory(Self.host, for: .people, within: .seconds(5))
+        // Its deadline on a clock nobody turns: refused for its size, never for a slow run.
+        let unturned = SourceReach(http: http, work: work, sleep: TurnedClock().sleep)
+        let reader = unturned.unsignedDirectory(Self.host, for: .people, within: .seconds(5))
         await #expect(throws: URLError.self) { _ = try await reader.stretch(source: Self.source) }
         #expect(work.record.map(\.purpose) == [.people], "refused, and listed all the same")
 

@@ -8,7 +8,7 @@ import Testing
 /// walk, for somebody this device never met as well — and only whoever the source said the post
 /// mentions is one.
 @MainActor
-@Suite("Pressing somebody mentioned in a post's words", .timeLimit(.minutes(3)))
+@Suite("Pressing somebody mentioned in a post's words", .watched)
 struct MentionPressTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -218,6 +218,7 @@ struct MentionPressTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: server)
         )
+        session.deadlinesUnturned()
         await session.store.add(Self.source)
         session.sources = await session.store.sources()
         #expect(session.notes.isEmpty, "the premise: nobody has been met")

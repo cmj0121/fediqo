@@ -37,10 +37,10 @@ enum HostedPersonPage {
 /// turned and the page left, what it says in each language, and that it lays out.
 ///
 /// **No check here waits on the clock.** Each waits on an ask arriving at `PageServer` or on
-/// the call that made it returning; a held ask is let go by the check, and by the server after
-/// its patience.
+/// the call that made it returning; a held ask is let go by the check, and by a guard when the
+/// run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("Somebody's page, a page of its own", .serialized, .timeLimit(.minutes(3)))
+@Suite("Somebody's page, a page of its own", .serialized, .watched)
 struct PersonPageTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -91,6 +91,7 @@ struct PersonPageTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: server)
         )
+        session.deadlinesUnturned()
         session.work = SourceWork()
         for source in [Self.source, Self.forum] { await session.store.add(source) }
         session.sources = await session.store.sources()
@@ -401,8 +402,10 @@ struct PersonPageTests {
         await pages.opened(Self.ada, in: session)
 
         await server.hold(Self.statuses)
+        let statusesGuard = watching("the ask of \(Self.statuses), held at its server") { await server.release(Self.statuses) }
+        defer { statusesGuard.cancel() }
         let fronted = Task { await bring(.posts, in: pages, session) }
-        await server.arrival(of: Self.statuses)
+        await server.arrival(of: Self.statuses, by: fronted)
         let out = try #require(pages.said(of: Self.ada, in: session))
         #expect(out.askingPosts && out.posts == nil && out.foot == .reading)
         #expect(pages.walked(of: Self.ada, in: session) == held, "what is held stays drawn, and is what the keys walk")
@@ -509,8 +512,10 @@ struct PersonPageTests {
 
         // A press while an ask is out asks nothing.
         await server.hold(Self.lookup)
+        let lookupGuard = watching("the ask of \(Self.lookup), held at its server") { await server.release(Self.lookup) }
+        defer { lookupGuard.cancel() }
         let pressed = Task { await pages.again(Self.ada, in: session) }
-        await server.arrival(of: Self.lookup, times: 5)
+        await server.arrival(of: Self.lookup, times: 5, by: pressed)
         let out = await asked(server).count
         for _ in 0..<3 { await pages.again(Self.ada, in: session) }
         #expect(await asked(server).count == out)
@@ -596,8 +601,10 @@ struct PersonPageTests {
 
         // A reading-on of theirs still out when the next reader comes: its answer lands nowhere.
         await server.hold(more)
+        let moreGuard = watching("the ask of \(more), held at its server") { await server.release(more) }
+        defer { moreGuard.cancel() }
         let reading = Task { await pages.pinnedReadOn(Self.ada, in: session) }
-        await server.arrival(of: more)
+        await server.arrival(of: more, by: reading)
         #expect(pages.pinned(of: Self.ada, in: session)?.foot == .reading)
         try signIn(session, as: "third")
         await pages.opened(Self.ada, in: session)
@@ -608,12 +615,14 @@ struct PersonPageTests {
 
         // And an ask from the top still out: the reader before is answered late, and to nobody.
         await server.hold(Self.pinned)
+        let pinnedGuard = watching("the ask of \(Self.pinned), held at its server") { await server.release(Self.pinned) }
+        defer { pinnedGuard.cancel() }
         let theirsOut = Task { await pages.fronted(Self.ada, in: session) }
-        await server.arrival(of: Self.pinned, times: 3)
+        await server.arrival(of: Self.pinned, times: 3, by: theirsOut)
         try signIn(session, as: "fourth")
         await pages.opened(Self.ada, in: session)
         let fourth = Task { await pages.fronted(Self.ada, in: session) }
-        await server.arrival(of: Self.pinned, times: 4)
+        await server.arrival(of: Self.pinned, times: 4, by: fourth)
         await server.releaseOne(Self.pinned)
         await theirsOut.value
         #expect(pages.pinned(of: Self.ada, in: session)?.answered == false, "the third reader's answer is not the fourth's")

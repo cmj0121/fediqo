@@ -10,10 +10,10 @@ import Testing
 /// and what the list says after.
 ///
 /// **No check here waits on the clock.** Each waits on an ask arriving at `PageServer` or on
-/// the call that made it returning; a held ask is let go by the check, and by the server after
-/// its patience.
+/// the call that made it returning; a held ask is let go by the check, and by a guard when the
+/// run has gone still; every deadline is on a clock nobody turns.
 @MainActor
-@Suite("Requests to follow are answered, and a follower removed", .serialized, .timeLimit(.minutes(3)))
+@Suite("Requests to follow are answered, and a follower removed", .serialized, .watched)
 struct RequestsTests {
     private static let host = "m.example"
     private static let source = Source(host: host, kind: .mastodon)
@@ -68,6 +68,7 @@ struct RequestsTests {
         let session = ShellSession(
             http: server, store: ItemStore(), mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: server)
         )
+        session.deadlinesUnturned()
         session.work = SourceWork()
         for source in [Self.source, Self.forum] { await session.store.add(source) }
         session.sources = await session.store.sources()
@@ -167,8 +168,10 @@ struct RequestsTests {
         let three = try row("3", of: Self.requests, lists, session), four = try row("4", of: Self.requests, lists, session)
 
         await server.hold(Self.accept(3))
+        let accept3Guard = watching("the ask of \(Self.accept(3)), held at its server") { await server.release(Self.accept(3)) }
+        defer { accept3Guard.cancel() }
         let pressed = Task { await lists.press(.acceptRequest, on: three, of: Self.requests, in: session) }
-        await server.arrival(of: Self.accept(3))
+        await server.arrival(of: Self.accept(3), by: pressed)
         #expect(ids(Self.requests, lists, session) == ["4"], "it leaves at the press")
         await lists.press(.acceptRequest, on: three, of: Self.requests, in: session)
         await lists.press(.refuseRequest, on: three, of: Self.requests, in: session)
@@ -272,8 +275,10 @@ struct RequestsTests {
         let three = try row("3", of: Self.requests, lists, session)
 
         await server.hold(Self.accept(3))
+        let accept3Guard = watching("the ask of \(Self.accept(3)), held at its server") { await server.release(Self.accept(3)) }
+        defer { accept3Guard.cancel() }
         let pressed = Task { await lists.press(.acceptRequest, on: three, of: Self.requests, in: session) }
-        await server.arrival(of: Self.accept(3))
+        await server.arrival(of: Self.accept(3), by: pressed)
         await lists.again(Self.requests, in: session)
         #expect(ids(Self.requests, lists, session) == ["4"], "still leaving while the press is out")
         await server.release(Self.accept(3))
@@ -285,9 +290,11 @@ struct RequestsTests {
 
         // The reader changes while a press is out.
         await server.hold(Self.refuse(4))
+        let refuse4Guard = watching("the ask of \(Self.refuse(4)), held at its server") { await server.release(Self.refuse(4)) }
+        defer { refuse4Guard.cancel() }
         let four = try row("4", of: Self.requests, lists, session)
         let refusing = Task { await lists.press(.refuseRequest, on: four, of: Self.requests, in: session) }
-        await server.arrival(of: Self.refuse(4))
+        await server.arrival(of: Self.refuse(4), by: refusing)
         try await signIn(session, as: "second")
         await lists.opened(Self.requests, in: session)
         #expect(ids(Self.requests, lists, session) == ["3", "4"], "the second reader's list, whole")
