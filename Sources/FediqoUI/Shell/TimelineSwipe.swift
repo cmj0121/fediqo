@@ -172,9 +172,29 @@ enum TimelineSwipe {
     }
 
     /// Whether a swipe back on the tab at `index` leaves the page: on its first tab, where the
-    /// page is one that is left. From any other tab it goes to the tab before.
+    /// page is one that is left. From any other tab it goes to the tab before. **Not where no
+    /// tab is in front**: a swipe that began on nothing is never acted on (`completes`), and
+    /// the page would slide away under the finger and come back.
     static func leavesPage(from index: Int?, leaves: Bool) -> Bool {
-        leaves && (index ?? 0) == 0
+        leaves && index == 0
+    }
+
+    /// What a page with tabs says is in front, for `completes`: the detail opened over it, or
+    /// the tab in front by its place — nothing where none of its tabs is.
+    static func tabInFront(_ means: Means?, index: Int?) -> String? {
+        means == .back ? "detail" : index.map(String.init)
+    }
+
+    /// What a swipe let go on a page with tabs does, `step` from the tab at `index` among
+    /// `count`: the tab arrived at, the way out of the page, or nothing.
+    enum TabStep: Equatable {
+        case tab(Int)
+        case leave
+    }
+
+    static func tabStep(from index: Int?, count: Int, step: Int, leaves: Bool) -> TabStep? {
+        if let to = target(from: index, count: count, step: step) { return .tab(to) }
+        return step == -1 && leavesPage(from: index, leaves: leaves) ? .leave : nil
     }
 
     /// Which ways there is somewhere to go, for what a swipe means: a timeline's neighbours, or
@@ -294,19 +314,18 @@ struct SwipesTabs<Tab: Hashable>: ViewModifier {
             .modifier(PageSwipes(
                 slide: slide, enabled: means != nil, key: means == .back ? "back" : "beside",
                 hasNext: ways?.next ?? false, hasPrevious: (ways?.previous ?? false) || leaves,
-                inFront: { means == .back ? "detail" : index.map(String.init) },
+                inFront: { TimelineSwipe.tabInFront(means, index: index) },
                 step: { step in
                     if means == .back {
                         guard step == -1 else { return false }
                         back()
                         return true
                     }
-                    guard let to = TimelineSwipe.target(from: index, count: tabs.count, step: step) else {
-                        guard step == -1, leaves, let leave else { return false }
-                        leave()
-                        return true
+                    switch TimelineSwipe.tabStep(from: index, count: tabs.count, step: step, leaves: leaves) {
+                    case .tab(let to): select(tabs[to])
+                    case .leave: leave?()
+                    case nil: return false
                     }
-                    select(tabs[to])
                     return true
                 }
             ))

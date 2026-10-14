@@ -51,6 +51,24 @@ enum ShellStep: Hashable, Sendable {
     case followedTags(FollowedTags)
 }
 
+/// Whose the Tab key is with a step in front (F10): the page's own, asked of the walk before
+/// the timelines are turned.
+enum StepTabKey: Hashable, Sendable {
+    /// Somebody's page: its tabs, round their ring (F9).
+    case person(DummyPerson)
+}
+
+extension ShellStep {
+    /// What Tab turns with this step in front, or nothing where the step has no answer of
+    /// its own and the key is the timelines'.
+    var tabKey: StepTabKey? {
+        switch self {
+        case .person(let who): .person(who)
+        case .thread, .link, .tag, .people, .rising, .foundTags, .followedTags: nil
+        }
+    }
+}
+
 /// How far the reader has walked from the stream, and what each step is owed when it is left.
 ///
 /// **One stack, and the order in it is the order the reader walked.** `DummyLayer` says what is
@@ -134,6 +152,9 @@ struct ShellWalk: Hashable, Sendable {
 
     var isEmpty: Bool { taken.isEmpty }
 
+    /// What Tab turns with the step in front (`ShellStep.tabKey`): nothing on the stream.
+    var tabKey: StepTabKey? { standing?.tabKey }
+
     /// Whether the page of the person `id` names is one of the steps taken, in front or under
     /// another. **By who they are, as their page is kept, and not by the value a row carried**:
     /// somebody met twice — from a post, then from a row of a list — may be two unequal
@@ -158,6 +179,24 @@ struct ShellWalk: Hashable, Sendable {
     mutating func walk(to step: ShellStep, from lamp: String?) -> Bool {
         if taken.last?.step == step { return false }
         taken.append(Taken(step: step, lamp: lamp))
+        return true
+    }
+
+    /// A tab that is the step's own value, brought in front (F10): the step in front is
+    /// replaced where it stands. Whether anything changed.
+    ///
+    /// **A tab is not a step.** The row the lamp goes back to stays the one the page was
+    /// opened from, and the walk is no deeper: leaving never passes through the other tab.
+    ///
+    /// **Only for a tab of the page in front** — the same kind of step, another of its own
+    /// values (`.rising(.tags)` to `.rising(.links)`); it is not a way to another page.
+    /// Nothing is turned on the stream, to the step already in front, or to the step
+    /// beneath: that would stand the reader twice on one step, which `walk(to:)` refuses.
+    @discardableResult
+    mutating func turned(to step: ShellStep) -> Bool {
+        guard let last = taken.last, last.step != step else { return false }
+        if taken.count > 1, taken[taken.count - 2].step == step { return false }
+        taken[taken.count - 1] = Taken(step: step, lamp: last.lamp)
         return true
     }
 

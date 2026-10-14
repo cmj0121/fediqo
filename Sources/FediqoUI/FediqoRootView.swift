@@ -2211,20 +2211,27 @@ public struct FediqoRootView: View {
     /// Tab rotates this page's tabs: named queries on the timeline, purposes on Usage, on
     /// Preferences and on Account. Elsewhere it is the platform's.
     ///
-    /// **The walk is asked first** (F9): with somebody's page in front the tabs are that
-    /// page's, round their ring, and the timelines are not turned from under it — to change
-    /// timeline the reader leaves first. Under anything drawn over the page the key does nothing.
+    /// **The walk is asked first, whatever step is in front** (F9, F10): a page that answers
+    /// has the key, and the timelines are not turned from under it — to change timeline the
+    /// reader leaves first.
     private func rotatePlaceTab(by step: Int) -> Bool {
-        if place == .timeline, let person = walk.openedPerson {
-            guard Self.turnsPersonTabs(open: openLayers) else { return false }
-            return people.rotate(person, by: step, lamp: &selectedItemID, in: session)
-        }
+        if place == .timeline, let key = walk.tabKey { return rotateStepTab(key, by: step) }
         return switch place {
         case .timeline: session.rotateTab(by: step)
         case .usage: session.rotateUsageTab(by: step)
         case .preferences: session.rotatePreferencesTab(by: step)
         case .account: session.rotateAccountTab(by: step)
         default: false
+        }
+    }
+
+    /// Tab on the page in front, as the walk answered for it. With somebody's page the tabs
+    /// are that page's, round their ring; under anything drawn over the page the key does nothing.
+    private func rotateStepTab(_ key: StepTabKey, by step: Int) -> Bool {
+        switch key {
+        case .person(let person):
+            guard Self.turnsPersonTabs(open: openLayers) else { return false }
+            return people.rotate(person, by: step, lamp: &selectedItemID, in: session)
         }
     }
 

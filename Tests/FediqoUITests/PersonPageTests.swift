@@ -142,7 +142,7 @@ struct PersonPageTests {
         #expect(ShellPersonTabs.tabs(said: troubled, own: false) == PersonTab.allCases)
 
         // A strip only where there is more than one tab, and the names and glyphs each tab has.
-        #expect(!PersonPage.stripDrawn([.posts]) && PersonPage.stripDrawn([.about, .posts]))
+        #expect(!PageFrame.stripDrawn([PersonTab.posts]) && PageFrame.stripDrawn([PersonTab.about, .posts]))
         #expect(PersonTab.allCases.map(\.symbol) == ["person.text.rectangle", "person.line.dotted.person", "person.2", "pin", "text.bubble"])
         #expect(PersonTab.allCases.map { L10n.t($0.titleKey, language: .english) } == ["About", "Following", "Followers", "Pinned", "Posts"])
         #expect(PersonTab.allCases.map { L10n.t($0.titleKey, language: .taiwanese) } == ["關於", "跟隨中", "跟隨者", "釘選", "貼文"])
@@ -199,7 +199,7 @@ struct PersonPageTests {
         #expect(figures.map(\.figure) == ["1,204", "2,811", "310"])
         #expect(figures.map(\.words) == ["1,204 posts", "2,811 followers", "Follows 310"])
         #expect(figures.allSatisfy { $0.opens && !$0.hidden } && figures.map { $0.spoken(language: en) } == figures.map(\.words))
-        #expect(PersonSaid.Figure.hint(language: en) == "Shows it on this page" && PersonSaid.Figure.hint(language: .taiwanese) == "在這一頁顯示")
+        #expect(PageFigure.hint(language: en) == "Shows it on this page" && PageFigure.hint(language: .taiwanese) == "在這一頁顯示")
         let large = Person(source: Self.source, accountID: "1", handle: "@a@m.example", name: "a", tally: Person.Tally(followers: 3_000_000_000))
         #expect(PersonSaid.figures(of: large, tabs: all, language: en).map(\.figure) == [nil, "3,000,000,000", nil], "never shortened, never made up")
 
@@ -864,7 +864,9 @@ struct PersonPageTests {
         #expect(TimelineSwipe.means(touch: true, detail: false, tabs: 1) == nil && TimelineSwipe.means(touch: false, detail: false, tabs: 5, leaves: true) == nil)
         #expect(TimelineSwipe.means(touch: true, detail: false, tabs: 5, leaves: true, covered: true) == nil)
         #expect(TimelineSwipe.leavesPage(from: 0, leaves: true) && !TimelineSwipe.leavesPage(from: 1, leaves: true))
-        #expect(!TimelineSwipe.leavesPage(from: 0, leaves: false) && TimelineSwipe.leavesPage(from: nil, leaves: true))
+        #expect(!TimelineSwipe.leavesPage(from: 0, leaves: false))
+        // With no tab in front there is nothing a swipe began on, and it is never acted on: it does not leave.
+        #expect(!TimelineSwipe.leavesPage(from: nil, leaves: true) && !TimelineSwipe.completes(startedOn: TimelineSwipe.tabInFront(.beside, index: nil), inFront: nil))
         // From any other tab the swipe back is the tab before.
         #expect(TimelineSwipe.target(from: 1, count: 5, step: -1) == 0 && TimelineSwipe.target(from: 0, count: 5, step: -1) == nil)
     }
@@ -892,7 +894,8 @@ struct PersonPageTests {
         }
         let root = try String(contentsOf: ui.appending(path: "FediqoRootView.swift"), encoding: .utf8)
         for call in [
-            "if place == .timeline, let person = walk.openedPerson {\n            guard Self.turnsPersonTabs(open: openLayers) else { return false }\n            return people.rotate(person, by: step, lamp: &selectedItemID, in: session)",
+            "if place == .timeline, let key = walk.tabKey { return rotateStepTab(key, by: step) }",
+            "case .person(let person):\n            guard Self.turnsPersonTabs(open: openLayers) else { return false }\n            return people.rotate(person, by: step, lamp: &selectedItemID, in: session)",
             "walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }",
             "people.followByKey(\n            place: place, open: openLayers, person: walk.openedPerson, tag: walk.openedTag, in: session",
         ] {
@@ -1036,7 +1039,7 @@ struct PersonPageTests {
                         // At the largest text the head is a row of the tab's list: where that list
                         // is lazy it may not be laid out with no window, and then nothing is said.
                         guard !probe.frames.isEmpty else {
-                            #expect(PersonPage.headScrolls(at: size), "the head was not laid out: \(at)")
+                            #expect(PageFrame.headScrolls(at: size), "the head was not laid out: \(at)")
                             continue
                         }
                         #expect(probe.width > 0 && probe.width <= width - 2 * ShellSpace.pad + 0.5, "\(at)")
@@ -1054,8 +1057,8 @@ struct PersonPageTests {
                 }
             }
         }
-        #expect(PersonPage.headScrolls(at: .accessibility1) && PersonPage.headScrolls(at: .accessibility5))
-        #expect(!PersonPage.headScrolls(at: .xxxLarge) && !PersonPage.headScrolls(at: .large))
+        #expect(PageFrame.headScrolls(at: .accessibility1) && PageFrame.headScrolls(at: .accessibility5))
+        #expect(!PageFrame.headScrolls(at: .xxxLarge) && !PageFrame.headScrolls(at: .large))
     }
 
     @Test("A forum author's page is the bar, the heading it always had and what this device holds: no strip, no figure, no mark of how anybody stands, no mark in the bar; and what stands where its posts would is about this device")
@@ -1066,7 +1069,7 @@ struct PersonPageTests {
         ))!
         let tabs = ShellPersonTabs.tabs(said: nil, own: false)
         let head = PersonHeadSaid.made(of: author, said: nil, tabs: tabs, held: 2, standing: nil, language: .english)
-        #expect(tabs == [.posts] && !PersonPage.stripDrawn(tabs))
+        #expect(tabs == [.posts] && !PageFrame.stripDrawn(tabs))
         #expect(head.through == "Read through forum.example" && head.held == "2 posts here" && head.whose == nil)
         #expect(head.figures.isEmpty && head.marks.isEmpty && head.standing == nil)
         #expect(head.spoken(language: .english) == "bob, Read through forum.example")
