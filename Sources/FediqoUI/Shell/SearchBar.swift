@@ -84,7 +84,9 @@ struct SearchBar: View {
             }
         }
         .background(ShellChrome.page(colorScheme))
-        .onAppear { focused = true }
+        // Given the keys as the search opens, and again where it had them when a page was opened
+        // in front of it — and not otherwise: it comes back as it went (F10).
+        .onAppear { if search.appeared() { focused = true } }
         .onChange(of: search.focusTick) { _, _ in focused = true }
         // The field takes the keys when the reader asks for them, and not when AppKit hands them
         // back by itself on the Return that let them go (#168). See `ShellSearch.letGo`.
@@ -96,7 +98,7 @@ struct SearchBar: View {
         .onChange(of: search.isIndexed) { _, _ in
             if search.takeLitWhenIndexed() { onSubmit() }
         }
-        .onDisappear { search.fieldFocused = false }
+        .onDisappear { search.disappeared() }
         .onChange(of: search.text) { old, new in
             if new.isEmpty, !old.isEmpty { onCleared() }
         }

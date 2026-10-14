@@ -70,19 +70,18 @@ extension EnvironmentValues {
     @Entry var tagAboutProbe: TagAboutProbe? = nil
 }
 
-/// One block of About: as wide as the page, on the lamp's wash while the lamp is on it, and
+/// One block of About: as wide as the page, lit as the lamp lights it (`AboutBlockLit`), and
 /// called what the lamp calls it.
 private struct TagAboutBlock: ViewModifier {
     let id: String
     let lit: String?
 
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.tagAboutProbe) private var probe
 
     func body(content: Content) -> some View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(id == lit ? ShellChrome.floatFill(colorScheme) : .clear)
+            .modifier(AboutBlockLit(lit: id == lit))
             .background(GeometryReader { room in
                 let _ = probe?.sizes[id] = room.size
                 Color.clear

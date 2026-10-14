@@ -468,6 +468,15 @@ struct TimelinePane: View {
         }
     }
 
+    /// Whether the search field is drawn at the pane's foot: where a search is `open` and the
+    /// timelines' head is drawn (`headDrawn`), and nowhere else. The field is the stream's, as
+    /// the head is, so a page opened over a search's results — a page about one thing — takes the
+    /// whole place without it (F10); the search stays open behind the page, as it was, and its
+    /// field is drawn again when the walk leaves the page (`ShellSearch.appeared`).
+    static func searchFieldDrawn(open: Bool, over standing: ShellStep?, drawn: Bool) -> Bool {
+        open && headDrawn(over: standing, drawn: drawn)
+    }
+
     /// What is drawn of the step in front: the post a conversation is around, where this device
     /// still holds it; the list a list of people's page is handed, where it can be said; what
     /// the tab of what is rising in front is handed, where a source has a ranking of it; and

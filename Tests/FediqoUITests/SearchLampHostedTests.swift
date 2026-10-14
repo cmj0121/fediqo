@@ -28,7 +28,7 @@ import Testing
 ///
 /// **It gives the main actor back between passes**, as `TimelinePlacesHostedTests` explains:
 /// one layout, one brief turn of the run loop and a `Task.yield()` per settle.
-@Suite("Return in the search lights a result and j and k walk them, hosted", .serialized)
+@Suite("Return in the search lights a result and j and k walk them, hosted", .serialized, .watched)
 @MainActor
 struct SearchLampHostedTests {
     private let microblog = Source(host: "m.example", kind: .mastodon)
@@ -43,12 +43,20 @@ struct SearchLampHostedTests {
         var seen: String?
     }
 
+    /// The step the pane stands on, which a check moves as the root's walk would.
+    @Observable
+    @MainActor
+    final class Standing {
+        var step: ShellStep?
+    }
+
     /// The root's share of the timeline place: a lamp in `@State`, the one search, the line at the
-    /// foot of the pane, and Return lighting the first of what is in front.
+    /// foot of the pane where the root draws it, and Return lighting the first of what is in front.
     private struct Host: View {
         let session: ShellSession
         let search: ShellSearch
         let lamp: Lamp
+        let standing: Standing
         /// A key the shell has answered: what it lit.
         let pressed: Pressed
         @State private var selected: String?
@@ -61,7 +69,7 @@ struct SearchLampHostedTests {
             return TimelinePane(
                 session: session,
                 selectedID: $selected,
-                standing: nil,
+                standing: standing.step,
                 onOpenPerson: { _ in },
                 decks: $decks,
                 playback: playback,
@@ -75,7 +83,10 @@ struct SearchLampHostedTests {
                 search: search
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if search.isOpen {
+                // Where the root draws it (F10): not under a page drawn in front of the results.
+                if TimelinePane.searchFieldDrawn(
+                    open: search.isOpen, over: standing.step, drawn: TimelinePane.drawn(standing.step, of: nil, in: session).drawn
+                ) {
                     SearchBar(
                         search: search,
                         timeline: "All",
@@ -111,6 +122,7 @@ struct SearchLampHostedTests {
         let search: ShellSearch
         let lamp: Lamp
         let pressed: Pressed
+        let standing: Standing
         let window: NSWindow
         let view: NSView
 
@@ -223,14 +235,15 @@ struct SearchLampHostedTests {
         let search = ShellSearch()
         let lamp = Lamp()
         let pressed = Pressed()
-        let view = NSHostingView(rootView: Host(session: session, search: search, lamp: lamp, pressed: pressed))
+        let standing = Standing()
+        let view = NSHostingView(rootView: Host(session: session, search: search, lamp: lamp, standing: standing, pressed: pressed))
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
             styleMask: [.titled], backing: .buffered, defer: true
         )
         window.isReleasedWhenClosed = false
         window.contentView = view
-        let harness = Harness(session: session, search: search, lamp: lamp, pressed: pressed, window: window, view: view)
+        let harness = Harness(session: session, search: search, lamp: lamp, pressed: pressed, standing: standing, window: window, view: view)
         await harness.settle()
         return harness
     }
@@ -274,6 +287,61 @@ struct SearchLampHostedTests {
         #expect(h.search.fieldFocused)
         await h.type("x")
         #expect(h.search.text.contains("x"), "a letter now reaches the field")
+    }
+
+    @Test("A page opened over the results takes the whole place: the field is not drawn under it, and comes back as it went — the pattern, the results, the lamp, and the keys where they were")
+    func theFieldStandsAsideForAPage() async throws {
+        let h = await harness()
+        defer { h.window.contentView = nil }
+        await h.press("/", code: 44)
+        await h.search.indexed()
+        await h.type("swift")
+        await met("what was typed searched") {
+            await h.settle()
+            return results(h).count == 3
+        }
+        #expect(h.search.fieldFocused && h.field != nil)
+
+        // With the keys in the field: a conversation of a result in front, then left.
+        let found = results(h)
+        let result = try #require(found.last)
+        h.standing.step = .thread(result)
+        await met("the field gone from under the page") {
+            await h.settle()
+            return h.field == nil
+        }
+        #expect(!h.search.fieldFocused && h.search.isOpen && h.search.text == "swift" && results(h) == found)
+        h.standing.step = nil
+        await met("the field back, with the keys") {
+            await h.settle()
+            return h.field != nil && h.search.fieldFocused
+        }
+        #expect(h.search.text == "swift" && results(h) == found)
+
+        // With the keys the list's, after Return: the same, and they stay the list's.
+        await h.press("\r", code: 36)
+        await h.reselect()
+        let lit = try #require(h.lamp.seen)
+        #expect(!h.search.fieldFocused)
+        h.standing.step = .thread(result)
+        await met("the field gone again") {
+            await h.settle()
+            return h.field == nil
+        }
+        h.standing.step = nil
+        await met("the field back") {
+            await h.settle()
+            return h.field != nil
+        }
+        #expect(!h.search.fieldFocused, "the keys are still the list's")
+        #expect(h.lamp.seen == lit && h.search.text == "swift" && results(h) == found)
+        await h.press("j", code: 38)
+        #expect(h.lamp.seen == found[1], "and j walks the results")
+
+        // Over a conversation that cannot be drawn the stream is, and the field with it.
+        h.standing.step = .thread("withdrawn")
+        await h.settle()
+        #expect(h.field != nil)
     }
 }
 

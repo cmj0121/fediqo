@@ -100,6 +100,8 @@ struct ShortcutGuide: View {
     /// One tab's lines: its keys, and what each does.
     struct Page: View {
         let group: DummyShortcutGroup
+        /// The language its words are in: the app's where none is named.
+        var language: DummyLanguage? = nil
         @Environment(\.colorScheme) private var colorScheme
 
         var body: some View {
@@ -107,7 +109,7 @@ struct ShortcutGuide: View {
                 ForEach(DummyShortcut.lines(in: group)) { line in
                     GridRow {
                         keys(of: line)
-                        Text(line.detail)
+                        Text(line.words(language: language))
                             .shellFont(.body)
                             .foregroundStyle(ShellChrome.ink(colorScheme))
                             .fixedSize(horizontal: false, vertical: true)

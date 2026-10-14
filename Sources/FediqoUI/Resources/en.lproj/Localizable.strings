@@ -77,7 +77,7 @@
 "shortcut.group.act" = "Act";
 "shortcut.group.app" = "App";
 "shortcut.landing" = "Reload from the launch";
-"shortcut.tabs" = "Rotate this page's tabs. On an opened page with no tabs it does nothing: leave the page to change timeline";
+"shortcut.tabs" = "Turn the tabs of the page in front — the timelines, or those of somebody's page, a hashtag, what is rising or what a search found. A conversation, a list of people and the hashtags you follow have none, and there it does nothing: leave the page to change timeline";
 "shortcut.pages" = "Rotate the places";
 "shortcut.posts" = "Move in this list";
 "shortcut.top" = "Top of this thread";
@@ -103,7 +103,6 @@
 "shortcut.search" = "Search the posts this device holds";
 
 "thread.title" = "Thread";
-"thread.replies" = "Replies";
 "item.reply.one.body" = "Same machine. Keep it here.";
 "item.reply.two.body" = "Then the list stays one stream.";
 "item.reply.up.body" = "Before this: the question that started it.";

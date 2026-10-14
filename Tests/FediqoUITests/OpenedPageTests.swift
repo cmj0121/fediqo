@@ -347,7 +347,7 @@ struct OpenedPageTests {
         // The root asks the walk once, before any place's own tabs, and names no page there.
         let ui = try Self.sources()
         let root = try String(contentsOf: ui.appending(path: "FediqoRootView.swift"), encoding: .utf8)
-        let asked = "private func rotatePlaceTab(by step: Int) -> Bool {\n        if place == .timeline, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: TimelinePane.drawn(walk.standing, of: people, in: session).drawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }\n        return switch place {"
+        let asked = "private func rotatePlaceTab(by step: Int) -> Bool {\n        if place == .timeline, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: standingDrawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }\n        return switch place {"
         #expect(root.components(separatedBy: asked).count == 2)
         // The frame and the figure draw, and learn no kind of source.
         for file in ["OpenedPage.swift", "PageBar.swift", "PageFigure.swift"] {

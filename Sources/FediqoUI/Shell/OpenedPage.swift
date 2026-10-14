@@ -94,6 +94,24 @@ enum PageFrame {
     }
 }
 
+/// A block of an About tab the lamp may stand on — a hashtag's (F10), somebody's (F9): on the
+/// lamp's wash while it is lit, and told to a listener as the lit one, as every other lit row is,
+/// and not by the wash alone. **One for both pages**, so the two About tabs cannot come to differ.
+struct AboutBlockLit: ViewModifier {
+    let lit: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// What a listener is told of the block: that it is the lit one, where it is.
+    var traits: AccessibilityTraits { lit ? .isSelected : [] }
+
+    func body(content: Content) -> some View {
+        content
+            .background(lit ? ShellChrome.floatFill(colorScheme) : .clear)
+            .accessibilityAddTraits(traits)
+    }
+}
+
 /// What Tab or ⇧Tab does on an opened page (`PageFrame.keyed`).
 enum PageKeyed<Tab: Equatable>: Equatable {
     /// That tab is brought in front.

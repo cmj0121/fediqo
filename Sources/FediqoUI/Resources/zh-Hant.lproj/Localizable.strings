@@ -77,7 +77,7 @@
 "shortcut.group.act" = "動作";
 "shortcut.group.app" = "App";
 "shortcut.landing" = "從啟動重新載入";
-"shortcut.tabs" = "輪換這一頁的分頁。開啟的頁面沒有分頁時，這個鍵不做任何事：先離開那一頁，才能換時間軸";
+"shortcut.tabs" = "輪換眼前這一頁的分頁——時間軸，或某人的頁面、主題標籤頁、正在竄升的、搜尋找到的那一頁的分頁。討論串、一份名單和你追蹤的主題標籤沒有分頁，在那裡這個鍵不做任何事：先離開那一頁，才能換時間軸";
 "shortcut.pages" = "輪換左側的地方";
 "shortcut.posts" = "在這份清單裡移動";
 "shortcut.top" = "到這串的頂端";
@@ -103,7 +103,6 @@
 "shortcut.search" = "搜尋這台裝置上的貼文";
 
 "thread.title" = "討論串";
-"thread.replies" = "回覆";
 "item.reply.one.body" = "同一台機器。留在這裡。";
 "item.reply.two.body" = "這樣清單還是一條流。";
 "item.reply.up.body" = "在這之前：引起這則的問題。";

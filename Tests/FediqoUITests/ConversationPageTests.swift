@@ -312,8 +312,9 @@ struct ConversationPageTests {
         #expect(TimelinePane.headDrawn(over: gone, drawn: undrawn) && TimelinePane.page(gone, drawn: undrawn) == .opened)
         #expect(gone.tabKey == .sole(.thread), "the step still answers; the root asks what is drawn before it listens")
         let root = try String(contentsOf: Self.sources().appending(path: "FediqoRootView.swift"), encoding: .utf8)
-        let asked = "if place == .timeline, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: TimelinePane.drawn(walk.standing, of: people, in: session).drawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }\n        return switch place {\n        case .timeline: session.rotateTab(by: step)"
+        let asked = "if place == .timeline, let key = walk.tabKey {\n            switch Self.stepTab(key, drawn: standingDrawn, open: openLayers) {\n            case .page: return rotateStepTab(key, by: step)\n            case .covered: return false\n            case .timelines: break\n            }\n        }\n        return switch place {\n        case .timeline: session.rotateTab(by: step)"
         #expect(root.components(separatedBy: asked).count == 2, "the root asks what is drawn, and else turns the timelines")
+        #expect(root.contains("private var standingDrawn: Bool {\n        TimelinePane.drawn(walk.standing, of: people, in: session).drawn\n    }"))
         let pane = try String(contentsOf: Self.sources().appending(path: "Shell/TimelinePane.swift"), encoding: .utf8)
         // One look-up of the post, in one function: the pane's body and the root both go through it.
         #expect(pane.components(separatedBy: "session.held(").count == 2, "the pane looks a post up to draw it in one place")
@@ -324,8 +325,8 @@ struct ConversationPageTests {
 
     @Test("The keys guide says what Tab does on an opened page with no tabs, in each language; the bar's words are the ones every opened page has")
     func theGuideSaysWhatTabDoes() throws {
-        #expect(L10n.t("shortcut.tabs", language: .english) == "Rotate this page's tabs. On an opened page with no tabs it does nothing: leave the page to change timeline")
-        #expect(L10n.t("shortcut.tabs", language: .taiwanese) == "輪換這一頁的分頁。開啟的頁面沒有分頁時，這個鍵不做任何事：先離開那一頁，才能換時間軸")
+        #expect(L10n.t("shortcut.tabs", language: .english) == "Turn the tabs of the page in front — the timelines, or those of somebody's page, a hashtag, what is rising or what a search found. A conversation, a list of people and the hashtags you follow have none, and there it does nothing: leave the page to change timeline")
+        #expect(L10n.t("shortcut.tabs", language: .taiwanese) == "輪換眼前這一頁的分頁——時間軸，或某人的頁面、主題標籤頁、正在竄升的、搜尋找到的那一頁的分頁。討論串、一份名單和你追蹤的主題標籤沒有分頁，在那裡這個鍵不做任何事：先離開那一頁，才能換時間軸")
         let resources = try Self.sources().appending(path: "Resources")
         let tw = try String(contentsOf: resources.appending(path: "zh-TW.lproj/Localizable.strings"), encoding: .utf8)
         let hant = try String(contentsOf: resources.appending(path: "zh-Hant.lproj/Localizable.strings"), encoding: .utf8)

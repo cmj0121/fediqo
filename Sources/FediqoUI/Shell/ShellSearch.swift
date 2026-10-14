@@ -77,6 +77,7 @@ final class ShellSearch {
         text = ""
         selectionBefore = selection
         focusTick += 1
+        focusesOnAppear = true
         isIndexed = false
         let old = index
         indexing?.cancel()
@@ -108,9 +109,33 @@ final class ShellSearch {
         isOpen = false
         text = ""
         fieldFocused = false
+        focusesOnAppear = false
         letGo = nil
         selectionBefore = nil
         return selection
+    }
+
+    /// Whether the field takes the keys when it is next drawn: when the search has just opened,
+    /// and when the field had them as it went — under a page opened in front of the results
+    /// (F10, `TimelinePane.searchFieldDrawn`) — so it comes back as it went, and not otherwise.
+    @ObservationIgnored private var focusesOnAppear = false
+
+    /// The field is drawn: whether it takes the keys (`focusesOnAppear`), once.
+    func appeared() -> Bool {
+        defer { focusesOnAppear = false }
+        return focusesOnAppear
+    }
+
+    /// The field is no longer drawn: the keys are not its, and whether they were is kept for it
+    /// to be drawn again with, while the search stays open.
+    ///
+    /// **A Return still waiting for the index is let go of.** The field goes because a page was
+    /// opened in front of the results, which is the reader moving on from that Return; lighting
+    /// the first result when the field comes back would put out the lamp the walk handed back.
+    func disappeared() {
+        focusesOnAppear = isOpen && fieldFocused
+        fieldFocused = false
+        litWhenIndexed = false
     }
 
     /// The field emptied: `restore` is handed the selection to give back — but only while the

@@ -184,7 +184,7 @@ struct PersonAbout<Lead: View>: View {
                             .padding(.horizontal, ShellSpace.pad)
                             .padding(.vertical, ShellSpace.snug)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(said.lamp(on: block) == lit ? ShellChrome.floatFill(colorScheme) : .clear)
+                            .modifier(AboutBlockLit(lit: said.lamp(on: block) == lit))
                             .id(said.lamp(on: block))
                     }
                 }
