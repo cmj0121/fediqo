@@ -17,6 +17,9 @@ private actor NoticeSources: HTTPSender {
 
     private var routes: [String: Outcome]
     private(set) var asked: [String] = []
+    /// How many reads had been asked for, each time a held one was let go — so what went out
+    /// beside a read that was held can be told once everything has ended.
+    private(set) var readsAtLetGo: [Int] = []
 
     init(_ routes: [String: Outcome]) {
         self.routes = routes
@@ -44,6 +47,7 @@ private actor NoticeSources: HTTPSender {
         case .status(let status)?: return answer(#"{"error":"no"}"#, status)
         case .held(let gate, let body, let status)?:
             await gate.wait()
+            readsAtLetGo.append(reads.count)
             try Task.checkCancellation()
             return answer(body, status)
         case nil:
@@ -84,7 +88,7 @@ private final class LockableTokens: MastodonTokenStore, @unchecked Sendable {
 }
 
 @MainActor
-@Suite("Every signed-in source's notices as one list")
+@Suite("Every signed-in source's notices as one list", .watched)
 struct NoticeListTests {
     private static let a = "a.example"
     private static let b = "b.example"
@@ -147,6 +151,8 @@ struct NoticeListTests {
         session.mastodon.refresh()
         await session.reloadFromStore()
         session.noticeList.deadline = .seconds(5)
+        // On a clock nobody turns: a read held at a gate is not ended by a deadline of its own.
+        session.mastodon.deadlineSleep = TurnedClock().sleep
         return (session, server, tokens)
     }
 
@@ -173,6 +179,8 @@ struct NoticeListTests {
         let (session, server, _) = try await shell(
             Self.two, signedIn: [Self.a: Self.reads, Self.b: Self.reads, "c.example": plain, "d.example": nil]
         )
+        // Counted turns: with nobody reading nothing is begun, so there is no work whose end, and
+        // no point after it, could be waited for.
         for _ in 0..<50 { await Task.yield() }
         #expect(await server.asked.isEmpty, "a source was asked with nobody reading")
         #expect(ShellNoticeList.asked(in: session).map(\.host) == [Self.a, Self.b])
@@ -197,15 +205,24 @@ struct NoticeListTests {
         let list = session.noticeList
 
         let first = Task { await list.read(in: session) }
-        #expect(await spun { await server.reads.count == 1 })
-        let second = Task { await list.read(in: session) }
-        for _ in 0..<50 { await Task.yield() }
+        await met("the first read is on the wire", by: first) { await server.reads.count == 1 }
+        // A read asked for runs, with no wait, up to where it waits on the one out: once it has
+        // been asked for it is parked there. What it must not have done is kept by the source —
+        // how many reads it had been asked for when the first was let go — and looked at once
+        // both have ended.
+        var secondAsked = false
+        let second = Task {
+            secondAsked = true
+            await list.read(in: session)
+        }
+        await met("the second read is asked for, the first still out", by: second) { secondAsked }
         #expect(await server.reads.count == 1, "a second read went out beside the first")
         try tokens.save(Self.token(Self.b))
         session.mastodon.refresh()
         await gate.open()
         await first.value
         await second.value
+        #expect(await server.readsAtLetGo.first == 1, "a second read went out beside the first")
 
         #expect(await server.reads.contains("\(Self.b)\(Self.v1)"), "the source allowed meanwhile was not asked")
         #expect(drawn(list.lines) == ["a4", "b8", "a3"])
@@ -216,9 +233,13 @@ struct NoticeListTests {
         await server.set("\(Self.b)\(Self.v1)", .held(gated, Self.body([Self.one(8, at: 45), Self.one(7, at: 10)])))
         await server.set("\(Self.a)\(Self.v1)", Self.page(Self.one(4, at: 50), Self.one(3, at: 40)))
         let third = Task { await list.read(in: session) }
-        #expect(await spun { await server.asked.count == asked + 2 })
-        let fourth = Task { await list.read(in: session) }
-        for _ in 0..<50 { await Task.yield() }
+        await met("the third read is on the wire", by: third) { await server.asked.count == asked + 2 }
+        var fourthAsked = false
+        let fourth = Task {
+            fourthAsked = true
+            await list.read(in: session)
+        }
+        await met("the fourth read is asked for, the third still out", by: fourth) { fourthAsked }
         await gated.open()
         await third.value
         await fourth.value
@@ -253,7 +274,7 @@ struct NoticeListTests {
         let list = session.noticeList
 
         let reading = Task { await list.read(in: session) }
-        #expect(await spun { list.standing(host: Self.b) == .read })
+        await met("the source that answers has been read", by: reading) { list.standing(host: Self.b) == .read }
 
         #expect(list.lines.isEmpty, "a line was drawn that a later answer could take back")
         #expect(list.isReading && list.readingHosts == [Self.a])
@@ -303,7 +324,7 @@ struct NoticeListTests {
         await server.set("\(Self.a)\(Self.v1)?3", .held(gate, Self.body([Self.one(2, at: 30), Self.one(1, at: 20)])))
 
         let first = Task { await list.readOn(in: session) }
-        #expect(await spun { await server.reads.last == "\(Self.a)\(Self.v1)?3" })
+        await met("the next stretch is asked for", by: first) { await server.reads.last == "\(Self.a)\(Self.v1)?3" }
         #expect(!list.hasMore(in: session), "the foot offered to ask while it was asking")
         await list.readOn(in: session)
         await gate.open()
@@ -641,12 +662,14 @@ struct NoticeListTests {
         await server.set("\(Self.a)/oauth/revoke", .held(revoke, "{}"))
 
         let reading = Task { await list.read(in: session) }
-        #expect(await spun { await server.reads.count == 4 })
+        await met("the second read of both sources is on the wire", by: reading) { await server.reads.count == 4 }
         #expect(list.isReading)
         let leaving = Task {
             if clearing { await session.clear(host: Self.a) } else { await session.signOut(host: Self.a) }
         }
-        #expect(await spun { await server.asked.contains("\(Self.a)/oauth/revoke") })
+        await met("the server is asked to forget the sign-in", by: leaving) {
+            await server.asked.contains("\(Self.a)/oauth/revoke")
+        }
         #expect(list.reaches[Self.a] == nil, "the notices stood while the server was asked to forget the sign-in")
         #expect(drawn(list.lines) == ["b8", "b7"])
         await revoke.open()
@@ -698,7 +721,7 @@ struct NoticeListTests {
         await server.set("\(Self.b)\(Self.v1)", .held(gate, Self.body([Self.one(9, at: 59)])))
 
         let reading = Task { await list.read(in: session) }
-        #expect(await spun { await server.reads.count == 4 })
+        await met("the second read of both sources is on the wire", by: reading) { await server.reads.count == 4 }
         #expect(list.stop())
         #expect(list.reaches == before && !list.isReading)
         await gate.open()
@@ -720,7 +743,7 @@ struct NoticeListTests {
         await server.set("\(Self.b)\(Self.v1)", .held(gate, Self.body([Self.one(9, at: 59)])))
 
         let reading = Task { await list.read(in: session) }
-        #expect(await spun { await server.reads.count == 4 })
+        await met("the second read of both sources is on the wire", by: reading) { await server.reads.count == 4 }
         reading.cancel()
         await gate.open()
         await reading.value
@@ -739,7 +762,7 @@ struct NoticeListTests {
         let list = session.noticeList
 
         let reading = Task { await list.read(in: session) }
-        #expect(await spun { await server.reads.count == 2 })
+        await met("the read of both sources is on the wire", by: reading) { await server.reads.count == 2 }
         try tokens.save(Self.token(Self.a, "tok-other"))
         await gate.open()
         await reading.value
@@ -758,7 +781,7 @@ struct NoticeListTests {
         let list = session.noticeList
 
         let reading = Task { await list.read(in: session) }
-        #expect(await spun { await server.reads.count == 2 })
+        await met("the read of both sources is on the wire", by: reading) { await server.reads.count == 2 }
         try tokens.save(Self.token(Self.a, "tok-other"))
         await gate.open()
         await reading.value

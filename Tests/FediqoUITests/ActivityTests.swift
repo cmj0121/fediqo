@@ -12,7 +12,7 @@ import Testing
 /// Every test builds its own `SourceWork` and hands it to the object under test, so nothing here
 /// reads or writes the app's shared one.
 @MainActor
-@Suite("This run's requests")
+@Suite("This run's requests", .watched)
 struct ActivityTests {
     private static let source = "one.example"
 
@@ -104,9 +104,10 @@ struct ActivityTests {
     func thePageFollows() async {
         let work = SourceWork()
         work.note(host: Self.source, for: .page)
-        #expect(await spun { work.log.acts.map(\.source) == [Self.source] }, "the page never saw it")
+        // No `by:`: the page's record follows the work in a task of the work's own making.
+        await met("the page's record holds the first act") { work.log.acts.map(\.source) == [Self.source] }
         work.note(host: "two.example", for: .page)
-        #expect(await spun { work.log.acts.count == 2 })
+        await met("the page's record holds both acts") { work.log.acts.count == 2 }
     }
 
     @Test("The record is bounded, cut in one chunk past its bound, and counts what went")
@@ -249,7 +250,7 @@ struct ActivityTests {
         #expect(Self.record(work).count == 1, "stopping is not an act")
     }
 
-    @Test("Reading a timeline is recorded under its source", .timeLimit(.minutes(3)))
+    @Test("Reading a timeline is recorded under its source")
     func aTimeline() async {
         let work = SourceWork()
         let http = FixtureHTTP([

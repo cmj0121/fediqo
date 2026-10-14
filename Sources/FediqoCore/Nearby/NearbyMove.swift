@@ -67,6 +67,8 @@ public actor NearbyMove {
     private let device: String
     private let retryDelay: Duration
     private let retries: Int
+    /// What the wait before a dropped link is tried again is slept on.
+    private let sleep: @Sendable (Duration) async throws -> Void
     private let holdClock: @Sendable () async throws -> Void
     /// How long a device that joined and proved the code has to make its offer.
     private let offerClock: @Sendable () async throws -> Void
@@ -107,14 +109,34 @@ public actor NearbyMove {
         offerClock: (@Sendable () async throws -> Void)? = nil,
         lastWordClock: (@Sendable () async throws -> Void)? = nil
     ) {
+        self.init(
+            link: link, carrier: carrier, device: device, retryDelay: retryDelay, retries: retries,
+            holdTimeout: holdTimeout, guessCap: guessCap,
+            holdClock: holdClock, offerClock: offerClock, lastWordClock: lastWordClock
+        ) { try await Task.sleep(for: $0) }
+    }
+
+    /// `init`, saying what every wait of the move is slept on — the wait before a dropped link
+    /// is tried again, and each of the three clocks where none was given: `Task.sleep` but for
+    /// a test, which turns it by hand.
+    package init(
+        link: any NearbyLink, carrier: any StoreCarrier, device: String,
+        retryDelay: Duration = .seconds(2), retries: Int = 45,
+        holdTimeout: Duration = .seconds(600), guessCap: Int = 5,
+        holdClock: (@Sendable () async throws -> Void)? = nil,
+        offerClock: (@Sendable () async throws -> Void)? = nil,
+        lastWordClock: (@Sendable () async throws -> Void)? = nil,
+        sleep: @escaping @Sendable (Duration) async throws -> Void
+    ) {
         self.link = link
         self.carrier = carrier
         self.device = device
         self.retryDelay = retryDelay
         self.retries = retries
-        self.holdClock = holdClock ?? { try await Task.sleep(for: holdTimeout) }
-        self.offerClock = offerClock ?? { try await Task.sleep(for: .seconds(30)) }
-        self.lastWordClock = lastWordClock ?? { try await Task.sleep(for: .seconds(1800)) }
+        self.sleep = sleep
+        self.holdClock = holdClock ?? { try await sleep(holdTimeout) }
+        self.offerClock = offerClock ?? { try await sleep(.seconds(30)) }
+        self.lastWordClock = lastWordClock ?? { try await sleep(.seconds(1800)) }
         self.guessCap = guessCap
     }
 
@@ -552,7 +574,7 @@ public actor NearbyMove {
                         NearbyLog.note(.sender, "join not reached, giving up")
                         throw sentDone ? NearbyRefusal.unsure : .lost
                     }
-                    try await Task.sleep(for: retryDelay)
+                    try await sleep(retryDelay)
                     continue
                 }
                 let mailbox = Mailbox(connection)
@@ -581,7 +603,7 @@ public actor NearbyMove {
                         NearbyLog.note(.sender, "retries spent, giving up")
                         throw sentDone ? NearbyRefusal.unsure : .lost
                     }
-                    try await Task.sleep(for: retryDelay)
+                    try await sleep(retryDelay)
                 }
             }
         } catch {

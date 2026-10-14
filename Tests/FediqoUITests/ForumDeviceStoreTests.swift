@@ -21,7 +21,7 @@ extension ForumSessions {
 /// store, and the object in front of it is rebuilt from nothing — which is exactly what these
 /// tests rebuild.
 @MainActor
-@Suite("Sign-ins kept on this device")
+@Suite("Sign-ins kept on this device", .watched)
 struct ForumDeviceStoreTests {
     static func cookie(_ name: String, domain: String) -> HTTPCookie {
         HTTPCookie(properties: [
@@ -36,12 +36,12 @@ struct ForumDeviceStoreTests {
         return store
     }
 
-    /// Waits, boundedly, for something the store's own notification or a spawned read settles.
-    private func eventually(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<200 where !condition() {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return condition()
+    /// Waits for something the store's own notification or a spawned read settles: the
+    /// sessions' own doing, so no work is named.
+    private func eventually(
+        _ what: String, sourceLocation: SourceLocation = #_sourceLocation, _ condition: () -> Bool
+    ) async {
+        await met(what, sourceLocation: sourceLocation, until: condition)
     }
 
     private func forum(_ host: String) -> Source { Source(host: host, kind: .discuz) }
@@ -129,7 +129,7 @@ struct ForumDeviceStoreTests {
         let session = ShellSession(http: FixtureHTTP(), forums: forums)
         #expect(forums.reachedHosts.isEmpty)
         session.sources = [forum("later.example")]
-        #expect(await eventually { forums.reachedSignIn(host: "later.example") })
+        await eventually("the forum added is read signed in off the store") { forums.reachedSignIn(host: "later.example") }
     }
 
     @Test("A sign-in whose cookie is not named *_auth reads signed in until Clear")
@@ -163,7 +163,7 @@ struct ForumDeviceStoreTests {
         #expect(built == 0, "a reader with no forum opened the WebKit store")
 
         session.sources.append(forum("bbs.example.org"))
-        #expect(await eventually { built == 1 })
+        await eventually("the store is opened for the forum added") { built == 1 }
     }
 
     @Test("Every engine is built on the store the sessions were handed")

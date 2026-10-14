@@ -106,6 +106,9 @@ final class ShellNearby {
     @ObservationIgnored let work: SourceWork
     /// The device kept awake while the flow runs, and let sleep once it ends.
     @ObservationIgnored let awake: StayAwake
+    /// What a move's waits are slept on (`NearbyMove.init(…sleep:)`): `Task.sleep` but for a
+    /// test, which turns it by hand.
+    @ObservationIgnored var moveSleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     @ObservationIgnored private var move: NearbyMove?
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var browsing: Task<Void, Never>?
@@ -257,7 +260,7 @@ final class ShellNearby {
         side = .holding
         self.pictures = pictures
         self.adopt = adopt
-        let move = NearbyMove(link: link, carrier: carrier, device: device)
+        let move = NearbyMove(link: link, carrier: carrier, device: device, sleep: moveSleep)
         self.move = move
         step = .holding(code: "")
         follow { await move.hold() }
@@ -311,7 +314,7 @@ final class ShellNearby {
         browsing = nil
         step = .packing(PackageProgress(done: 0, total: 0))
         hold(true)
-        let move = NearbyMove(link: link, carrier: carrier, device: device)
+        let move = NearbyMove(link: link, carrier: carrier, device: device, sleep: moveSleep)
         self.move = move
         follow {
             await save()

@@ -12,7 +12,7 @@ import WebKit
 /// Every test builds its own `SourceWork` and its own `AllowanceBook` on a defaults suite of its
 /// own, so nothing here reads or writes the app's shared list or its preferences.
 @MainActor
-@Suite("The list of what reaches beyond a source")
+@Suite("The list of what reaches beyond a source", .watched)
 struct AllowanceListTests {
     private static let forum = "bbs.one.example"
     private static let other = "bbs.two.example"
@@ -142,7 +142,7 @@ struct AllowanceListTests {
 
     // MARK: - Switching one off
 
-    @Test("The directory switched off is not reached and adding by name still works; on again, it is", .timeLimit(.minutes(3)))
+    @Test("The directory switched off is not reached and adding by name still works; on again, it is")
     func theDirectoryOff() async throws {
         let shelf = Shelf()
         let (book, work, defaults) = (shelf.book, shelf.work, shelf.defaults)
@@ -190,10 +190,12 @@ struct AllowanceListTests {
             #expect(!engine.decide(elsewhere, mainFrame: true), "switched off, a page followed away is refused")
             book.set(.personCheck, on: false)
             #expect(!PageRules.rules(.signIn, of: Self.forum, allowing: work.allowances).contains("recaptcha"))
-            #expect(await waited { engine.ruledWith?.contains("recaptcha") == false },
-                    "the page in front of the person is ruled again at once")
+            // No `by:`: a list is compiled and put on in WebKit's own time.
+            await met("the page in front of the person is ruled again, without the check") {
+                engine.ruledWith?.contains("recaptcha") == false
+            }
             book.set(.personCheck, on: true)
-            #expect(await waited { engine.ruledWith?.contains("recaptcha") == true })
+            await met("the page is ruled again, with the check") { engine.ruledWith?.contains("recaptcha") == true }
             await engine.signingIn(false)
         }
     }
@@ -321,7 +323,7 @@ struct AllowanceListTests {
         #expect(broken.off.isEmpty && broken.own.isEmpty)
     }
 
-    @Test("Switching the directory while its servers are listed is answered on the spot", .timeLimit(.minutes(3)))
+    @Test("Switching the directory while its servers are listed is answered on the spot")
     func theDirectorySwitchedWhileBrowsing() async {
         let shelf = Shelf()
         let http = FixtureHTTP(["/servers": .text("[]")])
@@ -332,11 +334,12 @@ struct AllowanceListTests {
         session.work = shelf.work
         session.browse()
         session.chooseProtocol(.mastodon)
-        #expect(await spun { session.catalog == .empty })
+        // No `by:` here: the directory is asked by a task the browsing starts for itself.
+        await met("the directory's servers are listed") { session.catalog == .empty }
         shelf.book.set(.directory, on: false)
-        #expect(await spun { session.catalog == .off }, "the list still showed the directory")
+        await met("the list says the directory is off") { session.catalog == .off }
         shelf.book.set(.directory, on: true)
-        #expect(await spun { session.catalog == .empty })
+        await met("the directory's servers are listed again") { session.catalog == .empty }
         #expect(await http.requested.count == 2)
         // Another gate's list is not this session's.
         SourceWork().allow([])
@@ -450,11 +453,11 @@ struct AllowanceListTests {
 /// A page shown in a forum's browser, with a host the person added for that forum (#226): loaded
 /// for real, off screen, and nothing reaches a network — a scheme of this test's own, or loopback.
 @MainActor
-@Suite("A host the person added, on a forum's page", .serialized)
+@Suite("A host the person added, on a forum's page", .serialized, .watched)
 struct AllowanceOnAPageTests {
     @Test(
         "The forum's page reaches the host added for it; without the entry it does not",
-        .timeLimit(.minutes(3)), arguments: [true, false]
+        arguments: [true, false]
     )
     func thePageReachesIt(added: Bool) async throws {
         let forum = "bbs.forum.example"
@@ -471,10 +474,13 @@ struct AllowanceOnAPageTests {
         configuration.userContentController.add(rules)
         let view = WKWebView(frame: .init(x: 0, y: 0, width: 400, height: 400), configuration: configuration)
         view.load(URLRequest(url: URL(string: "\(PageServed.scheme)://\(forum)/thread")!))
-        for _ in 0..<400 where !served.hosts.contains("static.forum.example") {
-            try await Task.sleep(for: .milliseconds(10))
+        // No `by:`: the load is the web view's own, in a process of its own. A page has loaded
+        // when everything it asks for has been answered or refused, so what it has not asked for
+        // by then it does not ask for.
+        await met("the page has asked for its own picture, and has loaded") {
+            guard served.hosts.contains("static.forum.example"), !view.isLoading else { return false }
+            return (try? await view.evaluateJavaScript("document.readyState")) as? String == "complete"
         }
-        try await Task.sleep(for: .milliseconds(300))
         #expect(served.hosts.contains("static.forum.example"))
         #expect(!served.hosts.contains("tracker.example"), "a host nobody added was reached")
         #expect(served.hosts.contains("cdn.example") == added)
@@ -495,7 +501,8 @@ struct AllowanceOnAPageTests {
         await engine.signingIn(true)
         #expect(engine.ruledAs == .signIn && engine.ruledWith?.contains("recaptcha") == true)
         work.allow(Allowance.standing + [Allowance.own(host: "failsmarker.example", for: forum)])
-        #expect(await waited { engine.ruledAs == .page }, "the sign-in's list was left on")
+        // No `by:` in this suite's waits on a list: it is compiled and put on in WebKit's own time.
+        await met("the strictest list is put on in place of the sign-in's") { engine.ruledAs == .page }
         #expect(engine.ruledWith == nil)
         let strict = await PageRules.list(.page)
         #expect(strict != nil && engine.ruledBy === strict, "what is on is not the strictest list")
@@ -503,7 +510,7 @@ struct AllowanceOnAPageTests {
             _ = try await engine.page(at: URL(string: "https://\(forum)/")!)
         }
         work.allow(Allowance.standing)
-        #expect(await waited { engine.ruledAs == .signIn }, "the list put right is put on")
+        await met("the list put right is put on") { engine.ruledAs == .signIn }
         await engine.signingIn(false)
     }
 
@@ -524,7 +531,7 @@ struct AllowanceOnAPageTests {
         #expect(made.filter { PageRules.compiled[$0] != nil }.count <= PageRules.kept)
         #expect(PageRules.compiled[made[0]] == nil, "the oldest is still held")
         #expect(PageRules.compiled[made.last!] != nil)
-        #expect(await waited { compiler.discarded.contains(names[0]) }, "the oldest was not taken out of the store")
+        await met("the oldest list is taken out of the store") { compiler.discarded.contains(names[0]) }
         #expect(!compiler.discarded.contains(names.last!))
         #expect(Set(names).count == names.count, "each compile has a name of its own")
     }
@@ -551,7 +558,7 @@ struct AllowanceOnAPageTests {
         #expect(!compiler.discarded.contains(engine.ruledBy?.identifier ?? "-"))
     }
 
-    @Test("The directory switched off while it is being asked does not show what came back", .timeLimit(.minutes(3)))
+    @Test("The directory switched off while it is being asked does not show what came back")
     func theDirectoryOffMidFetch() async {
         let work = SourceWork()
         work.govern(sources: [])
@@ -563,8 +570,10 @@ struct AllowanceOnAPageTests {
         session.work = work
         session.browse()
         session.stage = .browsingServers(.mastodon)
+        let guardTask = watching(http.gate, "the directory's answer, held on the wire")
+        defer { guardTask.cancel() }
         let fetch = Task { await session.loadCatalog() }
-        #expect(await spun { await http.reached })
+        await met("the directory is being asked", by: fetch) { await http.reached }
         work.allow(Allowance.standing.filter { $0.id != .directory })
         await http.gate.open()
         await fetch.value
@@ -575,7 +584,7 @@ struct AllowanceOnAPageTests {
     /// from a world its own scripts cannot reach. Served on loopback, since a page's resource
     /// timing is kept for `http` and not for a scheme of a test's own: the page is `localhost`,
     /// the host the person added is `127.0.0.1`.
-    @Test("What the page pulled in from the host added is listed under the forum, naming the entry", .timeLimit(.minutes(3)))
+    @Test("What the page pulled in from the host added is listed under the forum, naming the entry")
     func whatThePagePulledInIsListed() async throws {
         let server = try LoopServer()
         let port = try await server.start()
@@ -598,9 +607,16 @@ struct AllowanceOnAPageTests {
         )
         let view = WKWebView(frame: .init(x: 0, y: 0, width: 400, height: 400), configuration: configuration)
         view.load(URLRequest(url: URL(string: "http://localhost:\(port)/thread")!))
-        #expect(await waited { work.record.contains { $0.reached == "127.0.0.1" } },
-                "what the page pulled in was not listed: \(server.asked)")
-        try await Task.sleep(for: .milliseconds(200))
+        // No `by:`: the page loads, and says what it pulled in, in a process of its own.
+        await met("what the page pulled in is listed") { work.record.contains { $0.reached == "127.0.0.1" } }
+        await met("the page's own timing has all three of its pictures") {
+            (try? await view.evaluateJavaScript("performance.getEntriesByType('resource').length")) as? Int == 3
+        }
+        // The page answers once more, a turn of its own later: what it had to say of those three
+        // came before this answer.
+        _ = try await view.callAsyncJavaScript(
+            "await new Promise((done) => setTimeout(done, 0))", contentWorld: .defaultClient
+        )
         #expect(server.asked.contains { $0.hasPrefix("127.0.0.1") }, "the premise: the page did pull it in")
         let rows = work.record
         #expect(server.asked.filter { $0.hasPrefix("127.0.0.1") }.count == 2, "the premise: two pictures of it")
@@ -608,17 +624,6 @@ struct AllowanceOnAPageTests {
         #expect(rows.first?.source == forum && rows.first?.allowedBy == entry.id && rows.first?.purpose == .pagePart)
         _ = view
     }
-}
-
-/// Waits, sleeping, for what WebKit does in its own time — a list compiled, a page loaded — for
-/// up to ten seconds: a count of yields runs out in a moment on a machine running the whole suite.
-@MainActor
-private func waited(_ condition: @MainActor () -> Bool) async -> Bool {
-    for _ in 0..<500 {
-        if condition() { return true }
-        try? await Task.sleep(for: .milliseconds(20))
-    }
-    return condition()
 }
 
 /// What is compiled and let go, for a test: the real compiler, failing where the rules name

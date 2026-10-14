@@ -90,7 +90,7 @@ private final class LockingTokens: MastodonTokenStore, @unchecked Sendable {
 ///
 /// **What it does not reach.** No window is made: light and dark, a finger on a phone, the menu
 /// of kinds opened and VoiceOver itself are for a person on a running app.
-@Suite("The notices page, hosted", .serialized)
+@Suite("The notices page, hosted", .serialized, .watched)
 @MainActor
 struct NoticesHostedTests {
     private static let a = "a.example"
@@ -148,6 +148,9 @@ struct NoticesHostedTests {
         )
         session.mastodon.refresh()
         await session.reloadFromStore()
+        // The deadline of what is asked through a sign-in, on a clock nobody turns: an ask held at
+        // a gate is not ended by one, however long the page takes to be drawn while it is held.
+        session.mastodon.deadlineSleep = TurnedClock().sleep
         session.noticeList.deadline = .seconds(5)
         return (session, server)
     }
@@ -191,15 +194,51 @@ struct NoticesHostedTests {
 
     private static func settle(_ view: NSView) {
         view.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        RunLoop.main.run(mode: .default, before: .distantPast)
         view.layoutSubtreeIfNeeded()
     }
 
-    /// The page hosted `width` across, with what it drew.
+    /// What a page said it drew, to tell one look at it from the next.
+    private struct Drawn: Equatable {
+        let frames: [NoticesProbe.Part: CGRect]
+        let says: [NoticesProbe.Part: String]
+    }
+
+    /// What `probe` holds, or nothing while the page has not said anything yet.
+    private static func drawn(_ probe: NoticesProbe) -> Drawn? {
+        probe.frames.isEmpty ? nil : Drawn(frames: probe.frames, says: probe.says)
+    }
+
+    /// How many looks in a row must find a page as the look before left it.
+    private static let looks = 20
+
+    /// Lays `view` out and turns the run loop until `drawn` says something, and has said the same
+    /// for `looks` looks in a row — the main actor given away between them, so whatever the page
+    /// began by being drawn has had its turns. No `by:`: the run loop is turned here, by the
+    /// check. Counted turns, because a hosted page's own tasks are nothing a check can name.
+    ///
+    /// With `read` named, a look counts only once that list's read has ended: where the check
+    /// means "the page has read, and this is what it came to".
+    private static func still<Seen: Equatable>(
+        _ view: NSView, read list: ShellNoticeList? = nil, _ drawn: () -> Seen?
+    ) async {
+        var last: Seen?
+        var same = 0
+        let what = list == nil ? "the page is drawn" : "the page's read has ended, it is drawn"
+        await met("\(what), and \(looks) turns more move nothing in it") {
+            settle(view)
+            let now = list?.isReading == true ? nil : drawn()
+            same = now != nil && now == last ? same + 1 : 0
+            last = now
+            return same >= looks
+        }
+    }
+
+    /// The page hosted `width` across, with what it drew — once it has stopped moving (`still`).
     private func hosted(
         _ session: ShellSession, root: Root = Root(), width: CGFloat = 600, layout: ShellLayout = .wide,
         type: DynamicTypeSize = .large, opening: Bool = false
-    ) -> (NSView, NoticesProbe) {
+    ) async -> (NSView, NoticesProbe) {
         let probe = NoticesProbe()
         let view = NSHostingView(
             rootView: Host(session: session, root: root)
@@ -211,7 +250,8 @@ struct NoticesHostedTests {
                 .dynamicTypeSize(type)
         )
         view.frame = NSRect(x: 0, y: 0, width: width, height: 700)
-        Self.settle(view)
+        // A page that reads as it opens may be held mid-read by its check; any other has read.
+        await Self.still(view, read: opening ? nil : session.noticeList) { Self.drawn(probe) }
         return (view, probe)
     }
 
@@ -229,8 +269,8 @@ struct NoticesHostedTests {
         #expect(session.availability.allows(.notices), "the place is entered with nobody signed in")
         #expect(session.availability.enabledPlaces.contains(.notices))
 
-        let (view, probe) = hosted(session, opening: true)
-        for _ in 0..<5 { Self.settle(view) }
+        let (view, probe) = await hosted(session, opening: true)
+        await Self.still(view, read: session.noticeList) { Self.drawn(probe) }
 
         #expect((probe.frames[.nobody]?.height ?? 0) > 0, "the page drew nothing")
         #expect(probe.says[.nobody] == L10n.t("notices.empty.line"))
@@ -245,8 +285,8 @@ struct NoticesHostedTests {
         session.mastodon.refusedNotices(host: Self.b, sentWith: Self.token(Self.b, scopes: Self.plain))
         #expect(NoticesPane.hosts(in: session).map(\.notices) == [.unasked, .unavailable])
 
-        let (view, probe) = hosted(session, opening: true)
-        for _ in 0..<5 { Self.settle(view) }
+        let (view, probe) = await hosted(session, opening: true)
+        await Self.still(view, read: session.noticeList) { Self.drawn(probe) }
 
         #expect((probe.frames[.notAllowed]?.height ?? 0) > 0)
         #expect(probe.says[.notAllowed] == "No sign-in on this device may read notices yet.")
@@ -259,7 +299,7 @@ struct NoticesHostedTests {
         // With nobody left to ask, the page says that instead, and still names the source.
         let (refused, _) = try await shell([:], signedIn: [Self.b: Self.plain])
         refused.mastodon.refusedNotices(host: Self.b, sentWith: Self.token(Self.b, scopes: Self.plain))
-        let (_, told) = hosted(refused)
+        let (_, told) = await hosted(refused)
         #expect(told.says[.notAllowed] == "No sign-in on this device may read notices.")
         #expect(told.says[.line("refused:b.example")] == "b.example was asked for your notices and gave none.")
     }
@@ -269,15 +309,19 @@ struct NoticesHostedTests {
         let gate = Gate()
         let (session, server) = try await shell([Self.a: .held(gate, "[]")], signedIn: [Self.a: Self.reads])
 
-        let (view, probe) = hosted(session, opening: true)
-        #expect(await spun(400) {
+        let (view, probe) = await hosted(session, opening: true)
+        await met("the page has asked its source, and says it is reading") {
             Self.settle(view)
             return await server.asked.count == 1 && probe.says[.line("reading")] != nil
-        })
+        }
         #expect(probe.frames[.line("unread:a.example")] == nil, "a source on the wire was named as not read")
 
         #expect(session.noticeList.stop())
-        for _ in 0..<5 { Self.settle(view) }
+        await met("the page names the source as not read") {
+            Self.settle(view)
+            return probe.says[.line("unread:a.example")] != nil
+        }
+        await Self.still(view, read: session.noticeList) { Self.drawn(probe) }
         await gate.open()
 
         #expect(!session.noticeList.isReading && session.noticeList.reaches.isEmpty)
@@ -297,13 +341,17 @@ struct NoticesHostedTests {
             Self.b: .held(gate, "[]"),
         ], signedIn: [Self.a: Self.reads, Self.b: Self.reads])
 
-        let (view, probe) = hosted(session, opening: true)
-        #expect(await spun(400) {
+        let (view, probe) = await hosted(session, opening: true)
+        await met("both sources are asked, and the first has answered") {
             Self.settle(view)
             return await server.asked.count == 2 && session.noticeList.standing(host: Self.a) == .read
-        })
+        }
         #expect(session.noticeList.stop())
-        for _ in 0..<5 { Self.settle(view) }
+        await met("the page names the second source as not read") {
+            Self.settle(view)
+            return probe.says[.line("unread:b.example")] != nil
+        }
+        await Self.still(view, read: session.noticeList) { Self.drawn(probe) }
         await gate.open()
 
         #expect(session.noticeList.standing(host: Self.b) == .unread)
@@ -316,13 +364,17 @@ struct NoticesHostedTests {
         // And where the one that answered had nothing: the page does not say nothing happened.
         let closed = Gate()
         let (empty, asked) = try await shell([Self.a: Self.page(), Self.b: .held(closed, "[]")], signedIn: [Self.a: Self.reads, Self.b: Self.reads])
-        let (other, said) = hosted(empty, opening: true)
-        #expect(await spun(400) {
+        let (other, said) = await hosted(empty, opening: true)
+        await met("both sources are asked, and the one with nothing has answered") {
             Self.settle(other)
             return await asked.asked.count == 2 && empty.noticeList.standing(host: Self.a) == .read
-        })
+        }
         #expect(empty.noticeList.stop())
-        for _ in 0..<5 { Self.settle(other) }
+        await met("the page names the second source as not read") {
+            Self.settle(other)
+            return said.says[.line("unread:b.example")] != nil
+        }
+        await Self.still(other, read: empty.noticeList) { Self.drawn(said) }
         await closed.open()
         #expect(NoticesPane.none(in: empty) == .unread)
         #expect(said.says[.none] == nil, "nothing was said to have happened with a source unread")
@@ -337,12 +389,16 @@ struct NoticesHostedTests {
         let (session, server) = try await shell([Self.a: Self.page()], signedIn: [Self.a: Self.reads], tokens: tokens)
         tokens.locked = true
 
-        let (view, probe) = hosted(session, opening: true)
-        #expect(await spun(400) {
+        let (view, probe) = await hosted(session, opening: true)
+        await met("the list has found the sign-in unreadable") {
             Self.settle(view)
             return session.noticeList.locked == [Self.a]
-        })
-        for _ in 0..<5 { Self.settle(view) }
+        }
+        await met("the page names the source as not asked") {
+            Self.settle(view)
+            return probe.says[.line("locked:a.example")] != nil
+        }
+        await Self.still(view, read: session.noticeList) { Self.drawn(probe) }
 
         #expect(await server.asked.isEmpty)
         #expect(NoticesPane.lines(in: session) == [.locked(host: Self.a)])
@@ -359,40 +415,40 @@ struct NoticesHostedTests {
             Self.b: Self.page(Self.one(8, "mention", by: "Cy", minutes: 5, post: 31)),
         ], signedIn: [Self.a: Self.reads, Self.b: Self.reads])
 
-        let (view, probe) = hosted(session, opening: true)
-        #expect(await spun(400) {
+        let (view, probe) = await hosted(session, opening: true)
+        await met("opening the page has asked both sources") {
             Self.settle(view)
             return await server.asked.count == 2
-        }, "opening the page did not read")
-        #expect(await spun(400) {
+        }
+        await met("the page says it is reading") {
             Self.settle(view)
             return probe.says[.line("reading")] != nil
-        })
+        }
         #expect(probe.says[.line("reading")] == "Reading notices from a.example, b.example…"
             || probe.says[.line("reading")] == "Reading notices from a.example…")
         #expect(rows(probe).isEmpty, "nothing is drawn until every source asked has answered")
         #expect(probe.frames[.none] == nil, "nothing is said to be empty while it is being read")
 
         await gate.open()
-        #expect(await spun(400) {
+        await met("the read has ended, and its two lines are drawn") {
             Self.settle(view)
             return !session.noticeList.isReading && rows(probe).count == 2
-        })
+        }
         // Down to where the source read least far has reached, and no further: the older
         // follow waits for the other source to be read down past it.
-        let (_, after) = hosted(session)
+        let (_, after) = await hosted(session)
         #expect(rows(after) == session.noticeList.lines.map(\.id))
         #expect(session.noticeList.lines.map(\.newestID) == ["4", "8"], "newest first, across both sources")
         #expect(after.frames[.line("reading")] == nil)
         #expect(after.says[.foot] == NoticesFoot.more.words())
-        for _ in 0..<10 { Self.settle(view) }
+        await Self.still(view, read: session.noticeList) { Self.drawn(probe) }
         #expect(await server.asked.count == 2, "a list too short to scroll read on with nobody asking")
 
-        #expect(await spun(400) {
+        await met("the list is read on to its end") {
             if NoticesPane.foot(in: session) == .more { await session.noticeList.readOn(in: session) }
             return NoticesPane.foot(in: session) == .end
-        })
-        let (_, whole) = hosted(session)
+        }
+        let (_, whole) = await hosted(session)
         #expect(session.noticeList.lines.map(\.newestID) == ["4", "8", "3"])
         #expect(rows(whole) == session.noticeList.lines.map(\.id))
     }
@@ -402,7 +458,7 @@ struct NoticesHostedTests {
         let (session, _) = try await shell([Self.a: Self.page()], signedIn: [Self.a: Self.reads])
         await session.noticeList.read(in: session)
 
-        let (_, probe) = hosted(session)
+        let (_, probe) = await hosted(session)
 
         #expect(probe.says[.none] == "Nothing has happened to you on these sources yet.")
         #expect((probe.frames[.head]?.height ?? 0) > 0, "the head stays, with the read on it")
@@ -418,8 +474,7 @@ struct NoticesHostedTests {
         ], signedIn: [Self.a: Self.reads, Self.b: Self.reads])
         await session.noticeList.read(in: session)
 
-        let (view, probe) = hosted(session)
-        for _ in 0..<5 { Self.settle(view) }
+        let (view, probe) = await hosted(session)
         #expect(await server.asked.filter { $0.hasPrefix(Self.b) } == [Self.b], "a failed source was asked again unpressed")
         #expect(probe.says[.linePress("failed:b.example")] == "", "asking again is offered, and waits on nothing")
         #expect(NoticesPane.retryHint(waits: true, language: .english) == "A read is on its way. Try again once it has ended.")
@@ -439,16 +494,16 @@ struct NoticesHostedTests {
             onOpen: { _ in }, onOpenPerson: { _, _ in }
         )
         pane.retry(Self.b)
-        #expect(await spun(400) {
+        await met("the source asked again has answered") {
             Self.settle(view)
             return session.noticeList.failures.isEmpty && !session.noticeList.isReading
-        })
+        }
         #expect(Array(await server.asked[before...]) == [Self.b])
-        #expect(await spun(400) {
+        await met("the list is read on to its end") {
             if NoticesPane.foot(in: session) == .more { await session.noticeList.readOn(in: session) }
             return NoticesPane.foot(in: session) == .end
-        })
-        let (_, after) = hosted(session)
+        }
+        let (_, after) = await hosted(session)
         #expect(rows(after).count == 2 && after.frames[.line("failed:b.example")] == nil)
     }
 
@@ -462,7 +517,7 @@ struct NoticesHostedTests {
         await session.noticeList.read(in: session)
 
         #expect(NoticesPane.lines(in: session) == [.failed(host: Self.b, why: .refused, again: false)])
-        let (_, probe) = hosted(session)
+        let (_, probe) = await hosted(session)
         #expect(probe.says[.line("failed:b.example")] == "b.example would not let this sign-in read notices. What it sent before is still here.")
         #expect(rows(probe).count == 1)
     }
@@ -489,21 +544,25 @@ struct NoticesHostedTests {
         )
         session.mastodon.refresh()
         await session.reloadFromStore()
+        // As `shell`: the ask held at the gate below is not ended by a deadline.
+        session.mastodon.deadlineSleep = TurnedClock().sleep
 
-        let (still, before) = hosted(session)
-        Self.settle(still)
+        let (_, before) = await hosted(session)
         #expect(rows(before).count == 2, "drawn with nobody asked")
         #expect(await server.asked.isEmpty)
         #expect(before.says[.foot] == "Older notices can be read. Press here, or scroll to here, to read them.")
 
-        let (view, probe) = hosted(session, opening: true)
-        #expect(await spun { Self.settle(view); return await server.asked == [Self.a] })
-        Self.settle(view)
+        let (view, probe) = await hosted(session, opening: true)
+        await met("opening the page has asked its source") { Self.settle(view); return await server.asked == [Self.a] }
+        await met("the foot says the newest are being read") {
+            Self.settle(view)
+            return probe.says[.foot] == "Reading the newest notices…"
+        }
         #expect(rows(probe).count == 2, "what is held stays drawn while the source is asked")
         #expect(probe.says[.foot] == "Reading the newest notices…")
         #expect(probe.says[.foot] != NoticesFoot.held.words())
         await gate.open()
-        #expect(await spun { Self.settle(view); return !session.noticeList.isReading })
+        await met("the read has ended") { Self.settle(view); return !session.noticeList.isReading }
     }
 
     @Test("A short list reads on only when its foot is pressed, and says when there is no more")
@@ -515,16 +574,14 @@ struct NoticesHostedTests {
         await session.noticeList.read(in: session)
         #expect(NoticesPane.foot(in: session) == .more)
 
-        let (view, probe) = hosted(session)
-        for _ in 0..<10 { Self.settle(view) }
+        let (view, probe) = await hosted(session)
         #expect(probe.says[.foot] == "Older notices can be read. Press here, or scroll to here, to read them.")
         #expect(await server.asked == [Self.a], "the foot in view of a list too short to scroll read on by itself")
 
         // A pointer that selects the last line selects it, and reads nothing.
         let root = Root()
         root.selected = session.noticeList.lines.last?.id
-        let (clicked, lit) = hosted(session, root: root)
-        for _ in 0..<10 { Self.settle(clicked) }
+        let (_, lit) = await hosted(session, root: root)
         #expect(lit.frames[.row(root.selected ?? "")] != nil)
         #expect(await server.asked == [Self.a], "selecting the last line read on")
 
@@ -534,17 +591,17 @@ struct NoticesHostedTests {
             onOpen: { _ in }, onOpenPerson: { _, _ in }
         )
         pane.readOn()
-        #expect(await spun(400) {
+        await met("the press has read one stretch more") {
             Self.settle(view)
             return session.noticeList.lines.count == 3 && !session.noticeList.isReading
-        })
+        }
         #expect(await server.asked == [Self.a, "\(Self.a)?3"])
         pane.readOn()
-        #expect(await spun(400) {
+        await met("the second press has read to the end") {
             Self.settle(view)
             return NoticesPane.foot(in: session) == .end
-        })
-        let (_, after) = hosted(session)
+        }
+        let (_, after) = await hosted(session)
         #expect(after.says[.foot] == "No older notices: every source has sent all it has.")
         #expect(rows(after).count == 3)
     }
@@ -586,15 +643,14 @@ struct NoticesHostedTests {
         let root = Root()
 
         root.prefs.noticesHidden = ["favourite"]
-        let (_, some) = hosted(session, root: root)
+        let (_, some) = await hosted(session, root: root)
         #expect(rows(some) == [session.noticeList.lines[1].id])
         #expect(some.says[.head] == "1 kind left out")
 
         // Every line hidden, and older ones to be had: the foot is there to press, and coming
         // into view it reads nothing — or the whole history would be read with nothing shown.
         root.prefs.noticesHidden = ["favourite", "follow"]
-        let (view, none) = hosted(session, root: root)
-        for _ in 0..<20 { Self.settle(view) }
+        let (_, none) = await hosted(session, root: root)
         #expect(rows(none).isEmpty)
         #expect(none.says[.none] == "2 notices read so far are all of kinds you left out. Show a kind again above, or read older ones below.")
         #expect(none.says[.foot] == NoticesFoot.more.words())
@@ -606,7 +662,7 @@ struct NoticesHostedTests {
             == "2 notices read so far are all of kinds you left out. Show a kind again above.")
 
         root.prefs.noticesHidden = []
-        let (_, all) = hosted(session, root: root)
+        let (_, all) = await hosted(session, root: root)
         #expect(rows(all).count == 2 && all.says[.head] == "Every kind")
         #expect(await server.asked == [Self.a], "narrowing asked a source something")
     }
@@ -627,7 +683,7 @@ struct NoticesHostedTests {
         let lines = session.noticeList.lines
         #expect(lines.count == 4)
 
-        let (_, page) = hosted(session)
+        let (_, page) = await hosted(session)
         for notice in lines {
             #expect(page.says[.row(notice.id)] == NoticeWords.spoken(notice), "the label the page's row set is not what the words say")
         }
@@ -676,7 +732,7 @@ struct NoticesHostedTests {
         let lines = session.noticeList.lines
         #expect(lines.map { $0.post?.body } == ["What was put under the cover", "What was put under the cover", "Said in the open"])
 
-        let (_, page) = hosted(session)
+        let (_, page) = await hosted(session)
         let said = lines.compactMap { page.says[.row($0.id)] }
         #expect(said.count == 3)
         #expect(said[0].hasPrefix("Ada mentioned you: Author's warning: Spoilers for the finale. From a.example, "))
@@ -907,8 +963,7 @@ struct NoticesHostedTests {
         let root = Root()
         root.prefs.noticesHidden = ["poll"]
 
-        let (view, probe) = hosted(session, root: root, width: 320, layout: .narrow, type: type)
-        for _ in 0..<3 { Self.settle(view) }
+        let (_, probe) = await hosted(session, root: root, width: 320, layout: .narrow, type: type)
         #expect(rows(probe).count == 2)
         for (part, frame) in probe.frames {
             #expect(frame.minX >= -0.5 && frame.maxX <= 320.5, "\(type): \(part) runs past a page 320 points across")
@@ -948,13 +1003,11 @@ struct NoticesHostedTests {
 
         // And the two pages with no list.
         let (empty, _) = try await shell([:], signedIn: [Self.a: nil])
-        let (nobody, said) = hosted(empty, width: 320, layout: .narrow, type: type)
-        Self.settle(nobody)
+        let (_, said) = await hosted(empty, width: 320, layout: .narrow, type: type)
         let whole = try #require(said.frames[.nobody])
         #expect(whole.maxX <= 320.5 && whole.height > 0)
         let (unasked, _) = try await shell([:], signedIn: ["a-rather-long-instance-name.example": Self.plain])
-        let (notAllowed, told) = hosted(unasked, width: 320, layout: .narrow, type: type)
-        Self.settle(notAllowed)
+        let (_, told) = await hosted(unasked, width: 320, layout: .narrow, type: type)
         let named = try #require(told.frames[.lineWords("unasked:a-rather-long-instance-name.example")])
         let asks = Self.wrapped(
             Text(NoticesLine.unasked(host: "a-rather-long-instance-name.example").words()).shellFont(.meta), width: named.width, type
@@ -980,7 +1033,7 @@ struct NoticesHostedTests {
 
         // The press on the page reaches the root with the line, once selected and pressed again.
         let root = Root()
-        let (_, page) = hosted(session, root: root)
+        let (_, page) = await hosted(session, root: root)
         #expect(page.frames[.row(line.id)] != nil)
         let pane = NoticesPane(
             session: session, selectedID: .constant(line.id), mark: root.mark, canReload: true, onReload: {},
@@ -999,7 +1052,7 @@ struct NoticesHostedTests {
         let probe = PaneProbe()
         let timeline = NSHostingView(rootView: Walked(session: session, standing: walk.standing).environment(\.shellPaneProbe, probe))
         timeline.frame = NSRect(x: 0, y: 0, width: 600, height: 700)
-        for _ in 0..<5 { Self.settle(timeline) }
+        await Self.still(timeline) { probe.under.height > 0 ? probe.under : nil }
         #expect(probe.under.height > 0, "the conversation is drawn on the timeline place")
 
         // Leaving it: the errand is over, and Notices has the line again — lit, and kept as
@@ -1009,7 +1062,7 @@ struct NoticesHostedTests {
         #expect(errand.isOver(walk))
         root.selected = errand.line
         root.mark.keep(errand.line)
-        let (_, back) = hosted(session, root: root)
+        let (_, back) = await hosted(session, root: root)
         #expect(back.frames[.row(line.id)] != nil)
         #expect(root.mark.id == line.id && root.mark.lamp(for: line.id).lit)
     }
@@ -1073,10 +1126,10 @@ struct NoticesHostedTests {
 
         // The page hands the line the word, and the label that row sets carries it.
         let root = Root()
-        let (_, before) = hosted(session, root: root)
+        let (_, before) = await hosted(session, root: root)
         #expect(before.says[.row(line.id)] == NoticeWords.spoken(line))
         root.tooOld = line.id
-        let (_, probe) = hosted(session, root: root)
+        let (_, probe) = await hosted(session, root: root)
         #expect(probe.frames[.row(line.id)] != nil)
         let heard = try #require(probe.says[.row(line.id)])
         #expect(heard.hasPrefix(NoticeWords.spoken(line)) && heard.hasSuffix(NoticeRow.tooOldWords()), "the page's row does not say the post is too old")
@@ -1103,7 +1156,7 @@ struct NoticesHostedTests {
         #expect(session.noticeList.fullHosts == [Self.a])
 
         for width in [600, 320] as [CGFloat] {
-            let (_, probe) = hosted(session, width: width, layout: width < 400 ? .narrow : .wide)
+            let (_, probe) = await hosted(session, width: width, layout: width < 400 ? .narrow : .wide)
             let words = NoticesLine.full(host: Self.a).words()
             #expect(probe.says[.line("full:a.example")] == words, "what a listener is read is the line's own words")
             let line = try #require(probe.frames[.line("full:a.example")])

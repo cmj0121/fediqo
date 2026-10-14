@@ -23,6 +23,9 @@ struct SourceReach {
     let work: SourceWork
     /// The forums' sign-ins, where its holder has them.
     var forums: ForumSessions?
+    /// What a deadline is waited on (`Deadline`): `Task.sleep` but for a test, which turns it by
+    /// hand.
+    var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
 
     // MARK: - The wire
 
@@ -37,7 +40,7 @@ struct SourceReach {
         within limit: Duration?
     ) -> any HTTPClient {
         let watched = WatchedHTTP(base ?? http, for: purpose, name: name, in: work) as any HTTPClient
-        return limit.map { Deadline(watched, within: $0) } ?? watched
+        return limit.map { Deadline(watched, within: $0, sleep: sleep) } ?? watched
     }
 
     /// What a read of `host` goes through before it is listed or bounded: that forum's own
@@ -291,7 +294,7 @@ struct SourceReach {
 extension ShellSession {
     /// Where this session reaches its sources from. See `SourceReach`.
     var reach: SourceReach {
-        SourceReach(http: http, work: work, forums: forums)
+        SourceReach(http: http, work: work, forums: forums, sleep: deadlineSleep)
     }
 }
 

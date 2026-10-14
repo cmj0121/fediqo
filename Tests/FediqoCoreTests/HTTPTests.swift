@@ -3,7 +3,7 @@ import Testing
 import os
 @testable import FediqoCore
 
-@Suite("HTTP", .serialized)
+@Suite("HTTP", .serialized, .watched)
 struct HTTPTests {
     @Test("URLSessionClient GETs HTTPS saying who it is, never DNS")
     func urlSessionClientGET() async throws {
@@ -93,7 +93,9 @@ struct HTTPTests {
         await #expect(throws: URLError(.dataLengthExceedsMaximum)) {
             try await client.data(from: URL(string: "https://urlprotocol.test/chunked")!)
         }
-        #expect(StubURLProtocol.delivered() < body.count)
+        #expect(StubURLProtocol.delivered() <= body.count / 2, "more went out than the stub hands over before it holds")
+        // No `by:`: the transfer is torn down by the session, on a thread of its own.
+        await met("the transfer refused is torn down, not left running") { StubURLProtocol.tornDown() == 1 }
     }
 
     @Test("Cancelling the Task cancels the transfer")
@@ -106,9 +108,7 @@ struct HTTPTests {
         let fetch = Task {
             try await client.data(from: URL(string: "https://urlprotocol.test/slow")!)
         }
-        while StubURLProtocol.delivered() == 0 {
-            try await Task.sleep(for: .milliseconds(2))
-        }
+        await met("the first of the body is on the wire", by: fetch) { StubURLProtocol.delivered() > 0 }
         fetch.cancel()
 
         do {
@@ -117,7 +117,9 @@ struct HTTPTests {
         } catch let error as URLError {
             #expect(error.code == .cancelled)
         }
-        #expect(StubURLProtocol.delivered() < body.count)
+        #expect(StubURLProtocol.delivered() <= body.count / 2, "more went out than the stub hands over before it holds")
+        // No `by:`: the transfer is torn down by the session, on a thread of its own.
+        await met("the transfer cancelled is torn down, not left running") { StubURLProtocol.tornDown() == 1 }
     }
 
     /// The second wire boundary. `URLSession` follows a 302 on its own, and left to itself it
@@ -186,7 +188,10 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         var status: Int
         var body: Data
         var http: Bool
-        /// Bytes per `didLoad`, paced, or `0` to hand the whole body over at once.
+        /// Bytes per `didLoad`, or `0` to hand the whole body over at once. A body handed over
+        /// in pieces is handed over **as far as its half and no further**: the rest is held
+        /// until the transfer is torn down, so a transfer that is to be stopped part-way is
+        /// part-way however long whoever stops it takes to get there.
         var chunk: Int
         /// The `Content-Length` to advertise, or `nil` for a response that declares nothing —
         /// which is what `URLSession` reports as `NSURLSessionTransferSizeUnknown`.
@@ -201,10 +206,20 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         var lastRequest: URLRequest?
         var delivered = 0
         var redirected = false
+        /// How many transfers handed over in pieces were torn down while the rest was held.
+        var tornDown = 0
+        /// What each transfer holding the rest of its body waits on: `reset` lets them all go.
+        var holding: [DispatchSemaphore] = []
+        /// Which `prepare` this is, so a transfer of an earlier one torn down late is not counted.
+        var round = 0
     }
 
     private static let state = OSAllocatedUnfairLock(initialState: State())
     private let stopped = OSAllocatedUnfairLock(initialState: false)
+    /// Signalled when this transfer is torn down, and by `reset`.
+    private let letGo = DispatchSemaphore(value: 0)
+    /// The `prepare` this transfer hands a body over in pieces for, where it does.
+    private let round = OSAllocatedUnfairLock<Int?>(initialState: nil)
 
     static func session() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
@@ -233,6 +248,8 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
             $0.lastRequest = nil
             $0.delivered = 0
             $0.redirected = false
+            $0.tornDown = 0
+            $0.round += 1
         }
     }
 
@@ -245,13 +262,24 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         state.withLock { $0.delivered }
     }
 
+    /// How many transfers handed over in pieces have been torn down since the current `prepare`.
+    static func tornDown() -> Int {
+        state.withLock { $0.tornDown }
+    }
+
+    /// Every test that prepares a stub ends with this, so a transfer nobody tore down is not
+    /// left holding a thread.
     static func reset() {
-        state.withLock {
-            $0.stub = nil
-            $0.lastRequest = nil
-            $0.delivered = 0
-            $0.redirected = false
+        let holding = state.withLock { state -> [DispatchSemaphore] in
+            defer { state.holding = [] }
+            state.stub = nil
+            state.lastRequest = nil
+            state.delivered = 0
+            state.redirected = false
+            state.tornDown = 0
+            return state.holding
         }
+        for one in holding { one.signal() }
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -261,6 +289,13 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         let captured = Self.state.withLock { state -> (Stub?, URLRequest) in
             state.lastRequest = request
+            // Said here, under the lock `reset` takes: a transfer that will hold the rest of its
+            // body is one `reset` lets go, whichever of the two comes first.
+            if let stub = state.stub, stub.chunk > 0 {
+                state.holding.append(letGo)
+                let mine = state.round
+                round.withLock { $0 = mine }
+            }
             return (state.stub, request)
         }
 
@@ -309,22 +344,20 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         DispatchQueue.global().async { [weak self] in self?.pace(stub) }
     }
 
-    /// Hands the body over a chunk at a time, stopping the moment the task is torn down, so a
-    /// refusal part-way through a transfer is the same shape here as it is over a socket.
+    /// Hands half the body over a chunk at a time, stopping the moment the task is torn down,
+    /// so a refusal part-way through a transfer is the same shape here as it is over a socket.
+    /// The other half is never sent: it is held until the transfer is torn down (`Stub.chunk`).
     private func pace(_ stub: Stub) {
         var sent = 0
-        while sent < stub.body.count {
+        while sent < stub.body.count / 2 {
             if stopped.withLock({ $0 }) { return }
-            let end = min(sent + stub.chunk, stub.body.count)
+            let end = min(sent + stub.chunk, stub.body.count / 2)
             let piece = stub.body[sent..<end]
             Self.state.withLock { $0.delivered += piece.count }
             client?.urlProtocol(self, didLoad: Data(piece))
             sent = end
-            Thread.sleep(forTimeInterval: 0.01)
         }
-        if !stopped.withLock({ $0 }) {
-            client?.urlProtocolDidFinishLoading(self)
-        }
+        letGo.wait()
     }
 
     /// True once, for the first request only, so a followed redirect is served rather than bounced
@@ -338,6 +371,12 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {
-        stopped.withLock { $0 = true }
+        let already = stopped.withLock { was -> Bool in
+            defer { was = true }
+            return was
+        }
+        guard !already, let mine = round.withLock({ $0 }) else { return }
+        Self.state.withLock { if $0.round == mine { $0.tornDown += 1 } }
+        letGo.signal()
     }
 }

@@ -112,6 +112,9 @@ enum PackagerFixture {
         readsWithoutAccount: true, rules: ["be kind"], asOf: nil
     )
 
+    /// Where a test's package is written: a file of its own name, **directly in the temporary
+    /// directory** — the folder above it is every test's, and every other program's. A test
+    /// removes the file and never that folder (`ScratchIsOnesOwnTests`).
     static func package() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("fediqo-\(UUID().uuidString).fdq")
     }

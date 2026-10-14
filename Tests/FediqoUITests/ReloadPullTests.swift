@@ -13,7 +13,7 @@ import AppKit
 /// directly. A pull and a press are then each made on a session of their own, against the same
 /// answers, and what each asked for is compared: the pull is the press, so they are the same.
 /// The pull itself — a finger on a list — is not reached from here.
-@Suite("Pulling a timeline down reads it again, and a read can be stopped", .serialized)
+@Suite("Pulling a timeline down reads it again, and a read can be stopped", .serialized, .watched)
 @MainActor
 struct ReloadPullTests {
     @Test("The mark is absent where a reload is not offered, Stop while one the reader pressed for runs, and the reload mark otherwise")
@@ -42,22 +42,26 @@ struct ReloadPullTests {
     @Test("A pull is the press and then the wait, every time — the press itself takes a second one of the same read and does nothing; where no reload is offered a pull does neither")
     func whatAPullDoes() async {
         var pressed = 0, waited = 0
-        await PullsToReload.pull(offered: true, reload: { pressed += 1 }, settled: { waited += 1 })
-        #expect(pressed == 1 && waited == 1)
-        await PullsToReload.pull(offered: false, reload: { pressed += 1 }, settled: { waited += 1 })
+        // What the pull gives its press before it waits is kept, and not slept.
+        var leads: [Duration] = []
+        await PullsToReload.pull(offered: true, reload: { pressed += 1 }, settled: { waited += 1 }) { leads.append($0) }
+        #expect(pressed == 1 && waited == 1 && leads == [PullsToReload.lead])
+        await PullsToReload.pull(offered: false, reload: { pressed += 1 }, settled: { waited += 1 }) { leads.append($0) }
         #expect(pressed == 1 && waited == 1, "not offered, a pull's spinner comes and goes")
+        #expect(leads.count == 1, "and it waits for nothing")
         // A second pull while the first read runs presses again, and the press starts nothing.
         let http = FixtureHTTP(Self.routes)
         let session = session(http)
         session.reload.press(thread: nil, timeline: .all, in: session)
         session.reload.press(thread: nil, timeline: .all, in: session)
-        await session.reload.settled(.timeline)
-        _ = await spun { session.reload.landed > 0 || !session.reload.failed.isEmpty }
+        // No `by:` in this suite's waits on a press: its read is a task of the press's own
+        // making, which nothing out here can name.
+        await met("the reload pressed for twice has ended") { Self.ended(session) }
         await session.reload.settled(.timeline)
         let once = FixtureHTTP(Self.routes)
         let single = self.session(once)
         single.reload.press(thread: nil, timeline: .all, in: single)
-        _ = await spun { single.reload.landed > 0 || !single.reload.failed.isEmpty }
+        await met("the reload pressed for once has ended") { Self.ended(single) }
         await single.reload.settled(.timeline)
         let twice = await http.paths, one = await once.paths
         #expect(!one.isEmpty && twice == one, "two presses asked \(twice), one asks \(one)")
@@ -187,21 +191,38 @@ struct ReloadPullTests {
 
     private static let routes: [String: FixtureHTTP.Outcome] = ["/api/v1/timelines/public": .text("[]")]
 
+    /// Whether a timeline's reload has come to its end here, read or not.
+    private static func ended(_ session: ShellSession) -> Bool {
+        session.reload.landed > 0 || !session.reload.failed.isEmpty
+    }
+
     @Test("A pull and a press on the reload mark ask the same things of the same source, in the same order")
     func aPullIsThePress() async throws {
         let pressedHTTP = FixtureHTTP(Self.routes)
         let pressed = session(pressedHTTP)
         pressed.reload.press(thread: nil, timeline: .all, in: pressed)
-        #expect(await spun { pressed.reload.landed > 0 || !pressed.reload.failed.isEmpty })
+        await met("the pressed reload has ended") { Self.ended(pressed) }
         await pressed.reload.settled(.timeline)
 
         let pulledHTTP = FixtureHTTP(Self.routes)
         let pulled = session(pulledHTTP)
-        await PullsToReload.pull(
-            offered: true,
-            reload: { pulled.reload.press(thread: nil, timeline: .all, in: pulled) },
-            settled: { await pulled.reload.settled(.timeline) }
-        )
+        // What the pull gives its press, turned here once the press has begun its read: the
+        // pull then waits for a read that is there to wait for, on any machine.
+        let lead = TurnedClock()
+        let pulling = Task {
+            await PullsToReload.pull(
+                offered: true,
+                reload: { pulled.reload.press(thread: nil, timeline: .all, in: pulled) },
+                settled: { await pulled.reload.settled(.timeline) { _ in await Task.yield() } },
+                sleep: lead.sleep
+            )
+        }
+        await met("the pull has pressed, and its press has begun its read", by: pulling) {
+            lead.sleeping == 1 && (pulled.reload.stoppable || Self.ended(pulled))
+        }
+        #expect(lead.asked == [PullsToReload.lead])
+        lead.turn()
+        await pulling.value
         #expect(!pulled.reload.stoppable, "the pull returned when its reload had ended")
         let asked = await pressedHTTP.paths, askedByPull = await pulledHTTP.paths
         #expect(!asked.isEmpty, "the press asked for something")
@@ -217,7 +238,7 @@ struct ReloadPullTests {
 
         let held = session(FixtureHTTP(Self.routes))
         held.reload.press(thread: nil, timeline: .all, in: held)
-        #expect(await spun { held.reload.stoppable })
+        await met("the pressed reload is running") { held.reload.stoppable }
         let waiting = Task { await held.reload.settled(.timeline) }
         #expect(held.reload.stop(), "there was something to stop")
         await waiting.value
@@ -228,29 +249,39 @@ struct ReloadPullTests {
     @Test("A wait whose list has gone ends with it, though the reload runs on")
     func theWaitIsCancelled() async {
         let reload = ShellReload()
-        let asked = Task { await reload.run(.timeline) { try? await Task.sleep(for: .seconds(30)) } }
-        #expect(await spun { reload.stoppable })
-        final class Flag: @unchecked Sendable { var done = false }
-        let flag = Flag()
-        let waiting = Task {
-            await reload.settled(.timeline)
-            flag.done = true
+        let running = Gate()
+        let guardTask = watching(running, "the reload that is to run on")
+        defer { guardTask.cancel() }
+        let asked = Task { await reload.run(.timeline) { await running.wait() } }
+        await met("the reload is running", by: asked) { reload.stoppable }
+        // The wait's own clock, turned here: asleep on it is a look that was made and found the
+        // read running, and turned, it looks again — so "still waiting" is two looks that both
+        // found it so, and not a stretch of time in which nothing was seen to happen.
+        let clock = TurnedClock()
+        let waiting = Task { await reload.settled(.timeline, sleep: clock.sleep) }
+        await met("the wait has looked, and found the reload running", by: waiting) { clock.sleeping == 1 }
+        clock.turn()
+        await met("the wait has looked again, and found it running still", by: waiting) {
+            clock.asked.count == 2 && clock.sleeping == 1
         }
-        try? await Task.sleep(for: .milliseconds(250))
-        #expect(!flag.done, "while the reload runs, the wait is still waiting")
+        #expect(clock.asked == [ShellReload.look, ShellReload.look])
         waiting.cancel()
         await waiting.value
         #expect(reload.stoppable, "the reload itself was not stopped by it")
-        // And a wait for another read than the one running is over at once.
-        let other = Flag()
+        // And a wait for another read than the one running is over at once: over without ever
+        // having slept. One that did wait would be asleep on its clock, and is told apart.
+        final class Flag: @unchecked Sendable { var done = false }
+        let over = Flag()
+        let other = TurnedClock()
         let waitingForThread = Task {
-            await reload.settled(.thread)
-            other.done = true
+            await reload.settled(.thread, sleep: other.sleep)
+            over.done = true
         }
-        try? await Task.sleep(for: .milliseconds(250))
-        #expect(other.done, "a conversation's pull does not wait for a timeline's read")
+        await met("a conversation's wait is over, or asleep", by: waitingForThread) { over.done || other.sleeping == 1 }
+        #expect(over.done && other.asked.isEmpty, "a conversation's pull does not wait for a timeline's read")
         waitingForThread.cancel()
         _ = reload.stop()
+        await running.open()
         asked.cancel()
     }
 

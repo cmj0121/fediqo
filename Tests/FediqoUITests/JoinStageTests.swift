@@ -11,7 +11,7 @@ import Testing
 /// the reader, and a press they abandoned springing the sheet back open behind them. Both are
 /// below, and both were unreachable before this unit.
 @MainActor
-@Suite("Two-stage subscribe")
+@Suite("Two-stage subscribe", .watched)
 struct JoinStageTests {
     private static let forum = "install-c.example"
     /// A second forum, for the tests about a look replacing a look.
@@ -116,14 +116,14 @@ struct JoinStageTests {
     /// that `pageWaiting` reads as *nobody is waiting*. `checking` is now `progress != nil` and
     /// there is no such state to spell, so the errand here is a real one: a look parked on the
     /// forum's front page while Subscribe is pressed underneath it.
-    @Test("Subscribe does nothing while a press is already in flight", .timeLimit(.minutes(3)))
+    @Test("Subscribe does nothing while a press is already in flight")
     func confirmIsRefusedWhileChecking() async {
         // The front page is held, which is a Discuz! look's **first** request — so the look parks
         // before it has a preview to hand back, and Subscribe is pressed with an errand genuinely
         // on the wire. (Holding the index instead parks the same look one request later: a look
         // reads the front page and the index, so both are inside it.)
         let http = GatedHTTP(Self.forumRoutes(), holding: "/")
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the look, held on the forum's front page")
         defer { watchdog.cancel() }
         let session = ShellSession(http: http, store: ItemStore())
         session.hostname = Self.forum
@@ -133,7 +133,7 @@ struct JoinStageTests {
         // and a count read at that moment is read too early — which is how the first cut of this
         // rewrite compared 1 against a 0 it had captured a hop too soon.
         let look = Task { await session.add() }
-        #expect(await spun { await http.asks == 1 }, "the look never reached the wire")
+        await met("the look is on the wire", by: look) { await http.asks == 1 }
 
         await session.confirm()
         #expect(await http.asks == 1, "a second press reached the forum")
@@ -152,16 +152,13 @@ struct JoinStageTests {
     /// the index probe landed, a look and a press both want `/forum.php`, and a gate on it would
     /// stop the look this test is not about. A preview carrying no boards is what a forum that
     /// turned the reader away leaves behind, and it is exactly the preview whose press reads.
-    @Test(
-        "A sheet swiped away mid-press does not spring back when the boards arrive",
-        .timeLimit(.minutes(3))
-    )
+    @Test("A sheet swiped away mid-press does not spring back when the boards arrive")
     func anAbandonedPressDoesNotReopenTheSheet() async {
         let http = GatedHTTP(Self.forumRoutes(), holding: "https://\(Self.forum)/forum.php")
         let session = ShellSession(http: http, store: ItemStore())
         // **Armed before anything can await, which is the half that is easy to get wrong.**
         // Nothing but this test releases the gate, so any call that comes to want this address
-        // parks for ever — and `.timeLimit` does not rescue a task held on a `CheckedContinuation`
+        // parks for ever — and nothing else rescues a task held on a `CheckedContinuation`
         // (`ClearTests` records that), so the watchdog is the load-bearing half. Placed here
         // rather than beside the press because a watchdog created *after* the hang site never
         // runs: verified by re-creating the deadlock, which hung for 200 seconds with the
@@ -169,7 +166,7 @@ struct JoinStageTests {
         //
         // Not hypothetical: the index probe made `look` want the forum's index, and the first cut
         // of it deadlocked exactly this way.
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the press, held on the forum's index")
         defer { watchdog.cancel() }
 
         session.hostname = Self.forum
@@ -183,7 +180,7 @@ struct JoinStageTests {
 
         let press = Task { await session.confirm() }
         // The press is parked on the index. The reader leaves.
-        #expect(await spun { session.checking }, "the press never reached the wire")
+        await met("the press has claimed the errand", by: press) { session.checking }
         session.dismissStage()
         await http.gate.open()
         await press.value
@@ -198,10 +195,7 @@ struct JoinStageTests {
     /// while it was in flight has joined that server whether or not they are still looking at the
     /// sheet. Refusing the whole answer would leave it added and invisible — the list disagreeing
     /// with the store until something else happened to refresh it.
-    @Test(
-        "A join that finished behind a dismissed sheet still reaches the list",
-        .timeLimit(.minutes(3))
-    )
+    @Test("A join that finished behind a dismissed sheet still reaches the list")
     func anAbandonedJoinIsStillAdopted() async {
         let http = GatedHTTP([
             "/": .text(#"""
@@ -219,7 +213,7 @@ struct JoinStageTests {
         let session = ShellSession(http: http, store: ItemStore())
         // **Armed before anything can await, which is the half that is easy to get wrong.**
         // Nothing but this test releases the gate, so any call that comes to want this address
-        // parks for ever — and `.timeLimit` does not rescue a task held on a `CheckedContinuation`
+        // parks for ever — and nothing else rescues a task held on a `CheckedContinuation`
         // (`ClearTests` records that), so the watchdog is the load-bearing half. Placed here
         // rather than beside the press because a watchdog created *after* the hang site never
         // runs: verified by re-creating the deadlock, which hung for 200 seconds with the
@@ -227,14 +221,14 @@ struct JoinStageTests {
         //
         // Not hypothetical: the index probe made `look` want the forum's index, and the first cut
         // of it deadlocked exactly this way.
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the join, held on the public timeline")
         defer { watchdog.cancel() }
 
         session.hostname = "first.example"
         await session.add()
 
         let press = Task { await session.confirm() }
-        #expect(await spun { session.checking }, "the press never reached the wire")
+        await met("the press has claimed the errand", by: press) { session.checking }
         session.dismissStage()
         await http.gate.open()
         await press.value
@@ -400,7 +394,8 @@ struct JoinStageTests {
         session.chooseProtocol(.mastodon)
         #expect(session.stage == .browsingServers(.mastodon))
         // `chooseProtocol` starts the load rather than awaiting it, so the step is up at once.
-        while await http.paths.isEmpty { await Task.yield() }
+        // No `by:`: the load is a task the press starts for itself.
+        await met("the directory is asked for its servers") { await !http.paths.isEmpty }
         #expect(await http.paths == ["/servers"])
     }
 
@@ -483,18 +478,14 @@ struct JoinStageTests {
     /// started a second request to the same third party and decoded the whole directory twice.
     /// Reachable only once the browser had two steps, since `browse()` is refused while a sheet is
     /// up and could not be pressed twice.
-    @Test(
-        "Stepping back and forward between the two steps asks the directory once",
-        .timeLimit(.minutes(3))
-    )
+    @Test("Stepping back and forward between the two steps asks the directory once")
     func steppingBackAndForwardAsksTheDirectoryOnce() async {
         let http = GatedHTTP(["/servers": .text(#"""
         [{"domain": "first.example", "description": "The flagship server"}]
         """#)], holding: "/servers")
         // Armed before anything can await, for the reason the other gated tests give: nothing but
-        // this test releases the gate, and `.timeLimit` does not rescue a task parked on a
-        // continuation.
-        let watchdog = hangGuard(http.gate)
+        // this test releases the gate, and nothing else rescues a task parked on a continuation.
+        let watchdog = watching(http.gate, "the directory's answer, held on the wire")
         defer { watchdog.cancel() }
 
         let session = ShellSession(http: http, store: ItemStore())
@@ -508,12 +499,8 @@ struct JoinStageTests {
         // one request was made *for the wrong reason*. Neutered, it passed one full-suite run in
         // four: a pin that looks present and is not, which is the shape this branch has spent four
         // incidents on.
-        var parked = false
-        for _ in 0..<100_000 {
-            if await http.asks == 1 { parked = true; break }
-            await Task.yield()
-        }
-        #expect(parked, "the premise: the first fetch never reached the wire")
+        // No `by:` in this check's waits: each fetch is a task the press starts for itself.
+        await met("the premise: the first fetch is on the wire") { await http.asks == 1 }
 
         session.backToProtocols()
         session.chooseProtocol(.mastodon)
@@ -525,6 +512,8 @@ struct JoinStageTests {
         // 10_000 yields: the second press's `Task` needs only to be *scheduled* to reach the
         // request, so this is generous by orders of magnitude while costing a fraction of a
         // second. Verified by neutering `fetchingCatalog` — it trips within the first few.
+        // Counted turns, behind the wait above: a press that is refused is a task of the
+        // session's own that leaves nothing behind to say it has run.
         var second = false
         for _ in 0..<10_000 {
             if await http.asks > 1 { second = true; break }
@@ -540,8 +529,7 @@ struct JoinStageTests {
         // And the one fetch that was made still lands, so the reader's second press leaves them
         // looking at the directory rather than at a `.loading` that nothing will ever finish.
         await http.gate.open()
-        #expect(await spun { if case .ready = session.catalog { true } else { false } },
-                "the one fetch was refused as well as the second, and nothing answered")
+        await met("the one fetch that was made has landed") { if case .ready = session.catalog { true } else { false } }
         #expect(await http.asks == 1, "a third request arrived once the gate opened")
     }
 
@@ -1406,8 +1394,8 @@ struct JoinStageTests {
         let http = GatedHTTP(routes, holding: board)
         let session = ShellSession(http: http, store: ItemStore())
         // Armed before anything awaits, for the reason the two tests above give: nothing else
-        // releases this gate, and `.timeLimit` does not rescue a task held on a continuation.
-        let watchdog = hangGuard(http.gate)
+        // releases this gate, and nothing else rescues a task held on a continuation.
+        let watchdog = watching(http.gate, "the pick's board, held on the wire")
         defer { watchdog.cancel() }
 
         session.hostname = Self.forum
@@ -1419,7 +1407,7 @@ struct JoinStageTests {
         }
 
         let press = Task { await session.subscribe(offer.boards.filter { $0.fid == 33 }) }
-        #expect(await spun { session.checking }, "the pick never reached the wire")
+        await met("the pick has claimed the errand", by: press) { session.checking }
 
         // The reader presses Remove while the boards are being read one at a time.
         await session.remove(host: Self.forum)
@@ -1446,25 +1434,21 @@ struct JoinStageTests {
     /// written the source back behind `store.remove`, and the stale-token branch that takes it
     /// back was never taken.
     ///
-    /// **The main actor is held on purpose, and that is what makes the window reachable.** Remove
-    /// is let run to its first await and then the test body sits on the main actor, without
-    /// yielding, while a detached task watches the store: once `store.remove` has run it opens the
-    /// gate, and once Core has written the forum back it lets go. By then remove's own
-    /// continuation and the subscribe's are both queued behind this body, remove's first — so the
-    /// subscribe resumes with `remove` still mid-flight, which is the whole of the bug. The grace
-    /// before letting go is for the subscribe's continuation to be queued at all; a run where it
-    /// is late passes on the fixed code and merely stops discriminating on the broken one.
-    @Test(
-        "A board read that lands while Remove is still running does not bring the server back",
-        .timeLimit(.minutes(3))
-    )
+    /// **Remove is held mid-flight on purpose, and that is what makes the window reachable.** It
+    /// waits for the store to be written down right after `store.remove`, with every other await
+    /// of its own still ahead, and the write is this check's to hold. With Remove parked there the
+    /// board's gate is opened, Core writes the forum back — the store's own word for which
+    /// sources it holds is what says so — and the subscribe runs to its end, reading its token
+    /// with `remove` provably still running, which is the whole of the bug. Only then is the
+    /// write let go. No order is left to a scheduler, and nothing here waits by a clock.
+    @Test("A board read that lands while Remove is still running does not bring the server back")
     func aSubscribeLandingMidRemoveStaysRemoved() async {
         let board = "https://\(Self.forum)/forum.php?mod=forumdisplay&fid=33&filter=author&orderby=dateline"
         var routes = Self.forumRoutes()
         routes[board] = .text(Self.oneBoard)
         let http = GatedHTTP(routes, holding: board)
         let session = ShellSession(http: http, store: ItemStore())
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the pick's board, held on the wire")
         defer { watchdog.cancel() }
 
         session.hostname = Self.forum
@@ -1476,40 +1460,43 @@ struct JoinStageTests {
         }
 
         let press = Task { await session.subscribe(offer.boards.filter { $0.fid == 33 }) }
-        #expect(await spun { await http.reached }, "the pick never reached the wire")
+        await met("the pick's board is on the wire", by: press) { await http.reached }
         // Something of the forum's in the store, so "`store.remove` has run" is a thing the
-        // watcher below can see.
+        // store says of itself below.
         let store = session.store
         await store.add(Source(host: Self.forum, kind: .discuz))
+        let heard = HostsHeard()
+        await store.watchSources { heard.add($0) }
 
-        let forum = Self.forum
-        let gate = http.gate
-        let landed = DispatchSemaphore(value: 0)
-        Task.detached {
-            while await store.sources().contains(where: { $0.host == forum }) { await Task.yield() }
-            await gate.open()
-            while await !store.all().contains(where: { $0.source.host == forum }) { await Task.yield() }
-            try? await Task.sleep(for: .milliseconds(100))
-            landed.signal()
+        // Remove's write of the store, held: `store.remove` is behind it and the rest is ahead.
+        let writing = Gate()
+        let writingGuard = watching(writing, "Remove, held at its write of the store")
+        defer { writingGuard.cancel() }
+        final class Writes { var asked = 0 }
+        let writes = Writes()
+        session.persist = {
+            writes.asked += 1
+            if writes.asked == 1 { await writing.wait() }
+            return true
         }
 
         let removal = Task { await session.remove(host: Self.forum) }
-        // Remove runs to its first await; this body resumes behind it.
-        await Task.yield()
-        #expect(Self.hold(until: landed), "Core never wrote the forum back")
-        await removal.value
+        await met("Remove is held at its write, the store's own remove behind it", by: removal) { writes.asked == 1 }
+        #expect(heard.all.last == [], "the premise: `store.remove` has run")
+        let removed = heard.all.count
+
+        // The board's read lands and the subscribe ends, all of it with Remove still running.
+        await http.gate.open()
         await press.value
+        #expect(heard.all.dropFirst(removed).contains([Self.forum]), "Core never wrote the forum back")
+        #expect(session.storeHeldStill, "the premise: Remove was still running when the subscribe ended")
+        await writing.open()
+        await removal.value
 
         #expect(session.sources.isEmpty, "the subscribe put back a server removed around it")
         #expect(await store.sources().isEmpty, "the store kept what the list let go of")
         #expect(await store.all().isEmpty, "its threads came back with it")
         #expect(session.unread.isEmpty, "a sentence was left about a server that is gone")
-    }
-
-    /// Blocks the caller — the main actor, here — until `signal` or ten seconds. Synchronous on
-    /// purpose, so no continuation queued behind it can run until it returns.
-    private static func hold(until signal: DispatchSemaphore) -> Bool {
-        signal.wait(timeout: .now() + 10) == .success
     }
 
     /// The other side of the same token: **a Remove of a *different* server must not abandon this
@@ -1529,7 +1516,7 @@ struct JoinStageTests {
         routes[board] = .text(Self.oneBoard)
         let http = GatedHTTP(routes, holding: board)
         let session = ShellSession(http: http, store: ItemStore())
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the pick's board, held on the wire")
         defer { watchdog.cancel() }
 
         await session.store.add(Source(host: "elsewhere.example", kind: .mastodon))
@@ -1544,7 +1531,7 @@ struct JoinStageTests {
         }
 
         let press = Task { await session.subscribe(offer.boards.filter { $0.fid == 33 }) }
-        #expect(await spun { session.checking }, "the pick never reached the wire")
+        await met("the pick has claimed the errand", by: press) { session.checking }
 
         // Somebody else's server goes, while this errand is about the forum and parked on a board.
         await session.remove(host: "elsewhere.example")
@@ -1607,7 +1594,7 @@ struct JoinStageTests {
             "/api/v1/timelines/public": .text("[]"),
             "/api/v1/trends/statuses": .text("[]"),
         ], holding: "/api/v1/timelines/public")
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the resumed join, held on the public timeline")
         defer { watchdog.cancel() }
 
         let session = ShellSession(http: http, store: ItemStore())
@@ -1624,12 +1611,7 @@ struct JoinStageTests {
         // **Parked on the *take*, not merely `checking`.** The resumed press is a look and then a
         // take with no await between them, and both set `checking` — so spinning on that alone
         // would assert against the look, where the owner is `.page` for an unrelated reason.
-        var landed = false
-        for _ in 0..<100_000 {
-            if await http.reached { landed = true; break }
-            await Task.yield()
-        }
-        #expect(landed, "the resumed press never reached the timeline")
+        await met("the resumed press is parked on the timeline", by: press) { await http.reached }
 
         #expect(session.progressHost == second)
         #expect(session.progress?.owner == .page, """
@@ -1661,7 +1643,7 @@ struct JoinStageTests {
             "/api/v1/timelines/public": .text("[]"),
             "/api/v1/trends/statuses": .text("[]"),
         ], holding: "/api/v1/timelines/public")
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the join, held on the public timeline")
         defer { watchdog.cancel() }
 
         let session = ShellSession(http: http, store: ItemStore())
@@ -1670,7 +1652,7 @@ struct JoinStageTests {
         await session.add()
 
         let press = Task { await session.confirm() }
-        #expect(await spun { session.checking }, "the press never reached the wire")
+        await met("the press has claimed the errand", by: press) { session.checking }
         // The block owns it while the block is there.
         #expect(pane.blockWaiting != nil)
         #expect(pane.pageWaiting == nil)
@@ -1720,7 +1702,7 @@ struct JoinStageTests {
             "/api/v1/timelines/public": .text("[]"),
             "/api/v1/trends/statuses": .text("[]"),
         ], holding: "/api/v1/timelines/public")
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the join, held on the public timeline")
         defer { watchdog.cancel() }
 
         let session = ShellSession(http: http, store: ItemStore())
@@ -1740,7 +1722,7 @@ struct JoinStageTests {
             """)
 
         let press = Task { await session.confirm() }
-        #expect(await spun { session.checking }, "the press never reached the wire")
+        await met("the press has claimed the errand", by: press) { session.checking }
 
         #expect(session.stage?.surface == .pane, "a sheet came up over the press mid-flight")
         #expect(session.progress?.owner == .block, """
@@ -1809,4 +1791,14 @@ struct JoinStageTests {
         #expect(!session.checking, "the detail stands over a request still on the wire")
         #expect(session.progress == nil, "a sentence outlived the press that opened the detail")
     }
+}
+
+/// Which sources a store said it held, each time it said so. Told inside the store's own actor,
+/// so in the order the changes were made.
+private final class HostsHeard: @unchecked Sendable {
+    private let lock = NSLock()
+    private var said: [[String]] = []
+
+    var all: [[String]] { lock.withLock { said } }
+    func add(_ hosts: [String]) { lock.withLock { said.append(hosts) } }
 }

@@ -14,7 +14,7 @@ import WebKit
 /// source asked, or when, is pinned here: the run's record, the network stack's cache and cookie
 /// jar, the forum browser's store, the preferences, and the system's log.
 @MainActor
-@Suite("Nothing of where a run went is left behind")
+@Suite("Nothing of where a run went is left behind", .watched)
 struct LeftBehindTests {
     private static let root = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -144,6 +144,8 @@ struct LeftBehindTests {
             await store.httpCookieStore.setCookie(ForumDeviceStoreTests.cookie(name, domain: domain))
         }
         let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
+        // The limits, on a clock nobody turns: a sweep that is slow is not left behind by one.
+        forums.limitSleep = TurnedClock().sleep
         _ = forums.dataStore
         await forums.dropCache(within: .seconds(5))
         #expect(await store.httpCookieStore.allCookies().count == 6, "going to the background keeps every cookie")
@@ -163,19 +165,34 @@ struct LeftBehindTests {
         untouched.sweepAtLaunch(keeping: ["bbs.example.org"], onDisk: false, within: .seconds(5))
         #expect(untouched.sweeping == nil, "no store on disk, none opened")
         let forums = ForumSessions(credentials: MemoryCredentials(), dataStore: store)
+        // The limit, on a clock nobody turns: a sweep that is slow is not left behind by it.
+        forums.limitSleep = TurnedClock().sleep
         forums.sweepAtLaunch(keeping: ["bbs.example.org"], onDisk: true, within: .seconds(5))
         #expect(forums.engine(host: "bbs.example.org").sweeping != nil, "a page waits for the sweep too")
         await forums.sweeping?.value
         #expect(Set(await store.httpCookieStore.allCookies().map(\.name)) == ["x7Kq_2132_auth"])
     }
 
-    @Test("A sweep that does not answer is left behind at its limit", .timeLimit(.minutes(3)))
+    @Test("A sweep that does not answer is left behind at its limit")
     func theSweepIsBounded() async {
         let finished = OSAllocatedUnfairLock(initialState: false)
-        await ForumSessions.bounded(.milliseconds(50)) {
-            try? await Task.sleep(for: .seconds(30))
-            finished.withLock { $0 = true }
+        // The store that never answers, and the limit on a clock turned by hand.
+        let gate = Gate()
+        let guardTask = watching(gate, "the sweep that does not answer")
+        defer { guardTask.cancel() }
+        defer { Task { await gate.open() } }
+        let clock = TurnedClock()
+        let limit: Duration = .milliseconds(4_321)
+        let quit = Task {
+            await ForumSessions.bounded(limit, sleep: clock.sleep) {
+                await gate.wait()
+                finished.withLock { $0 = true }
+            }
         }
+        await met("the limit is being waited on", by: quit) { clock.sleeping == 1 }
+        #expect(clock.asked == [limit], "the limit it was handed, and nothing else")
+        clock.turn()
+        await quit.value
         #expect(!finished.withLock { $0 }, "the quit waited for a store that never answered")
     }
 

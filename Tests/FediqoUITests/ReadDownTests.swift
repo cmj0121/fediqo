@@ -11,7 +11,7 @@ import Testing
 /// and the press let a settled place go and count it. What it cannot: the row drawn in light and
 /// dark on a Mac and a phone, a finger or VoiceOver on it.
 @MainActor
-@Suite("A place where posts may be missing reads down when reached")
+@Suite("A place where posts may be missing reads down when reached", .watched)
 struct ReadDownTests {
     private static let one = "one.example"
     private static let source = Source(host: one, kind: .mastodon)
@@ -39,6 +39,8 @@ struct ReadDownTests {
             http: server, store: store,
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: ActServer([:]))
         )
+        // A read's deadline, on a clock nobody turns: a read held at the gate is not ended by one.
+        session.deadlineSleep = TurnedClock().sleep
         await session.reloadFromStore()
         await server.post(11...60)
         await server.keep(from: 31)
@@ -110,15 +112,18 @@ struct ReadDownTests {
         await server.post(1...30)
         let asked = await server.cursors.filter { $0 == "max_id=31" }.count
         await server.hold("max_id=1")
-        let guardTask = hangGuard(server.gate)
+        let guardTask = watching(server.gate, "the ask for more, held on the wire")
         defer { guardTask.cancel() }
         let more = Task { await session.reload.more(.all, in: session) }
-        #expect(await spun { await server.parked == 1 })
+        await met("the ask for more is held on the wire", by: more) { await server.parked == 1 }
         await session.reload.readDown(Self.stretch, below: Self.key(31), in: session)
         #expect(session.reload.asking == [.more], "not dropped, and not beside the other")
         await server.gate.open()
         await more.value
-        #expect(await spun { marks(session).isEmpty && session.reload.asking.isEmpty }, "read down once that one ended")
+        // No `by:`: the place kept is read by a task the reload starts for itself.
+        await met("the place is read down once the ask for more ended") {
+            marks(session).isEmpty && session.reload.asking.isEmpty
+        }
         #expect(await server.cursors.filter { $0 == "max_id=31" }.count == asked + 1, "once")
     }
 

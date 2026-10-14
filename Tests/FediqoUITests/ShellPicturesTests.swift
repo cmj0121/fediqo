@@ -19,7 +19,7 @@ import FediqoPersistence
 /// anything, so exceeding the contract is the only way to reach the branch under test. Saying so
 /// at the call site is the point — an exemption that has to be typed is one a reviewer can see.
 @MainActor
-@Suite("Pictures")
+@Suite("Pictures", .watched)
 struct ShellPicturesTests {
     private let mb = 1024 * 1024
 
@@ -89,24 +89,6 @@ struct ShellPicturesTests {
         }
     }
 
-    /// A barrier a test opens by hand. `opened` is checked **before** waiting, so a caller that
-    /// arrives after the gate is open does not park on a continuation nobody will resume.
-    private actor Gate {
-        private var waiting: [CheckedContinuation<Void, Never>] = []
-        private var opened = false
-
-        func wait() async {
-            guard !opened else { return }
-            await withCheckedContinuation { waiting.append($0) }
-        }
-
-        func open() {
-            opened = true
-            for continuation in waiting { continuation.resume() }
-            waiting = []
-        }
-    }
-
     /// Holds every request open until the gate is opened, so "these fetches were all still in the
     /// air" is a fact the test arranges rather than a race it hopes to win.
     ///
@@ -118,30 +100,18 @@ struct ShellPicturesTests {
         private let png: Data?
         private let gate: Gate
 
-        private var awaited: Int?
-        private var arrival: CheckedContinuation<Void, Never>?
-
         init(png: Data?, gate: Gate) {
             self.png = png
             self.gate = gate
         }
 
-        /// Returns once `n` requests are simultaneously parked at the gate. A barrier rather than
-        /// a sleep: on a starved machine this takes longer and still means the same thing.
-        func whenHolding(_ n: Int) async {
-            guard current < n else { return }
-            awaited = n
-            await withCheckedContinuation { arrival = $0 }
-        }
+        /// How many requests are parked at the gate now. What a check waits on: a barrier rather
+        /// than a sleep, so on a starved machine it takes longer and still means the same thing.
+        var held: Int { current }
 
         func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
             current += 1
             peak = max(peak, current)
-            if let target = awaited, current >= target, let waiter = arrival {
-                awaited = nil
-                arrival = nil
-                waiter.resume()
-            }
             await gate.wait()
             current -= 1
             guard let png else {
@@ -521,6 +491,8 @@ struct ShellPicturesTests {
         // it, the cache never overflows, and nothing is declined. Measured 4 red in 14 runs under
         // a 12-way load. A timing stand-in for a barrier is the same defect as a bounded spin.
         let gate = Gate()
+        let guardTask = watching(gate, "the fetches, held on the wire")
+        defer { guardTask.cancel() }
         let holding = Holding(png: png, gate: gate)
         let queued = ShellPictures(http: holding, enforcingViewerContract: false)
 
@@ -536,15 +508,15 @@ struct ShellPicturesTests {
             queued.order.isEmpty,
             "a fetch landed while passes were still being commissioned; they did not overlap"
         )
+        // Every one of them is held, at the gate or behind those that are, so the first stands
+        // for them all: it cannot have ended while the gate is shut.
+        await met("as many fetches as may be in the air are held at the gate", by: outstanding[0]) {
+            await holding.held >= ShellPictures.maxInFlight
+        }
         #expect(await holding.peak == ShellPictures.maxInFlight)
-
-        let rescued = Signal()
-        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
 
         await gate.open()
         for task in outstanding { await task.value }
-        watchdog.cancel()
-        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
 
         // The same screen with nothing to wait for, each pass drained before the next.
         let direct = ShellPictures(http: Counting(png: png), enforcingViewerContract: false)
@@ -943,7 +915,7 @@ struct ShellPicturesTests {
 
     // MARK: I6 — how much can be in the air at once
 
-    /// Both halves structurally rather than by timing. `whenHolding` returns only once the gate
+    /// Both halves structurally rather than by timing. The wait on `held` ends only once the gate
     /// has admitted everything it will ever admit at once, so the lower bound is a fact this test
     /// waits for; the upper bound is then whatever the counter reached across the whole run.
     ///
@@ -953,6 +925,8 @@ struct ShellPicturesTests {
     @Test("No more than a handful of bodies are ever resident at once")
     func boundedInFlight() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the fetches, held on the wire")
+        defer { guardTask.cancel() }
         let http = Holding(png: try picture(width: 32, height: 32, bits: 8), gate: gate)
         let cache = ShellPictures(http: http)
 
@@ -965,18 +939,14 @@ struct ShellPicturesTests {
             })
         }
 
-        let rescued = Signal()
-        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
-
         // Twenty-four asked for at once, and exactly `maxInFlight` are ever held at once.
-        await http.whenHolding(ShellPictures.maxInFlight)
+        await met("as many fetches as may be in the air are held at the gate", by: started[0]) {
+            await http.held >= ShellPictures.maxInFlight
+        }
         #expect(await http.peak == ShellPictures.maxInFlight)
 
         await gate.open()
         for task in started { await task.value }
-        watchdog.cancel()
-
-        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
         #expect(await http.peak == ShellPictures.maxInFlight)
         #expect(cache.inFlight.isEmpty)
     }
@@ -1386,7 +1356,7 @@ struct ShellPicturesTests {
     /// What Clear is for, end to end and from the reader's side: a server whose avatar was
     /// written off is asked about again once they have cleared it, where before the Clear it was
     /// not. Without the second sweep in `forget(host:)` the second fetch never reaches the client.
-    @Test("An address written off for a cleared server is asked for again", .timeLimit(.minutes(3)))
+    @Test("An address written off for a cleared server is asked for again")
     func aClearedSourceIsAskedAgain() async throws {
         let http = Counting(png: try picture(width: 32, height: 32, bits: 8))
         let cache = ShellPictures(http: http)
@@ -1406,20 +1376,19 @@ struct ShellPicturesTests {
     /// fetch that was already running, which stores its answer back under the very host the
     /// reader asked to be rid of. Nothing about the cleared state is observable at the moment the
     /// fetch lands, so only the in-flight record can say the work no longer belongs to anybody.
-    @Test("A Clear during a fetch is not undone when the fetch lands", .timeLimit(.minutes(3)))
+    @Test("A Clear during a fetch is not undone when the fetch lands")
     func forgottenDuringAFetchDoesNotComeBack() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the fetches, held on the wire")
+        defer { guardTask.cancel() }
         let http = Holding(png: try picture(width: 32, height: 32, bits: 8), gate: gate)
         let cache = ShellPictures(http: http)
-
-        let rescued = Signal()
-        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
 
         let running = Task { @MainActor in
             await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         }
         // Held at the gate, so "the fetch is in the air" is arranged rather than hoped for.
-        await http.whenHolding(1)
+        await met("the fetch is held on the wire", by: running) { await http.held == 1 }
 
         // **Pin the ordering this test is about.** Kept-then-cleared satisfies every expectation
         // below, so without this the whole test passes vacuously the moment the fetch lands
@@ -1429,8 +1398,6 @@ struct ShellPicturesTests {
         cache.forget(host: alpha)
         await gate.open()
         await running.value
-        watchdog.cancel()
-        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
 
         #expect(cache.picture(address(1), scale: 2, tier: .deck, host: alpha) == nil)
         #expect(cache.order.isEmpty)
@@ -1449,26 +1416,23 @@ struct ShellPicturesTests {
     /// the host they just cleared, so the Clear re-populates `missing` and `missingSources` with
     /// their own cleared server a moment after they emptied it — and it spends a request on a
     /// stranger's server that nobody is waiting for. Being liftable later repairs neither.
-    @Test("A Clear during a fetch that fails writes no permanent mark", .timeLimit(.minutes(3)))
+    @Test("A Clear during a fetch that fails writes no permanent mark")
     func forgottenDuringAFailingFetchIsNotWrittenOff() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the fetches, held on the wire")
+        defer { guardTask.cancel() }
         let http = Holding(png: nil, gate: gate)
         let cache = ShellPictures(http: http)
-
-        let rescued = Signal()
-        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
 
         let running = Task { @MainActor in
             await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         }
-        await http.whenHolding(1)
+        await met("the fetch is held on the wire", by: running) { await http.held == 1 }
         #expect(cache.missing.isEmpty, "the refusal landed before the Clear; this measures nothing")
 
         cache.forget(host: alpha)
         await gate.open()
         await running.value
-        watchdog.cancel()
-        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
 
         #expect(cache.missing.isEmpty)
         #expect(!cache.isMissing(address(1), scale: 2, tier: .deck))
@@ -1477,33 +1441,30 @@ struct ShellPicturesTests {
 
     /// The other half of the same record: a fetch two sources are waiting on is still the second
     /// source's fetch after the first one clears, and what lands is tagged for whoever is left.
-    @Test(
-        "A second source joins a fetch in the air and keeps it when the first clears",
-        .timeLimit(.minutes(3))
-    )
+    @Test("A second source joins a fetch in the air and keeps it when the first clears")
     func joiningSourceKeepsTheFetch() async throws {
         let gate = Gate()
+        let guardTask = watching(gate, "the fetches, held on the wire")
+        defer { guardTask.cancel() }
         let http = Holding(png: try picture(width: 32, height: 32, bits: 8), gate: gate)
         let cache = ShellPictures(http: http)
-
-        let rescued = Signal()
-        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
 
         let first = Task { @MainActor in
             await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         }
-        await http.whenHolding(1)
+        await met("the first source's fetch is held on the wire", by: first) { await http.held == 1 }
 
         let second = Task { @MainActor in
             await cache.fetch(address(1), scale: 2, tier: .deck, host: beta)
         }
         // **No client-side barrier reaches this one.** Both sources want the same address, so
         // `work` folds the second into the first and only one request ever reaches the client —
-        // `whenHolding(2)` would wait for a request that is never made. What is being waited for
-        // is a fact about the cache, on the main actor, so it is spun for rather than parked on:
-        // bounded, and the expectation below turns an exhausted spin into a wrong answer rather
-        // than a hang.
-        await spin(until: { cache.inFlight[self.key(1)]?.hosts.count == 2 })
+        // waiting for two held would wait for a request that is never made. What is being waited
+        // for is a fact about the cache, on the main actor. Not by the first: it is held at the
+        // gate whether the second joins it or not.
+        await met("the second source has joined the fetch in the air", by: second) {
+            cache.inFlight[self.key(1)]?.hosts.count == 2
+        }
         #expect(cache.inFlight[key(1)]?.hosts == [alpha, beta], "the second source never joined")
         #expect(cache.order.isEmpty, "the fetch landed before the Clear; this measures nothing")
 
@@ -1511,8 +1472,6 @@ struct ShellPicturesTests {
         await gate.open()
         await first.value
         await second.value
-        watchdog.cancel()
-        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
 
         #expect(cache.picture(address(1), scale: 2, tier: .deck, host: beta) != nil)
         #expect(cache.sources[key(1)] == [beta])
@@ -1636,54 +1595,50 @@ struct ShellPicturesTests {
 
     /// The guard that stops a Clear being undone by work already in the air, on its disk half:
     /// bytes that land after every host was struck off are not written back under the one cleared.
-    @Test("A fetch that lands after its host was cleared keeps nothing on disk", .timeLimit(.minutes(3)))
+    @Test("A fetch that lands after its host was cleared keeps nothing on disk")
     func clearedInFlightKeepsNothing() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let gate = Gate()
+        let guardTask = watching(gate, "the fetches, held on the wire")
+        defer { guardTask.cancel() }
         let http = Holding(png: try picture(width: 32, height: 32, bits: 8), gate: gate)
         let cache = ShellPictures(http: http, disk: try MediaCache(directory: dir))
-        let rescued = Signal()
-        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
-
         let running = Task { @MainActor in
             await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         }
-        await http.whenHolding(1)
+        await met("the fetch is held on the wire", by: running) { await http.held == 1 }
         cache.forget(host: alpha)
         await gate.open()
         await running.value
-        watchdog.cancel()
-        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
 
         await cache.diskSettled()
         #expect(try MediaCache(directory: dir).data(host: alpha, url: address(1)) == nil)
     }
 
-    @Test("A fetch the asker cleared is kept on disk under the source still waiting", .timeLimit(.minutes(3)))
+    @Test("A fetch the asker cleared is kept on disk under the source still waiting")
     func clearedAskerKeepsUnderJoiner() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let gate = Gate()
+        let guardTask = watching(gate, "the fetches, held on the wire")
+        defer { guardTask.cancel() }
         let http = Holding(png: try picture(width: 32, height: 32, bits: 8), gate: gate)
         let cache = ShellPictures(http: http, disk: try MediaCache(directory: dir))
-        let rescued = Signal()
-        let watchdog = Task { await Self.watchdog(gate, rescued: rescued) }
-
         let first = Task { @MainActor in
             await cache.fetch(address(1), scale: 2, tier: .deck, host: alpha)
         }
-        await http.whenHolding(1)
+        await met("the first source's fetch is held on the wire", by: first) { await http.held == 1 }
         let second = Task { @MainActor in
             await cache.fetch(address(1), scale: 2, tier: .deck, host: beta)
         }
-        await spin(until: { cache.inFlight[self.key(1)]?.hosts.count == 2 })
+        await met("the second source has joined the fetch in the air", by: second) {
+            cache.inFlight[self.key(1)]?.hosts.count == 2
+        }
         cache.forget(host: alpha)
         await gate.open()
         await first.value
         await second.value
-        watchdog.cancel()
-        #expect(!rescued.fired, "the watchdog opened the gate; the test never got there itself")
 
         await cache.diskSettled()
         let disk = try MediaCache(directory: dir)
@@ -1717,41 +1672,5 @@ struct ShellPicturesTests {
         // Checked, because a false here is an empty `Data` and a puzzling nil two tests away.
         #expect(CGImageDestinationFinalize(destination))
         return written as Data
-    }
-
-    /// Opens a gate nobody else will, so that a regression is a failed expectation rather than a
-    /// suite that never finishes and gets re-run instead of investigated. `rescued` is what makes
-    /// that failure loud: a test whose gate was opened by this rather than by its own body has
-    /// measured nothing, and says so.
-    ///
-    /// **Forty-five seconds, not the five `EmojiCatalogueTests` uses, and the difference is
-    /// isolation rather than taste.** That suite is a plain `@Suite` over an `actor`, so its body
-    /// is never queued behind one contended executor; this one is `@MainActor` and shares that
-    /// actor with the rest of the run, so under load the *test body* can be held off for seconds
-    /// while the gate's own actor runs freely. Measured — at five seconds a watchdog fired before
-    /// a starved body reached the line it was gating, and a loaded run of the whole suite has
-    /// taken 23s, the same order as a twenty-second watchdog. The ceiling is the
-    /// `.timeLimit(.minutes(3))` on the tests that carry one, so 45 still leaves fifteen seconds
-    /// spare, and being early buys nothing while costing false failures.
-    private static func watchdog(_ gate: Gate, rescued: Signal) async {
-        try? await Task.sleep(for: .seconds(45))
-        // `try?` swallows the cancellation, so without this a watchdog cancelled on the passing
-        // path would still go on to open the gate.
-        guard !Task.isCancelled else { return }
-        rescued.fired = true
-        await gate.open()
-    }
-
-    /// Waits a bounded number of turns for something another task has to do first.
-    ///
-    /// For conditions no client-side barrier can reach — a fact about the cache rather than about
-    /// the wire. Bounded on purpose: a test that waits forever for a thing that has stopped
-    /// happening hangs with no output, so this gives up and lets the expectation below it fail.
-    private func spin(until ready: () async -> Bool) async {
-        var spins = 0
-        while spins < 10_000, await ready() == false {
-            spins += 1
-            await Task.yield()
-        }
     }
 }

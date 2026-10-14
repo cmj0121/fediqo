@@ -24,7 +24,7 @@ import Testing
 /// the rule — the floor, the line itself and a point either side, the rail's line — rather than
 /// every point between, and the suite runs serially. Each language is named, not set: a suite
 /// that wrote `L10n.language` would change the words under every suite running beside it.
-@Suite("The narrowest window's fold names what it opens, hosted", .serialized)
+@Suite("The narrowest window's fold names what it opens, hosted", .serialized, .watched)
 @MainActor
 struct FoldHostedTests {
     /// A view that can be found in the hosted tree, standing in for a page.
@@ -39,17 +39,61 @@ struct FoldHostedTests {
         ((view as? T).map { [$0] } ?? []) + view.subviews.flatMap { all(type, in: $0) }
     }
 
-    /// A new frame, laid out, and the one redraw the width's measurement asks for, laid out again.
-    private static func settle(_ view: NSView) {
+    /// The width the arrangement last measured, written by a view inside it.
+    private final class Measured {
+        var width: CGFloat?
+    }
+
+    private struct Measuring: View {
+        let measured: Measured
+        @Environment(\.shellWidth) private var width
+
+        var body: some View {
+            measured.width = width
+            return Color.clear
+        }
+    }
+
+    /// How many looks in a row must find the tree as the look before left it.
+    private static let looks = 20
+
+    /// A new frame, laid out, and the one redraw the width's measurement asks for, laid out
+    /// again — until the tree under `view` holds something, and has held the same views in the
+    /// same places for `looks` looks in a row. No `by:`: the run loop is turned here, by the
+    /// check. Counted looks, because the redraw a measurement asks for is nothing a check can name.
+    /// One layout, one turn of the run loop that does not wait, and the layout after it.
+    /// Synchronous, because the run loop cannot be turned from an async body.
+    private static func turn(_ view: NSView) {
         view.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        RunLoop.main.run(mode: .default, before: .distantPast)
         view.layoutSubtreeIfNeeded()
     }
 
-    private static func host(_ root: some View, width: CGFloat, height: CGFloat = 500) -> NSHostingView<some View> {
+    private static func settle(_ view: NSView, measured: Measured? = nil) async {
+        // Where the tree was drawn before at another width, the new one is waited for by name:
+        // a tree still as the width before left it is not taken for the answer.
+        if let measured {
+            let width = view.frame.width
+            await met("the arrangement has measured \(width) points across") {
+                turn(view)
+                return measured.width == width
+            }
+        }
+        var last: [String] = []
+        var same = 0
+        await met("the tree is drawn, and \(looks) turns more move nothing in it") {
+            turn(view)
+            let now = all(NSView.self, in: view).dropFirst().map { "\(type(of: $0)) \($0.frame)" }
+            same = !now.isEmpty && now == last ? same + 1 : 0
+            last = now
+            return same >= looks
+        }
+    }
+
+    private static func host(_ root: some View, width: CGFloat, height: CGFloat = 500) async -> NSHostingView<some View> {
         let view = NSHostingView(rootView: root)
         view.frame = NSRect(x: 0, y: 0, width: width, height: height)
-        settle(view)
+        await settle(view)
         return view
     }
 
@@ -70,13 +114,17 @@ struct FoldHostedTests {
 
     /// The narrow arrangement's switch, as `FediqoRootView.narrow` writes it, under the real
     /// measurement.
-    private static func narrow(_ places: [ShellPlace], _ language: DummyLanguage = .english) -> some View {
+    private static func narrow(
+        _ places: [ShellPlace], _ language: DummyLanguage = .english, measured: Measured? = nil
+    ) -> some View {
         ShellArranged { _ in
             ShellNarrow(titles: titles(places, language)) {
                 tabs(places, language)
             } folded: {
                 FoldedPlaces(place: .constant(places[0]), places: places, language: language) { Marker() }
             }
+            // Behind the switch, where a check that moves the width says so: nothing it reads.
+            .background { if let measured { Measuring(measured: measured) } }
         }
     }
 
@@ -104,10 +152,10 @@ struct FoldHostedTests {
     /// **The measurement is the control's.** The width the rule asks AppKit for is the width the
     /// hosted strip says it wants, for every set of names, in both languages.
     @Test("The strip's width the rule measures is the width the hosted strip wants")
-    func theMeasuredWidthIsTheStrips() throws {
+    func theMeasuredWidthIsTheStrips() async throws {
         for language in Self.languages {
             for places in Self.offered {
-                let view = Self.host(Self.tabs(places, language), width: ShellLayout.breakpoint - 1)
+                let view = await Self.host(Self.tabs(places, language), width: ShellLayout.breakpoint - 1)
                 let strip = try #require(Self.all(NSSegmentedControl.self, in: view).first)
                 #expect(strip.segmentCount == places.count)
                 #expect(
@@ -123,13 +171,13 @@ struct FoldHostedTests {
     /// narrower than its names need, and nowhere else. Every other width is on one side of the
     /// line or the other, and the rule is one comparison with no memory.
     @Test("The rule folds exactly where the hosted strip is squeezed, at every width that decides it")
-    func theRuleFoldsWhereTheStripIsSqueezed() throws {
+    func theRuleFoldsWhereTheStripIsSqueezed() async throws {
         var asked = 0
         for language in Self.languages {
             for places in Self.offered {
                 let titles = Self.titles(places, language)
                 let needed = ShellFold.stripWidth(titles)
-                let view = Self.host(Self.tabs(places, language), width: ShellLayout.breakpoint - 1)
+                let view = await Self.host(Self.tabs(places, language), width: ShellLayout.breakpoint - 1)
                 for width in Self.deciding(needed) {
                     view.frame.size.width = width
                     view.layoutSubtreeIfNeeded()
@@ -154,13 +202,14 @@ struct FoldHostedTests {
     /// At the widths that decide it, the switch draws the strip where the rule says it fits and
     /// the named pop-up where it does not. Never both, and never neither.
     @Test("The narrow arrangement draws the tabs or the pop-up, as the rule says")
-    func eitherTheTabsOrThePopUp() {
+    func eitherTheTabsOrThePopUp() async {
         let places = ShellPlace.allCases
         let titles = Self.titles(places, .english)
-        let view = Self.host(Self.narrow(places), width: ShellLayout.breakpoint - 1)
+        let measured = Measured()
+        let view = await Self.host(Self.narrow(places, measured: measured), width: ShellLayout.breakpoint - 1)
         for width in Self.deciding(ShellFold.stripWidth(titles)).reversed() {
             view.frame.size.width = width
-            Self.settle(view)
+            await Self.settle(view, measured: measured)
             let folds = ShellFold.folds(width: width, titles: titles)
             #expect(Self.all(NSTabView.self, in: view).count == (folds ? 0 : 1), "\(width)")
             #expect(Self.all(NSPopUpButton.self, in: view).count == (folds ? 1 : 0), "\(width)")
@@ -171,10 +220,10 @@ struct FoldHostedTests {
     /// A pop-up is pressed with a pointer or a finger and worked with the arrow keys and Return,
     /// and ⌃Tab reads the place rather than the strip, so it walks the same places it did.
     @Test("The pop-up holds every place, by name, in the tabs' order")
-    func thePopUpHoldsEveryPlace() throws {
+    func thePopUpHoldsEveryPlace() async throws {
         var folded = 0
         for places in Self.offered {
-            let view = Self.host(Self.narrow(places), width: ShellLayout.floor)
+            let view = await Self.host(Self.narrow(places), width: ShellLayout.floor)
             guard ShellFold.folds(width: ShellLayout.floor, titles: Self.titles(places, .english)) else {
                 // Four English names fit at the floor, and three do, so there is nothing folded
                 // to reach.
@@ -194,8 +243,8 @@ struct FoldHostedTests {
     /// pop-up does not stand at the middle of the bar, because its label stands before it. What
     /// the label says is `shell.places.fold`; that it is drawn is read off where the pop-up is.
     @Test("Something is written before the pop-up, where the strip's middle was")
-    func theLabelIsWrittenBeforeThePopUp() throws {
-        let view = Self.host(Self.narrow(ShellPlace.allCases), width: ShellLayout.floor)
+    func theLabelIsWrittenBeforeThePopUp() async throws {
+        let view = await Self.host(Self.narrow(ShellPlace.allCases), width: ShellLayout.floor)
         let popUp = try #require(Self.all(NSPopUpButton.self, in: view).first)
         let frame = popUp.convert(popUp.bounds, to: view)
         // Centred as a pair, so the pop-up is pushed past the middle by what stands before it.
@@ -207,11 +256,11 @@ struct FoldHostedTests {
     /// point, and the pop-up takes the strip's height and no more. Read off both hosted trees
     /// through a marker drawn as the page.
     @Test("The folded page stands exactly where the tabs' page stood")
-    func thePageDoesNotMove() throws {
+    func thePageDoesNotMove() async throws {
         let places = ShellPlace.allCases
         let width = ShellLayout.floor
-        let tabbed = Self.host(Self.tabs(places, .english), width: width)
-        let folded = Self.host(
+        let tabbed = await Self.host(Self.tabs(places, .english), width: width)
+        let folded = await Self.host(
             FoldedPlaces(place: .constant(.timeline), places: places, language: .english) { Marker() },
             width: width
         )

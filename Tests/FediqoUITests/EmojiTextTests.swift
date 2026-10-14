@@ -75,18 +75,6 @@ enum EmojiFixture {
     }
 }
 
-/// Spins — never sleeps — until a condition holds or the spin runs out, so a test can wait for a
-/// task to reach a gate without a timer. Bounded, so a mistake fails the test instead of hanging
-/// it.
-@MainActor
-func spin(until reached: () async -> Bool) async {
-    var spins = 0
-    while !(await reached()), spins < 10_000 {
-        await Task.yield()
-        spins += 1
-    }
-}
-
 /// A client that holds every request open until it is let go, so a test can do something to the
 /// cache while a fetch is genuinely in flight.
 actor HeldHTTP: HTTPClient {
@@ -799,7 +787,7 @@ struct EmojiCacheTests {
 // MARK: - The ceiling on open requests
 
 @MainActor
-@Suite("The in-flight gate")
+@Suite("The in-flight gate", .watched)
 struct EmojiGateTests {
     @Test("Up to the ceiling nobody waits")
     func underTheCeilingNobodyWaits() async {
@@ -817,7 +805,7 @@ struct EmojiGateTests {
 
         let third = Task { @MainActor in await gate.enter() }
         let fourth = Task { @MainActor in await gate.enter() }
-        await spin { gate.waitingCount == 2 }
+        await met("the third and the fourth are queued", by: third, fourth) { gate.waitingCount == 2 }
         #expect(gate.waitingCount == 2)
         #expect(gate.openCount == 2)
 
@@ -854,7 +842,7 @@ struct EmojiGateTests {
 // MARK: - Fetching, without a socket
 
 @MainActor
-@Suite("Fetching an emoji")
+@Suite("Fetching an emoji", .watched)
 struct EmojiFetchTests {
     private static func emoji(_ shortcode: String, file: String, still: String? = nil) -> CustomEmoji {
         CustomEmoji(shortcode: shortcode,
@@ -1023,12 +1011,14 @@ struct EmojiFetchTests {
     @Test("Clearing while a picture is on the wire does not let it back in")
     func clearingStrikesOffWorkInFlight() async {
         let http = HeldHTTP(body: EmojiFixture.gif(delays: [0.1]))
+        let guardTask = watching("the picture, held on the wire") { await http.release() }
+        defer { guardTask.cancel() }
         let cache = EmojiCache(http: http)
         let one = Self.emoji("blobcat", file: "blobcat.gif")
         let request = Self.request([one])
 
         let fetching = Task { await cache.fetch(request) }
-        await spin { await http.waiting == 1 }
+        await met("the picture is held on the wire", by: fetching) { await http.waiting == 1 }
         cache.clear()
         #expect(cache.entriesHeld == 0)
 
@@ -1049,12 +1039,14 @@ struct EmojiFetchTests {
         // is stale. So the pass comes back empty. Recorded rather than discovered later: the
         // cost of the epoch is one re-request, and this is where it is paid.
         let http = HeldHTTP(body: EmojiFixture.gif(delays: [0.1]))
+        let guardTask = watching("the picture, held on the wire") { await http.release() }
+        defer { guardTask.cancel() }
         let cache = EmojiCache(http: http)
         let one = Self.emoji("blobcat", file: "blobcat.gif")
         let request = Self.request([one])
 
         let first = Task { await cache.fetch(request) }
-        await spin { await http.waiting == 1 }
+        await met("the picture is held on the wire", by: first) { await http.waiting == 1 }
         cache.clear()
 
         let second = Task { await cache.fetch(request) }
@@ -1069,7 +1061,7 @@ struct EmojiFetchTests {
         // And it self-heals: the next pass finds nothing in flight and nothing held, asks once
         // more, and this time the picture lands.
         let third = Task { await cache.fetch(request) }
-        await spin { await http.waiting == 1 }
+        await met("the picture asked for again is held on the wire", by: third) { await http.waiting == 1 }
         await http.release()
         await third.value
 
@@ -1080,12 +1072,14 @@ struct EmojiFetchTests {
     @Test("A source cleared while its pictures were loading does not reappear under that source")
     func forgettingAHostStrikesOffWorkInFlight() async {
         let http = HeldHTTP(body: EmojiFixture.gif(delays: [0.1]))
+        let guardTask = watching("the picture, held on the wire") { await http.release() }
+        defer { guardTask.cancel() }
         let cache = EmojiCache(http: http)
         let one = Self.emoji("blobcat", file: "blobcat.gif")
         let request = Self.request([one], host: "first.example")
 
         let fetching = Task { await cache.fetch(request) }
-        await spin { await http.waiting == 1 }
+        await met("the picture is held on the wire", by: fetching) { await http.waiting == 1 }
         cache.forget(host: "first.example")
 
         await http.release()
@@ -1099,12 +1093,14 @@ struct EmojiFetchTests {
         // The in-flight work here will decide "absent" — the body is not a picture — which is
         // exactly what `forgetAbsences()` has just thrown away.
         let http = HeldHTTP(body: Data("not a picture".utf8))
+        let guardTask = watching("the picture, held on the wire") { await http.release() }
+        defer { guardTask.cancel() }
         let cache = EmojiCache(http: http)
         let one = Self.emoji("blobcat", file: "blobcat.gif")
         let request = Self.request([one])
 
         let fetching = Task { await cache.fetch(request) }
-        await spin { await http.waiting == 1 }
+        await met("the picture is held on the wire", by: fetching) { await http.waiting == 1 }
         cache.forgetAbsences()
 
         await http.release()

@@ -20,11 +20,11 @@ import Testing
 /// **It gives the main actor back between passes.** Every test in this process that waits on the
 /// main actor — the reload, join and subscribe suites behind `FixtureHTTP`'s gates — waits behind
 /// whatever holds it, and a nested `RunLoop.main.run` does not drain the main queue: an earlier
-/// version spun it four times per switch and, on a loaded runner, held the main actor for most of
-/// a minute, until those suites' fifty-second watchdogs fired. Each settle here is one layout, one
-/// brief pass of the run loop and a `Task.yield()`, and the rows a test stands on are worked out
-/// from the session without drawing anything.
-@Suite("Where each timeline was left, hosted", .serialized)
+/// version turned it four times per switch and, on a loaded runner, held the main actor for most of
+/// a minute, until the guards those suites then had, which went by a clock, fired. Each settle
+/// here is one layout, one brief pass of the run loop and a `Task.yield()`, and the rows a test
+/// stands on are worked out from the session without drawing anything.
+@Suite("Where each timeline was left, hosted", .serialized, .watched)
 @MainActor
 struct TimelinePlacesHostedTests {
     private let microblog = Source(host: "m.example", kind: .mastodon)
@@ -95,7 +95,11 @@ struct TimelinePlacesHostedTests {
             lamp.wanted = id
             lamp.tick += 1
             await settle()
-            #expect(lamp.seen == id)
+            // No `by:`: the run loop is turned here, by the check.
+            await met("the lamp is on the row the key landed on") {
+                turn()
+                return lamp.seen == id
+            }
         }
 
         func press(_ query: TimelineQuery) async {
@@ -111,8 +115,22 @@ struct TimelinePlacesHostedTests {
             }
         }
 
+        /// The lamp is on `id`: what a switch gave back, waited for with the run loop turned.
+        /// No `by:`: the run loop is turned here, by the check.
+        func gives(
+            _ id: String, _ what: String = "the timeline gives back the post it was left on",
+            sourceLocation: SourceLocation = #_sourceLocation
+        ) async {
+            await met(what, sourceLocation: sourceLocation) {
+                turn()
+                return lamp.seen == id
+            }
+        }
+
         /// One change answered: the pane's `onChange`, then the lamp it wrote. Two passes, each
         /// a layout and a brief turn of the run loop, and the main actor handed back after each.
+        /// Counted passes, and room only: a check that then wants a post lit waits for it
+        /// (`gives`, `stand`); only one that wants the lamp out looks straight after them.
         func settle() async {
             for _ in 0 ..< 2 {
                 turn()
@@ -186,10 +204,10 @@ struct TimelinePlacesHostedTests {
         await h.stand(on: post2)
 
         await h.press(x)
-        #expect(h.lamp.seen == post1, "step 3: X gives back post 1")
+        await h.gives(post1, "step 3: X gives back post 1")
 
         await h.press(y)
-        #expect(h.lamp.seen == post2, "step 4: Y gives back post 2")
+        await h.gives(post2, "step 4: Y gives back post 2")
     }
 
     // MARK: Acceptance: any number of trips, any pairing
@@ -224,9 +242,9 @@ struct TimelinePlacesHostedTests {
             await h.stand(on: yPost)
             for trip in 1 ... 2 {
                 await go(x)
-                #expect(h.lamp.seen == xPost, "\(x) → back on trip \(trip)")
+                await h.gives(xPost, "\(x) → back on trip \(trip)")
                 await go(y)
-                #expect(h.lamp.seen == yPost, "\(y) → back on trip \(trip)")
+                await h.gives(yPost, "\(y) → back on trip \(trip)")
             }
         }
     }
@@ -246,10 +264,10 @@ struct TimelinePlacesHostedTests {
         await h.press(mine)
         await h.stand(on: try #require(h.rows(of: mine).last))
         await h.press(.all)
-        #expect(h.lamp.seen == allPost)
+        await h.gives(allPost)
         await h.press(mine)
         await h.press(.trends)
-        #expect(h.lamp.seen == trendPost)
+        await h.gives(trendPost)
     }
 
     /// A post that has left the timeline since is not pretended to be there, however many trips
@@ -264,14 +282,14 @@ struct TimelinePlacesHostedTests {
         await h.press(.trends)
         await h.stand(on: trendPost)
         await h.press(.all)
-        #expect(h.lamp.seen == allPost)
+        await h.gives(allPost)
         // A reload lands without the Trends post the reader was on.
         h.session.notes = h.session.notes.filter { $0.id != String(trendPost.split(separator: "\u{1E}").last ?? "") }
         await h.settle()
         await h.press(.trends)
         #expect(h.lamp.seen == nil)
         await h.press(.all)
-        #expect(h.lamp.seen == allPost)
+        await h.gives(allPost)
         await h.press(.trends)
         #expect(h.lamp.seen == nil)
     }
@@ -294,9 +312,9 @@ struct TimelinePlacesHostedTests {
         await h.press(.all)
         // Closed, as the root closes it: the parked post back on the lamp.
         await h.stand(on: h.search.close())
-        #expect(h.lamp.seen == allPost)
+        await h.gives(allPost)
         await h.press(.trends)
-        #expect(h.lamp.seen == trendPost)
+        await h.gives(trendPost)
     }
 
     /// #145 on top of #100 and #144: a timeline switched under an open search is searched with
@@ -330,11 +348,11 @@ struct TimelinePlacesHostedTests {
         await h.press(mine)
         await h.press(.trends)
         await h.stand(on: h.search.close())
-        #expect(h.lamp.seen == trendPost, "Trends' own place, not All's")
+        await h.gives(trendPost, "Trends' own place, not All's")
         await h.press(.all)
-        #expect(h.lamp.seen == allPost, "All's place was written down, not the result")
+        await h.gives(allPost, "All's place was written down, not the result")
         await h.press(.trends)
-        #expect(h.lamp.seen == trendPost)
+        await h.gives(trendPost)
     }
 }
 

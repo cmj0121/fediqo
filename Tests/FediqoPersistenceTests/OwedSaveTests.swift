@@ -288,7 +288,7 @@ struct OwedSaveTests {
         let from = try await PackagerFixture.populated()
         defer { from.remove() }
         let package = PackagerFixture.package()
-        defer { try? FileManager.default.removeItem(at: package.deletingLastPathComponent()) }
+        defer { try? FileManager.default.removeItem(at: package) }
         try await from.packager().takeAway(to: package, key: .password("open sesame"), pictures: false, contents: .whole) { _ in }
         let onto = try await PackagerFixture.PackagerDevice()
         defer {
@@ -314,7 +314,7 @@ struct OwedSaveTests {
         // A package whose index will not open as a store: said as that where the canary reads,
         // and as the lock where it has come to refuse — a lock says nothing of the package.
         let bad = PackagerFixture.package()
-        defer { try? FileManager.default.removeItem(at: bad.deletingLastPathComponent()) }
+        defer { try? FileManager.default.removeItem(at: bad) }
         let junk = Data(repeating: 0x5A, count: 64)
         let settings = try PropertyListSerialization.data(fromPropertyList: [String: Any](), format: .binary, options: 0)
         let pieces: [(PackageFormat.Entry.Kind, String, Data)] = [

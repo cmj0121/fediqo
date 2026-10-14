@@ -7,7 +7,7 @@ import Testing
 ///
 /// **No clock.** Each wait the follower asks for is held until the test ends it, so "inside the
 /// quiet" and "inside the gap" are where the test put the change, not where a timer happened to be.
-@Suite("The store is saved behind every change, with nobody asking")
+@Suite("The store is saved behind every change, with nobody asking", .watched)
 struct StoreSaverFollowTests {
     private static let quiet = Duration.seconds(2)
     private static let gap = Duration.seconds(60)
@@ -26,21 +26,22 @@ struct StoreSaverFollowTests {
     private actor Waits {
         private(set) var asked: [Duration] = []
         private var held: [CheckedContinuation<Bool, Never>] = []
-        private var watchers: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
         private var stopped = false
 
         func sleep(_ wait: Duration) async throws {
             asked.append(wait)
-            let count = asked.count
-            for watcher in watchers where watcher.count <= count { watcher.continuation.resume() }
-            watchers.removeAll { $0.count <= count }
             guard !stopped, await withCheckedContinuation({ held.append($0) }) else { throw CancellationError() }
         }
 
-        /// Returns once `count` waits have been asked for.
-        func asked(_ count: Int) async {
-            guard asked.count < count else { return }
-            await withCheckedContinuation { watchers.append((count, $0)) }
+        /// Returns once `count` waits have been asked for — by `following`, which is the
+        /// follower: it ends only when a check ends it, so a wait it never asks for is given up
+        /// on where it has.
+        nonisolated func asked(
+            _ count: Int, by following: Task<Void, Never>, sourceLocation: SourceLocation = #_sourceLocation
+        ) async {
+            await met("the follower has asked for its wait number \(count)", by: following, sourceLocation: sourceLocation) {
+                await self.asked.count >= count
+            }
         }
 
         /// Ends the wait under way: it is out, and the follower goes on.
@@ -89,10 +90,10 @@ struct StoreSaverFollowTests {
 
     /// A write a test holds, fails, or counts, by which write it is.
     private actor Door {
-        private var entered: [Int: [CheckedContinuation<Void, Never>]] = [:]
         private var seen: Set<Int> = []
         private var held: [CheckedContinuation<Void, Never>] = []
         private var count = 0
+        private var opened = false
         private let holding: Int?
 
         init(holding: Int? = nil) { self.holding = holding }
@@ -102,19 +103,24 @@ struct StoreSaverFollowTests {
             count += 1
             let number = count
             seen.insert(number)
-            for watcher in entered[number] ?? [] { watcher.resume() }
-            entered[number] = nil
-            if number == holding { await withCheckedContinuation { held.append($0) } }
+            if number == holding, !opened { await withCheckedContinuation { held.append($0) } }
             return number
         }
 
-        /// Returns once write `number` has begun.
-        func began(_ number: Int) async {
-            guard !seen.contains(number) else { return }
-            await withCheckedContinuation { entered[number, default: []].append($0) }
+        private func has(begun number: Int) -> Bool { seen.contains(number) }
+
+        /// Returns once write `number` has begun — by `work`, whoever is to make it.
+        nonisolated func began(
+            _ number: Int, by work: any Ending, sourceLocation: SourceLocation = #_sourceLocation
+        ) async {
+            await met("write number \(number) has begun", by: work, sourceLocation: sourceLocation) {
+                await self.has(begun: number)
+            }
         }
 
+        /// Holds nothing any more, now or later.
         func open() {
+            opened = true
             for wait in held { wait.resume() }
             held = []
         }
@@ -137,12 +143,12 @@ struct StoreSaverFollowTests {
     func aChangeIsSaved() async throws {
         let (store, _, waits, landed, following) = try await followed()
         await store.ingest([note("1")])
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         #expect(await waits.asked == [Self.quiet])
         #expect(await landed.writes == [[]], "written before the quiet was out")
 
         await waits.wake()
-        await waits.asked(2)
+        await waits.asked(2, by: following)
         #expect(await landed.writes == [[], ["1"]])
         #expect(await waits.asked == [Self.quiet, Self.gap - Self.quiet], "the save is owed its gap")
         await end(following, waits)
@@ -152,13 +158,13 @@ struct StoreSaverFollowTests {
     func aBurstIsOneWrite() async throws {
         let (store, _, waits, landed, following) = try await followed()
         await store.ingest([note("1")])
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         await store.ingest([note("2")])
         await store.ingest([note("3")])
         #expect(await waits.asked == [Self.quiet], "a later change armed a second save, or put the first off")
 
         await waits.wake()
-        await waits.asked(2)
+        await waits.asked(2, by: following)
         #expect(await landed.writes == [[], ["1", "2", "3"]])
         await end(following, waits)
     }
@@ -167,9 +173,9 @@ struct StoreSaverFollowTests {
     func theNextWaitsOutTheGap() async throws {
         let (store, _, waits, landed, following) = try await followed()
         await store.ingest([note("1")])
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         await waits.wake()
-        await waits.asked(2)
+        await waits.asked(2, by: following)
 
         // Inside the gap: heard, and nothing written for it yet.
         await store.ingest([note("2")])
@@ -178,10 +184,10 @@ struct StoreSaverFollowTests {
         #expect(await waits.asked.count == 2)
 
         await waits.wake()
-        await waits.asked(3)
+        await waits.asked(3, by: following)
         #expect(await landed.writes.count == 2, "saved the moment the gap ended, with no quiet")
         await waits.wake()
-        await waits.asked(4)
+        await waits.asked(4, by: following)
         #expect(await landed.writes == [[], ["1"], ["1", "2", "3"]])
         #expect(await waits.asked == [Self.quiet, Self.gap - Self.quiet, Self.quiet, Self.gap - Self.quiet])
         await end(following, waits)
@@ -191,7 +197,7 @@ struct StoreSaverFollowTests {
     func anAskedSaveDisarms() async throws {
         let (store, saver, waits, landed, following) = try await followed()
         await store.ingest([note("1")])
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         try await saver.save()
         #expect(await landed.writes == [[], ["1"]])
 
@@ -210,6 +216,8 @@ struct StoreSaverFollowTests {
         let landed = Landed()
         let waits = Waits()
         let door = Door(holding: 2)
+        let guardTask = watching("the second write, held") { await door.open() }
+        defer { guardTask.cancel() }
         let saver = StoreSaver(store: store) { _, notes, _ in
             _ = await door.pass()
             await landed.record(notes)
@@ -219,11 +227,13 @@ struct StoreSaverFollowTests {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
         }
         await store.ingest([note("1")])
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         let asked = Task { try await saver.save() }
-        await door.began(2)
+        await door.began(2, by: asked)
 
         await waits.wake()
+        // Counted turns: a follower behind the write under way waits in the saver's queue, which
+        // says nothing of who is waiting — and the same two lines hold had it not got there.
         for _ in 0..<200 { await Task.yield() }
         await door.open()
         try await asked.value
@@ -238,6 +248,8 @@ struct StoreSaverFollowTests {
         let landed = Landed()
         let waits = Waits()
         let door = Door(holding: 2)
+        let guardTask = watching("the second write, held") { await door.open() }
+        defer { guardTask.cancel() }
         let saver = StoreSaver(store: store) { _, notes, _ in
             _ = await door.pass()
             await landed.record(notes)
@@ -247,19 +259,19 @@ struct StoreSaverFollowTests {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
         }
         await store.ingest([note("1")])
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         await waits.wake()
-        await door.began(2)
+        await door.began(2, by: following)
         // The snapshot is taken; this is not in it.
         await store.ingest([note("2")])
         await door.open()
 
-        await waits.asked(2)
+        await waits.asked(2, by: following)
         #expect(await landed.writes == [[], ["1"]])
         await waits.wake()
-        await waits.asked(3)
+        await waits.asked(3, by: following)
         await waits.wake()
-        await waits.asked(4)
+        await waits.asked(4, by: following)
         #expect(await landed.writes == [[], ["1"], ["1", "2"]])
         #expect(await waits.asked == [Self.quiet, Self.gap - Self.quiet, Self.quiet, Self.gap - Self.quiet])
         await end(following, waits)
@@ -280,17 +292,17 @@ struct StoreSaverFollowTests {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
         }
         await store.ingest([note("1")])
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         await waits.wake()
-        await door.began(2)
+        await door.began(2, by: following)
 
         // After the write that fails has begun, so this is a change the failed save never saw.
         await store.ingest([note("2")])
-        await waits.asked(2)
+        await waits.asked(2, by: following)
         #expect(await landed.writes == [[]])
         #expect(await waits.asked == [Self.quiet, Self.gap], "the failure was tried again at once, or not at all")
         await waits.wake()
-        await waits.asked(3)
+        await waits.asked(3, by: following)
         #expect(await landed.writes == [[], ["1", "2"]], "nobody asked, and nothing changed after the failure was owed")
         #expect(await waits.asked == [Self.quiet, Self.gap, Self.gap], "a try that wrote is owed its gap")
         await end(following, waits)
@@ -312,15 +324,16 @@ struct StoreSaverFollowTests {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
         }
         await store.ingest([note("1")])
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         for wait in 1...StoreSaver.retries {
             await waits.wake()
-            await waits.asked(wait + 1)
+            await waits.asked(wait + 1, by: following)
         }
         #expect(await waits.asked == [Self.quiet] + Array(repeating: Self.gap, count: StoreSaver.retries))
         await waits.wake()
-        // The last try has failed: a turn of every queue, and nothing more is asked for.
-        while await tries.count < StoreSaver.retries + 1 { await Task.yield() }
+        await met("the last try has been made", by: following) { await tries.count >= StoreSaver.retries + 1 }
+        // Counted turns, behind the last try: a follower that has given up asks for nothing, and
+        // says nothing of having given up.
         for _ in 0..<200 { await Task.yield() }
         #expect(await tries.count == StoreSaver.retries + 1, "the follower went on trying past its bound")
         #expect(await waits.asked.count == StoreSaver.retries + 1, "the follower went on waiting past its bound")
@@ -332,9 +345,9 @@ struct StoreSaverFollowTests {
         #expect(await landed.writes == [["1"]])
         await failing.set(true)
         await store.ingest([note("2")])
-        await waits.asked(StoreSaver.retries + 2)
+        await waits.asked(StoreSaver.retries + 2, by: following)
         await waits.wake()
-        await waits.asked(StoreSaver.retries + 3)
+        await waits.asked(StoreSaver.retries + 3, by: following)
         #expect(await waits.asked.suffix(2) == [Self.quiet, Self.gap])
         await end(following, waits)
     }
@@ -357,14 +370,15 @@ struct StoreSaverFollowTests {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
         }
         await store.hold(NoticeReach(host: alpha.host, before: "9", gathered: true))
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         for wait in 1...StoreSaver.retries {
             await waits.wake()
-            await waits.asked(wait + 1)
+            await waits.asked(wait + 1, by: following)
         }
         await waits.wake()
-        while await tries.count < StoreSaver.retries + 1 { await Task.yield() }
-        // The last try has failed: every turn there is to take, and nothing more is asked for.
+        await met("the last try has been made", by: following) { await tries.count >= StoreSaver.retries + 1 }
+        // Counted turns, behind the last try: a follower that has given up asks for nothing, and
+        // says nothing of having given up.
         for _ in 0..<500 { await Task.yield() }
         #expect(await tries.count == StoreSaver.retries + 1, "the notices went on being tried past the bound")
         #expect(await waits.asked == [Self.quiet] + Array(repeating: Self.gap, count: StoreSaver.retries))
@@ -372,10 +386,11 @@ struct StoreSaverFollowTests {
 
         // A change: one try behind it, and its handful again.
         await store.hold(NoticeReach(host: alpha.host, before: "8", gathered: true))
-        await waits.asked(StoreSaver.retries + 2)
+        await waits.asked(StoreSaver.retries + 2, by: following)
         await waits.wake()
-        while await tries.count < StoreSaver.retries + 2 { await Task.yield() }
-        for _ in 0..<500 { await Task.yield() }
+        await met("the try behind the change has been made", by: following) { await tries.count >= StoreSaver.retries + 2 }
+        // The gap before the next try is the count having started again: waited for, by name.
+        await waits.asked(StoreSaver.retries + 3, by: following)
         #expect(await waits.asked.suffix(2) == [Self.quiet, Self.gap], "a change did not start the count again")
         await end(following, waits)
     }
@@ -393,14 +408,17 @@ struct StoreSaverFollowTests {
             for await _ in landings { await told.bump() }
         }
         await #expect(throws: Refused.self) { try await saver.save() }
+        // Counted turns: a landing is told down a stream, and a save with nothing to tell sends
+        // nothing down it.
         for _ in 0..<200 { await Task.yield() }
         #expect(await told.count == 0)
 
         await failing.set(false)
         try await saver.save()
-        while await told.count < 1 { await Task.yield() }
+        await met("the landing after the failure is told", by: listening) { await told.count >= 1 }
         await store.ingest([note("1")])
         try await saver.save()
+        // Counted turns, as above: a save with nothing to make good sends nothing down the stream.
         for _ in 0..<200 { await Task.yield() }
         #expect(await told.count == 1, "a save with nothing to make good was told as one that did")
         listening.cancel()
@@ -420,11 +438,11 @@ struct StoreSaverFollowTests {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
         }
         await #expect(throws: Refused.self) { try await saver.save() }
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         #expect(await waits.asked == [Self.gap])
         #expect(await landed.writes.isEmpty)
         await waits.wake()
-        await waits.asked(2)
+        await waits.asked(2, by: following)
         #expect(await landed.writes == [[]])
         await end(following, waits)
     }
@@ -443,9 +461,11 @@ struct StoreSaverFollowTests {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
         }
         await #expect(throws: Refused.self) { try await saver.resave() }
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         try await saver.resave()
         await waits.wake()
+        // Counted turns: a retry that finds the store written writes nothing and waits for
+        // nothing, so there is no end of it to wait for.
         for _ in 0..<200 { await Task.yield() }
         #expect(await landed.writes == [[]], "the retry wrote the store a second time")
         #expect(await waits.asked == [Self.gap])
@@ -461,11 +481,12 @@ struct StoreSaverFollowTests {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
         }
         await store.ingest([note("1")])
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         await waits.wake()
         await end(following, waits)
         #expect(await waits.asked == [Self.quiet])
-        #expect(await saver.flush(deadline: .seconds(60)) == .saved)
+        // The deadline, on a clock nobody turns.
+        #expect(await saver.flush(deadline: StoreSaver.deadline, sleep: TurnedClock().sleep) == .saved)
     }
 
     @Test("A change that moved nothing a save writes arms nothing")
@@ -477,14 +498,15 @@ struct StoreSaverFollowTests {
         #expect(await store.revision == before, "the recount is no longer the change a save skips")
         var heard = changes.makeAsyncIterator()
         _ = await heard.next()
-        // The follower was told as this was; a turn of every queue, and it has asked for no wait.
+        // Counted turns, behind the change having been told: the follower was told as this was,
+        // and one that arms nothing asks for no wait and says nothing.
         for _ in 0..<200 { await Task.yield() }
         #expect(await waits.asked.isEmpty)
 
         await store.ingest([note("2")])
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         await waits.wake()
-        await waits.asked(2)
+        await waits.asked(2, by: following)
         #expect(await landed.writes == [["1"], ["1", "2"]])
         await end(following, waits)
     }
@@ -500,9 +522,9 @@ struct StoreSaverFollowTests {
         let following = Task {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
         }
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         await waits.wake()
-        await waits.asked(2)
+        await waits.asked(2, by: following)
         #expect(await landed.writes == [[], ["1"]])
         await end(following, waits)
     }
@@ -517,9 +539,9 @@ struct StoreSaverFollowTests {
         let following = Task {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
         }
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         await waits.wake()
-        await waits.asked(2)
+        await waits.asked(2, by: following)
         #expect(await landed.writes == [["1"]])
         await end(following, waits)
     }
@@ -536,10 +558,10 @@ struct StoreSaverFollowTests {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
         }
         await store.ingest([note("1")])
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         #expect(StoreFile.open(at: dir).notes.isEmpty)
         await waits.wake()
-        await waits.asked(2)
+        await waits.asked(2, by: following)
         #expect(StoreFile.open(at: dir).notes.map(\.id) == ["1"])
         await end(following, waits)
     }
@@ -548,7 +570,7 @@ struct StoreSaverFollowTests {
     func cancelledEnds() async throws {
         let (store, _, waits, landed, following) = try await followed()
         await store.ingest([note("1")])
-        await waits.asked(1)
+        await waits.asked(1, by: following)
         await end(following, waits)
         #expect(await landed.writes == [[]])
     }

@@ -9,7 +9,7 @@ import Testing
 /// Every test builds its own `SourceWork` and hands it to the object under test, so nothing here
 /// reads or writes the app's shared one, and suites running beside this one cannot show up in it.
 @MainActor
-@Suite("What is in flight", .serialized)
+@Suite("What is in flight", .serialized, .watched)
 struct SourceWorkTests {
     private static let host = "one.example"
 
@@ -52,10 +52,11 @@ struct SourceWorkTests {
 
         let stopped = Task {
             try await work.watching(host: Self.host, for: .signIn) {
-                try await Task.sleep(for: .seconds(30))
+                // Asleep on a clock nobody turns: it ends when it is stopped, and not before.
+                try await TurnedClock().sleep(for: .seconds(30))
             }
         }
-        #expect(await spun { !work.now.isEmpty })
+        await met("the work is listed", by: stopped) { !work.now.isEmpty }
         stopped.cancel()
         _ = await stopped.result
         #expect(work.now.isEmpty, "a stopped piece of work stayed listed")
@@ -68,12 +69,12 @@ struct SourceWorkTests {
         let work = SourceWork()
         let url = "https://one.example/api/v1/timelines/public?limit=40&access_token=secret"
         let http = GatedHTTP([url: .text("[]"), "/fails": .fail], holding: url)
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the request, held on the wire")
         defer { watchdog.cancel() }
         let client = WatchedHTTP(http, for: .timeline, in: work)
 
         let asking = Task { try await client.data(from: URL(string: url)!) }
-        #expect(await spun { await http.asks == 1 })
+        await met("the request is on the wire", by: asking) { await http.asks == 1 }
         #expect(Self.running(work) == ["one.example timeline"], "only the host, only the purpose")
         await http.gate.open()
         _ = try await asking.value
@@ -90,7 +91,7 @@ struct SourceWorkTests {
         let work = SourceWork()
         let client = WatchedHTTP(Parked(), for: .picture, in: work)
         let asking = Task { try await client.data(from: URL(string: "https://cdn.example/a.png")!) }
-        #expect(await spun { !work.now.isEmpty })
+        await met("the request is listed", by: asking) { !work.now.isEmpty }
         asking.cancel()
         _ = await asking.result
         #expect(work.now.isEmpty)
@@ -100,13 +101,13 @@ struct SourceWorkTests {
     func aSentRequest() async throws {
         let work = SourceWork()
         let sender = GatedSender()
-        let watchdog = hangGuard(sender.gate)
+        let watchdog = watching(sender.gate, "the request sent, held at the source")
         defer { watchdog.cancel() }
         let client = WatchedHTTP(sender: sender, for: .write, in: work)
         var request = URLRequest(url: URL(string: "https://one.example/api/v1/statuses")!)
         request.httpMethod = "POST"
         let sending = Task { try await client.send(request) }
-        #expect(await spun { await sender.asks == 1 })
+        await met("the request is at the source", by: sending) { await sender.asks == 1 }
         #expect(Self.running(work) == ["one.example write"])
         await sender.gate.open()
         _ = try? await sending.value
@@ -121,14 +122,16 @@ struct SourceWorkTests {
     func aForumPost() async {
         let work = SourceWork()
         let http = GatedHTTP([Self.thread: .text("<div></div>")], holding: Self.thread)
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the forum post's read, held on the wire")
         defer { watchdog.cancel() }
         let posts = ForumPosts(http: http)
         posts.work = work
+        // The read's deadline, on a clock nobody turns: a read held at the gate is not ended by one.
+        posts.deadlineSleep = TurnedClock().sleep
         let ref = ForumThreadRef(host: "forum.example", tid: 40125)
 
         let reading = Task { await posts.fetch(ref) }
-        #expect(await spun { await http.asks == 1 })
+        await met("the post's read is on the wire", by: reading) { await http.asks == 1 }
         #expect(Self.running(work) == ["forum.example forumPost"])
         await http.gate.open()
         await reading.value
@@ -139,28 +142,29 @@ struct SourceWorkTests {
     func forumReplies() async {
         let work = SourceWork()
         let http = GatedHTTP([Self.thread: .text("<div></div>")], holding: Self.thread)
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the forum post's read, held on the wire")
         defer { watchdog.cancel() }
         let posts = ForumPosts(http: http)
         posts.work = work
+        // The read's deadline, on a clock nobody turns: a read held at the gate is not ended by one.
+        posts.deadlineSleep = TurnedClock().sleep
 
         let reading = Task { await posts.fetchReplies(ForumThreadRef(host: "forum.example", tid: 40125)) }
-        #expect(await spun { await http.asks >= 1 })
+        await met("the replies' read is on the wire", by: reading) { await http.asks >= 1 }
         #expect(Set(Self.running(work)) == ["forum.example forumReplies"])
         await http.gate.open()
         await reading.value
         #expect(work.now.isEmpty)
     }
 
-    @Test("Reloading a timeline is listed per source while it runs, and leaves when it ends",
-          .timeLimit(.minutes(3)))
+    @Test("Reloading a timeline is listed per source while it runs, and leaves when it ends")
     func aTimelineReload() async {
         let work = SourceWork()
         let http = GatedHTTP([
             "https://one.example/api/v1/trends/statuses?limit=20": .text("[]"),
             MastodonInstance.address(Self.host): MastodonInstance.mastodon(Self.host),
         ], holding: "/api/v1/trends/statuses")
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the read of what is rising, held on the wire")
         defer { watchdog.cancel() }
         let store = ItemStore()
         await store.add(Source(host: Self.host, kind: .mastodon))
@@ -169,10 +173,12 @@ struct SourceWorkTests {
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: GatedSender())
         )
         session.work = work
+        // The read's deadline, on a clock nobody turns: a read held at the gate is not ended by one.
+        session.deadlineSleep = TurnedClock().sleep
         await session.reloadFromStore()
 
         let reloading = Task { await session.reload.timeline(.trends, in: session) }
-        #expect(await spun { await http.asks == 1 })
+        await met("the read of what is rising is on the wire", by: reloading) { await http.asks == 1 }
         #expect(Self.running(work) == ["one.example timeline"])
         await http.gate.open()
         await reloading.value
@@ -271,17 +277,17 @@ struct SourceWorkTests {
         #expect(work.now.isEmpty)
     }
 
-    @Test("Listing servers to join is listed as that while it is asked", .timeLimit(.minutes(3)))
+    @Test("Listing servers to join is listed as that while it is asked")
     func theDirectory() async {
         let work = SourceWork()
         let http = GatedHTTP(["/servers": .text("[]")], holding: "/servers")
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the list of servers, held on the wire")
         defer { watchdog.cancel() }
         let session = ShellSession(http: http, store: ItemStore())
         session.work = work
 
         let loading = Task { await session.loadCatalog() }
-        #expect(await spun { await http.asks == 1 })
+        await met("the list of servers is asked for", by: loading) { await http.asks == 1 }
         #expect(work.now.values.map(\.purpose) == [.directory])
         await http.gate.open()
         await loading.value
@@ -294,13 +300,14 @@ struct SourceWorkTests {
         let tokens = MemoryMastodonTokens()
         try tokens.save(MastodonToken(host: Self.host, accessToken: "tok", clientID: "c", clientSecret: "s"))
         let sender = GatedSender()
-        let watchdog = hangGuard(sender.gate)
+        let watchdog = watching(sender.gate, "the sign-in's check, held at the source")
         defer { watchdog.cancel() }
         let mastodon = MastodonSessions(tokens: tokens, sender: sender)
         mastodon.work = work
+        mastodon.deadlineSleep = TurnedClock().sleep
 
         let checking = Task { await mastodon.verifyAll() }
-        #expect(await spun { await sender.asks == 1 })
+        await met("the sign-in's check is at the source", by: checking) { await sender.asks == 1 }
         #expect(Self.running(work) == ["one.example signInCheck"])
         await sender.gate.open()
         await checking.value
@@ -313,14 +320,15 @@ struct SourceWorkTests {
         let tokens = MemoryMastodonTokens()
         try tokens.save(MastodonToken(host: Self.host, accessToken: "tok", clientID: "c", clientSecret: "s"))
         let sender = GatedSender()
-        let watchdog = hangGuard(sender.gate)
+        let watchdog = watching(sender.gate, "what went through the signed-in door, held at the source")
         defer { watchdog.cancel() }
         let mastodon = MastodonSessions(tokens: tokens, sender: sender)
         mastodon.work = work
+        mastodon.deadlineSleep = TurnedClock().sleep
         let door = try #require(mastodon.authorized(host: Self.host, for: .write))
 
         let acting = Task { _ = try? await door.handle() }
-        #expect(await spun { await sender.asks == 1 })
+        await met("the request is at the source", by: acting) { await sender.asks == 1 }
         #expect(Self.running(work) == ["one.example write"])
         await sender.gate.open()
         await acting.value
@@ -335,7 +343,7 @@ struct SourceWorkTests {
         let forums = ForumSessions(credentials: credentials)
         forums.work = work
         let gate = Gate()
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the launch sign-in's attempt")
         defer { watchdog.cancel() }
 
         forums.signInAgain(hosts: ["forum.example"]) { _ in
@@ -344,15 +352,16 @@ struct SourceWorkTests {
         }
         #expect(Self.running(work) == ["forum.example signIn"])
         await gate.open()
-        #expect(await spun { !forums.isSigningInAgain(host: "forum.example") })
-        #expect(await spun { work.now.isEmpty }, "a settled sign-in stayed listed")
+        // No `by:` in these two: the launch sign-in is a task the sessions start for themselves.
+        await met("the launch sign-in has settled") { !forums.isSigningInAgain(host: "forum.example") }
+        await met("the settled sign-in has left the list") { work.now.isEmpty }
     }
 
     @Test("Pictures on one host are one line with a count, and none once they have come")
     func picturesGather() async {
         let work = SourceWork()
         let http = GatedHTTP([:], holding: "/a.png")
-        let watchdog = hangGuard(http.gate)
+        let watchdog = watching(http.gate, "the two pictures, held on the wire")
         defer { watchdog.cancel() }
         let pictures = ShellPictures(http: http, enforcingViewerContract: false)
         pictures.work = work
@@ -363,7 +372,7 @@ struct SourceWorkTests {
         let second = Task {
             await pictures.fetch(URL(string: "https://cdn.example/a.png?2"), scale: 2, tier: .deck, host: Self.host)
         }
-        #expect(await spun { await http.asks == 2 })
+        await met("both pictures are on the wire", by: first, second) { await http.asks == 2 }
         let rows = SourceWorkRow.rows(of: Array(work.now))
         #expect(rows.count == 1)
         #expect(rows.first?.host == "cdn.example")
@@ -381,9 +390,10 @@ struct SourceWorkTests {
     func thePageFollows() async {
         let work = SourceWork()
         let token = work.begin(host: Self.host, for: .timeline)
-        #expect(await spun { work.rows.map(\.host) == [Self.host] }, "the page never saw it start")
+        // No `by:` here or below: what the page draws is brought up to date by the record itself.
+        await met("the page has seen the work start") { work.rows.map(\.host) == [Self.host] }
         work.end(token)
-        #expect(await spun { work.rows.isEmpty }, "the page never saw it end")
+        await met("the page has seen the work end") { work.rows.isEmpty }
     }
 
     @Test("A board's name is carried from its start to its line, and a blank one is none")
@@ -392,7 +402,7 @@ struct SourceWorkTests {
         let named = work.begin(host: "Forum.Example", for: .timeline, name: .called("  Child "))
         let blank = work.begin(host: "forum.example", for: .boards, name: .called(" "))
         #expect(Set(work.now.values.map(\.name)) == [.called("Child"), nil])
-        #expect(await spun { work.rows.count == 2 })
+        await met("the page has seen both start") { work.rows.count == 2 }
         let line = work.rows.first { $0.purpose == .timeline }
         #expect(line?.host == "forum.example")
         #expect(line?.name == .called("Child"))
@@ -522,7 +532,8 @@ private actor Witness: HTTPClient {
 /// A request that never answers, and gives up when the reader walks away.
 private struct Parked: HTTPClient {
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
-        try await Task.sleep(for: .seconds(30))
+        // Asleep on a clock nobody turns.
+        try await TurnedClock().sleep(for: .seconds(30))
         throw URLError(.timedOut)
     }
 }

@@ -79,7 +79,7 @@ private final class OfflineDefaults: UserDefaults, @unchecked Sendable {
 /// with Wi-Fi off does. No sentence is compared against English: each is compared against the
 /// key 0.4.0 wrote it under, in whatever language the run is in.
 @MainActor
-@Suite("With the network off")
+@Suite("With the network off", .watched)
 struct OfflineTests {
     private static let host = "social.example"
     private static let writing = MastodonOAuth.scopes(writing: true)
@@ -398,12 +398,15 @@ struct OfflineTests {
         await session.reload.timeline(.all, in: session)
 
         #expect(!session.reload.running, "the reload did not wait on the account check")
-        #expect(await spun { session.mastodon.handles[Self.host] == "@me@\(Self.host)" })
+        // No `by:`: the account check is a task the reload starts for itself and does not wait on.
+        await met("who the reader is has been learnt") { session.mastodon.handles[Self.host] == "@me@\(Self.host)" }
         let checks = await network.asked.filter { $0 == "/api/v1/accounts/verify_credentials" }.count
         #expect(checks == 2, "once dark at launch, once when the network came back")
         await session.reload.timeline(.all, in: session)
-        // Room for an account check the reload might have started to reach the wire.
-        _ = await spun(1_000) { false }
+        // Room for an account check the reload might have started to reach the wire. Counted
+        // turns: the reload starts it in a task of its own, which says nothing of having begun or
+        // of having found nobody to ask.
+        for _ in 0..<1_000 { await Task.yield() }
         #expect(
             await network.asked.filter { $0 == "/api/v1/accounts/verify_credentials" }.count == checks,
             "learnt once, and not asked again on every reload"

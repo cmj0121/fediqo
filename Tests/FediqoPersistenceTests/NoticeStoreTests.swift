@@ -11,7 +11,7 @@ import Testing
 /// What a test can reach: the tables and the bytes of the file, a store as the build before
 /// this one left it, a build that knows no `v14-notices`, the saver's own order, and a package
 /// taken away and read back. What it cannot: a process killed between two of these writes.
-@Suite("Notices are on disk until they are let go")
+@Suite("Notices are on disk until they are let go", .watched)
 struct NoticeStoreTests {
     private static let mastodon = PackagerFixture.mastodon
     private static let origin = PackagerFixture.origin
@@ -332,7 +332,8 @@ struct NoticeStoreTests {
         defer { following.cancel() }
 
         await store.hold(Self.reach([Self.line(1)]))
-        for _ in 0..<200_000 where wrote.list.isEmpty { await Task.yield() }
+        // No work named: a follower goes on until it is cancelled, and so never ends without it.
+        await met("the follower has written the notices") { !wrote.list.isEmpty }
 
         #expect(wrote.list == ["notices:1"], "a launch's store is not written whole for a notice")
         #expect(slept.list == ["2.0 seconds"], "the quiet, and no gap: no note was written")
@@ -347,7 +348,13 @@ struct NoticeStoreTests {
         let following = Task { await saver.follow { slept.add("\($0)") } }
         defer { following.cancel() }
 
+        let changes = await store.changes()
         await store.hold(Self.reach([Self.line(1)]))
+        var heard = changes.makeAsyncIterator()
+        // Awaited as it is: the store tells every change, this hold included, so it comes.
+        _ = await heard.next()
+        // Counted turns, behind the change having been told: the follower was told as this was,
+        // and one that is not armed asks for no wait and writes nothing.
         for _ in 0..<2_000 { await Task.yield() }
 
         #expect(wrote.list.isEmpty && slept.list.isEmpty)

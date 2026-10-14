@@ -66,7 +66,7 @@ actor ActServer: HTTPSender {
 /// going on its way, failing, being tried again and landing; and that nothing about the press is
 /// remembered once the source has answered. What it cannot: that the mark is drawn where the
 /// rule says, on a Mac and a phone, in light and dark — that lives in a view body.
-@Suite("Boosting and favouriting a post")
+@Suite("Boosting and favouriting a post", .watched)
 @MainActor
 struct ActTests {
     init() {
@@ -213,8 +213,7 @@ struct ActTests {
 
     // MARK: - The press
 
-    @Test("A press is on its way until the source answers, and a second press sends nothing more until it has: then the last press is asked",
-          .timeLimit(.minutes(3)))
+    @Test("A press is on its way until the source answers, and a second press sends nothing more until it has: then the last press is asked")
     func onItsWay() async throws {
         let gate = Gate()
         let (session, server) = try await shell(
@@ -226,15 +225,15 @@ struct ActTests {
             held: "/api/v1/statuses/9/reblog", gate: gate
         )
         let item = try row(session)
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the boost, held on the wire")
+        defer { watchdog.cancel() }
         let first = Task { await session.toggle(.boost, on: item) }
-        #expect(await spun { await server.paths.count == 1 })
+        await met("the boost is on the wire", by: first) { await server.paths.count == 1 }
         #expect(session.acts.isOnItsWay(item.id, .boost))
         await session.toggle(.boost, on: item)
         #expect(await server.paths == ["/api/v1/statuses/9/reblog"], "one act, not two")
         await gate.open()
         await first.value
-        watchdog.cancel()
         #expect(session.acts.standing(of: item.id, .boost) == nil)
         // The second press took the boost back, and the last press wins.
         #expect(await server.paths == ["/api/v1/statuses/9/reblog", "/api/v1/statuses/9/unreblog"])

@@ -14,7 +14,7 @@ import Testing
 /// `ShellSession.clear` presses all three, that it presses them for the right server, and that
 /// the readouts the screen draws fall where the reader can see them.
 @MainActor
-@Suite("Clearing a server")
+@Suite("Clearing a server", .watched)
 struct ClearTests {
     private let alpha = "alpha.test"
     private let beta = "beta.test"
@@ -311,8 +311,7 @@ struct ClearTests {
     /// it is still on the wire — and the `.task` id does not move when it lands, so without the
     /// wait the reading says "No emoji names held" beside a server whose names arrived a moment
     /// later, for as long as the pane stays open.
-    @Test("A catalogue still on the wire is waited for rather than reported as absent",
-          .timeLimit(.minutes(3)))
+    @Test("A catalogue still on the wire is waited for rather than reported as absent")
     func aCatalogueInFlightIsWaitedFor() async {
         let session = ShellSession(http: FixtureHTTP())
         let registered = [emoji("wave"), emoji("blobcat")]
@@ -332,7 +331,7 @@ struct ClearTests {
                 "it landed before the read; this measures nothing")
 
         // Opened before anything waits on it, so a regression is a wrong answer rather than a
-        // hung job — `.timeLimit` does not rescue a task parked on a continuation.
+        // hung job — nothing rescues a task parked on a continuation nobody resumes.
         await gate.open()
         await session.emoji.settle(host: alpha)
         #expect(await session.emoji.catalogue(host: alpha)?.count == 2)

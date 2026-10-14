@@ -12,7 +12,7 @@ import Testing
 /// own copy and lets go of both; that a row nothing can act on says why; and on its way, failed
 /// and tried again. What it cannot: the marks drawn on a Mac and a phone, in light and dark, and
 /// VoiceOver reaching them — that lives in a view body.
-@Suite("Acting on a row two sources carried")
+@Suite("Acting on a row two sources carried", .watched)
 @MainActor
 struct MergedRowActTests {
     init() {
@@ -238,8 +238,7 @@ struct MergedRowActTests {
 
     // MARK: - On its way, failed, tried again
 
-    @Test("Pressed and failed read on the acting copy; a failure leaves the row and tries again",
-          .timeLimit(.minutes(3)))
+    @Test("Pressed and failed read on the acting copy; a failure leaves the row and tries again")
     func standingsAreTheActingCopys() async throws {
         let gate = Gate()
         let (session, server) = try await shell(
@@ -248,9 +247,10 @@ struct MergedRowActTests {
             held: "/api/v1/statuses/222/reblog", gate: gate
         )
         let row = try row(session)
-        let watchdog = hangGuard(gate)
+        let watchdog = watching(gate, "the boost through the acting copy, held on the wire")
+        defer { watchdog.cancel() }
         let press = Task { await session.toggle(.boost, on: row) }
-        #expect(await spun { await server.paths.count == 1 })
+        await met("the boost is on the wire", by: press) { await server.paths.count == 1 }
         let out = session.acting(on: row)
         #expect(out.standings[.boost] == .pressed(to: true))
         let pressed = ItemActs.mark(.boost, on: row, acting: out)
@@ -260,7 +260,6 @@ struct MergedRowActTests {
         #expect(await server.paths.count == 1, "one act, not two")
         await gate.open()
         await press.value
-        watchdog.cancel()
 
         #expect(session.acting(on: row).standings[.boost] == .failed)
         #expect(held(session, on: second)?.boosted == false, "the row is as it was")

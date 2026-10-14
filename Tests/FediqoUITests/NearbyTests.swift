@@ -10,7 +10,7 @@ import Testing
 /// what each question says, that both sides record one line under the other device's name,
 /// that the store is held still from the first byte to every way out, and that every word is in
 /// every language.
-@Suite("Moving to and from a device nearby, on the shell", .serialized)
+@Suite("Moving to and from a device nearby, on the shell", .serialized, .watched)
 @MainActor
 struct NearbyTests {
     /// A carrier that writes a real, small package and counts what it was asked, on no store.
@@ -114,11 +114,16 @@ struct NearbyTests {
         func begin() async {
             // A hold put away a moment ago leaves the pipe as its stream ends; a second round
             // starts once it has, as a browser lists only devices still holding.
-            for _ in 0..<600 where !link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+            await left()
             holding.beginHold(with: onto, link: link, device: "a tablet") { [log] in log.adopted.withLock { $0 += 1 } }
-            await settle(holding) { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
+            await settle(holding, "the code is up, on the receiver") { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
             offering.beginOffer(with: from, link: link)
-            await settle(offering) { if case .browsing(let peers) = $0 { !peers.isEmpty } else { false } }
+            await settle(offering, "the device holding is listed, on the sender") { if case .browsing(let peers) = $0 { !peers.isEmpty } else { false } }
+        }
+
+        /// The pipe holds nobody: a hold put away has left it.
+        func left(sourceLocation: SourceLocation = #_sourceLocation) async {
+            await met("the hold put away a moment ago has left the pipe", sourceLocation: sourceLocation) { link.peers.isEmpty }
         }
 
         func offer(rides: ShellNearby.Rides = .withoutPictures) async {
@@ -129,69 +134,19 @@ struct NearbyTests {
             #expect(check.mark == holding.mark, "the sender works the receiver's mark out from the digits")
             #expect(offering.asking == offering.step)
             offering.markMatched(with: from, link: link, device: "a laptop") {}
-            await settle(offering) { if case .asking = $0 { true } else { false } }
-            await settle(holding) { if case .asking = $0 { true } else { false } }
+            await settle(offering, "the question is up, on the sender") { if case .asking = $0 { true } else { false } }
+            await settle(holding, "the question is up, on the receiver") { if case .asking = $0 { true } else { false } }
         }
 
-        /// Waits for the step `done` names, woken by the step changing rather than by a clock:
-        /// a bound of a few seconds is for a runner that is slow, never a wait a test pays.
-        /// Waits for the step `done` names. **The budget is turns, not wall time**: sixteen
-        /// half-second periods in which this test held the main actor and the step did not come.
-        /// A step is delivered on the main actor, so while other suites hold it for forty
-        /// seconds — which a slow runner does — no step can arrive and none of that is the
-        /// move's delay; such a stall is one turn, not the whole budget.
-        func settle(_ nearby: ShellNearby, until done: (ShellNearby.Step?) -> Bool) async {
-            // Bounded both ways: sixteen idle turns, and — for a step that changes without end
-            // and never to the one named — two thousand changes or two minutes of the wall.
-            var turns = 16
-            var changes = 2000
-            let ceiling = ContinuousClock.now + .seconds(120)
-            while turns > 0, changes > 0, ContinuousClock.now < ceiling {
-                // Armed before the check, so a step assigned between the two is not missed.
-                let changed = StepSignal()
-                withObservationTracking { _ = nearby.step } onChange: { changed.fire() }
-                if done(nearby.step) { return }
-                if await changed.wait(most: .milliseconds(500)) == .clock {
-                    turns -= 1
-                    // Whatever was queued on the main actor behind this wake runs before it is judged.
-                    await Task.yield()
-                } else {
-                    changes -= 1
-                }
-            }
-            if !done(nearby.step) { Issue.record("never settled: \(String(describing: nearby.step))") }
-        }
-
-        /// One wake, fired by the step changing or by a clock, whichever is first — and which.
-        final class StepSignal: Sendable {
-            enum Wake: Sendable { case change, clock }
-
-            private let held = Mutex<(fired: Wake?, waiter: CheckedContinuation<Wake, Never>?)>((nil, nil))
-
-            func fire(_ wake: Wake = .change) {
-                let (waiter, first) = held.withLock { held -> (CheckedContinuation<Wake, Never>?, Wake?) in
-                    guard held.fired == nil else { return (nil, nil) }
-                    held.fired = wake
-                    defer { held.waiter = nil }
-                    return (held.waiter, wake)
-                }
-                if let waiter, let first { waiter.resume(returning: first) }
-            }
-
-            func wait(most: Duration) async -> Wake {
-                let clock = Task { [self] in
-                    try? await Task.sleep(for: most)
-                    fire(.clock)
-                }
-                defer { clock.cancel() }
-                return await withCheckedContinuation { (continuation: CheckedContinuation<Wake, Never>) in
-                    let now = held.withLock { held -> Wake? in
-                        if let fired = held.fired { return fired }
-                        held.waiter = continuation
-                        return nil
-                    }
-                    if let now { continuation.resume(returning: now) }
-                }
+        /// Waits for the step `what` names, on `nearby`. No work is named: the flow's run is its
+        /// own, and nothing here stands for it.
+        func settle(
+            _ nearby: ShellNearby, _ what: String, sourceLocation: SourceLocation = #_sourceLocation,
+            until done: (ShellNearby.Step?) -> Bool
+        ) async {
+            guard await met(what, sourceLocation: sourceLocation, until: { done(nearby.step) }) else {
+                Issue.record("never settled: \(String(describing: nearby.step))", sourceLocation: sourceLocation)
+                return
             }
         }
 
@@ -225,10 +180,10 @@ struct NearbyTests {
         two.offering.answer(true)
         #expect(two.offering.step == .waiting(peer: "a tablet"))
         two.holding.answer(true)
-        await two.settle(two.holding) { if case .done = $0 { true } else { false } }
-        await two.settle(two.offering) { if case .done = $0 { true } else { false } }
+        await two.settle(two.holding, "the move is done, on the receiver") { if case .done = $0 { true } else { false } }
+        await two.settle(two.offering, "the move is done, on the sender") { if case .done = $0 { true } else { false } }
         #expect(two.onto.read == [false])
-        for _ in 0..<50 where two.log.adopted.withLock({ $0 }) == 0 { try? await Task.sleep(for: .milliseconds(10)) }
+        await met("the receiver adopts what it read back") { two.log.adopted.withLock { $0 } > 0 }
         #expect(two.log.adopted.withLock { $0 } == 1)
         #expect(two.offering.asking == two.offering.step)
 
@@ -270,8 +225,8 @@ struct NearbyTests {
         #expect(waiting.title == "Moving to a tablet" && waiting.stage == "Waiting for the other device to agree" && waiting.canCancel)
         #expect(waiting.code == "Code " + NearbyCode.spaced(two.holding.code), "the code on both")
         two.holding.answer(true)
-        await two.settle(two.holding) { if case .settling(let progress?, _) = $0 { progress.done == 2_500 } else { false } }
-        await two.settle(two.offering) { if case .settling = $0 { true } else { false } }
+        await two.settle(two.holding, "half the read back is told, on the receiver") { if case .settling(let progress?, _) = $0 { progress.done == 2_500 } else { false } }
+        await two.settle(two.offering, "the last byte is sent, on the sender") { if case .settling = $0 { true } else { false } }
         let there = try #require(NearbyFlow.progress(two.offering, language: .english))
         #expect(there.stage == "The other device is proving the whole of it" && there.press == .close && there.canCancel,
                 "the sender waiting on the other's read back may still close its own screen")
@@ -289,7 +244,7 @@ struct NearbyTests {
         two.offering.dismiss()
         #expect(two.offering.step == nil && !two.offering.awake.on)
         gate.open()
-        await two.settle(two.holding) { if case .done = $0 { true } else { false } }
+        await two.settle(two.holding, "the move is done, on the receiver") { if case .done = $0 { true } else { false } }
         #expect(two.onto.read == [false])
     }
 
@@ -314,19 +269,32 @@ struct NearbyTests {
         #expect(two.offering.awake.on && two.holding.awake.on, "awake through the mark and the question")
         two.holding.answer(false)
         two.offering.answer(true)
-        await two.settle(two.offering) { $0 == .refused(.refusedThere) }
+        await two.settle(two.offering, "the no said there is heard, on the sender") { $0 == .refused(.refusedThere) }
         #expect(!two.holding.awake.on && !two.offering.awake.on, "a refusal on screen is the run ended")
         two.offering.dismiss()
         #expect(asked("hold") == [true, false, true, false] && asked("offer") == [true, false, true, false])
 
         // A drop midway, back to waiting for the other, and on to the end.
+        // The sender's wait before it tries the dropped link again is slept on a clock turned
+        // here, once the receiver listens again: the first try then joins. The drop comes before
+        // the last word, so nothing else is asked of that clock first. The receiver's own waits
+        // — the offer's deadline among them — are on a clock nobody turns.
+        let clock = TurnedClock()
+        two.offering.moveSleep = clock.sleep
+        two.holding.moveSleep = TurnedClock().sleep
         await two.begin()
-        await two.offer()
+        // Set before the sender joins: it is the next pair joined that drops.
         two.link.cutNext(afterBytesFrames: 0)
+        await two.offer()
         two.offering.answer(true)
         two.holding.answer(true)
-        await two.settle(two.holding) { if case .done = $0 { true } else { false } }
-        await two.settle(two.offering) { if case .done = $0 { true } else { false } }
+        await met("the sender waits to try again, and the receiver listens again") {
+            clock.asked.count == 1 && clock.sleeping == 1 && !two.link.peers.isEmpty
+        }
+        #expect(clock.asked == [.seconds(2)], "one wait before the one try, of two seconds")
+        clock.turn()
+        await two.settle(two.holding, "the move is done, on the receiver") { if case .done = $0 { true } else { false } }
+        await two.settle(two.offering, "the move is done, on the sender") { if case .done = $0 { true } else { false } }
         #expect(asked("hold") == [true, false, true, false, true, false], "awake across the drop, told once each way")
         #expect(asked("offer") == [true, false, true, false, true, false])
     }
@@ -343,7 +311,7 @@ struct NearbyTests {
         two.holding.answer(false)
         #expect(two.holding.step == nil && two.holding.work.now.isEmpty)
         two.offering.answer(true)
-        await two.settle(two.offering) { $0 == .refused(.refusedThere) }
+        await two.settle(two.offering, "the no said there is heard, on the sender") { $0 == .refused(.refusedThere) }
         #expect(two.onto.read.isEmpty)
         #expect(two.holding.work.record.count == 1 && two.offering.work.record.count == 1)
         #expect(two.log.stillness.withLock { $0 }.last?.hasSuffix("false") == true)
@@ -354,7 +322,7 @@ struct NearbyTests {
         two.offering.answer(false)
         #expect(two.offering.step == nil)
         two.holding.answer(true)
-        await two.settle(two.holding) { $0 == .refused(.refusedThere) }
+        await two.settle(two.holding, "the no said there is heard, on the receiver") { $0 == .refused(.refusedThere) }
         #expect(two.onto.read.isEmpty)
         let left = (try? FileManager.default.contentsOfDirectory(atPath: two.onto.staging.path)) ?? []
         #expect(!left.contains { $0.hasPrefix("incoming-") })
@@ -374,8 +342,8 @@ struct NearbyTests {
         #expect(two.offering.sheet == .pick && two.offering.work.record.isEmpty, "not the same: back to the list, nothing joined")
         two.offering.offer(code: code == "000000" ? "000001" : "000000", rides: .withoutPictures)
         two.offering.markMatched(with: two.from, link: two.link, device: "a laptop") {}
-        await two.settle(two.offering) { $0 == .refused(.wrongCode) }
-        await two.settle(two.holding) { if case .holding(let next) = $0 { next != code } else { false } }
+        await two.settle(two.offering, "the wrong code is refused, on the sender") { $0 == .refused(.wrongCode) }
+        await two.settle(two.holding, "a new code is up, on the receiver") { if case .holding(let next) = $0 { next != code } else { false } }
         #expect(two.offering.work.record.count == 1, "the try is on the record, under the device pointed at")
         two.offering.dismiss()
         two.holding.dismiss()
@@ -384,10 +352,10 @@ struct NearbyTests {
         denied.deny()
         let nearby = ShellNearby(work: SourceWork())
         nearby.beginOffer(with: two.from, link: denied)
-        await two.settle(nearby) { $0 == .refused(.notAllowed) }
+        await two.settle(nearby, "the look nearby is refused as not allowed, on the device that was denied") { $0 == .refused(.notAllowed) }
         nearby.dismiss()
         nearby.beginHold(with: two.onto, link: denied, device: "a tablet") {}
-        await two.settle(nearby) { $0 == .refused(.notAllowed) }
+        await two.settle(nearby, "the look nearby is refused as not allowed, on the device that was denied") { $0 == .refused(.notAllowed) }
         nearby.dismiss()
         // An ill-formed code or no device picked goes nowhere.
         nearby.beginOffer(with: two.from, link: two.link)
@@ -405,9 +373,9 @@ struct NearbyTests {
         defer { try? FileManager.default.removeItem(at: onto.staging); try? FileManager.default.removeItem(at: from.staging) }
         let holding = ShellNearby(work: SourceWork())
         holding.beginHold(with: onto, link: link, device: "a tablet") {}
-        for _ in 0..<200 where link.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        await met("the receiver is holding on the pipe") { !link.peers.isEmpty }
         session.nearby.beginOffer(with: from, link: link)
-        for _ in 0..<200 where session.nearby.peers.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        await met("the sender lists the receiver") { !session.nearby.peers.isEmpty }
         #expect(!session.holdsStill)
         guard case .holding(let code) = holding.step else { Issue.record("no code"); return }
         session.nearby.picked = session.nearby.peers.first
@@ -415,19 +383,18 @@ struct NearbyTests {
         #expect(!session.holdsStill, "nothing held while the mark is asked")
         session.nearby.markMatched(with: from, link: link, device: "a laptop") {}
         #expect(session.holdsStill, "not held before the first byte moved")
-        for _ in 0..<400 { if case .asking = session.nearby.step { break }; try? await Task.sleep(for: .milliseconds(10)) }
+        await met("the sender's question is up") { if case .asking = session.nearby.step { true } else { false } }
         #expect(session.holdsStill)
         session.nearby.answer(false)
         #expect(!session.holdsStill && session.nearby.step == nil)
         holding.dismiss()
     }
 
-    /// A few turns of the main actor: long enough for a put-away judged a turn later to act.
+    /// Counted turns of the main actor, for what must *not* have happened by the end of them: a
+    /// put-away is judged one turn after the press, in a task of the flow's own, and one that
+    /// does nothing says nothing.
     static func turns() async {
-        for _ in 0..<4 {
-            await Task.yield()
-            try? await Task.sleep(for: .milliseconds(10))
-        }
+        for _ in 0..<200 { await Task.yield() }
     }
 
     /// A sender's session over `two`'s pipe, its question up, answered the way the card answers:
@@ -438,9 +405,9 @@ struct NearbyTests {
         session.nearbyLink = two.link
         session.deviceName = "a laptop"
         two.holding.beginHold(with: two.onto, link: two.link, device: "a tablet") {}
-        await two.settle(two.holding) { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
+        await two.settle(two.holding, "the code is up, on the receiver") { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
         session.nearby.beginOffer(with: two.from, link: two.link)
-        await two.settle(session.nearby) { if case .browsing(let peers) = $0 { !peers.isEmpty } else { false } }
+        await two.settle(session.nearby, "the device holding is listed, on the sender") { if case .browsing(let peers) = $0 { !peers.isEmpty } else { false } }
         guard case .holding(let code) = two.holding.step else { Issue.record("no code"); return nil }
         session.nearby.picked = session.nearby.peers.first
         session.nearby.offer(code: code, rides: .withoutPictures)
@@ -466,11 +433,12 @@ struct NearbyTests {
         case .packing, .connecting, .asking: break
         default: Issue.record("the mark's yes did nothing: \(String(describing: session.nearby.step))")
         }
-        await two.settle(session.nearby) { if case .asking = $0 { true } else { false } }
-        await two.settle(two.holding) { if case .asking = $0 { true } else { false } }
+        await two.settle(session.nearby, "the question is up, on the sender") { if case .asking = $0 { true } else { false } }
+        await two.settle(two.holding, "the question is up, on the receiver") { if case .asking = $0 { true } else { false } }
         Self.press(.choice(ShellQuestion.yes), on: flow, session.nearby)
-        await Self.turns()
         #expect(session.nearby.step == .waiting(peer: "a tablet"), "the ask's yes waits for the other screen")
+        await Self.turns()
+        #expect(session.nearby.step == .waiting(peer: "a tablet"), "the question going down undid the yes")
         // The sheet let down after the yes writes the clearing back once more, with no question up.
         flow.asking.wrappedValue = nil
         await Self.turns()
@@ -484,17 +452,15 @@ struct NearbyTests {
         guard let (session, flow) = await Self.sender(two) else { return }
         defer { session.nearby.dismiss() }
         Self.press(.cancel, on: flow, session.nearby)
-        await Self.turns()
-        #expect(session.nearby.sheet == .pick, "not the same: back to the list")
+        await met("not the same: the mark put away goes back to the list") { session.nearby.sheet == .pick }
         if case .browsing = session.nearby.step {} else { Issue.record("not back to the list: \(String(describing: session.nearby.step))") }
 
         guard case .holding(let code) = two.holding.step else { Issue.record("no code"); return }
         session.nearby.offer(code: code, rides: .withoutPictures)
         Self.press(.choice(ShellQuestion.yes), on: flow, session.nearby)
-        await two.settle(session.nearby) { if case .asking = $0 { true } else { false } }
+        await two.settle(session.nearby, "the question is up, on the sender") { if case .asking = $0 { true } else { false } }
         Self.press(.cancel, on: flow, session.nearby)
-        await Self.turns()
-        #expect(session.nearby.step == nil, "the ask put away closes the move")
+        await met("the ask put away closes the move") { session.nearby.step == nil }
     }
 
     @Test("A hold put away before its yes gives back no copies it never took")
@@ -520,26 +486,29 @@ struct NearbyTests {
 
     /// The receiver's question up over `two`'s pipe, with `disk` as the copies a yes holds.
     private static func asked(_ two: Two, pictures disk: DiskCopies) async -> Bool {
+        await two.left()
         two.holding.beginHold(with: two.onto, link: two.link, device: "a tablet", pictures: disk) {}
-        await two.settle(two.holding) { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
+        await two.settle(two.holding, "the code is up, on the receiver") { if case .holding(let code) = $0 { !code.isEmpty } else { false } }
         two.offering.beginOffer(with: two.from, link: two.link)
-        await two.settle(two.offering) { if case .browsing(let peers) = $0 { !peers.isEmpty } else { false } }
+        await two.settle(two.offering, "the device holding is listed, on the sender") { if case .browsing(let peers) = $0 { !peers.isEmpty } else { false } }
         await two.offer()
         guard case .asking = two.holding.step else { Issue.record("no question on the receiver"); return false }
         return true
     }
 
-    /// Whether the copies run: a write and a read of it come back within a couple of seconds.
-    /// A queue left suspended never answers, so this asks off to the side and stops looking.
-    private static func running(_ disk: DiskCopies, _ cache: MediaCache, _ name: String) async -> Bool {
+    /// Whether the copies run: a write and a read of it come back. A queue left suspended never
+    /// answers and the write asked of it never ends, so this asks off to the side and names no
+    /// work: the wait is let go with the run's.
+    private static func running(
+        _ disk: DiskCopies, _ cache: MediaCache, _ name: String, sourceLocation: SourceLocation = #_sourceLocation
+    ) async -> Bool {
         let done = Mutex(false)
         Task.detached {
             disk.store(Data("x".utf8), host: "a.example", url: URL(string: "https://a.example/\(name).jpg")!)
             await disk.settled()
             done.withLock { $0 = true }
         }
-        for _ in 0..<200 where !done.withLock({ $0 }) { try? await Task.sleep(for: .milliseconds(10)) }
-        return done.withLock { $0 }
+        return await met("the copies answer a write, and a read of it", sourceLocation: sourceLocation) { done.withLock { $0 } }
     }
 
     @Test("A yes put away before its hold of the copies returns, or after, leaves them running; at most one hold is ever out")
@@ -555,6 +524,9 @@ struct NearbyTests {
         guard await Self.asked(two, pictures: disk) else { return }
         await disk.hold()
         two.holding.answer(true)
+        // Counted turns: the yes's hold waits behind this one on a queue that says nothing of who
+        // waits on it — and the lines below hold had it not got there. Kept counted: only
+        // `DiskCopies` could say a hold is queued, and that would take a seam there.
         await Self.turns()
         two.holding.dismiss()
         disk.release()
@@ -563,8 +535,10 @@ struct NearbyTests {
 
         // After: the yes's hold has returned, and the put-away releases it, once.
         guard await Self.asked(two, pictures: disk) else { return }
+        let crossed = two.link.transcript.count
         two.holding.answer(true)
-        await Self.turns()
+        // The yes goes onto the wire only once its hold of the copies has returned.
+        await met("the receiver's yes has crossed, its hold of the copies returned") { two.link.transcript.count > crossed }
         two.holding.dismiss()
         #expect(await Self.running(disk, cache, "two"), "a returned hold is released on the way out")
         #expect(cache.bytes(host: "a.example") == 2)

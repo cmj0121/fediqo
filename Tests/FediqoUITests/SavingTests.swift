@@ -14,7 +14,7 @@ import Testing
 /// app's own flush on a scene going to the background — that is `Launch.pause()`, outside the
 /// package, and it calls the same `StoreSaver.flush` these do.
 @MainActor
-@Suite("A save is asked for and not waited for", .serialized)
+@Suite("A save is asked for and not waited for", .serialized, .watched)
 struct SavingTests {
     private static let alpha = LimitRoom.alpha
 
@@ -49,6 +49,8 @@ struct SavingTests {
     func theActDoesNotWait() async throws {
         let session = await Self.shell(2)
         let entered = Gate()
+        let watchdog = watching(entered, "the save the press asked for, to have begun")
+        defer { watchdog.cancel() }
         let release = Gate()
         var saved = 0
         session.persist = {
@@ -80,7 +82,10 @@ struct SavingTests {
 
         await session.setKept(true, on: try Self.row(session, "1"))
         // What `Launch.pause()` and `Launch.end()` do, and nothing between the press and it.
-        #expect(await saver.flush(deadline: .seconds(60)) == .saved)
+        // Its deadline is on a clock nobody turns: the flush is answered by its write, however
+        // long this machine takes over it.
+        let deadline = TurnedClock()
+        #expect(await saver.flush(deadline: .seconds(60), sleep: deadline.sleep) == .saved)
 
         #expect(try file.load().notes.first { $0.id == "1" }?.kept == true)
         #expect(try file.load().notes.first { $0.id == "0" }?.kept == false)
@@ -93,6 +98,8 @@ struct SavingTests {
         let session = await Self.shell(2)
         let file = try StoreFile(at: dir)
         let entered = Gate()
+        let watchdog = watching(entered, "the first press's write, to have begun")
+        defer { watchdog.cancel() }
         let release = Gate()
         let writes = Writes()
         let saver = StoreSaver(store: session.store) { sources, notes, said in
@@ -108,7 +115,9 @@ struct SavingTests {
         await entered.wait()
         // A second press, whose save cannot have started: the first is still being written.
         await session.setKept(true, on: try Self.row(session, "1"))
-        let flush = Task { await saver.flush(deadline: .seconds(60)) }
+        // The deadline is never turned, so only the write can answer the flush.
+        let deadline = TurnedClock()
+        let flush = Task { await saver.flush(deadline: .seconds(60), sleep: deadline.sleep) }
         await release.open()
 
         #expect(await flush.value == .saved)
@@ -119,6 +128,8 @@ struct SavingTests {
     func aRunOfActsIsFewWrites() async throws {
         let session = await Self.shell(12)
         let entered = Gate()
+        let watchdog = watching(entered, "the first press's write, to have begun")
+        defer { watchdog.cancel() }
         let release = Gate()
         let writes = Writes()
         let saver = StoreSaver(store: session.store) { _, _, _ in
@@ -149,6 +160,8 @@ struct SavingTests {
     func aPurgeWaitsForItsWrite() async throws {
         let session = await Self.shell(4)
         let entered = Gate()
+        let watchdog = watching(entered, "the write that takes the posts off the disk, to have begun")
+        defer { watchdog.cancel() }
         let release = Gate()
         var saved = 0
         session.persist = {
@@ -166,6 +179,7 @@ struct SavingTests {
         await entered.wait()
         // The store has let them go and the write is held. Every turn there is to take: the
         // press cannot get past a save it waits for, and would have within one had it not.
+        // Counted: a press that waits does nothing more, so there is nothing later to wait for.
         for _ in 0..<200 { await Task.yield() }
         #expect(await session.store.snapshot().notes.count == 1)
         #expect(said == nil, "the count was said while the file still held what went")
@@ -272,7 +286,7 @@ struct SavingTests {
         session.persist = { (try? await saver.save()) != nil }
         // Held until the session is listening, so the landing below cannot come before it.
         let listening = Gate()
-        let watchdog = hangGuard(listening)
+        let watchdog = watching(listening, "the session, to be listening for saves that land")
         defer { watchdog.cancel() }
         session.savesLanded = {
             let landings = await saver.landings()
@@ -294,7 +308,7 @@ struct SavingTests {
         // The disk is back, and the save that lands is the saver's own or another window's: not this session's.
         failing.withLock { $0 = false }
         try await saver.save()
-        #expect(await spun { session.said.lines.isEmpty }, "the line still says what a landed save made untrue")
+        await met("the line a landed save made untrue is taken down", by: following) { session.said.lines.isEmpty }
         #expect(!SpanSection.unwritten(in: session))
     }
 
@@ -304,7 +318,7 @@ struct SavingTests {
     func aRemoveWaitsForItsWrite() async throws {
         let session = await Self.shell(3)
         let entered = Gate()
-        let watchdog = hangGuard(entered)
+        let watchdog = watching(entered, "the Remove's first write, to have begun")
         defer { watchdog.cancel() }
         let release = Gate()
         let clearedBefore = session.cleared
@@ -321,6 +335,7 @@ struct SavingTests {
             done = true
         }
         await entered.wait()
+        // Counted: a Remove that waits does nothing more, so there is nothing later to wait for.
         for _ in 0..<200 { await Task.yield() }
         #expect(seen.count == 1 && seen.first?.sources == 0, "the write was asked for before the store let the source go")
         #expect(seen.first?.cleared == clearedBefore, "the first write waited for is the Clear's, after the rest had gone on")
@@ -335,7 +350,7 @@ struct SavingTests {
     func aClearWaitsForItsWrite() async throws {
         let session = await Self.shell(3)
         let entered = Gate()
-        let watchdog = hangGuard(entered)
+        let watchdog = watching(entered, "the Clear's write, to have begun")
         defer { watchdog.cancel() }
         let release = Gate()
         var saves = 0
@@ -351,6 +366,7 @@ struct SavingTests {
             done = true
         }
         await entered.wait()
+        // Counted: a Clear that waits does nothing more, so there is nothing later to wait for.
         for _ in 0..<200 { await Task.yield() }
         #expect(!done && saves == 1, "Clear said it was done before its write returned")
 

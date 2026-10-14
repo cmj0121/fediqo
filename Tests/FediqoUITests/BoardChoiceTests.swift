@@ -12,7 +12,7 @@ import Testing
 /// and the boards they kept as a property of the source. `DiscuzBoardJoin` has its own suite for what the
 /// two Core calls do; this one is about who calls them and what the reader is left holding.
 @MainActor
-@Suite("Choosing boards")
+@Suite("Choosing boards", .watched)
 struct BoardChoiceTests {
     private static let host = "install-c.example"
 
@@ -1115,9 +1115,7 @@ struct BoardChoiceTests {
         let pane = AccountPane(session: session)
 
         let press = Task { await session.changeBoards(host: Self.host) }
-        #expect(await spun { session.checking }, """
-            the index read never claimed the errand, so there was nothing to ask who owned it
-            """)
+        await met("the index read has claimed the errand", by: press) { session.checking }
 
         #expect(session.progress?.owner == .row(host: Self.host), """
             the row did not claim its own errand
@@ -1471,9 +1469,7 @@ struct BoardChoiceTests {
         }
 
         let press = Task { await session.subscribe(offer.boards.filter { $0.fid == 33 }) }
-        #expect(await spun { session.checking }, """
-            the boards never went on the wire, so there was nothing to ask who owned it
-            """)
+        await met("the boards' read has claimed the errand", by: press) { session.checking }
 
         // A join: the boards sheet is down and the block went with the stage, so the page owns it.
         #expect(session.progress?.owner == .page)
@@ -1522,9 +1518,7 @@ struct BoardChoiceTests {
         session.stage = .choosingBoards(offer, from: .joined(subscribed: [], ticked: [40]))
 
         let press = Task { await session.subscribe(offer.boards) }
-        #expect(await spun { session.checking }, """
-            the restate never claimed the errand, so there was nothing to ask who owned it
-            """)
+        await met("the restate has claimed the errand", by: press) { session.checking }
 
         #expect(session.progress?.owner == .row(host: Self.host), """
             A restate reported itself under the field, a screen away from the row that asked.

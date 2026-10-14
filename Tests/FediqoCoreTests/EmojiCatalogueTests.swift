@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import FediqoCore
 
-@Suite("The server's emoji catalogue")
+@Suite("The server's emoji catalogue", .watched)
 struct EmojiCatalogueTests {
     private let source = Source(host: "first.example", kind: .mastodon)
     private let noon = Date(timeIntervalSince1970: 1_700_000_000)
@@ -226,10 +226,12 @@ struct EmojiCatalogueTests {
         #expect(await store.alphabet(own: [], host: "first.example").lookup("wave") != nil)
     }
 
-    @Test("Four callers racing one cold host make one fetch, not four", .timeLimit(.minutes(3)))
+    @Test("Four callers racing one cold host make one fetch, not four")
     func concurrentCallersShareOneFetch() async {
         let store = EmojiCatalogueStore()
         let gate = Gate()
+        let guardTask = watching(gate, "the catalogue's answer, held on the wire")
+        defer { guardTask.cancel() }
         let counter = Counter()
 
         await withTaskGroup(of: Void.self) { group in
@@ -253,10 +255,12 @@ struct EmojiCatalogueTests {
         #expect(await store.catalogue(host: "first.example")?.count == 1)
     }
 
-    @Test("A fetch still on the wire when the reader clears does not arrive behind them", .timeLimit(.minutes(3)))
+    @Test("A fetch still on the wire when the reader clears does not arrive behind them")
     func forgetDuringAFetchKeepsNothing() async {
         let store = EmojiCatalogueStore()
         let gate = Gate()
+        let guardTask = watching(gate, "the catalogue's answer, held on the wire")
+        defer { guardTask.cancel() }
         await store.refresh(host: "first.example") {
             await gate.wait()
             return [Self.emoji("blobcat", on: "first.example")]
@@ -270,10 +274,12 @@ struct EmojiCatalogueTests {
         #expect(await store.needsFetch(host: "first.example"))
     }
 
-    @Test("Clearing and asking again in the same turn starts a fetch, and it lands", .timeLimit(.minutes(3)))
+    @Test("Clearing and asking again in the same turn starts a fetch, and it lands")
     func forgetThenAskAgainInTheSameTurn() async {
         let store = EmojiCatalogueStore()
         let held = Gate()
+        let guardTask = watching(held, "the fetch that was cleared, held on the wire")
+        defer { guardTask.cancel() }
         // Cleared while still on the wire, and asked for again before it has unwound — which is
         // exactly what a Clear button does: drop this server, then let the screen re-ask.
         await store.refresh(host: "first.example") {
@@ -298,13 +304,12 @@ struct EmojiCatalogueTests {
         #expect(await store.alphabet(own: [], host: "first.example").lookup("cleared") == nil)
     }
 
-    @Test(
-        "A fetch that ignores cancellation still cannot land, and the host stays askable",
-        .timeLimit(.minutes(3))
-    )
+    @Test("A fetch that ignores cancellation still cannot land, and the host stays askable")
     func aFetchThatIgnoresCancellationLandsNothing() async {
         let store = EmojiCatalogueStore()
         let held = Gate()
+        let guardTask = watching(held, "the fetch that was cleared, held on the wire")
+        defer { guardTask.cancel() }
         await store.refresh(host: "first.example") {
             await held.wait()
             return [Self.emoji("cleared", on: "first.example")]
@@ -324,16 +329,22 @@ struct EmojiCatalogueTests {
         #expect(await store.alphabet(own: [], host: "first.example").lookup("asked") != nil)
     }
 
-    @Test("A cleared fetch unwinding late does not strike off the one that replaced it", .timeLimit(.minutes(3)))
+    @Test("A cleared fetch unwinding late does not strike off the one that replaced it")
     func aCancelledFetchDoesNotClearItsSuccessor() async {
         let store = EmojiCatalogueStore()
         let cleared = Gate()
+        let clearedGuard = watching(cleared, "the fetch that was cleared, held on the wire")
+        defer { clearedGuard.cancel() }
         let asked = Gate()
+        let askedGuard = watching(asked, "the fetch that replaced it, held on the wire")
+        defer { askedGuard.cancel() }
         let counter = Counter()
+        let answered = Counter()
 
         await store.refresh(host: "first.example") {
             await counter.tick()
             await cleared.wait()
+            await answered.tick()
             return [Self.emoji("cleared", on: "first.example")]
         }
         await store.forget(host: "first.example")
@@ -343,10 +354,13 @@ struct EmojiCatalogueTests {
             return [Self.emoji("asked", on: "first.example")]
         }
 
-        // The cleared one unwinds here, while its replacement is still on the wire. Yielding
-        // rather than sleeping: this hands the pool as many turns as it needs and depends on no
-        // duration. A task that struck its successor off would do it inside this loop.
+        // The cleared one unwinds here, while its replacement is still on the wire. No `by:`:
+        // it is a task of the store's own.
         await cleared.open()
+        await met("the cleared fetch has answered") { await answered.count == 1 }
+        // Counted turns, behind that answer: what the store does with it is the rest of that
+        // task, which says nothing where it rightly changes nothing. A task that struck its
+        // successor off would do it inside this loop.
         for _ in 0..<1_000 { await Task.yield() }
 
         // If the entry had been struck off, this would be a third fetch running beside the
@@ -364,10 +378,12 @@ struct EmojiCatalogueTests {
         #expect(await store.alphabet(own: [], host: "first.example").lookup("third") == nil)
     }
 
-    @Test("forget() clears every server and none of them is left unaskable", .timeLimit(.minutes(3)))
+    @Test("forget() clears every server and none of them is left unaskable")
     func forgetAllThenAskAgain() async {
         let store = EmojiCatalogueStore()
         let held = Gate()
+        let guardTask = watching(held, "the fetch that was cleared, held on the wire")
+        defer { guardTask.cancel() }
         for host in ["first.example", "second.example"] {
             await store.refresh(host: host) {
                 await held.wait()
@@ -470,22 +486,18 @@ struct EmojiCatalogueTests {
         #expect(await http.paths.filter { $0 == "/api/v1/custom_emojis" }.count == 1)
     }
 
-    @Test(
-        "The join returns with the timeline in hand while the catalogue is still on the wire",
-        .timeLimit(.minutes(3))
-    )
+    @Test("The join returns with the timeline in hand while the catalogue is still on the wire")
     func joinDoesNotWaitForTheCatalogue() async throws {
         let gate = Gate()
+        // Nothing but this test can release the gate, so a join that went back to waiting for
+        // the catalogue would wait for ever. The guard turns that into a recorded issue, when
+        // the run has gone still, instead of a suite that never finishes. On the passing path
+        // the join returns at once and this is cancelled without ever having waited.
+        let guardTask = watching(gate, "the catalogue's answer, held on the wire")
+        defer { guardTask.cancel() }
         let http = GatedHTTP(Self.joinHTTP(), holding: "/api/v1/custom_emojis", at: gate)
         let items = ItemStore()
         let catalogues = EmojiCatalogueStore()
-
-        // Nothing but this test can release the gate, so a join that went back to waiting for
-        // the catalogue would wait for ever. The guard turns that into a recorded issue inside
-        // the time limit instead of a suite that never finishes. On the passing path the join
-        // returns at once and this is cancelled without ever having waited.
-        let watchdog = hangGuard { await gate.open() }
-        defer { watchdog.cancel() }
 
         try await MastodonJoin(http: http, store: items, catalogues: catalogues)
             .join(host: "first.example")
@@ -502,7 +514,7 @@ struct EmojiCatalogueTests {
         #expect(await catalogues.catalogue(host: "first.example")?.count == 3)
     }
 
-    @Test("Four joins of one host racing each other still ask the server once", .timeLimit(.minutes(3)))
+    @Test("Four joins of one host racing each other still ask the server once")
     func concurrentJoinsAskOnce() async {
         let http = Self.joinHTTP()
         let catalogues = EmojiCatalogueStore()
@@ -525,24 +537,6 @@ struct EmojiCatalogueTests {
     private static func hold(_ emojis: [CustomEmoji], host: String, in store: EmojiCatalogueStore) async {
         await store.refresh(host: host) { emojis }
         await store.settle(host: host)
-    }
-
-    /// A fetch the test opens by hand, so that "while one is still on the wire" is a state a
-    /// test can stand in rather than a race it has to hope for.
-    private actor Gate {
-        private var waiting: [CheckedContinuation<Void, Never>] = []
-        private var opened = false
-
-        func wait() async {
-            guard !opened else { return }
-            await withCheckedContinuation { waiting.append($0) }
-        }
-
-        func open() {
-            opened = true
-            for continuation in waiting { continuation.resume() }
-            waiting = []
-        }
     }
 
     /// The fixture client with one path held shut, so that "everything has landed except the
@@ -693,8 +687,7 @@ struct EmojiCatalogueTests {
 
     // MARK: - Leaving a wait
 
-    @Test("A waiter that is cancelled leaves, and does not sit on a server that never answers",
-          .timeLimit(.minutes(3)))
+    @Test("A waiter that is cancelled leaves, and does not sit on a server that never answers")
     func aCancelledWaiterLeaves() async throws {
         // The leak this closes: waiting used to be `await task.value`, which honours nobody's
         // cancellation but the fetch's own. A screen that joins and leaves against a dripping
@@ -708,6 +701,8 @@ struct EmojiCatalogueTests {
             return []
         }
 
+        let guardTask = watching("the server that never answers") { parked.continuation.finish() }
+        defer { guardTask.cancel() }
         let waiting = Task { await store.settle(host: "slow.example") }
         // Cancelling is the whole test: without a ticket of its own this never returns.
         waiting.cancel()
@@ -720,8 +715,7 @@ struct EmojiCatalogueTests {
         parked.continuation.finish()
     }
 
-    @Test("A waiter is woken when the fetch ends, including when it was called off",
-          .timeLimit(.minutes(3)))
+    @Test("A waiter is woken when the fetch ends, including when it was called off")
     func everyEndingWakesTheWaiters() async throws {
         // A waiter nobody resumes is not a slow wait, it is a hang, and this project's risks
         // record that `.timeLimit` is not a hang guard. So every path out of the fetch wakes
@@ -733,6 +727,8 @@ struct EmojiCatalogueTests {
             return []
         }
 
+        let guardTask = watching("the server that never answers") { parked.continuation.finish() }
+        defer { guardTask.cancel() }
         let first = Task { await store.settle(host: "slow.example") }
         let second = Task { await store.settle(host: "slow.example") }
         // `forget` cancels the fetch. Both waiters must still be told it is over.
@@ -742,7 +738,7 @@ struct EmojiCatalogueTests {
         await second.value
     }
 
-    @Test("Waiting on a host with nothing on its way is not a wait", .timeLimit(.minutes(3)))
+    @Test("Waiting on a host with nothing on its way is not a wait")
     func nothingOnItsWayIsNoWait() async {
         let store = EmojiCatalogueStore()
         await store.settle(host: "quiet.example")

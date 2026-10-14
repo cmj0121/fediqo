@@ -84,11 +84,21 @@ final class ShellReload {
     ///
     /// `ask` is the read whoever pulled is waiting for — a timeline's list waits for the
     /// timeline's, a conversation for its own — and not any read that happens to be running.
-    func settled(_ ask: Ask) async {
+    ///
+    /// It looks again every `look`. `sleep` is `Task.sleep` but for a test, which turns it by
+    /// hand: "still waiting" is then a look that was made and found the read running, and not a
+    /// quarter of a second in which nothing was seen to happen.
+    func settled(
+        _ ask: Ask,
+        sleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) async {
         while asking.contains(ask), !Task.isCancelled {
-            try? await Task.sleep(for: .milliseconds(80))
+            try? await sleep(Self.look)
         }
     }
+
+    /// How often `settled` looks at whether its read is still running.
+    static let look: Duration = .milliseconds(80)
     /// Whether any reload the toast speaks for is on the wire. Not a tag's ask, which its own
     /// page speaks for (#124), nor an open thread's renewal, which its foot does (#198).
     var running: Bool { !asking.subtracting([.tag, .renew]).isEmpty }
@@ -1377,17 +1387,27 @@ struct Deadline: HTTPClient, HTTPSender {
     private let get: (@Sendable (URL) async throws -> (Data, HTTPURLResponse))?
     private let sender: (any HTTPSender)?
     private let limit: Duration
+    /// What `limit` is waited on: `Task.sleep` but for a test, which turns it by hand.
+    private let sleep: @Sendable (Duration) async throws -> Void
 
-    init(_ inner: any HTTPClient, within limit: Duration) {
+    init(
+        _ inner: any HTTPClient, within limit: Duration,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) {
         get = { try await inner.data(from: $0) }
         sender = nil
         self.limit = limit
+        self.sleep = sleep
     }
 
-    init(_ inner: any HTTPSender, within limit: Duration) {
+    init(
+        _ inner: any HTTPSender, within limit: Duration,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) {
         get = nil
         sender = inner
         self.limit = limit
+        self.sleep = sleep
     }
 
     /// **Nothing leaves once the work asking has been stopped** (#221): a read that goes on to
@@ -1396,22 +1416,23 @@ struct Deadline: HTTPClient, HTTPSender {
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         try Task.checkCancellation()
         guard let get else { return try await send(URLRequest(url: url)) }
-        return try await Self.within(limit) { try await get(url) }
+        return try await Self.within(limit, sleep: sleep) { try await get(url) }
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         try Task.checkCancellation()
         guard let sender else { throw URLError(.unsupportedURL) }
-        return try await Self.within(limit) { try await sender.send(request) }
+        return try await Self.within(limit, sleep: sleep) { try await sender.send(request) }
     }
 
     private static func within<T: Sendable>(
-        _ limit: Duration, _ work: @escaping @Sendable () async throws -> T
+        _ limit: Duration, sleep: @escaping @Sendable (Duration) async throws -> Void,
+        _ work: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask { try await work() }
             group.addTask {
-                try await Task.sleep(for: limit)
+                try await sleep(limit)
                 throw URLError(.timedOut)
             }
             defer { group.cancelAll() }

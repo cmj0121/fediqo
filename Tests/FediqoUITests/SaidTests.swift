@@ -16,7 +16,7 @@ import Testing
 /// **What it does not reach.** No window is made: light and dark, the strip under a sheet and
 /// over the tabs on a phone, the count's sheet opened, and VoiceOver itself are for a person
 /// on a running app.
-@Suite("What did not happen is said on every page", .serialized)
+@Suite("What did not happen is said on every page", .serialized, .watched)
 @MainActor
 struct SaidTests {
     private typealias F = NoticeActFixture
@@ -61,7 +61,9 @@ struct SaidTests {
         said.say(Self.boost(Self.a, 1))
         said.say(Self.boost(Self.b, 1))
         said.say(Said(.notice(.letGo), .declined, host: Self.b))
-        try await Task.sleep(for: .milliseconds(50))
+        // Counted turns: nothing that holds the lines starts work of its own, so there is no end
+        // to wait for behind which a line would have gone.
+        for _ in 0..<1_000 { await Task.yield() }
         #expect(said.lines.count == 3)
 
         // Its own press, and the same act having since succeeded, by the same name.
@@ -191,14 +193,38 @@ struct SaidTests {
 
     private static func settle(_ view: NSView) {
         view.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        RunLoop.main.run(mode: .default, before: .distantPast)
         view.layoutSubtreeIfNeeded()
+    }
+
+    /// What a page said it drew, to tell one look at it from the next.
+    private struct Drawn: Equatable {
+        let page: CGRect
+        let frames: [SaidProbe.Part: CGRect]
+    }
+
+    /// How many looks in a row must find a page as the look before left it.
+    private static let looks = 20
+
+    /// Lays `view` out and turns the run loop until the page has said where it is, and has said
+    /// the same for `looks` looks in a row. No `by:`: the run loop is turned here, by the check.
+    /// Counted looks, because what a hosted page does to draw itself is nothing a check can name.
+    private static func still(_ view: NSView, _ probe: SaidProbe, _ room: Room) async {
+        var last: Drawn?
+        var same = 0
+        await met("the page is drawn, and \(looks) turns more move nothing in it") {
+            settle(view)
+            let now = room.page == .zero ? nil : Drawn(page: room.page, frames: probe.frames)
+            same = now != nil && now == last ? same + 1 : 0
+            last = now
+            return same >= looks
+        }
     }
 
     private func hosted(
         _ said: ShellSaid, width: CGFloat, layout: ShellLayout = .wide, type: DynamicTypeSize = .large,
         corner: CGSize = .zero
-    ) -> (NSView, SaidProbe, Room) {
+    ) async -> (NSView, SaidProbe, Room) {
         let probe = SaidProbe(), room = Room()
         let view = NSHostingView(
             rootView: Page(said: said, room: room)
@@ -208,7 +234,7 @@ struct SaidTests {
                 .dynamicTypeSize(type)
         )
         view.frame = NSRect(x: 0, y: 0, width: width, height: 700)
-        for _ in 0..<3 { Self.settle(view) }
+        await Self.still(view, probe, room)
         return (view, probe, room)
     }
 
@@ -231,15 +257,15 @@ struct SaidTests {
     }
 
     @Test("Nothing said draws nothing and takes no room; a line stands under the page, which ends above it")
-    func theStripIsAnInset() throws {
+    func theStripIsAnInset() async throws {
         let said = ShellSaid()
         said.announce = { _ in }
-        let (_, nothing, whole) = hosted(said, width: 600)
+        let (_, nothing, whole) = await hosted(said, width: 600)
         #expect(nothing.frames.isEmpty)
         #expect(whole.page.height == 700, "an empty strip took room from the page")
 
         said.say(Said(.notice(.dismiss), .refused, host: Self.a))
-        let (_, probe, room) = hosted(said, width: 600)
+        let (_, probe, room) = await hosted(said, width: 600)
         let line = try #require(probe.frames[.line(said.lines[0].id)])
         #expect(room.page.height < 700 && line.height > 0)
         // The page and the line share no point: the strip covers nothing the page draws.
@@ -247,20 +273,20 @@ struct SaidTests {
         #expect(probe.frames[.more] == nil)
 
         said.takeDown(said.lines[0].id)
-        let (_, after, back) = hosted(said, width: 600)
+        let (_, after, back) = await hosted(said, width: 600)
         #expect(after.frames.isEmpty && back.page.height == 700)
     }
 
     @Test("A wide page draws three lines, newest on top, and a narrow one the newest alone; the rest are behind a count under them",
           arguments: [ShellLayout.wide, .narrow])
-    func someLinesAndACount(_ layout: ShellLayout) throws {
+    func someLinesAndACount(_ layout: ShellLayout) async throws {
         let width: CGFloat = layout == .wide ? 600 : 320
         let said = ShellSaid()
         said.announce = { _ in }
         // From two sources, so no more than three are about one act at one of them: more
         // would be drawn as one line that says how many (`ShellSaid.folded`).
         for id in 1...5 { said.say(Self.boost(id.isMultiple(of: 2) ? Self.a : Self.b, id)) }
-        let (_, probe, _) = hosted(said, width: width, layout: layout)
+        let (_, probe, _) = await hosted(said, width: width, layout: layout)
         let drawn = said.lines.prefix(layout == .wide ? 3 : 1).map(\.id)
         #expect(lines(probe) == drawn)
         let more = try #require(probe.frames[.more], "the count of the rest is not drawn")
@@ -270,7 +296,7 @@ struct SaidTests {
 
     @Test("At 320 points, beside the compose button, the line is not cut: its sentence at the height it asks for, its press whole and clear of the words, the count whole",
           arguments: [DummyFontSize.standard.dynamicType, DummyFontSize.largest.dynamicType, DynamicTypeSize.accessibility2])
-    func nothingCutAt320(_ type: DynamicTypeSize) throws {
+    func nothingCutAt320(_ type: DynamicTypeSize) async throws {
         let width: CGFloat = 320
         let corner = FediqoRootView.composeCorner(canCompose: true)
         let said = ShellSaid()
@@ -279,7 +305,7 @@ struct SaidTests {
         said.say(Said(.act(.withdraw, row: Self.row(Self.long, 1)), .refused, host: Self.long))
         for id in 1...3 { said.say(Self.boost(Self.long, id, .unconfirmed)) }
 
-        let (_, probe, room) = hosted(said, width: width, layout: .narrow, type: type, corner: corner)
+        let (_, probe, room) = await hosted(said, width: width, layout: .narrow, type: type, corner: corner)
         // And at the sizes the app reaches, one line with its count is well under half a phone.
         if type <= DummyFontSize.largest.dynamicType {
             #expect(700 - room.page.height <= 240, "\(type): the strip stands \(700 - room.page.height) points tall")

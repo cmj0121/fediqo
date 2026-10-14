@@ -15,7 +15,7 @@ import Testing
 /// on screen would answer by asking the deleted host again. And that a note two servers both carry
 /// survives the first Remove — decision 9, seen from the screen rather than from the store.
 @MainActor
-@Suite("Removing a server")
+@Suite("Removing a server", .watched)
 struct RemoveTests {
     private let alpha = "alpha.test"
     private let beta = "beta.test"
@@ -382,7 +382,8 @@ struct RemoveTests {
 
         // Only the yes reaches the page's Remove.
         put[0].answered(ShellQuestion.yes)
-        #expect(await spun { session.sources.isEmpty }, "the yes did not remove the source")
+        // No `by:`: the yes starts the Remove in a task of the question's own.
+        await met("the yes has removed the source") { session.sources.isEmpty }
         #expect(session.sources.isEmpty)
     }
 

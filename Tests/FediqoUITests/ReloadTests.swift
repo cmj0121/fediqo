@@ -5,7 +5,7 @@ import Testing
 
 /// `r` (#29): what is in front is asked for again, from exactly its own sources, and nothing else.
 @MainActor
-@Suite("r reloads what you are looking at")
+@Suite("r reloads what you are looking at", .watched)
 struct ReloadTests {
     private static let one = "one.example"
     private static let two = "two.example"
@@ -137,8 +137,32 @@ struct ReloadTests {
         let session = ShellSession(
             http: wire, store: store, mastodon: mastodon, posts: ForumPosts(http: wire)
         )
+        session.deadlinesUnturned()
+        // Its own list of what is on the wire, so a check can ask whether anything of its is.
+        session.work = SourceWork()
         await session.reloadFromStore()
         return (session, fixture)
+    }
+
+    /// Waits until both held answers about what is rising have come back and nothing this
+    /// session asked is on the wire. No `by:`: what they come back to is a run already stopped,
+    /// whose task nothing out here can name.
+    private func risingAnswered(
+        _ gated: GatedHTTP, in session: ShellSession, sourceLocation: SourceLocation = #_sourceLocation
+    ) async {
+        await met(
+            "what was held has been answered, and nothing of the reload is on the wire", sourceLocation: sourceLocation
+        ) {
+            let answered = await gated.requested().count(where: { $0.contains("/api/v1/trends/statuses") })
+            return answered == 2 && session.work.now.isEmpty
+        }
+    }
+
+    /// The turns a stopped run would take from its answer to landing it. **Counted, and after a
+    /// wait for the answer**: the landing that must not happen is the stopped run's own task's,
+    /// which nothing here can name, so there is no later point to wait for instead.
+    private func turnsToLand() async {
+        for _ in 0..<2_000 { await Task.yield() }
     }
 
     private func asked(_ http: FixtureHTTP) async -> Set<String> {
@@ -414,18 +438,19 @@ struct ReloadTests {
     @Test("Opening the timeline editor stops a running reload, which Esc could no longer reach")
     func editorStopsTheReload() async {
         let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "what is rising, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: gated)
         let running = Task { await session.reload.timeline(.trends, in: session) }
-        #expect(await spun { await gated.asks == 2 })
+        await met("both sources are asked what is rising", by: running) { await gated.asks == 2 }
         session.newTimeline()
         #expect(session.editing != nil)
         #expect(!session.reload.running)
         #expect(session.reload.stopped)
         await running.value
         await gated.gate.open()
-        for _ in 0..<2_000 { await Task.yield() }
+        await risingAnswered(gated, in: session)
+        await turnsToLand()
         #expect(await session.store.all().isEmpty, "what it had not landed did not land")
     }
 
@@ -476,11 +501,13 @@ struct ReloadTests {
             ["/api/v1/timelines/home": "[" + Self.status("5", "home") + "]"],
             holding: ["/api/v1/timelines/home"]
         )
-        let guardTask = hangGuard(signedIn.gate)
+        let guardTask = watching(signedIn.gate, "Home, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(mastodon: MastodonSessions(tokens: tokens, sender: signedIn))
         let running = Task { await session.reload.timeline(.all, in: session) }
-        #expect(await spun { await signedIn.paths.contains("/api/v1/timelines/home") })
+        await met("Home is asked for, as the reader", by: running) {
+            await signedIn.paths.contains("/api/v1/timelines/home")
+        }
         await session.signOut(host: Self.one)
         await signedIn.gate.open()
         await running.value
@@ -508,10 +535,40 @@ struct ReloadTests {
 
     @Test("A request that trickles past its deadline fails that source, and the others land")
     func deadline() async {
-        let slow = Slow(Self.one, then: FixtureHTTP(Self.everything))
+        let answering = FixtureHTTP(Self.ranking)
+        let slow = Slow(Self.one, then: answering)
+        let guardTask = watching("one.example, which answers nothing") { await slow.answer() }
+        defer { guardTask.cancel() }
         let (session, _) = await shell(http: slow)
-        session.reload.deadline = .milliseconds(50)
-        await session.reload.timeline(.all, in: session)
+        // The deadlines of what this reload asks with no sign-in — all it asks here — are on this
+        // clock, and it is turned only when the one request asleep on it is one.example's: the
+        // others have answered by then, so what a turn fails is that source and nothing else.
+        let deadlines = TurnedClock()
+        session.deadlineSleep = deadlines.sleep
+        session.reload.deadline = .seconds(7)
+        let running = Task { await session.reload.timeline(.all, in: session) }
+
+        // Nothing of the others has landed yet, nor can it: no source is read before each has
+        // been asked what it is. So the one sleeper is shown to be one.example's by what has
+        // left the app — that ask and the other Mastodon's, which has answered and is kept.
+        await met("one.example is asked what it is, and the other has said", by: running) {
+            let said = await session.store.snapshot().said.map(\.host)
+            let answered = await answering.requested.map(\.absoluteString)
+            return await slow.held == 1 && deadlines.sleeping == 1 && said == [Self.two]
+                && answered == [Self.flavourAddress(Self.two)]
+        }
+        deadlines.turn()
+        // Its public timeline, then what is rising there: each given up on in its turn.
+        for held in 2...3 {
+            await met("the others have landed, and one.example is held again", by: running) {
+                let landed = await Self.othersLanded(session)
+                return await slow.held == held && deadlines.sleeping == 1 && landed
+            }
+            #expect(session.reload.running, "nothing gives a source up before its deadline")
+            deadlines.turn()
+        }
+        await running.value
+        #expect(Set(deadlines.asked) == [.seconds(7)], "and the deadline is the one the reload was given")
         #expect(session.reload.failed == [Self.one])
         #expect(Set(session.notes.map(\.source.host)) == [Self.two, Self.forum])
     }
@@ -519,29 +576,30 @@ struct ReloadTests {
     @Test("Stopping a running reload: it ends at once, says so, and what it had not landed does not land")
     func stopTheReload() async {
         let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "what is rising, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: gated)
         let first = Task { await session.reload.timeline(.trends, in: session) }
-        #expect(await spun { await gated.asks == 2 })
+        await met("both sources are asked what is rising", by: first) { await gated.asks == 2 }
         #expect(session.reload.stop())
         await first.value
         #expect(!session.reload.running)
         #expect(session.reload.line == "Reload stopped.")
         #expect(!session.reload.stop(), "nothing left to stop")
         await gated.gate.open()
-        for _ in 0..<2_000 { await Task.yield() }
+        await risingAnswered(gated, in: session)
+        await turnsToLand()
         #expect(await session.store.all().isEmpty)
     }
 
     @Test("Pressing r again while the same reload runs starts no second one")
     func noDoubleReload() async {
         let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "what is rising, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: gated)
         let first = Task { await session.reload.timeline(.trends, in: session) }
-        #expect(await spun { await gated.asks == 2 })
+        await met("both sources are asked what is rising", by: first) { await gated.asks == 2 }
         #expect(session.reload.running)
         #expect(session.reload.line == "Reloading…")
         await session.reload.timeline(.trends, in: session)
@@ -558,20 +616,29 @@ struct ReloadTests {
         routes["https://\(Self.one)/api/v1/statuses/9"] = .text(Self.status("9", "edited words"))
         routes["https://\(Self.one)/api/v1/statuses/9/context"] = .text(Self.context)
         let held = Held(routes, holding: ["/api/v1/trends/statuses", "/api/v1/statuses/9"])
-        let guards = [hangGuard(held.first), hangGuard(held.second)]
+        let guards = [
+            watching(held.first, "what is rising, held on the wire"),
+            watching(held.second, "the open post, held on the wire"),
+        ]
         defer { for guardTask in guards { guardTask.cancel() } }
         let (session, _) = await shell(http: held)
         let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
 
         let first = Task { await session.reload.timeline(.trends, in: session) }
-        #expect(await spun { await held.asks("/api/v1/trends/statuses") == 2 })
+        await met("both sources are asked what is rising", by: first) {
+            await held.asks("/api/v1/trends/statuses") == 2
+        }
         #expect(session.reload.stop())
         await first.value
         let second = Task { await session.reload.thread(item, in: session) }
-        #expect(await spun { await held.asks("/api/v1/statuses/9") == 1 })
+        await met("the open post is asked for", by: second) { await held.asks("/api/v1/statuses/9") == 1 }
 
         await held.first.open()
-        for _ in 0..<2_000 { await Task.yield() }
+        // No `by:`: the stopped run's task is its own, and its end is what must change nothing.
+        await met("what is rising has been answered to the run that was stopped") {
+            await held.answered("/api/v1/trends/statuses") == 2
+        }
+        await turnsToLand()
         #expect(session.reload.running, "the first run's late end left the second running")
         #expect(session.reload.line == "Reloading…")
         await session.reload.thread(item, in: session)
@@ -585,18 +652,20 @@ struct ReloadTests {
     @Test("A second r while a reload runs does nothing: it neither stops it nor starts another")
     func secondPressDoesNothing() async {
         let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "what is rising, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: gated)
         session.reload.press(thread: nil, timeline: .trends, in: session)
-        #expect(await spun { await gated.asks == 2 })
+        // No `by:`: the read is a task of the press's own making, which nothing out here can name.
+        await met("both sources are asked what is rising") { await gated.asks == 2 }
         session.reload.press(thread: nil, timeline: .trends, in: session)
+        // Counted: a press that starts nothing leaves nothing behind it to wait for.
         for _ in 0..<200 { await Task.yield() }
         #expect(session.reload.running)
         #expect(!session.reload.stopped)
         #expect(await gated.asks == 2)
         await gated.gate.open()
-        #expect(await spun { !session.reload.running })
+        await met("the pressed reload has ended") { !session.reload.running }
         #expect(session.reload.landed == 1)
     }
 
@@ -663,7 +732,7 @@ struct ReloadTests {
     @Test("Esc on a Discuz! thread reload: its page does not land, and what was noted stays")
     func stopTheThreadReload() async {
         let http = Switching(Self.threadAddress)
-        let guardTask = hangGuard(http.gate)
+        let guardTask = watching(http.gate, "the thread's page, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: http)
         let ref = ForumThreadRef(host: Self.forum, tid: Self.tid)
@@ -672,12 +741,13 @@ struct ReloadTests {
 
         await http.answer(Self.thread)
         let running = Task { await session.reload.thread(DummyItem(Self.forumNote()), in: session) }
-        #expect(await spun { await http.held })
+        await met("the thread's page is on the wire", by: running) { await http.held }
         #expect(session.reload.stop())
         await running.value
         #expect(session.posts.reading(ref) == .absent(.refused), "the mark stays while stopped")
         await http.gate.open()
-        #expect(await spun { session.posts.inFlight.isEmpty })
+        // No `by:`: the page's read is the forum posts' own task, and its end is what is waited for.
+        await met("the stopped page's read has ended") { session.posts.inFlight.isEmpty }
         #expect(session.posts.reading(ref) == .absent(.refused), "the stopped page did not land")
         #expect(session.reload.failed.isEmpty)
     }
@@ -685,11 +755,30 @@ struct ReloadTests {
     @Test("A Discuz! thread that trickles past the deadline fails the reload")
     func threadDeadline() async {
         let slow = Slow(Self.forum, then: FixtureHTTP(Self.everything))
+        let guardTask = watching("the forum, which answers nothing") { await slow.answer() }
+        defer { guardTask.cancel() }
         let (session, _) = await shell(http: slow)
-        session.reload.deadline = .milliseconds(50)
-        await session.reload.thread(DummyItem(Self.forumNote()), in: session)
+        let deadlines = TurnedClock()
+        session.posts.deadlineSleep = deadlines.sleep
+        session.reload.deadline = .seconds(7)
+        let running = Task { await session.reload.thread(DummyItem(Self.forumNote()), in: session) }
+        await met("the thread's page is asked for, and its deadline counted", by: running) {
+            await slow.held == 1 && deadlines.sleeping == 1
+        }
+        #expect(session.reload.asking == [.thread], "nothing gives the page up before its deadline")
+        deadlines.turn()
+        await running.value
+        #expect(deadlines.asked == [.seconds(7)], "and the deadline is the one the reload was given")
         #expect(session.reload.failed == [Self.forum])
         #expect(session.posts.reading(ForumThreadRef(host: Self.forum, tid: Self.tid)) == .absent(.unreachable))
+    }
+
+    /// Whether everything the two sources that answer have to give has been read into the
+    /// store: nothing of theirs is on the wire after that.
+    private static func othersLanded(_ session: ShellSession) async -> Bool {
+        let landed = await session.store.all().filter { $0.source.host != one }
+        return landed.count(where: { $0.source.host == two }) == 2
+            && landed.count(where: { $0.source.host == forum }) == 3
     }
 
     private static func status(_ id: String, _ text: String, answering parent: String? = nil) -> String {
@@ -727,13 +816,13 @@ struct ReloadTests {
         routes["https://\(Self.one)/api/v1/statuses/9"] = .text(Self.status("9", "edited words"))
         routes["https://\(Self.one)/api/v1/statuses/9/context"] = .text(Self.context)
         let gated = GatedHTTP(routes, holding: "/api/v1/trends/statuses")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "what is rising, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: gated)
         let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
 
         let timeline = Task { await session.reload.timeline(.trends, in: session) }
-        #expect(await spun { await gated.asks == 2 })
+        await met("both sources are asked what is rising", by: timeline) { await gated.asks == 2 }
         await session.reload.thread(item, in: session)
         #expect(session.notes.first { $0.key.rowID == item.id }?.body == "edited words",
                 "the thread was not refused because the timeline was running")
@@ -755,13 +844,13 @@ struct ReloadTests {
         routes[Self.publicAddress(Self.two)] = .text("", status: 500)
         routes[Self.trendsAddress(Self.two)] = .text("", status: 500)
         let gated = GatedHTTP(routes, holding: "/api/v1/trends/statuses")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "what is rising, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: gated)
         let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
 
         let timeline = Task { await session.reload.timeline(.all, in: session) }
-        #expect(await spun { await gated.asks == 2 })
+        await met("both sources are asked what is rising", by: timeline) { await gated.asks == 2 }
         await gated.gate.open()
         await timeline.value
         #expect(session.reload.failed == [Self.two], "the premise: the timeline's reload missed one")
@@ -783,7 +872,7 @@ struct ReloadTests {
         var routes = Self.everything
         routes["https://\(Self.one)/api/v1/statuses/9"] = .text("", status: 500)
         let held = Held(routes, holding: ["/never/held", "/api/v1/statuses/9"])
-        let guards = [hangGuard(held.second)]
+        let guards = [watching(held.second, "the open post, held on the wire")]
         defer { for guardTask in guards { guardTask.cancel() } }
         if end != .stopped { await held.second.open() }
         let (session, _) = await shell(http: held)
@@ -791,7 +880,7 @@ struct ReloadTests {
 
         if end == .stopped {
             let thread = Task { await session.reload.thread(item, in: session) }
-            #expect(await spun { await held.asks("/api/v1/statuses/9") == 1 })
+            await met("the open post is asked for", by: thread) { await held.asks("/api/v1/statuses/9") == 1 }
             #expect(session.reload.stop())
             await thread.value
             await held.second.open()
@@ -819,7 +908,7 @@ struct ReloadTests {
         let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
         let following = Task { await session.followStore() }
         defer { following.cancel() }
-        #expect(await spun { await session.store.drawn > 0 })
+        await met("the session has drawn from the store it follows", by: following) { await session.store.drawn > 0 }
         let drawn = session.notesRevision
 
         let found = Note(
@@ -834,7 +923,6 @@ struct ReloadTests {
             body: "found, edited", postedAt: found.postedAt, categories: []
         )
         #expect(await session.store.refresh([edited], ifSourceHere: Self.one))
-        for _ in 0..<2_000 { await Task.yield() }
         // And asked outright, rather than trusting the follower to have come round.
         await session.reloadFromStore()
         #expect(session.notesRevision > drawn, "what is drawn changed")
@@ -848,13 +936,13 @@ struct ReloadTests {
         var routes = Self.everything
         routes["https://\(Self.one)/api/v1/statuses/9/context"] = .text(Self.context)
         let gated = GatedHTTP(routes, holding: "/api/v1/trends/statuses")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "what is rising, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: gated)
         let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
 
         let timeline = Task { await session.reload.timeline(.trends, in: session) }
-        #expect(await spun { await gated.asks == 2 })
+        await met("both sources are asked what is rising", by: timeline) { await gated.asks == 2 }
         await session.conversations.open(item, in: session)
         #expect(session.conversations.conversation(around: item).descendants.count == 2)
         let search = ShellSearch()
@@ -886,7 +974,8 @@ struct ReloadTests {
             categories: [.public]
         )
         await session.store.ingest([newer], ifSourceHere: Self.one)
-        #expect(await spun { session.notes.count == 2 }, "no key was pressed and no reload asked for")
+        // No key was pressed and no reload asked for.
+        await met("the newer post is drawn", by: following) { session.notes.count == 2 }
         let stream = session.timelineItems(latest: nil)
         #expect(stream.map(\.id) == [newer.key.rowID, item.id], "the newer post above")
         let row = try #require(session.heldNote(item.id))
@@ -1046,7 +1135,8 @@ struct ReloadTests {
         await signedIn.after("/api/v2/search") { await session.signOut(host: Self.one) }
         let item = await holding(Self.mastodonNote(statusID: nil), in: session)
         await session.reload.thread(item, in: session)
-        #expect(await spun { !session.isSignedIn(host: Self.one) })
+        // No `by:`: the sign-out is a task the door itself starts as it answers the search.
+        await met("the sign-out the search's answer set off is done") { !session.isSignedIn(host: Self.one) }
         let sent = await signedIn.paths.filter { $0.hasPrefix("/api") }
         #expect(sent == ["/api/v2/search"], "nothing after the sign-out went out")
         #expect(session.notes.first { $0.key.rowID == item.id }?.body == "first words")
@@ -1185,13 +1275,13 @@ struct ReloadTests {
         var routes = Self.everything
         routes["https://\(Self.one)/api/v1/statuses/9/context"] = .text(Self.context)
         let gated = GatedHTTP(routes, holding: "/api/v1/trends/statuses")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "what is rising, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: gated)
         let item = await holding(Self.mastodonNote(statusID: "9"), in: session)
 
         let held = Task { await session.reload.held(in: session) }
-        #expect(await spun { await gated.asks == 2 })
+        await met("both sources are asked what is rising", by: held) { await gated.asks == 2 }
         #expect(session.reload.running)
         #expect(session.reload.reading == [.timeline])
         let toast = TimelineToast.shown(
@@ -1237,7 +1327,7 @@ struct ReloadTests {
         let before = session.notesRevision
 
         await session.reload.held(in: session)
-        #expect(await spun { session.notes.count == 6 })
+        await met("what the wait brought is drawn", by: following) { session.notes.count == 6 }
         #expect(session.notesRevision != before, "the screen was renewed")
         let stream = session.timelineItems(latest: nil)
         let row = try #require(session.heldNote(item.id))
@@ -1249,13 +1339,14 @@ struct ReloadTests {
     @Test("A wait and an r finishing together leave one row per post")
     func aWaitBesideAPress() async {
         let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "what is rising, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: gated)
         let waited = Task { await session.reload.held(in: session) }
-        #expect(await spun { await gated.asks == 2 })
+        await met("both sources are asked what is rising", by: waited) { await gated.asks == 2 }
         let pressed = Task { await session.reload.timeline(.all, in: session) }
-        #expect(await spun { await gated.asks == 4 }, "both kinds on the wire at once: r is not refused")
+        // Both kinds on the wire at once: r is not refused.
+        await met("r's own asks are on the wire beside the wait's", by: pressed) { await gated.asks == 4 }
         await gated.gate.open()
         await pressed.value
         await waited.value
@@ -1268,11 +1359,11 @@ struct ReloadTests {
     @Test("A wait coming round while r reads the timeline asks nothing beside it")
     func noWaitBesideAPress() async {
         let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "what is rising, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: gated)
         let pressed = Task { await session.reload.timeline(.all, in: session) }
-        #expect(await spun { await gated.asks == 2 })
+        await met("both sources are asked what is rising", by: pressed) { await gated.asks == 2 }
         await session.reload.held(in: session)
         #expect(session.reload.onlyWaiting == false)
         #expect(await gated.asks == 2, "nothing asked twice at once")
@@ -1293,14 +1384,16 @@ struct ReloadTests {
         defer { following.cancel() }
 
         // The first window reaches its wait, asks, and waits again — keeping the clock.
+        // Its second wait is on a clock nobody turns.
         let slept = Counter()
+        let never = TurnedClock()
         let firstLoop = Task {
-            await first.reload.keepAsking(every: .seconds(60), in: first) { _ in
+            await first.reload.keepAsking(every: .seconds(60), in: first) {
                 slept.count += 1
-                if slept.count > 1 { try await Task.sleep(for: .seconds(3_600)) }
+                if slept.count > 1 { try await never.sleep(for: $0) }
             }
         }
-        #expect(await spun { slept.count == 2 })
+        await met("the first window has asked, and waits again", by: firstLoop) { slept.count == 2 }
         #expect(await !firstHTTP.requested.isEmpty)
 
         var waits = 0
@@ -1309,7 +1402,9 @@ struct ReloadTests {
             if waits > 2 { throw CancellationError() }
         }
         #expect(await secondHTTP.requested.isEmpty, "two waits passed and the other window had them")
-        #expect(await spun { second.notes.count == 5 }, "yet it holds what the first one's wait brought")
+        await met("the second window holds what the first one's wait brought", by: following) {
+            second.notes.count == 5
+        }
 
         firstLoop.cancel()
         await firstLoop.value
@@ -1324,7 +1419,7 @@ struct ReloadTests {
     @Test("A window that goes while its wait is on the wire ends it, saying nothing, and none of it lands")
     func closingEndsTheWait() async {
         let gated = GatedHTTP(Self.everything, holding: "/api/v1/trends/statuses")
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "what is rising, held on the wire")
         defer { guardTask.cancel() }
         let (session, _) = await shell(http: gated)
         let loop = Task {
@@ -1332,14 +1427,15 @@ struct ReloadTests {
                 if Task.isCancelled { throw CancellationError() }
             }
         }
-        #expect(await spun { await gated.asks == 2 })
+        await met("both sources are asked what is rising", by: loop) { await gated.asks == 2 }
         loop.cancel()
         await loop.value
         #expect(!session.reload.running)
         #expect(!session.reload.stopped, "nobody stopped it")
         #expect(session.reload.line == nil)
         await gated.gate.open()
-        for _ in 0..<2_000 { await Task.yield() }
+        await risingAnswered(gated, in: session)
+        await turnsToLand()
         #expect(await !session.store.all().contains { $0.categories.contains(.trends) })
     }
 
@@ -1462,18 +1558,34 @@ private actor Paths: HTTPSender {
     }
 }
 
-/// One host that answers nothing for a minute, and everything else as `inner` does.
-private struct Slow: HTTPClient {
-    let host: String
-    let inner: any HTTPClient
+/// One host that answers nothing until whoever asked gives up, and everything else as `inner`
+/// does.
+private actor Slow: HTTPClient {
+    private let host: String
+    private let inner: any HTTPClient
+    /// What the host's requests are asleep on: a clock no check turns, so each ends when it is
+    /// cancelled, as a request given up on is.
+    private let never = TurnedClock()
+    /// How many requests the host has been sent.
+    private(set) var held = 0
+    private var answers = false
 
     init(_ host: String, then inner: any HTTPClient) {
         self.host = host
         self.inner = inner
     }
 
+    /// Lets the host answer after all, from now on: for the guard, where nobody gave up on it.
+    func answer() {
+        answers = true
+        never.turn()
+    }
+
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
-        if url.host == host { try await Task.sleep(for: .seconds(60)) }
+        if url.host == host, !answers {
+            held += 1
+            try await never.sleep(for: .seconds(60))
+        }
         return try await inner.data(from: url)
     }
 }
@@ -1508,6 +1620,7 @@ private actor Held: HTTPClient {
     let first = Gate()
     let second = Gate()
     private var counted: [String: Int] = [:]
+    private var passed: [String: Int] = [:]
 
     init(_ routes: [String: FixtureHTTP.Outcome], holding paths: [String]) {
         inner = FixtureHTTP(routes)
@@ -1518,10 +1631,16 @@ private actor Held: HTTPClient {
         counted[path] ?? 0
     }
 
+    /// How many asks for `path` have got past its gate, and been answered.
+    func answered(_ path: String) -> Int {
+        passed[path] ?? 0
+    }
+
     func data(from url: URL) async throws -> (Data, HTTPURLResponse) {
         counted[url.path, default: 0] += 1
         if url.path == paths[0] { await first.wait() }
         if url.path == paths[1] { await second.wait() }
+        defer { passed[url.path, default: 0] += 1 }
         return try await inner.data(from: url)
     }
 }

@@ -430,10 +430,18 @@ public actor StoreSaver {
     /// locked file, a disk that stopped answering — must not turn a quit into one that never
     /// happens. Past the deadline the write is left running and the caller goes on.
     public nonisolated func flush(deadline: Duration = StoreSaver.deadline) async -> Outcome {
+        await flush(deadline: deadline) { try await Task.sleep(for: $0) }
+    }
+
+    /// `flush(deadline:)`, saying what the deadline is waited on: `Task.sleep` but for a test,
+    /// which turns it by hand.
+    package nonisolated func flush(
+        deadline: Duration, sleep: @escaping @Sendable (Duration) async throws -> Void
+    ) async -> Outcome {
         let outcome = await withCheckedContinuation { (continuation: CheckedContinuation<Outcome, Never>) in
             let once = Once(continuation)
             let timer = Task {
-                try await Task.sleep(for: deadline)
+                try await sleep(deadline)
                 once.resume(.timedOut)
             }
             Task {

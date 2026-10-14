@@ -9,7 +9,7 @@ import WebKit
 /// #153. Everything here is through `MemoryCredentials` or a store that fails on purpose, and a
 /// non-persistent cookie store: no test touches the real Keychain or the real WebKit store.
 @MainActor
-@Suite("A forum's sign-in lasts")
+@Suite("A forum's sign-in lasts", .watched)
 struct ForumSignInLastsTests {
     static let host = "bbs.example.org"
 
@@ -179,7 +179,11 @@ struct ForumSignInLastsTests {
 
         forums.signInAgain(hosts: [Self.host], attempt: attempts.attempt)
         let fetching = Task { await posts.fetch(Self.ref) }
-        #expect(await spun { attempts.hosts == [Self.host] }, "the launch sign-in never started")
+        // No `by:`: the launch sign-in is a task the sessions start for themselves.
+        await met("the launch sign-in has started") { attempts.hosts == [Self.host] }
+        await met("the post's read has begun", by: fetching) { posts.isFetching(Self.ref) }
+        // Counted turns, behind the two waits: the read is parked on the sign-in inside the
+        // posts' own task, and nothing says it has reached that wait.
         for _ in 0..<50 { await Task.yield() }
         #expect(await http.requested.isEmpty, "a post was read before its forum's sign-in settled")
 

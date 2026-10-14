@@ -78,6 +78,10 @@ actor FixtureHTTP: HTTPClient {
 /// **`checking` and "on the wire" are not the same instant.** A press sets its progress report
 /// before it calls out, so a test that spins on `checking` and then reads a request count is
 /// reading it one hop too early. Spin on the count when the count is what you mean.
+///
+/// **A new check says `met` (#346)**, which is this with a name for what is waited for and no
+/// count of turns: a count is a clock that runs faster on a faster machine. This stays until
+/// every site that says it has been given that name.
 @MainActor
 func spun(_ limit: Int = 100_000, until condition: @MainActor () async -> Bool) async -> Bool {
     for _ in 0..<limit {
@@ -85,26 +89,6 @@ func spun(_ limit: Int = 100_000, until condition: @MainActor () async -> Bool) 
         await Task.yield()
     }
     return false
-}
-
-/// Opens only when a test lets it, so a press can be caught mid-flight.
-///
-/// The flag is set **before** the waiters are resumed, so a caller arriving after the gate is
-/// open does not park on a continuation nobody will resume.
-actor Gate {
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-    private var opened = false
-
-    func wait() async {
-        guard !opened else { return }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-
-    func open() {
-        opened = true
-        for continuation in waiting { continuation.resume() }
-        waiting.removeAll()
-    }
 }
 
 /// A fixture that holds one address until the test says otherwise.
@@ -174,33 +158,15 @@ enum MastodonInstance {
     static func mastodon(_ host: String) -> FixtureHTTP.Outcome { says("4.3.1", host: host) }
 }
 
-/// Opens a gate nobody else will, so a test that lost its synchronisation fails instead of
-/// hanging the suite. Armed before anything awaits and cancelled on the passing path.
+/// `watching(_:_:)` under the name it had while it kept a clock of its own (#346) — fifty seconds,
+/// then a hundred and seventy, and each time shorter than some honest run. It keeps none now:
+/// the gate is opened by the run going still, and by nothing else.
 ///
-/// **A hang guard, not a clock.** These used to open the gate after five seconds, and on a loaded
-/// runner five seconds is a time a starved test body can still be short of the line it gates —
-/// the watchdog then opened the gate early, the test measured an order it never set up, and CI
-/// went red on a test that was right. The bound below is past any honest wait, and still inside
-/// the `.timeLimit` these tests carry, so the only run that reaches the end is one whose gate
-/// nobody was ever going to open, and that run says so rather than passing on whatever the gate
-/// let through. `.timeLimit` does not rescue a task parked on a
-/// continuation, which is why this has to exist at all.
-///
-/// **The bound is a stopgap, and it was moved once already (#346).** A check that waits behind
-/// everything else on the main actor answers when the whole run of this target does, and the
-/// run had grown to fifty-five seconds against a bound of fifty: seven checks then failed in
-/// every full run and passed in under a second alone. The bound is now well past the run, and
-/// the one-minute limits beside it went to three with it, so that this still speaks before
-/// they do. A bound in seconds is a guess about a machine either way; #346 takes it out.
-func hangGuard(_ gate: Gate) -> Task<Void, Never> {
-    Task {
-        try? await Task.sleep(for: .seconds(170))
-        // `try?` swallows the cancellation, so without this a guard cancelled on the passing path
-        // would still go on to open the gate and record an issue against a test that passed.
-        guard !Task.isCancelled else { return }
-        Issue.record("watchdog opened the gate; the test lost its synchronisation")
-        await gate.open()
-    }
+/// **Here until every site that says it has been given a name for what it holds.** A new check
+/// says `watching(gate, "what is held")`, so that a run which does reach the guard says which
+/// gate it was.
+func hangGuard(_ gate: Gate, sourceLocation: SourceLocation = #_sourceLocation) -> Task<Void, Never> {
+    watching(gate, sourceLocation: sourceLocation)
 }
 
 extension Note {

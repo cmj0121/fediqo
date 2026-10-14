@@ -11,7 +11,7 @@ import Testing
 /// of its requests goes out. Every test builds its own `SourceWork`; none sets the shell's
 /// language, and each line is asked for in a language named.
 @MainActor
-@Suite("The reload toast names what it is reading", .serialized)
+@Suite("The reload toast names what it is reading", .serialized, .watched)
 struct ReloadToastTests {
     private static let one = "one.example"
     private static let since = Date(timeIntervalSince1970: 1_000)
@@ -124,11 +124,11 @@ struct ReloadToastTests {
 
     // MARK: - What each reload names
 
-    @Test("A reload says which of its purposes are its own, while it runs", .timeLimit(.minutes(3)))
+    @Test("A reload says which of its purposes are its own, while it runs")
     func whatAReloadReads() async {
         let asked = MastodonInstance.address(Self.one)
         let gated = GatedHTTP([asked: MastodonInstance.mastodon(Self.one)], holding: asked)
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "what the source says it is, held on the wire")
         defer { guardTask.cancel() }
         let store = ItemStore()
         await store.add(Source(host: Self.one, kind: .mastodon))
@@ -136,7 +136,7 @@ struct ReloadToastTests {
         session.work = SourceWork()
         await session.reloadFromStore()
         let running = Task { await session.reload.timeline(.all, in: session) }
-        #expect(await spun { await gated.asks == 1 })
+        await met("the reload has asked the source what it is", by: running) { await gated.asks == 1 }
         #expect(session.reload.reading == [.timeline])
         await gated.gate.open()
         await running.value
@@ -144,7 +144,7 @@ struct ReloadToastTests {
         #expect(session.reload.reading.isEmpty)
     }
 
-    @Test("A Mastodon's Public and Trends are read under those names", .timeLimit(.minutes(3)))
+    @Test("A Mastodon's Public and Trends are read under those names")
     func publicAndTrends() async {
         let work = SourceWork()
         let http = Noting(FixtureHTTP([
@@ -169,7 +169,7 @@ struct ReloadToastTests {
         #expect(work.now.isEmpty)
     }
 
-    @Test("Signed in, Home and a list are read under Home and the list's own title", .timeLimit(.minutes(3)))
+    @Test("Signed in, Home and a list are read under Home and the list's own title")
     func homeAndAList() async throws {
         let work = SourceWork()
         let tokens = MemoryMastodonTokens()
@@ -201,7 +201,7 @@ struct ReloadToastTests {
         #expect(work.now.isEmpty)
     }
 
-    @Test("A forum's boards are read under their names, never their numbers", .timeLimit(.minutes(3)))
+    @Test("A forum's boards are read under their names, never their numbers")
     func aForumsBoards() async {
         let work = SourceWork()
         let http = Noting(FixtureHTTP(SubBoardChoiceTests.routes), work: work)

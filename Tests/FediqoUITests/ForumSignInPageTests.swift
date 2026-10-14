@@ -8,7 +8,7 @@ import WebKit
 
 /// The forum's own sign-in page, driven the way a reader drives it — #153.
 @MainActor
-@Suite("A sign-in on the forum's own page", .serialized)
+@Suite("A sign-in on the forum's own page", .serialized, .watched)
 struct ForumSignInPageTests {
     static let signedIn = #"""
     <p>Welcome back</p><a href="member.php?mod=logging&amp;action=logout&amp;formhash=ab12cd34">Log out</a>
@@ -31,14 +31,12 @@ struct ForumSignInPageTests {
     /// Loads `html` as though `bbs.example` had served it, and waits for it to settle.
     static func load(_ html: String, in engine: ForumWebEngine) async throws {
         engine.view.loadHTMLString(html, baseURL: URL(string: "https://bbs.example/member.php"))
-        for _ in 0..<400 {
-            try await Task.sleep(for: .milliseconds(10))
-            if !engine.view.isLoading,
-               (try? await engine.view.evaluateJavaScript("document.readyState")) as? String == "complete" {
-                return
-            }
+        // No `by:`: the load is the web view's own, in a process of its own.
+        // Under extreme load (94–250) that process may not settle it before the run goes still.
+        await met("the page has settled") {
+            guard !engine.view.isLoading else { return false }
+            return (try? await engine.view.evaluateJavaScript("document.readyState")) as? String == "complete"
         }
-        Issue.record("the page never settled")
     }
 
     /// What the reader does: types into the two fields and presses the forum's button. The page's
@@ -76,7 +74,8 @@ struct ForumSignInPageTests {
         // The reader turns the switch on with the form already in front of them.
         forums.watchTyped(host: "bbs.example", on: true)
         try await Self.typeAndPress(in: engine)
-        #expect(await spun { forums.holdsTyped(host: "bbs.example") }, "nothing was handed over")
+        // No `by:`: what was typed is handed over by the page, in a process of its own.
+        await met("what was typed is handed over") { forums.holdsTyped(host: "bbs.example") }
         #expect(await engine.isSignedIn())
 
         #expect(await forums.saveTyped(host: "bbs.example") == .kept)
@@ -94,7 +93,12 @@ struct ForumSignInPageTests {
         try await Self.load(Self.login, in: engine)
         try await Self.typeAndPress(in: engine)
         #expect(await engine.isSignedIn())
-        for _ in 0..<20 { try await Task.sleep(for: .milliseconds(10)) }
+        // The page answers once more, a turn of its own later, from the world a watcher would
+        // post from. This relies on a page's messages reaching the app in the order it sent them:
+        // anything handed over at the press, or in the turn after it, came before this answer.
+        _ = try await engine.view.callAsyncJavaScript(
+            "await new Promise((done) => setTimeout(done, 0))", contentWorld: .defaultClient
+        )
         #expect(!forums.holdsTyped(host: "bbs.example"), "the field was read with the switch off")
     }
 

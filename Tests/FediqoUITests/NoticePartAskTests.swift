@@ -9,7 +9,7 @@ import Testing
 /// that names all its page will ask, a reason where it is put twice, and no yes that ends in
 /// silence.
 @MainActor
-@Suite("Notices asked of a sign-in where it stands")
+@Suite("Notices asked of a sign-in where it stands", .watched)
 struct NoticePartAskTests {
     private typealias S = PartServer
     private let host = "social.example"
@@ -523,13 +523,10 @@ struct NoticePartAskTests {
         #expect(session.askForNotices(host: host))
         let ask = try #require(session.partAsks.open)
         session.partAsks.answer(ask, through: page, in: session)
-        let waiting: Bool
-        if let path {
-            waiting = await spun { await server.waiting.contains(path) }
-        } else {
-            waiting = await spun { page.opened == 1 }
+        let asking = Task { await session.partAsks.landed(host: host) }
+        await met("the ask is waiting at \(step.rawValue)", by: asking) {
+            if let path { await server.waiting.contains(path) } else { page.opened == 1 }
         }
-        #expect(waiting, "the ask never reached \(step.rawValue)")
 
         // Shown first: while it is out a press — for notices or for another part — raises
         // nothing, and the place reads as asking instead of offering a press that is dead.
@@ -539,14 +536,17 @@ struct NoticePartAskTests {
         #expect(NoticesPane.lines(in: session) == [.asking(host: host)])
 
         let other = MastodonToken(host: host, accessToken: "other-1", clientID: "cid", clientSecret: "csecret", scopes: Self.reads)
+        var leaving: Task<Void, Never>?
         switch meanwhile {
-        case .signOut: Task { await session.signOut(host: host) }
-        case .remove: Task { await session.mastodon.signOut(host: host, forgettingApp: true) }
+        case .signOut: leaving = Task { await session.signOut(host: host) }
+        case .remove: leaving = Task { await session.mastodon.signOut(host: host, forgettingApp: true) }
         case .replaced: try tokens.save(other)
         case .readBack: try await Task.detached { try tokens.save(other) }.value
         }
         let gone = meanwhile == .signOut || meanwhile == .remove
-        if gone { #expect(await spun { (try? tokens.token(host: self.host)) == .some(nil) }) }
+        if let leaving {
+            await met("the sign-in is off this device", by: leaving) { (try? tokens.token(host: self.host)) == .some(nil) }
+        }
         await gate.open()
         await session.partAsks.landed(host: host)
         await session.mastodon.leftSettled()

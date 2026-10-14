@@ -111,7 +111,7 @@ enum MastodonFixture {
     static let app = MastodonApp(host: host, clientID: "cid", clientSecret: "csecret")
 }
 
-@Suite("Signing in to a Mastodon")
+@Suite("Signing in to a Mastodon", .watched)
 struct MastodonAuthTests {
     private let host = MastodonFixture.host
 
@@ -474,11 +474,13 @@ struct MastodonAuthTests {
     func late401KeepsTheNewToken() async throws {
         let store = MemoryMastodonTokens()
         let gate = Gate()
+        let guardTask = watching(gate, "the first token's request, held on the wire")
+        defer { guardTask.cancel() }
         let server = HeldSender(gate: gate)
         try store.save(MastodonFixture.token)
         let door = MastodonAuthorized(token: MastodonFixture.token, sender: server, store: store)
         let request = Task { try await door.get(path: "/api/v1/timelines/home") }
-        #expect(await spin { await server.waiting })
+        await met("the first token's request is on the wire", by: request) { await server.waiting }
 
         let replacement = MastodonToken(
             host: host, accessToken: "tok-456", clientID: "cid", clientSecret: "csecret"
@@ -728,29 +730,4 @@ private actor HeldSender: HTTPSender {
         )!
         return (Data("{}".utf8), response)
     }
-}
-
-private actor Gate {
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-    private var opened = false
-
-    func wait() async {
-        guard !opened else { return }
-        await withCheckedContinuation { waiting.append($0) }
-    }
-
-    func open() {
-        opened = true
-        for continuation in waiting { continuation.resume() }
-        waiting.removeAll()
-    }
-}
-
-/// Yields until `condition` holds, and gives up rather than hanging the suite.
-private func spin(until condition: () async -> Bool) async -> Bool {
-    for _ in 0..<100_000 {
-        if await condition() { return true }
-        await Task.yield()
-    }
-    return false
 }

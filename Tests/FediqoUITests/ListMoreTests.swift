@@ -10,7 +10,7 @@ import Testing
 /// it was; two asks landing one row; and the rule for when a row coming into view asks. What it
 /// cannot: a real scroll reaching the end on a Mac and a phone — that lives in a lazy stack.
 @MainActor
-@Suite("Listing asks for more as you go")
+@Suite("Listing asks for more as you go", .watched)
 struct ListMoreTests {
     private static let one = "one.example"
     private static let forum = "forum.example"
@@ -85,6 +85,7 @@ struct ListMoreTests {
             mastodon: MastodonSessions(tokens: MemoryMastodonTokens(), sender: ActServer([:])),
             posts: ForumPosts(http: http)
         )
+        session.deadlinesUnturned()
         await session.reloadFromStore()
         return session
     }
@@ -174,11 +175,11 @@ struct ListMoreTests {
             Self.older(than: "5"): Self.page(),
             Self.board(page: 2): Self.board((40100, "二")),
         ], holding: Self.older(than: "5"))
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "the ask for more, held on the wire")
         defer { guardTask.cancel() }
         let session = await shell(gated)
         let more = Task { await session.reload.more(.all, in: session) }
-        #expect(await spun { await gated.asks == 1 })
+        await met("the ask for more is on the wire", by: more) { await gated.asks == 1 }
         #expect(!session.reload.stop(), "nothing pressed to stop")
         #expect(session.reload.asking == [.more])
         #expect(!session.reload.stopped)
@@ -190,11 +191,11 @@ struct ListMoreTests {
     @Test("The wait does not start while an ask for more is out")
     func waitHoldsOff() async {
         let gated = GatedHTTP([Self.older(than: "5"): Self.page()], holding: Self.older(than: "5"))
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "the ask for more, held on the wire")
         defer { guardTask.cancel() }
         let session = await shell(gated)
         let more = Task { await session.reload.more(.all, in: session) }
-        #expect(await spun { await gated.asks == 1 })
+        await met("the ask for more is on the wire", by: more) { await gated.asks == 1 }
         await session.reload.held(in: session)
         #expect(session.reload.asking == [.more], "the wait asked nothing")
         await gated.gate.open()
@@ -211,11 +212,11 @@ struct ListMoreTests {
             Self.boardFirst: Self.board((40125, "工具箱一键下载安装")),
             MastodonInstance.address(Self.one): MastodonInstance.mastodon(Self.one),
         ], holding: Self.board(page: 2))
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "the ask for more, held on the wire")
         defer { guardTask.cancel() }
         let session = await shell(gated)
         let more = Task { await session.reload.more(.all, in: session) }
-        #expect(await spun { await gated.asks == 1 })
+        await met("the ask for more is on the wire", by: more) { await gated.asks == 1 }
         await session.reload.timeline(.all, in: session)
         await gated.gate.open()
         await more.value
@@ -234,18 +235,25 @@ struct ListMoreTests {
             Self.boardFirst: Self.board((40125, "工具箱一键下载安装")),
             MastodonInstance.address(Self.one): MastodonInstance.mastodon(Self.one),
         ], holding: Self.board(page: 2))
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "the ask for more, held on the wire")
         defer { guardTask.cancel() }
         let session = await shell(gated)
+        // A record of its own, so "nothing of this session's is on the wire" can be waited for.
+        let work = SourceWork()
+        session.work = work
         let more = Task { await session.reload.more(.all, in: session) }
-        #expect(await spun { await gated.asks == 1 })
+        await met("the ask for more is on the wire", by: more) { await gated.asks == 1 }
         let reload = Task { await session.reload.timeline(.all, in: session) }
-        #expect(await spun { session.reload.asking.contains(.timeline) })
+        await met("r has begun", by: reload) { session.reload.asking.contains(.timeline) }
         #expect(!session.reload.asking.contains(.more), "ended as r started, before r read the forum")
         await more.value
         await reload.value
         await gated.gate.open()
-        #expect(await spun { await gated.requested().contains(Self.board(page: 2)) })
+        // No `by:`: the ask that was held outlived the task that made it, which has ended.
+        await met("the ask that was held has gone past the gate") { await gated.requested().contains(Self.board(page: 2)) }
+        await met("the held ask's answer is back with whoever asked, and nothing is on the wire") { work.now.isEmpty }
+        // Counted turns, behind those waits: the answer is dropped by a task that had ended
+        // before it came back, and nothing says when that has been done.
         for _ in 0..<50 { await Task.yield() }
         #expect(!ids(session).contains("discuz:\(Self.forum):40100"))
         #expect(!session.reload.stopped, "nobody stopped anything")
@@ -327,12 +335,12 @@ struct ListMoreTests {
             Self.boardFirst: Self.board((40125, "工具箱一键下载安装")),
             MastodonInstance.address(Self.one): MastodonInstance.mastodon(Self.one),
         ], holding: Self.newest())
-        let guardTask = hangGuard(gated.gate)
+        let guardTask = watching(gated.gate, "r's read, held on the wire")
         defer { guardTask.cancel() }
         let session = await shell(gated)
 
         let reload = Task { await session.reload.timeline(.all, in: session) }
-        #expect(await spun { await gated.asks == 1 })
+        await met("r's read is on the wire", by: reload) { await gated.asks == 1 }
         await session.reload.more(.all, in: session)
         #expect(session.reload.asking == [.timeline], "the ask for more ran beside r and finished")
         let asked = await gated.requested()

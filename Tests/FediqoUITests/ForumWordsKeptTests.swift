@@ -6,7 +6,7 @@ import Testing
 
 /// A forum post's words, once read, are kept on this device with the post — #154.
 @MainActor
-@Suite("A forum post's words, kept with its row")
+@Suite("A forum post's words, kept with its row", .watched)
 struct ForumWordsKeptTests {
     static let host = "bbs.example"
     static let tid = 88012
@@ -61,9 +61,11 @@ struct ForumWordsKeptTests {
         #expect(session.posts.asks(ref), "the premise: a row nobody reached asks")
 
         await session.posts.fetch(ref)
-        #expect(await spun { await store.note(Self.key)?.opening != nil }, "nothing was kept")
+        // No `by:` in this suite's waits on the store: the keeping is a task the posts start for
+        // themselves once the read has landed.
+        await met("the opening post is kept with its row") { await store.note(Self.key)?.opening != nil }
         #expect(await store.note(Self.key)?.opening?.words == "旧插座该换了。")
-        #expect(await spun { saves.count > 0 }, "kept and never saved")
+        await met("what was kept is saved") { saves.count > 0 }
     }
 
     @Test("After a relaunch the kept words draw at once, with no request and no network")
@@ -85,9 +87,11 @@ struct ForumWordsKeptTests {
         let (session, store, _) = await Self.session(http, holding: Self.row(opening: ForumOpening(words: "旧的")))
         let ref = try #require(Self.ref(in: session))
 
+        // The reload's deadline, on a clock nobody turns.
+        session.posts.deadlineSleep = TurnedClock().sleep
         #expect(await session.posts.reload(ref, within: .seconds(5)))
         #expect(session.posts.reading(ref) == .words("换好了。"))
-        #expect(await spun { await store.note(Self.key)?.opening?.words == "换好了。" })
+        await met("the row is kept with what the forum says now") { await store.note(Self.key)?.opening?.words == "换好了。" }
     }
 
     @Test("Reading its board again makes a kept row ask once more when it is reached")
@@ -134,7 +138,7 @@ struct ForumWordsKeptTests {
         let after = try #require(Self.ref(in: session), "Clear took the row")
         #expect(session.posts.reading(after) == .words("旧插座该换了。"), "Clear took the words with the cache")
         #expect(!session.posts.asks(after))
-        #expect(await spun { await store.note(Self.key)?.opening?.words == "旧插座该换了。" })
+        await met("the row is still kept with its words") { await store.note(Self.key)?.opening?.words == "旧插座该换了。" }
         #expect(await http.requested.count == 1)
     }
 
@@ -152,6 +156,8 @@ struct ForumWordsKeptTests {
     func unreachedRowsGrowNothing() async throws {
         let http = FixtureHTTP([Self.address: .text(Self.page("旧插座该换了。"))])
         let (session, store, saves) = await Self.session(http)
+        // Counted turns: a row nobody reached begins nothing, so there is no work whose end, and
+        // no point after it, could be waited for.
         for _ in 0..<20 { await Task.yield() }
         #expect(await http.requested.isEmpty)
         #expect(await store.note(Self.key)?.opening == nil)

@@ -160,7 +160,7 @@ final class PartPage: OAuthBrowser {
 /// one page of the source's own, and the sign-in the person had left exactly as it was by
 /// everything but a yes there.
 @MainActor
-@Suite("Asking a sign-in for a part where it stands")
+@Suite("Asking a sign-in for a part where it stands", .watched)
 struct PartAskTests {
     private typealias S = PartServer
     private let host = "social.example"
@@ -190,6 +190,9 @@ struct PartAskTests {
             await session.store.add(source)
         }
         session.sources = await session.store.sources()
+        // A door's deadline, on a clock nobody turns: an ask held at a gate is not ended by one,
+        // and no check here waits for one to pass.
+        session.mastodon.deadlineSleep = TurnedClock().sleep
         return (session, server, tokens)
     }
 
@@ -694,6 +697,8 @@ struct PartAskTests {
         let (session, server, tokens) = try await shell()
         let gate = Gate()
         defer { Task { await gate.open() } }
+        let guardTask = watching(gate, "the ask, held where it waits")
+        defer { guardTask.cancel() }
         let page = PartPage(gate: step == .page ? gate : nil)
         let path: String? = switch step {
         case .check, .newCheck: S.check
@@ -711,13 +716,10 @@ struct PartAskTests {
         #expect(session.askBookmarks(host: host))
         let ask = try #require(session.partAsks.open)
         session.partAsks.answer(ask, through: page, in: session)
-        let waiting: Bool
-        if let path {
-            waiting = await spun { await server.waiting.contains(path) }
-        } else {
-            waiting = await spun { page.opened == 1 }
+        let asking = Task { await session.partAsks.landed(host: host) }
+        await met("the ask is waiting at \(step.rawValue)", by: asking) {
+            if let path { await server.waiting.contains(path) } else { page.opened == 1 }
         }
-        #expect(waiting, "the ask never reached \(step.rawValue)")
 
         // No second question, and no second page, while this one is out. Not waited for
         // here: an ask that did go out would wait where the first one waits.
@@ -726,12 +728,15 @@ struct PartAskTests {
         let second = Task { await session.mastodon.ask([.bookmarks], host: self.host, through: page) }
 
         let other = MastodonToken(host: host, accessToken: "other-1", clientID: "cid", clientSecret: "csecret", scopes: Self.reading)
+        var leaving: Task<Void, Never>?
         switch meanwhile {
-        case .signOut: Task { await session.signOut(host: host) }
-        case .remove: Task { await session.mastodon.signOut(host: host, forgettingApp: true) }
+        case .signOut: leaving = Task { await session.signOut(host: host) }
+        case .remove: leaving = Task { await session.mastodon.signOut(host: host, forgettingApp: true) }
         case .replaced: try tokens.save(other)
         }
-        if meanwhile != .replaced { #expect(await spun { (try? tokens.token(host: self.host)) == .some(nil) }) }
+        if let leaving {
+            await met("the sign-in is off this device", by: leaving) { (try? tokens.token(host: self.host)) == .some(nil) }
+        }
         await gate.open()
         await session.partAsks.landed(host: host)
         #expect(await second.value == .busy)
@@ -757,10 +762,13 @@ struct PartAskTests {
         let (session, _, tokens) = try await shell()
         let gate = Gate()
         defer { Task { await gate.open() } }
+        let guardTask = watching(gate, "the ask, held where it waits")
+        defer { guardTask.cancel() }
         let page = PartPage(gate: gate)
         #expect(session.askBookmarks(host: host))
         session.partAsks.answer(try #require(session.partAsks.open), through: page, in: session)
-        #expect(await spun { page.opened == 1 })
+        let asking = Task { await session.partAsks.landed(host: host) }
+        await met("the source's page is up", by: asking) { page.opened == 1 }
 
         await session.mastodon.learnWho(host: host)
         await gate.open()
@@ -849,9 +857,11 @@ struct PartAskTests {
         let (session, server, tokens) = try await unnamedShell()
         let gate = Gate()
         defer { Task { await gate.open() } }
+        let guardTask = watching(gate, "the ask, held where it waits")
+        defer { guardTask.cancel() }
         let page = PartPage(gate: gate)
         let asking = Task { await session.mastodon.ask([.notices], host: self.host, through: page) }
-        #expect(await spun { page.opened == 1 }, "the ask never reached its page")
+        await met("the ask has reached its page", by: asking) { page.opened == 1 }
         #expect(try tokens.token(host: host)?.accountID == nil)
         try forgetWho(session, tokens)
         _ = session.mastodon.takeReadersChanged()
@@ -879,6 +889,8 @@ struct PartAskTests {
         let (session, server, tokens) = try await unnamedShell()
         let gate = Gate()
         defer { Task { await gate.open() } }
+        let guardTask = watching(gate, "the ask, held where it waits")
+        defer { guardTask.cancel() }
         var answer = PartPage.Answer.allow
         switch outcome {
         case .closed: answer = .close
@@ -892,8 +904,14 @@ struct PartAskTests {
         case .allowed, .checkFails, .notKept: break
         }
         let page = PartPage(answer, gate: gate)
-        let asking = Task { await session.mastodon.ask([.notices], host: self.host, through: page) }
-        let paged = await spun { page.opened == 1 }
+        var over = false
+        let asking = Task {
+            defer { over = true }
+            return await session.mastodon.ask([.notices], host: self.host, through: page)
+        }
+        // No `by:`: the ask ending with no page up is one of the two things waited for.
+        await met("the ask's page is up, or the ask has ended without one") { page.opened == 1 || over }
+        let paged = page.opened == 1
         let pages = outcome != .hasNone
         #expect(paged == pages)
         if paged {
@@ -1023,12 +1041,17 @@ struct PartAskTests {
         await server.answer(S.info, .body(PartAskFixture.info(Self.acting)))
         let gate = Gate()
         defer { Task { await gate.open() } }
+        let guardTask = watching(gate, "the ask, held where it waits")
+        defer { guardTask.cancel() }
         await server.hold(S.info, at: gate)
         #expect(session.askBookmarks(host: host))
         let first = try #require(session.partAsks.open)
         let page = PartPage()
         session.partAsks.answer(first, through: page, in: session)
-        #expect(await spun { await server.waiting.contains(S.info) }, "the ask never reached the source's account of the token")
+        let asking = Task { await session.partAsks.landed(host: host) }
+        await met("the ask has reached the source's account of the token", by: asking) {
+            await server.waiting.contains(S.info)
+        }
         #expect(session.askBookmarks(host: elsewhere))
         let other = try #require(session.partAsks.open)
 

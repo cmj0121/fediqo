@@ -11,7 +11,7 @@ import Testing
 ///
 /// Every word a page is held against, and every sentence, is written out here.
 @MainActor
-@Suite("Signing in again over what a sign-in holds")
+@Suite("Signing in again over what a sign-in holds", .watched)
 struct SignInAgainTests {
     private typealias S = PartServer
     private let host = "social.example"
@@ -141,6 +141,9 @@ struct SignInAgainTests {
         let session = ShellSession(
             http: FixtureHTTP(), store: ItemStore(), mastodon: MastodonSessions(tokens: tokens, sender: server)
         )
+        // A door's deadline, on a clock nobody turns: a sign-in held at its page is not ended by
+        // one, and no check here waits for one to pass.
+        session.mastodon.deadlineSleep = TurnedClock().sleep
         await session.store.add(Source(host: host, kind: .mastodon))
         session.sources = await session.store.sources()
         if state.named, state.scopes != nil { await session.mastodon.learnWho(host: host) }
@@ -360,10 +363,12 @@ struct SignInAgainTests {
         let (session, server, tokens) = try await shell(Self.states[4])
         let gate = Gate()
         defer { Task { await gate.open() } }
+        let guardTask = watching(gate, "the sign-in's page, up")
+        defer { guardTask.cancel() }
         let page = PartPage(gate: gate)
         let drawn = raise(session)
         let answered = Task { await self.answer(session, drawn, writing: true, through: page) }
-        #expect(await spun { page.opened == 1 }, "the sign-in never reached its page")
+        await met("the sign-in has reached its page", by: answered) { page.opened == 1 }
         await session.signOut(host: host)
         await gate.open()
         await answered.value
@@ -410,10 +415,12 @@ struct SignInAgainTests {
         let (session, server, tokens) = try await shell(Self.states[index])
         let gate = Gate()
         defer { Task { await gate.open() } }
+        let guardTask = watching(gate, "the sign-in's page, up")
+        defer { guardTask.cancel() }
         let page = PartPage(gate: gate)
         let drawn = raise(session)
         let answered = Task { await self.answer(session, drawn, writing: writing, through: page) }
-        #expect(await spun { page.opened == 1 }, "the sign-in never reached its page")
+        await met("the sign-in has reached its page", by: answered) { page.opened == 1 }
         let other = MastodonToken(
             host: host, accessToken: "other-1", clientID: "cid", clientSecret: "csecret", scopes: Self.reads, asked: Self.reads
         )

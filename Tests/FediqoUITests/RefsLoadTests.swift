@@ -34,7 +34,7 @@ final class StillClock: PacerClock, @unchecked Sendable {
 /// loaded — once, through the source that brought it, in that source's line — and the row says
 /// it is on its way until it has come.
 @MainActor
-@Suite("What an item refers to is loaded")
+@Suite("What an item refers to is loaded", .watched)
 struct RefsLoadTests {
     private let host = "social.example"
     private static let origin = Date(timeIntervalSince1970: 1_700_000_000)
@@ -82,6 +82,7 @@ struct RefsLoadTests {
         let work = SourceWork()
         work.govern(sources: [host])
         let session = ShellSession(http: unsigned, store: store, mastodon: MastodonSessions(tokens: tokens, sender: server))
+        session.deadlinesUnturned()
         session.work = work
         session.loads = LoadPacer(limits: limits, clock: StillClock())
         session.mastodon.refresh()
@@ -125,7 +126,7 @@ struct RefsLoadTests {
     @Test("While it is on its way the reply's row says so, and the timeline is there to read meanwhile; once it has come the row says only whom it answers")
     func onItsWayIsSaid() async throws {
         let http = GatedHTTP(["/api/v1/statuses/1": .text(Self.status("1"))], holding: "/api/v1/statuses/1")
-        let guardTask = hangGuard(http.gate)
+        let guardTask = watching(http.gate, "the post the reply answers, held on the wire")
         defer { guardTask.cancel() }
         let (session, _, _) = try await shell(unsigned: http)
         await session.store.ingest([reply("2", to: "1")], ifSourceHere: host)
@@ -164,7 +165,7 @@ struct RefsLoadTests {
     @Test("A post that quotes one not held and not sent along: the quoted post is loaded, held and stands in All; meanwhile the quote says it is on its way")
     func aQuotedPostIsLoaded() async throws {
         let http = GatedHTTP(["/api/v1/statuses/1": .text(Self.status("1"))], holding: "/api/v1/statuses/1")
-        let guardTask = hangGuard(http.gate)
+        let guardTask = watching(http.gate, "the quoted post, held on the wire")
         defer { guardTask.cancel() }
         let (session, _, _) = try await shell(unsigned: http)
         let quoting = Note(
@@ -536,7 +537,7 @@ struct RefsLoadTests {
             ["/api/v1/statuses/1": .text(Self.status("1")), "/api/v1/statuses/3": .text(Self.status("3"))],
             holding: "/api/v1/statuses/3"
         )
-        let guardTask = hangGuard(http.gate)
+        let guardTask = watching(http.gate, "the newer reply's load, held on the wire")
         defer { guardTask.cancel() }
         let (session, _, _) = try await shell(unsigned: http)
         // The newer reply is asked first, and held on the wire; the older waits behind it.
@@ -564,7 +565,7 @@ struct RefsLoadTests {
             ["/api/v1/statuses/1": .text(Self.status("1")), "/api/v1/statuses/3": .text(Self.status("3"))],
             holding: "/api/v1/statuses/3"
         )
-        let guardTask = hangGuard(http.gate)
+        let guardTask = watching(http.gate, "the newer reply's load, held on the wire")
         defer { guardTask.cancel() }
         let (session, _, _) = try await shell(unsigned: http)
         var older = reply("2", to: "1"), newer = reply("4", to: "3")
