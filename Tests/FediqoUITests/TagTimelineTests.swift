@@ -353,12 +353,12 @@ struct TagTimelineTests {
         ).sentence
         func height(_ reach: String?, _ scheme: ColorScheme) throws -> CGFloat {
             let pane = TagPane(
-                tag: Self.swift, items: [], reach: reach,
+                said: TagPageSaid.made(of: Self.swift, held: 0, reach: reach), items: [],
                 catalogues: EmojiCatalogueStore(), posts: ForumPosts(http: FixtureHTTP([:])),
                 selectedID: .constant(nil),
                 decks: .constant(ShellDecks()), playback: ShellPlayback(),
                 onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { _ in },
-                onRetry: {}, jumpToTop: 0, onBack: {}
+                jumpToTop: 0
             )
             .frame(width: 320)
             .environment(\.colorScheme, scheme)

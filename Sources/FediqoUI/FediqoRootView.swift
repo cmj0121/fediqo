@@ -1153,6 +1153,8 @@ public struct FediqoRootView: View {
             // What the page draws: the source's posts once it answered, what is held until then.
             return people.walked(of: person, in: session)
         case .tag(let tag):
+            // Its posts, where they are in front: About's blocks are no posts (`currentListIDs`).
+            guard people.tags.front(of: tag, in: session).listsPosts else { return [] }
             return session.heldPosts(under: tag, latest: prefs.latestDate)
         // A list of people has no posts: its rows are people, walked by who they are
         // (`currentListIDs`), and no mark of a post acts on one.
@@ -1184,7 +1186,9 @@ public struct FediqoRootView: View {
         let foundTags = walk.openedFoundTags.map { people.found.walked($0, in: session) }
             ?? walk.openedFollowedTags.map { people.followed.walked($0, in: session) }
         let person = walk.openedPerson.map { people.walkedIDs(of: $0, in: session) }
-        let opened = listed ?? rising ?? foundTags ?? person
+        // On a hashtag's About the rows are its blocks (F10).
+        let tagAbout = walk.openedTag.flatMap { people.tags.walkedAbout(of: $0, in: session) }
+        let opened = listed ?? rising ?? foundTags ?? person ?? tagAbout
         // Over a search's posts stand the rows of what the sources found (#319).
         let ids = opened ?? (foundRowIDs + currentListItems.map(\.id))
         return ids.isEmpty ? nil : ids
@@ -1494,6 +1498,10 @@ public struct FediqoRootView: View {
             if let entry = people.followedEntry(of: person, in: session), entry.id == id { return followedPressed(entry) }
             if id == RequestsEntry.id, let entry = people.requestsEntry(of: person, in: session) { return requestsPressed(entry) }
             return people.pressAbout(id, of: person, in: session)
+        }
+        // On a hashtag's About the lamp is on a source's row: Return makes its press (F10).
+        if let tag = walk.openedTag, !people.tags.front(of: tag, in: session).listsPosts {
+            return people.tags.pressAbout(id, of: tag, in: session)
         }
         // On a list of people the row the lamp is on is somebody (#311): Return opens them.
         if let list = walk.openedPeople {
@@ -2107,9 +2115,26 @@ public struct FediqoRootView: View {
         if case .followedTags(let page) = left.step { people.followed.closed(page) }
         // The tab in front of somebody's page goes with its last step (F9, decided 2026-10-13).
         people.left(left.step, of: walk)
-        selectedItemID = left.lamp
+        // A hashtag met twice in one walk is one page, on the tab it was left on: a row its
+        // first step was taken from may not be one of the tab now in front.
+        selectedItemID = Self.lampBack(left.lamp, onto: walk.standing, rows: currentListIDs)
         returnFromErrand()
         return true
+    }
+
+    /// The lamp a step left hands back, as the page come back to takes it: on a hashtag's page
+    /// only a row of the tab in front — `rows` — and no lamp otherwise; everywhere else as the
+    /// walk kept it.
+    static func lampBack(_ lamp: String?, onto standing: ShellStep?, rows: [String]?) -> String? {
+        guard case .tag = standing else { return lamp }
+        return TagTab.lamp(lamp, among: rows ?? [])
+    }
+
+    /// The lamp of a hashtag's page whose timeline changed under it (#197), given what the
+    /// timeline now in front holds under the tag: a post it no longer shows is put out, and
+    /// **a block of About is left lit** — About is not the timeline's.
+    static func lampOverSwitch(_ lamp: String?, aboutInFront: Bool, held: [String]) -> String? {
+        aboutInFront ? lamp : TagTab.lamp(lamp, among: held)
     }
 
     /// The Back on a page read out of a post: one step back out of the walk, which is that page
@@ -2122,6 +2147,11 @@ public struct FediqoRootView: View {
     /// A timeline switched: the walk ends, unless a tag's page is in front — that stays, and asks
     /// the sources of the timeline now in front (#197). `tagSwitched` asks nothing of a timeline
     /// already switched away from by the time it runs.
+    ///
+    /// **Nothing on a tag's page switches a timeline any more** (F10): Tab is the page's own,
+    /// and the timelines' names are not drawn over it. This is kept for the switches that are
+    /// nobody's press there — the timeline in front removed with its last source, a launch
+    /// staged — where a page asked of a timeline that is gone would say what is no longer so.
     ///
     /// **The places are this handler's, whole, where the page stays**, and `TimelinePane` leaves
     /// them alone while it stands on a tag: two handlers of one change, each writing the lamp,
@@ -2139,12 +2169,15 @@ public struct FediqoRootView: View {
         ) else { return clearWalk() }
         if hadLink { linkReader.close() }
         for page in lists { people.followed.closed(page) }
-        // Only the tag's page is left of the walk: no person's page is in it any more.
+        // Only the tag's page is left of the walk: no person's page is in it any more, and no
+        // other hashtag's.
         people.tabs.leftAll()
-        if let lamp = selectedItemID,
-           !session.heldPosts(under: tag, latest: prefs.latestDate).contains(where: { $0.id == lamp }) {
-            selectedItemID = nil
-        }
+        people.tags.leftAll(but: tag)
+        let held = session.heldPosts(under: tag, latest: prefs.latestDate).map(\.id)
+        let lamp = Self.lampOverSwitch(selectedItemID, aboutInFront: !people.tags.front(of: tag, in: session).listsPosts, held: held)
+        if lamp != selectedItemID { selectedItemID = lamp }
+        // And the lamp its Posts were left with, where About is in front, by the same rule.
+        people.tags.timelineSwitched(under: tag, held: held)
         let timeline = session.currentTimeline
         Task { await session.reload.tagSwitched(to: timeline, in: session) }
     }
@@ -2176,6 +2209,7 @@ public struct FediqoRootView: View {
         for page in walk.followedTags { people.followed.closed(page) }
         walk.clear()
         people.tabs.leftAll()
+        people.tags.leftAll()
         errand = nil
     }
 
@@ -2231,10 +2265,15 @@ public struct FediqoRootView: View {
     /// Tab on the page in front, as the walk answered for it. With somebody's page the tabs
     /// are that page's, round their ring; under anything drawn over the page the key does nothing.
     /// With a page that has no tabs the key is taken, and turns nothing — under the same
-    /// condition: the page is what is in front.
+    /// condition: the page is what is in front. A hashtag's page is either: its two tabs where
+    /// it has them, and taken all the same where it has its posts alone.
     private func rotateStepTab(_ key: StepTabKey, by step: Int) -> Bool {
         switch key {
         case .sole: return Self.pageInFront(.thread, open: openLayers)
+        case .tag(let tag):
+            return people.tags.rotate(
+                tag, by: step, covered: !Self.pageInFront(.tag, open: openLayers), lamp: &selectedItemID, in: session
+            )
         case .person(let person):
             guard Self.turnsPersonTabs(open: openLayers) else { return false }
             return people.rotate(person, by: step, lamp: &selectedItemID, in: session)

@@ -124,7 +124,10 @@ struct TagFollowLine: Equatable, Identifiable {
         switch offers {
         case .follow: String(format: L10n.t("tag.follow.follow.spoken", language: language), tag.text, host)
         case .unfollow: String(format: L10n.t("tag.follow.unfollow.spoken", language: language), tag.text, host)
-        case .again, .ask, nil: pressWords(language: language)
+        // "Try again" alone says neither what nor where: two sources that failed would be
+        // two presses of one name.
+        case .again: String(format: L10n.t("tag.again.spoken", language: language), tag.text, host)
+        case .ask, nil: pressWords(language: language)
         }
     }
 
@@ -202,6 +205,13 @@ final class ShellTagFollow {
     /// row is as an act answered (`ShellFollowedTags`). Told for the reader who pressed and
     /// nobody else, whether or not the page pressed on still stands.
     @ObservationIgnored var whenAnswered: ((_ tag: PostTag, _ host: String, _ followed: Bool) -> Void)?
+    /// The tab in front on each hashtag's page, where it is not its first — by the hashtag as
+    /// its page is kept (`HeldUnderTag.folded`), and not in the step of the walk: a tab is not
+    /// a step.
+    private var fronts: [String: TagTab] = [:]
+    /// Where the lamp stood on each tab of each page when the tab was left. Not observed: it
+    /// is read only as a tab is brought in front.
+    @ObservationIgnored private var lamps: [String: [TagTab: String]] = [:]
 
     init(errands: PageErrands, readers: PageReaders) {
         self.errands = errands
@@ -278,6 +288,126 @@ final class ShellTagFollow {
             return TagFollowLine(host: host, tag: tag, standing: page.failed ? .unknown : .asking)
         }
         return TagFollowLine(host: host, tag: tag, standing: .said(said), missed: missed[key])
+    }
+
+    // MARK: - The page's tabs (F10)
+
+    /// The tabs of the page of `tag`, as it stands for whoever would ask now: Posts, and About
+    /// where a source has a line (`TagTab.tabs`).
+    func tabs(of tag: PostTag, in session: ShellSession) -> [TagTab] {
+        TagTab.tabs(follows: lines(of: tag, in: session))
+    }
+
+    /// The tab in front on the page of `tag`: Posts on opening.
+    func front(of tag: PostTag, in session: ShellSession) -> TagTab {
+        TagTab.front(fronts[HeldUnderTag.folded(tag)], among: tabs(of: tag, in: session))
+    }
+
+    /// What the page of `tag` is handed, with `held` posts of it on this device.
+    func said(of tag: PostTag, held: Int, in session: ShellSession) -> TagPageSaid {
+        TagPageSaid.made(
+            of: tag, held: held, follows: lines(of: tag, in: session), front: fronts[HeldUnderTag.folded(tag)], in: session
+        )
+    }
+
+    /// What About holds on the page of `tag`, or nothing where the page has none. The count
+    /// of posts held is the head's and no part of it.
+    func about(of tag: PostTag, in session: ShellSession) -> TagAboutSaid? {
+        said(of: tag, held: 0, in: session).about
+    }
+
+    /// A tab pressed, the figure that counts its posts, or a swipe: brought in front, each
+    /// tab keeping its own lamp. Whether anything changed — a tab the page has not, and the
+    /// one already in front, change nothing.
+    @discardableResult
+    func turn(_ tag: PostTag, to tab: TagTab, lamp: inout String?, in session: ShellSession) -> Bool {
+        let all = tabs(of: tag, in: session), id = HeldUnderTag.folded(tag)
+        let from = TagTab.front(fronts[id], among: all)
+        guard all.contains(tab), tab != from else { return false }
+        lamps[id, default: [:]][from] = lamp
+        fronts[id] = tab
+        lamp = lamps[id]?[tab]
+        return true
+    }
+
+    /// Tab and ⇧Tab on the page of `tag`, as `TagTab.keyed` answers for it: the tab beside,
+    /// round the ring; taken, and nothing turned, on a page with one tab; and not the page's
+    /// at all while it is `covered`. Whether the key was taken.
+    func rotate(_ tag: PostTag, by step: Int, covered: Bool, lamp: inout String?, in session: ShellSession) -> Bool {
+        switch TagTab.keyed(tabs(of: tag, in: session), front: front(of: tag, in: session), by: step, covered: covered) {
+        case .turn(let tab):
+            turn(tag, to: tab, lamp: &lamp, in: session)
+            return true
+        case .taken: return true
+        case .unheard: return false
+        }
+    }
+
+    /// The timeline changed under the page of `tag` (#197): the lamp its Posts tab was left
+    /// with is let go where the timeline now in front no longer shows that post — `held` is
+    /// what it shows — so turning back to Posts lights no row that is not there.
+    func timelineSwitched(under tag: PostTag, held: [String]) {
+        let id = HeldUnderTag.folded(tag)
+        let kept = TagTab.lamp(lamps[id]?[.posts], among: held)
+        lamps[id]?[.posts] = kept
+    }
+
+    /// The blocks `j` and `k` walk on the page of `tag` while About is in front, or nothing
+    /// where its posts are: those are walked as posts.
+    func walkedAbout(of tag: PostTag, in session: ShellSession) -> [String]? {
+        guard front(of: tag, in: session) == .about else { return nil }
+        return about(of: tag, in: session)?.walked
+    }
+
+    /// Return with the lamp on the block `id` of About, on the page of `tag`: its row's press,
+    /// where it has one. Whether the key did anything.
+    func pressAbout(_ id: String, of tag: PostTag, in session: ShellSession) -> Bool {
+        guard front(of: tag, in: session) == .about, let line = about(of: tag, in: session)?.press(on: id) else { return false }
+        pressed(line, in: session)
+        return true
+    }
+
+    /// A line's press, whatever it offers: following or unfollowing, asking the source again
+    /// whether it is followed, or raising the question for a sign-in that does not hold
+    /// follows. `only` is the one way a follow may go, where whoever presses means that one
+    /// (`press(_:at:only:in:)`): the head's Follow never unfollows. Hands back what it sent
+    /// on its way, or nothing where nothing is sent.
+    @discardableResult
+    func pressed(_ line: TagFollowLine, only: Bool? = nil, in session: ShellSession) -> Task<Void, Never>? {
+        switch line.offers {
+        case .follow, .unfollow: return Task { await self.press(line.tag, at: line.host, only: only, in: session) }
+        case .again: return Task { await self.again(line.tag, at: line.host, in: session) }
+        case .ask: session.askFor([.follows], host: line.host)
+        case nil: break
+        }
+        return nil
+    }
+
+    /// The walk has left the page of `tag`: which tab was in front, and each tab's lamp, are
+    /// forgotten — opened afresh it opens on Posts.
+    func left(_ tag: PostTag) {
+        fronts[HeldUnderTag.folded(tag)] = nil
+        lamps[HeldUnderTag.folded(tag)] = nil
+    }
+
+    /// The walk has ended in one go: every page's tab in front is forgotten — all but the
+    /// page of `kept`, where the walk ended with that one page left standing (#197).
+    func leftAll(but kept: PostTag? = nil) {
+        let id = kept.map(HeldUnderTag.folded)
+        fronts = fronts.filter { $0.key == id }
+        lamps = lamps.filter { $0.key == id }
+    }
+
+    /// The tabs of the page of `tag` changed under it — a sign-in ended, and About went with
+    /// it: where the tab kept in front is one the page no longer has, it is forgotten with
+    /// every tab's lamp, and the lamp goes out (`TagTab.fallen`). The page is then its posts,
+    /// with no lamp on a block no row is.
+    func tabsChanged(_ tag: PostTag, lamp: inout String?, in session: ShellSession) {
+        let id = HeldUnderTag.folded(tag)
+        guard let fallen = TagTab.fallen(fronts[id], among: tabs(of: tag, in: session), lamp: lamp) else { return }
+        fronts[id] = nil
+        lamps[id] = nil
+        lamp = fallen.lamp
     }
 
     // MARK: - Letting go
@@ -535,11 +665,20 @@ final class ShellTagFollow {
         // The press is answered, or did not arrive: either way it is out no longer.
         presses.settle(key)
         guard let answer else {
-            missed[key] = wanted
+            miss(tag, wanted, key: key, at: source, in: session)
             return
         }
         pages[key]?.said = answer
         // The source's word stands either way; one that is not what was pressed is said as not done.
-        if answer != wanted { missed[key] = wanted }
+        if answer != wanted { miss(tag, wanted, key: key, at: source, in: session) }
+    }
+
+    /// A press that did not arrive: written down to be said on the page, and said aloud once
+    /// by the road every line the app says takes (`ShellSaid.announce`) — a listener is not
+    /// looking at the line that changed.
+    private func miss(_ tag: PostTag, _ wanted: Bool, key: String, at source: Source, in session: ShellSession) {
+        missed[key] = wanted
+        let line = TagFollowLine(host: source.host, tag: tag, standing: .said(!wanted), missed: wanted)
+        if let words = line.missedWords() { session.said.announce(words) }
     }
 }

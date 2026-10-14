@@ -74,7 +74,7 @@ struct NamesItselfTests {
     func keyHintsNeedAKeyboard() throws {
         #expect(ShellKeyboard.present)
         for (path, key) in [
-            ("Shell/PageBar.swift", "person.leaveHint"), ("Shell/TagPane.swift", "person.leaveHint"),
+            ("Shell/PageBar.swift", "person.leaveHint"),
             ("Shell/ShellReader.swift", "link.reader.leaveHint"),
         ] {
             let text = try source(path)

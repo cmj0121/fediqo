@@ -95,30 +95,36 @@ struct HeldTag {
     let items: [DummyItem]
 }
 
-/// A hashtag, opened: what this device holds under it, and what its sources were asked (#124).
+/// A hashtag, opened: a page of its own (F10), drawn in the frame every opened page stands in
+/// (`OpenedPage`) — what this device holds under it, and what its sources were asked (#124).
 ///
-/// The person page's shape — a way back, a heading, a list — for the person page's reason: it is
-/// a page of rows opened from a row, and a reader who has learnt to leave one has learnt to leave
-/// this. **Unlike that page, this one may ask.** What a source sends under the tag lands in the
-/// store and the list renews from it; while it is on its way, and where it failed, that is said
-/// here, where the answer would have been, with a way to ask again.
+///     ‹ Back                                                    Esc or q
+///     ─────────────────────────────────────────────────────────────────────
+///     #swift                                                  [ Follow ]
+///     (bubble 41)  [✓ mastodon.social]
+///     ─────────────────────────────────────────────────────────────────────
+///     Asking mastodon.social, example.org for #swift…        the page's line
+///     ─────────────────────────────────────────────────────────────────────
+///     (bubble Posts)  (i About)         only where a source keeps it followed
+///     ─────────────────────────────────────────────────────────────────────
+///     post rows, newest first
+///
+/// **It is handed everything it draws** (`TagPageSaid`) and asks nothing: which tabs it has,
+/// which is in front, the marks of its head and what About holds are worked out where the
+/// sources are asked. **A page handed its posts alone draws no strip, no mark and no Follow**
+/// — a forum's reader, and nobody signed in, have the one list.
+///
+/// **Unlike somebody's page, this one has nobody to ask again from its bar**: what a source
+/// sends under the tag is asked as the page opens, lands in the store and the list renews
+/// from it; while it is on its way, and where it failed, that is said in the page's line, with
+/// a way to ask again.
 struct TagPane: View {
-    let tag: PostTag
+    let said: TagPageSaid
     /// What this device holds under it, newest first — `ShellSession.heldPosts(under:)`.
     let items: [DummyItem]
-    /// The sources being asked now, or nothing.
-    var asking: [String] = []
-    /// The sources the last ask could not reach.
-    var failed: [String] = []
-    /// Which of the timeline's sources were asked and why the rest were not (#197), or nothing.
-    var reach: String?
-    /// One line a source the reader is signed in to and that says who people are (#318):
-    /// whether they follow the hashtag there, or how the sign-in stands. None for a forum.
-    var follows: [TagFollowLine] = []
-    /// A line's press at one source: follow or unfollow, or ask again whether it is followed.
-    var onFollow: (TagFollowLine) -> Void = { _ in }
-    /// A lock's press: the question that asks that source's sign-in for who the reader follows.
-    var onAskFollows: (String) -> Void = { _ in }
+    /// How far a sideways swipe has slid what is under the tabs.
+    var slide = PageSlide()
+    var acts = TagPageActs()
     let catalogues: EmojiCatalogueStore
     var catalogueSettled: Bool = false
     let posts: ForumPosts
@@ -131,45 +137,22 @@ struct TagPane: View {
     var onTurnRow: (DummyItem) -> Void
     var onOpenThread: (String) -> Void
     var onOpenPerson: ((DummyPerson) -> Void)?
-    /// Asks the sources again, after a failure.
-    var onRetry: () -> Void
     var jumpToTop: Int
-    var onBack: () -> Void
 
     /// Under a finger one press on a row opens it (#303); the lamp here is where the walk left it.
     @Environment(\.shellTouch) private var touch
     @Environment(\.colorScheme) private var colorScheme
 
+    /// The head of the list: what `g` scrolls back to.
+    private static var top: String { "tag.top" }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            bar
-            ShellRule()
-            heading
-            ShellRule()
-            if !follows.isEmpty {
-                ForEach(follows) { line in
-                    TagFollowRow(line: line, onPress: { onFollow(line) }, onAsk: { onAskFollows(line.host) })
-                }
-                ShellRule()
-            }
-            // Where the page's rows came from, as a search says it under its field (#197). Wraps
-            // rather than truncates, since the names are the point.
-            if let reach {
-                Text(reach)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, ShellSpace.pad)
-                    .padding(.vertical, ShellSpace.snug)
-                ShellRule()
-            }
-            if let said = Self.said(asking: asking, failed: failed, tag: tag) {
-                answer(said)
-                ShellRule()
-            }
-            list
-        }
+        OpenedPage(
+            tabs: said.tabs, front: said.front, slide: slide,
+            acts: OpenedPageActs(onBack: acts.onBack, onTab: acts.onTab),
+            head: { heading },
+            inFront: { lead in inFront { lead } }
+        )
     }
 
     /// What the ask of the sources has to say, or nothing once it has landed whole.
@@ -179,97 +162,58 @@ struct TagPane: View {
     }
 
     /// A function of what it reads, so a test can ask it without standing a pane up.
-    static func said(asking: [String], failed: [String], tag: PostTag) -> Said? {
+    static func said(asking: [String], failed: [String], tag: PostTag, language: DummyLanguage? = nil) -> Said? {
         if !asking.isEmpty {
-            return .asking(String(format: L10n.t("tag.asking"), asking.joined(separator: ", "), tag.text))
+            return .asking(String(format: L10n.t("tag.asking", language: language), asking.joined(separator: ", "), tag.text))
         }
         if !failed.isEmpty {
-            return .failed(String(format: L10n.t("tag.failed"), failed.joined(separator: ", "), tag.text))
+            return .failed(String(format: L10n.t("tag.failed", language: language), failed.joined(separator: ", "), tag.text))
         }
         return nil
     }
 
     /// The empty page's sentence: about this device, never about the tag — a page that said
     /// "nobody has used this tag" would be this app speaking for servers it did not ask.
-    static func none(_ tag: PostTag) -> String { String(format: L10n.t("tag.none"), tag.text) }
-
-    private var bar: some View {
-        HStack(spacing: ShellSpace.snug) {
-            ShellBackButton("person.back", action: onBack)
-            Spacer()
-            ShellKeyHint("person.leaveHint")
-        }
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.snug)
+    static func none(_ tag: PostTag, language: DummyLanguage? = nil) -> String {
+        String(format: L10n.t("tag.none", language: language), tag.text)
     }
 
-    /// The tag as it was written where it was pressed, and how much is here under it.
-    private var heading: some View {
-        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
-            Text(verbatim: tag.text)
-                .shellFont(.name)
-                .foregroundStyle(ShellChrome.ink(colorScheme))
-                .lineLimit(1)
-                .accessibilityLabel(String(format: L10n.t("post.tag.spoken"), tag.name))
-            Spacer(minLength: 0)
-            Text(PersonHeadSaid.heldLine(items.count))
-                .shellFont(.reading)
-                .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                .lineLimit(1)
-        }
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.step)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-    }
-
-    /// On its way, or failed and a way to ask again: where the answer would have been.
-    private func answer(_ said: Said) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: ShellSpace.snug) {
-            switch said {
-            case .asking(let line):
-                Text(line)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.updatesFrequently)
-            case .failed(let line):
-                Text(line)
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-                ShellLinkButton(L10n.t("tag.retry"), action: onRetry)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, ShellSpace.pad)
-        .padding(.vertical, ShellSpace.snug)
-    }
-
+    /// The tag and what stands with it, and under it the page's line where there is one.
     @ViewBuilder
-    private var list: some View {
-        if items.isEmpty {
-            // Empty, and said so — never left blank under a line that has finished asking, which
-            // would read as still waiting.
-            if asking.isEmpty {
-                Text(Self.none(tag))
-                    .shellFont(.meta)
-                    .foregroundStyle(ShellChrome.inkFaint(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(ShellSpace.pad)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Spacer(minLength: 0)
-        } else {
-            rows
+    private var heading: some View {
+        TagHead(said: said, onTab: acts.onTab, onFollow: acts.onHeadFollow)
+        ShellRule()
+        if said.line != nil || said.reach != nil || !said.troubles.isEmpty {
+            TagPageLine(
+                line: said.line, retrySpoken: said.retrySpoken, troubles: said.troubles, reach: said.reach,
+                onRetry: acts.onRetry, onAgain: acts.onFollow
+            )
+            ShellRule()
         }
     }
 
-    private var rows: some View {
+    /// The tab in front, with `lead` as the first rows of its list.
+    @ViewBuilder
+    private func inFront<Lead: View>(@ViewBuilder lead: () -> Lead) -> some View {
+        switch said.front {
+        case .about:
+            if let about = said.about {
+                TagAbout(said: about, lit: selectedID, jumpToTop: jumpToTop, onPress: acts.onFollow, onAsk: acts.onAskFollows, lead: lead)
+            }
+        case .posts:
+            rows(lead: lead())
+        }
+    }
+
+    /// The posts under the tag — or, with none, that there are none, said so and never left
+    /// blank — under `lead`, which scrolls away with them.
+    private func rows<Lead: View>(lead: Lead) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    Color.clear.frame(height: 0).id(Self.top).accessibilityHidden(true)
+                    lead
+                    if let none = said.none { quiet(none) }
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         row(item)
                             .id(item.id)
@@ -279,15 +223,28 @@ struct TagPane: View {
             }
             .scrollIndicators(.never)
             .clearsFloatingCorner()
+            // Come back to from a conversation, or brought in front again, the row the lamp is
+            // on is in view.
+            .onAppear {
+                if let id = DummyCommand.centredOnAppear(selected: selectedID) { proxy.scrollTo(id, anchor: .center) }
+            }
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
             }
             .onChange(of: jumpToTop) { _, _ in
-                guard let first = items.first else { return }
-                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(first.id, anchor: .top) }
+                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(Self.top, anchor: .top) }
             }
         }
+    }
+
+    private func quiet(_ sentence: String) -> some View {
+        Text(sentence)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkFaint(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(ShellSpace.pad)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// One post under the tag, drawn and pressed as a row anywhere else is.
@@ -325,7 +282,74 @@ struct TagPane: View {
     }
 }
 
-/// One source's line under a hashtag's heading (#318): at which source, whether the reader
+/// The page's line of a hashtag's page, between its head and its tabs and seen from every
+/// tab: the sources being asked, or those that could not be, with the press that asks again ·
+/// what a source failed at about following — a press that did not arrive, a source that could
+/// not say whether it is followed, with its press · which sources were asked and why not the
+/// rest, where the page has no About to say it. What is said, is `TagPageSaid`'s to say.
+struct TagPageLine: View {
+    let line: TagPane.Said?
+    /// What the press beside a failed ask is called, where its word alone does not say.
+    var retrySpoken: String?
+    var troubles: [TagPageSaid.Trouble] = []
+    let reach: String?
+    var onRetry: () -> Void = {}
+    /// The press beside a source that could not be asked whether it is followed.
+    var onAgain: (TagFollowLine) -> Void = { _ in }
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switch line {
+            case .asking(let words):
+                quiet(words).accessibilityAddTraits(.updatesFrequently)
+            case .failed(let words):
+                // Full ink, and where the answer would have been: a way to ask again.
+                failure(words, press: L10n.t("tag.retry"), spoken: retrySpoken, action: onRetry)
+            case nil:
+                EmptyView()
+            }
+            ForEach(troubles) { trouble in
+                failure(trouble.words, press: trouble.again?.pressWords(), spoken: trouble.spoken) {
+                    if let line = trouble.again { onAgain(line) }
+                }
+            }
+            // Where the page's rows came from, as a search says it under its field (#197).
+            // Wraps rather than truncates, since the names are the point.
+            if let reach { quiet(reach) }
+        }
+    }
+
+    /// Something that went wrong, in full ink, and the press that asks again where there is one.
+    /// `spoken` is what the press is called to a listener and a pointer, who meet it apart
+    /// from the words beside it.
+    private func failure(_ words: String, press: String?, spoken: String?, action: @escaping () -> Void) -> some View {
+        WordsThenPress(
+            words: Text(words).shellFont(.meta).foregroundStyle(ShellChrome.ink(colorScheme)),
+            press: Group {
+                if let press {
+                    ShellLinkButton(press, action: action)
+                        .accessibilityLabel(spoken ?? press)
+                        .help(spoken ?? press)
+                        .fixedSize()
+                }
+            }
+        )
+    }
+
+    private func quiet(_ words: String) -> some View {
+        Text(words)
+            .shellFont(.meta)
+            .foregroundStyle(ShellChrome.inkDim(colorScheme))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, ShellSpace.pad)
+            .padding(.vertical, ShellSpace.snug)
+    }
+}
+
+/// One source's row on a hashtag's About (#318, F10): at which source, whether the reader
 /// follows the hashtag there as the source last said, and the press for the other — or, where
 /// the sign-in does not hold who the reader follows, how it stands, dim with the lock.
 ///

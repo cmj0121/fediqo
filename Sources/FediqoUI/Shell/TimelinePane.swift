@@ -147,9 +147,9 @@ struct TimelinePane: View {
         let root = Self.drawnRoot(standing, in: session)
         let drawn = Self.pageDrawn(standing, root: root)
         VStack(alignment: .leading, spacing: 0) {
-            // **Somebody's page is a page of its own** (F9), **and a conversation's** (F10): each
-            // takes the pane's whole height, and the timelines' names, the search and the reload
-            // are not drawn over it.
+            // **Somebody's page is a page of its own** (F9), **and a conversation's and a
+            // hashtag's** (F10): each takes the pane's whole height, and the timelines' names,
+            // the search and the reload are not drawn over it.
             if Self.headDrawn(over: standing, drawn: drawn) {
                 header
                     .padding(.horizontal, ShellSpace.pad)
@@ -170,53 +170,7 @@ struct TimelinePane: View {
             case .person(let person):
                 personPage(person)
             case .tag(let tag):
-                TagPane(
-                    tag: tag,
-                    items: session.heldPosts(under: tag, latest: prefs.latestDate),
-                    // What the ask says only where it is this tag's: another tag's, or one left
-                    // behind, is not this page's to say.
-                    asking: session.reload.tagAsk?.tag == tag ? session.reload.tagAsking : [],
-                    failed: session.reload.tagAsk?.tag == tag ? session.reload.tagFailed : [],
-                    reach: session.reload.tagAsk?.tag == tag ? session.reload.tagAsk?.reach.sentence : nil,
-                    // Whether the reader follows it at each source they are signed in to (#318).
-                    follows: people?.tags.lines(of: tag, in: session) ?? [],
-                    onFollow: { line in
-                        Task {
-                            if line.offers == .again {
-                                await people?.tags.again(tag, at: line.host, in: session)
-                            } else {
-                                await people?.tags.press(tag, at: line.host, in: session)
-                            }
-                        }
-                    },
-                    onAskFollows: { host in session.askFor([.follows], host: host) },
-                    catalogues: session.emoji,
-                    catalogueSettled: false,
-                    posts: session.posts,
-                    selectedID: $selectedID,
-                    acting: acting,
-                    decks: $decks,
-                    playback: playback,
-                    onPlayRow: onPlayRow,
-                    onViewRow: onViewRow,
-                    onTurnRow: onTurnRow,
-                    onOpenThread: onOpenThread,
-                    onOpenPerson: onOpenPerson,
-                    // Asked again of the timeline in front, as the press asked it.
-                    onRetry: {
-                        let timeline = session.currentTimeline
-                        Task { await session.reload.tag(tag, timeline: timeline, in: session) }
-                    },
-                    jumpToTop: jumpToTop,
-                    onBack: onBack
-                )
-                .id(HeldUnderTag.folded(tag))
-                // **The ask is the page coming in front**: each source whose sign-in holds
-                // follows, once. And who asks, and what they hold, is part of which opening it
-                // is: a sign-in given follows opens the page again, and it is read — never acted.
-                .task(id: people?.tags.opening(tag, in: session)) { await people?.tags.opened(tag, in: session) }
-                // What a source said of a hashtag is held only while its page is in front.
-                .onDisappear { people?.tags.closed(tag) }
+                tagPage(tag)
             case .people(let list):
                 // A list whose source is no longer one that says who people are — removed since
                 // — draws the stream instead, as a conversation no longer held does.
@@ -310,7 +264,7 @@ struct TimelinePane: View {
         }
         // **A sideways swipe, heard on the pane and begun under its head** (#305): whatever it draws —
         // posts, or that there are none — and whichever page is in front. On the timeline it
-        // goes to the one beside; on a post or a tag opened over it, it goes back; on somebody's page it is that page's own.
+        // goes to the one beside; on a list opened over it, it goes back; on somebody's page, a conversation's or a hashtag's it is that page's own.
         // What follows the finger stays inside the pane: not over the rail on a wide page.
         .modifier(SwipesSideways(
             session: session, slide: slide, touch: touch, page: Self.page(standing, drawn: drawn),
@@ -524,26 +478,27 @@ struct TimelinePane: View {
     /// opened over it, or a page read out of a post, which is somebody's own.
     static func page(_ standing: ShellStep?, drawn: Bool = true) -> TimelineSwipe.Page {
         switch standing {
-        // Somebody's page has tabs of its own, and its sideways is theirs (F9).
-        case .person: .tabbed
+        // Somebody's page has tabs of its own, and its sideways is theirs (F9); a hashtag's
+        // is the frame's too, with tabs or with none (F10).
+        case .person, .tag: .tabbed
         // A conversation's page is the frame's, and its sideways the frame's (F10) — where it
         // is drawn; over the stream drawn in its stead the swipe goes back, as it did.
         case .thread: drawn ? .tabbed : .opened
-        case .tag, .people, .rising, .foundTags, .followedTags: .opened
+        case .people, .rising, .foundTags, .followedTags: .opened
         case .link: .link
         case nil: .timeline
         }
     }
 
     /// Whether the timelines' head — their names, the search, the reload — is drawn over what
-    /// the reader stands on: not over somebody's page nor a conversation's, each a page of its
-    /// own. **Asked of what is drawn, not of the step alone** (F10 §1): a conversation that
+    /// the reader stands on: not over somebody's page, a conversation's nor a hashtag's, each a
+    /// page of its own. **Asked of what is drawn, not of the step alone** (F10 §1): a conversation that
     /// cannot be drawn (`drawn` false) draws the stream, and the head is over that.
     static func headDrawn(over standing: ShellStep?, drawn: Bool = true) -> Bool {
         switch standing {
-        case .person: false
+        case .person, .tag: false
         case .thread: !drawn
-        case .tag, .people, .rising, .foundTags, .followedTags, .link, nil: true
+        case .people, .rising, .foundTags, .followedTags, .link, nil: true
         }
     }
 
@@ -735,6 +690,62 @@ struct TimelinePane: View {
             session.reload.forget(.thread)
             session.reload.left(opened)
             session.stopReadingFurther(of: opened)
+        }
+    }
+
+    /// A hashtag's page (F10): the whole height of the pane, in the frame every opened page
+    /// stands in, handed which tabs it has, which is in front and what its head says — all of
+    /// them worked out where its sources are asked, and nothing here looks at which kind of
+    /// source any of them is.
+    private func tagPage(_ tag: PostTag) -> some View {
+        let items = session.heldPosts(under: tag, latest: prefs.latestDate)
+        return TagPane(
+            // Whether the reader follows it at each source they are signed in to (#318), and
+            // so whether the page has an About; with nobody to ask, its posts alone.
+            said: people?.tags.said(of: tag, held: items.count, in: session)
+                ?? TagPageSaid.made(of: tag, held: items.count, follows: [], front: nil, in: session),
+            items: items,
+            slide: session.slide("tag"),
+            acts: TagPageActs(
+                onBack: onBack,
+                onTab: { tab in _ = people?.tags.turn(tag, to: tab, lamp: &selectedID, in: session) },
+                // The head's Follow only ever follows, as `l` does.
+                onHeadFollow: { line in _ = people?.tags.pressed(line, only: true, in: session) },
+                onFollow: { line in _ = people?.tags.pressed(line, in: session) },
+                onAskFollows: { host in session.askFor([.follows], host: host) },
+                // Asked again of the timeline in front, as the press asked it.
+                onRetry: {
+                    let timeline = session.currentTimeline
+                    Task { await session.reload.tag(tag, timeline: timeline, in: session) }
+                }
+            ),
+            catalogues: session.emoji,
+            catalogueSettled: false,
+            posts: session.posts,
+            selectedID: $selectedID,
+            acting: acting,
+            decks: $decks,
+            playback: playback,
+            onPlayRow: onPlayRow,
+            onViewRow: onViewRow,
+            onTurnRow: onTurnRow,
+            onOpenThread: onOpenThread,
+            onOpenPerson: onOpenPerson,
+            jumpToTop: jumpToTop
+        )
+        .id(HeldUnderTag.folded(tag))
+        // **The ask is the page coming in front**: each source whose sign-in holds
+        // follows, once. And who asks, and what they hold, is part of which opening it
+        // is: a sign-in given follows opens the page again, and it is read — never acted.
+        // **Asked for the page and not for About**: the head's mark needs the answer, and
+        // About, brought in front, asks nothing more.
+        .task(id: people?.tags.opening(tag, in: session)) { await people?.tags.opened(tag, in: session) }
+        // What a source said of a hashtag is held only while its page is in front.
+        .onDisappear { people?.tags.closed(tag) }
+        // About gone from under the reader — the sign-in ended: the page is its posts, and
+        // the lamp is on no block that is no longer there.
+        .onChange(of: people?.tags.tabs(of: tag, in: session)) { _, _ in
+            people?.tags.tabsChanged(tag, lamp: &selectedID, in: session)
         }
     }
 

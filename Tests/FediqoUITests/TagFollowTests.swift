@@ -661,26 +661,27 @@ struct TagFollowTests {
 
     // MARK: - The page
 
-    @Test("The hashtag's page draws a line for each one it is handed and none where it is handed none, which is the page a forum's reader always had; and the pane that opens it asks through the object, lets go when it leaves, and raises the question for follows from the lock")
+    @Test("The hashtag's About is handed a row for each line and the page none where it is handed none, which is the page a forum's reader always had; a row draws the sentence of a press that did not arrive under it; and the pane that opens it asks through the object, lets go when it leaves, and raises the question for follows from the lock")
     func thePage() throws {
-        func height(_ follows: [TagFollowLine]) -> CGFloat {
-            let pane = TagPane(
-                tag: Self.swift, items: [], follows: follows, catalogues: EmojiCatalogueStore(), posts: ForumPosts(http: FixtureHTTP([:])),
-                selectedID: .constant(nil), decks: .constant(ShellDecks()), playback: ShellPlayback(),
-                onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { _ in }, onRetry: {},
-                jumpToTop: 0, onBack: {}
-            )
-            let hosted = NSHostingView(rootView: pane.frame(width: 460).fixedSize(horizontal: false, vertical: true))
+        // The rows stand on About since F10: About is hosted, and says which rows it drew and how tall.
+        func drawn(_ follows: [TagFollowLine]) -> [String: CGSize] {
+            let probe = TagAboutProbe()
+            let about = TagAbout(said: TagAboutSaid(follows: follows)) { EmptyView() }
+            let hosted = NSHostingView(rootView: about.frame(width: 460, height: 400).environment(\.tagAboutProbe, probe))
             hosted.layoutSubtreeIfNeeded()
-            return hosted.fittingSize.height
+            return probe.sizes
         }
-        let bare = height([])
-        let one = height(line(.said(false)))
-        let missed = height(line(.said(false), missed: true))
-        let taller: Bool = one > bare
-        let tallest: Bool = missed > one
-        #expect(taller, "a line is drawn")
+        let row = TagAboutSaid.lamp(on: line(.said(false))[0])
+        #expect(drawn([]).isEmpty, "handed none, it draws none")
+        let one = try #require(drawn(line(.said(false)))[row]), missed = try #require(drawn(line(.said(false), missed: true))[row])
+        let taller: Bool = one.height > 0 && one.width == 460
+        let tallest: Bool = missed.height > one.height
+        #expect(taller, "a line is drawn, as wide as the page")
         #expect(tallest, "and under it the sentence of a press that did not arrive")
+        let other = TagFollowLine(host: "two.example", tag: Self.swift, standing: .asking)
+        #expect(Set(drawn(line(.said(true)) + [other]).keys) == [row, TagAboutSaid.lamp(on: other)], "a row for each line")
+        #expect(TagPageSaid.made(of: Self.swift, held: 0).about == nil, "handed none, the page has no About to draw one on")
+        #expect(TagPageSaid.made(of: Self.swift, held: 0, follows: line(.said(false))).about?.follows == line(.said(false)))
 
         let pane = try String(contentsOf: Self.shell.appending(path: "Shell/TimelinePane.swift"), encoding: .utf8)
         #expect(pane.contains(".task(id: people?.tags.opening(tag, in: session)) { await people?.tags.opened(tag, in: session) }"))

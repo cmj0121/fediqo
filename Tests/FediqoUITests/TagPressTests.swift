@@ -259,12 +259,12 @@ struct TagPressTests {
         for scheme in [ColorScheme.light, .dark] {
             for (asking, failed) in [([Self.one], [String]()), ([], [Self.one]), ([], [])] {
                 let pane = TagPane(
-                    tag: Self.swift, items: [], asking: asking, failed: failed,
+                    said: TagPageSaid.made(of: Self.swift, held: 0, asking: asking, failed: failed), items: [],
                     catalogues: EmojiCatalogueStore(), posts: ForumPosts(http: FixtureHTTP([:])),
                     selectedID: .constant(nil),
                     decks: .constant(ShellDecks()), playback: ShellPlayback(),
                     onPlayRow: { _ in }, onViewRow: { _ in }, onTurnRow: { _ in }, onOpenThread: { _ in },
-                    onRetry: {}, jumpToTop: 0, onBack: {}
+                    jumpToTop: 0
                 )
                 .frame(width: 390, height: 400)
                 .environment(\.colorScheme, scheme)

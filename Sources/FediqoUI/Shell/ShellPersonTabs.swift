@@ -370,7 +370,11 @@ extension ShellPersonPages {
     /// into somebody else and back keeps the tab, and a page opened afresh opens on About.
     /// Somebody met twice in one walk is one page: theirs is forgotten when the last of
     /// their steps goes.
+    ///
+    /// **A hashtag's page keeps its tab the same way** (F10), and forgets it with the last of
+    /// its steps.
     func left(_ step: ShellStep, of walk: ShellWalk) {
+        if case .tag(let tag) = step, !walk.holdsTag(tag) { tags.left(tag) }
         guard case .person(let who) = step, !walk.holdsPerson(who.id) else { return }
         tabs.left(who.id)
     }

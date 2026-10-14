@@ -851,7 +851,7 @@ struct PersonPageTests {
     @Test("The page takes the whole place: the timelines' head is not drawn over it and is over every other step; its sideways is its own — the tab beside, and on the first tab the swipe back leaves the page, as it leaves a page with one tab; a page that is a place is left by no swipe")
     func thePageAndItsSwipe() {
         #expect(!TimelinePane.headDrawn(over: .person(Self.ada)))
-        for step in [nil, ShellStep.tag(PostTag("#birds")!), .rising(.tags), .link(URL(string: "https://example.org")!)] as [ShellStep?] {
+        for step in [nil, ShellStep.rising(.tags), .link(URL(string: "https://example.org")!)] as [ShellStep?] {
             #expect(TimelinePane.headDrawn(over: step), "\(String(describing: step))")
         }
         #expect(TimelinePane.page(.person(Self.ada)) == .tabbed && TimelinePane.page(.rising(.tags)) == .opened)

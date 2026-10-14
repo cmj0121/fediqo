@@ -333,8 +333,10 @@ struct OpenedPageTests {
         _ = walk.walk(to: .person(Self.bob), from: "post-1")
         #expect(walk.tabKey == .person(Self.bob))
         let tag = try #require(PostTag("#swift"))
+        // A hashtag's page answers for itself: its tabs where it has two, and taken where one.
+        #expect(ShellStep.tag(tag).tabKey == .tag(tag))
         for step in [
-            ShellStep.link(URL(string: "https://example.org/")!), .tag(tag), .rising(.tags), .rising(.links),
+            ShellStep.link(URL(string: "https://example.org/")!), .rising(.tags), .rising(.links),
             .foundTags(FoundTags(source: "m.example", words: "swift")), .followedTags(FollowedTags(host: "m.example")),
             .people(PeopleList(.followers, of: Person(source: Source(host: "m.example", kind: .mastodon), accountID: "42", handle: "@ada@m.example", name: "Ada"))),
         ] {

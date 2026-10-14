@@ -56,6 +56,9 @@ enum ShellStep: Hashable, Sendable {
 enum StepTabKey: Hashable, Sendable {
     /// Somebody's page: its tabs, round their ring (F9).
     case person(DummyPerson)
+    /// A hashtag's page (F10): Posts and About where it has both, round their ring — and
+    /// taken, turning nothing, where it has its posts alone.
+    case tag(PostTag)
     /// A page with no tabs (F10): the key is taken and does nothing — to change timeline the
     /// reader leaves first.
     case sole
@@ -68,7 +71,8 @@ extension ShellStep {
         switch self {
         case .person(let who): .person(who)
         case .thread: .sole
-        case .link, .tag, .people, .rising, .foundTags, .followedTags: nil
+        case .tag(let tag): .tag(tag)
+        case .link, .people, .rising, .foundTags, .followedTags: nil
         }
     }
 }
@@ -166,6 +170,15 @@ struct ShellWalk: Hashable, Sendable {
     func holdsPerson(_ id: String) -> Bool {
         taken.contains { taken in
             if case .person(let who) = taken.step { return who.id == id }
+            return false
+        }
+    }
+
+    /// Whether the page of `tag` is one of the steps taken, in front or under another — by
+    /// the hashtag as its page is kept, whatever case it was written in where it was pressed.
+    func holdsTag(_ tag: PostTag) -> Bool {
+        taken.contains { taken in
+            if case .tag(let held) = taken.step { return HeldUnderTag.same(held, tag) }
             return false
         }
     }

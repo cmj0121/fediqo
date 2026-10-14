@@ -955,6 +955,11 @@
 "tag.asking" = "正在向 %1$@ 詢問 %2$@…";
 "tag.failed" = "無法向 %1$@ 詢問 %2$@。";
 "tag.retry" = "再試一次";
+"tag.retry.spoken" = "再向 %1$@ 詢問 %2$@";
+"tag.again.spoken" = "再問 %2$@ 一次你是否追蹤 %1$@";
+"tag.tab.posts" = "貼文";
+"tag.tab.about" = "關於";
+"tag.stands.followed" = "已在 %@ 追蹤";
 "tag.none" = "這台裝置上還沒有 %@ 底下的貼文。";
 "tag.reach.asked" = "問了 %@。";
 "tag.reach.partial" = "沒有問，因為這個時間軸只顯示它們送來的一部分：%@。";
