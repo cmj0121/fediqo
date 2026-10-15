@@ -1,5 +1,7 @@
 import Foundation
+import ImageIO
 import Testing
+import UniformTypeIdentifiers
 @testable import FediqoCore
 @testable import FediqoUI
 
@@ -172,7 +174,7 @@ struct ProfileDraftTests {
             guard line.hasPrefix("\"profile.") else { return nil }
             return String(line.dropFirst().prefix { $0 != "\"" })
         }
-        #expect(keys.count == 48)
+        #expect(keys.count == 79)
         for key in keys where key != "profile.switch.follow.waiting.one" {
             let english = L10n.t(key, language: .english), taiwanese = L10n.t(key, language: .taiwanese)
             #expect(english != key && taiwanese != key, "\(key)")
@@ -184,5 +186,90 @@ struct ProfileDraftTests {
         #expect(L10n.t("shortcut.follow", language: .english).hasSuffix("— or, on your own page, change your profile"))
         #expect(L10n.t("profile.title", language: .english) == "Your profile" && L10n.t("profile.title", language: .taiwanese) == "你的個人檔案")
         #expect(!keys.contains { L10n.t($0, language: .taiwanese).contains("帳號") }, "the profile is 個人檔案, as the part's own words say")
+    }
+
+    // MARK: - The picture and the header
+
+    /// A real picture's bytes: `side` pixels square, as a PNG.
+    static func png(side: Int = 4) -> Data {
+        let context = CGContext(
+            data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        let out = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(out, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        CGImageDestinationFinalize(destination)
+        return out as Data
+    }
+
+    private static let held = OwnAccount(name: "Me", picture: URL(string: "https://m.example/system/a.png"))
+
+    @Test("A picture chosen is staged, not sent: it is a change, Save sends it as its own type and name, and Keep current puts back what was read; Remove takes away the one held, and over nothing held only lets the choice go")
+    func choosingAndRemoving() {
+        var draft = ProfileDraft(Self.held)
+        #expect(draft.stage(of: .picture) == .held(Self.held.picture) && draft.stage(of: .header) == .held(nil))
+        #expect(draft.canRemove(.picture) && !draft.canRemove(.header) && !draft.canKeep(.picture) && !draft.changed)
+        let png = Self.png()
+        #expect(draft.stage(.header, data: png, type: .png, name: "band.png") == nil)
+        guard case .chosen(let chosen) = draft.stage(of: .header) else {
+            Issue.record("not staged")
+            return
+        }
+        #expect(chosen.image.width == 4 && draft.changed && draft.canKeep(.header) && draft.canRemove(.header))
+        #expect(draft.pictureChanges == [.header: .chosen(png, type: "image/png", name: "band.png")])
+        draft.remove(.header)
+        #expect(draft.stage(of: .header) == .held(nil) && !draft.changed, "nothing held: the choice let go, nothing to take away")
+        draft.remove(.picture)
+        #expect(draft.stage(of: .picture) == .removed && draft.pictureChanges == [.picture: .removed] && draft.changed)
+        #expect(!draft.canRemove(.picture) && draft.canKeep(.picture))
+        draft.keep(.picture)
+        #expect(draft.stage(of: .picture) == .held(Self.held.picture) && !draft.changed)
+        #expect(draft.after.picture == nil, "a picture is never sent as a row")
+    }
+
+    @Test("A file over the host's stated limit is refused naming the file, its size, the limit and that it is the host's; with none stated, this app's own, said as Fediqo's; one that is no picture is refused as such — and each leaves what was there")
+    func refusedAtTheChoice() {
+        let png = Self.png()
+        var stated = ProfileDraft(Self.held, limits: OwnLimits(picture: 10))
+        let refusal = stated.stage(.picture, data: png, type: .png, name: "me.png")
+        #expect(refusal == .tooLarge(name: "me.png", size: png.count, limit: 10, stated: true))
+        #expect(stated.stage(of: .picture) == .held(Self.held.picture) && stated.refusals[.picture] == refusal && !stated.changed)
+        let said = ProfileSaid(host: Self.host, state: .read, draft: stated)
+        let size = PictureRefusal.bytes(png.count, language: .english)
+        #expect(said.pictureRefusal(of: .picture, language: .english) == "me.png is \(size), and m.example takes pictures up to 10 bytes. Nothing was chosen.")
+        #expect(said.pictureRefusal(of: .picture, language: .taiwanese)?.contains("而 m.example 只接受最大") == true)
+        #expect(said.pictureLimitLine(language: .english) == "m.example takes pictures up to 10 bytes.")
+        stated.keep(.picture)
+        #expect(stated.refusals.isEmpty, "Keep current takes the line away")
+
+        var unstated = ProfileDraft(Self.held)
+        #expect(unstated.pictureLimit == (OwnPicture.byteLimit, false))
+        #expect(ProfileSaid(host: Self.host, state: .read, draft: unstated).pictureLimitLine() == nil, "no line where none is stated")
+        let big = Data(count: OwnPicture.byteLimit + 1)
+        #expect(unstated.stage(.header, data: big, type: .png, name: "huge.png")
+            == .tooLarge(name: "huge.png", size: big.count, limit: OwnPicture.byteLimit, stated: false))
+        #expect(ProfileSaid(host: Self.host, state: .read, draft: unstated).pictureRefusal(of: .header, language: .english)?
+            .hasSuffix("and Fediqo sends pictures up to 33.6 MB. Nothing was chosen.") == true)
+        #expect(unstated.stage(.header, data: Data("not a picture".utf8), type: .png, name: "notes.png") == .unreadable(name: "notes.png"))
+        #expect(PictureRefusal.unreadable(name: "notes.png").words(host: Self.host, language: .english)
+            == "Fediqo could not read notes.png as a picture. Nothing was chosen.")
+        #expect(unstated.stage(of: .header) == .held(nil))
+        let over = ProfileDraft(Self.held, limits: OwnLimits(picture: OwnPicture.byteLimit + 1)).pictureLimit
+        #expect(over == (OwnPicture.byteLimit, false), "a host stating more than this app sends: this app's own")
+    }
+
+    @Test("Saved in part: Save stays live, Cancel asks, the line is in full ink and names what was not taken off, in each language")
+    func savedInPart() {
+        var draft = ProfileDraft(Self.held)
+        draft.remove(.picture)
+        let said = ProfileSaid(host: Self.host, state: .partly(failed: [.picture]), draft: draft)
+        #expect(said.canSave && said.cancelAsks && said.lineWarns && said.editable)
+        #expect(said.stateLine(language: .english) == "m.example saved your profile but did not take off your picture. Save asks it again.")
+        #expect(said.stateLine(language: .taiwanese) == "m.example 已儲存你的個人檔案，但沒有拿掉你的大頭貼。按「儲存」會再要求一次。")
+        let both = ProfileSaid(host: Self.host, state: .partly(failed: [.picture, .header]), draft: draft)
+        #expect(both.stateLine(language: .english).contains("your picture and header."))
     }
 }

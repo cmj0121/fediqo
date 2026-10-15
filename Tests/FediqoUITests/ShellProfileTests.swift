@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 import Testing
 @testable import FediqoCore
 @testable import FediqoUI
@@ -482,6 +483,114 @@ struct ShellProfileTests {
         #expect(pages.profile.open == nil && heard.isEmpty)
         #expect(pages.head(of: them, in: session).name == "Other", "the first account's answer is not drawn on theirs")
         #expect(session.mastodon.asking(host: Self.host) == 5, "nor counted for them")
+    }
+
+    // MARK: - The picture and the header
+
+    private static let avatar = "/api/v1/profile/avatar"
+    private static let header = "/api/v1/profile/header"
+
+    /// The account check with a picture and a header held, as a real one draws them.
+    private static func pictured(name: String = "Me", avatar: String = "https://m.example/system/a.png", header: String = "https://m.example/system/h.png") -> String {
+        own(name: name).replacingOccurrences(of: #""locked":"#, with: #""avatar":"\#(avatar)","header":"\#(header)","locked":"#)
+    }
+
+    @Test("A picture chosen on the device goes with Save as one ask of several parts to the source's own change and nowhere else, as the file's own type and name; the sheet closes and the reader's page draws the picture the source answered with")
+    func aChosenPictureIsSent() async throws {
+        let (session, server) = await session(Self.served([
+            Self.who: PageServer.Answer(body: Self.pictured()),
+            Self.change: PageServer.Answer(body: Self.pictured(avatar: "https://m.example/system/new.png")),
+        ]))
+        try await signIn(session)
+        let (pages, me) = try await ownPage(session)
+        _ = try await opened(pages, session)
+        let png = ProfileDraftTests.png()
+        #expect(pages.profile.draft?.stage(.picture, data: png, type: .png, name: "me.png") == nil)
+        #expect(pages.profile.said(in: session)?.canSave == true)
+        let before = await server.asked.count
+        await pages.profile.save(in: session)?.value
+
+        let sent = try #require(await server.sent.last)
+        #expect(sent.ask == Self.change && sent.method == "PATCH")
+        #expect(sent.body.contains(#"name="avatar"; filename="me.png""#) && sent.body.contains("Content-Type: image/png"))
+        #expect(!sent.body.contains("display_name"), "only what changed")
+        let after = await server.asked.dropFirst(before).filter { $0 != Self.who && $0 != Self.lookup && !$0.hasPrefix(Self.statuses) }
+        #expect(after == [Self.change], "one ask, to the change alone")
+        #expect(pages.profile.open == nil)
+        #expect(pages.head(of: me, in: session).face == URL(string: "https://m.example/system/new.png"), "the page draws the source's answer")
+    }
+
+    @Test("Remove sends the removal alone at Save, and nothing else is asked")
+    func aRemovalIsSent() async throws {
+        let (session, server) = await session(Self.served([
+            Self.who: PageServer.Answer(body: Self.pictured()),
+            Self.header: PageServer.Answer(body: Self.own()),
+        ]))
+        try await signIn(session)
+        let (pages, _) = try await ownPage(session)
+        _ = try await opened(pages, session)
+        pages.profile.draft?.remove(.header)
+        await pages.profile.save(in: session)?.value
+        #expect(await server.arrivals(of: Self.header) == 1)
+        #expect(await server.arrivals(of: Self.change) == 0)
+        #expect(pages.profile.open == nil)
+    }
+
+    @Test("A change that lands while a removal fails: the page draws the answer, the sheet stays up on it with the removal still staged and says what was not taken off; Save sends the removal alone again")
+    func savedInPart() async throws {
+        let (session, server) = await session(Self.served([
+            Self.who: PageServer.Answer(body: Self.pictured()),
+            Self.change: PageServer.Answer(body: Self.pictured(name: "River Me")),
+            Self.header: PageServer.Answer(body: "", status: 502),
+        ]))
+        try await signIn(session)
+        let (pages, me) = try await ownPage(session)
+        _ = try await opened(pages, session)
+        pages.profile.draft?.name = "River Me"
+        pages.profile.draft?.remove(.header)
+        await pages.profile.save(in: session)?.value
+
+        let said = try #require(pages.profile.said(in: session))
+        #expect(said.state == .partly(failed: [.header]) && said.canSave && said.cancelAsks)
+        #expect(said.stateLine(language: .english) == "m.example saved your profile but did not take off your header. Save asks it again.")
+        #expect(said.draft?.name == "River Me" && said.draft?.stage(of: .header) == .removed)
+        #expect(pages.head(of: me, in: session).name == "River Me", "the page took the answer")
+
+        await server.answer(Self.header, PageServer.Answer(body: Self.pictured(name: "River Me")))
+        await pages.profile.save(in: session)?.value
+        #expect(await server.arrivals(of: Self.change) == 1, "the removal alone again")
+        #expect(await server.arrivals(of: Self.header) == 2)
+        #expect(pages.profile.open == nil)
+    }
+
+    @Test("A picture over the limit the host states is refused at the choice and never sent; a picture the source refuses at Save is said under its row in the source's words, the choice kept")
+    func tooLargeAndRefused() async throws {
+        let refused = PageServer.Answer(
+            body: #"{"error":"Validation failed: Avatar must be less than 2 MB","details":{"avatar":[{"error":"ERR_INVALID","description":"must be less than 2 MB"}]}}"#,
+            status: 422
+        )
+        let stating = #"{"configuration":{"media_attachments":{"image_size_limit":10}}}"#
+        let (session, server) = await session(Self.served([Self.instance: PageServer.Answer(body: stating), Self.change: refused]))
+        try await signIn(session)
+        let (pages, _) = try await ownPage(session)
+        _ = try await opened(pages, session)
+        let png = ProfileDraftTests.png()
+        #expect(pages.profile.draft?.stage(.picture, data: png, type: .png, name: "me.png") != nil)
+        let said = try #require(pages.profile.said(in: session))
+        #expect(said.pictureRefusal(of: .picture, language: .english)?.contains("m.example takes pictures up to 10 bytes") == true)
+        #expect(!said.canSave && pages.profile.save(in: session) == nil)
+        #expect(await server.arrivals(of: Self.change) == 0)
+
+        let (other, wire) = await self.session(Self.served([Self.change: refused]))
+        try await signIn(other)
+        let (theirs, _) = try await ownPage(other)
+        _ = try await opened(theirs, other)
+        theirs.profile.draft?.stage(.picture, data: png, type: .png, name: "me.png")
+        await theirs.profile.save(in: other)?.value
+        let after = try #require(theirs.profile.said(in: other))
+        #expect(after.refusal(of: .picture) == "must be less than 2 MB" && after.canSave)
+        if case .chosen = after.draft?.stage(of: .picture) {} else { Issue.record("the choice is kept") }
+        #expect(await wire.arrivals(of: Self.change) == 1)
     }
 
     @Test("Where the source has named neither reader, a sign-in replaced by another's while the sheet is up is not taken for the reader: Save sends nothing and the sheet goes down")

@@ -920,7 +920,7 @@
 "part.follows.readOnly" = "With Sign in to read, Fediqo can see who you follow but cannot follow or unfollow.";
 "part.account.ask.title" = "Ask %@ to allow changing your profile?";
 "part.account.ask.line" = "Its page asks for what you allowed, and for your profile.";
-"part.account.ask.detail" = "%1$@'s own sign-in page opens. It asks for what this sign-in already has, and for one thing more — your profile: to change your name, your bio, your extra fields and what your account lets others do. %1$@ gives the same permission for featuring people and hashtags on your profile, pinning your posts, and dismissing announcements and suggestions. Nothing is signed out first, on this device or another: close the page, or refuse on it, and the sign-in you have goes on as it is.";
+"part.account.ask.detail" = "%1$@'s own sign-in page opens. It asks for what this sign-in already has, and for one thing more — your profile: to change your pictures, your name, your bio, your extra fields and what your account lets others do. %1$@ gives the same permission for featuring people and hashtags on your profile, pinning your posts, and dismissing announcements and suggestions. Nothing is signed out first, on this device or another: close the page, or refuse on it, and the sign-in you have goes on as it is.";
 "part.account.unasked" = "This sign-in was not asked to change your profile. Update permission";
 /* What a sign-in holds, part by part (#347): its row and its source's page. */
 "part.held.line" = "This sign-in allows %@.";
@@ -935,7 +935,7 @@
 "part.follows.name" = "who you follow";
 "part.account.name" = "your profile";
 "profile.change" = "Change";
-"profile.change.help" = "Change your name, your words, your fields and what others can do";
+"profile.change.help" = "Change your pictures, your name, your words, your fields and what others can do";
 "profile.change.spoken" = "Change your profile at %@";
 "profile.title" = "Your profile";
 "profile.whose" = "As %@ holds it now.";
@@ -982,6 +982,37 @@
 "profile.discard.line" = "Nothing was sent to %@.";
 "profile.discard" = "Discard";
 "profile.discard.keep" = "Keep editing";
+"profile.picture" = "Picture";
+"profile.header" = "Header";
+"profile.picture.word" = "picture";
+"profile.header.word" = "header";
+"profile.pictures.word" = "picture and header";
+"profile.pictures.limit" = "%1$@ takes pictures up to %2$@.";
+"profile.picture.choose" = "Choose…";
+"profile.picture.fromPhotos" = "From Photos";
+"profile.picture.fromFiles" = "From Files";
+"profile.picture.remove" = "Remove";
+"profile.picture.keep" = "Keep current";
+"profile.picture.chosen" = "New. Sent when you save.";
+"profile.picture.removed" = "Removed. %@ takes it off when you save.";
+"profile.picture.none" = "No picture";
+"profile.header.none" = "No header";
+"profile.picture.preview" = "Shown as your page draws it.";
+"profile.picture.tooLarge" = "%1$@ is %2$@, and %3$@ takes pictures up to %4$@. Nothing was chosen.";
+"profile.picture.tooLarge.app" = "%1$@ is %2$@, and Fediqo sends pictures up to %3$@. Nothing was chosen.";
+"profile.picture.unreadable" = "Fediqo could not read %@ as a picture. Nothing was chosen.";
+"profile.picture.partly" = "%1$@ saved your profile but did not take off your %2$@. Save asks it again.";
+"profile.picture.spoken" = "Your picture at %@";
+"profile.header.spoken" = "Your header at %@";
+"profile.picture.spoken.now" = "as %@ holds it";
+"profile.picture.spoken.new" = "new, not sent yet";
+"profile.picture.spoken.removed" = "removed, not sent yet";
+"profile.picture.spoken.none" = "none";
+"profile.picture.choose.spoken" = "Choose a new picture";
+"profile.header.choose.spoken" = "Choose a new header";
+"profile.picture.remove.spoken" = "Remove your picture";
+"profile.header.remove.spoken" = "Remove your header";
+"profile.picture.keep.spoken" = "Keep the one %@ holds";
 
 /* #25 — Home and your lists, read as you, and choosing which lists. */
 "account.mastodon.home.progress"      = "Reading your Home on %@…";

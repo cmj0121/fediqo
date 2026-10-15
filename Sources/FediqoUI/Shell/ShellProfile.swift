@@ -24,6 +24,10 @@ import SwiftUI
 // outlive that; so at each press the sheet looks at who the sign-in is now (`PageReaders`,
 // which lets the pages go), and is put down only where that is another account. An answer
 // lands only while its ask is still the one awaited. **Held nowhere**: for this run, in memory.
+//
+// **A picture chosen goes with Save, to the source alone**: the change, then a removal. Where
+// the change landed and a removal did not, the page draws the answer and the sheet stays up on
+// it with that removal still staged.
 
 /// Which sheet is up: the host whose account it changes, and the opening it is.
 struct ProfileOpen: Identifiable, Equatable {
@@ -166,19 +170,19 @@ final class ShellProfile {
         awaits = errand
         state = .sending
         let own = session.reach.ownAccount(session.mastodon.authorized(token: held, within: deadline, for: .write))
-        let (before, after) = (draft.before, draft.after)
-        let task = Task { await self.saving(before, after, at: source, through: own, errand: errand, in: session) }
+        self.draft?.refusals = [:]
+        let change = ProfileChange(before: draft.before, after: draft.after, pictures: draft.pictureChanges, limit: draft.limits.picture)
+        let task = Task { await self.saving(change, at: source, through: own, errand: errand, in: session) }
         self.task = task
         return task
     }
 
     private func saving(
-        _ before: OwnAccount, _ after: OwnAccount, at source: Source, through own: MastodonOwnAccount, errand: Int,
-        in session: ShellSession
+        _ change: ProfileChange, at source: Source, through own: MastodonOwnAccount, errand: Int, in session: ShellSession
     ) async {
         let host = source.host
         do {
-            let answer = try await own.change(from: before, to: after)
+            let answer = try await own.change(from: change.before, to: change.after, pictures: change.pictures, limit: change.limit)
             guard awaits == errand, open?.host == host else { return }
             // **Drawn only for the account it was sent as**: the reader become another
             // meanwhile, it is neither drawn on their page nor counted for them.
@@ -188,6 +192,15 @@ final class ShellProfile {
             announce(String(format: L10n.t("profile.saved"), host))
             session.mastodon.askingAnswered(answer.asking, of: answer.person.accountID, host: host)
             await answered?(answer.person, host, session)
+        } catch let part as OwnChangedInPart {
+            await landedInPart(part, at: source, errand: errand, in: session)
+        } catch let large as OwnPictureTooLarge {
+            guard awaits == errand, open?.host == host else { return }
+            for (which, sent) in change.pictures {
+                guard case .chosen(let data, _, let name) = sent, data.count > large.limit else { continue }
+                draft?.refusals[which] = .tooLarge(name: name, size: data.count, limit: large.limit, stated: large.stated)
+            }
+            state = .read
         } catch {
             guard awaits == errand, open?.host == host, !Cancellation.happened(error) else { return }
             // An ending is of the very sign-in the change went through, which is gone with it.
@@ -204,6 +217,24 @@ final class ShellProfile {
                 state = (error as? MastodonAuthError) == .signedOut ? .ended : .failed
             }
         }
+    }
+
+    /// A change that landed while a removal did not: **the page draws the answer**, and the sheet
+    /// stays up on it — made afresh from the answer, the failed removals still staged for Save.
+    private func landedInPart(_ part: OwnChangedInPart, at source: Source, errand: Int, in session: ShellSession) async {
+        let host = source.host
+        guard awaits == errand, open?.host == host else { return }
+        guard isTheReader(at: host, strictly: true, in: session) else {
+            close()
+            return
+        }
+        for error in part.failed.values { ShellPersonPages.concluded(error, at: source, askedAs: askedAs, in: session) }
+        var fresh = ProfileDraft(part.answer.account, limits: draft?.limits ?? .none)
+        for which in part.failed.keys { fresh.remove(which) }
+        draft = fresh
+        state = .partly(failed: Set(part.failed.keys))
+        session.mastodon.askingAnswered(part.answer.asking, of: part.answer.person.accountID, host: host)
+        await answered?(part.answer.person, host, session)
     }
 
     /// The sign-in a press goes through, after the one look at it: nothing — and the sheet put
@@ -263,6 +294,14 @@ final class ShellProfile {
         draft = nil
         state = .asking
     }
+}
+
+/// What one Save sends: the account from and to, the pictures, and the host's picture limit.
+private struct ProfileChange: Sendable {
+    let before: OwnAccount
+    let after: OwnAccount
+    let pictures: [OwnPicture: OwnPictureChange]
+    let limit: Int?
 }
 
 // MARK: - Change, on the reader's own page
