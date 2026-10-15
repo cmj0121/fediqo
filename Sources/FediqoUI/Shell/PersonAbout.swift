@@ -15,7 +15,8 @@ import SwiftUI
 struct PersonAboutSaid: Equatable {
     /// One block of the tab, top to bottom: what the lamp stops on.
     enum Block: String, CaseIterable {
-        case view, sentences, picture, words, fields, figures, none, stands, boosts, notices, home, requests, you
+        case view, sentences, picture, words, fields, featuredTags, featuredPeople, figures, none, stands, boosts, notices, home,
+             requests, you
     }
 
     /// The host of the source that says, and whose copies the pictures are.
@@ -41,6 +42,8 @@ struct PersonAboutSaid: Equatable {
     var followed: FollowedTagsEntry?
     /// The way to the people who ask to follow the reader, on their own page (#313).
     var requests: RequestsEntry?
+    /// What they feature on their profile (#315, #318), or nothing where it is not asked.
+    var featured: FeaturedSaid?
 
     /// What About is handed, from what the page was: the source's word, their own server's
     /// where it is drawn, and how the reader stands.
@@ -96,6 +99,8 @@ struct PersonAboutSaid: Equatable {
             case .picture: person?.headerURL != nil
             case .words: person?.words.isEmpty == false
             case .fields: person?.fields.isEmpty == false
+            case .featuredTags: featured?.tagsDrawn == true
+            case .featuredPeople: featured?.people != nil
             case .figures: figures != nil
             case .none: none != nil
             case .stands: standsDrawn
@@ -111,13 +116,27 @@ struct PersonAboutSaid: Equatable {
     /// What the lamp stands on where it stands on `block`. The way to the hashtags followed
     /// keeps its own name, so Return on it opens what a press on it opens.
     func lamp(on block: Block) -> String {
-        block == .you ? followed?.id ?? Self.name(block) : Self.name(block)
+        switch block {
+        case .you: followed?.id ?? Self.name(block)
+        case .featuredPeople: FeaturedSaid.peopleID
+        case .featuredTags: FeaturedSaid.tagsID
+        default: Self.name(block)
+        }
     }
 
     static func name(_ block: Block) -> String { "about." + block.rawValue }
 
-    /// Every row `j` and `k` walk on About, top to bottom as it is drawn.
-    var walked: [String] { blocks.map(lamp(on:)) }
+    /// Every row `j` and `k` walk on About, top to bottom as it is drawn: one a block, and
+    /// one a hashtag they feature.
+    var walked: [String] {
+        blocks.flatMap { block in
+            switch block {
+            case .featuredTags: featured?.tagRows ?? []
+            case .featuredPeople: [FeaturedSaid.peopleID]
+            default: [lamp(on: block)]
+            }
+        }
+    }
 
     /// What Return does with the lamp on a block of About.
     enum Press: Equatable {
@@ -126,12 +145,15 @@ struct PersonAboutSaid: Equatable {
         case askFollows
         /// One of what is taken from them, turned the other way.
         case act(PersonAct)
+        /// What they feature (#315, #318): answered by whoever takes that step.
+        case featured(FeaturedPress)
     }
 
     /// The press of the block the lamp is on, where that block is one: the line about their
     /// own server, and the lock of a sign-in that may be asked for following. The way to the
     /// hashtags followed is answered by whoever takes that step.
     func press(on id: String) -> Press? {
+        if let press = featured?.press(on: id) { return .featured(press) }
         if id == Self.name(.home), let press = home?.press { return .home(press) }
         if id == Self.name(.stands), standing?.lock?.asks == true { return .askFollows }
         for which in PersonActing.Narrow.Which.allCases where id == Self.name(which == .boosts ? .boosts : .notices) {
@@ -162,6 +184,8 @@ struct PersonAbout<Lead: View>: View {
     var onAct: (PersonAct) -> Void = { _ in }
     /// The way to the people who ask to follow the reader, pressed.
     var onRequests: (RequestsEntry) -> Void = { _ in }
+    /// A hashtag they feature, the way to the people they feature, or asking again (#315, #318).
+    var onFeatured: (FeaturedPress) -> Void = { _ in }
     /// What stands over the blocks and scrolls away with them: the page's head, at a text
     /// size where it would fill the page.
     @ViewBuilder var lead: Lead
@@ -210,6 +234,8 @@ struct PersonAbout<Lead: View>: View {
         case .picture: picture
         case .words: words
         case .fields: fields
+        case .featuredTags: featuredTags
+        case .featuredPeople: featuredPeople
         case .figures: quiet(said.figures ?? "")
         case .none: quiet(said.none ?? "")
         case .stands: stands
@@ -364,6 +390,83 @@ struct PersonAbout<Lead: View>: View {
                 .help(L10n.t("mark.dim.askAgain"))
         } else {
             label
+        }
+    }
+
+    /// The hashtags they feature: a head, and each a row the lamp stops on — the hashtag, and
+    /// what the source says of it — whose press opens the hashtag's page; or the ask's own
+    /// sentence, with "Try again" beside a failure.
+    @ViewBuilder
+    private var featuredTags: some View {
+        if let featured = said.featured {
+            VStack(alignment: .leading, spacing: ShellSpace.tight) {
+                Text(featured.tagsTitle())
+                    .shellFont(.meta, weight: .semibold)
+                    .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    .accessibilityAddTraits(.isHeader)
+                if let asking = featured.askingWords() { quiet(asking) }
+                if let failed = featured.failedWords() {
+                    marked(PersonHead.failedSymbol, failed, ink: ShellChrome.ink(colorScheme))
+                    ShellLinkButton(L10n.t("person.retry")) { onFeatured(.again) }.fixedSize()
+                }
+                ForEach(featured.tags, id: \.self) { tag in featuredRow(tag, of: featured) }
+                ForEach(featured.missed, id: \.self) { missed in
+                    Text(missed)
+                        .shellFont(.meta)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// One hashtag they feature: its press opens the hashtag's page, and on the reader's own
+    /// page its `…` holds Take off your profile.
+    private func featuredRow(_ tag: FeaturedTag, of featured: FeaturedSaid) -> some View {
+        HStack(alignment: .center, spacing: ShellSpace.step) {
+            Button { onFeatured(.tag(tag.tag)) } label: {
+                VStack(alignment: .leading, spacing: ShellSpace.hair) {
+                    Text(tag.tag.text).shellFont(.body).foregroundStyle(ShellChrome.ink(colorScheme))
+                    if let words = featured.said(of: tag) {
+                        Text(words).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(featured.spoken(tag))
+            .accessibilityAddTraits(.isButton)
+            if let more = featured.more(of: tag, act: { onFeatured(.takeOff(tag.tag)) }) {
+                ShellMoreButton(label: featured.moreLabel(of: tag)) { more }
+                    .fixedSize()
+            }
+        }
+        .padding(.horizontal, ShellSpace.pad)
+        .padding(.vertical, ShellSpace.hair)
+        .modifier(AboutBlockLit(lit: FeaturedSaid.lamp(of: tag.tag) == lit))
+        .padding(.horizontal, -ShellSpace.pad)
+        .id(FeaturedSaid.lamp(of: tag.tag))
+    }
+
+
+    /// The way to the people they feature: words, and the mark that says it leads on.
+    @ViewBuilder
+    private var featuredPeople: some View {
+        if let featured = said.featured, let list = featured.people {
+            Button { onFeatured(.people(list)) } label: {
+                HStack(alignment: .firstTextBaseline, spacing: ShellSpace.tight) {
+                    Text(featured.peopleWords()).fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: "chevron.right").shellFont(.mark).accessibilityHidden(true)
+                }
+                .shellFont(.reading)
+                .foregroundStyle(ShellChrome.inkDim(colorScheme))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(featured.peopleWords())
         }
     }
 

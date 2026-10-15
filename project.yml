@@ -137,6 +137,10 @@ targets:
         # And incoming, for one thing only: a device nearby joining this one to move a store
         # to it (#253). The listener is up while Hold from nearby is, and at no other time.
         ENABLE_INCOMING_NETWORK_CONNECTIONS: YES
+        # And a file the person picks in a panel, and nothing else: a picture for their
+        # profile (#312), read; a store carried in, read, and one carried out, written where
+        # they chose. The panel hands over only what was picked.
+        ENABLE_USER_SELECTED_FILES: readwrite
         GENERATE_INFOPLIST_FILE: NO
         COMBINE_HIDPI_IMAGES: YES
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO

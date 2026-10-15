@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SwiftUI
 import Testing
+import UniformTypeIdentifiers
 @testable import FediqoCore
 @testable import FediqoUI
 
@@ -24,7 +25,7 @@ struct ProfileSheetHostedTests {
     private static let states: [ProfileState] = [
         .asking, .readFailed, .read, .sending,
         .refused(sentence: "Validation failed: Display name is too long", rows: [.name: "is too long", .listsShown: "is not allowed"]),
-        .forbidden, .partGone, .failed, .ended,
+        .forbidden, .partGone, .failed, .ended, .partly(failed: [.picture]),
     ]
 
     private static let arrangements: [(width: CGFloat, size: DynamicTypeSize)] = [(600, .large), (390, .large), (320, .accessibility5)]
@@ -48,6 +49,35 @@ struct ProfileSheetHostedTests {
                 let sheet = ProfileSheet(said: said, draft: .constant(said.draft ?? ProfileDraft(OwnAccount())), framed: false)
                 let view = NSHostingView(
                     rootView: sheet.frame(width: width, height: 900)
+                        .environment(\.colorScheme, scheme).environment(\.dynamicTypeSize, size)
+                )
+                view.layoutSubtreeIfNeeded()
+                #expect(view.fittingSize.height > 0, "\(state) at \(width)")
+                #expect(view.fittingSize.width <= width + 0.5, "\(state) at \(width)")
+            }
+        }
+    }
+
+    @Test("The picture and the header lay out held, chosen, removed, absent, refused and saved in part at 600, 390 and 320 at the largest text, in light and in dark, no wider than the room", arguments: 0..<2)
+    func picturesLaidOut(_ dark: Int) {
+        let scheme: ColorScheme = dark == 1 ? .dark : .light
+        let pictured = OwnAccount(
+            name: "Alice Example", picture: URL(string: "https://m.example/a.png"), header: URL(string: "https://m.example/h.png")
+        )
+        var chosen = ProfileDraft(pictured, limits: OwnLimits(picture: 16 << 20))
+        chosen.stage(.picture, data: ProfileDraftTests.png(side: 64), type: .png, name: "me.png")
+        chosen.remove(.header)
+        var refused = ProfileDraft(OwnAccount(name: "Alice Example"), limits: OwnLimits(picture: 10))
+        refused.stage(.header, data: ProfileDraftTests.png(), type: .png, name: "a-rather-long-file-name-for-a-header.png")
+        let cases: [(ProfileState, ProfileDraft)] = [
+            (.read, ProfileDraft(pictured)), (.read, chosen), (.read, refused), (.partly(failed: [.header]), chosen),
+            (.refused(sentence: "Validation failed", rows: [.picture: "must be less than 2 MB"]), chosen),
+        ]
+        for (state, draft) in cases {
+            for (width, size) in Self.arrangements {
+                let said = ProfileSaid(host: Self.host, state: state, draft: draft)
+                let view = NSHostingView(
+                    rootView: ProfileSheet(said: said, draft: .constant(draft), framed: false).frame(width: width, height: 900)
                         .environment(\.colorScheme, scheme).environment(\.dynamicTypeSize, size)
                 )
                 view.layoutSubtreeIfNeeded()

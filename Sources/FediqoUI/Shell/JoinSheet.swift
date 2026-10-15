@@ -411,6 +411,9 @@ struct JoinSheet: View {
     /// What the person set at a joined source they are signed in to (#321), asked and kept by
     /// the pages the root holds. Nothing where the sheet is drawn with none.
     var you: ShellYouThere?
+    /// What a joined source announces to the reader signed in there (#321), asked and kept by
+    /// the pages the root holds. Nothing where the sheet is drawn with none.
+    var announcements: ShellAnnouncements?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
@@ -607,6 +610,9 @@ struct JoinSheet: View {
                     if case .joined(let source) = origin {
                         standing(source.host)
                         if let me = ownPage(at: source.host) { OwnPageLine(me: me, press: { openOwnPage(me) }) }
+                    }
+                    if case .joined(let source) = origin, let announcements {
+                        AnnouncementsBlock(host: source.host, announcements: announcements, session: session)
                     }
                     SourcePreviewView(preview: preview, surface: .sheet, origin: origin)
                     if case .joined(let source) = origin, let you { YouThereBlock(host: source.host, you: you, session: session) }

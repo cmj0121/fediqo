@@ -198,7 +198,10 @@ struct TagPane: View {
         switch said.front {
         case .about:
             if let about = said.about {
-                TagAbout(said: about, lit: selectedID, jumpToTop: jumpToTop, onPress: acts.onFollow, onUnfollow: acts.onUnfollow, onAsk: acts.onAskFollows, lead: lead)
+                TagAbout(
+                    said: about, lit: selectedID, jumpToTop: jumpToTop, onPress: acts.onFollow, onUnfollow: acts.onUnfollow,
+                    onAsk: acts.onAskFollows, onFeature: acts.onFeature, onUnfeature: acts.onUnfeature, lead: lead
+                )
             }
         case .posts:
             rows(lead: lead())

@@ -19,9 +19,10 @@ import Foundation
 // `PeopleRead`, which lists nobody twice — and somebody may be passed over, which nothing here
 // can know.
 //
-// **Telling the source not to suggest somebody is not here.** A real server takes that only
-// from a sign-in holding a word that belongs to changing the reader's own account, which no
-// sign-in of this app is asked for yet.
+// **Telling the source not to suggest somebody** (`dismiss`) rides the account part
+// (`MastodonPart.account`): a real server takes it only from a sign-in holding the word that
+// belongs to changing the reader's own account. Its lock is the held words', as every write of
+// that part is (`AccountPartError`).
 //
 // **A stranger's word, bounded where it enters.** The body arrives under the signed-in door's
 // ceiling; each account is read by the one reader an account has (`AccountDTO.asPerson`), which
@@ -76,6 +77,18 @@ public struct MastodonSuggestions: Sendable {
             next: given.count < length || reached >= Self.furthest ? nil : String(reached)
         )
     }
+
+    /// Tells the source not to suggest the account `accountID` names to the reader again.
+    ///
+    /// Throws `AccountPartError.locked` for a 403 to a sign-in without the account part,
+    /// `.forbidden` for one to a sign-in holding it, and `MastodonHostMoreError.noSuchAddress`
+    /// where the host has no such address.
+    public func dismiss(accountID: String) async throws {
+        guard ListSubscription.isPathSegment(accountID) else { throw MastodonRequestError.invalidURL }
+        _ = try await AccountPartError.act(door, path: "\(Self.dismissPath)/\(accountID)", method: "DELETE")
+    }
+
+    static let dismissPath = "/api/v1/suggestions"
 
     /// One suggestion as the server sends it. Why it is suggested stands beside the account,
     /// and is not read.

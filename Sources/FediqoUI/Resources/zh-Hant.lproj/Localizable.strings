@@ -790,7 +790,6 @@
 "board.choose.detail.change"      = "挑你想看的版塊。挑好的會取代你現在讀的。";
 "board.choose.line.change" = "挑好的會取代你現在讀的。";
 
-
 /* Decision 29: Clear asks first, and says what actually goes. */
 "account.clear.title"             = "清除 %@ 留在這裡的東西？";
 "account.clear.detail"            = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉。你再讀它的時候會回來，它也還留在你的來源裡，版塊和文章都在。";
@@ -900,7 +899,7 @@
 "part.follows.readOnly" = "選「登入來讀」，Fediqo 只能查看你追蹤的對象，不能追蹤或取消追蹤。";
 "part.account.ask.title" = "請 %@ 允許修改你的個人檔案？";
 "part.account.ask.line" = "它的頁面會問你已允許的，並加上你的個人檔案。";
-"part.account.ask.detail" = "%1$@ 自己的登入頁面會打開，問這個登入已經有的，再多問一件事——你的個人檔案：修改你的名稱、簡介、額外欄位，以及你的帳號讓別人做什麼。%1$@ 用同一個權限讓你在個人檔案上推薦人和主題標籤、釘選貼文，以及關閉公告和推薦。不會先登出，這台裝置和其他裝置都不會：關掉那一頁，或在上面拒絕，你原有的登入都照舊。";
+"part.account.ask.detail" = "%1$@ 自己的登入頁面會打開，問這個登入已經有的，再多問一件事——你的個人檔案：修改你的圖片、名稱、簡介、額外欄位，以及你的帳號讓別人做什麼。%1$@ 用同一個權限讓你在個人檔案上推薦人和主題標籤、釘選貼文，以及關閉公告和推薦。不會先登出，這台裝置和其他裝置都不會：關掉那一頁，或在上面拒絕，你原有的登入都照舊。";
 "part.account.unasked" = "這個登入還沒被問過修改你的個人檔案。更新權限";
 /* What a sign-in holds, part by part (#347): its row and its source's page. */
 "part.held.line" = "這個登入允許：%@。";
@@ -915,7 +914,7 @@
 "part.follows.name" = "你追蹤的對象";
 "part.account.name" = "你的個人檔案";
 "profile.change" = "修改";
-"profile.change.help" = "修改你的名稱、自我介紹、欄位，以及別人可以做的事";
+"profile.change.help" = "修改你的圖片、名稱、自我介紹、欄位，以及別人可以做的事";
 "profile.change.spoken" = "修改你在 %@ 的個人檔案";
 "profile.title" = "你的個人檔案";
 "profile.whose" = "%@ 現在保存的樣子。";
@@ -961,6 +960,37 @@
 "profile.discard.line" = "什麼都沒有送到 %@。";
 "profile.discard" = "捨棄";
 "profile.discard.keep" = "繼續編輯";
+"profile.picture" = "大頭貼";
+"profile.header" = "封面圖片";
+"profile.picture.word" = "大頭貼";
+"profile.header.word" = "封面圖片";
+"profile.pictures.word" = "大頭貼和封面圖片";
+"profile.pictures.limit" = "%1$@ 接受最大 %2$@ 的圖片。";
+"profile.picture.choose" = "選擇…";
+"profile.picture.fromPhotos" = "從「照片」";
+"profile.picture.fromFiles" = "從「檔案」";
+"profile.picture.remove" = "移除";
+"profile.picture.keep" = "保留目前的";
+"profile.picture.chosen" = "新的。按「儲存」時才送出。";
+"profile.picture.removed" = "已移除。按「儲存」時 %@ 才會拿掉。";
+"profile.picture.none" = "沒有大頭貼";
+"profile.header.none" = "沒有封面圖片";
+"profile.picture.preview" = "依你的頁面畫出的樣子顯示。";
+"profile.picture.tooLarge" = "%1$@ 有 %2$@，而 %3$@ 只接受最大 %4$@ 的圖片。沒有選取任何圖片。";
+"profile.picture.tooLarge.app" = "%1$@ 有 %2$@，而 Fediqo 只送出最大 %3$@ 的圖片。沒有選取任何圖片。";
+"profile.picture.unreadable" = "Fediqo 無法把 %@ 當成圖片讀取。沒有選取任何圖片。";
+"profile.picture.partly" = "%1$@ 已儲存你的個人檔案，但沒有拿掉你的%2$@。按「儲存」會再要求一次。";
+"profile.picture.spoken" = "你在 %@ 的大頭貼";
+"profile.header.spoken" = "你在 %@ 的封面圖片";
+"profile.picture.spoken.now" = "%@ 目前保存的";
+"profile.picture.spoken.new" = "新的，還沒送出";
+"profile.picture.spoken.removed" = "已移除，還沒送出";
+"profile.picture.spoken.none" = "沒有";
+"profile.picture.choose.spoken" = "選擇新的大頭貼";
+"profile.header.choose.spoken" = "選擇新的封面圖片";
+"profile.picture.remove.spoken" = "移除你的大頭貼";
+"profile.header.remove.spoken" = "移除你的封面圖片";
+"profile.picture.keep.spoken" = "保留 %@ 目前保存的";
 
 /* #25 — Home and your lists, read as you, and choosing which lists. */
 "account.mastodon.home.progress"      = "正在讀你在 %@ 的首頁…";
@@ -1764,7 +1794,9 @@
 "people.suggested.none" = "%@ 沒有向這個登入建議任何人。";
 "people.suggested.foot.farthest" = "Fediqo 只讀取一個來源建議的前 %1$@ 人，%2$@ 可能還建議了更多人。";
 "people.suggested.dismiss" = "不再建議";
-"people.suggested.dismiss.dim" = "要 %@ 不再建議某個人，得更動你在那裡的帳號，而這個版本的 Fediqo 還不會請你允許這件事。";
+"people.suggested.dismiss.ask.title" = "要 %1$@ 不再建議 %2$@ 嗎？";
+"people.suggested.dismiss.ask.line" = "他們會離開這份清單。你仍然可以找到並跟隨他們。";
+"people.suggested.dismiss.failed" = "無法要 %2$@ 不再建議 %1$@。";
 "work.purpose.serverSays" = "讀取來源對自己的說明";
 "source.more.title" = "%@ 還說了什麼";
 "source.more.line" = "打開這一頁時向它詢問。";
@@ -1944,3 +1976,73 @@
 "people.requests.none" = "%@ 說沒有人請求跟隨你。";
 "people.requests.entry.count" = "%@ 人請求跟隨你";
 "people.requests.entry.count.one" = "%@ 人請求跟隨你";
+
+/* What a source announces (#321) */
+"announce.title" = "公告";
+"announce.line" = "%@ 對在那裡登入的人發布的公告。";
+"announce.help" = "在這裡顯示過的公告，在 Fediqo 下次執行前不會再讓這個來源列上的標記亮起，也不會為此送出任何東西。關閉後，%1$@ 會在你用的每個 app 都把它記為已讀，在這裡它會收起來。這個頁面打開時，以及每次讀取 %1$@ 時，都會詢問它，但每 15 分鐘最多一次。";
+"announce.asking" = "正在向 %@ 詢問它的公告…";
+"announce.failed" = "無法向 %@ 詢問它的公告。";
+"announce.forbidden" = "%@ 不讓這個登入看它的公告。";
+"announce.new" = "新的";
+"announce.span" = "%1$@ 到 %2$@";
+"announce.edited" = "%@ 修改過";
+"announce.more.spoken" = "%@ 的公告";
+"announce.dismiss" = "關閉";
+"announce.dismiss.ask.title" = "關閉 %@ 的這則公告？";
+"announce.dismiss.ask.line" = "%@ 會在你用的每個 app 都把它記為已讀。在這裡它會收進「已關閉」。";
+"announce.dismiss.failed" = "無法在 %@ 關閉這則公告。";
+"announce.dismissed" = "已關閉 %d 則";
+"announce.dismissed.one" = "已關閉 1 則";
+"announce.folded" = "收起";
+"announce.unfolded" = "展開";
+"announce.reaction.spoken" = "%1$@，%2$@";
+"announce.reaction.spoken.mine" = "包括你";
+"announce.reaction.add.hint" = "加上你的 %@";
+"announce.reaction.take.hint" = "收回你的";
+"announce.react" = "加上反應";
+"announce.react.field" = "一個表情符號";
+"announce.react.add" = "加上";
+"announce.react.notOne" = "請輸入一個表情符號。";
+"announce.react.reads" = "%@ 上的登入只讀，所以不能加上反應。";
+"announce.react.failed" = "無法在 %2$@ 加上你的 %1$@。";
+"announce.unreact.failed" = "無法在 %2$@ 收回你的 %1$@。";
+"account.source.announced.help" = "%@ 有你還沒看過的公告。會打開它的頁面。";
+"account.source.announced.spoken" = "%2$@ 有 %1$d 則新公告";
+"account.source.announced.spoken.one" = "%@ 有 1 則新公告";
+"account.sources.announced" = "列上的擴音器：那個來源有你還沒看過的公告，按下會打開它的頁面。";
+"work.purpose.announcements" = "讀取來源發給你的公告";
+
+"person.act.feature" = "在個人檔案上推薦";
+"person.act.unfeature" = "從個人檔案上拿掉";
+"person.act.feature.failed" = "無法在 %2$@ 把 %1$@ 推薦到你的個人檔案上。";
+"person.act.unfeature.failed" = "無法在 %2$@ 把 %1$@ 從你的個人檔案上拿掉。";
+"person.stands.featured" = "在你的個人檔案上";
+"person.featured.tags" = "他們推薦的主題標籤";
+"person.featured.tags.own" = "你推薦的主題標籤";
+"person.featured.tag.said" = "他們的 %1$@ 則貼文，最近一則在 %2$@";
+"person.featured.tag.said.own" = "你的 %1$@ 則貼文，最近一則在 %2$@";
+"person.featured.tag.never" = "他們還沒有貼文用它";
+"person.featured.tag.never.own" = "你還沒有貼文用它";
+"person.featured.tags.asking" = "正在向 %@ 詢問他們推薦的主題標籤…";
+"person.featured.tags.failed" = "無法向 %@ 詢問他們推薦的主題標籤。";
+"person.featured.people" = "他們推薦的人";
+"person.featured.people.own" = "你推薦的人";
+"people.title.featured" = "%@ 推薦的人";
+"people.title.featured.own" = "你在 %@ 推薦的人";
+"people.featured.asking" = "正在向 %@ 詢問被推薦的人…";
+"people.featured.failed" = "無法向 %@ 詢問被推薦的人。";
+"people.featured.absent" = "%@ 沒有在個人檔案上推薦人的功能。";
+"people.featured.none" = "%@ 沒有給出任何被推薦的人。";
+"tag.feature.featured" = "在你的個人檔案上。";
+"tag.feature.notFeatured" = "不在你的個人檔案上。";
+"tag.feature.asking" = "正在確認你的個人檔案是否推薦它…";
+"tag.feature.unknown" = "無法確認你的個人檔案是否推薦它。";
+"tag.feature.featuring" = "推薦中…";
+"tag.feature.unfeaturing" = "拿掉中…";
+"tag.feature.feature" = "推薦";
+"tag.feature.unfeature" = "從個人檔案上拿掉";
+"tag.feature.feature.spoken" = "在 %2$@ 把 %1$@ 推薦到你的個人檔案上";
+"tag.feature.unfeature.spoken" = "在 %2$@ 把 %1$@ 從你的個人檔案上拿掉";
+"tag.feature.failed.feature" = "無法在 %2$@ 把 %1$@ 推薦到你的個人檔案上。";
+"tag.feature.failed.unfeature" = "無法在 %2$@ 把 %1$@ 從你的個人檔案上拿掉。";

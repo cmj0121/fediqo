@@ -68,6 +68,7 @@ extension SourceWork.Purpose {
         case .lookUp: "person.crop.circle.badge.questionmark"
         case .personHome: "house"
         case .followedTags: "number"
+        case .announcements: "megaphone"
         }
     }
 }

@@ -330,6 +330,16 @@ struct MultipartDoorTests {
         #expect(CappedBody.mayFollow(from: request, to: URL(string: "https://social.example/moved")!))
     }
 
+    @Test("A 422 to it hands on the source's answer, which says what it would not take, and the sign-in goes on")
+    func unprocessable() async throws {
+        let (door, server, store) = try Self.door([Self.path: .json(MastodonPartsCaptures.noPicture, status: 422)])
+        await #expect(throws: MastodonUnprocessable(body: Data(MastodonPartsCaptures.noPicture.utf8))) {
+            try await door.patch(path: Self.path, parts: [.file("avatar", named: "me.png", type: "image/png", Self.picture)])
+        }
+        #expect(await server.requests.count == 1)
+        #expect(try store.token(host: MastodonFixture.host) != nil)
+    }
+
     @Test("A 401 to it is checked with the account check alone: the body is not sent a second time")
     func unauthorizedIsCheckedWithoutTheBody() async throws {
         let (door, server, store) = try Self.door([

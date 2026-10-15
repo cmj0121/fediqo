@@ -401,11 +401,30 @@ extension ShellPersonPages {
         let hidden = said.person.map { person in
             person.hidesLists && !person.suspended && !tabs(of: who, in: session).contains(.following)
         } ?? false
-        return PersonAboutSaid.made(
-            of: said, home: homeSaid(of: who, in: session), homeLine: homeLine(of: who, in: session),
+        let home = homeSaid(of: who, in: session)
+        var about = PersonAboutSaid.made(
+            of: said, home: home, homeLine: homeLine(of: who, in: session),
             standing: stands(to: who, in: session), followed: followedEntry(of: who, in: session), hidden: hidden,
             requests: requestsEntry(of: who, in: session)
         )
+        // What they feature is the added source's: not drawn while their own server's word is.
+        if home == nil { about.featured = featured(of: who, in: session) }
+        return about
+    }
+
+    /// What `who` features on their profile (#315, #318), as About is handed it.
+    func featured(of who: DummyPerson, in session: ShellSession) -> FeaturedSaid? {
+        features.said(of: who, said: said(of: who, in: session), own: Self.own(at: who.host, in: session)?.id == who.id, in: session)
+    }
+
+    /// Which opening the asking of what `who` features is, or nothing where nobody is asked.
+    func featuredOpening(of who: DummyPerson, in session: ShellSession) -> ShellFeatures.Opening? {
+        features.opening(who, said: said(of: who, in: session), in: session)
+    }
+
+    /// The page of `who` has said who they are: what they feature is asked (B7).
+    func featuredOpened(_ who: DummyPerson, in session: ShellSession) async {
+        await features.opened(who, said: said(of: who, in: session), in: session)
     }
 
     /// The way to the people who ask to follow the reader (#313), where the page of `who` is
@@ -483,6 +502,9 @@ extension ShellPersonPages {
         case .home(let asked): Task { await homePressed(asked, on: who, in: session) }
         case .askFollows: session.askFor([PersonAct.follow.needs], host: who.host)
         case .act(let pressed): Task { await act(pressed, on: who, in: session) }
+        case .featured(.again): Task { await features.again(who, said: said(of: who, in: session), in: session) }
+        // A hashtag's page and the list of people are steps of the walk: whoever holds it takes them.
+        case .featured(.tag), .featured(.people), .featured(.takeOff): return false
         }
         return true
     }

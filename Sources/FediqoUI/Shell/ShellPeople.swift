@@ -49,7 +49,14 @@ import Observation
 // with nobody — or with a failure, where what it suggests grew shorter meanwhile. **The known
 // limit**: a host that gives fewer in a stretch than it was asked for is cut short there, and
 // that is called the end. Absent by the host's own address, as a directory is.
-// **Nothing here tells a source not to suggest somebody**: that needs a word no sign-in holds.
+// **Telling the source not to suggest somebody** (`dismiss`) rides the account part, asked in
+// place from the row's `…` where it is not held: the row leaves at the yes, comes back with a
+// line under it where the press did not arrive, and is gone once the source has answered — and
+// a read from the top already on its way when it answered does not bring it back.
+//
+// **The people somebody features on their profile are such a list too** (#315), of somebody's:
+// read on by the source's own next, as whom they follow is, and absent by the host's own
+// address, as a directory is.
 //
 // **A stretch that lands is asked about once more: how the reader stands to the people in it**
 // (#310, #313) — one ask for each eighty people of a stretch, which is one ask a stretch as
@@ -83,6 +90,8 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         /// The people who ask to follow whoever is signed in (#313): the reader's own, asked
         /// only as them.
         case requests
+        /// The people somebody features on their profile (#315).
+        case featured
 
         /// The two lists that are somebody's, in the order their page counts them.
         static let ofSomebody: [Which] = [.following, .followers]
@@ -123,7 +132,7 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .following: counted = person.tally.following
         case .followers: counted = person.tally.followers
         // Not somebody's: a directory is made by `init(directoryAt:)`, and counts nobody.
-        case .directory, .found, .suggested, .requests: counted = nil
+        case .directory, .found, .suggested, .requests, .featured: counted = nil
         }
         hidden = person.hidesLists
     }
@@ -162,6 +171,17 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         hidden = false
     }
 
+    /// The people `person` features on their profile (#315), as their source said them:
+    /// counted by nobody — the source gives no figure of them — and hidden by nobody.
+    init(featuredBy person: Person) {
+        which = .featured
+        host = person.source.host
+        accountID = person.accountID
+        handle = person.handle
+        counted = nil
+        hidden = false
+    }
+
     /// The people the source at `host` suggests whoever is signed in there (#315): of no
     /// account, counted by nobody, and hidden by nobody.
     init(suggestedAt host: String) {
@@ -183,6 +203,7 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         case .following: .following(of: accountID)
         case .followers: .followers(of: accountID)
         case .requests: .requests
+        case .featured: .featured(by: accountID)
         case .directory, .found, .suggested: nil
         }
     }
@@ -197,6 +218,7 @@ struct PeopleList: Hashable, Sendable, Identifiable {
         switch which {
         case .directory: .directory
         case .suggested: .suggestions
+        case .featured: .featuredPeople
         case .following, .followers, .found, .requests: nil
         }
     }
@@ -261,8 +283,10 @@ final class ShellPeoplePages {
         /// is told by.
         var round = 0
         /// Who left the list by a press the source answered (#313) — a request answered, a
-        /// follower removed — since it was last read from the top: by the id it knows each by.
-        var gone: Set<String> = []
+        /// follower removed, a suggestion dismissed (#315) — by the id it knows each by, each
+        /// with the number the count stood at when the source answered: **a read from the top
+        /// begun before that does not bring them back**, and one begun after is the list.
+        var gone: [String: Int] = [:]
 
         /// Whether asking came to something. A list that is not settled and has nothing on the
         /// wire — an ask that was stopped — is asked again when it is opened.
@@ -281,6 +305,12 @@ final class ShellPeoplePages {
     /// the page**: a page let go and made again does not bring the old figure back; the next
     /// check does, with its own.
     private var askingOld: [String: Int] = [:]
+    /// The suggestions being dismissed, by list and the id the source knows each by: the row
+    /// is off the list while the press is out (#315). The one guard of a press.
+    private var dismissing = PressGuard<String, Bool>()
+    /// The dismissals that did not arrive, by list and id: said under the row until the list
+    /// is read again from the top, or the row is pressed again.
+    private var dismissMissed: Set<String> = []
     @ObservationIgnored private var order = PageOrder()
     /// The one ask on the wire for each list — from the top, or a reading-on.
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
@@ -367,6 +397,11 @@ final class ShellPeoplePages {
         var handed = PeopleSaid(list: list, signedIn: now != .nobody, own: Self.isOwn(list, as: now, in: session))
         handed.acts = Self.rowActs(of: handed, at: source, in: session)
         handed.lock = Self.rowLock(of: handed, at: source, in: session)
+        if list.which == .suggested { handed.dismissing = Self.dismissOffer(at: source.host, in: session) }
+        if Self.takesOff(handed, at: source), !ShellPersonActs.features(at: source.host, in: session) {
+            handed.accountLock = session.mastodon.place(PersonAct.unfeature.needs, host: source.host)
+                ?? PartWords.Place(kind: .none, key: "part.account.unasked")
+        }
         let page = self.standing(list, at: source, in: session)
         // How many ask is the source's word only where the sign-in's account check said it: the
         // figure the way to this list carried, said again over it, and never worked out from rows.
@@ -386,9 +421,13 @@ final class ShellPeoplePages {
         handed.reading = page.answered ? .said : page.failed ? .failed : .asking
         handed.againFailed = page.answered && page.failed
         handed.people = page.read.people.filter { person in
-            !page.gone.contains(person.accountID) && acts?.isLeaving(DummyPerson(person).id, at: source.host, in: session) != true
+            page.gone[person.accountID] == nil && dismissing.shown(Self.dismissKey(list, person.accountID)) == nil
+                && acts?.isLeaving(DummyPerson(person).id, from: list.which, at: source.host, in: session) != true
         }
-        handed.missed = Self.missed(among: handed.people, by: acts, at: source.host)
+        handed.missed = Self.missed(among: handed.people, of: list.which, by: acts, at: source.host)
+        for person in handed.people where dismissMissed.contains(Self.dismissKey(list, person.accountID)) {
+            handed.missed[person.accountID] = PersonActing.missedWords(.dismissSuggestion, named: person.lineHandle, at: source.host)
+        }
         handed.stands = page.stands
         handed.asking = page.asking
         handed.foot = Self.foot(of: page)
@@ -437,20 +476,44 @@ final class ShellPeoplePages {
     /// on the requests, removing on the reader's own followers — and nothing on anybody
     /// else's list, on any other, or to a sign-in that may not change who follows whom.
     private static func rowActs(of said: PeopleSaid, at source: Source, in session: ShellSession) -> [PersonAct] {
+        if takesOff(said, at: source) { return ShellPersonActs.features(at: source.host, in: session) ? [.unfeature] : [] }
         guard offersRows(said, at: source), ShellPersonActs.changes(at: source.host, in: session) else { return [] }
         switch said.list.which {
         case .requests: return [.acceptRequest, .refuseRequest]
         case .followers: return [.removeFollower]
-        case .following, .directory, .found, .suggested: return []
+        case .following, .directory, .found, .suggested, .featured: return []
         }
     }
 
+    /// Whether the rows of `said` offer Take off your profile (#315): the reader's own people
+    /// featured, at a source where somebody is followed — only somebody followed is featured.
+    private static func takesOff(_ said: PeopleSaid, at source: Source) -> Bool {
+        said.own && said.list.which == .featured && ShellPersonActs.offersFollowing(source)
+    }
+
+    /// How "Don't suggest" stands on a row of the people a source suggests (#315): offered
+    /// where the sign-in holds the account part, and otherwise dim with that part's lock.
+    private static func dismissOffer(at host: String, in session: ShellSession) -> PeopleSaid.Dismissing {
+        guard session.mastodon.standing(PersonAct.dismissSuggestion.needs, host: host) != .held else { return .offered }
+        return .locked(
+            session.mastodon.place(PersonAct.dismissSuggestion.needs, host: host)
+                ?? PartWords.Place(kind: .none, key: "part.account.unasked")
+        )
+    }
+
+    private static func dismissKey(_ list: PeopleList, _ accountID: String) -> String {
+        list.id + "\u{1e}" + accountID
+    }
+
     /// The sentence of each row whose press did not arrive, by the id the source knows them by.
-    private static func missed(among people: [Person], by acts: ShellPersonActs?, at host: String) -> [String: String] {
+    private static func missed(
+        among people: [Person], of which: PeopleList.Which, by acts: ShellPersonActs?, at host: String
+    ) -> [String: String] {
         guard let acts else { return [:] }
         var said: [String: String] = [:]
         for person in people {
-            guard let act = acts.missedOnARow(DummyPerson(person).id) else { continue }
+            guard let act = acts.missedOnARow(DummyPerson(person).id), ShellPersonActs.isOfARow(act, on: which) else { continue }
+
             said[person.accountID] = PersonActing.missedWords(act, named: person.lineHandle, at: host)
         }
         return said
@@ -466,6 +529,16 @@ final class ShellPeoplePages {
     /// list them: the answer to the press is the newer word, so they stay off it. A read that
     /// lands after the answer is newer still, and is the list.
     func press(_ act: PersonAct, on person: Person, of list: PeopleList, in session: ShellSession) async {
+        if act == .dismissSuggestion {
+            await dismiss(person, of: list, in: session)
+            return
+        }
+        // Take off your profile where the sign-in lacks the account part only asks for it.
+        if act == .unfeature, let lock = said(of: list, in: session)?.accountLock {
+            if lock.asks { session.askFor([act.needs], host: list.host) }
+            return
+        }
+
         guard let acts, let source = ShellPersonPages.source(at: list.host, in: session),
               let page = self.standing(list, at: source, in: session),
               let offered = said(of: list, in: session), offered.acts.contains(act),
@@ -476,7 +549,56 @@ final class ShellPeoplePages {
         // Answered: the count of who asks is old, whichever page now stands for the list.
         if list.which == .requests { askingOld[source.host] = session.mastodon.askingCheck(host: source.host) }
         guard self.standing(list, at: source, in: session)?.number == page.number else { return }
-        pages[list.id]?.gone.insert(person.accountID)
+        pages[list.id]?.gone[person.accountID] = errands.next()
+    }
+
+    /// "Don't suggest" on the row of `person` among the people a source suggests (#315): the
+    /// source told not to suggest them to the reader again. **Only where the sign-in holds
+    /// the account part** — otherwise the press only raises the question that asks for it —
+    /// **of somebody the list holds, with no such press out for them.**
+    ///
+    /// The row leaves at the press; where the press did not arrive it comes back with the
+    /// sentence that says so under it. Answered, they are gone from the list: a read from the
+    /// top already on its way then was answered before the source took the press, and does
+    /// not bring them back. The next read begun after it is the source's word.
+    func dismiss(_ person: Person, of list: PeopleList, in session: ShellSession) async {
+        guard list.which == .suggested, let source = ShellPersonPages.source(at: list.host, in: session),
+              let offered = said(of: list, in: session), offered.people.contains(where: { $0.accountID == person.accountID })
+        else { return }
+        guard offered.dismissing == .offered else {
+            if case .locked(let place) = offered.dismissing, place.asks {
+                session.askFor([PersonAct.dismissSuggestion.needs], host: source.host)
+            }
+            return
+        }
+        let looked = readers.look(at: source.host, in: session)
+        let key = Self.dismissKey(list, person.accountID)
+        guard let held = looked.held, !looked.changed, let page = self.standing(list, at: source, in: session),
+              let flight = dismissing.begin(key, showing: true)
+        else { return }
+        dismissMissed.remove(key)
+        let through = reachingSuggestions?(source)
+            ?? session.reach.suggestions(session.mastodon.authorized(token: held, within: deadline, for: .write))
+        let accountID = person.accountID
+        await Task {
+            var done = false
+            do {
+                try await through.dismiss(accountID: accountID)
+                done = true
+            } catch {
+                ShellPersonPages.concluded(error, at: source, askedAs: page.askedAs, in: session)
+            }
+            guard self.dismissing.isStill(flight, key) else { return }
+            self.dismissing.settle(key)
+            guard session.mastodon.token(host: source.host)?.accessToken == held.accessToken,
+                  self.standing(list, at: source, in: session)?.number == page.number
+            else { return }
+            if done {
+                self.pages[list.id]?.gone[accountID] = self.errands.next()
+            } else {
+                self.dismissMissed.insert(key)
+            }
+        }.value
     }
 
     /// The rows `j` and `k` walk on the page of `list`, by who they are.
@@ -618,8 +740,13 @@ final class ShellPeoplePages {
             pages[id]?.stands = standing
             pages[id]?.stood = []
             // And a press on a row that did not arrive is said no longer: the rows are new.
-            for person in fresh.people { acts?.forgetMissedOnARow(DummyPerson(person).id) }
-            pages[id]?.gone = []
+            for person in fresh.people {
+                acts?.forgetMissedOnARow(DummyPerson(person).id, on: list.which)
+                dismissMissed.remove(Self.dismissKey(list, person.accountID))
+            }
+            // Whoever left by a press answered after this read set out stays off it.
+            let stillGone = pages[id]?.gone.filter { $0.value > errand } ?? [:]
+            pages[id]?.gone = stillGone
             pages[id]?.round += 1
             reached = fresh.people
             pages[id]?.answered = true
@@ -711,7 +838,8 @@ final class ShellPeoplePages {
         case .suggested:
             let passed = next.flatMap(MastodonSuggestions.passed) ?? 0
             return passed + stretchLength >= MastodonSuggestions.furthest
-        case .following, .followers, .requests: return false
+        case .following, .followers, .requests, .featured: return false
+
         }
     }
 

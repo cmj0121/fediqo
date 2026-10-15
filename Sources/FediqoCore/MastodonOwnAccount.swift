@@ -14,6 +14,11 @@ import Foundation
 // word and is not a Mastodon's sentence (item 2), so a 403 is the part's lock only where the
 // sign-in does not hold the part — and the source forbidding it where it does.
 //
+// **The picture and the header go as a body of several parts** (`MultipartBody`), through the
+// same door, and are taken away by a DELETE of their own; either is answered with the account
+// whole, as a change is. How large a picture may be is the host's word where it states one
+// (`configuration.media_attachments.image_size_limit`), and one over it is never sent.
+//
 // **Nothing here writes anywhere on this device**: what is read lands in what it returns.
 
 /// The reader's own account as its owner sees it: what a change starts from.
@@ -47,10 +52,15 @@ public struct OwnAccount: Sendable, Hashable {
     /// Whether others may see the account's lists of followers and followed — the source's
     /// `hide_collections`, turned round. Nothing where the source did not say.
     public var listsShown: Bool?
+    /// Where the account's picture is. Nothing where it has none and the host draws its own
+    /// stand-in. Read, never sent: a picture goes as an `OwnPictureChange`.
+    public var picture: URL?
+    /// Where the account's header is; as `picture`.
+    public var header: URL?
 
     public init(
         name: String = "", words: String = "", fields: [Field] = [], followWithoutAsking: Bool? = nil,
-        findable: Bool? = nil, listsShown: Bool? = nil
+        findable: Bool? = nil, listsShown: Bool? = nil, picture: URL? = nil, header: URL? = nil
     ) {
         self.name = name
         self.words = words
@@ -58,12 +68,14 @@ public struct OwnAccount: Sendable, Hashable {
         self.followWithoutAsking = followWithoutAsking
         self.findable = findable
         self.listsShown = listsShown
+        self.picture = picture
+        self.header = header
     }
 }
 
 /// One thing of an own account a change sends and a refusal may name.
 public enum OwnRow: String, Sendable, CaseIterable {
-    case name, words, fields, followWithoutAsking, findable, listsShown
+    case name, words, fields, followWithoutAsking, findable, listsShown, picture, header
 }
 
 /// How long a source says each thing of an own account may be, and how many fields it may have.
@@ -75,13 +87,19 @@ public struct OwnLimits: Sendable, Hashable {
     public var fields: Int?
     public var fieldName: Int?
     public var fieldValue: Int?
+    /// How many bytes a picture may be: what the host says of any picture it takes.
+    public var picture: Int?
 
-    public init(name: Int? = nil, words: Int? = nil, fields: Int? = nil, fieldName: Int? = nil, fieldValue: Int? = nil) {
+    public init(
+        name: Int? = nil, words: Int? = nil, fields: Int? = nil, fieldName: Int? = nil, fieldValue: Int? = nil,
+        picture: Int? = nil
+    ) {
         self.name = name
         self.words = words
         self.fields = fields
         self.fieldName = fieldName
         self.fieldValue = fieldValue
+        self.picture = picture
     }
 
     public static let none = OwnLimits()
@@ -117,8 +135,69 @@ public enum OwnAccountError: Error, Equatable, Sendable {
     case unreadable
 }
 
+/// The two pictures of an own account.
+public enum OwnPicture: String, Sendable, CaseIterable {
+    /// The small one drawn beside the name.
+    case picture
+    /// The wide one across the head of the page.
+    case header
+
+    /// The most this app sends as one picture, in bytes, where the host states less or nothing.
+    public static let byteLimit = 32 << 20
+
+    /// The source's name for it: the part it is sent as, and the last piece of its address.
+    var said: String {
+        switch self {
+        case .picture: "avatar"
+        case .header: "header"
+        }
+    }
+
+    /// The row a refusal of it names.
+    var row: OwnRow {
+        switch self {
+        case .picture: .picture
+        case .header: .header
+        }
+    }
+}
+
+/// What a change does to a picture or the header: a new one sent, or the one held taken away.
+public enum OwnPictureChange: Sendable, Hashable {
+    /// `data` sent as the picture: `type` its one plain type and subtype (`image/png`), and of
+    /// `name` only the last piece goes.
+    case chosen(Data, type: String, name: String)
+    case removed
+}
+
+/// A picture refused before anything was sent: it is over `limit` bytes. `stated` where that
+/// is the host's own word (`OwnLimits.picture`); else it is this app's (`OwnPicture.byteLimit`).
+public struct OwnPictureTooLarge: Error, Equatable, Sendable {
+    public let limit: Int
+    public let stated: Bool
+
+    public init(limit: Int, stated: Bool) {
+        self.limit = limit
+        self.stated = stated
+    }
+}
+
+/// A change that landed in part: what was sent with the rows — or a removal before — was taken
+/// and `answer` is the source's word after it, but taking `failed` away was not: each with what
+/// its removal threw, as `change` throws (`OwnAccountError`, `MastodonAuthError`, the door's).
+public struct OwnChangedInPart: Error, Sendable {
+    public let answer: OwnAnswer
+    public let failed: [OwnPicture: any Error]
+
+    public init(answer: OwnAnswer, failed: [OwnPicture: any Error]) {
+        self.answer = answer
+        self.failed = failed
+    }
+}
+
 /// A Mastodon asked for the reader's own account and to change it: the account check
-/// (`/api/v1/accounts/verify_credentials`), `/api/v1/accounts/update_credentials`, and the
+/// (`/api/v1/accounts/verify_credentials`), `/api/v1/accounts/update_credentials` — a form, or
+/// a picture as several parts — `/api/v1/profile/avatar` and `/header` to take one away, and the
 /// limits the host states in `/api/v2/instance` — **through the one signed-in door**.
 public struct MastodonOwnAccount: Sendable {
     private let door: MastodonAuthorized
@@ -151,12 +230,64 @@ public struct MastodonOwnAccount: Sendable {
     /// Throws `.refused` where the source would not take it (422); `.forbidden` for a 403 to a
     /// sign-in that holds the account part, `.locked` for one to a sign-in that does not; and
     /// what the door threw otherwise.
-    public func change(from before: OwnAccount, to after: OwnAccount) async throws -> OwnAnswer? {
+    ///
+    /// **With pictures**, the rows and every chosen picture go as one PATCH of several parts,
+    /// and then each removal as a DELETE of its own, in `OwnPicture`'s order; the answer is the
+    /// source's word after the last that was taken. **A picture over its limit is not sent**,
+    /// nor anything else: `OwnPictureTooLarge` names the limit. `limit` is the host's
+    /// (`OwnLimits.picture`), nothing where it states none; this app's own bound
+    /// (`OwnPicture.byteLimit`) stands where the host states more or nothing. A removal that
+    /// fails once something was taken throws `OwnChangedInPart` with the answer and what was
+    /// not taken away; before, it throws as the change does — and a cancelled one is always
+    /// thrown as it is.
+    public func change(
+        from before: OwnAccount, to after: OwnAccount, pictures: [OwnPicture: OwnPictureChange] = [:],
+        limit: Int? = nil
+    ) async throws -> OwnAnswer? {
         let form = Self.form(from: before, to: after)
-        guard !form.isEmpty else { return nil }
+        let chosen = OwnPicture.allCases.compactMap { which -> MultipartPart? in
+            guard case .chosen(let data, let type, let name) = pictures[which] else { return nil }
+            return .file(which.said, named: name, type: type, data)
+        }
+        let removed = OwnPicture.allCases.filter { pictures[$0] == .removed }
+        // A limit of nothing or less is no limit stated.
+        let host = limit.flatMap { $0 > 0 ? $0 : nil }
+        let stated = host.map { $0 <= OwnPicture.byteLimit } ?? false
+        let bound = stated ? host ?? OwnPicture.byteLimit : OwnPicture.byteLimit
+        for case .chosen(let data, _, _) in pictures.values where data.count > bound {
+            throw OwnPictureTooLarge(limit: bound, stated: stated)
+        }
+
+        var answer: OwnAnswer?
+        if !chosen.isEmpty {
+            let parts = form.map { MultipartPart.field($0.0, $0.1) } + chosen
+            answer = try await answered { try await door.patch(path: Self.changePath, parts: parts) }
+        } else if !form.isEmpty {
+            answer = try await answered { try await door.patch(path: Self.changePath, form: form) }
+        }
+        var failed: [OwnPicture: any Error] = [:]
+        for which in removed {
+            do {
+                answer = try await answered { try await door.delete(path: Self.removePath(which)) }
+            } catch {
+                // Nothing taken yet: nothing changed, and the failure is the change's. A reader
+                // who walked away is told so, whatever was taken.
+                guard answer != nil, !Cancellation.happened(error) else { throw error }
+                failed[which] = error
+            }
+        }
+        if let answer, !failed.isEmpty { throw OwnChangedInPart(answer: answer, failed: failed) }
+        return answer
+    }
+
+    /// Where the picture or the header is taken away.
+    static func removePath(_ which: OwnPicture) -> String { "/api/v1/profile/\(which.said)" }
+
+    /// What an ask of the account was answered, read; its refusals said as this account's.
+    private func answered(_ ask: () async throws -> Data) async throws -> OwnAnswer {
         let body: Data
         do {
-            body = try await door.patch(path: Self.changePath, form: form)
+            body = try await ask()
         } catch let refused as MastodonUnprocessable {
             throw Self.refusal(from: refused.body)
         } catch MastodonAuthError.http(403) {
@@ -220,6 +351,8 @@ public struct MastodonOwnAccount: Sendable {
             let locked: L<Bool>?
             let discoverable: L<Bool>?
             let hideCollections: L<Bool>?
+            let avatar: L<String>?
+            let header: L<String>?
             let source: Source
         }
         guard let wire = try? MastodonJSON.decoder.decode(Wire.self, from: body) else {
@@ -236,8 +369,28 @@ public struct MastodonOwnAccount: Sendable {
             name: wire.displayName?.value ?? "", words: source.note?.value ?? "", fields: fields,
             followWithoutAsking: wire.locked?.value.map(!),
             findable: source.discoverable?.value ?? wire.discoverable?.value,
-            listsShown: (source.hideCollections?.value ?? wire.hideCollections?.value).map(!)
+            listsShown: (source.hideCollections?.value ?? wire.hideCollections?.value).map(!),
+            picture: held(wire.avatar?.value, .picture),
+            header: held(wire.header?.value, .header)
         )
+    }
+
+    /// A picture's address where it is one the account holds: a web address, and not the
+    /// host's own stand-in for none.
+    private static func held(_ address: String?, _ which: OwnPicture) -> URL? {
+        // Fetched as every other picture is: https only, to a host that is one.
+        guard let url = Host.fetchableURL(address), !isStandIn(url.path(), which) else { return nil }
+        return url
+    }
+
+    /// Whether `path` is a host's own stand-in for no picture: a Mastodon's ends
+    /// `/original/missing.png`; a GoToSocial's is one of its own drawings, under
+    /// `/assets/default_avatars/` or `/assets/default_header.webp` (asked of 0.22.2).
+    static func isStandIn(_ path: String, _ which: OwnPicture) -> Bool {
+        switch which {
+        case .picture: path.hasSuffix("/avatars/original/missing.png") || path.hasPrefix("/assets/default_avatars/")
+        case .header: path.hasSuffix("/headers/original/missing.png") || path == "/assets/default_header.webp"
+        }
     }
 
     /// The limits a host's document states for an own account; a document that states none,
@@ -251,17 +404,23 @@ public struct MastodonOwnAccount: Sendable {
             let profileFieldNameLimit: L<Int>?
             let profileFieldValueLimit: L<Int>?
         }
-        struct Configuration: Decodable, Sendable { let accounts: L<Accounts>? }
+        struct Media: Decodable, Sendable { let imageSizeLimit: L<Int>? }
+        struct Configuration: Decodable, Sendable {
+            let accounts: L<Accounts>?
+            let mediaAttachments: L<Media>?
+        }
         struct Document: Decodable, Sendable { let configuration: L<Configuration>? }
-        guard let accounts = (try? MastodonJSON.decoder.decode(Document.self, from: body))?.configuration?.value?.accounts?.value else {
+        guard let configuration = (try? MastodonJSON.decoder.decode(Document.self, from: body))?.configuration?.value else {
             return .none
         }
+        let accounts = configuration.accounts?.value
         // A limit of nothing or less is a host that said something useless, not one.
         func stated(_ limit: L<Int>?) -> Int? { limit?.value.flatMap { $0 > 0 ? $0 : nil } }
         return OwnLimits(
-            name: stated(accounts.maxDisplayNameLength), words: stated(accounts.maxNoteLength),
-            fields: stated(accounts.maxProfileFields), fieldName: stated(accounts.profileFieldNameLimit),
-            fieldValue: stated(accounts.profileFieldValueLimit)
+            name: stated(accounts?.maxDisplayNameLength), words: stated(accounts?.maxNoteLength),
+            fields: stated(accounts?.maxProfileFields), fieldName: stated(accounts?.profileFieldNameLimit),
+            fieldValue: stated(accounts?.profileFieldValueLimit),
+            picture: stated(configuration.mediaAttachments?.value?.imageSizeLimit)
         )
     }
 
@@ -294,6 +453,8 @@ public struct MastodonOwnAccount: Sendable {
         case "locked": .followWithoutAsking
         case "discoverable": .findable
         case "hide_collections": .listsShown
+        case "avatar": .picture
+        case "header": .header
         default: name.hasPrefix("fields") ? .fields : nil
         }
     }

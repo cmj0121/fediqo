@@ -7,6 +7,21 @@ public enum MastodonTagFollowError: Error, Equatable, Sendable {
     case unreadable
 }
 
+/// How the reader stands to a hashtag at one source, as its answer to the hashtag says.
+public struct TagStanding: Hashable, Sendable {
+    /// The reader follows it.
+    public let following: Bool
+    /// The reader features it on their profile (#318). **Nothing where the answer does not say**
+    /// — a GoToSocial's never does (`servers/gotosocial/FINDINGS.md` item 13): the reader's own
+    /// featured hashtags are where to look then (`MastodonFeaturing.ownFeaturedTags`).
+    public let featuring: Bool?
+
+    public init(following: Bool, featuring: Bool? = nil) {
+        self.following = following
+        self.featuring = featuring
+    }
+}
+
 /// One stretch of the hashtags somebody follows, as their source handed it over.
 public struct FollowedTagsStretch: Hashable, Sendable {
     /// In the source's own order: the one followed last comes first.
@@ -93,6 +108,17 @@ public struct MastodonTagFollows: Sendable {
     /// Whether the reader follows `tag`, as the source says now.
     public func isFollowed(_ tag: PostTag) async throws -> Bool {
         try Self.followed(in: try await door.get(path: try Self.path(of: tag, host: door.token.host)))
+    }
+
+    /// How the reader stands to `tag`, as the source says now: whether they follow it, and
+    /// whether they feature it where the answer says. The same one ask as `isFollowed`.
+    public func standing(of tag: PostTag) async throws -> TagStanding {
+        let body = try await door.get(path: try Self.path(of: tag, host: door.token.host))
+        struct Said: Decodable, Sendable {
+            let featuring: StatusDTO.Lenient<Bool>?
+        }
+        let featuring = (try? MastodonJSON.decoder.decode(Said.self, from: body))?.featuring?.value
+        return TagStanding(following: try Self.followed(in: body), featuring: featuring)
     }
 
     /// Follows `tag`, or with `on` false stops following it, and hands back what the source

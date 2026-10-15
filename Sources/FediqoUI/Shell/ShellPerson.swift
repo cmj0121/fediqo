@@ -271,6 +271,9 @@ final class ShellPersonPages {
     /// page (#321): asked the same way, numbered on the same count, and let go with the same
     /// reader.
     let you: ShellYouThere
+    /// What a source announces to the reader there, for that source's own page and its row's
+    /// mark (#321): numbered on the same count, and let go with the same reader.
+    let announcements: ShellAnnouncements
     /// The reader's own account as its owner sees it, and the sheet that changes it (#312):
     /// numbered on the same count, and let go with the same reader.
     let profile: ShellProfile
@@ -283,6 +286,9 @@ final class ShellPersonPages {
     /// Whether the reader follows a hashtag at each source, for that hashtag's page (#318):
     /// numbered on the same count, and let go with the same reader.
     let tags: ShellTagFollow
+    /// What somebody features on their profile, and a hashtag featured on the reader's own
+    /// (#315, #318): numbered on the same count, and let go with the same reader.
+    let features: ShellFeatures
     /// The hashtags the reader follows at each source, as a list (#318): numbered on the same
     /// count, let go with the same reader, and pressed through `tags`.
     let followed: ShellFollowedTags
@@ -306,6 +312,8 @@ final class ShellPersonPages {
         self.rising = rising
         let you = ShellYouThere(errands: count, readers: looks)
         self.you = you
+        let announcements = ShellAnnouncements(errands: count, readers: looks, hosts: hosts)
+        self.announcements = announcements
         let profile = ShellProfile(errands: count, readers: looks)
         self.profile = profile
         let found = ShellSearchFound(errands: count, readers: looks, lists: lists)
@@ -313,11 +321,15 @@ final class ShellPersonPages {
         home = ShellPersonHome(errands: count)
         let tags = ShellTagFollow(errands: count, readers: looks)
         self.tags = tags
+        let features = ShellFeatures(errands: count, readers: looks, hosts: hosts)
+        self.features = features
+        tags.features = features
         let followed = ShellFollowedTags(errands: count, readers: looks, tags: tags)
         self.followed = followed
         let acts = ShellPersonActs(errands: count, readers: looks)
         self.acts = acts
         lists.acts = acts
+        acts.hosts = hosts
         let tabs = ShellPersonTabs(errands: count, readers: looks, hosts: hosts)
         self.tabs = tabs
         looks.whenChanged { [weak tabs] host in tabs?.letGo(at: host) }
@@ -329,7 +341,9 @@ final class ShellPersonPages {
         looks.whenChanged { [weak more] host in more?.letGo(at: host) }
         looks.whenChanged { [weak rising] host in rising?.letGo(at: host) }
         looks.whenChanged { [weak you] host in you?.letGo(at: host) }
+        looks.whenChanged { [weak announcements] host in announcements?.letGo(at: host) }
         looks.whenChanged { [weak tags] host in tags?.letGo(at: host) }
+        looks.whenChanged { [weak features] host in features?.letGo(at: host) }
         profile.answered = { [weak self] person, host, session in await self?.ownAnswered(person, at: host, in: session) }
     }
 
@@ -564,6 +578,8 @@ final class ShellPersonPages {
         await begin(who, at: source, with: held, in: session)?.value
         // And how the reader stands to them (#310), by the id the page now says they have.
         await acts.again(who, said: said(of: who, in: session), in: session)
+        // And what they feature (#315, #318), where it was asked.
+        await features.again(who, said: said(of: who, in: session), in: session)
         // The tabs, where the source said who they are this time: one that failed, or knows
         // them no longer, is asked nothing more for the press, and nothing held is let go.
         guard let page = self.standing(of: who, at: source, in: session), case .said = page.reading, page.again == nil
@@ -830,6 +846,7 @@ final class ShellPersonPages {
             asks[gone] = nil
             postAsks[gone] = nil
             tabs.forget(gone)
+            features.forget(gone)
         }
     }
 }

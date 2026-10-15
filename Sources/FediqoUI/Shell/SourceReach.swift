@@ -141,6 +141,24 @@ struct SourceReach {
         MastodonSuggestions(door: door)
     }
 
+    /// Featuring people and hashtags on the reader's profile, taking them off, and which
+    /// hashtags the reader features (#315, #318): only ever as the reader, through the
+    /// signed-in door.
+    func featuring(_ door: MastodonAuthorized) -> MastodonFeaturing {
+        MastodonFeaturing(door: door)
+    }
+
+    /// What somebody features on their profile (#315, #318), as the reader, through `door`.
+    func featured(_ door: MastodonAuthorized) -> MastodonFeatured {
+        MastodonFeatured(door: door)
+    }
+
+    /// What somebody features with no token: anyone is given it. Listed as `purpose`, ended
+    /// within `limit`, under the small body's ceiling and of that host alone.
+    func unsignedFeatured(_ host: String, for purpose: SourceWork.Purpose, within limit: Duration) -> MastodonFeatured {
+        MastodonFeatured(http: wire(Self.smallAtItsHost(http), for: purpose, within: limit), host: host)
+    }
+
     /// How much body an ask known to be small may bring: what the signed-in door takes.
     static let smallBody = 1 << 20
 
@@ -223,6 +241,12 @@ struct SourceReach {
     /// ever asked as them, through `door`.
     func settings(_ door: MastodonAuthorized) -> MastodonSettings {
         MastodonSettings(door: door)
+    }
+
+    /// What a source announces to the reader, and the reader's acts on one (#321), which are
+    /// only ever asked as them, through `door`.
+    func announcements(_ door: MastodonAuthorized) -> MastodonAnnouncements {
+        MastodonAnnouncements(door: door)
     }
 
     /// The reader's own account as its owner sees it, and a change to it (#312), which is only

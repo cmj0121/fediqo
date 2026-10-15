@@ -92,6 +92,9 @@ struct TimelinePane: View {
     var onFollowed: (FollowedTagsEntry) -> Void = { _ in }
     /// The way to the people who ask to follow the reader, pressed there (#313).
     var onRequests: (RequestsEntry) -> Void = { _ in }
+    /// A hashtag somebody features, or the way to the people they feature, pressed on About
+    /// of their page (#315, #318), answered by the root: a step of the walk.
+    var onOpenFeatured: (FeaturedPress) -> Void = { _ in }
     /// The press about looking somebody up through a source, answered by the root.
     var onLookUp: (SearchLookUpLine.Press) -> Void = { _ in }
     /// Bumped once each server's emoji catalogue has landed, so the rows already on screen ask
@@ -582,6 +585,9 @@ struct TimelinePane: View {
         // **A tab asks when it is first in front, and never before**: their posts, what
         // they pinned, a list of people. About asks nothing.
         .task(id: people?.fronting(person, in: session)) { await people?.fronted(person, in: session) }
+        // **And what they feature, once the source has said who they are** (B7): their
+        // hashtags, and whether they feature anybody — two asks more of the page opening.
+        .task(id: people?.featuredOpening(of: person, in: session)) { await people?.featuredOpened(person, in: session) }
         // What their own server said is held only while this page is in front (#310).
         .onDisappear { people?.home.letGo(of: person) }
     }
@@ -603,6 +609,17 @@ struct TimelinePane: View {
             },
             onFollowed: onFollowed,
             onRequests: onRequests,
+            onFeatured: { press in
+                switch press {
+                case .again:
+                    Task { await people?.features.again(person, said: people?.said(of: person, in: session), in: session) }
+                case .takeOff(let tag):
+                    Task { await people?.features.takeOff(tag, of: person, said: people?.said(of: person, in: session), in: session) }
+                case .tag, .people:
+                    onOpenFeatured(press)
+                }
+            },
+
             onListAct: { act, listed in
                 guard let people, let list = people.list(people.front(of: person, in: session), of: person, in: session) else { return }
                 Task { await people.lists.press(act, on: listed, of: list, in: session) }
@@ -843,6 +860,8 @@ struct TimelinePane: View {
                 onHeadFollow: { line in _ = people?.tags.pressed(line, only: true, in: session) },
                 onFollow: { line in _ = people?.tags.pressed(line, in: session) },
                 onUnfollow: { line in _ = people?.tags.unfollowed(line, in: session) },
+                onFeature: { line in _ = people?.tags.featurePressed(line, in: session) },
+                onUnfeature: { line in _ = people?.tags.unfeatured(line, in: session) },
                 onAskFollows: { host in session.askFor([.follows], host: host) },
                 // Asked again of the timeline in front, as the press asked it.
                 onRetry: {
@@ -871,6 +890,10 @@ struct TimelinePane: View {
         // **Asked for the page and not for About**: the head's mark needs the answer, and
         // About, brought in front, asks nothing more.
         .task(id: people?.tags.opening(tag, in: session)) { await people?.tags.opened(tag, in: session) }
+        // Once those have said, where a source did not say whether it is featured there, the
+        // reader's own featured hashtags are asked of it — once a run (#318).
+        .task(id: people?.tags.opening(tag, in: session)) { await people?.tags.featuresOpened(tag, in: session) }
+
         // What a source said of a hashtag is held only while its page is in front.
         .onDisappear { people?.tags.closed(tag) }
         // About gone from under the reader — the sign-in ended: the page is its posts, and

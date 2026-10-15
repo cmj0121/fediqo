@@ -314,6 +314,7 @@ public struct FediqoRootView: View {
             // And the store is held within the room the person gave it (#249).
             .modifier(KeepingWithinRoom(session: session))
             .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
+            .modifier(AnnouncementsAsk(session: session, announcements: people.announcements))
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
@@ -426,7 +427,7 @@ public struct FediqoRootView: View {
             // device is the preview sitting on screen while the session says boards. `JoinSheet`
             // reads `session.stage` inside its own body and switches there, which is a redraw.
             .sheet(isPresented: stagePresented) {
-                JoinSheet(session: session, onOwnPage: ownPageOpener, onPeople: directoryOpener, more: people.more, you: people.you)
+                JoinSheet(session: session, onOwnPage: ownPageOpener, onPeople: directoryOpener, more: people.more, you: people.you, announcements: people.announcements)
             }
             // The timeline editor (#27), on the root beside the other presenters for their reason.
             // Dismissed by any route it is Cancel: the draft is dropped (Decision 21).
@@ -1572,6 +1573,9 @@ public struct FediqoRootView: View {
         if let person = walk.openedPerson, people.front(of: person, in: session) == .about {
             if let entry = people.followedEntry(of: person, in: session), entry.id == id { return followedPressed(entry) }
             if id == RequestsEntry.id, let entry = people.requestsEntry(of: person, in: session) { return requestsPressed(entry) }
+            if let press = people.featured(of: person, in: session)?.press(on: id), press != .again {
+                return featuredPressed(press, from: id)
+            }
             return people.pressAbout(id, of: person, in: session)
         }
         // On a hashtag's About the lamp is on a source's row: Return makes its press (F10).
@@ -2015,6 +2019,27 @@ public struct FediqoRootView: View {
         else { return false }
         selectedItemID = nil
         return true
+    }
+
+    /// What somebody features, pressed on About of their page (#315, #318): the hashtag's page,
+    /// or the list of the people they feature — one more step of the walk, from the row the
+    /// lamp is on, or from the row pressed (`from`), which is lit first so leaving gives it back.
+    private func featuredPressed(_ press: FeaturedPress, from row: String?) -> Bool {
+        switch press {
+        case .tag(let tag):
+            let before = selectedItemID, lamp = row ?? FeaturedSaid.lamp(of: tag)
+            selectedItemID = lamp
+            let opened = openTag(tag, from: lamp)
+            if !opened { selectedItemID = before }
+            return opened
+        case .people(let list):
+            guard Self.canWalk(place: place, open: openLayers), walk.walk(to: .people(list), from: row ?? FeaturedSaid.peopleID)
+            else { return false }
+            selectedItemID = nil
+            return true
+        case .again, .takeOff:
+            return false
+        }
     }
 
     /// A row of such a list opened: that person's page. **The lamp and the step in one turn**,
@@ -2622,6 +2647,7 @@ public struct FediqoRootView: View {
                 onTurnFound: foundTurned,
                 onFollowed: { _ = followedPressed($0) },
                 onRequests: { _ = requestsPressed($0) },
+                onOpenFeatured: { _ = featuredPressed($0, from: nil) },
                 onLookUp: lookUpPressed
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -2654,7 +2680,7 @@ public struct FediqoRootView: View {
                 tooOld: noticeTooOld,
                 jumpToTop: noticeJump
             )
-        case .account: AccountPane(session: session, onOwnPage: ownPageOpener)
+        case .account: AccountPane(session: session, onOwnPage: ownPageOpener, announced: people.announcements)
         case .usage: UsagePane()
         case .preferences: PreferencesPane()
         }

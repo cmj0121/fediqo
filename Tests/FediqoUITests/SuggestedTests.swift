@@ -8,7 +8,8 @@ import Testing
 /// #315, the people a source suggests the reader: the page that is a list of people, for a
 /// list that is the reader's alone — what is asked for it and when, how it is read on and where
 /// it ends, what it says where the host has none, where it is opened from and for whom, and
-/// that telling the source not to suggest somebody is a dim line that sends nothing. And that
+/// telling the source not to suggest somebody — asked first where the sign-in holds the account
+/// part, and dim with its lock where it does not. And that
 /// a source which is not asked who people are has no such page and no line to one.
 ///
 /// Every wait here is on an ask arriving or being let go (`PageServer`), tied to the work that
@@ -79,7 +80,8 @@ struct SuggestedTests {
         try signIn(session)
         let pages = ShellPersonPages().lists
         let before = try #require(pages.said(of: Self.suggested, in: session))
-        #expect(before == PeopleSaid(list: Self.suggested, signedIn: true), "before anything answered")
+        #expect(before == PeopleSaid(list: Self.suggested, signedIn: true, dismissing: before.dismissing), "before anything answered")
+        #expect(before.dismissing != nil, "Don't suggest stands on the people suggested, and on no other list")
         #expect(before.stateLine(language: .english) == "Asking m.example for the people it suggests…")
 
         await pages.opened(Self.suggested, in: session)
@@ -340,42 +342,124 @@ struct SuggestedTests {
 
     // MARK: - Don't suggest
 
-    @Test("A row of the people suggested has a menu of one line, Don't suggest, and it is dim: the menu's head says why — it changes the reader's account there, which this version does not yet ask them to allow — the line takes no press, and nothing is sent; a row of any other list of people has no menu; and nothing in the app can send a dismissal")
-    func dontSuggestIsDimAndSendsNothing() async throws {
-        let (session, server, work) = await session([Self.first: Self.stretch([3, 2, 1])])
+    private static let reads = "read:statuses read:lists read:accounts"
+    private static let account = "\(reads) write:accounts"
+    private static func dismiss(_ id: Int) -> String { "/api/v1/suggestions/\(id)" }
+
+    private func signIn(_ session: ShellSession, holding scopes: String) throws {
+        try signOut(session)
+        try session.mastodon.tokens.save(MastodonToken(
+            host: Self.host, accessToken: "tok", clientID: "c", clientSecret: "s", scopes: scopes, asked: scopes
+        ))
+        session.mastodon.refresh()
+    }
+
+    @Test("Where the sign-in holds the account part, a suggestion's row has Don't suggest in its `…`, asked about first: at the yes the row leaves and the source is told, as the reader, written down as an act; a read from the top already on its way when the source answered does not bring them back, and the next read is the source's word — one it no longer suggests is not there")
+    func dontSuggestTellsTheSource() async throws {
+        let (session, server, work) = await session([
+            Self.first: Self.stretch([3, 2, 1]), Self.dismiss(3): PageServer.Answer(body: "{}"),
+        ])
         session.mastodon.work = work
-        try signIn(session)
+        try signIn(session, holding: Self.account)
         let pages = ShellPersonPages().lists
         await pages.opened(Self.suggested, in: session)
         let said = try #require(pages.said(of: Self.suggested, in: session))
-        let more = try #require(said.more(language: .english))
-        #expect(more.head == ["Telling m.example to stop suggesting somebody changes your account there, and this version of Fediqo does not yet ask you to allow that."])
+        #expect(said.dismissing == .offered)
+        let three = try #require(said.people.first)
+        let more = try #require(said.more(of: three, act: {}, language: .english))
+        #expect(more.head == [three.lineName, three.lineHandle])
         let item = try #require(more.items.first)
-        #expect(more.items.count == 1)
-        #expect(item.name == "Don't suggest")
-        #expect(item.title(language: .english) == "Don't suggest")
-        #expect(!item.answers)
-        #expect(!item.isDanger)
-        #expect(item.look == .dim(.askAgain))
-        var put: [ShellMoreAsk] = []
-        let counting = item.press { put.append($0) }
-        #expect(counting == nil && put.isEmpty)
+        #expect(more.items.count == 1 && item.isDanger && item.name == "Don't suggest" && item.answers)
+        let question = try #require(item.question)
+        #expect(question.title == "Tell m.example not to suggest \(three.lineHandle) again?")
+        #expect(question.line == "They leave this list. You can still find them and follow them.")
+        #expect(question.chorded != nil)
+
+        await server.hold(Self.dismiss(3))
+        defer { Task { await server.release(Self.dismiss(3)) } }
+        let dismissGuard = watching("the ask of \(Self.dismiss(3)), held at its server") { await server.release(Self.dismiss(3)) }
+        defer { dismissGuard.cancel() }
+        let press = Task { await pages.press(.dismissSuggestion, on: three, of: Self.suggested, in: session) }
+        await server.arrival(of: Self.dismiss(3), by: press)
+        #expect(ids(pages, session) == ["2", "1"], "the row leaves at the press")
+
+        // A read from the top set out while the press is out, and answered after it.
+        await server.hold(Self.first)
+        defer { Task { await server.release(Self.first) } }
+        let firstGuard = watching("the ask of \(Self.first), held at its server") { await server.release(Self.first) }
+        defer { firstGuard.cancel() }
+        let top = Task { await pages.again(Self.suggested, in: session) }
+        await server.arrival(of: Self.first, times: 2, by: top)
+        await server.release(Self.dismiss(3))
+        await press.value
+        #expect(ids(pages, session) == ["2", "1"])
+        await server.release(Self.first)
+        await top.value
+        #expect(ids(pages, session) == ["2", "1"], "a read already on its way does not bring them back")
+        #expect(await server.asked.filter { $0 == Self.dismiss(3) }.count == 1)
+        #expect(work.record.contains { $0.purpose == .write && $0.reached == Self.host })
+
+        // The next read is the source's word.
+        await server.answer(Self.first, Self.stretch([2, 1]))
+        await pages.again(Self.suggested, in: session)
+        #expect(ids(pages, session) == ["2", "1"], "a dismissed suggestion does not come back on the next read")
+        await server.answer(Self.first, Self.stretch([3, 2, 1]))
+        await pages.again(Self.suggested, in: session)
+        #expect(ids(pages, session) == ["3", "2", "1"], "one the source still suggests is drawn")
+    }
+
+    @Test("A dismissal that did not arrive brings the row back where it was, with the sentence that says so under it in both languages; read again from the top the sentence goes")
+    func aDismissalThatFailed() async throws {
+        let (session, server, _) = await session([
+            Self.first: Self.stretch([3, 2, 1]), Self.dismiss(2): PageServer.Answer(body: "<html>", status: 500),
+        ])
+        try signIn(session, holding: Self.account)
+        let pages = ShellPersonPages().lists
+        await pages.opened(Self.suggested, in: session)
+        let two = try #require(pages.said(of: Self.suggested, in: session)?.people[1])
+        await pages.press(.dismissSuggestion, on: two, of: Self.suggested, in: session)
+        #expect(await server.asked.contains(Self.dismiss(2)))
+        let said = try #require(pages.said(of: Self.suggested, in: session))
+        #expect(said.people.map(\.accountID) == ["3", "2", "1"])
+        #expect(said.missed["2"] == "Could not tell m.example not to suggest \(two.lineHandle).")
+        #expect(PersonActing.missedWords(.dismissSuggestion, named: "@p2", at: Self.host, language: .taiwanese) == "無法要 m.example 不再建議 @p2。")
+        await pages.again(Self.suggested, in: session)
+        #expect(pages.said(of: Self.suggested, in: session)?.missed.isEmpty == true)
+    }
+
+    @Test("Where the sign-in does not hold the account part, Don't suggest is dim with the lock and the part's own sentence stands at the menu's head; its press asks for the part and sends nothing; a row of any other list of people has no such item")
+    func dontSuggestWithoutThePartAsks() async throws {
+        let (session, server, work) = await session([Self.first: Self.stretch([3, 2, 1])])
+        session.mastodon.work = work
+        try signIn(session, holding: Self.reads)
+        let pages = ShellPersonPages().lists
+        await pages.opened(Self.suggested, in: session)
+        let said = try #require(pages.said(of: Self.suggested, in: session))
+        guard case .locked(let place) = said.dismissing else {
+            Issue.record("Don't suggest is not dim: \(String(describing: said.dismissing))")
+            return
+        }
+        #expect(place.asks)
+        let three = try #require(said.people.first)
+        var acted = 0
+        let more = try #require(said.more(of: three, act: { acted += 1 }, language: .english))
+        #expect(more.head == ["This sign-in was not asked to change your profile. Update permission"])
+        let item = try #require(more.items.first)
+        #expect(item.look == .dim(.askAgain) && item.symbol == SourceRow.permissionSymbol && !item.isDanger && item.answers)
+        item.press { _ in }
+        #expect(acted == 1)
+
+        #expect(session.partAsks.open == nil)
+        await pages.press(.dismissSuggestion, on: three, of: Self.suggested, in: session)
+        #expect(session.partAsks.open?.ticked == [.account] && session.partAsks.open?.host == Self.host)
         #expect(await server.asked == [Self.first] && work.record.count == 1, "the press sends nothing")
-        #expect(PeoplePane.menu(for: said) != nil)
+        #expect(ids(pages, session) == ["3", "2", "1"])
 
         let person = Person(source: Self.source, accountID: "42", handle: "@ada@m.example", name: "Ada")
         for list in [PeopleList(directoryAt: Self.host), PeopleList(.followers, of: person), PeopleList(foundAt: Self.host, words: "ada")] {
             let other = PeopleSaid(list: list, reading: .said, people: [person])
-            #expect(other.more() == nil && PeoplePane.menu(for: other) == nil, "\(list.which)")
-        }
-        // What reads suggestions sends nothing but a read, and no file names the address a dismissal goes to.
-        let reader = try String(contentsOf: Self.sources.appending(path: "FediqoCore/MastodonSuggestions.swift"), encoding: .utf8)
-        #expect(!reader.contains("DELETE"))
-        #expect(!reader.contains(".post("))
-        #expect(!reader.contains("httpMethod"))
-        for file in try FileManager.default.subpathsOfDirectory(atPath: Self.sources.path) where file.hasSuffix(".swift") {
-            let text = try String(contentsOf: Self.sources.appending(path: file), encoding: .utf8)
-            #expect(!text.contains("/api/v1/suggestions"), "\(file)")
+            #expect(other.more(of: person, act: {}) == nil, "\(list.which)")
+            #expect(PeoplePane.menu(for: other, of: person, asks: .constant(nil)) { _ in } == nil, "\(list.which)")
         }
     }
 
@@ -464,8 +548,9 @@ struct SuggestedTests {
             guard line.hasPrefix("\"people.suggested.") || line.hasPrefix("\"people.title.suggested\"") || line.hasPrefix("\"source.more.suggested") else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 10)
-        #expect(keys.contains("people.suggested.dismiss.dim"))
+        #expect(keys.count == 12)
+        #expect(!keys.contains("people.suggested.dismiss.dim"))
+        #expect(keys.contains("people.suggested.dismiss.failed"))
         #expect(keys.contains("source.more.suggested.hint"))
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
@@ -512,7 +597,10 @@ struct SuggestedTests {
         }
         // A row with a menu is a row with its `…`: drawn, and laid out within the row.
         let probe = PersonRowProbe()
-        let menu = PeoplePane.menu(for: PeopleSaid(list: Self.suggested, reading: .said, people: people))
+        let menu = PeoplePane.menu(
+            for: PeopleSaid(list: Self.suggested, reading: .said, people: people, dismissing: .offered), of: people[0],
+            asks: .constant(nil)
+        ) { _ in }
         let row = PersonRow(person: people[0], menu: menu, probe: probe)
         let drawn = size(row, 390, .light)
         let dots = probe.frames[.more]

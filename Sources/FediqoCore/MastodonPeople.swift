@@ -41,9 +41,17 @@ public struct MastodonPeople: Sendable {
         case following(of: String)
         /// Who asks to follow the reader (#313): the reader's own, and so asked only signed in.
         case requests
+        /// Whom they feature on their profile (#315). **Not every host has it**: one that does
+        /// not answers a not-found of its own address (`MastodonHostThing.featuredPeople`).
+        case featured(by: String)
+        /// Whom the reader features on their own profile (#315): the reader's own, and so asked
+        /// only signed in. Absent where the host says so, as `featured(by:)` is.
+        case featuredByReader
 
         /// Where the requests to follow the reader are listed, and under it answered.
         static let requestsPath = "/api/v1/follow_requests"
+        /// Where the people the reader features are listed.
+        static let featuredByReaderPath = "/api/v1/endorsements"
 
         /// Where the list is asked. Nothing for an id that could not stand in a path as one
         /// segment: it came out of a stranger's answer.
@@ -51,8 +59,19 @@ public struct MastodonPeople: Sendable {
             switch self {
             case .followers(let id) where ListSubscription.isPathSegment(id): "/api/v1/accounts/\(id)/followers"
             case .following(let id) where ListSubscription.isPathSegment(id): "/api/v1/accounts/\(id)/following"
+            case .featured(let id) where ListSubscription.isPathSegment(id): "/api/v1/accounts/\(id)/endorsements"
             case .requests: Self.requestsPath
+            case .featuredByReader: Self.featuredByReaderPath
             default: nil
+            }
+        }
+
+        /// Whether the host may not have the list at all, so that a not-found of its address
+        /// is a word about the host and is told apart (`MastodonHostMoreError.noSuchAddress`).
+        var mayBeAbsent: Bool {
+            switch self {
+            case .featured, .featuredByReader: true
+            case .followers, .following, .requests: false
             }
         }
     }
@@ -79,12 +98,17 @@ public struct MastodonPeople: Sendable {
     ///
     /// **Only of the source this reads**: the people are stamped with `source`, so one that is
     /// another's asks nothing — two sources number their accounts apart.
+    ///
+    /// **Of a list a host may not have** (`featured(by:)`, `featuredByReader`), throws
+    /// `MastodonHostMoreError.noSuchAddress` where the host says it has no such address; an
+    /// empty list is nobody featured, never that.
     public func stretch(
         _ list: List, source: Source, after next: String? = nil, limit: Int? = nil
     ) async throws -> PeopleStretch {
         guard source.host == door.host, let path = list.path else { throw MastodonRequestError.invalidURL }
         let length = limit.map { [URLQueryItem(name: "limit", value: String(max(1, $0)))] } ?? []
-        let (body, link) = try await door.get(path: path, query: length + (try MastodonPage.older(than: next)))
+        let query = length + (try MastodonPage.older(than: next))
+        let (body, link) = try await list.mayBeAbsent ? door.getAtAddress(path: path, query: query) : door.get(path: path, query: query)
         guard let read = try? MastodonJSON.decoder.decode([StatusDTO.Lenient<AccountDTO>].self, from: body) else {
             throw MastodonPeopleError.unreadable
         }
@@ -138,6 +162,27 @@ struct MastodonReading: Sendable {
                 throw MastodonRequestError.invalidURL
             }
             let (body, response) = try await http.data(from: url)
+            guard (200..<300).contains(response.statusCode) else {
+                throw MastodonRequestError.http(response.statusCode)
+            }
+            return (body, response.value(forHTTPHeaderField: "Link"))
+        }
+    }
+
+    /// As `get`, with a not-found of the address told apart by either way out: throws
+    /// `MastodonHostMoreError.noSuchAddress` where the host says it has no such address.
+    func getAtAddress(path: String, query: [URLQueryItem] = []) async throws -> (body: Data, link: String?) {
+        switch door {
+        case .signedIn(let door):
+            return try await door.getLinkedAtAddress(path: path, query: query)
+        case .unsigned(let http):
+            guard let url = Host.httpsURL(host: host, path: path, query: query) else {
+                throw MastodonRequestError.invalidURL
+            }
+            let (body, response) = try await http.data(from: url)
+            if MastodonHostNotFound.isOfTheAddress(status: response.statusCode, body: body) {
+                throw MastodonHostMoreError.noSuchAddress
+            }
             guard (200..<300).contains(response.statusCode) else {
                 throw MastodonRequestError.http(response.statusCode)
             }

@@ -187,12 +187,13 @@ struct GoToSocialSaysTests {
         try tokens.save(token)
         let own = MastodonOwnAccount(door: MastodonAuthorized(token: token, sender: try LocalHTTP.client(), store: tokens))
         // As the seed leaves them: locked as made, and nothing said of the lists.
+        // The pictures it draws of its own for none are none (`profilePartActs`).
         let start = OwnAccount(name: "other", words: "", fields: [], followWithoutAsking: false, findable: false, listsShown: nil)
 
         let thrown: (any Error)?
         do {
             #expect(try await own.read() == start)
-            #expect(try await own.limits() == OwnLimits(fields: 6), "only how many fields")
+            #expect(try await own.limits() == OwnLimits(fields: 6, picture: 41_943_040), "only how many fields, and how large a picture")
 
             var changed = start
             changed.name = String(repeating: "o", count: 600)
@@ -227,5 +228,83 @@ struct GoToSocialSaysTests {
         }
         if let thrown { throw thrown }
         #expect(try await own.read() == start, "left changed on the server")
+    }
+
+    /// Asked by hand first, 2026-10-15, as the seed's writer (FINDINGS, "Asked later — what rides
+    /// the profile part"); the seed takes the writer's picture and header away on every run.
+    @Test("What rides the profile part, there: a picture and a header go and are taken away as on a Mastodon, and its own drawings for none are none; it states 40 MiB of a picture, more than this app sends; nobody is suggested and a dismissal's address is not there; nobody is featured at any address; its featured hashtags are read, empty, but none can be featured; it announces nothing, and an act on an announcement nobody has is that one gone — or, taken back, done")
+    func profilePartActs() async throws {
+        try await LocalServers.requireGoToSocial()
+        let seeded = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: LocalServers.repoRoot.appending(path: "servers/.run/gotosocial-tokens.json"))
+        ) as? [String: Any]
+        let me = try #require(seeded?["writer_id"] as? String), other = try #require(seeded?["other_id"] as? String)
+        let tokens = MemoryMastodonTokens()
+        let token = MastodonToken(
+            host: Self.host, accessToken: try LocalServers.gotosocialWriterToken(), clientID: "x", clientSecret: "x",
+            scopes: MastodonParts.words(of: Set(MastodonPart.allCases))
+        )
+        try tokens.save(token)
+        let http = try LocalHTTP.client()
+        let door = MastodonAuthorized(token: token, sender: http, store: tokens)
+        let source = Source(host: Self.host, kind: .mastodon)
+
+        // Pictures.
+        let own = MastodonOwnAccount(door: door)
+        let start = try await own.read()
+        #expect(start.picture == nil && start.header == nil, "its own drawings for none")
+        let limit = try #require(try await own.limits().picture)
+        #expect(limit == 41_943_040)
+        let pixel = try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="))
+        let thrown: (any Error)?
+        do {
+            let sent = try #require(try await own.change(from: start, to: start, pictures: [
+                .picture: .chosen(pixel, type: "image/png", name: "face.png"), .header: .chosen(pixel, type: "image/png", name: "band.png"),
+            ], limit: limit))
+            let picture = try #require(sent.account.picture), header = try #require(sent.account.header)
+            let back = try await own.read()
+            #expect(back.picture == picture && back.header == header, "read back the same")
+            let removed = try #require(try await own.change(from: back, to: back, pictures: [.picture: .removed, .header: .removed]))
+            #expect(removed.account == start, "taken away, to its drawings again")
+            #expect(try await own.read() == start, "read back so")
+            #expect(try await own.change(from: start, to: start, pictures: [.picture: .removed])?.account == start, "none taken away again")
+            await #expect(throws: OwnPictureTooLarge(limit: OwnPicture.byteLimit, stated: false)) {
+                _ = try await own.change(from: start, to: start, pictures: [.picture: .chosen(Data(count: OwnPicture.byteLimit + 1), type: "image/png", name: "big.png")], limit: limit)
+            }
+            thrown = nil
+        } catch {
+            thrown = error
+        }
+        _ = try? await own.change(from: start, to: start, pictures: [.picture: .removed, .header: .removed])
+        if let thrown { throw thrown }
+
+        // Suggestions and people featured: not there.
+        let suggestions = MastodonSuggestions(door: door)
+        #expect(try await suggestions.stretch(source: source).people.isEmpty)
+        await #expect(throws: MastodonHostMoreError.noSuchAddress) { try await suggestions.dismiss(accountID: other) }
+        let featuring = MastodonFeaturing(door: door)
+        await #expect(throws: MastodonHostMoreError.noSuchAddress) { _ = try await featuring.feature(accountID: other) }
+        await #expect(throws: MastodonHostMoreError.noSuchAddress) { _ = try await featuring.unfeature(accountID: other) }
+        await #expect(throws: MastodonHostMoreError.noSuchAddress) {
+            _ = try await MastodonPeople(door: door).stretch(.featuredByReader, source: source)
+        }
+        let anybody = MastodonFeatured(http: http, host: Self.host)
+        await #expect(throws: MastodonHostMoreError.noSuchAddress) { _ = try await anybody.featuredPeople(of: me, source: source) }
+
+        // Hashtags featured: read, and empty, but its address takes none — the answer is a 405.
+        let tag = try #require(PostTag("#partsq7"))
+        #expect(try await featuring.ownFeaturedTags().isEmpty)
+        #expect(try await MastodonFeatured(door: door).featuredTags(of: me, source: source).isEmpty)
+        await #expect(throws: MastodonRequestError.http(401), "kept from strangers") { _ = try await anybody.featuredTags(of: me, source: source) }
+        await #expect(throws: MastodonAuthError.http(405)) { _ = try await featuring.feature(tag: tag) }
+        try await featuring.unfeature(tag: tag)
+
+        // Announcements: none, and an act on one nobody has.
+        let announcements = MastodonAnnouncements(door: door)
+        #expect(try await announcements.read().isEmpty)
+        let nobody = "01XXXXXXXXXXXXXXXXXXXXXXXX"
+        await #expect(throws: AnnouncementError.gone) { try await announcements.dismiss(nobody) }
+        await #expect(throws: AnnouncementError.gone) { try await announcements.react(nobody, with: "👍") }
+        try await announcements.unreact(nobody, with: "👍")
     }
 }

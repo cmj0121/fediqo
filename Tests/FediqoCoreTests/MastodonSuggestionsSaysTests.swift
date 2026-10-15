@@ -14,11 +14,11 @@ import Testing
 /// named nine people to suggest — the seven its directory lists, one suspended and one
 /// limited — and the writer, who blocks one of them and mutes another, is suggested five.
 ///
-/// **Nobody is told not to be suggested.** No sign-in the seed holds for this app's words may
-/// tell the server that, and that refusal is what is checked; the asks that are let through
-/// name an account nobody has, which dismisses nobody. What a dismissal does to the next read
-/// was asked by hand in a window of its own and is in the captures' table: a dismissal cannot
-/// be taken back through any address, so no check here makes one.
+/// **Nobody is told not to be suggested here.** No sign-in these checks hold for this app's
+/// words without the profile part may tell the server that, and that refusal is what is
+/// checked; the asks that are let through name an account nobody has, which dismisses nobody.
+/// A dismissal cannot be taken back through any address, so the one check that makes one is of
+/// a reader of its own, whom the seed puts back (`MastodonProfilePartSaysTests`).
 ///
 /// **Whoever a check follows it unfollows, however it ends**: one person, by the writer's
 /// sign-in for everything, whatever became of the check.

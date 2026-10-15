@@ -464,7 +464,11 @@ struct RequestsTests {
             }
         }
         let lists = try String(contentsOf: shell.appending(path: "ShellPeople.swift"), encoding: .utf8)
-        #expect(!lists.contains("PressGuard") && lists.components(separatedBy: "acts.pressRow(").count == 2)
+        #expect(lists.components(separatedBy: "acts.pressRow(").count == 2)
+        // A suggestion dismissed is no act on how the reader stands, and has a guard of its own (#315).
+        #expect(!lists.contains("PressGuard<String, PersonAct>"), "a row's act has no guard of its own")
+        #expect(lists.components(separatedBy: "PressGuard<").count == 2, "one guard, the dismissal's")
+
         let keys = try String(contentsOf: shell.appending(path: "DummyCommand.swift"), encoding: .utf8)
         #expect(!keys.contains("acceptRequest") && !keys.contains("removeFollower") && !keys.contains("refuseRequest"))
 

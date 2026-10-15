@@ -118,7 +118,7 @@ struct PeopleStandingTests {
         let said = try #require(pages.said(of: Self.followers, in: session))
         #expect(said.stands == [
             "3": PersonStanding(accountID: "3", followedBy: true),
-            "1": PersonStanding(accountID: "1", following: true, muting: true, showsBoosts: true, notifies: false),
+            "1": PersonStanding(accountID: "1", following: true, muting: true, showsBoosts: true, notifies: false, featured: false),
         ])
         #expect(said.reading == .said && said.foot == .more && said.stateLine() == nil && session.notes.isEmpty)
         #expect(PersonRow.standing(said.stands["3"], language: .english) == ["Follows you"])
@@ -153,7 +153,7 @@ struct PeopleStandingTests {
         await server.answer(Self.stands([3, 2, 1]), Self.said(Self.standing(3, following: true, followedBy: true)))
         await pages.again(Self.followers, in: session)
         #expect(await asked(server).suffix(2) == [Self.first, Self.stands([3, 2, 1])])
-        #expect(stands(pages, session) == ["3": PersonStanding(accountID: "3", following: true, followedBy: true, showsBoosts: true, notifies: false)])
+        #expect(stands(pages, session) == ["3": PersonStanding(accountID: "3", following: true, followedBy: true, showsBoosts: true, notifies: false, featured: false)])
     }
 
     @Test("Asked again from the top, what the source said before stands until it answers; its answer is then its whole word of whoever it named — somebody it now says nothing of, or of whom its entry cannot be read, loses their word, and the others have what it says now; and an ask that fails takes no word away")
@@ -184,7 +184,7 @@ struct PeopleStandingTests {
         await server.release(Self.stands([4, 3, 2, 1]))
         await again.value
         let now = [
-            "3": PersonStanding(accountID: "3", following: true, followedBy: true, showsBoosts: true, notifies: false), "1": PersonStanding(accountID: "1", following: true, showsBoosts: true, notifies: false),
+            "3": PersonStanding(accountID: "3", following: true, followedBy: true, showsBoosts: true, notifies: false, featured: false), "1": PersonStanding(accountID: "1", following: true, showsBoosts: true, notifies: false, featured: false),
         ]
         #expect(stands(pages, session) == now, "nothing is said of 2 and of 4 any longer")
 
@@ -332,7 +332,7 @@ struct PeopleStandingTests {
         await server.answer(Self.stands([3, 2, 1]), Self.said(Self.standing(3, following: true)))
         await server.release(Self.stands([3, 2, 1]))
         await new.value
-        #expect(stands(pages, session) == ["3": PersonStanding(accountID: "3", following: true, showsBoosts: true, notifies: false)])
+        #expect(stands(pages, session) == ["3": PersonStanding(accountID: "3", following: true, showsBoosts: true, notifies: false, featured: false)])
     }
 
     @Test("An answer is taken only by the reader it was asked for: where the reader changed while it was out, it is written nowhere — not on the list the next reader was given — and a stretch that lands after its reader changed is asked about for nobody")

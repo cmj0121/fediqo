@@ -1,8 +1,9 @@
 import FediqoCore
 import SwiftUI
+import UniformTypeIdentifiers
 
-// The sheet that changes the reader's own account at a source (#312): the name, the words,
-// the fields and what others can do — **edited from the account as it was read when the sheet
+// The sheet that changes the reader's own account at a source (#312): the picture and the
+// header, the name, the words, the fields and what others can do — **edited from the account as it was read when the sheet
 // opened**, and drawn from values it is handed. It asks nothing and names no kind of source.
 
 /// What stands where Follow would on the reader's own page: Change, and the lock it is where
@@ -43,6 +44,9 @@ enum ProfileState: Equatable {
     case failed
     /// The sign-in has ended.
     case ended
+    /// The change landed, but taking `failed` away did not: the page drew the answer, and the
+    /// removals stay staged for Save to send again.
+    case partly(failed: Set<OwnPicture>)
 }
 
 /// A count beside a row, against a limit the host stated.
@@ -99,7 +103,13 @@ struct ProfileDraft: Equatable {
     var follow: Bool?
     var found: Bool?
     var lists: Bool?
+    /// The picture and the header as the sheet holds them: as read, chosen, or taken away.
+    private(set) var pictures: [OwnPicture: PictureStage]
+    /// Why the last choice of each was not taken, until the next choice, Keep current or Save.
+    var refusals: [OwnPicture: PictureRefusal] = [:]
     private var made: Int
+    /// How many choices have been staged: each one's id.
+    private var chosen = 0
 
     init(_ account: OwnAccount, limits: OwnLimits = .none) {
         before = account
@@ -111,6 +121,7 @@ struct ProfileDraft: Equatable {
         follow = account.followWithoutAsking
         found = account.findable
         lists = account.listsShown
+        pictures = [.picture: .held(account.picture), .header: .held(account.header)]
     }
 
     /// The account as the sheet would have it: what a change is sent towards. A row with
@@ -134,7 +145,98 @@ struct ProfileDraft: Equatable {
             (now.listsShown, before.listsShown),
         ]
         return now.name != before.name || now.words != before.words || pairs(now.fields) != pairs(before.fields)
-            || switches.contains { now, was in now != nil && now != was }
+            || switches.contains { now, was in now != nil && now != was } || !pictureChanges.isEmpty
+    }
+
+    // MARK: - The picture and the header
+
+    /// How many bytes one picture may be, and whether that is the host's word: the host's where
+    /// it states one this app would send, else this app's own — as `change` bounds it.
+    var pictureLimit: (bytes: Int, stated: Bool) {
+        if let stated = limits.picture, stated > 0, stated <= OwnPicture.byteLimit { return (stated, true) }
+        return (OwnPicture.byteLimit, false)
+    }
+
+    func stage(of which: OwnPicture) -> PictureStage { pictures[which] ?? .held(nil) }
+
+    /// What the source held of `which` when the sheet opened.
+    func held(_ which: OwnPicture) -> URL? {
+        switch which {
+        case .picture: before.picture
+        case .header: before.header
+        }
+    }
+
+    /// What Save sends of the two: each chosen one, and each taken away.
+    var pictureChanges: [OwnPicture: OwnPictureChange] {
+        pictures.compactMapValues { stage in
+            switch stage {
+            case .held: nil
+            case .chosen(let chosen): .chosen(chosen.data, type: chosen.type.preferredMIMEType ?? "image/jpeg", name: chosen.name)
+            case .removed: .removed
+            }
+        }
+    }
+
+    /// A file chosen as `which`: over the limit, or not a picture, it is refused and what was
+    /// there stays; else it is staged, to go with Save. The refusal, where it was one.
+    @discardableResult
+    mutating func stage(_ which: OwnPicture, data: Data, type: UTType, name: String) -> PictureRefusal? {
+        refusals[which] = nil
+        let limit = pictureLimit
+        let refusal: PictureRefusal
+        if data.count > limit.bytes {
+            refusal = .tooLarge(name: name, size: data.count, limit: limit.bytes, stated: limit.stated)
+        } else if let image = ProfilePicturePreview.decode(data) {
+            chosen += 1
+            pictures[which] = .chosen(PictureChosen(id: chosen, data: data, type: type, name: name, image: image))
+            return nil
+        } else {
+            refusal = .unreadable(name: name)
+        }
+        refusals[which] = refusal
+        return refusal
+    }
+
+    /// What came of reading a picked file, taken: staged, or refused and what was there kept.
+    mutating func take(_ which: OwnPicture, _ picked: PicturePicked) {
+        switch picked {
+        case .read(let data, let type, let name): stage(which, data: data, type: type, name: name)
+        case .refused(let refusal): refusals[which] = refusal
+        }
+    }
+
+    /// A choice refused once staged: put back to what was read, and why said under it.
+    mutating func refuse(_ which: OwnPicture, _ refusal: PictureRefusal) {
+        keep(which)
+        refusals[which] = refusal
+    }
+
+    /// Whether Remove stands: something is held or chosen.
+    func canRemove(_ which: OwnPicture) -> Bool {
+        switch stage(of: which) {
+        case .held(let url): url != nil
+        case .chosen: true
+        case .removed: false
+        }
+    }
+
+    /// Remove: the one held taken away by Save; a choice over nothing held only let go.
+    mutating func remove(_ which: OwnPicture) {
+        refusals[which] = nil
+        pictures[which] = held(which) == nil ? .held(nil) : .removed
+    }
+
+    /// Whether Keep current stands: a choice or a removal is staged.
+    func canKeep(_ which: OwnPicture) -> Bool {
+        if case .held = stage(of: which) { return false }
+        return true
+    }
+
+    /// Keep current: what was read put back.
+    mutating func keep(_ which: OwnPicture) {
+        refusals[which] = nil
+        pictures[which] = .held(held(which))
     }
 
     /// How many fields there may be: what the host states, or what this app keeps.
@@ -177,6 +279,10 @@ struct ProfileSaid: Equatable {
     var waiting: Int?
     /// The lock of the account part, where the sign-in no longer holds it.
     var lock: PartWords.Place?
+    /// Which opening of the sheet this is: what a late read is told apart by.
+    var opening = 0
+    /// The pictures whose files are being read: Save waits for them.
+    var reading: Set<OwnPicture> = []
 
     /// Whether the rows are drawn: there is an account read to edit.
     var drawsRows: Bool { draft != nil && state != .asking && state != .readFailed }
@@ -186,9 +292,9 @@ struct ProfileSaid: Equatable {
     var offersSave: Bool { state != .ended }
 
     var canSave: Bool {
-        guard draft?.changed == true else { return false }
+        guard reading.isEmpty, draft?.changed == true else { return false }
         switch state {
-        case .read, .refused, .forbidden, .failed: return true
+        case .read, .refused, .forbidden, .failed, .partly: return true
         case .asking, .readFailed, .sending, .partGone, .ended: return false
         }
     }
@@ -197,7 +303,7 @@ struct ProfileSaid: Equatable {
     var cancelAsks: Bool {
         guard draft?.changed == true else { return false }
         switch state {
-        case .read, .refused, .forbidden, .partGone, .failed: return true
+        case .read, .refused, .forbidden, .partGone, .failed, .partly: return true
         case .asking, .readFailed, .sending, .ended: return false
         }
     }
@@ -218,6 +324,8 @@ struct ProfileSaid: Equatable {
         case .partGone: return lockWords(language: language) ?? String(format: L10n.t("profile.whose", language: language), host)
         case .failed: key = "profile.failed"
         case .ended: key = "profile.ended"
+        case .partly(let failed):
+            return String(format: L10n.t("profile.picture.partly", language: language), host, PictureRefusal.word(failed, language: language))
         }
         return String(format: L10n.t(key, language: language), host)
     }
@@ -225,7 +333,7 @@ struct ProfileSaid: Equatable {
     /// Whether the line is said in full ink: something went wrong.
     var lineWarns: Bool {
         switch state {
-        case .readFailed, .refused, .forbidden, .failed, .ended: true
+        case .readFailed, .refused, .forbidden, .failed, .ended, .partly: true
         case .asking, .read, .sending, .partGone: false
         }
     }
@@ -234,6 +342,17 @@ struct ProfileSaid: Equatable {
     func refusalSaid(language: DummyLanguage? = nil) -> String? {
         guard case .refused(let sentence, _) = state, !sentence.isEmpty else { return nil }
         return String(format: L10n.t("profile.refused.said", language: language), host, sentence)
+    }
+
+    /// The line under the picture or the header, where its last choice was not taken.
+    func pictureRefusal(of which: OwnPicture, language: DummyLanguage? = nil) -> String? {
+        draft?.refusals[which]?.words(host: host, language: language)
+    }
+
+    /// The line beside "Picture": how large a picture the host takes, only where it states it.
+    func pictureLimitLine(language: DummyLanguage? = nil) -> String? {
+        guard let limit = draft?.pictureLimit, limit.stated else { return nil }
+        return String(format: L10n.t("profile.pictures.limit", language: language), host, PictureRefusal.bytes(limit.bytes, language: language))
     }
 
     /// The source's word on `row`, where its refusal named that row.
@@ -271,6 +390,10 @@ struct ProfileSheetActs {
     var onAgain: () -> Void = {}
     /// The lock's press, where the sign-in no longer holds the account part.
     var onAsk: () -> Void = {}
+    /// A file is being read for a picture, in the sheet's opening of that number.
+    var onReading: (Int, OwnPicture) -> Void = { _, _ in }
+    /// What came of it, for that opening.
+    var onPicked: (Int, OwnPicture, PicturePicked) -> Void = { _, _, _ in }
 }
 
 /// The three switches, by the row each is.
@@ -439,6 +562,8 @@ struct ProfileSheet: View {
     @ViewBuilder
     private var rows: some View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
+            picturesBlock
+            ShellRule()
             nameRow
             wordsRow
             fieldsBlock
@@ -449,6 +574,14 @@ struct ProfileSheet: View {
             ForEach(ProfileSwitch.allCases, id: \.self) { which in switchRow(which) }
         }
         .disabled(!said.editable)
+    }
+
+    /// The picture and the header, their reads told which opening they belong to.
+    private var picturesBlock: ProfilePicturesBlock {
+        let (opening, acts) = (said.opening, acts)
+        return ProfilePicturesBlock(
+            said: said, draft: $draft, onReading: { acts.onReading(opening, $0) }, onPicked: { acts.onPicked(opening, $0, $1) }
+        )
     }
 
     /// A row's name, and its count beside it where one is drawn — under it where both do not fit.
@@ -829,7 +962,7 @@ private struct ProfileSheetHost: View {
     }
 
     private var draft: Binding<ProfileDraft> {
-        Binding(get: { profile.draft ?? ProfileDraft(OwnAccount()) }, set: { profile.draft = $0 })
+        Binding(get: { profile.draft ?? ProfileDraft(OwnAccount()) }, set: { if profile.draft != nil { profile.draft = $0 } })
     }
 
     private var acts: ProfileSheetActs {
@@ -837,7 +970,9 @@ private struct ProfileSheetHost: View {
             onSave: { profile.save(in: session) },
             onClose: { profile.putDown() },
             onAgain: { profile.readAgain(in: session) },
-            onAsk: { profile.askForPart(in: session) }
+            onAsk: { profile.askForPart(in: session) },
+            onReading: { profile.reading($1, opening: $0) },
+            onPicked: { profile.picked($1, $2, opening: $0) }
         )
     }
 }

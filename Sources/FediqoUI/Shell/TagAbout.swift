@@ -18,6 +18,10 @@ struct TagAbout<Lead: View>: View {
     var onUnfollow: (TagFollowLine) -> Void = { _ in }
     /// A lock's press: the question that asks that source's sign-in for who the reader follows.
     var onAsk: (String) -> Void = { _ in }
+    /// A feature row's press (#318): feature, find out again, or ask for the account part.
+    var onFeature: (TagFeatureLine) -> Void = { _ in }
+    /// The item of a feature row's `…` that takes it off.
+    var onUnfeature: (TagFeatureLine) -> Void = { _ in }
     /// What stands over the blocks and scrolls away with them: the page's head, at a text
     /// size where it would fill the page.
     @ViewBuilder var lead: Lead
@@ -35,6 +39,10 @@ struct TagAbout<Lead: View>: View {
                     ForEach(said.follows) { line in
                         TagFollowRow(line: line, onPress: { onPress(line) }, onUnfollow: { onUnfollow(line) }, onAsk: { onAsk(line.host) })
                             .modifier(TagAboutBlock(id: TagAboutSaid.lamp(on: line), lit: lit))
+                        if let feature = said.feature(under: line) {
+                            TagFeatureRow(line: feature, onPress: { onFeature(feature) }, onUnfeature: { onUnfeature(feature) })
+                                .modifier(TagAboutBlock(id: feature.id, lit: lit))
+                        }
                     }
                     if let reach = said.reach {
                         Text(reach)

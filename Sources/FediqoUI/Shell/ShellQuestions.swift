@@ -466,6 +466,19 @@ enum ShellQuestion {
         )
     }
 
+    /// Telling a source not to suggest somebody to the reader again (#315). **Asked first, and
+    /// drawn as a loss**: they leave the list, and the source keeps them off it. `named` is
+    /// their handle, already made fit for a line.
+    static func dontSuggest(_ named: String, at host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: PeopleSaid.dismissSymbol,
+            title: String(format: L10n.t("people.suggested.dismiss.ask.title", language: language), host, named),
+            line: L10n.t("people.suggested.dismiss.ask.line", language: language), help: nil,
+            choices: [.init(yes, PeopleSaid.dismissName(language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     static let signInRead = "read"
     static let signInWrite = "write"
 

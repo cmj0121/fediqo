@@ -71,6 +71,20 @@ struct PeopleSaid: Equatable {
     /// How a directory is asked for — its order, and whether only the people who live there —
     /// or nothing where the list is somebody's, which has no such choice.
     var sorting: DirectoryChoice?
+    /// How "Don't suggest" stands on each row (#315): only on the people a source suggests.
+    var dismissing: Dismissing?
+    /// How the sign-in stands where a row of the reader's own people featured would offer
+    /// Take off your profile and it lacks the account part (#315): the item is dim with this
+    /// lock, and its press asks where it may. Nothing where it holds it, and on any other list.
+    var accountLock: PartWords.Place?
+
+    /// How telling the source not to suggest somebody stands for the sign-in.
+    enum Dismissing: Equatable {
+        /// It holds the account part: the row's `…` holds the press, asked about first.
+        case offered
+        /// It does not: the press is dim with the part's lock, and asks where it may.
+        case locked(PartWords.Place)
+    }
 
     /// The host of the source that says.
     var source: String { list.host }
@@ -79,17 +93,25 @@ struct PeopleSaid: Equatable {
 
     /// Whose list it is, in the page's head. **Their handle is a stranger's word set in a
     /// sentence of ours**, and is the one made fit for a line.
-    static func title(_ list: PeopleList, language: DummyLanguage? = nil) -> String {
-        String(
+    static func title(_ list: PeopleList, own: Bool = false, language: DummyLanguage? = nil) -> String {
+        if own, list.which == .featured {
+            return String(format: L10n.t("people.title.featured.own", language: language), list.host)
+        }
+        return String(
             format: L10n.t("people.title.\(list.which.rawValue)", language: language),
             titleNamesHost(list) ? list.host : list.lineHandle
         )
     }
 
+    /// The head's title of this list: the reader's own people featured say "you" (#315).
+    func title(language: DummyLanguage? = nil) -> String {
+        Self.title(list, own: own, language: language)
+    }
+
     /// Whether the title names the source that keeps the list — nobody's list, or the
     /// reader's own requests — and not whose list it is.
-    static func titleNamesHost(_ list: PeopleList) -> Bool {
-        list.readByCount || list.which == .requests
+    static func titleNamesHost(_ list: PeopleList, own: Bool = false) -> Bool {
+        list.readByCount || list.which == .requests || (own && list.which == .featured)
     }
 
     /// What an order of a directory is called, in the control that chooses it.
@@ -173,6 +195,7 @@ struct PeopleSaid: Equatable {
         case .found: "people.found"
         case .suggested: "people.suggested"
         case .requests: "people.requests"
+        case .featured: "people.featured"
         case .following, .followers: "people"
         }
         return switch reading {
@@ -219,7 +242,7 @@ struct PeopleSaid: Equatable {
             let key = switch list.which {
             case .found: "people.found.foot.farthest"
             case .suggested: "people.suggested.foot.farthest"
-            case .directory, .following, .followers, .requests: "people.directory.foot.farthest"
+            case .directory, .following, .followers, .requests, .featured: "people.directory.foot.farthest"
             }
             return String(format: L10n.t(key, language: language), L10n.grouped(people.count, language: language), source)
         case .end:
@@ -260,6 +283,9 @@ struct PeopleSaid: Equatable {
         if list.which == .requests {
             return String(format: L10n.t("people.requests.none", language: language), source)
         }
+        if list.which == .featured {
+            return String(format: L10n.t("people.featured.none", language: language), source)
+        }
         if list.hidden, !own {
             return String(format: L10n.t("people.hidden", language: language), list.lineHandle)
         }
@@ -279,6 +305,10 @@ struct PeopleSaid: Equatable {
     /// The acts of a row that take something away, and so stand only in its `…` and ask first.
     var dangerous: [PersonAct] { acts.filter { $0 == .refuseRequest || $0 == .removeFollower } }
 
+    /// Whether a row's `…` holds Take off your profile (#315): on the reader's own people
+    /// featured, plain and at once — or dim with the account part's lock.
+    var takesOff: Bool { acts.contains(.unfeature) || accountLock != nil }
+
     /// Whether accepting is a press on the row.
     var accepts: Bool { acts.contains(.acceptRequest) }
 
@@ -289,23 +319,32 @@ struct PeopleSaid: Equatable {
         L10n.t("people.suggested.dismiss", language: language)
     }
 
-    /// Why that is dim: the word a source wants for it belongs to changing the reader's own
-    /// account there, which no sign-in is asked for yet.
-    static func dismissDim(_ source: String, language: DummyLanguage? = nil) -> String {
-        String(format: L10n.t("people.suggested.dismiss.dim", language: language), source)
-    }
-
     static let dismissSymbol = "person.crop.circle.badge.minus"
 
-    /// What the `…` of a row of this list holds, or nothing on a list with nothing to do to a
-    /// row. **On the people a source suggests, one line and it is dim**: a source takes "don't
-    /// suggest" only from a sign-in that may change the reader's account there, and no sign-in
-    /// here is asked for that — so the line says why at the menu's head, takes no press, and
-    /// nothing is sent.
-    func more(language: DummyLanguage? = nil) -> ShellMore? {
-        guard list.which == .suggested else { return nil }
-        let dismiss = ShellMark(Self.dismissSymbol, Self.dismissName(language: language), look: .dim(.askAgain))
-        return ShellMore.ending(in: .plain(dismiss, act: {}), dimFor: Self.dismissDim(source, language: language))
+    /// What the `…` of the row of `person` holds on the people a source suggests (#315), or
+    /// nothing on any other list. **Where the sign-in holds the account part**: at its head who
+    /// they are, and Don't suggest, asked about first — its yes is `act`. **Where it does not**:
+    /// the part's own sentence at the head, and Don't suggest dim with the lock, whose press is
+    /// `act` too where the part may be asked for — which then only asks.
+    @MainActor
+    func more(of person: Person, act: @escaping () -> Void, language: DummyLanguage? = nil) -> ShellMore? {
+        switch dismissing {
+        case .offered?:
+            return ShellMore(head: [person.lineName, person.lineHandle], items: [
+                .danger(
+                    Self.dismissSymbol, Self.dismissName(language: language),
+                    asks: ShellQuestion.dontSuggest(person.lineHandle, at: source, language: language), act: act
+                ),
+            ])
+        case .locked(let place)?:
+            let dim = ShellMark(SourceRow.permissionSymbol, Self.dismissName(language: language), look: .dim(.askAgain))
+            return ShellMore.ending(
+                in: .plain(dim, ask: place.asks ? act : nil, act: {}),
+                dimFor: String(format: L10n.t(place.key, language: language), source)
+            )
+        case nil:
+            return nil
+        }
     }
 }
 
@@ -374,21 +413,34 @@ struct PeoplePane: View {
         )
     }
 
-    /// The `…` of a row of `said`, or nothing where its list has nothing to do to a row.
-    /// **No item here asks first**, so no question is ever put and none is hung.
-    static func menu(for said: PeopleSaid) -> NoticeRow.Menu? {
-        said.more().map { more in NoticeRow.Menu(more: { more }, asks: .constant(nil)) }
-    }
-
     /// The `…` of the row of `person` in `said`: what the list offers a row that takes
-    /// something away (#313) — refusing a request, removing a follower — each asked about
-    /// first, through the page's one asker; or what the list's own `…` holds, or nothing.
+    /// something away (#313) — refusing a request, removing a follower — and Don't suggest
+    /// (#315), each asked about first, through the page's one asker; or nothing.
     @MainActor
     static func menu(
         for said: PeopleSaid, of person: Person, asks: Binding<ShellMoreAsk?>, act: @escaping (PersonAct) -> Void
     ) -> NoticeRow.Menu? {
+        if let more = said.more(of: person, act: { act(.dismissSuggestion) }) {
+            return NoticeRow.Menu(more: { more }, asks: asks)
+        }
+        if said.takesOff {
+            let name = PersonActing.name(.unfeature)
+            guard let lock = said.accountLock else {
+                let more = ShellMore(head: [person.lineName, person.lineHandle], items: [
+                    .plain(PersonActing.symbol(.unfeature), name) { act(.unfeature) },
+                ])
+                return NoticeRow.Menu(more: { more }, asks: asks)
+            }
+            let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
+            let more = ShellMore.ending(
+                in: .plain(dim, ask: lock.asks ? { act(.unfeature) } : nil, act: {}),
+                dimFor: String(format: L10n.t(lock.key), said.source)
+            )
+            return NoticeRow.Menu(more: { more }, asks: asks)
+        }
         let dangerous = said.dangerous
-        guard !dangerous.isEmpty else { return menu(for: said) }
+        guard !dangerous.isEmpty else { return nil }
+
         let more = ShellMore(head: [person.lineName, person.lineHandle], items: dangerous.map { offered in
             .danger(
                 PersonActing.symbol(offered), PersonActing.name(offered),
@@ -419,7 +471,7 @@ struct PeopleHead: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
             VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                Text(PeopleSaid.title(list))
+                Text(said.title())
                     .shellFont(.name)
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
@@ -441,7 +493,8 @@ struct PeopleHead: View {
                 ShellWellPill(list.host)
                     .fixedSize()
                     // Heard once: where the title already names the source, the pill is not said again.
-                    .accessibilityHidden(PeopleSaid.titleNamesHost(list))
+                    .accessibilityHidden(PeopleSaid.titleNamesHost(list, own: said.own))
+
             }
         }
         .padding(.horizontal, ShellSpace.pad)
