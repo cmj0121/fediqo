@@ -75,6 +75,9 @@ public actor NearbyMove {
     /// How long the sender waits, after its last byte, for the receiver to say it has read the
     /// package back.
     private let lastWordClock: @Sendable () async throws -> Void
+    /// What the person's answer passes through on its way to the connection the question was
+    /// asked on: nothing but for a test, which holds it to land the answer after the link's end.
+    nonisolated let answerPassage: @Sendable () async -> Void
     private let guessCap: Int
 
     private var continuation: AsyncStream<Event>.Continuation?
@@ -118,7 +121,8 @@ public actor NearbyMove {
 
     /// `init`, saying what every wait of the move is slept on — the wait before a dropped link
     /// is tried again, and each of the three clocks where none was given: `Task.sleep` but for
-    /// a test, which turns it by hand.
+    /// a test, which turns it by hand. `answerPassage` is what the person's answer passes
+    /// through on its way to the connection: nothing but for a test, which holds it.
     package init(
         link: any NearbyLink, carrier: any StoreCarrier, device: String,
         retryDelay: Duration = .seconds(2), retries: Int = 45,
@@ -126,6 +130,7 @@ public actor NearbyMove {
         holdClock: (@Sendable () async throws -> Void)? = nil,
         offerClock: (@Sendable () async throws -> Void)? = nil,
         lastWordClock: (@Sendable () async throws -> Void)? = nil,
+        answerPassage: @escaping @Sendable () async -> Void = {},
         sleep: @escaping @Sendable (Duration) async throws -> Void
     ) {
         self.link = link
@@ -137,6 +142,7 @@ public actor NearbyMove {
         self.holdClock = holdClock ?? { try await sleep(holdTimeout) }
         self.offerClock = offerClock ?? { try await sleep(.seconds(30)) }
         self.lastWordClock = lastWordClock ?? { try await sleep(.seconds(1800)) }
+        self.answerPassage = answerPassage
         self.guessCap = guessCap
     }
 
@@ -183,6 +189,11 @@ public actor NearbyMove {
     fileprivate func awaitAnswer(for id: String) async -> Bool {
         if let answered = answered[id] { return answered }
         return await withCheckedContinuation { pending[id, default: []].append($0) }
+    }
+
+    /// The answer about `id`, where one has been given; nothing while the question waits.
+    fileprivate func given(for id: String) -> Bool? {
+        answered[id]
     }
 
     private func emit(_ event: Event) {
@@ -836,11 +847,16 @@ final class Mailbox: NearbyInbox, Sendable {
     /// The person's answer, and one word the peer said meanwhile, if any: a refusal is thrown
     /// as `refusedThere`, a second word is out of turn, and an ending is a drop. `sealed` is the
     /// channel the peer's word rides in, once one is open.
+    ///
+    /// An ending after the answer was given — its way here merely slower than the link's end,
+    /// as on a rejoin, where it was given before — is no drop: the answer comes back with the
+    /// word heard, and the ending stays for whatever reads next.
     func waitAnswer(
         of move: NearbyMove, for id: String, sealed channel: NearbyChannel? = nil
     ) async throws -> (yes: Bool, heard: NearbyFrame?) {
         let waiter = Task { [self] in
             let yes = await move.awaitAnswer(for: id)
+            await move.answerPassage()
             push(.answer(yes))
         }
         defer { waiter.cancel() }
@@ -853,7 +869,10 @@ final class Mailbox: NearbyInbox, Sendable {
                 if case .refuse = word { throw NearbyRefusal.refusedThere }
                 guard heard == nil else { throw NearbyRefusal.malformed }
                 heard = word
-            case .ended: throw NearbyDropped()
+            case .ended:
+                guard let yes = await move.given(for: id) else { throw NearbyDropped() }
+                push(.ended)
+                return (yes, heard)
             }
         }
     }

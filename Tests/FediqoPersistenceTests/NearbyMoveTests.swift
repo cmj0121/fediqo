@@ -97,12 +97,14 @@ struct NearbyMoveTests {
         /// clocks nobody turns.
         let clock = TurnedClock()
 
-        init(from: Device, onto: Device) {
+        /// `answerPassage` is what the sender's answers pass through on their way to its
+        /// connection.
+        init(from: Device, onto: Device, answerPassage: @escaping @Sendable () async -> Void = {}) {
             self.from = from
             self.onto = onto
             sender = NearbyMove(
                 link: link, carrier: from.packager(), device: "a laptop", retryDelay: NearbyMoveTests.retryDelay, retries: 20,
-                lastWordClock: NearbyMoveTests.never, sleep: clock.sleep
+                lastWordClock: NearbyMoveTests.never, answerPassage: answerPassage, sleep: clock.sleep
             )
             receiver = NearbyMove(
                 link: link, carrier: onto.packager(), device: "a tablet", retryDelay: NearbyMoveTests.retryDelay, retries: 20,
@@ -494,7 +496,53 @@ struct NearbyMoveTests {
         #expect(held.events.filter(Self.isDone).count == 1)
         #expect(sent.events.contains { if case .reconnecting = $0 { true } else { false } })
         #expect(sent.events.filter(Self.isDone).count == 1 && !sent.events.contains(where: Self.isRefused))
+        #expect(pair.clock.asked.count == 1, "the rejoin ends the move on its first try: \(pair.clock.asked)")
         #expect(await pair.onto.store.snapshot().notes.count == 3)
+    }
+
+    /// Lets the first answer through at once and holds every later one until `release()`.
+    final class LateAnswer: Sendable {
+        private let passed = Mutex(0)
+        private let gate = TurnedClock()
+
+        var passage: @Sendable () async -> Void {
+            { [self] in
+                let count = passed.withLock { passed -> Int in
+                    passed += 1
+                    return passed
+                }
+                if count > 1 { try? await gate.sleep(for: .zero) }
+            }
+        }
+
+        func release() { gate.turn() }
+    }
+
+    @Test("A link cut on the last word while the sender's yes is still on its way to the rejoin: it ends on the done it heard")
+    func cutOnTheLastWordAnswerLate() async throws {
+        let late = LateAnswer()
+        let pair = Pair(from: try await PackagerFixture.populated(), onto: try await Device(), answerPassage: late.passage)
+        defer { pair.remove() }
+        pair.link.cutNextBeforeLastWord()
+        let (held, code, peer) = await pair.hold()
+        let sent = Watch(await pair.sender.offer(to: peer, code: code, pictures: false, contents: .whole))
+        await sent.until("the sender's question", Self.isAsking)
+        await held.until("the receiver's question", Self.isAsking)
+        await pair.sender.answer(true)
+        await pair.receiver.answer(true)
+        await Self.rejoin(pair.clock, on: pair.link, by: sent)
+        // The rejoin's answer is held: the receiver's done and the link's end reach the sender
+        // before it, every time.
+        await met("the sender ends on the done, or takes the end as a drop", by: sent.work) {
+            sent.events.contains(where: Self.isDone) || pair.clock.asked.count == 2
+        }
+        late.release()
+        #expect(sent.events.filter(Self.isDone).count == 1 && !sent.events.contains(where: Self.isRefused), "\(sent.events)")
+        #expect(pair.clock.asked.count == 1, "no second retry: the rejoin ended on the done it heard")
+        await held.until("the receiver done", Self.isDone)
+        #expect(await pair.onto.store.snapshot().notes.count == 3)
+        await pair.sender.stop()
+        await pair.receiver.stop()
     }
 
     @Test("A recording of the wire holds nothing in the clear past the opening, and the code alone opens none of it")
