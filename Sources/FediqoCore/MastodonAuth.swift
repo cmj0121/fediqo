@@ -759,6 +759,30 @@ public struct MastodonAuthorized: Sendable {
         return try await finish(result, path: path)
     }
 
+    /// `getLinked(path:query:)`, with a not-found of the address told apart as `getAtAddress`
+    /// tells it (#315, #318): a list paged by its `Link` header at an address a host may not have.
+    public func getLinkedAtAddress(path: String, query: [URLQueryItem] = []) async throws -> (body: Data, link: String?) {
+        let result = try await send(path: path, query: query)
+        if MastodonHostNotFound.isOfTheAddress(status: result.status, body: result.body) {
+            throw MastodonHostMoreError.noSuchAddress
+        }
+        return (try await finish(result, path: path), result.link)
+    }
+
+    /// An act at an address a host may not have, through the same door (#315, #318): `method`,
+    /// with `form` where it has one. A not-found of the address throws
+    /// `MastodonHostMoreError.noSuchAddress`, as `getAtAddress` does; a 422 throws
+    /// `MastodonUnprocessable` with the source's answer, as `patch(path:form:)` does; anything
+    /// else is what `get` throws.
+    public func actAtAddress(path: String, method: String, form: [(String, String)]? = nil) async throws -> Data {
+        let result = try await send(path: path, method: method, form: form)
+        if MastodonHostNotFound.isOfTheAddress(status: result.status, body: result.body) {
+            throw MastodonHostMoreError.noSuchAddress
+        }
+        if result.status == 422 { throw MastodonUnprocessable(body: result.body) }
+        return try await finish(result, path: path)
+    }
+
     /// As `get`, with a refusal for want of a scope told from every other 403 (#319): throws
     /// `MastodonScopeError.outside` where the server says the token was not issued with what
     /// the ask needs (`MastodonScopeRefusal`), and what `get` throws for any other refusal.

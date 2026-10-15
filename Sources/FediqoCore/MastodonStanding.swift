@@ -27,12 +27,17 @@ public struct PersonStanding: Hashable, Sendable {
     /// source did not say: never a "no" made up for it.
     public var showsBoosts: Bool?
     public var notifies: Bool?
+    /// The reader features them on their own profile (#315) — the source's `endorsed`. **Said
+    /// of a follow, and of nothing else**, as what is taken from them is: only somebody followed
+    /// can be featured, and unfollowing takes them off. Nothing where the source did not say.
+    public var featured: Bool?
 
     public init(
         accountID: String, following: Bool = false, followedBy: Bool = false, requested: Bool = false,
         muting: Bool = false, mutedUntil: Date? = nil, blocking: Bool = false, blockedBy: Bool = false,
-        showsBoosts: Bool? = nil, notifies: Bool? = nil
+        showsBoosts: Bool? = nil, notifies: Bool? = nil, featured: Bool? = nil
     ) {
+        self.featured = featured
         self.showsBoosts = showsBoosts
         self.notifies = notifies
         self.accountID = accountID
@@ -184,7 +189,7 @@ public struct MastodonStanding: Sendable {
     }
 
     /// The standing a press was answered with, where it is about whom the press was about.
-    private static func answered(about accountID: String, _ body: Data) throws -> PersonStanding {
+    static func answered(about accountID: String, _ body: Data) throws -> PersonStanding {
         guard let said = try? MastodonJSON.decoder.decode(Said.self, from: body), let standing = said.standing,
               standing.accountID == accountID
         else { throw MastodonStandingError.unreadable }
@@ -219,6 +224,7 @@ public struct MastodonStanding: Sendable {
         let blockedBy: Bool?
         let showingReblogs: Bool?
         let notifying: Bool?
+        let endorsed: Bool?
 
         /// The standing, where the source said every part of it. What is taken from them is
         /// no such part: a source that leaves it out has said the rest.
@@ -227,7 +233,8 @@ public struct MastodonStanding: Sendable {
             return PersonStanding(
                 accountID: id, following: following, followedBy: followedBy, requested: requested, muting: muting,
                 mutedUntil: muting ? mutingExpiresAt?.value : nil, blocking: blocking, blockedBy: blockedBy,
-                showsBoosts: following ? showingReblogs : nil, notifies: following ? notifying : nil
+                showsBoosts: following ? showingReblogs : nil, notifies: following ? notifying : nil,
+                featured: following ? endorsed : nil
             )
         }
     }

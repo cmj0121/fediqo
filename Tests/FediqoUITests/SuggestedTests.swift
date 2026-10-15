@@ -340,7 +340,7 @@ struct SuggestedTests {
 
     // MARK: - Don't suggest
 
-    @Test("A row of the people suggested has a menu of one line, Don't suggest, and it is dim: the menu's head says why — it changes the reader's account there, which this version does not yet ask them to allow — the line takes no press, and nothing is sent; a row of any other list of people has no menu; and nothing in the app can send a dismissal")
+    @Test("A row of the people suggested has a menu of one line, Don't suggest, and it is dim: the menu's head says why — it changes the reader's account there, which this version does not yet ask them to allow — the line takes no press, and nothing is sent; a row of any other list of people has no menu; and nothing in the app sends a dismissal yet")
     func dontSuggestIsDimAndSendsNothing() async throws {
         let (session, server, work) = await session([Self.first: Self.stretch([3, 2, 1])])
         session.mastodon.work = work
@@ -368,14 +368,11 @@ struct SuggestedTests {
             let other = PeopleSaid(list: list, reading: .said, people: [person])
             #expect(other.more() == nil && PeoplePane.menu(for: other) == nil, "\(list.which)")
         }
-        // What reads suggestions sends nothing but a read, and no file names the address a dismissal goes to.
-        let reader = try String(contentsOf: Self.sources.appending(path: "FediqoCore/MastodonSuggestions.swift"), encoding: .utf8)
-        #expect(!reader.contains("DELETE"))
-        #expect(!reader.contains(".post("))
-        #expect(!reader.contains("httpMethod"))
-        for file in try FileManager.default.subpathsOfDirectory(atPath: Self.sources.path) where file.hasSuffix(".swift") {
-            let text = try String(contentsOf: Self.sources.appending(path: file), encoding: .utf8)
-            #expect(!text.contains("/api/v1/suggestions"), "\(file)")
+        // Core can dismiss one now; nothing in the app calls it yet.
+        let ui = Self.sources.appending(path: "FediqoUI")
+        for file in try FileManager.default.subpathsOfDirectory(atPath: ui.path) where file.hasSuffix(".swift") {
+            let text = try String(contentsOf: ui.appending(path: file), encoding: .utf8)
+            #expect(!text.contains("dismiss(accountID:"), "\(file)")
         }
     }
 

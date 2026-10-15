@@ -37,7 +37,7 @@ struct PersonStandingTests {
         following: Bool = false, followedBy: Bool = false, requested: Bool = false, muting: Bool = false,
         until: String? = nil, blocking: Bool = false, blockedBy: Bool = false
     ) -> String {
-        #"{"id":"42","following":\#(following),"showing_reblogs":\#(following),"notifying":false,"languages":null,"followed_by":\#(followedBy),"blocking":\#(blocking),"blocked_by":\#(blockedBy),"muting":\#(muting),"muting_notifications":\#(muting),"muting_expires_at":\#(until.map { "\"\($0)\"" } ?? "null"),"requested":\#(requested),"requested_by":false,"domain_blocking":false,"endorsed":false,"note":""}"#
+        #"{"id":"42","following":\#(following),"showing_reblogs":\#(following),"notifying":false,"languages":null,"followed_by":\#(followedBy),"blocking":\#(blocking),"blocked_by":\#(blockedBy),"muting":\#(muting),"muting_notifications":\#(muting),"muting_expires_at":\#(until.map { "\"\($0)\"" } ?? "null"),"requested":\#(requested),"requested_by":false,"domain_blocking":false,"note":""}"#
     }
 
     private static func said(_ standing: String) -> PageServer.Answer { PageServer.Answer(body: "[\(standing)]") }
@@ -854,7 +854,7 @@ struct PersonStandingTests {
     /// real server's has (`MastodonStandingCaptures.narrowed`).
     private static func narrowed(boosts: Bool?, notify: Bool?, following: Bool = true, requested: Bool = false) -> String {
         let taken = [boosts.map { #""showing_reblogs":\#($0),"# }, notify.map { #""notifying":\#($0),"# }].compactMap { $0 }.joined()
-        return #"{"id":"42","following":\#(following),\#(taken)"languages":null,"followed_by":false,"blocking":false,"blocked_by":false,"muting":false,"muting_notifications":false,"muting_expires_at":null,"requested":\#(requested),"requested_by":false,"domain_blocking":false,"endorsed":false,"note":""}"#
+        return #"{"id":"42","following":\#(following),\#(taken)"languages":null,"followed_by":false,"blocking":false,"blocked_by":false,"muting":false,"muting_notifications":false,"muting_expires_at":null,"requested":\#(requested),"requested_by":false,"domain_blocking":false,"note":""}"#
     }
 
     private static func followed(boosts: Bool? = true, notify: Bool? = false) -> PersonStanding {

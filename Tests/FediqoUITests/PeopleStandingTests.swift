@@ -51,7 +51,7 @@ struct PeopleStandingTests {
         _ id: Int, following: Bool = false, followedBy: Bool = false, requested: Bool = false, muting: Bool = false,
         blocking: Bool = false, blockedBy: Bool = false
     ) -> String {
-        #"{"id":"\#(id)","following":\#(following),"showing_reblogs":\#(following),"notifying":false,"languages":null,"followed_by":\#(followedBy),"blocking":\#(blocking),"blocked_by":\#(blockedBy),"muting":\#(muting),"muting_notifications":\#(muting),"muting_expires_at":null,"requested":\#(requested),"requested_by":false,"domain_blocking":false,"endorsed":false,"note":""}"#
+        #"{"id":"\#(id)","following":\#(following),"showing_reblogs":\#(following),"notifying":false,"languages":null,"followed_by":\#(followedBy),"blocking":\#(blocking),"blocked_by":\#(blockedBy),"muting":\#(muting),"muting_notifications":\#(muting),"muting_expires_at":null,"requested":\#(requested),"requested_by":false,"domain_blocking":false,"note":""}"#
     }
 
     private static func said(_ standings: String...) -> PageServer.Answer {

@@ -182,7 +182,7 @@ struct MastodonStandingSaysTests {
             let follows = try reader(seeded.following)
             #expect(try await follows.standing(to: id) == PersonStanding(accountID: id), "a refusal followed nobody")
 
-            let followed = PersonStanding(accountID: id, following: true, showsBoosts: true, notifies: false)
+            let followed = PersonStanding(accountID: id, following: true, showsBoosts: true, notifies: false, featured: false)
             #expect(try await follows.follow(id) == followed)
             #expect(try await follows.standing(to: id) == followed)
             #expect(try await reader(seeded.seeing).standing(to: id) == followed, "told to the word that only sees")
@@ -202,7 +202,7 @@ struct MastodonStandingSaysTests {
         let seeded = try seeded()
         let id = seeded.followable
         func stands(_ boosts: Bool, _ notify: Bool) -> PersonStanding {
-            PersonStanding(accountID: id, following: true, showsBoosts: boosts, notifies: notify)
+            PersonStanding(accountID: id, following: true, showsBoosts: boosts, notifies: notify, featured: false)
         }
         try await restoring(seeded, unfollowed: [id]) {
             let follows = try reader(seeded.following)
@@ -341,7 +341,7 @@ struct MastodonStandingSaysTests {
         try await restoring(seeded, unfollowed: [id]) {
             let follows = try reader(seeded.following)
             #expect(try await follows.standing(to: id) == PersonStanding(accountID: id))
-            #expect(try await follows.follow(id) == PersonStanding(accountID: id, following: true, showsBoosts: true, notifies: false), "what the press was answered")
+            #expect(try await follows.follow(id) == PersonStanding(accountID: id, following: true, showsBoosts: true, notifies: false, featured: false), "what the press was answered")
             #expect(try await follows.standing(to: id) == PersonStanding(accountID: id, requested: true), "and how it stands")
             #expect(try await follows.follow(id, false) == PersonStanding(accountID: id))
         }

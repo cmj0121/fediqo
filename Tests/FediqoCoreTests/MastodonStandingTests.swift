@@ -123,7 +123,7 @@ struct MastodonStandingTests {
             "POST /api/v1/accounts/\(Captures.locked)/follow": .json(Captures.asked),
             "POST /api/v1/accounts/\(Captures.locked)/unfollow": .json(Captures.withdrawn),
         ])
-        #expect(try await stands.follow(Captures.followable) == PersonStanding(accountID: Captures.followable, following: true, showsBoosts: true, notifies: false))
+        #expect(try await stands.follow(Captures.followable) == PersonStanding(accountID: Captures.followable, following: true, showsBoosts: true, notifies: false, featured: false))
         #expect(try await stands.follow(Captures.followable, false) == PersonStanding(accountID: Captures.followable))
         #expect(try await stands.follow(Captures.locked) == PersonStanding(accountID: Captures.locked, requested: true))
         #expect(try await stands.follow(Captures.locked, false) == PersonStanding(accountID: Captures.locked))
@@ -160,7 +160,7 @@ struct MastodonStandingTests {
         let tokens = MemoryMastodonTokens()
         try tokens.save(Self.token)
         let stands = MastodonStanding(door: MastodonAuthorized(token: Self.token, sender: server, store: tokens))
-        let said = PersonStanding(accountID: id, following: true, showsBoosts: false, notifies: true)
+        let said = PersonStanding(accountID: id, following: true, showsBoosts: false, notifies: true, featured: false)
         #expect(try await stands.narrow(id, boosts: false) == said)
         #expect(try await stands.narrow(id, notify: true) == said)
         #expect(try await stands.narrow(id, boosts: true, notify: false) == said, "what the source answered, and never what was sent")
@@ -201,7 +201,7 @@ struct MastodonStandingTests {
             "POST /api/v1/follow_requests/7/authorize": .json(Asked.noSuchRequest, status: 404),
             "POST /api/v1/follow_requests/8/reject": .json(Asked.authorized),
         ])
-        let follows = PersonStanding(accountID: id, following: true, followedBy: true, showsBoosts: true, notifies: false)
+        let follows = PersonStanding(accountID: id, following: true, followedBy: true, showsBoosts: true, notifies: false, featured: false)
         var gone = follows
         gone.followedBy = false
         #expect(try await stands.answer(id, accept: true) == follows)
