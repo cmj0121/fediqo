@@ -253,15 +253,21 @@ final class ForumBlogs {
             // A forum still signing in is waited for, and the reader chosen after — `ForumPosts`'
             // order, so a blog is not read as a guest a moment before the sign-in lands.
             if let forums = self.forums { await forums.settled(host: key.host) }
-            let client = SourceReach(http: self.http, work: self.work, forums: self.forums)
-                .discuz(key.host, for: .forumPost, within: nil)
-            let answer: Result<DiscuzBlog, ForumPosts.Absence>
-            do {
-                answer = .success(try await client.blog(uid: address.uid, id: address.id))
-            } catch {
-                answer = .failure(ForumPosts.absence(for: error))
-            }
+            let asked = self.forums?.signIns(host: key.host) ?? 0
+            var answer = await self.ask(address, at: key.host)
             guard !self.cleared.contains(key) else { return }
+            // **Past the hold, a refusal the sign-in could change waits for it**, `ForumPosts`'
+            // rule: the pane says the blog is on its way rather than why it was refused, and once
+            // a sign-in lands the blog is read again as the member the reader now is.
+            if let forums = self.forums, case .failure(let absence) = answer, absence.signInMayChange,
+               forums.isSigningInAgain(host: key.host) || forums.signIns(host: key.host) != asked {
+                await forums.signInEnds(host: key.host)
+                guard !self.cleared.contains(key) else { return }
+                if forums.signIns(host: key.host) != asked {
+                    answer = await self.ask(address, at: key.host)
+                    guard !self.cleared.contains(key) else { return }
+                }
+            }
             switch answer {
             case .success(let blog):
                 await self.landing?(key, blog)
@@ -277,6 +283,18 @@ final class ForumBlogs {
         }
         inFlight[key] = task
         await task.value
+    }
+
+    /// One blog's page asked of its forum, through the reader it should be read through now.
+    private func ask(
+        _ address: (uid: Int, id: Int), at host: String
+    ) async -> Result<DiscuzBlog, ForumPosts.Absence> {
+        let client = SourceReach(http: http, work: work, forums: forums).discuz(host, for: .forumPost, within: nil)
+        do {
+            return .success(try await client.blog(uid: address.uid, id: address.id))
+        } catch {
+            return .failure(ForumPosts.absence(for: error))
+        }
     }
 
     private static func key(of item: DummyItem) -> NoteKey {
