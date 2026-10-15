@@ -163,7 +163,7 @@ struct MastodonOwnAccountTests {
     @Test("A limit is one the host states — a real Mastodon's document states five — and a host that states none, or a value of nothing, has none")
     func limits() {
         let mastodon = MastodonOwnAccount.limits(from: Data(MastodonHostCaptures.document.utf8))
-        #expect(mastodon == OwnLimits(name: 40, words: 500, fields: 4, fieldName: 255, fieldValue: 255))
+        #expect(mastodon == OwnLimits(name: 40, words: 500, fields: 4, fieldName: 255, fieldValue: 255, picture: 16_777_216))
         #expect(MastodonOwnAccount.limits(from: Data(#"{"configuration":{"statuses":{"max_characters":5000}}}"#.utf8)) == .none)
         #expect(MastodonOwnAccount.limits(from: Data(#"{"configuration":{"accounts":{"max_note_length":0,"max_profile_fields":"4"}}}"#.utf8)) == .none)
         #expect(MastodonOwnAccount.limits(from: Data("<html>".utf8)) == .none)
@@ -286,5 +286,107 @@ struct MastodonOwnAccountTests {
         let (odd, _, _) = try Self.reader([Self.change: .json("[]")])
         await #expect(throws: OwnAccountError.unreadable) { try await odd.change(from: Self.before, to: after) }
         #expect(try tokens.token(host: MastodonFixture.host) != nil)
+    }
+
+    // MARK: - The picture and the header
+
+    private static let pixel = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF])
+    private static let avatar = "/api/v1/profile/avatar"
+    private static let header = "/api/v1/profile/header"
+
+    @Test("The picture's limit is the host's: what a real Mastodon states of any picture, read alone where nothing else is stated; none where it states none, or nothing")
+    func pictureLimit() {
+        #expect(MastodonOwnAccount.limits(from: Data(MastodonHostCaptures.document.utf8)).picture == 16_777_216)
+        #expect(MastodonOwnAccount.limits(from: Data(#"{"configuration":{"media_attachments":{"image_size_limit":10485760}}}"#.utf8)) == OwnLimits(picture: 10_485_760))
+        #expect(MastodonOwnAccount.limits(from: Data(#"{"configuration":{"media_attachments":{"image_size_limit":0}}}"#.utf8)) == .none)
+        #expect(MastodonOwnAccount.limits(from: Data(#"{"configuration":{"media_attachments":{"video_size_limit":10485760}}}"#.utf8)) == .none)
+        #expect(MastodonOwnAccount.limits(from: Data(#"{"configuration":{"accounts":{"max_profile_fields":6}}}"#.utf8)) == OwnLimits(fields: 6))
+    }
+
+    @Test("A picture or a header goes as one PATCH of one file part — its name the source's, of the file's name the last piece alone — to the sign-in's own host with its token, nothing else beside it; and what is handed back is the source's answer", arguments: [
+        (OwnPicture.picture, "avatar"), (.header, "header"),
+    ])
+    func pictureSent(which: OwnPicture, part: String) async throws {
+        let answered = Self.answer(name: "Ada said", note: "as kept")
+        let (reader, server, _) = try Self.reader([Self.change: .json(answered)])
+        let back = try await reader.change(which, to: Self.pixel, named: "/Users/ada/Pictures/頭像 1.png", type: "image/png", limit: 1024)
+        #expect(back.account.name == "Ada said" && back.account.words == "as kept" && back.person.accountID == "1")
+
+        let requests = await server.requests
+        #expect(requests.count == 1)
+        let sent = try #require(requests.first)
+        #expect(sent.url?.absoluteString == "https://\(MastodonFixture.host)\(Self.change)")
+        #expect(sent.httpMethod == "PATCH")
+        #expect(sent.value(forHTTPHeaderField: "Authorization") == "Bearer \(MastodonFixture.token.accessToken)")
+        let said = try #require(sent.value(forHTTPHeaderField: "Content-Type"))
+        let prefix = "multipart/form-data; boundary="
+        #expect(said.hasPrefix(prefix))
+        let boundary = String(said.dropFirst(prefix.count))
+        let expected = try MultipartBody(
+            [.file(part, named: "頭像 1.png", type: "image/png", Self.pixel)], limit: MultipartBody.byteLimit
+        ) { boundary }
+        #expect(sent.httpBody == expected.data)
+        let text = String(decoding: try #require(sent.httpBody), as: UTF8.self)
+        #expect(!text.contains("Users") && !text.contains("Pictures"))
+    }
+
+    @Test("A picture over the host's limit is refused naming that limit, and nothing is asked; one at the limit is sent; with no limit stated only the app's own bound on a body stands, named the same way")
+    func pictureTooLarge() async throws {
+        let (reader, server, _) = try Self.reader([Self.change: .json(Self.answer())])
+        await #expect(throws: OwnPictureTooLarge(limit: 9)) {
+            try await reader.change(.picture, to: Self.pixel, named: "me.png", type: "image/png", limit: 9)
+        }
+        await #expect(throws: OwnPictureTooLarge(limit: 9)) {
+            try await reader.change(.header, to: Self.pixel, named: "me.png", type: "image/png", limit: 9)
+        }
+        #expect(await server.requests.isEmpty)
+
+        _ = try await reader.change(.picture, to: Self.pixel, named: "me.png", type: "image/png", limit: Self.pixel.count)
+        _ = try await reader.change(.picture, to: Self.pixel, named: "me.png", type: "image/png", limit: nil)
+        #expect(await server.requests.count == 2)
+
+        await #expect(throws: OwnPictureTooLarge(limit: MultipartBody.byteLimit)) {
+            try await reader.change(.picture, to: Data(count: MultipartBody.byteLimit), named: "me.png", type: "image/png", limit: nil)
+        }
+        #expect(await server.requests.count == 2)
+    }
+
+    @Test("Taking the picture or the header away is a DELETE of its own address on the sign-in's own host, carrying nothing, and what is handed back is the source's answer", arguments: [
+        (OwnPicture.picture, "/api/v1/profile/avatar"), (.header, "/api/v1/profile/header"),
+    ])
+    func removed(which: OwnPicture, path: String) async throws {
+        let (reader, server, _) = try Self.reader([path: .json(Self.answer(name: "Ada after"))])
+        let back = try await reader.remove(which)
+        #expect(back.account.name == "Ada after" && back.person.accountID == "1")
+        let requests = await server.requests
+        #expect(requests.count == 1)
+        let sent = try #require(requests.first)
+        #expect(sent.url?.absoluteString == "https://\(MastodonFixture.host)\(path)")
+        #expect(sent.httpMethod == "DELETE")
+        #expect(sent.httpBody == nil)
+        #expect(sent.value(forHTTPHeaderField: "Authorization") == "Bearer \(MastodonFixture.token.accessToken)")
+    }
+
+    @Test("A picture the source will not take (422) is its refusal, a real Mastodon's sentence; a 403 is the lock without the part and the source forbidding it with it, to a change and a removal alike; any other failure is the door's")
+    func pictureRefusals() async throws {
+        let (refusing, _, tokens) = try Self.reader([Self.change: .json(MastodonPartsCaptures.noPicture, status: 422)])
+        await #expect(throws: OwnAccountError.refused(sentence: "Validation failed: Avatar has contents that are not what they are reported to be", rows: [:])) {
+            try await refusing.change(.picture, to: Self.pixel, named: "me.png", type: "image/png", limit: nil)
+        }
+        #expect(try tokens.token(host: MastodonFixture.host) != nil)
+
+        let forbidden = [Self.change: FixtureSender.Outcome.json(#"{"error":"Forbidden"}"#, status: 403), Self.avatar: .json("", status: 403), Self.header: .json("", status: 403)]
+        for (scopes, error) in [(Self.r, OwnAccountError.locked), ("\(Self.r) \(Self.a)", .forbidden)] {
+            let (reader, _, _) = try Self.reader(forbidden, scopes: scopes)
+            await #expect(throws: error) { try await reader.change(.header, to: Self.pixel, named: "me.png", type: "image/png", limit: nil) }
+            await #expect(throws: error) { try await reader.remove(.picture) }
+            await #expect(throws: error) { try await reader.remove(.header) }
+        }
+
+        let (failing, _, _) = try Self.reader([Self.avatar: .json("{}", status: 500), Self.change: .json("[]")])
+        await #expect(throws: MastodonAuthError.http(500)) { try await failing.remove(.picture) }
+        await #expect(throws: OwnAccountError.unreadable) {
+            try await failing.change(.picture, to: Self.pixel, named: "me.png", type: "image/png", limit: nil)
+        }
     }
 }

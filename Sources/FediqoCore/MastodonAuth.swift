@@ -799,12 +799,15 @@ public struct MastodonAuthorized: Sendable {
     /// **The body is made before anything is sent** — every name checked, the whole of it
     /// under `limit` — and one that will not do is thrown as a `MultipartError`, with nothing
     /// asked of the source. `limit` is for a source that says it takes less: it only ever
-    /// lowers the bound, and one above `MultipartBody.byteLimit` is that.
+    /// lowers the bound, and one above `MultipartBody.byteLimit` is that. As `patch(path:form:)`,
+    /// a 422 throws `MastodonUnprocessable` with the source's answer.
     public func patch(
         path: String, parts: [MultipartPart], limit: Int = MultipartBody.byteLimit
     ) async throws -> Data {
         let body = try MultipartBody(parts, limit: min(limit, MultipartBody.byteLimit))
-        return try await finish(try await send(path: path, method: "PATCH", parts: body), path: path)
+        let result = try await send(path: path, method: "PATCH", parts: body)
+        if result.status == 422 { throw MastodonUnprocessable(body: result.body) }
+        return try await finish(result, path: path)
     }
 
     /// A PATCH carrying a form through the same door (#312). As `post(path:form:)`, with what

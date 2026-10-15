@@ -192,7 +192,10 @@ struct GoToSocialSaysTests {
         let thrown: (any Error)?
         do {
             #expect(try await own.read() == start)
-            #expect(try await own.limits() == OwnLimits(fields: 6), "only how many fields")
+            // What it states of a picture is not held to here: no answer of it is kept yet.
+            var limits = try await own.limits()
+            limits.picture = nil
+            #expect(limits == OwnLimits(fields: 6), "only how many fields")
 
             var changed = start
             changed.name = String(repeating: "o", count: 600)

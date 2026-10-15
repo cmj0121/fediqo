@@ -84,7 +84,7 @@ struct MastodonOwnAccountSaysTests {
         let seeded = try seeded()
         try await restoring(seeded) { (own: MastodonOwnAccount) async throws in
             #expect(try await own.read() == Self.start, "as the seed left it")
-            #expect(try await own.limits() == OwnLimits(name: 40, words: 500, fields: 4, fieldName: 255, fieldValue: 255))
+            #expect(try await own.limits() == OwnLimits(name: 40, words: 500, fields: 4, fieldName: 255, fieldValue: 255, picture: 16_777_216))
 
             var name = Self.start, words = Self.start, fields = Self.start
             name.name = "Own 312, renamed"
