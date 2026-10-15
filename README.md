@@ -379,16 +379,15 @@ meanwhile: no standing is drawn for a sign-in that cannot see it.
 
 Your profile is asked for apart too, and only when it is first needed: at a press on Change on
 your own page, on Feature or Take off your profile, on Don't suggest, or on Dismiss on what a
-source announces. The press asks first, and says what the server's page will be asked for:
-what the sign-in already has, and one thing more — your profile: to change your pictures, your
-name, your bio, your extra fields and what your account lets others do. The server gives the
-same permission for featuring people and hashtags on your profile, pinning your posts, and
-dismissing announcements and suggestions, and the question says so; all of those but pinning
-are done from Fediqo with it — see Reading, below. Where a sign-in was not given your profile,
-each of those presses is dim, under the mark signing in wears, and asks for it. Nobody is
-signed out, on this device
-or another; close the server's page, or say no on it, and the sign-in you had goes on as it
-was. A sign-in that only reads may be asked too.
+source announces. The press asks first, and says what the server's page will be asked for: what
+the sign-in already has, and one thing more — your profile: to change your pictures, your name,
+your bio, your extra fields and what your account lets others do. The server gives the same
+permission for featuring people and hashtags on your profile, pinning your posts, and dismissing
+announcements and suggestions, and the question says so; all of those but pinning are done from
+Fediqo with it — see Reading, below. Where a sign-in was not given your profile, each of those
+presses is dim, under the mark signing in wears, and asks for it. Nobody is signed out, on this
+device or another; close the server's page, or say no on it, and the sign-in you had goes on as
+it was. A sign-in that only reads may be asked too.
 
 What a sign-in asks its server for, in the server's own words:
 
@@ -422,33 +421,33 @@ account signing in on that source leaves its posts here saying nothing of any of
 until a signed-in read says so again.
 
 A source's row on Account is one line at every width: its mark, its hostname, the sign-in key
-and three dots. Where a source you are signed in to has announcements you have not seen, a
-megaphone stands before the key, and a press on it opens the source's page; it draws no
-number, and VoiceOver says how many. Every source draws the same marks; one a source does not have, or cannot do
-right now, is grey and says why. Choosing boards and lists is behind the dots, and so are Clear
-and Remove. What may be done on that source — read, read and write, or read only where the
-protocol has no writing in Fediqo at all, which is every forum — is no longer written on the
-row, and VoiceOver still says it. It is the server's own answer: a server that grants less than
-Fediqo asked for is taken at its word, and what is said is what may be done rather than what
-was asked. Where a sign-in has to be asked again before something it could do is offered, the
-mark signing in wears stands before the key with the words Update permission, on the same line
-and drawn as the key is; on a row too narrow for the words and the whole hostname it is the
-mark alone. It is one mark wherever a sign-in is asked for more; a plain lock means only what
-is locked — an account that asks before anyone follows, a post for followers only. The
-sign-in's mark is red on a source that turned a write away, and stays until you sign in to it again.
+and three dots, and a megaphone while it has announcements you have not seen. The megaphone
+stands before the key, only at a source you are signed in to, and a press on it opens the
+source's page; it draws no number, and VoiceOver says how many. The megaphone aside, every
+source draws the same marks; one a source does not have, or cannot do right now, is grey and
+says why. Choosing boards and lists is behind the dots, and so are Clear and Remove. What may be
+done on that source — read, read and write, or read only where the protocol has no writing in
+Fediqo at all, which is every forum — is no longer written on the row, and VoiceOver still says
+it. It is the server's own answer: a server that grants less than Fediqo asked for is taken at
+its word, and what is said is what may be done rather than what was asked. Where a sign-in has
+to be asked again before something it could do is offered, the mark signing in wears stands
+before the key with the words Update permission, on the same line and drawn as the key is; on a
+row too narrow for the words and the whole hostname it is the mark alone. It is one mark
+wherever a sign-in is asked for more; a plain lock means only what is locked — an account that
+asks before anyone follows, a post for followers only. The sign-in's mark is red on a source
+that turned a write away, and stays until you sign in to it again.
 
-Whatever takes something away, signing out aside, is behind three dots on the row or the
-section it acts on, and asks first: Clear and Remove on a source's row, Clear and Forget
-password in a source's detail on Usage, Stop keeping, letting go by dates, dropping picture
-copies, removing a timeline or a host you added, taking back a
-post of your own, dismissing a notice or every notice of a source, dismissing an announcement,
-telling a source not to suggest somebody, refusing a request to
-follow you, removing a follower, and letting go of what a
-source holds back. Signing out is the key itself, and asks first too. One is not asked: removing
-a rule from a timeline being edited is behind the dots as well, but it is only a draft, and
-nothing is kept until Done. Taking somebody or a hashtag off your profile is behind the dots
-too, and is not asked either: Feature puts it back. Discarding a text that was not sent asks first as well, from its
-line at the foot of the page.
+Whatever takes something away, signing out aside, is behind three dots on the row or the section
+it acts on, and asks first: Clear and Remove on a source's row, Clear and Forget password in a
+source's detail on Usage, Stop keeping, letting go by dates, dropping picture copies, removing a
+timeline or a host you added, taking back a post of your own, dismissing a notice or every
+notice of a source, dismissing an announcement, telling a source not to suggest somebody,
+refusing a request to follow you, removing a follower, and letting go of what a source holds
+back. Signing out is the key itself, and asks first too. One is not asked: removing a rule from
+a timeline being edited is behind the dots as well, but it is only a draft, and nothing is kept
+until Done. Taking somebody or a hashtag off your profile is behind the dots too, and is not
+asked either: Feature puts it back. Discarding a text that was not sent asks first as well, from
+its line at the foot of the page.
 
 The secret is kept in this device's Keychain. It is not in the
 store, it is not copied to iCloud, and it does not follow your Apple account to another
