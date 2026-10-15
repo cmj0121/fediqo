@@ -27,7 +27,7 @@ struct MastodonFollowsPartTests {
         #expect(part.wordsBesideActing.isEmpty)
         #expect(!part.rider, "follows rode along on the read-or-act question")
         #expect(!part.needsActing, "a sign-in that only reads could not be asked for follows")
-        #expect(MastodonPart.allCases.last == .follows, "a part added later is not the last of the table")
+        #expect(MastodonPart.allCases.firstIndex(of: .follows) == 5, "follows moved in the table")
         #expect(MastodonPart.allCases.filter(\.needsActing) == [.bookmarks])
         #expect(MastodonPart.allCases.filter(\.rider) == [.search, .bookmarks])
     }
@@ -152,7 +152,7 @@ struct MastodonFollowsPartTests {
 
     @Test("The registration gains the two words of follows after every word it had, in the order it had them; one kept from before carries every page it carried and no page that asks for follows, so it is made again at that press and at no other")
     func theRegistrationWidens() {
-        #expect(MastodonRegistration.superset() == "\(Self.before) \(Self.f)")
+        #expect(MastodonRegistration.superset().hasPrefix("\(Self.before) \(Self.f)"), "a later part is registered after follows")
         let lacking: Set<String> = Set(Self.before.split(separator: " ").map(String.init))
         #expect(MastodonRegistration.superset(listed: lacking) == Self.before, "a host whose list has no follows is registered with as before")
 

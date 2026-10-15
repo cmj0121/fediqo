@@ -324,8 +324,9 @@ A Mastodon source can be signed in to from its row on Account, so its Home and y
 be read. Before the server's page opens, Fediqo asks which sign-in you want, and says which
 part is which: reading alone, or reading and writing. Reading brings in your Home and your
 lists. Writing lets you post, reply, boost, favourite and bookmark from Fediqo, and take any of
-them back — and nothing else: no sign-in asks to follow anybody unasked, and Fediqo never asks
-to change your profile or touch your filters. Choosing reading alone asks for exactly what
+them back — and nothing else: no sign-in asks to follow anybody unasked, signing in never asks
+to change your profile — that is asked apart, at Change, below — and Fediqo never asks to touch
+your filters. Choosing reading alone asks for exactly what
 Fediqo asked for before it could write at all, so refusing the writing part changes nothing
 about reading. Signing in again is how you change your answer.
 
@@ -375,6 +376,15 @@ line that says what it was not asked — how you stand to people, seeing who you
 following and unfollowing — and a press on it asks for exactly that. Nothing is guessed
 meanwhile: no standing is drawn for a sign-in that cannot see it.
 
+Your profile is asked for apart too, and only when it is first needed: at a press on Change on
+your own page. The press asks first, and says what the server's page will be asked for: what
+the sign-in already has, and one thing more — your profile: to change your name, your bio,
+your extra fields and what your account lets others do. The server gives the same permission
+for featuring people and hashtags on your profile, pinning your posts, and dismissing
+announcements and suggestions, and the question says so. Nobody is signed out, on this device
+or another; close the server's page, or say no on it, and the sign-in you had goes on as it
+was. A sign-in that only reads may be asked too.
+
 What a sign-in asks its server for, in the server's own words:
 
 | Part       | Asked for                                            | When                                            |
@@ -386,6 +396,7 @@ What a sign-in asks its server for, in the server's own words:
 | dismissing | `write:notifications`                                | with notices, and only where the sign-in writes |
 | who you follow | `read:follows`                                   | only after you press for following              |
 | following  | `write:follows`                                      | with who you follow, and only where the sign-in writes |
+| your profile | `write:accounts`                                   | only after you press Change on your own page    |
 
 A server that refuses `read:search` or `write:bookmarks` is asked again without it.
 
@@ -482,7 +493,8 @@ On any other opened page it asks again what that page shows, where the page can 
 Pressing `r` again while a reload runs does not start a second one; Esc stops it. A source that fails says
 so, and the others still land. The selected post stays selected.
 
-`l` is the press on Follow on the page in front, and it only ever follows. On somebody's page
+`l` is the press on Follow on the page in front, and it only ever follows; on your own page,
+where Follow would stand, it is the press on Change. On somebody's page
 it follows them, or asks to where they must agree. On a hashtag's page it follows the hashtag
 at the first of your sources that offers it. Unfollowing is never a key: it is behind the
 three dots on a person's page, behind the three dots of a source's row on a hashtag's About,
@@ -613,6 +625,25 @@ on the line is the source's, as old as that sign-in's last check: it does not co
 you answer here. A sign-in that sees who you follow and may not change it is told so above
 the rows, with a press that asks for the rest. None of this stands on anybody else's lists,
 with no sign-in, or at a forum.
+
+Your profile is changed on your own page at a source, where Change stands in place of Follow.
+Where the sign-in was not given your profile, Change is dim, under the mark signing in wears,
+and a press asks for it and opens nothing. Change opens a sheet that reads your profile afresh each
+time, as that source holds it now, and Save waits for that read. It edits your display name,
+the words about you, your fields — added, removed and moved, shown in that order — and three
+switches for what others can do: follow you without asking, find you and see you suggested,
+and see who you follow and who follows you. A count stands under a box only where the source
+states its limit, and never holds Save back. A switch the source did not state says so, and
+sends nothing until you choose Yes or No. Turning on following without asking while people
+wait says, under the switch, how many it will let in at once. Changing a checked field's
+content says that the source will take its check off.
+
+What is shown after Save is the source's answer, not what was typed: the sheet closes, your
+page's head and About draw it, the line of who asks to follow you takes its figure, and Posts
+and Pinned are read again. A refusal says what was refused, under each row it named, and keeps
+every letter typed; a source that did not answer changes nothing on the page, keeps what was
+typed, and Save sends it again. Cancel with something typed asks first. Your picture and
+header are not changed here yet.
 
 One thing is not here. Following somebody on another server is not settled by the press: the
 page reads the source again, and says "asked" until their server agrees.

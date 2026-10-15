@@ -26,6 +26,11 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     /// unfollowed, requests to follow answered, a follower removed. **Stands without
     /// `acting`**: a sign-in that only reads may be asked for it (#347).
     case follows
+    /// The reader's own account as others see it: its name, its words and fields, and what it
+    /// lets others do (#312). **The source gives the same word for more than that** — featuring
+    /// people and hashtags, pinning a post, dismissing an announcement or a suggestion — so the
+    /// question says so. Stands without `acting`.
+    case account
 
     /// The words a page asks for this part.
     public var words: [String] {
@@ -36,6 +41,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
         case .bookmarks: ["write:bookmarks"]
         case .notices: ["read:notifications"]
         case .follows: ["read:follows", "write:follows"]
+        case .account: ["write:accounts"]
         }
     }
 
@@ -44,7 +50,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var wordsBesideActing: [String] {
         switch self {
         case .notices: ["write:notifications"]
-        case .reading, .search, .acting, .bookmarks, .follows: []
+        case .reading, .search, .acting, .bookmarks, .follows, .account: []
         }
     }
 
@@ -54,7 +60,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var rider: Bool {
         switch self {
         case .search, .bookmarks: true
-        case .reading, .acting, .notices, .follows: false
+        case .reading, .acting, .notices, .follows, .account: false
         }
     }
 
@@ -63,7 +69,7 @@ public enum MastodonPart: String, CaseIterable, Sendable {
     public var needsActing: Bool {
         switch self {
         case .bookmarks: true
-        case .reading, .search, .acting, .notices, .follows: false
+        case .reading, .search, .acting, .notices, .follows, .account: false
         }
     }
 }

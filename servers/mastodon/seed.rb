@@ -420,6 +420,21 @@ blocker.block!(writer_account) unless blocker.blocking?(writer_account)
 # named unlike the rest, so that no search for the seed's people finds one more.
 followable = person.call("followable_313")
 
+# One whose own account the checks change and put back (#312), and one who asks to follow it:
+# nobody else asks after, counts or lists either. Limited by this server, so that being found
+# turned on lists it in no directory another check reads; named unlike the rest, so that no
+# search for the seed's people finds them. Put back here as the checks start it, every run,
+# whatever a run that stopped part way left.
+own = person.call("own_312")
+own_fan = person.call("own_fan_312")
+own.silence! unless own.silenced?
+FollowRequest.where(target_account: own).destroy_all
+Follow.where(target_account: own).destroy_all
+own.update!(
+  display_name: "Own 312", note: "Words of my own.", locked: false, discoverable: false, hide_collections: false,
+  fields_attributes: [{ name: "site", value: "own.example" }, { name: "pronouns", value: "they" }]
+)
+
 # How the writer stands to people: they mute one and block another.
 writer_account.mute!(fans[4]) unless writer_account.muting?(fans[4])
 writer_account.block!(fans[3]) unless writer_account.blocking?(fans[3])
@@ -497,7 +512,8 @@ standing = "#{reading} read:follows"
 following = "#{standing} write:follows"
 people_sign_ins = {
   "standing" => [user, standing], "hidden" => [hidden.user, "read write"], "narrow" => [user, "read:statuses"],
-  "following" => [user, following]
+  "following" => [user, following],
+  "own" => [own.user, "read write"], "ownFan" => [own_fan.user, "read write"]
 }.transform_values do |(owner, scopes)|
   held = Doorkeeper::AccessToken.find_by(application: grained, resource_owner_id: owner.id, scopes: scopes, revoked_at: nil) ||
     Doorkeeper::AccessToken.create!(application: grained, resource_owner_id: owner.id, scopes: scopes, expires_in: nil)
@@ -527,6 +543,7 @@ File.write(more, JSON.generate(tokens.merge(
     "person" => named.call(shown), "locked" => named.call(locked), "hidden" => named.call(hidden).merge(people_sign_ins["hidden"]),
     "moved" => named.call(moved), "gone" => named.call(gone), "limited" => named.call(limited),
     "robot" => named.call(robot), "blocker" => named.call(blocker), "followable" => named.call(followable),
+    "own" => named.call(own).merge(people_sign_ins["own"]), "ownFan" => named.call(own_fan).merge(people_sign_ins["ownFan"]),
     "muted" => named.call(fans[4]), "blocked" => named.call(fans[3]),
     "far" => named.call(far), "farHidden" => named.call(far_hidden),
     "fans" => fans.map { |fan| named.call(fan) },

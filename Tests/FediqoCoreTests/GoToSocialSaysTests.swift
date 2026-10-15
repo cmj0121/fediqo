@@ -171,4 +171,61 @@ struct GoToSocialSaysTests {
         }
         if let thrown { throw thrown }
     }
+
+    /// Asked by hand first, 2026-10-15, as the seed's second person (FINDINGS, "Asked later — a
+    /// change to one's own account"): no length is stated or held to, a form it will not take is
+    /// a 400 with one sentence — never a 422 naming what — and `hide_collections` is sent only
+    /// while it is `true`.
+    @Test("One's own account is changed there through the same code: what is sent comes back and reads back the same, one empty field clears them all, a form it will not take is a 400 and not a refusal naming what, and the lists are said hidden only while they are")
+    func changesOwnAccount() async throws {
+        try await LocalServers.requireGoToSocial()
+        let seeded = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: LocalServers.repoRoot.appending(path: "servers/.run/gotosocial-tokens.json"))
+        ) as? [String: Any]
+        let tokens = MemoryMastodonTokens()
+        let token = MastodonToken(host: Self.host, accessToken: try #require(seeded?["other"] as? String), clientID: "x", clientSecret: "x")
+        try tokens.save(token)
+        let own = MastodonOwnAccount(door: MastodonAuthorized(token: token, sender: try LocalHTTP.client(), store: tokens))
+        // As the seed leaves them: locked as made, and nothing said of the lists.
+        let start = OwnAccount(name: "other", words: "", fields: [], followWithoutAsking: false, findable: false, listsShown: nil)
+
+        let thrown: (any Error)?
+        do {
+            #expect(try await own.read() == start)
+            #expect(try await own.limits() == OwnLimits(fields: 6), "only how many fields")
+
+            var changed = start
+            changed.name = String(repeating: "o", count: 600)
+            changed.words = "Words of my own."
+            changed.fields = [.init(name: "site", value: "own.example")]
+            changed.followWithoutAsking = true
+            changed.findable = true
+            changed.listsShown = false
+            #expect(try await own.change(from: start, to: changed)?.account == changed, "a name of 600 is taken")
+            #expect(try await own.read() == changed)
+
+            var cleared = changed
+            cleared.fields = []
+            cleared.listsShown = true
+            let answer = try #require(try await own.change(from: changed, to: cleared))
+            #expect(answer.account.fields.isEmpty)
+            #expect(answer.account.listsShown == nil, "shown is not said: `hide_collections` is gone, not false")
+
+            var seven = cleared
+            seven.fields = (0 ..< 7).map { OwnAccount.Field(name: "n\($0)", value: "v\($0)") }
+            await #expect(throws: MastodonAuthError.http(400)) { _ = try await own.change(from: cleared, to: seven) }
+            #expect(try await own.read().fields.isEmpty, "nothing of it was kept")
+            thrown = nil
+        } catch {
+            thrown = error
+        }
+        // Put back as the seed left it, whatever became of the asking.
+        if let now = try? await own.read(), now != start {
+            var back = start
+            back.listsShown = now.listsShown == false ? true : nil
+            _ = try? await own.change(from: now, to: back)
+        }
+        if let thrown { throw thrown }
+        #expect(try await own.read() == start, "left changed on the server")
+    }
 }

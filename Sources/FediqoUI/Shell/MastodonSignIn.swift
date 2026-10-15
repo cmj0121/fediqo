@@ -202,6 +202,32 @@ public final class MastodonSessions {
         return reader.asking
     }
 
+    /// How many ask to follow the reader at `host`, as a change to their own account was just
+    /// answered (#312) — **through the sign-in held now**, and only where the answer said: a
+    /// figure not said leaves the one the check said. Counted as an account check, since it is
+    /// the source's own figure of the same thing.
+    /// **Only for the account `accountID` names**: the figure is about that account and no other.
+    func askingAnswered(_ asking: Int?, of accountID: String, host raw: String) {
+        let host = raw.lowercased()
+        guard let asking, let held = token(host: host) else { return }
+        if let reader = readers[host], reader.accessToken == held.accessToken {
+            guard reader.id == accountID else { return }
+            readers[host]?.asking = asking
+        } else if let id = held.accountID, id == accountID {
+            let handle = held.handle.flatMap { MastodonWho.kept($0, at: host) }
+            readers[host] = Reader(id: id, handle: handle, accessToken: held.accessToken, asking: asking)
+        } else {
+            return
+        }
+        askingChecks[host, default: 0] += 1
+        askingAnswers[host, default: 0] += 1
+        readersLearnt += 1
+    }
+
+    /// How many times a change has said this run how many ask to follow the reader at each
+    /// host: what tells an account check set out before such an answer from one set out after.
+    @ObservationIgnored private var askingAnswers: [String: Int] = [:]
+
     /// Which account check at `host` this run `asking` is the word of: one more each time the
     /// check answers, so whoever saw a figure grow old by its own press knows when a newer one
     /// has come.
@@ -1027,8 +1053,9 @@ public final class MastodonSessions {
         let host = raw.lowercased()
         unlearned.remove(host)
         guard let door = authorized(host: host, within: limit, for: .signInCheck) else { return }
+        let answered = askingAnswers[host, default: 0]
         do {
-            name(door.token, as: try await door.who())
+            name(door.token, as: try await door.who(), askingAnsweredAt: answered)
         } catch MastodonAuthError.signedOut {
             endedByServer(host: host)
         } catch where DarkNetwork.caused(error) {
@@ -1048,7 +1075,10 @@ public final class MastodonSessions {
     /// handle of its own unwrites the one written before. A note the Keychain refuses changes
     /// nothing held, and the reader is still known for this run, by the token the answer came
     /// through.
-    private func name(_ asked: MastodonToken, as who: MastodonWho) {
+    ///
+    /// **A figure of who asks that a change answered after this check set out stays**
+    /// (`askingAnswered`): the check's own is older than it.
+    private func name(_ asked: MastodonToken, as who: MastodonWho, askingAnsweredAt answered: Int) {
         let host = asked.host
         guard let held = token(host: host), held.accessToken == asked.accessToken else { return }
         if let id = who.id, held.accountID != id || held.handle != who.handle {
@@ -1069,7 +1099,8 @@ public final class MastodonSessions {
             }
         }
         if who.handle != handles[host] { handles[host] = who.handle }
-        readers[host] = who.id.map { Reader(id: $0, handle: who.handle, accessToken: asked.accessToken, asking: who.asking) }
+        let newer = askingAnswers[host, default: 0] != answered ? readers[host].flatMap { $0.id == who.id ? $0.asking : nil } : nil
+        readers[host] = who.id.map { Reader(id: $0, handle: who.handle, accessToken: asked.accessToken, asking: newer ?? who.asking) }
         askingChecks[host, default: 0] += 1
         readersLearnt += 1
     }

@@ -24,6 +24,8 @@ actor PageServer: HTTPClient, HTTPSender {
     private var routes: [String: Answer]
     private(set) var asked: [String] = []
     private(set) var bearers: [String] = []
+    /// The method and body of each ask that sent one, in the order they came.
+    private(set) var sent: [(ask: String, method: String, body: String)] = []
     private var held: Set<String> = []
     private var gates: [String: [CheckedContinuation<Void, Never>]] = [:]
     private var arrived: [String: Int] = [:]
@@ -79,6 +81,7 @@ actor PageServer: HTTPClient, HTTPSender {
         let ask = url.path + (url.query.map { "?\($0)" } ?? "")
         asked.append(ask)
         bearers.append(request.value(forHTTPHeaderField: "Authorization") ?? "")
+        if let body = request.httpBody { sent.append((ask, request.httpMethod ?? "", String(decoding: body, as: UTF8.self))) }
         arrived[ask, default: 0] += 1
         if held.contains(ask) { await withCheckedContinuation { gates[ask, default: []].append($0) } }
         guard let answer = routes[ask] else { throw URLError(.notConnectedToInternet) }

@@ -59,6 +59,8 @@ struct PersonPageActs {
     var onAskFollows: () -> Void = {}
     /// "Try again", where the source could not be asked how the reader stands to them.
     var onStandingAgain: () -> Void = {}
+    /// Change, on the reader's own page.
+    var onChange: () -> Void = {}
     /// The foot under their posts, and under what they pinned; and "Try again" over those.
     var onReadOn: () -> Void = {}
     var onPinnedAgain: () -> Void = {}
@@ -151,7 +153,7 @@ struct PersonPage: View {
     private var heading: some View {
         PersonHead(
             head: head, front: PageFrame.stripDrawn(tabs) ? front : nil, onTab: acts.onTab, onAct: acts.onAct,
-            onAskFollows: acts.onAskFollows, onStandingAgain: acts.onStandingAgain
+            onAskFollows: acts.onAskFollows, onStandingAgain: acts.onStandingAgain, onChange: acts.onChange
         )
         ShellRule()
         if line != nil || lookUp != nil || homeOverTabs != nil {

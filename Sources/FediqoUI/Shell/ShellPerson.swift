@@ -271,6 +271,9 @@ final class ShellPersonPages {
     /// page (#321): asked the same way, numbered on the same count, and let go with the same
     /// reader.
     let you: ShellYouThere
+    /// The reader's own account as its owner sees it, and the sheet that changes it (#312):
+    /// numbered on the same count, and let go with the same reader.
+    let profile: ShellProfile
     /// The people and the hashtags a search found at the sources, and an address looked up
     /// through one (#319): numbered on the same count, and let go with the same reader.
     let found: ShellSearchFound
@@ -303,6 +306,8 @@ final class ShellPersonPages {
         self.rising = rising
         let you = ShellYouThere(errands: count, readers: looks)
         self.you = you
+        let profile = ShellProfile(errands: count, readers: looks)
+        self.profile = profile
         let found = ShellSearchFound(errands: count, readers: looks, lists: lists)
         self.found = found
         home = ShellPersonHome(errands: count)
@@ -325,6 +330,7 @@ final class ShellPersonPages {
         looks.whenChanged { [weak rising] host in rising?.letGo(at: host) }
         looks.whenChanged { [weak you] host in you?.letGo(at: host) }
         looks.whenChanged { [weak tags] host in tags?.letGo(at: host) }
+        profile.answered = { [weak self] person, host, session in await self?.ownAnswered(person, at: host, in: session) }
     }
 
     /// A page opening, as its pane's task is named: who they are **and who asks**, so a page
@@ -445,6 +451,35 @@ final class ShellPersonPages {
     }
 
     // MARK: - On their own page
+
+    /// The source answered a change to the reader's own account at `host` with `person`
+    /// (#312): their own page draws the answer — its head and About — and **its Posts and
+    /// Pinned forget what they read**, so the page is one account: the tab of the two in front
+    /// asks again now, and the other when it is next in front. Nothing where their own page
+    /// is not open for whoever asks now.
+    func ownAnswered(_ person: Person, at host: String, in session: ShellSession) async {
+        guard let me = Self.own(at: host, in: session), let source = Self.source(of: me, in: session),
+              let page = standing(of: me, at: source, in: session),
+              // The page of the account the answer is about, and of nobody else.
+              case .said(let shown) = page.reading, shown.accountID == person.accountID
+        else { return }
+        let id = me.id
+        // An ask of who they are still on the wire set out before the change: its answer is
+        // older than this one, and lands nowhere.
+        asks[id]?.cancel()
+        asks[id] = nil
+        pages[id]?.awaits = errands.next()
+        pages[id]?.asking = false
+        pages[id]?.reading = .said(person)
+        pages[id]?.again = nil
+        postAsks[id]?.cancel()
+        postAsks[id] = nil
+        pages[id]?.forgetPosts(errands.next())
+        built.forget(id)
+        tabs.forgetPinned(id)
+        let front = front(of: me, in: session)
+        if front == .posts || front == .pinned { await fronted(me, in: session) }
+    }
 
     /// The way to the hashtags the reader follows (#318), where the page of `who` is their own
     /// — drawn under the figures, and so only where they are: none until the source has said

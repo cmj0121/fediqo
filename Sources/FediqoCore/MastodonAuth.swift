@@ -58,6 +58,12 @@ public enum MastodonAuthError: Error, Equatable, Sendable {
     case http(Int)
 }
 
+/// A request made with a token whose content the source would not take (422), and its answer
+/// as sent — which says what was refused, and is a stranger's words.
+public struct MastodonUnprocessable: Error, Equatable, Sendable {
+    public let body: Data
+}
+
 /// A request made with a token, refused for want of a scope the token was not issued with.
 public enum MastodonScopeError: Error, Equatable, Sendable {
     case outside
@@ -785,6 +791,15 @@ public struct MastodonAuthorized: Sendable {
     ) async throws -> Data {
         let body = try MultipartBody(parts, limit: min(limit, MultipartBody.byteLimit))
         return try await finish(try await send(path: path, method: "PATCH", parts: body), path: path)
+    }
+
+    /// A PATCH carrying a form through the same door (#312). As `post(path:form:)`, with what
+    /// was sent refused told from every other refusal: a 422 throws `MastodonUnprocessable`
+    /// with the source's answer, which says what it would not take.
+    public func patch(path: String, form: [(String, String)]) async throws -> Data {
+        let result = try await send(path: path, method: "PATCH", form: form)
+        if result.status == 422 { throw MastodonUnprocessable(body: result.body) }
+        return try await finish(result, path: path)
     }
 
     /// Who the reader is on this source, as `@user@host` — the spelling `Note.handle` takes, so a
