@@ -330,7 +330,6 @@ final class ShellPersonPages {
         looks.whenChanged { [weak rising] host in rising?.letGo(at: host) }
         looks.whenChanged { [weak you] host in you?.letGo(at: host) }
         looks.whenChanged { [weak tags] host in tags?.letGo(at: host) }
-        looks.whenChanged { [weak profile] host in profile?.letGo(at: host) }
         profile.answered = { [weak self] person, host, session in await self?.ownAnswered(person, at: host, in: session) }
     }
 
@@ -463,6 +462,12 @@ final class ShellPersonPages {
               standing(of: me, at: source, in: session) != nil
         else { return }
         let id = me.id
+        // An ask of who they are still on the wire set out before the change: its answer is
+        // older than this one, and lands nowhere.
+        asks[id]?.cancel()
+        asks[id] = nil
+        pages[id]?.awaits = errands.next()
+        pages[id]?.asking = false
         pages[id]?.reading = .said(person)
         pages[id]?.again = nil
         postAsks[id]?.cancel()

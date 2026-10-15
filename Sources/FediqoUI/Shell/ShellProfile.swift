@@ -19,9 +19,11 @@ import SwiftUI
 // head and About of their own page (`ShellPersonPages.ownAnswered`), its Posts and Pinned asked
 // again, and how many ask to follow them (`MastodonSessions.askingAnswered`).
 //
-// **As whoever asked, and nobody else's.** A sheet is put down, its ask called off, when the
-// sign-in to that host ends, begins or changes (`PageReaders`), and an answer lands only while
-// its ask is still the one awaited. **Held nowhere**: for this run, in memory.
+// **As whoever asked, and nobody else's — told by the account, not the token.** Asking for the
+// account part in place hands back a new token for the same account, and the typing must
+// outlive that; so at each press the sheet looks at who the sign-in is now (`PageReaders`,
+// which lets the pages go), and is put down only where that is another account. An answer
+// lands only while its ask is still the one awaited. **Held nowhere**: for this run, in memory.
 
 /// Which sheet is up: the host whose account it changes, and the opening it is.
 struct ProfileOpen: Identifiable, Equatable {
@@ -45,6 +47,8 @@ final class ShellProfile {
     var draft: ProfileDraft?
 
     @ObservationIgnored private var askedAs: AskedAs = .nobody
+    /// The id the source gave the reader the sheet was opened for, where it had said.
+    @ObservationIgnored private var accountID: String?
     @ObservationIgnored private var task: Task<Void, Never>?
     /// The number of the ask whose answer the sheet awaits.
     @ObservationIgnored private var awaits = 0
@@ -87,6 +91,7 @@ final class ShellProfile {
               let held = readers.look(at: source.host, in: session).held
         else { return nil }
         askedAs = ShellPersonPages.askedAs(at: source.host, in: session)
+        accountID = session.mastodon.reader(host: source.host)?.id
         open = ProfileOpen(host: source.host, id: errands.next())
         return read(source, with: held, in: session)
     }
@@ -95,9 +100,7 @@ final class ShellProfile {
     @discardableResult
     func readAgain(in session: ShellSession) -> Task<Void, Never>? {
         guard let open, state == .readFailed, let source = ShellPersonPages.source(at: open.host, in: session) else { return nil }
-        let held = readers.look(at: source.host, in: session).held
-        // The look may have found another reader, and put the sheet down.
-        guard self.open == open, let held else { return nil }
+        guard let held = held(at: source, in: session) else { return nil }
         return read(source, with: held, in: session)
     }
 
@@ -145,8 +148,7 @@ final class ShellProfile {
         guard let open, let draft, said(in: session)?.canSave == true,
               let source = ShellPersonPages.source(at: open.host, in: session)
         else { return nil }
-        let held = readers.look(at: source.host, in: session).held
-        guard self.open == open, let held else { return nil }
+        guard let held = held(at: source, in: session) else { return nil }
         let errand = errands.next()
         awaits = errand
         state = .sending
@@ -183,6 +185,25 @@ final class ShellProfile {
         }
     }
 
+    /// The sign-in a press goes through, after the one look at it: nothing — and the sheet put
+    /// down — where it is another account's than the sheet was opened for, or where nobody is
+    /// signed in there now, which says the sign-in ended.
+    private func held(at source: Source, in session: ShellSession) -> MastodonToken? {
+        let held = readers.look(at: source.host, in: session).held
+        guard let held else {
+            state = .ended
+            return nil
+        }
+        let now = ShellPersonPages.askedAs(at: source.host, in: session)
+        let was = accountID, id = session.mastodon.reader(host: source.host)?.id
+        guard now.isTheSame(as: askedAs), was == nil || id == nil || was == id else {
+            close()
+            return nil
+        }
+        if accountID == nil { accountID = id }
+        return held
+    }
+
     /// The press on the lock where the sign-in no longer holds the account part.
     func askForPart(in session: ShellSession) {
         guard let open else { return }
@@ -192,12 +213,6 @@ final class ShellProfile {
     /// Cancel, or Discard: the sheet put down and nothing sent. **Nothing while a change is out.**
     func putDown() {
         guard state != .sending else { return }
-        close()
-    }
-
-    /// The sheet put down, its ask called off: the sign-in at `host` is no longer who asked.
-    func letGo(at host: String) {
-        guard open?.host == host else { return }
         close()
     }
 

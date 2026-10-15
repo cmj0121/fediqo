@@ -23,6 +23,7 @@ struct ShellProfileTests {
     private static let instance = "/api/v2/instance"
     private static let change = "/api/v1/accounts/update_credentials"
     private static let statuses = "/api/v1/accounts/7/statuses"
+    private static let pinned = "/api/v1/accounts/7/statuses?pinned=true"
 
     /// The account as its owner sees it, in the shape a real server's account check has.
     private static func own(name: String = "Me", locked: Bool = true, asking: Int = 3) -> String {
@@ -51,6 +52,7 @@ struct ShellProfileTests {
             instance: PageServer.Answer(body: limits),
             change: PageServer.Answer(body: own(name: "River Me", locked: false, asking: 0)),
             statuses: PageServer.Answer(body: "[" + status(2) + "]"),
+            pinned: PageServer.Answer(body: "[" + status(1) + "]"),
         ].merging(more) { $1 }
     }
 
@@ -310,7 +312,7 @@ struct ShellProfileTests {
         #expect(said.state == .forbidden && said.draft?.words == "Rivers, mostly." && said.canSave)
         #expect(said.stateLine(language: .english) == "m.example would not let this sign-in change your account. What you typed is kept.")
 
-        let (lacking, _) = await self.session(Self.served([Self.change: forbidden]))
+        let (lacking, wire) = await self.session(Self.served([Self.change: forbidden]))
         try await signIn(lacking, holding: Self.reads)
         let (others, _) = try await ownPage(lacking)
         _ = try await opened(others, lacking)
@@ -323,12 +325,20 @@ struct ShellProfileTests {
         others.profile.askForPart(in: lacking)
         #expect(lacking.partAsks.open?.ticked == [.account])
         lacking.partAsks.putDown()
-        // Held again — as a yes on the source's page leaves it — the sheet is as it was.
-        try lacking.mastodon.tokens.save(MastodonToken(
-            host: Self.host, accessToken: "tok", clientID: "c", clientSecret: "s", scopes: Self.all, asked: Self.all
-        ))
-        lacking.mastodon.refresh()
+        // Held again — as a yes on the source's page leaves it: a new token for the same
+        // account — the sheet is as it was, and the next press keeps it and what was typed.
+        try await signIn(lacking, as: "tok3")
         #expect(others.profile.said(in: lacking)?.state == .read && others.profile.said(in: lacking)?.canSave == true)
+        await wire.answer(Self.change, PageServer.Answer(body: Self.own()))
+        var heard: [String] = []
+        others.profile.announce = { heard.append($0) }
+        let saving = others.profile.save(in: lacking)
+        #expect(saving != nil, "the same account: the press goes through")
+        await saving?.value
+        #expect(await wire.arrivals(of: Self.change) == 2)
+        #expect(others.profile.open == nil)
+        #expect(await form(wire) == ["note": "Rivers, mostly."])
+        #expect(heard == ["m.example saved your account."], "the answer landed on the sheet that sent it")
     }
 
     @Test("A change that gets no answer says whether it took is not known, keeps what was typed and changes nothing held — the page stays as last read — and Save sends the same again")
@@ -373,9 +383,73 @@ struct ShellProfileTests {
         let (pages, _) = try await ownPage(session)
         _ = try await opened(pages, session)
         pages.profile.draft?.name = "River Me"
+        await server.answer(Self.who, PageServer.Answer(body: #"{"id":"8","acct":"other","username":"other"}"#))
         try await signIn(session, as: "tok2")
         #expect(pages.profile.save(in: session) == nil)
         #expect(pages.profile.open == nil)
         #expect(await server.arrivals(of: Self.change) == 0)
+    }
+
+    // MARK: - What lands after the answer
+
+    @Test("An ask of who the reader is that set out before the change and lands after its answer lands nowhere: the page goes on drawing the answer")
+    func anOlderReadLandsNowhere() async throws {
+        let (session, server) = await session()
+        try await signIn(session)
+        let (pages, me) = try await ownPage(session)
+        await server.hold(Self.lookup)
+        let held = watching("the page's ask of who they are, held at its server") { await server.release(Self.lookup) }
+        defer { held.cancel() }
+        let before = await server.arrivals(of: Self.lookup)
+        let asking = Task { await pages.again(me, in: session) }
+        await server.arrival(of: Self.lookup, times: before + 1, by: asking)
+        _ = try await opened(pages, session)
+        pages.profile.draft?.name = "River Me"
+        await pages.profile.save(in: session)?.value
+        #expect(pages.head(of: me, in: session).name == "River Me")
+        await server.release(Self.lookup)
+        await asking.value
+        #expect(pages.head(of: me, in: session).name == "River Me", "the older account is not drawn over the answer")
+    }
+
+    @Test("An account check that set out before a change's answer and lands after it leaves the answer's count of who asks to follow")
+    func anOlderCheckKeepsTheAnsweredCount() async throws {
+        let (session, server) = await session()
+        try await signIn(session)
+        #expect(session.mastodon.asking(host: Self.host) == 3)
+        await server.hold(Self.who)
+        let held = watching("the account check, held at its server") { await server.release(Self.who) }
+        defer { held.cancel() }
+        let before = await server.arrivals(of: Self.who)
+        let checking = Task { await session.mastodon.learnWho(host: Self.host) }
+        await server.arrival(of: Self.who, times: before + 1, by: checking)
+        session.mastodon.askingAnswered(0, host: Self.host)
+        await server.release(Self.who)
+        await checking.value
+        #expect(session.mastodon.asking(host: Self.host) == 0)
+        await session.mastodon.learnWho(host: Self.host)
+        #expect(session.mastodon.asking(host: Self.host) == 3, "a check set out after says its own")
+    }
+
+    @Test("With Pinned in front, an answer has Pinned forget what it read and ask again, and Posts asks when it is next in front")
+    func pinnedAsksAgain() async throws {
+        let (session, server) = await session()
+        try await signIn(session)
+        let (pages, me) = try await ownPage(session)
+        var lamp: String?
+        _ = pages.turn(me, to: .posts, lamp: &lamp, in: session)
+        await pages.fronted(me, in: session)
+        _ = pages.turn(me, to: .pinned, lamp: &lamp, in: session)
+        await pages.fronted(me, in: session)
+        #expect(await server.arrivals(of: Self.pinned) == 1)
+        #expect(await server.arrivals(of: Self.statuses) == 1)
+        _ = try await opened(pages, session)
+        pages.profile.draft?.name = "River Me"
+        await pages.profile.save(in: session)?.value
+        #expect(await server.arrivals(of: Self.pinned) == 2, "Pinned, in front, asked again")
+        #expect(await server.arrivals(of: Self.statuses) == 1, "Posts waits until it is in front")
+        _ = pages.turn(me, to: .posts, lamp: &lamp, in: session)
+        await pages.fronted(me, in: session)
+        #expect(await server.arrivals(of: Self.statuses) == 2)
     }
 }
