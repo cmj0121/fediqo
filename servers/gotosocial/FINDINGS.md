@@ -533,6 +533,38 @@ answers in `MastodonRequestsCaptures.swift`.
   - What in the app rests on it: `MastodonStanding.removeFollower`: here the press does not arrive and says so; the
     item is still offered (nothing says beforehand that the address is absent)
 
+### Asked later — a change to one's own account
+
+Asked 2026-10-15 by hand, as each seed's second person, and not counted among the 172. Kept as
+checks in `MastodonOwnAccountSaysTests.swift` (Mastodon, as the seed's `own_312`) and
+`GoToSocialSaysTests.swift` (`changesOwnAccount`).
+
+- **The limits a host states (`/api/v2/instance`, `configuration.accounts`)**:
+  - Mastodon 4.6.6: name 40, words 500, fields 4, a field's name and value 255 each
+  - GoToSocial 0.22.2: **fields 6 and nothing else** — and none held to: a name of 2000 and words of 6000 are 200
+  - What in the app rests on it: `MastodonOwnAccount.limits`: a limit not stated is none, and nothing refuses it
+- **A form it will not take (a name too long; seven fields; a switch said `maybe`)**:
+  - Mastodon 4.6.6: **422**, `error` and a `details` naming `display_name`, in the asking language; `locked=maybe`
+    is taken as `true`, 200
+  - GoToSocial 0.22.2: **400**, `{"error":"Bad Request: cannot have more than 6 profile fields"}`, nothing named;
+    `maybe` is 400 too
+  - What in the app rests on it: `MastodonOwnAccount.change`: a 400 is not `.refused` but the door's `http(400)` —
+    a failure, not "the source would not take this"; what was typed is not said to be what was refused
+- **`hide_collections` after it is sent**:
+  - Mastodon 4.6.6: always on the account and in `source`
+  - GoToSocial 0.22.2: **on the account while `true`, and gone while `false`** (never in `source`) — item 5 below,
+    which said it never comes
+  - What in the app rests on it: `OwnAccount.listsShown`: hidden reads as hidden, shown reads as not said
+- **One field with no name and no value**:
+  - Mastodon 4.6.6: no fields kept
+  - GoToSocial 0.22.2: the same
+  - What in the app rests on it: `MastodonOwnAccount.form` clears every field so
+- **"Follow without asking" turned on while somebody waits (Mastodon only)**:
+  - Mastodon 4.6.6: 200 at once, and `source.follow_requests_count` **still counts who waits**: the letting in is a
+    queued job per request, run later (this fixture runs none, so they wait; run by hand, the asker follows and the
+    count is 0)
+  - What in the app rests on it: `OwnAnswer.asking` is what the answer says, not what is about to be
+
 ## Could not be asked, or not comparable — 11
 
 - **An app registered with a word no server knows; with no words (2)**:
@@ -573,7 +605,8 @@ Each names the unit of `PLAN-mastodon.md` it touches.
    stands — P4.
 4. **That a follow is a follow.** An account made here is locked: a follow answers
    `requested: true` and stays so until agreed to — P4, P5b.
-5. **That an account says whether it hides its lists.** `hide_collections` is never sent, nor
+5. **That an account says whether it hides its lists.** `hide_collections` is sent only while `true` (asked
+   2026-10-15: an account of its own, hidden), never `false`, nor
    `uri`, nor `roles` — P5b's lists, P7's lists, P8.
 6. **That a mute for a time says when it ends**, or mutes notices too: no `muting_expires_at`,
    no `languages`, `muting_notifications: false` — P5a, P6a.

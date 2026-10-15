@@ -178,6 +178,11 @@ enum LocalServers {
             /// Followed by nobody, the writer least of all: who the check of following and
             /// unfollowing follows (#313). Nothing in a file a seed older than that wrote.
             let followable: Named?
+            /// Whose own account the checks change and put back, and who asks to follow it
+            /// (#312): limited by this server, so it is listed nowhere. Nothing in a file a seed
+            /// older than that wrote.
+            let own: SignedIn?
+            let ownFan: SignedIn?
             /// Followers of `person` the writer mutes and blocks.
             let muted: Named
             let blocked: Named
