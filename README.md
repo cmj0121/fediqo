@@ -323,9 +323,10 @@ choose a forum's boards. Home is always read once you are signed in.
 A Mastodon source can be signed in to from its row on Account, so its Home and your lists can
 be read. Before the server's page opens, Fediqo asks which sign-in you want, and says which
 part is which: reading alone, or reading and writing. Reading brings in your Home and your
-lists. Writing lets you post, reply, boost, favourite and bookmark from Fediqo, and take any of
-them back — and nothing else: no sign-in asks to follow anybody unasked, signing in never asks
-to change your profile — that is asked apart, at Change, below — and Fediqo never asks to touch
+lists. Writing lets you post, reply, boost, favourite and bookmark from Fediqo, react to what a
+source announces, and take any of them back — and nothing else: no sign-in asks to follow
+anybody unasked, signing in never asks to change your profile — that is asked apart, below —
+and Fediqo never asks to touch
 your filters. Choosing reading alone asks for exactly what
 Fediqo asked for before it could write at all, so refusing the writing part changes nothing
 about reading. Signing in again is how you change your answer.
@@ -377,11 +378,15 @@ following and unfollowing — and a press on it asks for exactly that. Nothing i
 meanwhile: no standing is drawn for a sign-in that cannot see it.
 
 Your profile is asked for apart too, and only when it is first needed: at a press on Change on
-your own page. The press asks first, and says what the server's page will be asked for: what
-the sign-in already has, and one thing more — your profile: to change your name, your bio,
-your extra fields and what your account lets others do. The server gives the same permission
-for featuring people and hashtags on your profile, pinning your posts, and dismissing
-announcements and suggestions, and the question says so. Nobody is signed out, on this device
+your own page, on Feature or Take off your profile, on Don't suggest, or on Dismiss on what a
+source announces. The press asks first, and says what the server's page will be asked for:
+what the sign-in already has, and one thing more — your profile: to change your pictures, your
+name, your bio, your extra fields and what your account lets others do. The server gives the
+same permission for featuring people and hashtags on your profile, pinning your posts, and
+dismissing announcements and suggestions, and the question says so; all of those but pinning
+are done from Fediqo with it — see Reading, below. Where a sign-in was not given your profile,
+each of those presses is dim, under the mark signing in wears, and asks for it. Nobody is
+signed out, on this device
 or another; close the server's page, or say no on it, and the sign-in you had goes on as it
 was. A sign-in that only reads may be asked too.
 
@@ -396,7 +401,7 @@ What a sign-in asks its server for, in the server's own words:
 | dismissing | `write:notifications`                                | with notices, and only where the sign-in writes |
 | who you follow | `read:follows`                                   | only after you press for following              |
 | following  | `write:follows`                                      | with who you follow, and only where the sign-in writes |
-| your profile | `write:accounts`                                   | only after you press Change on your own page    |
+| your profile | `write:accounts`                                   | only after you press for something it covers    |
 
 A server that refuses `read:search` or `write:bookmarks` is asked again without it.
 
@@ -417,7 +422,9 @@ account signing in on that source leaves its posts here saying nothing of any of
 until a signed-in read says so again.
 
 A source's row on Account is one line at every width: its mark, its hostname, the sign-in key
-and three dots. Every source draws the same marks; one a source does not have, or cannot do
+and three dots. Where a source you are signed in to has announcements you have not seen, a
+megaphone stands before the key, and a press on it opens the source's page; it draws no
+number, and VoiceOver says how many. Every source draws the same marks; one a source does not have, or cannot do
 right now, is grey and says why. Choosing boards and lists is behind the dots, and so are Clear
 and Remove. What may be done on that source — read, read and write, or read only where the
 protocol has no writing in Fediqo at all, which is every forum — is no longer written on the
@@ -434,11 +441,13 @@ Whatever takes something away, signing out aside, is behind three dots on the ro
 section it acts on, and asks first: Clear and Remove on a source's row, Clear and Forget
 password in a source's detail on Usage, Stop keeping, letting go by dates, dropping picture
 copies, removing a timeline or a host you added, taking back a
-post of your own, dismissing a notice or every notice of a source, refusing a request to
+post of your own, dismissing a notice or every notice of a source, dismissing an announcement,
+telling a source not to suggest somebody, refusing a request to
 follow you, removing a follower, and letting go of what a
 source holds back. Signing out is the key itself, and asks first too. One is not asked: removing
 a rule from a timeline being edited is behind the dots as well, but it is only a draft, and
-nothing is kept until Done. Discarding a text that was not sent asks first as well, from its
+nothing is kept until Done. Taking somebody or a hashtag off your profile is behind the dots
+too, and is not asked either: Feature puts it back. Discarding a text that was not sent asks first as well, from its
 line at the foot of the page.
 
 The secret is kept in this device's Keychain. It is not in the
@@ -552,7 +561,8 @@ Somebody's page takes the whole place: nothing of the timelines stands over it. 
 says who they are and which source the page is read through, and carries three figures —
 their posts, who follows them, who they follow — each a mark and a number, as the source gave
 it. Under the head the page has tabs of its own: About, Following, Followers, Pinned and
-Posts, with About in front. About is what the source says of them and how you and they stand;
+Posts, with About in front. About is what the source says of them, how you and they stand,
+and what they feature on their profile;
 Following is who they follow, Followers is who follows them, Pinned is what they pinned, and
 Posts is their posts. A press on a figure brings its tab in front. Tab and ⇧Tab turn the
 page's tabs while it is in front, round and back to the first, and the timelines are not
@@ -566,7 +576,8 @@ no Pinned tab. A forum's author has their posts alone, and no tabs. Until a sour
 who somebody is, the page has About and Posts.
 
 A tab asks its source only when it is first brought in front. Opening the page asks who they
-are and, where the sign-in may see it, how you and they stand, and nothing more. Their posts,
+are; where the sign-in may see it, how you and they stand; and, once the source has said who
+they are, what they feature on their profile — and nothing more. Their posts,
 what they pinned and each of the two lists are asked for when their tab first comes in front,
 and not again on coming back to it. What they pinned is read in the source's own order, which
 is not newest first.
@@ -642,8 +653,54 @@ What is shown after Save is the source's answer, not what was typed: the sheet c
 page's head and About draw it, the line of who asks to follow you takes its figure, and Posts
 and Pinned are read again. A refusal says what was refused, under each row it named, and keeps
 every letter typed; a source that did not answer changes nothing on the page, keeps what was
-typed, and Save sends it again. Cancel with something typed asks first. Your picture and
-header are not changed here yet.
+typed, and Save sends it again. Cancel with something typed asks first.
+
+Your picture and header are the two rows at the top of the sheet, each shown as your page
+draws it. Choose… opens a panel on a Mac, and offers From Photos or From Files on a phone;
+Remove takes away the one the source holds; Keep current puts back what it holds. Nothing goes
+before Save, and the row says so. Where the source states how large a picture it takes, the
+sheet says so in the source's name, and a picture over that is refused as it is chosen, with
+its size and the source's limit; where the source states none, the limit is Fediqo's own, and
+the refusal names Fediqo. Either way nothing is chosen, and what was there stays. A source may
+still turn a picture away at Save, and says why under its row. A source that saved the rest
+but did not take a picture away says so, and Save asks it again. On a Mac, Fediqo may read
+and write a file only where you picked it in a panel — a picture here, and the files Take
+away writes and Read back opens.
+
+Featuring is done where the person or hashtag is, at a source that keeps it. On the page of
+somebody you follow, the page's three dots hold Feature on your profile, or Take off your
+profile where you feature them, and the head then says On your profile; it is not offered for
+somebody you do not follow, since the source refuses it. On a hashtag's About, each source
+that keeps featured hashtags has a line under its follow row that says whether the hashtag is
+on your profile there, with Feature where it is not and Take off your profile behind that
+line's three dots where it is. A press says it is on its way until the source answers, and
+one that did not arrive says so. A source that keeps no featuring draws none of it.
+
+What somebody features is on their About, as their source gave it: Hashtags they feature,
+each a row saying how many of their posts carry it and the day of the last, that opens the
+hashtag's page; and, only where the source gave somebody, a line, People they feature, that
+opens that list. On your own page they are Hashtags you feature and People you feature, and a
+row's three dots there hold Take off your profile. Nothing is drawn where the source gave none.
+
+The people a source suggests to you open from its page. Don't suggest is behind a row's three
+dots there: it asks first, then tells the source not to suggest them to you again. The row
+leaves at the yes and does not come back on the next read; one whose press did not arrive
+comes back and says so under it. Nobody is unfollowed or hidden: you can still find them and
+follow them.
+
+What a source announces to the people signed in there is the first block of its page, for a
+source you are signed in to: each announcement with when it was made or the dates it is
+about, its words, and its reactions. Seeing one is this device's own, for this run: one not
+seen before the page opened is marked New while the page stays open, and from then on it does
+not light the mark on the source's row until Fediqo runs again. Nothing is sent for seeing
+it. Dismiss is the source's act: it is behind the announcement's three dots and asks first,
+the source keeps it read for every app you use there, and here it folds under one line —
+"2 dismissed", say — that opens and folds again at a press. A reaction is a pill with its
+count, and a press adds yours or takes it back; Add a reaction takes any one emoji. Reactions
+ride writing, so a sign-in that only reads says it cannot react; Dismiss rides your profile.
+The source is asked when its page opens and with each round of reading that reaches it, at
+most once every 15 minutes; a failure says so, and Try again asks at once. A source that has
+no announcements draws no block.
 
 One thing is not here. Following somebody on another server is not settled by the press: the
 page reads the source again, and says "asked" until their server agrees.
