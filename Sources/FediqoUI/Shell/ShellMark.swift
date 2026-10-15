@@ -175,8 +175,9 @@ struct ShellMark: Equatable {
 /// reason is that the sign-in must be asked again.
 struct ShellMarkButton: View {
     let mark: ShellMark
-    /// An ink for the glyph over the look's own — `MarkLook`'s one stated exception, and nothing
-    /// else hands one in.
+    /// An ink for the glyph over the look's own — `MarkLook`'s stated exception, and the source
+    /// row's lit megaphone (`SourceRow.announcedMark`, in `ink`: lit, never switched on by the
+    /// reader); nothing else hands one in.
     let ink: Color?
     let act: () -> Void
     let ask: (() -> Void)?

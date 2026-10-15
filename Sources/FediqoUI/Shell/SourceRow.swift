@@ -536,8 +536,24 @@ extension SourceRow {
 
     /// What a listener is told of the row: what it is, then whatever it has to say, and then
     /// what its sign-in holds — one sentence, as it is written.
-    static func heard(row: String, said: [String], holds: String? = nil) -> String {
-        ([row] + said + [holds].compactMap { $0 }).joined(separator: " ")
+    static func heard(row: String, said: [String], holds: String? = nil, announced: String? = nil) -> String {
+        ([row] + [announced].compactMap { $0 } + said + [holds].compactMap { $0 }).joined(separator: " ")
+    }
+
+    /// The glyph of the mark a row wears while its source holds announcements not seen (#321).
+    static let announcedSymbol = "megaphone.fill"
+
+    /// That mark, as a value: live, and named by what its press does. **No digit**: how many is
+    /// said to a listener (`announcedSpoken`), not drawn.
+    static func announcedMark(_ host: String, language: DummyLanguage? = nil) -> ShellMark {
+        ShellMark(announcedSymbol, String(format: L10n.t("account.source.announced.help", language: language), host), look: .live)
+    }
+
+    /// How many announcements of `host` are not seen, as a listener is told it with the row.
+    static func announcedSpoken(_ count: Int, _ host: String, language: DummyLanguage? = nil) -> String {
+        count == 1
+            ? String(format: L10n.t("account.source.announced.spoken.one", language: language), host)
+            : String(format: L10n.t("account.source.announced.spoken", language: language), count, host)
     }
 
     /// What each press of a row does, handed in by the page: the row acts on nothing itself.
@@ -734,6 +750,9 @@ struct SourceRowView: View {
     /// How the sign-in's bookmarks stand where they are not held (#347), which is what the
     /// permission control then says — `MastodonSessions.bookmarkPlace(host:)`, handed in.
     var lock: PartWords.Place? = nil
+    /// How many announcements its source holds that are not seen and not dismissed (#321), as
+    /// last asked — or nothing, and then no mark is drawn. Handed in: the row asks nothing.
+    var announced: Int? = nil
     /// Builds the question Clear asks. Handed in: what it says depends on a saved password and a
     /// sign-in, which are the session's to know — and called only when Clear is chosen.
     let clearAsks: () -> ShellConfirmation
@@ -784,7 +803,10 @@ struct SourceRowView: View {
 
     /// What a listener is told of the row. Internal for `more`'s reason.
     var heard: String {
-        SourceRow.heard(row: SourceRow.spoken(row, listed: holds != nil), said: said, holds: holds)
+        SourceRow.heard(
+            row: SourceRow.spoken(row, listed: holds != nil), said: said, holds: holds,
+            announced: announced.map { SourceRow.announcedSpoken($0, row.source.host) }
+        )
     }
 
     /// `more`, as the builder `…` calls when it is opened.
@@ -867,6 +889,12 @@ struct SourceRowView: View {
             // a narrow page it is the hostname that gives way, by its middle. The worded control
             // spills what a glyph does past its own edges, so one gap serves both.
             HStack(spacing: ShellTouchFloor.gap(drawn: box)) {
+                // Lit while the source holds announcements not seen; not drawn otherwise.
+                if announced != nil {
+                    ShellMarkButton(
+                        SourceRow.announcedMark(row.source.host), ink: ShellChrome.ink(colorScheme), act: presses.open
+                    )
+                }
                 if let permission {
                     ShellMarkButton(
                         permission,

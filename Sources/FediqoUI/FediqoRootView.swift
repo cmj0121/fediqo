@@ -314,6 +314,7 @@ public struct FediqoRootView: View {
             // And the store is held within the room the person gave it (#249).
             .modifier(KeepingWithinRoom(session: session))
             .modifier(AsksOnAWait(session: session, minutes: prefs.askMinutes))
+            .modifier(AnnouncementsAsk(session: session, announcements: people.announcements))
             .onChange(of: place) { old, new in
                 let accepted = availability.placing(old, as: new)
                 if accepted != new { place = accepted }
@@ -426,7 +427,7 @@ public struct FediqoRootView: View {
             // device is the preview sitting on screen while the session says boards. `JoinSheet`
             // reads `session.stage` inside its own body and switches there, which is a redraw.
             .sheet(isPresented: stagePresented) {
-                JoinSheet(session: session, onOwnPage: ownPageOpener, onPeople: directoryOpener, more: people.more, you: people.you)
+                JoinSheet(session: session, onOwnPage: ownPageOpener, onPeople: directoryOpener, more: people.more, you: people.you, announcements: people.announcements)
             }
             // The timeline editor (#27), on the root beside the other presenters for their reason.
             // Dismissed by any route it is Cancel: the draft is dropped (Decision 21).
@@ -2654,7 +2655,7 @@ public struct FediqoRootView: View {
                 tooOld: noticeTooOld,
                 jumpToTop: noticeJump
             )
-        case .account: AccountPane(session: session, onOwnPage: ownPageOpener)
+        case .account: AccountPane(session: session, onOwnPage: ownPageOpener, announced: people.announcements)
         case .usage: UsagePane()
         case .preferences: PreferencesPane()
         }

@@ -225,6 +225,12 @@ struct SourceReach {
         MastodonSettings(door: door)
     }
 
+    /// What a source announces to the reader, and the reader's acts on one (#321), which are
+    /// only ever asked as them, through `door`.
+    func announcements(_ door: MastodonAuthorized) -> MastodonAnnouncements {
+        MastodonAnnouncements(door: door)
+    }
+
     /// The reader's own account as its owner sees it, and a change to it (#312), which is only
     /// ever asked as them, through `door`.
     func ownAccount(_ door: MastodonAuthorized) -> MastodonOwnAccount {

@@ -15,6 +15,10 @@ struct AccountPane: View {
     /// is drawn in the timeline place, and leaving it comes back here. Nothing where this page
     /// is drawn with nobody to answer, and then no row offers it.
     var onOwnPage: ((DummyPerson) -> Void)?
+    /// What each source announces to the reader there (#321), as last asked by the pages the
+    /// root holds: what lights a row's mark. Nothing where this page is drawn with none. **Read,
+    /// never asked**: this page contacts nobody on appearing.
+    var announced: ShellAnnouncements?
     @FocusState private var searchFocused: Bool
     /// `JoinSheet`'s `headerFocused` doctrine applied to the page: without it a VoiceOver reader
     /// who pressed Return in the field is left with focus on a field while a screenful of new
@@ -620,6 +624,7 @@ struct AccountPane: View {
                             ?? session.mastodon.leftLine(host: row.source.host),
                         holds: session.mastodon.holds(host: row.source.host),
                         lock: session.mastodon.bookmarkPlace(host: row.source.host),
+                        announced: announced?.mark(at: row.source.host, in: session),
                         clearAsks: { session.clearQuestion(host: row.source.host) },
                         removeAsks: { session.removeQuestion(host: row.source.host, postsStay: postsStay()) },
                         presses: presses(row, postsStay: postsStay)
@@ -637,7 +642,8 @@ struct AccountPane: View {
     /// what each source left is counted — four keys, one bubble.
     static func sourcesHelp(language: DummyLanguage? = nil) -> String {
         [
-            "account.sources.detail", "account.sources.marks", "account.sources.writing", "account.sources.held",
+            "account.sources.detail", "account.sources.marks", "account.sources.writing", "account.sources.announced",
+            "account.sources.held",
         ]
         .map { L10n.t($0, language: language) }
         .joined(separator: "\n\n")

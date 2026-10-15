@@ -68,6 +68,11 @@ final class ShellReload {
     /// The kinds of reload on the wire now. A second `r` of a kind already here starts nothing.
     private(set) var asking: Set<Ask> = []
 
+    /// Told each host a round of reading — a timeline's or the wait's — got through to, once
+    /// that round has landed: what asks a source for what it announces with the round (#321).
+    /// Nothing where nobody listens.
+    @ObservationIgnored var sourceAnswered: ((String) -> Void)?
+
     /// What of `asking` a reader pressed for, and so may stop: `Escape`, and the Stop the
     /// reload mark becomes while one runs (#307). What the app asks by itself — on the wait,
     /// for more as the list is read down, for a tag or a search — is not theirs to stop here.
@@ -720,6 +725,9 @@ final class ShellReload {
         // wait must not stand on an account check.
         let deadline = deadline
         Task { await session.mastodon.learnWhoAgain(among: answered, within: deadline) }
+        if kind == .timeline || kind == .held, let sourceAnswered {
+            for host in answered.sorted() { sourceAnswered(host) }
+        }
     }
 
     /// The open thread's post and its thread, from the host it came through, and not the
@@ -1379,6 +1387,23 @@ struct AsksOnAWait: ViewModifier {
     }
 
     static func wait(_ minutes: Int) -> Duration { .seconds(minutes * 60) }
+}
+
+/// While this window is open, every round of reading that gets through to a source asks it for
+/// what it announces, as `ShellAnnouncements` allows (#321). A modifier of its own, for
+/// `AsksOnAWait`'s reason.
+struct AnnouncementsAsk: ViewModifier {
+    let session: ShellSession
+    let announcements: ShellAnnouncements
+
+    func body(content: Content) -> some View {
+        content.task {
+            session.reload.sourceAnswered = { [weak session, weak announcements] host in
+                guard let session, let announcements else { return }
+                announcements.checked(host, in: session)
+            }
+        }
+    }
 }
 
 /// Every request through it ends within `limit`: past it, the request is cancelled and fails as

@@ -271,6 +271,9 @@ final class ShellPersonPages {
     /// page (#321): asked the same way, numbered on the same count, and let go with the same
     /// reader.
     let you: ShellYouThere
+    /// What a source announces to the reader there, for that source's own page and its row's
+    /// mark (#321): numbered on the same count, and let go with the same reader.
+    let announcements: ShellAnnouncements
     /// The reader's own account as its owner sees it, and the sheet that changes it (#312):
     /// numbered on the same count, and let go with the same reader.
     let profile: ShellProfile
@@ -306,6 +309,8 @@ final class ShellPersonPages {
         self.rising = rising
         let you = ShellYouThere(errands: count, readers: looks)
         self.you = you
+        let announcements = ShellAnnouncements(errands: count, readers: looks, hosts: hosts)
+        self.announcements = announcements
         let profile = ShellProfile(errands: count, readers: looks)
         self.profile = profile
         let found = ShellSearchFound(errands: count, readers: looks, lists: lists)
@@ -329,6 +334,7 @@ final class ShellPersonPages {
         looks.whenChanged { [weak more] host in more?.letGo(at: host) }
         looks.whenChanged { [weak rising] host in rising?.letGo(at: host) }
         looks.whenChanged { [weak you] host in you?.letGo(at: host) }
+        looks.whenChanged { [weak announcements] host in announcements?.letGo(at: host) }
         looks.whenChanged { [weak tags] host in tags?.letGo(at: host) }
         profile.answered = { [weak self] person, host, session in await self?.ownAnswered(person, at: host, in: session) }
     }
