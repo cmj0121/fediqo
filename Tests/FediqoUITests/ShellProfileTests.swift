@@ -423,7 +423,9 @@ struct ShellProfileTests {
         let before = await server.arrivals(of: Self.who)
         let checking = Task { await session.mastodon.learnWho(host: Self.host) }
         await server.arrival(of: Self.who, times: before + 1, by: checking)
-        session.mastodon.askingAnswered(0, host: Self.host)
+        session.mastodon.askingAnswered(0, of: "8", host: Self.host)
+        #expect(session.mastodon.asking(host: Self.host) == 3, "a figure about another account is not laid on this one")
+        session.mastodon.askingAnswered(0, of: "7", host: Self.host)
         await server.release(Self.who)
         await checking.value
         #expect(session.mastodon.asking(host: Self.host) == 0)
@@ -451,5 +453,34 @@ struct ShellProfileTests {
         _ = pages.turn(me, to: .posts, lamp: &lamp, in: session)
         await pages.fronted(me, in: session)
         #expect(await server.arrivals(of: Self.statuses) == 2)
+    }
+
+    @Test("A change on the wire when the reader becomes another account lands for nobody: the sheet goes down, nothing is said to a listener, and the new account's own page and count of who asks to follow it are what its own source said")
+    func anAnswerForAnotherAccountLandsNowhere() async throws {
+        let other = #"{"id":"8","acct":"other","username":"other","display_name":"Other","locked":true,"source":{"note":"","fields":[],"follow_requests_count":5}}"#
+        let (session, server) = await session(Self.served(["/api/v1/accounts/lookup?acct=other": PageServer.Answer(body: other)]))
+        try await signIn(session)
+        let (pages, _) = try await ownPage(session)
+        var heard: [String] = []
+        pages.profile.announce = { heard.append($0) }
+        _ = try await opened(pages, session)
+        pages.profile.draft?.name = "River Me"
+        await server.hold(Self.change)
+        let held = watching("the change, held at its server") { await server.release(Self.change) }
+        defer { held.cancel() }
+        let saving = try #require(pages.profile.save(in: session))
+        await server.arrival(of: Self.change, by: saving)
+
+        await server.answer(Self.who, PageServer.Answer(body: other))
+        try await signIn(session, as: "tok2")
+        let them = try #require(ShellPersonPages.own(at: Self.host, in: session))
+        await pages.opened(them, in: session)
+        #expect(pages.head(of: them, in: session).name == "Other" && session.mastodon.asking(host: Self.host) == 5)
+        await server.release(Self.change)
+        await saving.value
+
+        #expect(pages.profile.open == nil && heard.isEmpty)
+        #expect(pages.head(of: them, in: session).name == "Other", "the first account's answer is not drawn on theirs")
+        #expect(session.mastodon.asking(host: Self.host) == 5, "nor counted for them")
     }
 }

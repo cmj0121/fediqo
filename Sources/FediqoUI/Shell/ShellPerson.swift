@@ -459,7 +459,9 @@ final class ShellPersonPages {
     /// is not open for whoever asks now.
     func ownAnswered(_ person: Person, at host: String, in session: ShellSession) async {
         guard let me = Self.own(at: host, in: session), let source = Self.source(of: me, in: session),
-              standing(of: me, at: source, in: session) != nil
+              let page = standing(of: me, at: source, in: session),
+              // The page of the account the answer is about, and of nobody else.
+              case .said(let shown) = page.reading, shown.accountID == person.accountID
         else { return }
         let id = me.id
         // An ask of who they are still on the wire set out before the change: its answer is

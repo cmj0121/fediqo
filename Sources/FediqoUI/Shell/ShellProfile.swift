@@ -125,11 +125,20 @@ final class ShellProfile {
             let limits = await limits
             guard awaits == errand, open?.host == source.host else { return }
             if let limits { stated[source.host] = limits }
+            // Read as an account that is no longer the one signed in: not edited.
+            guard isTheReader(at: source.host, in: session) else {
+                close()
+                return
+            }
             draft = ProfileDraft(account, limits: limits ?? .none)
             state = .read
         } catch {
             _ = await limits
             guard awaits == errand, open?.host == source.host, !Cancellation.happened(error) else { return }
+            guard isTheReader(at: source.host, in: session) else {
+                close()
+                return
+            }
             ShellPersonPages.concluded(error, at: source, askedAs: askedAs, in: session)
             state = (error as? MastodonAuthError) == .signedOut ? .ended : .readFailed
         }
@@ -167,13 +176,20 @@ final class ShellProfile {
         do {
             let answer = try await own.change(from: before, to: after)
             guard awaits == errand, open?.host == host else { return }
+            // **Drawn only for the account it was sent as**: the reader become another
+            // meanwhile, it is neither drawn on their page nor counted for them.
+            let theirs = isTheReader(at: host, strictly: true, in: session)
             close()
-            guard let answer else { return }
+            guard let answer, theirs else { return }
             announce(String(format: L10n.t("profile.saved"), host))
-            session.mastodon.askingAnswered(answer.asking, host: host)
+            session.mastodon.askingAnswered(answer.asking, of: answer.person.accountID, host: host)
             await answered?(answer.person, host, session)
         } catch {
             guard awaits == errand, open?.host == host, !Cancellation.happened(error) else { return }
+            guard isTheReader(at: host, in: session) else {
+                close()
+                return
+            }
             switch error as? OwnAccountError {
             case .refused(let sentence, let rows): state = .refused(sentence: sentence, rows: rows)
             case .forbidden: state = .forbidden
@@ -194,14 +210,27 @@ final class ShellProfile {
             state = .ended
             return nil
         }
-        let now = ShellPersonPages.askedAs(at: source.host, in: session)
-        let was = accountID, id = session.mastodon.reader(host: source.host)?.id
-        guard now.isTheSame(as: askedAs), was == nil || id == nil || was == id else {
+        guard isTheReader(at: source.host, in: session) else {
             close()
             return nil
         }
-        if accountID == nil { accountID = id }
+        if accountID == nil { accountID = session.mastodon.reader(host: source.host)?.id }
         return held
+    }
+
+    /// Whether whoever is signed in at `host` now is the account the sheet was opened for.
+    /// **At a press, a reader not named yet is the same reader** — asking for the account part
+    /// hands back a new sign-in the source names a moment later — and another only where the
+    /// handle or the id says so. **`strictly`, for an answer about to be drawn**, only a reader
+    /// named the same way is: an answer drawn for nobody is asked again by the page, and one
+    /// drawn for somebody else is a page of the wrong account.
+    private func isTheReader(at host: String, strictly: Bool = false, in session: ShellSession) -> Bool {
+        let now = ShellPersonPages.askedAs(at: host, in: session)
+        let was = accountID, id = session.mastodon.reader(host: host)?.id
+        guard now.isTheSame(as: askedAs) else { return false }
+        guard strictly else { return was == nil || id == nil || was == id }
+        if let was { return id == was }
+        return now == askedAs && now != .reader(nil)
     }
 
     /// The press on the lock where the sign-in no longer holds the account part.

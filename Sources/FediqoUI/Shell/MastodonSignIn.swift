@@ -206,12 +206,14 @@ public final class MastodonSessions {
     /// answered (#312) — **through the sign-in held now**, and only where the answer said: a
     /// figure not said leaves the one the check said. Counted as an account check, since it is
     /// the source's own figure of the same thing.
-    func askingAnswered(_ asking: Int?, host raw: String) {
+    /// **Only for the account `accountID` names**: the figure is about that account and no other.
+    func askingAnswered(_ asking: Int?, of accountID: String, host raw: String) {
         let host = raw.lowercased()
         guard let asking, let held = token(host: host) else { return }
         if let reader = readers[host], reader.accessToken == held.accessToken {
+            guard reader.id == accountID else { return }
             readers[host]?.asking = asking
-        } else if let id = held.accountID {
+        } else if let id = held.accountID, id == accountID {
             let handle = held.handle.flatMap { MastodonWho.kept($0, at: host) }
             readers[host] = Reader(id: id, handle: handle, accessToken: held.accessToken, asking: asking)
         } else {
