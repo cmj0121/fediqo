@@ -122,6 +122,11 @@ writer_id="$(as "$WRITER" "https://$HOST/api/v1/accounts/verify_credentials" | f
 other_id="$(as "$OTHER" "https://$HOST/api/v1/accounts/verify_credentials" | field id)"
 [ -n "$writer_id" ] && [ -n "$other_id" ] || die "a sign-in does not say whose it is"
 
+# The writer's picture and header, which the checks of what rides the profile part change and
+# take away, taken away here too on every run: a run that stopped part way may have left them.
+as "$WRITER" -o /dev/null -X DELETE "https://$HOST/api/v1/profile/avatar"
+as "$WRITER" -o /dev/null -X DELETE "https://$HOST/api/v1/profile/header"
+
 # An account here is made locked, so a follow is a request until it is agreed to.
 as "$WRITER" -o /dev/null -X POST "https://$HOST/api/v1/accounts/$other_id/follow"
 as "$OTHER" -o /dev/null -X POST "https://$HOST/api/v1/accounts/$writer_id/follow"

@@ -521,6 +521,44 @@ people_sign_ins = {
 end
 named = ->(who) { { "id" => who.id.to_s, "acct" => who.acct } }
 
+# What the checks of what rides the profile part need (#312, #315, #318, #321): one reader of
+# their own, whose picture and header are changed and taken away, who dismisses a suggestion,
+# features somebody they follow and a hashtag, and dismisses and reacts to what the server
+# announces — and nobody another check reads, counts or lists. Named unlike the rest. **Put
+# back here as the checks start it, every run**, whatever a run that stopped part way left:
+# no picture, no header, nobody dismissed, nobody and no hashtag featured, the one followed
+# followed and the other not, no announcement dismissed and no reaction of the reader's.
+parts = person.call("parts_321")
+parts_followed = person.call("parts_followed_315")
+parts_stranger = person.call("parts_stranger_315")
+follows.call(parts, parts_followed)
+parts.unfollow!(parts_stranger) if parts.following?(parts_stranger)
+AccountPin.where(account: parts).destroy_all
+FeaturedTag.where(account: parts).destroy_all
+FollowRecommendationMute.where(account: parts).destroy_all
+if parts.avatar.present? || parts.header.present?
+  parts.avatar = nil
+  parts.header = nil
+  parts.save!
+end
+# Two announcements, published: one to dismiss and one to react to, with the other person's
+# reaction already on it. Seen by every reader of this server.
+announced = %w(dismiss react).to_h do |what|
+  [what, Announcement.find_by(text: "fediqo321seed #{what}") ||
+    Announcement.create!(text: "fediqo321seed #{what}", published: true, published_at: Time.now.utc)]
+end
+AnnouncementMute.where(account: parts).destroy_all
+AnnouncementReaction.where(account: parts).destroy_all
+AnnouncementReaction.find_or_create_by!(account: other, announcement: announced["react"], name: "👍")
+# This app's words for every part, and the same without the profile part.
+every_part = "#{acting} read:notifications write:notifications read:follows write:follows write:accounts"
+parts_sign_ins = { "parts" => every_part, "partsLacking" => every_part.sub(" write:accounts", "") }
+  .transform_values do |scopes|
+    held = Doorkeeper::AccessToken.find_by(application: grained, resource_owner_id: parts.user.id, scopes: scopes, revoked_at: nil) ||
+      Doorkeeper::AccessToken.create!(application: grained, resource_owner_id: parts.user.id, scopes: scopes, expires_in: nil)
+    { "token" => held.token, "scopes" => scopes }
+  end
+
 more = "/tmp/fediqo-mastodon-tokens.json"
 File.write(more, JSON.generate(tokens.merge(
   # The sign-in page is asked by this id for a scope the registration does not include.
@@ -550,6 +588,12 @@ File.write(more, JSON.generate(tokens.merge(
     "posts" => (person_posts + [person_public, person_answer, person_boost]).map { |post| post.id.to_s },
     "kept" => { "private" => person_private.id.to_s, "direct" => person_direct.id.to_s },
     "farPosts" => far_posts.map { |post| post.id.to_s }
+  ),
+  "parts" => named.call(parts).merge(
+    "token" => parts_sign_ins["parts"]["token"], "scopes" => every_part,
+    "lacking" => parts_sign_ins["partsLacking"]["token"], "lackingScopes" => parts_sign_ins["partsLacking"]["scopes"],
+    "followed" => named.call(parts_followed), "stranger" => named.call(parts_stranger),
+    "dismiss" => announced["dismiss"].id.to_s, "react" => announced["react"].id.to_s
   )
 )))
 puts "wrote #{more}"

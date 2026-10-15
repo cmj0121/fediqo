@@ -565,6 +565,57 @@ checks in `MastodonOwnAccountSaysTests.swift` (Mastodon, as the seed's `own_312`
     count is 0)
   - What in the app rests on it: `OwnAnswer.asking` is what the answer says, not what is about to be
 
+### Asked later — what rides the profile part
+
+Asked 2026-10-15 by hand — Mastodon as the seed's `parts_321`, GoToSocial as its writer — and not
+counted among the 172. Kept as checks in `MastodonProfilePartSaysTests.swift` and
+`GoToSocialSaysTests.swift` (`profilePartActs`).
+
+- **A picture and a header (`update_credentials` of several parts; `DELETE /api/v1/profile/avatar`, `/header`)**:
+  - Mastodon 4.6.6: 200 with the account; each taken away is 200 with the account, and again 200; none is
+    `/avatars/original/missing.png`, `/headers/original/missing.png`
+  - GoToSocial 0.22.2: the same, and the account says `avatar_media_id` / `header_media_id` while one is held; **none is
+    a drawing of its own**, `/assets/default_avatars/GoToSocial_icon<n>.webp` and `/assets/default_header.webp`, with a
+    description of it
+  - What in the app rests on it: `MastodonOwnAccount` reads either host's drawing as no picture (Q7 fixed this: it read
+    GoToSocial's as one held)
+- **How large a picture may be (`configuration.media_attachments.image_size_limit`)**:
+  - Mastodon 4.6.6: states **16 MiB**, and **holds an own picture or header to 8 MB**, which it does not state: 9 MiB is
+    a 422 naming `avatar` and `avatar_file_size` ("must be less than 8 MB")
+  - GoToSocial 0.22.2: states **40 MiB**, and took 9 MiB
+  - What in the app rests on it: `OwnPictureTooLarge` names the host's stated limit, or this app's 32 MiB where a host
+    states more; between 8 MB and 16 MiB Mastodon's refusal is what names the limit
+- **A suggestion dismissed (`DELETE /api/v1/suggestions/:id`)**:
+  - Mastodon 4.6.6: wants `write:accounts`; `200 {}`; gone from the next read and the one after, still suggested to
+    others; no address takes it back
+  - GoToSocial 0.22.2: suggests nobody (`200 []`) and the address is **not there** (404 `Not Found`)
+  - What in the app rests on it: `MastodonSuggestions.dismiss` throws `noSuchAddress` there
+- **Somebody featured (`/accounts/:id/endorse`, `/unendorse`, `/api/v1/endorsements`, `/accounts/:id/endorsements`)**:
+  - Mastodon 4.6.6: wants `write:accounts`; 200 with the standing (`endorsed`), the same said again; somebody not
+    followed is a 422 ("You must be already following the person you want to endorse"); both lists name them,
+    unsigned too
+  - GoToSocial 0.22.2: **every one of the four is not there** (404 `Not Found`), signed or not — item 8
+  - What in the app rests on it: `MastodonFeaturing`, `MastodonFeatured.featuredPeople` throw `noSuchAddress`
+- **A hashtag featured (`POST /api/v1/featured_tags`, `DELETE …/:id`, `/accounts/:id/featured_tags`, a hashtag's `featuring`)**:
+  - Mastodon 4.6.6: wants `write:accounts`; 200 with the featuring, **the same one featured again**; the same name in
+    another case is a 422 ("Tag has already been taken"); a featuring gone is 404 `Record not found`; the hashtag says
+    `featuring`; anybody unsigned reads the list
+  - GoToSocial 0.22.2: the reader's list is read (`200 []`), but **featuring one is a 405**, `405 method not allowed`
+    as plain text, though its document states `max_featured_tags: 10`; somebody's list is **401 unsigned**, `200 []`
+    signed; a hashtag nobody used is 404 — item 13
+  - What in the app rests on it: `MastodonFeaturing.feature(tag:)` throws the door's `http(405)` there — a failure, not
+    an absence; F3 still reads the host as having featured hashtags
+- **Announcements (`/api/v1/announcements`, `…/:id/dismiss`, `…/:id/reactions/:name`)**:
+  - Mastodon 4.6.6: **read with any sign-in at all** — the address asks no word, only somebody signed in, so a sign-in
+    for reading posts alone is 200; never 403 `insufficient_scope`; unsigned it is 422. Dismissing wants
+    `write:accounts`, is `200 {}`, again `200 {}`, and **the dismissed one is still listed `read: true`, with or without
+    `with_dismissed`** (others still read `false`). A reaction wants `write:favourites`: PUT `200 {}`, **again 422
+    `Duplicate record`**, a name that is no emoji 422; DELETE `200 {}`, **one not there 404 `Record not found`** — as
+    for an announcement nobody has
+  - GoToSocial 0.22.2: `200 []` — none could be made here; every act on one nobody has is 404 `Not Found`
+  - What in the app rests on it: `MastodonAnnouncements.unreact` takes a 404 as done (Q7 fixed this: it said the
+    announcement gone); a second PUT is the source's refusal with its sentence
+
 ## Could not be asked, or not comparable — 11
 
 - **An app registered with a word no server knows; with no words (2)**:
@@ -587,9 +638,9 @@ checks in `MastodonOwnAccountSaysTests.swift` (Mastodon, as the seed's `own_312`
 Not asked of either, and so not known: the streaming service (a socket, #325); polls made and
 voted on (#331); scheduled posts (#333); reports (#339); an account suspended, moved, limited
 or of another server (this server's tool makes none); a blocked-by standing; anything federated
-— the fixture is one server alone; announcements, conversations, filters and suggestions with
-something in them; any setting of this server but its defaults (whether a stranger may read
-its public timeline is one of them).
+— the fixture is one server alone; announcements here (this server has no way to make one),
+conversations, filters and suggestions with something in them; any setting of this server but
+its defaults (whether a stranger may read its public timeline is one of them).
 
 ## What a unit still to build should not assume
 
@@ -625,7 +676,8 @@ Each names the unit of `PLAN-mastodon.md` it touches.
     another device.
 12. **That an unknown word is refused at registration.** It is accepted and echoed here — the
     same units as 11.
-13. **That a hashtag has an id, says whether it is featured, or carries a history** — P11.
+13. **That a hashtag has an id, says whether it is featured, or carries a history** — P11; nor that
+    a host stating `max_featured_tags` takes one: featuring is a 405 here ("what rides the profile part").
 14. **That a post says whether it quotes, how it may be quoted, or why it is hidden** — #327
     (#330), #336 (#338); and that a new post starts public — #327 (the default here is
     `unlisted`).
@@ -634,3 +686,6 @@ Each names the unit of `PLAN-mastodon.md` it touches.
 16. **That a withdrawn post is gone on the next ask** — #327: here it answers 200 again.
 17. **That a post says whether it is pinned.** Here `pinned` is about the reader, and `false` on a
     pinned post read by anybody but its author; Mastodon sends it to the author alone — M7, #334.
+18. **That a picture's address means one is held.** For none it answers a drawing of its own — P9.
+19. **That a host's stated picture limit is an own picture's.** Mastodon states 16 MiB and holds an
+    own picture to 8 MB — P9.

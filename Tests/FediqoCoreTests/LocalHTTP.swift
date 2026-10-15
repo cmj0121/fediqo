@@ -227,6 +227,25 @@ enum LocalServers {
         /// This app as it would register itself for every part a sign-in may be asked for,
         /// registered by the seed (#347). Nothing in a file an older seed wrote.
         let signIn: Notices.App?
+        /// The reader of what rides the profile part (#312, #315, #318, #321), put back by the
+        /// seed on every run. Nothing in a file an older seed wrote.
+        struct Parts: Decodable {
+            let id: String
+            let acct: String
+            /// A sign-in of this app's words for every part, and one without the profile part.
+            let token: String
+            let scopes: String
+            let lacking: String
+            let lackingScopes: String
+            /// Somebody the reader follows, and somebody they do not.
+            let followed: People.Named
+            let stranger: People.Named
+            /// What the server announces: one to dismiss, one to react to — with the other
+            /// person's 👍 already on it.
+            let dismiss: String
+            let react: String
+        }
+        let parts: Parts?
     }
 
     static func seeded() throws -> Seeded {
