@@ -118,6 +118,11 @@ public enum PersonAct: Sendable, Hashable, CaseIterable {
     case refuseRequest
     /// Has somebody who follows the reader follow them no longer.
     case removeFollower
+    /// Features somebody the reader follows on the reader's own profile (#315), or takes them off.
+    case feature
+    case unfeature
+    /// Tells the source not to suggest somebody to the reader again (#315).
+    case dismissSuggestion
 
     /// The part of a sign-in the act needs (#347): where it is not held, the act's place says
     /// so and asks. **No `default:`**, so an act added later has to say which.
@@ -125,6 +130,7 @@ public enum PersonAct: Sendable, Hashable, CaseIterable {
         switch self {
         case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .acceptRequest, .refuseRequest,
              .removeFollower: .follows
+        case .feature, .unfeature, .dismissSuggestion: .account
         }
     }
 }

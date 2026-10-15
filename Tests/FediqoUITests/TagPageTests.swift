@@ -308,7 +308,8 @@ struct TagPageTests {
         #expect(tags.walkedAbout(of: Self.swift, in: session) == nil && !tags.pressAbout(row, of: Self.swift, in: session))
         var lamp: String?
         #expect(tags.turn(Self.swift, to: .about, lamp: &lamp, in: session))
-        #expect(tags.walkedAbout(of: Self.swift, in: session) == [row])
+        // Under the row, the source's feature row (#318): a block of its own.
+        #expect(tags.walkedAbout(of: Self.swift, in: session) == [row, "tag.about.feature:m.example"])
         #expect(!tags.pressAbout("tag.about.follow:two.example", of: Self.swift, in: session))
         // Return on the followed row does nothing; the item of its `…` unfollows, and the
         // source's word is the row's.

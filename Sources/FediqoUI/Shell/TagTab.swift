@@ -71,6 +71,14 @@ struct TagAboutSaid: Equatable {
     let follows: [TagFollowLine]
     /// Which of the timeline's sources were asked and why the rest were not, or nothing.
     var reach: String?
+    /// Whether the reader features the hashtag on their profile at each source that keeps
+    /// hashtags featured (#318): drawn under that source's follow row.
+    var features: [TagFeatureLine] = []
+
+    /// The feature row of the source `follow` is of, where it has one.
+    func feature(under follow: TagFollowLine) -> TagFeatureLine? {
+        features.first { $0.host == follow.host }
+    }
 
     /// What the reach sentence is called as a row the lamp stops on.
     static let reachID = "tag.about.reach"
@@ -80,13 +88,19 @@ struct TagAboutSaid: Equatable {
 
     /// Every block `j` and `k` walk, top to bottom as the tab draws them.
     var walked: [String] {
-        follows.map(Self.lamp) + (reach == nil ? [] : [Self.reachID])
+        follows.flatMap { [Self.lamp(on: $0)] + (feature(under: $0).map { [$0.id] } ?? []) } + (reach == nil ? [] : [Self.reachID])
     }
 
     /// The line whose press Return makes with the lamp on the block `id`, or nothing where the
     /// block is words — or where all it offers is unfollowing, which is in its `…`.
     func press(on id: String) -> TagFollowLine? {
         follows.first { Self.lamp(on: $0) == id && $0.press != nil }
+    }
+
+    /// The feature row whose press Return makes with the lamp on it — never Take off, which is
+    /// in its `…`.
+    func featurePress(on id: String) -> TagFeatureLine? {
+        features.first { $0.id == id && $0.press != nil }
     }
 }
 
@@ -150,7 +164,7 @@ struct TagPageSaid: Equatable {
     /// device, never about the hashtag.
     let none: String?
     /// What About holds, where the page has one.
-    let about: TagAboutSaid?
+    var about: TagAboutSaid?
 
     /// Whether the page draws its strip of tabs.
     var stripped: Bool { PageFrame.stripDrawn(tabs) }
@@ -230,6 +244,11 @@ struct TagPageActs {
     var onFollow: (TagFollowLine) -> Void = { _ in }
     /// The item of a line's `…` that unfollows: it only ever unfollows.
     var onUnfollow: (TagFollowLine) -> Void = { _ in }
+    /// A feature row's press at one source (#318): feature, find out again, or ask for the part.
+    var onFeature: (TagFeatureLine) -> Void = { _ in }
+    /// The item of a feature row's `…` that takes it off: it only ever takes off.
+    var onUnfeature: (TagFeatureLine) -> Void = { _ in }
+
     /// A lock's press: the question that asks that source's sign-in for who the reader follows.
     var onAskFollows: (String) -> Void = { _ in }
     /// Asks the sources again, after a failure.

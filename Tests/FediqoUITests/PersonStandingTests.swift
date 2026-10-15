@@ -339,7 +339,7 @@ struct PersonStandingTests {
         await server.answer(Self.stands, Self.said(Self.standing(following: true)))
         await acts.again(Self.ada, said: page, in: session)
         let followed = try #require(acts.acting(of: Self.ada, said: page, in: session))
-        #expect(followed.pills(language: .english) == ["You follow them"] && followed.more.isEmpty && followed.press == .ask)
+        #expect(followed.pills(language: .english) == ["You follow them"] && followed.more == [.feature] && followed.press == .ask)
         await acts.press(.unfollow, on: Self.ada, said: page, in: session)
         #expect(await asked(server) == [Self.stands, Self.stands], "and nothing is sent that it may not send")
     }
@@ -391,10 +391,10 @@ struct PersonStandingTests {
 
         let followed = try #require(acts.acting(of: Self.ada, said: page, in: session))
         #expect(followed.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false, featured: false)) && followed.doing == nil)
-        #expect(followed.press == nil && followed.more == [.unfollow] && followed.missed == nil)
+        #expect(followed.press == nil && followed.more == [.feature, .unfollow] && followed.missed == nil)
         #expect(!followed.asksBefore(.unfollow), "somebody anyone may follow is unfollowed in one press")
         let menu = followed.menu(head: ["Ada"], act: { _ in })
-        #expect(menu.head == ["Ada"] && menu.items.map(\.name) == [PersonActing.name(.unfollow)] && menu.dangers.isEmpty)
+        #expect(menu.head == ["Ada", L10n.t("part.account.unasked")] && menu.items.map(\.name) == [PersonActing.name(.feature), PersonActing.name(.unfollow)] && menu.dangers.isEmpty)
         #expect(PersonActing.name(.unfollow, language: .english) == "Unfollow")
 
         await acts.press(.unfollow, on: Self.ada, said: page, in: session)
@@ -573,7 +573,7 @@ struct PersonStandingTests {
         await reading.value
         let after = try #require(acts.acting(of: Self.ada, said: page, in: session))
         #expect(after.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false, featured: false)), "the read is told to nobody")
-        #expect(after.more == [.unfollow] && after.press == nil && after.missed == nil)
+        #expect(after.more == [.feature, .unfollow] && after.press == nil && after.missed == nil)
         await acts.opened(Self.ada, said: page, in: session)
         #expect(await asked(server).count == 3, "and the page is left asking nothing")
     }
@@ -753,7 +753,7 @@ struct PersonStandingTests {
         #expect(await asked(server) == [lookup, Self.stands, lookup, Self.stands])
 
         await pages.act(.follow, on: Self.ada, in: session)
-        #expect(pages.stands(to: Self.ada, in: session)?.more == [.unfollow])
+        #expect(pages.stands(to: Self.ada, in: session)?.more == [.feature, .unfollow])
         #expect(!pages.followByKey(Self.ada, in: session), "followed already: the key does nothing")
 
         try await signIn(session, as: "narrow", holding: Self.reads)
@@ -955,7 +955,7 @@ struct PersonStandingTests {
         let after = try #require(acts.acting(of: Self.ada, said: page, in: session))
         #expect(after.reading == .said(Self.followed(boosts: false, notify: false)) && after.doing == nil && after.missed == nil)
         #expect(after.narrows().map(\.act) == [.showBoosts, .notify] && after.narrowsTakePress)
-        #expect(after.marks().map(\.words) == before.marks().map(\.words) && after.more == [.unfollow])
+        #expect(after.marks().map(\.words) == before.marks().map(\.words) && after.more == [.feature, .unfollow])
         #expect(await asked(server).filter { $0 == Self.follow }.count == 1)
 
         // The other switch, the same way; the first stays as the source answered.

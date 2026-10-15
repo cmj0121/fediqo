@@ -809,7 +809,6 @@
 "board.choose.detail.change"      = "Pick the boards you want to read. What you pick replaces what you read now.";
 "board.choose.line.change" = "What you pick replaces what you read now.";
 
-
 /* Decision 29: Clear asks first, and says what actually goes. */
 "account.clear.title"             = "Clear what %@ left here?";
 "account.clear.detail"            = "The pictures, emoji names and first posts this device is holding go. They come back as you read it again, and it stays in your sources, with its boards and its posts.";
@@ -1841,7 +1840,9 @@
 "people.suggested.none" = "%@ suggests nobody to this sign-in.";
 "people.suggested.foot.farthest" = "Fediqo reads the first %1$@ people a source suggests. %2$@ may suggest more.";
 "people.suggested.dismiss" = "Don't suggest";
-"people.suggested.dismiss.dim" = "Telling %@ to stop suggesting somebody changes your account there, and this version of Fediqo does not yet ask you to allow that.";
+"people.suggested.dismiss.ask.title" = "Tell %1$@ not to suggest %2$@ again?";
+"people.suggested.dismiss.ask.line" = "They leave this list. You can still find them and follow them.";
+"people.suggested.dismiss.failed" = "Could not tell %2$@ not to suggest %1$@.";
 "work.purpose.serverSays" = "Reading what a server says of itself";
 "source.more.title" = "More from %@";
 "source.more.line" = "Asked of it when this page opens.";
@@ -2057,3 +2058,36 @@
 "account.source.announced.spoken.one" = "1 new announcement from %@";
 "account.sources.announced" = "A megaphone on a row: that source has announcements you have not seen. It opens the source's page.";
 "work.purpose.announcements" = "Reading what a source announces to you";
+
+"person.act.feature" = "Feature on your profile";
+"person.act.unfeature" = "Take off your profile";
+"person.act.feature.failed" = "Could not feature %1$@ on your profile at %2$@.";
+"person.act.unfeature.failed" = "Could not take %1$@ off your profile at %2$@.";
+"person.stands.featured" = "On your profile";
+"person.featured.tags" = "Hashtags they feature";
+"person.featured.tags.own" = "Hashtags you feature";
+"person.featured.tag.said" = "%1$@ of their posts, the last on %2$@";
+"person.featured.tag.said.own" = "%1$@ of your posts, the last on %2$@";
+"person.featured.tag.never" = "None of their posts yet";
+"person.featured.tag.never.own" = "None of your posts yet";
+"person.featured.tags.asking" = "Asking %@ for the hashtags they feature…";
+"person.featured.tags.failed" = "Could not ask %@ for the hashtags they feature.";
+"person.featured.people" = "People they feature";
+"person.featured.people.own" = "People you feature";
+"people.title.featured" = "People %@ features";
+"people.featured.asking" = "Asking %@ for the people featured…";
+"people.featured.failed" = "Could not ask %@ for the people featured.";
+"people.featured.absent" = "%@ does not keep people featured on a profile.";
+"people.featured.none" = "%@ gave nobody featured.";
+"tag.feature.featured" = "on your profile.";
+"tag.feature.notFeatured" = "not on your profile.";
+"tag.feature.asking" = "finding out whether your profile features it…";
+"tag.feature.unknown" = "could not find out whether your profile features it.";
+"tag.feature.featuring" = "featuring…";
+"tag.feature.unfeaturing" = "taking off…";
+"tag.feature.feature" = "Feature";
+"tag.feature.unfeature" = "Take off your profile";
+"tag.feature.feature.spoken" = "Feature %1$@ on your profile at %2$@";
+"tag.feature.unfeature.spoken" = "Take %1$@ off your profile at %2$@";
+"tag.feature.failed.feature" = "Could not feature %1$@ on your profile at %2$@.";
+"tag.feature.failed.unfeature" = "Could not take %1$@ off your profile at %2$@.";

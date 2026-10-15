@@ -790,7 +790,6 @@
 "board.choose.detail.change"      = "挑你想看的版塊。挑好的會取代你現在讀的。";
 "board.choose.line.change" = "挑好的會取代你現在讀的。";
 
-
 /* Decision 29: Clear asks first, and says what actually goes. */
 "account.clear.title"             = "清除 %@ 留在這裡的東西？";
 "account.clear.detail"            = "這個裝置為它存的圖片、表情名稱和第一篇文章都會清掉。你再讀它的時候會回來，它也還留在你的來源裡，版塊和文章都在。";
@@ -1795,7 +1794,9 @@
 "people.suggested.none" = "%@ 沒有向這個登入建議任何人。";
 "people.suggested.foot.farthest" = "Fediqo 只讀取一個來源建議的前 %1$@ 人，%2$@ 可能還建議了更多人。";
 "people.suggested.dismiss" = "不再建議";
-"people.suggested.dismiss.dim" = "要 %@ 不再建議某個人，得更動你在那裡的帳號，而這個版本的 Fediqo 還不會請你允許這件事。";
+"people.suggested.dismiss.ask.title" = "要 %1$@ 不再建議 %2$@ 嗎？";
+"people.suggested.dismiss.ask.line" = "他們會離開這份清單。你仍然可以找到並跟隨他們。";
+"people.suggested.dismiss.failed" = "無法要 %2$@ 不再建議 %1$@。";
 "work.purpose.serverSays" = "讀取來源對自己的說明";
 "source.more.title" = "%@ 還說了什麼";
 "source.more.line" = "打開這一頁時向它詢問。";
@@ -2011,3 +2012,36 @@
 "account.source.announced.spoken.one" = "%@ 有 1 則新公告";
 "account.sources.announced" = "列上的擴音器：那個來源有你還沒看過的公告，按下會打開它的頁面。";
 "work.purpose.announcements" = "讀取來源發給你的公告";
+
+"person.act.feature" = "在個人檔案上推薦";
+"person.act.unfeature" = "從個人檔案上拿掉";
+"person.act.feature.failed" = "無法在 %2$@ 的個人檔案上推薦 %1$@。";
+"person.act.unfeature.failed" = "無法從 %2$@ 的個人檔案上拿掉 %1$@。";
+"person.stands.featured" = "在你的個人檔案上";
+"person.featured.tags" = "他們推薦的主題標籤";
+"person.featured.tags.own" = "你推薦的主題標籤";
+"person.featured.tag.said" = "他們的 %1$@ 則貼文，最近一則在 %2$@";
+"person.featured.tag.said.own" = "你的 %1$@ 則貼文，最近一則在 %2$@";
+"person.featured.tag.never" = "他們還沒有貼文用它";
+"person.featured.tag.never.own" = "你還沒有貼文用它";
+"person.featured.tags.asking" = "正在向 %@ 詢問他們推薦的主題標籤…";
+"person.featured.tags.failed" = "無法向 %@ 詢問他們推薦的主題標籤。";
+"person.featured.people" = "他們推薦的人";
+"person.featured.people.own" = "你推薦的人";
+"people.title.featured" = "%@ 推薦的人";
+"people.featured.asking" = "正在向 %@ 詢問被推薦的人…";
+"people.featured.failed" = "無法向 %@ 詢問被推薦的人。";
+"people.featured.absent" = "%@ 沒有在個人檔案上推薦人的功能。";
+"people.featured.none" = "%@ 沒有給出任何被推薦的人。";
+"tag.feature.featured" = "在你的個人檔案上。";
+"tag.feature.notFeatured" = "不在你的個人檔案上。";
+"tag.feature.asking" = "正在確認你的個人檔案是否推薦它…";
+"tag.feature.unknown" = "無法確認你的個人檔案是否推薦它。";
+"tag.feature.featuring" = "推薦中…";
+"tag.feature.unfeaturing" = "拿掉中…";
+"tag.feature.feature" = "推薦";
+"tag.feature.unfeature" = "從個人檔案上拿掉";
+"tag.feature.feature.spoken" = "在 %2$@ 的個人檔案上推薦 %1$@";
+"tag.feature.unfeature.spoken" = "從 %2$@ 的個人檔案上拿掉 %1$@";
+"tag.feature.failed.feature" = "無法在 %2$@ 的個人檔案上推薦 %1$@。";
+"tag.feature.failed.unfeature" = "無法從 %2$@ 的個人檔案上拿掉 %1$@。";

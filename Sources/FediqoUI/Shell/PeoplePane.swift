@@ -71,6 +71,16 @@ struct PeopleSaid: Equatable {
     /// How a directory is asked for — its order, and whether only the people who live there —
     /// or nothing where the list is somebody's, which has no such choice.
     var sorting: DirectoryChoice?
+    /// How "Don't suggest" stands on each row (#315): only on the people a source suggests.
+    var dismissing: Dismissing?
+
+    /// How telling the source not to suggest somebody stands for the sign-in.
+    enum Dismissing: Equatable {
+        /// It holds the account part: the row's `…` holds the press, asked about first.
+        case offered
+        /// It does not: the press is dim with the part's lock, and asks where it may.
+        case locked(PartWords.Place)
+    }
 
     /// The host of the source that says.
     var source: String { list.host }
@@ -173,6 +183,7 @@ struct PeopleSaid: Equatable {
         case .found: "people.found"
         case .suggested: "people.suggested"
         case .requests: "people.requests"
+        case .featured: "people.featured"
         case .following, .followers: "people"
         }
         return switch reading {
@@ -219,7 +230,7 @@ struct PeopleSaid: Equatable {
             let key = switch list.which {
             case .found: "people.found.foot.farthest"
             case .suggested: "people.suggested.foot.farthest"
-            case .directory, .following, .followers, .requests: "people.directory.foot.farthest"
+            case .directory, .following, .followers, .requests, .featured: "people.directory.foot.farthest"
             }
             return String(format: L10n.t(key, language: language), L10n.grouped(people.count, language: language), source)
         case .end:
@@ -260,6 +271,9 @@ struct PeopleSaid: Equatable {
         if list.which == .requests {
             return String(format: L10n.t("people.requests.none", language: language), source)
         }
+        if list.which == .featured {
+            return String(format: L10n.t("people.featured.none", language: language), source)
+        }
         if list.hidden, !own {
             return String(format: L10n.t("people.hidden", language: language), list.lineHandle)
         }
@@ -289,23 +303,32 @@ struct PeopleSaid: Equatable {
         L10n.t("people.suggested.dismiss", language: language)
     }
 
-    /// Why that is dim: the word a source wants for it belongs to changing the reader's own
-    /// account there, which no sign-in is asked for yet.
-    static func dismissDim(_ source: String, language: DummyLanguage? = nil) -> String {
-        String(format: L10n.t("people.suggested.dismiss.dim", language: language), source)
-    }
-
     static let dismissSymbol = "person.crop.circle.badge.minus"
 
-    /// What the `…` of a row of this list holds, or nothing on a list with nothing to do to a
-    /// row. **On the people a source suggests, one line and it is dim**: a source takes "don't
-    /// suggest" only from a sign-in that may change the reader's account there, and no sign-in
-    /// here is asked for that — so the line says why at the menu's head, takes no press, and
-    /// nothing is sent.
-    func more(language: DummyLanguage? = nil) -> ShellMore? {
-        guard list.which == .suggested else { return nil }
-        let dismiss = ShellMark(Self.dismissSymbol, Self.dismissName(language: language), look: .dim(.askAgain))
-        return ShellMore.ending(in: .plain(dismiss, act: {}), dimFor: Self.dismissDim(source, language: language))
+    /// What the `…` of the row of `person` holds on the people a source suggests (#315), or
+    /// nothing on any other list. **Where the sign-in holds the account part**: at its head who
+    /// they are, and Don't suggest, asked about first — its yes is `act`. **Where it does not**:
+    /// the part's own sentence at the head, and Don't suggest dim with the lock, whose press is
+    /// `act` too where the part may be asked for — which then only asks.
+    @MainActor
+    func more(of person: Person, act: @escaping () -> Void, language: DummyLanguage? = nil) -> ShellMore? {
+        switch dismissing {
+        case .offered?:
+            return ShellMore(head: [person.lineName, person.lineHandle], items: [
+                .danger(
+                    Self.dismissSymbol, Self.dismissName(language: language),
+                    asks: ShellQuestion.dontSuggest(person.lineHandle, at: source, language: language), act: act
+                ),
+            ])
+        case .locked(let place)?:
+            let dim = ShellMark(SourceRow.permissionSymbol, Self.dismissName(language: language), look: .dim(.askAgain))
+            return ShellMore.ending(
+                in: .plain(dim, ask: place.asks ? act : nil, act: {}),
+                dimFor: String(format: L10n.t(place.key, language: language), source)
+            )
+        case nil:
+            return nil
+        }
     }
 }
 
@@ -374,21 +397,19 @@ struct PeoplePane: View {
         )
     }
 
-    /// The `…` of a row of `said`, or nothing where its list has nothing to do to a row.
-    /// **No item here asks first**, so no question is ever put and none is hung.
-    static func menu(for said: PeopleSaid) -> NoticeRow.Menu? {
-        said.more().map { more in NoticeRow.Menu(more: { more }, asks: .constant(nil)) }
-    }
-
     /// The `…` of the row of `person` in `said`: what the list offers a row that takes
-    /// something away (#313) — refusing a request, removing a follower — each asked about
-    /// first, through the page's one asker; or what the list's own `…` holds, or nothing.
+    /// something away (#313) — refusing a request, removing a follower — and Don't suggest
+    /// (#315), each asked about first, through the page's one asker; or nothing.
     @MainActor
     static func menu(
         for said: PeopleSaid, of person: Person, asks: Binding<ShellMoreAsk?>, act: @escaping (PersonAct) -> Void
     ) -> NoticeRow.Menu? {
+        if let more = said.more(of: person, act: { act(.dismissSuggestion) }) {
+            return NoticeRow.Menu(more: { more }, asks: asks)
+        }
         let dangerous = said.dangerous
-        guard !dangerous.isEmpty else { return menu(for: said) }
+        guard !dangerous.isEmpty else { return nil }
+
         let more = ShellMore(head: [person.lineName, person.lineHandle], items: dangerous.map { offered in
             .danger(
                 PersonActing.symbol(offered), PersonActing.name(offered),

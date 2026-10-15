@@ -57,6 +57,15 @@ struct PersonActing: Equatable {
     var doing: PersonAct?
     /// The press that did not arrive.
     var missed: PersonAct?
+    /// What the source said where it would not do the press that did not arrive, made fit for
+    /// a line: said under the sentence that it did not. Nothing where it said nothing.
+    var refused: String?
+    /// Whether the source keeps people featured on a profile (#315): not where the host said it
+    /// has no such thing this run.
+    var featurable = false
+    /// How the sign-in stands where it holds less than featuring needs — the account part —
+    /// or nothing where it holds it.
+    var accountLock: PartWords.Place?
 
     /// How the reader stands to them as the page draws it: what the source last said, with the
     /// press on its way drawn over it. Nothing until the source has said.
@@ -75,7 +84,9 @@ struct PersonActing: Equatable {
         case .stopNotifying: standing.notifies = false
         case .acceptRequest: standing.followedBy = true
         case .refuseRequest, .removeFollower: standing.followedBy = false
-        case nil: break
+        case .feature: standing.featured = true
+        case .unfeature: standing.featured = false
+        case .dismissSuggestion, nil: break
         }
         return standing
     }
@@ -186,15 +197,31 @@ struct PersonActing: Equatable {
         return .follow
     }
 
-    /// What the page's `…` offers, in the order it lists them: stopping following, or taking a
-    /// request back; and — under the divider, since it takes something from them — having
-    /// them follow the reader no longer (#313), only where the source said they do. None while
-    /// a press is on its way, and none the sign-in may not make.
+    /// What the page's `…` offers, in the order it lists them: featuring them on the reader's
+    /// profile or taking them off (#315); stopping following, or taking a request back; and —
+    /// under the divider, since it takes something from them — having them follow the reader
+    /// no longer (#313), only where the source said they do. None while a press is on its way.
+    ///
+    /// **Featuring is offered only of somebody the source said the reader follows**, at a
+    /// source that keeps people featured, and only where it said which of the two it is:
+    /// absent otherwise, never grey. Where the sign-in lacks the account part it is offered
+    /// dim with the lock (`menu`), and its press asks. The rest only to a sign-in that may
+    /// change who the reader follows.
     var more: [PersonAct] {
-        guard changes, doing == nil, let standing = shown else { return [] }
-        let own: [PersonAct] = standing.following ? [.unfollow] : standing.requested ? [.withdraw] : []
-        return own + (standing.followedBy ? [.removeFollower] : [])
+        guard doing == nil, let standing = shown else { return [] }
+        var offered: [PersonAct] = []
+        if featurable, standing.following, let featured = standing.featured { offered.append(featured ? .unfeature : .feature) }
+        guard changes else { return offered }
+        offered += standing.following ? [.unfollow] : standing.requested ? [.withdraw] : []
+        return offered + (standing.followedBy ? [.removeFollower] : [])
     }
+
+    /// Whether `act` is one of featuring's two, which want the account part.
+    static func features(_ act: PersonAct) -> Bool { act == .feature || act == .unfeature }
+
+    /// Whether a press on `act` is the lock's: it wants the account part, which the sign-in
+    /// does not hold — the press then only asks.
+    func asksForPart(_ act: PersonAct) -> Bool { Self.features(act) && accountLock != nil }
 
     /// Whether `act` is asked about before it is sent: unfollowing somebody who must agree to
     /// be followed, since following them again means asking again.
@@ -255,6 +282,7 @@ struct PersonActing: Equatable {
         var marks: [Mark] = []
         func say(_ symbol: String, _ key: String) { marks.append(Mark(symbol: symbol, words: L10n.t(key, language: language))) }
         if standing.following { say("person.fill.checkmark", "person.stands.following") }
+        if standing.featured == true { say(featuredSymbol, "person.stands.featured") }
         if standing.followedBy { say("person.badge.plus", "person.stands.followsYou") }
         if standing.requested { say("person.badge.clock", "person.stands.asked") }
         if standing.muting {
@@ -265,6 +293,9 @@ struct PersonActing: Equatable {
         return marks
     }
 
+    /// The mark of somebody the reader features on their profile (#315).
+    static let featuredSymbol = "person.crop.rectangle.stack"
+
     /// Whether the head of their page has anything to draw where the marks stand: a mark, the
     /// press that asks again where the source could not be asked, or the lock of a sign-in
     /// that holds less than following needs. Nothing while it is being asked, and nothing
@@ -274,7 +305,19 @@ struct PersonActing: Equatable {
     /// What the head says in full ink under the figures, for what no glyph may say: that
     /// they block the reader, and a press that did not arrive.
     func headWords(language: DummyLanguage? = nil) -> [String] {
-        [blockedWords(language: language), missedWords(language: language)].compactMap { $0 }
+        [blockedWords(language: language), missedWords(language: language), refusedWords(language: language)].compactMap { $0 }
+    }
+
+    /// What the source said where it would not do the press, in its own words after its name.
+    func refusedWords(language: DummyLanguage? = nil) -> String? {
+        guard missed != nil, let refused, !refused.isEmpty else { return nil }
+        return String(format: L10n.t("profile.refused.said", language: language), source, refused)
+    }
+
+    /// The account part's lock, in its own sentence: what the `…` says at its head over a
+    /// featuring it cannot make.
+    func accountLockWords(language: DummyLanguage? = nil) -> String? {
+        accountLock.map { String(format: L10n.t($0.key, language: language), source) }
     }
 
     /// What a listener is read of the marks, as one element: each in words, joined.
@@ -356,6 +399,8 @@ struct PersonActing: Equatable {
         case .acceptRequest: "person.crop.circle.badge.checkmark"
         case .refuseRequest: "person.crop.circle.badge.xmark"
         case .removeFollower: "person.crop.circle.badge.minus"
+        case .feature, .unfeature: featuredSymbol
+        case .dismissSuggestion: PeopleSaid.dismissSymbol
         }
     }
 
@@ -369,18 +414,30 @@ struct PersonActing: Equatable {
         case .acceptRequest: "person.act.accept"
         case .refuseRequest: "person.act.refuse"
         case .removeFollower: "person.act.removeFollower"
+        case .feature: "person.act.feature"
+        case .unfeature: "person.act.unfeature"
+        case .dismissSuggestion: "people.suggested.dismiss"
         }
     }
 
     /// The page's `…`: at its head who they are and whose view the page is, and under it what
-    /// `more` offers. Unfollowing somebody who must agree is asked about first.
+    /// `more` offers. Unfollowing somebody who must agree is asked about first. **Featuring,
+    /// where the sign-in lacks the account part, is dim with the lock**, the part's sentence
+    /// at the head, and its press is `act`'s too — which only asks (`asksForPart`).
     @MainActor
     func menu(head: [String], act: @escaping (PersonAct) -> Void) -> ShellMore {
-        ShellMore(head: head, items: more.map { offered in
+        var said = head
+        let items: [ShellMoreItem] = more.map { offered in
             let symbol = Self.symbol(offered), name = Self.name(offered)
+            if asksForPart(offered), let lock = accountLock {
+                if let words = accountLockWords() { said.append(words) }
+                let dim = ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain))
+                return ShellMoreItem.plain(dim, ask: lock.asks ? { act(offered) } : nil, act: {}).underHead
+            }
             guard asksBefore(offered) else { return .plain(symbol, name) { act(offered) } }
             return .danger(symbol, name, asks: question(before: offered)) { act(offered) }
-        })
+        }
+        return ShellMore(head: said, items: items)
     }
 }
 

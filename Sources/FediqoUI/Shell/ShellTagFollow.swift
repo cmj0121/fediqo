@@ -186,6 +186,9 @@ final class ShellTagFollow {
         let number: Int
         /// As the source last said, or nothing where it has not.
         var said: Bool?
+        /// Whether the reader features it on their profile there, where the hashtag's own
+        /// answer said (#318). Nothing where it did not, and nothing from the list's word.
+        var featuring: Bool?
         /// Whether what stands in `said` was the list's word (`press(_:at:to:in:)`), written
         /// down to be pressed over: the page coming in front asks all the same.
         var seeded = false
@@ -233,6 +236,9 @@ final class ShellTagFollow {
     /// row is as an act answered (`ShellFollowedTags`). Told for the reader who pressed and
     /// nobody else, whether or not the page pressed on still stands.
     @ObservationIgnored var whenAnswered: ((_ tag: PostTag, _ host: String, _ followed: Bool) -> Void)?
+    /// Whether the reader features a hashtag at each source, and the presses that feature one
+    /// (#318): its rows stand under these lines on About. Handed in by whoever holds both.
+    @ObservationIgnored var features: ShellFeatures?
     /// The tab in front on each hashtag's page, where it is not its first — by the hashtag as
     /// its page is kept (`HeldUnderTag.folded`), and not in the step of the walk: a tab is not
     /// a step.
@@ -333,9 +339,64 @@ final class ShellTagFollow {
 
     /// What the page of `tag` is handed, with `held` posts of it on this device.
     func said(of tag: PostTag, held: Int, in session: ShellSession) -> TagPageSaid {
-        TagPageSaid.made(
-            of: tag, held: held, follows: lines(of: tag, in: session), front: fronts[HeldUnderTag.folded(tag)], in: session
+        let follows = lines(of: tag, in: session)
+        var said = TagPageSaid.made(of: tag, held: held, follows: follows, front: fronts[HeldUnderTag.folded(tag)], in: session)
+        said.about?.features = featureLines(of: tag, beside: follows, in: session)
+        return said
+    }
+
+    // MARK: - Featured on the reader's profile (#318)
+
+    /// Whether the reader features `tag` at `host`, as the hashtag's own answer said — only an
+    /// answer of its page's own read, for whoever would ask now. Nothing where it did not say.
+    func featuring(of tag: PostTag, at host: String, in session: ShellSession) -> Bool? {
+        guard let page = self.standing(Self.key(tag, host), at: host, in: session), !page.seeded, !page.asking else { return nil }
+        return page.featuring
+    }
+
+    /// The feature rows of the page of `tag`, one under each line that has one.
+    func featureLines(of tag: PostTag, in session: ShellSession) -> [TagFeatureLine] {
+        featureLines(of: tag, beside: lines(of: tag, in: session), in: session)
+    }
+
+    private func featureLines(of tag: PostTag, beside follows: [TagFollowLine], in session: ShellSession) -> [TagFeatureLine] {
+        features?.lines(of: tag, beside: follows, featuring: { self.featuring(of: tag, at: $0, in: session) }, in: session) ?? []
+    }
+
+    /// The page of `tag` in front: once its sources have said whether it is followed — the
+    /// reads already out are waited on, and nothing is asked twice — where a source's answer
+    /// did not say whether it is featured, that is found out (`ShellFeatures`).
+    func featuresOpened(_ tag: PostTag, in session: ShellSession) async {
+        await opened(tag, in: session)
+        await features?.opened(
+
+            tag, beside: lines(of: tag, in: session), featuring: { self.featuring(of: tag, at: $0, in: session) }, in: session
         )
+    }
+
+    /// A feature row's press, whatever it offers — held against what the row says **here,
+    /// where the press is taken**: featuring, finding out again, or asking for the part.
+    @discardableResult
+    func featurePressed(_ line: TagFeatureLine, in session: ShellSession) -> Task<Void, Never>? {
+        switch line.offers {
+        case .feature: return Task { await self.feature(line.tag, at: line.host, to: true, in: session) }
+        case .again: return features?.again(at: line.host, in: session)
+        case .ask: session.askFor([.account], host: line.host)
+        case .unfeature, nil: break
+        }
+        return nil
+    }
+
+    /// The `…`'s Take off your profile: **only ever a taking off**, held against what the row
+    /// says where the press is taken.
+    @discardableResult
+    func unfeatured(_ line: TagFeatureLine, in session: ShellSession) -> Task<Void, Never>? {
+        Task { await self.feature(line.tag, at: line.host, to: false, in: session) }
+    }
+
+    private func feature(_ tag: PostTag, at host: String, to: Bool, in session: ShellSession) async {
+        let now = featureLines(of: tag, in: session).first { $0.host == host }
+        await features?.press(tag, at: host, to: to, now: now, in: session)
     }
 
     /// What About holds on the page of `tag`, or nothing where the page has none. The count
@@ -390,7 +451,12 @@ final class ShellTagFollow {
     /// Return with the lamp on the block `id` of About, on the page of `tag`: its row's press,
     /// where it has one. Whether the key did anything.
     func pressAbout(_ id: String, of tag: PostTag, in session: ShellSession) -> Bool {
-        guard front(of: tag, in: session) == .about, let line = about(of: tag, in: session)?.press(on: id) else { return false }
+        guard front(of: tag, in: session) == .about, let about = about(of: tag, in: session) else { return false }
+        if let line = about.featurePress(on: id) {
+            featurePressed(line, in: session)
+            return true
+        }
+        guard let line = about.press(on: id) else { return false }
         pressed(line, in: session)
         return true
     }
@@ -463,6 +529,7 @@ final class ShellTagFollow {
     /// called off. **A press still out stays out** — it is one request at the source whether
     /// or not anybody is looking — and its answer lands nowhere.
     func closed(_ tag: PostTag) {
+        features?.closed(tag)
         let suffix = "\u{1e}" + MastodonRising.folded(tag)
         for key in pages.keys where key.hasSuffix(suffix) {
             drop(key)
@@ -544,6 +611,7 @@ final class ShellTagFollow {
         // Nothing the source said before stands while it is read again: the line reads as
         // asking, and there is no press over a read that is out.
         pages[key]?.said = nil
+        pages[key]?.featuring = nil
         // One read out a page: a read begun over another supersedes it.
         asks[key]?.cancel()
         let through = reaching?(held)
@@ -560,9 +628,11 @@ final class ShellTagFollow {
         let key = Self.key(tag, source.host)
         defer { if pages[key]?.awaits == errand { asks[key] = nil } }
         do {
-            let said = try await through.isFollowed(tag)
+            let standing = try await through.standing(of: tag)
             guard stillTheirs(key, errand: errand, at: source, in: session) else { return }
-            pages[key]?.said = said
+            pages[key]?.said = standing.following
+            pages[key]?.featuring = standing.featuring
+
             pages[key]?.failed = false
             pages[key]?.absent = false
         } catch {
