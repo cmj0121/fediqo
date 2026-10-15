@@ -214,11 +214,6 @@ struct FollowedTagsSaid: Equatable {
         L10n.t("followed.tags.title", language: language)
     }
 
-    /// How many hashtags are shown, or nothing where none is.
-    func shown(language: DummyLanguage? = nil) -> String? {
-        rows.isEmpty ? nil : String(format: L10n.t("followed.tags.shown", language: language), L10n.grouped(rows.count, language: language))
-    }
-
     /// What is said above the rows: that the list is being asked for, that it could not be —
     /// or, once the source has given it, what asking again came to.
     func stateLine(language: DummyLanguage? = nil) -> String? {
