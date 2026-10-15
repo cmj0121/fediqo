@@ -571,7 +571,86 @@ struct FeaturingTests {
         #expect(!theirs.takesOff)
     }
 
+    @Test("A hashtag taken off from the reader's own page while their hashtags are being read again stays off when that read lands still listing it: the answer is the newer word; a read begun after it is the list")
+    func takeOffOverARead() async throws {
+        let (session, server, _) = await session([
+            Self.myTags: PageServer.Answer(body: "[\(Self.featured()),\(Self.featured("maps", id: "6"))]"),
+            Self.myPeople: PageServer.Answer(body: "[]"),
+            "/api/v1/featured_tags/5": PageServer.Answer(body: "{}"),
+        ])
+        try await signIn(session)
+        let features = ShellPersonPages().features
+        let page = try Self.myPage()
+        await features.opened(Self.me, said: page, in: session)
+
+        await server.hold(Self.myTags)
+        defer { Task { await server.release(Self.myTags) } }
+        let tagsGuard = watching("the ask of \(Self.myTags), held at its server") { await server.release(Self.myTags) }
+        defer { tagsGuard.cancel() }
+        let reading = Task { await features.again(Self.me, said: page, in: session) }
+        await server.arrival(of: Self.myTags, times: 2, by: reading)
+        #expect(features.said(of: Self.me, said: page, own: true, in: session)?.tags.map(\.name) == ["swift", "maps"], "what was said stands")
+        await features.takeOff(Self.swift, of: Self.me, said: page, in: session)
+        await server.release(Self.myTags)
+        await reading.value
+        #expect(features.said(of: Self.me, said: page, own: true, in: session)?.tags.map(\.name) == ["maps"], "the read on its way does not bring it back")
+
+        await features.again(Self.me, said: page, in: session)
+        #expect(features.said(of: Self.me, said: page, own: true, in: session)?.tags.map(\.name) == ["swift", "maps"], "a read begun after it is the source's word")
+    }
+
+    @Test("A Take off that did not arrive on the reader's own people featured is said under the row until that list is read again — reading another list holding them leaves it")
+    func aMissedTakeOffStaysOnItsList() async throws {
+        let bea = #"{"id":"9","acct":"bea","display_name":"Bea"}"#
+        let standing = Self.standing(endorsed: true).replacingOccurrences(of: #""id":"42""#, with: #""id":"9""#)
+        let (session, _, _) = await session([
+            Self.myList: PageServer.Answer(body: "[\(bea)]"),
+            "/api/v1/accounts/7/followers?limit=80": PageServer.Answer(body: "[\(bea)]"),
+            "/api/v1/accounts/relationships?id%5B%5D=9": PageServer.Answer(body: "[\(standing)]"),
+            "/api/v1/accounts/9/unendorse": Self.down,
+        ])
+        try await signIn(session)
+        let lists = ShellPersonPages().lists
+        let me = try #require(try Self.myPage().person)
+        let featured = PeopleList(featuredBy: me)
+        await lists.opened(featured, in: session)
+        let person = try #require(lists.said(of: featured, in: session)?.people.first)
+        await lists.press(.unfeature, on: person, of: featured, in: session)
+        #expect(lists.said(of: featured, in: session)?.missed["9"] != nil)
+
+        await lists.opened(PeopleList(.followers, of: me), in: session)
+        #expect(lists.said(of: featured, in: session)?.missed["9"] != nil, "another list read from the top leaves it")
+        await lists.again(featured, in: session)
+        #expect(lists.said(of: featured, in: session)?.missed["9"] == nil, "its own list read again takes it down")
+    }
+
+    @Test("A person's page let go of the pages kept forgets what they feature: opened again, it is asked afresh")
+    func aPageLetGoIsAskedAfresh() async throws {
+        var routes: [String: PageServer.Answer] = [
+            "/api/v1/accounts/0/featured_tags": PageServer.Answer(body: "[\(Self.featured())]"),
+            "/api/v1/accounts/0/endorsements?limit=1": PageServer.Answer(body: "[]"),
+        ]
+        for n in 0...ShellPersonPages.kept {
+            routes["/api/v1/accounts/lookup?acct=p\(n)"] = PageServer.Answer(body: #"{"id":"\#(n)","acct":"p\#(n)","display_name":"P\#(n)"}"#)
+        }
+        let (session, server, _) = await session(routes)
+        try await signIn(session)
+        let all = ShellPersonPages()
+        let people = (0...ShellPersonPages.kept).map { DummyPerson(handle: "@p\($0)@m.example", host: Self.host)! }
+        await all.opened(people[0], in: session)
+        await all.featuredOpened(people[0], in: session)
+        #expect(all.featured(of: people[0], in: session)?.tags.map(\.name) == ["swift"])
+        for person in people.dropFirst() { await all.opened(person, in: session) }
+        #expect(all.featured(of: people[0], in: session) == nil, "let go with the page")
+
+        await all.opened(people[0], in: session)
+        await all.featuredOpened(people[0], in: session)
+        #expect(await server.asked.filter { $0 == "/api/v1/accounts/0/featured_tags" }.count == 2, "asked afresh")
+        #expect(all.featured(of: people[0], in: session)?.tags.map(\.name) == ["swift"])
+    }
+
     // MARK: - Words and drawing
+
 
 
     @Test("Every sentence of featuring is written in each language the app speaks, with the places it fills, and the two Chinese tables alike")

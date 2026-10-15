@@ -741,7 +741,7 @@ final class ShellPeoplePages {
             pages[id]?.stood = []
             // And a press on a row that did not arrive is said no longer: the rows are new.
             for person in fresh.people {
-                acts?.forgetMissedOnARow(DummyPerson(person).id)
+                acts?.forgetMissedOnARow(DummyPerson(person).id, on: list.which)
                 dismissMissed.remove(Self.dismissKey(list, person.accountID))
             }
             // Whoever left by a press answered after this read set out stays off it.

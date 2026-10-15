@@ -596,9 +596,9 @@ final class ShellPersonActs {
     }
 
     /// The press on a row of the person `key` names that did not arrive is said no longer:
-    /// their list was read again from the top.
-    func forgetMissedOnARow(_ key: String) {
-        if missedOnARow(key) != nil { missed[key] = nil }
+    /// their list `which`, the one that act takes them off, was read again from the top.
+    func forgetMissedOnARow(_ key: String, on which: PeopleList.Which) {
+        if let act = missedOnARow(key), Self.isOfARow(act, on: which) { missed[key] = nil }
     }
 
     /// The press on a row of the person `key` names that did not arrive, where one did not.

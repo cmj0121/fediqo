@@ -80,6 +80,10 @@ final class ShellFeatures {
     /// What each press that did not arrive wanted, and what the source said of it.
     private var missed: [String: Bool] = [:]
     private var refused: [String: String] = [:]
+    /// Each hashtag taken off the reader's profile from their own page, by the key of it and
+    /// its source, with the number the count stood at when the source answered: **a read of
+    /// their hashtags begun before that does not bring it back**, and one begun after is the list.
+    private var takenOff: [String: Int] = [:]
     @ObservationIgnored private var asks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var ownAsks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private let errands: PageErrands
@@ -121,6 +125,7 @@ final class ShellFeatures {
         pressedUnder = pressedUnder.filter { !$0.key.hasPrefix(prefix) }
         missed = missed.filter { !$0.key.hasPrefix(prefix) }
         refused = refused.filter { !$0.key.hasPrefix(prefix) }
+        takenOff = takenOff.filter { !$0.key.hasPrefix(prefix) }
     }
 
     /// What the page `id` names was told of what they feature let go, and its asks called
@@ -167,7 +172,10 @@ final class ShellFeatures {
         var handed = FeaturedSaid(source: source.host, own: isOwn)
         if hosts.has(.featuredTags, at: source.host) != .absent {
             // One being taken off leaves at the press.
-            handed.tags = page.tags.filter { presses.shown(Self.key($0.tag, source.host)) != false }
+            handed.tags = page.tags.filter { featured in
+                let key = Self.key(featured.tag, source.host)
+                return presses.shown(key) != false && (takenOff[key].map { $0 < page.awaits } ?? true)
+            }
             handed.tagsAsking = page.tagsAsking
             handed.tagsFailed = page.tagsFailed && !page.tagsAsking
             if isOwn {
@@ -221,6 +229,11 @@ final class ShellFeatures {
         let tagsWanted = hosts.has(.featuredTags, at: source.host) != .absent
         let peopleWanted = hosts.has(.featuredPeople, at: source.host) != .absent
         page.tagsAsking = tagsWanted
+        // Asked again, what was said before stands until the answer lands.
+        if let before = standing(id, of: person.accountID, at: source.host, in: session) {
+            page.tags = before.tags
+            page.anyFeatured = before.anyFeatured
+        }
         theirs[id] = page
         let through = held.map { session.reach.featured(session.mastodon.authorized(token: $0, within: deadline, for: .person)) }
             ?? session.reach.unsignedFeatured(source.host, for: .person, within: deadline)
@@ -340,6 +353,8 @@ final class ShellFeatures {
             self.theirs[id]?.tags.removeAll { MastodonRising.folded($0.tag) == folded }
             self.own[host]?.tags?.removeAll { MastodonRising.folded($0.tag) == folded }
             self.answered[key] = false
+            self.takenOff[key] = self.errands.next()
+
         }.value
     }
 
