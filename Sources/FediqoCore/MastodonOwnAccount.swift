@@ -12,24 +12,24 @@ import Foundation
 //
 // **The lock is the held words', never a 403's text.** A GoToSocial's 403 names no missing
 // word and is not a Mastodon's sentence (item 2), so a 403 is the part's lock only where the
-// sign-in does not hold the part — and a refusal where it does.
+// sign-in does not hold the part — and the source forbidding it where it does.
 //
 // **Nothing here writes anywhere on this device**: what is read lands in what it returns.
 
-/// The reader's own account as its owner sees it: what a change starts from and is answered with.
+/// The reader's own account as its owner sees it: what a change starts from.
 public struct OwnAccount: Sendable, Hashable {
     /// One of the account's extra fields: a name and its value, as the owner wrote them.
     public struct Field: Sendable, Hashable {
         public var name: String
         public var value: String
-        /// Whether the source has checked that the value's link points back. Read, never sent:
-        /// the source keeps it while the value stays the same.
-        public var verified: Bool
+        /// When the source checked that the value's link points back. Read, never sent: the
+        /// source keeps it while the value stays the same.
+        public var verifiedAt: Date?
 
-        public init(name: String, value: String, verified: Bool = false) {
+        public init(name: String, value: String, verifiedAt: Date? = nil) {
             self.name = name
             self.value = value
-            self.verified = verified
+            self.verifiedAt = verifiedAt
         }
     }
 
@@ -39,36 +39,37 @@ public struct OwnAccount: Sendable, Hashable {
     public var words: String
     /// The extra fields, in the source's order.
     public var fields: [Field]
-    /// Whether somebody must be agreed to before they follow. Nothing where the source did not say.
-    public var locked: Bool?
+    /// Whether somebody may follow without being agreed to — the source's `locked`, turned
+    /// round. Nothing where the source did not say.
+    public var followWithoutAsking: Bool?
     /// Whether the account may be found and suggested. Nothing where the source did not say.
-    public var discoverable: Bool?
-    /// Whether others are kept from the account's lists of followers and followed. Nothing where
-    /// the source did not say.
-    public var hidesLists: Bool?
+    public var findable: Bool?
+    /// Whether others may see the account's lists of followers and followed — the source's
+    /// `hide_collections`, turned round. Nothing where the source did not say.
+    public var listsShown: Bool?
 
     public init(
-        name: String = "", words: String = "", fields: [Field] = [], locked: Bool? = nil,
-        discoverable: Bool? = nil, hidesLists: Bool? = nil
+        name: String = "", words: String = "", fields: [Field] = [], followWithoutAsking: Bool? = nil,
+        findable: Bool? = nil, listsShown: Bool? = nil
     ) {
         self.name = name
         self.words = words
         self.fields = fields
-        self.locked = locked
-        self.discoverable = discoverable
-        self.hidesLists = hidesLists
+        self.followWithoutAsking = followWithoutAsking
+        self.findable = findable
+        self.listsShown = listsShown
     }
 }
 
 /// One thing of an own account a change sends and a refusal may name.
-public enum OwnAccountItem: String, Sendable, CaseIterable {
-    case name, words, fields, locked, discoverable, hidesLists
+public enum OwnRow: String, Sendable, CaseIterable {
+    case name, words, fields, followWithoutAsking, findable, listsShown
 }
 
 /// How long a source says each thing of an own account may be, and how many fields it may have.
 /// **Only what the host states**: nothing is a limit not said, which the source's refusal names
 /// if one is passed.
-public struct OwnAccountLimits: Sendable, Hashable {
+public struct OwnLimits: Sendable, Hashable {
     public var name: Int?
     public var words: Int?
     public var fields: Int?
@@ -83,19 +84,22 @@ public struct OwnAccountLimits: Sendable, Hashable {
         self.fieldValue = fieldValue
     }
 
-    public static let none = OwnAccountLimits()
+    public static let none = OwnLimits()
 }
 
-/// What the source would not take of a change: the things it named, and its sentence.
-public struct OwnAccountRefusal: Sendable, Hashable {
-    /// What was refused, in `OwnAccountItem`'s order. Nothing where the source named nothing.
-    public let what: [OwnAccountItem]
-    /// The source's own sentence, made fit for a line. Nothing where it sent none.
-    public let said: String?
+/// What the source answered a change with: the account as its owner sees it, the person it is
+/// as anyone sees it, and how many people ask to follow it.
+public struct OwnAnswer: Sendable, Hashable {
+    public let account: OwnAccount
+    public let person: Person
+    /// How many ask to follow the account (`source.follow_requests_count`). Nothing where the
+    /// source did not say, or said a figure below nothing.
+    public let asking: Int?
 
-    public init(what: [OwnAccountItem] = [], said: String? = nil) {
-        self.what = what
-        self.said = said
+    public init(account: OwnAccount, person: Person, asking: Int?) {
+        self.account = account
+        self.person = person
+        self.asking = asking
     }
 }
 
@@ -103,8 +107,12 @@ public enum OwnAccountError: Error, Equatable, Sendable {
     /// The sign-in does not hold the account part (`MastodonPart.account`): asking for it is
     /// what changes this.
     case locked
-    /// The source would not take the change. Nothing of the account changed there.
-    case refused(OwnAccountRefusal)
+    /// The source would not take the change (422): its sentence, made fit for a line — empty
+    /// where it sent none — and for each thing it named, its first word about it, likewise
+    /// (empty where it said nothing of it). Nothing of the account changed there.
+    case refused(sentence: String, rows: [OwnRow: String])
+    /// The source refused a sign-in that holds the account part (403).
+    case forbidden
     /// The source answered, and not with an account its owner sees.
     case unreadable
 }
@@ -123,7 +131,7 @@ public struct MastodonOwnAccount: Sendable {
     static let documentPath = "/api/v2/instance"
     /// How much of a refusal is read: a sentence and the names beside it, not a page.
     static let refusalLength = 16_384
-    /// How long the source's sentence is kept.
+    /// How long the source's sentence, and each of its words about a row, is kept.
     static let sentenceLength = 200
 
     /// The account as its owner sees it now.
@@ -132,35 +140,33 @@ public struct MastodonOwnAccount: Sendable {
     }
 
     /// The limits the host states for an own account. Those it does not state are none.
-    public func limits() async throws -> OwnAccountLimits {
+    public func limits() async throws -> OwnLimits {
         Self.limits(from: try await door.get(path: Self.documentPath))
     }
 
-    /// Sends what changed from `before` to `after` and hands back the account as the source
-    /// answers it. **Only what changed is sent** — and the fields whole where any of them
-    /// did, since the source replaces the set. Where nothing changed nothing is asked, and
-    /// `before` is handed back.
+    /// Sends what changed from `before` to `after` and hands back what the source answers.
+    /// **Only what changed is sent** — and the fields whole where any of them did, since the
+    /// source replaces the set. Where nothing changed nothing is asked: nothing is handed back.
     ///
-    /// Throws `.refused` where the source would not take it (422), or refused a sign-in that
-    /// holds the account part (403); `.locked` for a 403 to a sign-in that does not hold it;
-    /// and what the door threw otherwise.
-    public func change(from before: OwnAccount, to after: OwnAccount) async throws -> OwnAccount {
+    /// Throws `.refused` where the source would not take it (422); `.forbidden` for a 403 to a
+    /// sign-in that holds the account part, `.locked` for one to a sign-in that does not; and
+    /// what the door threw otherwise.
+    public func change(from before: OwnAccount, to after: OwnAccount) async throws -> OwnAnswer? {
         let form = Self.form(from: before, to: after)
-        guard !form.isEmpty else { return before }
+        guard !form.isEmpty else { return nil }
         let body: Data
         do {
             body = try await door.patch(path: Self.changePath, form: form)
         } catch let refused as MastodonUnprocessable {
-            throw OwnAccountError.refused(Self.refusal(from: refused.body))
+            throw Self.refusal(from: refused.body)
         } catch MastodonAuthError.http(403) {
-            guard MastodonParts.holds(.account, in: door.token.scopes) else { throw OwnAccountError.locked }
-            throw OwnAccountError.refused(OwnAccountRefusal())
+            throw MastodonParts.holds(.account, in: door.token.scopes) ? OwnAccountError.forbidden : .locked
         }
-        return try Self.account(from: body)
+        return try Self.answer(from: body, host: door.token.host)
     }
 
-    /// The form that changes `before` into `after`: each thing that differs, in
-    /// `OwnAccountItem`'s order. A switch the change leaves unsaid is not sent.
+    /// The form that changes `before` into `after`: each thing that differs, in `OwnRow`'s
+    /// order. A switch the change leaves unsaid is not sent.
     static func form(from before: OwnAccount, to after: OwnAccount) -> [(String, String)] {
         var form: [(String, String)] = []
         if after.name != before.name { form.append(("display_name", after.name)) }
@@ -173,14 +179,25 @@ public struct MastodonOwnAccount: Sendable {
                 form.append(("fields_attributes[\(place)][value]", field.value))
             }
         }
+        // The source's words for the two turned round are said the other way.
         for (key, now, was) in [
-            ("locked", after.locked, before.locked),
-            ("discoverable", after.discoverable, before.discoverable),
-            ("hide_collections", after.hidesLists, before.hidesLists),
+            ("locked", after.followWithoutAsking.map(!), before.followWithoutAsking.map(!)),
+            ("discoverable", after.findable, before.findable),
+            ("hide_collections", after.listsShown.map(!), before.listsShown.map(!)),
         ] {
             if let now, now != was { form.append((key, now ? "true" : "false")) }
         }
         return form
+    }
+
+    /// A change's answer read: the account as its owner sees it, the person it is, and how many
+    /// ask to follow it — all out of the one body. `unreadable` where any of the first two is not.
+    static func answer(from body: Data, host: String) throws -> OwnAnswer {
+        let account = try account(from: body)
+        guard let person = try? MastodonPeople.person(from: body, source: Source(host: host, kind: .mastodon)) else {
+            throw OwnAccountError.unreadable
+        }
+        return OwnAnswer(account: account, person: person, asking: MastodonWho.said(body, at: host).asking)
     }
 
     /// An account as its owner sees it, read out of an answer. `unreadable` where the answer
@@ -210,19 +227,22 @@ public struct MastodonOwnAccount: Sendable {
         }
         let source = wire.source
         let fields = (source.fields?.value ?? []).compactMap(\.value).map {
-            OwnAccount.Field(name: $0.name?.value ?? "", value: $0.value?.value ?? "", verified: $0.verifiedAt?.value != nil)
+            OwnAccount.Field(
+                name: $0.name?.value ?? "", value: $0.value?.value ?? "",
+                verifiedAt: $0.verifiedAt?.value.flatMap(MastodonJSON.date(from:))
+            )
         }
         return OwnAccount(
             name: wire.displayName?.value ?? "", words: source.note?.value ?? "", fields: fields,
-            locked: wire.locked?.value,
-            discoverable: source.discoverable?.value ?? wire.discoverable?.value,
-            hidesLists: source.hideCollections?.value ?? wire.hideCollections?.value
+            followWithoutAsking: wire.locked?.value.map(!),
+            findable: source.discoverable?.value ?? wire.discoverable?.value,
+            listsShown: (source.hideCollections?.value ?? wire.hideCollections?.value).map(!)
         )
     }
 
     /// The limits a host's document states for an own account; a document that states none,
     /// or is no document, states none.
-    static func limits(from body: Data) -> OwnAccountLimits {
+    static func limits(from body: Data) -> OwnLimits {
         typealias L = StatusDTO.Lenient
         struct Accounts: Decodable, Sendable {
             let maxDisplayNameLength: L<Int>?
@@ -238,41 +258,48 @@ public struct MastodonOwnAccount: Sendable {
         }
         // A limit of nothing or less is a host that said something useless, not one.
         func stated(_ limit: L<Int>?) -> Int? { limit?.value.flatMap { $0 > 0 ? $0 : nil } }
-        return OwnAccountLimits(
+        return OwnLimits(
             name: stated(accounts.maxDisplayNameLength), words: stated(accounts.maxNoteLength),
             fields: stated(accounts.maxProfileFields), fieldName: stated(accounts.profileFieldNameLimit),
             fieldValue: stated(accounts.profileFieldValueLimit)
         )
     }
 
-    /// What a 422 says was refused: each thing its `details` names that this app sent, and its
-    /// sentence. A name of the source's this app does not send is in the sentence alone.
-    static func refusal(from body: Data) -> OwnAccountRefusal {
+    /// What a 422 says was refused: its sentence, and each row its `details` names with the
+    /// first `description` given of it. A name of the source's this app does not send is in
+    /// the sentence alone.
+    static func refusal(from body: Data) -> OwnAccountError {
         guard body.count <= refusalLength,
               let said = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
-        else { return OwnAccountRefusal() }
-        let named = Set(((said["details"] as? [String: Any]) ?? [:]).keys.compactMap(item))
-        let sentence = (said["error"] as? String).map { LineText.oneLine($0, limit: sentenceLength) }
-        return OwnAccountRefusal(
-            what: OwnAccountItem.allCases.filter(named.contains),
-            said: sentence.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
-        )
+        else { return .refused(sentence: "", rows: [:]) }
+        func line(_ raw: Any?) -> String {
+            guard let raw = raw as? String else { return "" }
+            return LineText.oneLine(raw, limit: sentenceLength).trimmingCharacters(in: .whitespaces)
+        }
+        var rows: [OwnRow: String] = [:]
+        for (name, about) in (said["details"] as? [String: Any]) ?? [:] {
+            guard let row = row(name) else { continue }
+            let first = line(((about as? [Any])?.first as? [String: Any])?["description"])
+            // Two names for one row — the fields are named either way — keep the one that says something.
+            if rows[row]?.isEmpty ?? true { rows[row] = first }
+        }
+        return .refused(sentence: line(said["error"]), rows: rows)
     }
 
-    /// The item a source's name for a thing of the account is, by the names it is sent under.
-    private static func item(_ name: String) -> OwnAccountItem? {
+    /// The row a source's name for a thing of the account is, by the names it is sent under.
+    private static func row(_ name: String) -> OwnRow? {
         switch name {
         case "display_name": .name
         case "note": .words
-        case "locked": .locked
-        case "discoverable": .discoverable
-        case "hide_collections": .hidesLists
+        case "locked": .followWithoutAsking
+        case "discoverable": .findable
+        case "hide_collections": .listsShown
         default: name.hasPrefix("fields") ? .fields : nil
         }
     }
 }
 
 extension OwnAccount.Field {
-    /// What a change sends of a field: its verified mark is the source's.
+    /// What a change sends of a field: when it was verified is the source's.
     fileprivate var pair: [String] { [name, value] }
 }

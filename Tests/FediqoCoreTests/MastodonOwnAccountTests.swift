@@ -41,15 +41,17 @@ struct MastodonOwnAccountTests {
     /// An account as a source answers it, built from what a test changes.
     private static func answer(
         name: String = "Ada", note: String = "hello", fields: String = "[]", locked: String = "false",
-        discoverable: String = "true", hide: String = "false"
+        discoverable: String = "true", hide: String = "false", asking: String = "2"
     ) -> String {
-        #"{"id":"1","username":"ada","acct":"ada","display_name":"\#(name)","locked":\#(locked),"discoverable":\#(discoverable),"hide_collections":\#(hide),"note":"<p>\#(note)</p>","fields":[],"source":{"privacy":"public","note":"\#(note)","fields":\#(fields),"discoverable":\#(discoverable),"hide_collections":\#(hide)}}"#
+        #"{"id":"1","username":"ada","acct":"ada","display_name":"\#(name)","locked":\#(locked),"discoverable":\#(discoverable),"hide_collections":\#(hide),"note":"<p>\#(note)</p>","fields":[],"source":{"privacy":"public","note":"\#(note)","fields":\#(fields),"follow_requests_count":\#(asking),"discoverable":\#(discoverable),"hide_collections":\#(hide)}}"#
     }
+
+    private static let verified = Date(timeIntervalSince1970: 1_790_812_800)
 
     private static let before = OwnAccount(
         name: "Ada", words: "hello",
-        fields: [.init(name: "site", value: "https://a.example", verified: true), .init(name: "pronouns", value: "she/her")],
-        locked: false, discoverable: true, hidesLists: false
+        fields: [.init(name: "site", value: "https://a.example", verifiedAt: Self.verified), .init(name: "pronouns", value: "she/her")],
+        followWithoutAsking: true, findable: true, listsShown: true
     )
 
     // MARK: - The part
@@ -135,7 +137,7 @@ struct MastodonOwnAccountTests {
     @Test("What a real server answered is read as its owner sees it: the owner's own words, not the HTML; and a switch it answers null is not said, never no")
     func whatARealServerSent() throws {
         let account = try MastodonOwnAccount.account(from: Data(MastodonPartsCaptures.taken.utf8))
-        #expect(account == OwnAccount(name: "", words: MastodonPartsCaptures.note, fields: [], locked: false, discoverable: nil, hidesLists: nil))
+        #expect(account == OwnAccount(name: "", words: MastodonPartsCaptures.note, fields: [], followWithoutAsking: true, findable: nil, listsShown: nil))
     }
 
     @Test("Read once, as the person, at the account check of the host the sign-in is of: name, words, fields with their verified mark, and the three switches")
@@ -152,7 +154,7 @@ struct MastodonOwnAccountTests {
     func notSaidAndUnreadable() throws {
         let goToSocial = #"{"id":"01K","username":"ada","acct":"ada","display_name":"Ada","locked":true,"discoverable":false,"note":"<p>hi</p>","fields":[],"source":{"privacy":"unlisted","note":"hi","fields":[],"status_content_type":"text/plain","web_visibility":"unlisted"}}"#
         let read = try MastodonOwnAccount.account(from: Data(goToSocial.utf8))
-        #expect(read == OwnAccount(name: "Ada", words: "hi", locked: true, discoverable: false, hidesLists: nil))
+        #expect(read == OwnAccount(name: "Ada", words: "hi", followWithoutAsking: false, findable: false, listsShown: nil))
         for body in ["{}", "[]", "", #"{"display_name":"Ada","note":"<p>hi</p>"}"#, #"{"source":null}"#] {
             #expect(throws: OwnAccountError.unreadable) { try MastodonOwnAccount.account(from: Data(body.utf8)) }
         }
@@ -161,7 +163,7 @@ struct MastodonOwnAccountTests {
     @Test("A limit is one the host states — a real Mastodon's document states five — and a host that states none, or a value of nothing, has none")
     func limits() {
         let mastodon = MastodonOwnAccount.limits(from: Data(MastodonHostCaptures.document.utf8))
-        #expect(mastodon == OwnAccountLimits(name: 40, words: 500, fields: 4, fieldName: 255, fieldValue: 255))
+        #expect(mastodon == OwnLimits(name: 40, words: 500, fields: 4, fieldName: 255, fieldValue: 255))
         #expect(MastodonOwnAccount.limits(from: Data(#"{"configuration":{"statuses":{"max_characters":5000}}}"#.utf8)) == .none)
         #expect(MastodonOwnAccount.limits(from: Data(#"{"configuration":{"accounts":{"max_note_length":0,"max_profile_fields":"4"}}}"#.utf8)) == .none)
         #expect(MastodonOwnAccount.limits(from: Data("<html>".utf8)) == .none)
@@ -169,21 +171,38 @@ struct MastodonOwnAccountTests {
 
     // MARK: - Changing
 
-    @Test("A change sends only what changed — the name, the words, each switch — in that order, as a PATCH of a form, and hands back the source's answer, not what was sent")
+    @Test("A change sends only what changed — the name, the words, each switch — in that order, as a PATCH of a form, and hands back the source's answer, not what was sent: the account as its owner sees it, the person it is from the same body, and how many ask to follow it")
     func onlyWhatChanged() async throws {
-        let answered = Self.answer(name: "Ada L", note: "said by the source", locked: "true")
+        let answered = Self.answer(name: "Ada L", note: "said by the source", locked: "true", asking: "3")
         let (reader, server, _) = try Self.reader([Self.change: .json(answered)])
         var after = Self.before
         after.name = "Ada L"
-        after.locked = true
-        let back = try await reader.change(from: Self.before, to: after)
-        #expect(back.words == "said by the source" && back.name == "Ada L" && back.locked == true)
+        after.followWithoutAsking = false
+        let back = try #require(try await reader.change(from: Self.before, to: after))
+        #expect(back.account.words == "said by the source" && back.account.name == "Ada L" && back.account.followWithoutAsking == false)
+        #expect(back.person.name == "Ada L" && back.person.accountID == "1" && back.person.source.host == MastodonFixture.host)
+        #expect(back.asking == 3)
         let sent = try #require(await server.requests.first)
         #expect(sent.httpMethod == "PATCH" && sent.url?.path == Self.change)
         #expect(Self.form(sent) == [["display_name", "Ada L"], ["locked", "true"]])
 
-        #expect(MastodonOwnAccount.form(from: Self.before, to: { var a = Self.before; a.words = "a & b = c\n"; a.discoverable = false; a.hidesLists = true; return a }()).map { [$0.0, $0.1] }
+        #expect(MastodonOwnAccount.form(from: Self.before, to: { var a = Self.before; a.words = "a & b = c\n"; a.findable = false; a.listsShown = false; return a }()).map { [$0.0, $0.1] }
             == [["note", "a & b = c\n"], ["discoverable", "false"], ["hide_collections", "true"]])
+    }
+
+    @Test("The answer a real server gave is read whole: the person from the same body and a count of none asking; a count that is no figure or below nothing is not said; and a body that is no person is unreadable")
+    func theAnswer() throws {
+        let real = try MastodonOwnAccount.answer(from: Data(MastodonPartsCaptures.taken.utf8), host: "mastodon.localhost")
+        #expect(real.account.words == MastodonPartsCaptures.note)
+        #expect(real.person.accountID == "117419563845369311" && real.person.handle == "@fediqo_other@mastodon.localhost")
+        #expect(real.asking == 0)
+        for (figure, said) in [("-1", nil), (#""2""#, nil), ("null", nil), ("7", 7)] as [(String, Int?)] {
+            let body = Self.answer(asking: figure)
+            #expect(try MastodonOwnAccount.answer(from: Data(body.utf8), host: MastodonFixture.host).asking == said, "\(figure)")
+        }
+        #expect(throws: OwnAccountError.unreadable) {
+            try MastodonOwnAccount.answer(from: Data(#"{"source":{"note":"hi"}}"#.utf8), host: MastodonFixture.host)
+        }
     }
 
     @Test("Where any field changed every field is sent, in order, since the source replaces the set; a verified mark alone is no change; and fields all taken away are sent as one empty field")
@@ -198,44 +217,46 @@ struct MastodonOwnAccountTests {
             ["fields_attributes[1][name]", "pronouns"], ["fields_attributes[1][value]", "they/them"],
         ]
         #expect(form { $0.fields[1].value = "they/them" } == whole)
-        #expect(form { $0.fields[0].verified = false } == [])
+        #expect(form { $0.fields[0].verifiedAt = nil } == [])
         #expect(form { $0.fields.removeLast() } == [["fields_attributes[0][name]", "site"], ["fields_attributes[0][value]", "https://a.example"]])
         #expect(form { $0.fields = [] } == [["fields_attributes[0][name]", ""], ["fields_attributes[0][value]", ""]])
     }
 
-    @Test("A switch the source did not say is sent only when the person sets it, and one left unsaid is never sent; nothing changed asks nothing and hands back what was")
+    @Test("A switch the source did not say is sent only when the person sets it, and one left unsaid is never sent; nothing changed asks nothing and hands nothing back")
     func unsaidSwitches() async throws {
-        let unsaid = OwnAccount(name: "Ada", words: "hi", locked: false, discoverable: nil, hidesLists: nil)
+        let unsaid = OwnAccount(name: "Ada", words: "hi", followWithoutAsking: true, findable: nil, listsShown: nil)
         var set = unsaid
-        set.hidesLists = false
+        set.listsShown = true
         #expect(MastodonOwnAccount.form(from: unsaid, to: set).map { [$0.0, $0.1] } == [["hide_collections", "false"]])
-        #expect(MastodonOwnAccount.form(from: Self.before, to: { var a = Self.before; a.hidesLists = nil; return a }()).isEmpty)
+        #expect(MastodonOwnAccount.form(from: Self.before, to: { var a = Self.before; a.listsShown = nil; return a }()).isEmpty)
 
         let (reader, server, _) = try Self.reader([:])
-        #expect(try await reader.change(from: Self.before, to: Self.before) == Self.before)
+        #expect(try await reader.change(from: Self.before, to: Self.before) == nil)
         #expect(await server.requests.isEmpty)
     }
 
-    @Test("A refusal (422) says what was refused, by what it was sent as, and the source's sentence fit for a line — a real Mastodon's among them — and the sign-in goes on")
+    @Test("A refusal (422) says what was refused, by row, each with the source's first word about it, and the source's sentence — all fit for a line, a real Mastodon's among them — and the sign-in goes on")
     func refusal() async throws {
-        let said = #"{"error":"Validation failed: Note is too long\nreally","details":{"note":[{"error":"ERR_TOO_LONG"}],"fields":[{"error":"ERR_TOO_MANY"}],"display_name":[],"avatar":[]}}"#
+        let said = #"{"error":"Validation failed: Note is too long\nreally","details":{"note":[{"error":"ERR_TOO_LONG","description":"is too long\n(500)"},{"error":"ERR_OTHER","description":"second"}],"fields":[{"error":"ERR_TOO_MANY"}],"display_name":[],"avatar":[{"description":"bad"}]}}"#
         let (reader, _, tokens) = try Self.reader([Self.change: .json(said, status: 422)])
         var after = Self.before
         after.words = String(repeating: "x", count: 600)
-        await #expect(throws: OwnAccountError.refused(OwnAccountRefusal(what: [.name, .words, .fields], said: "Validation failed: Note is too long really"))) {
+        await #expect(throws: OwnAccountError.refused(sentence: "Validation failed: Note is too long really", rows: [.words: "is too long (500)", .fields: "", .name: ""])) {
             try await reader.change(from: Self.before, to: after)
         }
         #expect(try tokens.token(host: MastodonFixture.host) != nil)
 
         #expect(MastodonOwnAccount.refusal(from: Data(MastodonPartsCaptures.noPicture.utf8))
-            == OwnAccountRefusal(what: [], said: "Validation failed: Avatar has contents that are not what they are reported to be"))
-        #expect(MastodonOwnAccount.refusal(from: Data(#"{"error":"Unprocessable Entity"}"#.utf8)) == OwnAccountRefusal(said: "Unprocessable Entity"))
-        #expect(MastodonOwnAccount.refusal(from: Data("<html>".utf8)) == OwnAccountRefusal())
+            == .refused(sentence: "Validation failed: Avatar has contents that are not what they are reported to be", rows: [:]))
+        #expect(MastodonOwnAccount.refusal(from: Data(#"{"error":"Unprocessable Entity"}"#.utf8)) == .refused(sentence: "Unprocessable Entity", rows: [:]))
+        #expect(MastodonOwnAccount.refusal(from: Data(#"{"details":{"fields":[{"description":7}],"fields_attributes":[{"description":"too many"}]}}"#.utf8))
+            == .refused(sentence: "", rows: [.fields: "too many"]))
+        #expect(MastodonOwnAccount.refusal(from: Data("<html>".utf8)) == .refused(sentence: "", rows: [:]))
         let long = #"{"error":"\#(String(repeating: "y", count: 100_000))"}"#
-        #expect(MastodonOwnAccount.refusal(from: Data(long.utf8)) == OwnAccountRefusal())
+        #expect(MastodonOwnAccount.refusal(from: Data(long.utf8)) == .refused(sentence: "", rows: [:]))
     }
 
-    @Test("The lock is read from the held words, never from a 403's text: a 403 to a sign-in without the part is its lock, and to one holding it a refusal — whatever the 403 says")
+    @Test("The lock is read from the held words, never from a 403's text: a 403 to a sign-in without the part is its lock, and to one holding it the source forbidding it — whatever the 403 says")
     func theLock() async throws {
         let bodies = [
             #"{"error":"This action is outside the authorized scopes"}"#,
@@ -250,7 +271,7 @@ struct MastodonOwnAccountTests {
             let (unsaid, _, _) = try Self.reader([Self.change: .json(body, status: 403)], scopes: nil)
             await #expect(throws: OwnAccountError.locked) { try await unsaid.change(from: Self.before, to: after) }
             let (holding, _, _) = try Self.reader([Self.change: .json(body, status: 403)])
-            await #expect(throws: OwnAccountError.refused(OwnAccountRefusal())) { try await holding.change(from: Self.before, to: after) }
+            await #expect(throws: OwnAccountError.forbidden) { try await holding.change(from: Self.before, to: after) }
         }
     }
 
