@@ -89,6 +89,10 @@ public enum AnnouncementError: Error, Equatable, Sendable {
     case locked(MastodonPart)
     /// The source refused a sign-in that holds the part (403), or refused to read them.
     case forbidden
+    /// The source refused to read them for want of a word the sign-in was not issued with, and
+    /// said so as a Mastodon does (`MastodonScopeRefusal`). A 403 that does not say so — a
+    /// GoToSocial's — is `forbidden`.
+    case outsideScope
     /// The source would not take the reaction (422): its sentence, made fit for a line — empty
     /// where it sent none.
     case refused(sentence: String)
@@ -124,12 +128,15 @@ public struct MastodonAnnouncements: Sendable {
     /// source gave none, not that the host has none.**
     ///
     /// Throws `MastodonHostMoreError.noSuchAddress` where the host says it has no such address,
-    /// `.forbidden` for a 403, `.unreadable` for an answer that is no list, and what the door
+    /// `.outsideScope` where the server says the sign-in lacks a word to read them, `.forbidden`
+    /// for any other 403, `.unreadable` for an answer that is no list, and what the door
     /// threw otherwise. **Entry by entry**: one this build cannot read is that one left out.
     public func read() async throws -> [Announcement] {
         let body: Data
         do {
-            body = try await door.getAtAddress(path: Self.path)
+            body = try await door.getAtAddressInScope(path: Self.path)
+        } catch MastodonScopeError.outside {
+            throw AnnouncementError.outsideScope
         } catch MastodonAuthError.http(403) {
             throw AnnouncementError.forbidden
         }
@@ -185,6 +192,10 @@ public struct MastodonAnnouncements: Sendable {
     /// that turns a line round.
     static func isReactionName(_ name: String) -> Bool {
         guard !name.isEmpty, name.unicodeScalars.count <= nameLength else { return false }
+        // An emoji's name has an emoji in it, not only what joins or turns one.
+        if !name.unicodeScalars.allSatisfy(\.isASCII), !name.unicodeScalars.contains(where: \.properties.isEmoji) {
+            return false
+        }
         return name.unicodeScalars.allSatisfy { scalar in
             if scalar.isASCII { return scalar == "_" || CharacterSet.alphanumerics.contains(scalar) }
             let p = scalar.properties

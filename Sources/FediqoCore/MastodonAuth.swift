@@ -770,6 +770,20 @@ public struct MastodonAuthorized: Sendable {
         return try await finish(result, path: path)
     }
 
+    /// `getAtAddress` and `getInScope` at once (#321): a not-found of the address throws
+    /// `MastodonHostMoreError.noSuchAddress`, a refusal for want of a scope
+    /// `MastodonScopeError.outside`, and anything else what `get` throws.
+    public func getAtAddressInScope(path: String, query: [URLQueryItem] = []) async throws -> Data {
+        let result = try await send(path: path, query: query)
+        if MastodonHostNotFound.isOfTheAddress(status: result.status, body: result.body) {
+            throw MastodonHostMoreError.noSuchAddress
+        }
+        if MastodonScopeRefusal.isOne(status: result.status, body: result.body, authenticate: result.authenticate) {
+            throw MastodonScopeError.outside
+        }
+        return try await finish(result, path: path)
+    }
+
     public func post(path: String, form: [(String, String)]) async throws -> Data {
         try await post(path: path, form: form, headers: [:])
     }

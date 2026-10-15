@@ -81,9 +81,12 @@ struct MastodonAnnouncementsTests {
         await #expect(throws: MastodonAuthError.http(404)) { try await record.read() }
     }
 
-    @Test("A reading refused (403) is the source's refusal; an answer that is no list is unreadable")
+    @Test("A reading refused (403) for want of a word, as a Mastodon says it, is outside the scope; any other 403 is the source's refusal; an answer that is no list is unreadable")
     func readRefusals() async throws {
-        let (refused, _) = try Self.reader([Self.list: .json(#"{"error":"This action is outside the authorized scopes"}"#, status: 403)])
+        let (outside, _) = try Self.reader([Self.list: .json(#"{"error":"This action is outside the authorized scopes"}"#, status: 403)])
+        await #expect(throws: AnnouncementError.outsideScope) { try await outside.read() }
+        // GoToSocial's 403 names no word and is not Mastodon's sentence: the source refusing.
+        let (refused, _) = try Self.reader([Self.list: .json(#"{"error":"Forbidden"}"#, status: 403)])
         await #expect(throws: AnnouncementError.forbidden) { try await refused.read() }
         let (odd, _) = try Self.reader([Self.list: .json(#"{"id":"1"}"#)])
         await #expect(throws: AnnouncementError.unreadable) { try await odd.read() }
@@ -168,6 +171,9 @@ struct MastodonAnnouncementsTests {
             #expect(requests.allSatisfy { $0.url?.path == path && $0.url?.host == MastodonFixture.host })
             #expect(requests.allSatisfy { $0.httpBody == nil })
         }
+        let (announcements, server) = try Self.reader(["\(Self.list)/8/reactions/🤔": .json("{}")])
+        try await announcements.react("8", with: "🤔")
+        #expect(await server.requests.first?.url?.absoluteString == "https://\(MastodonFixture.host)\(Self.list)/8/reactions/%F0%9F%A4%94")
     }
 
     @Test("A reaction's 403 is the acting part's lock only where it is not held — the account part is no stand-in — and the source forbidding it where it is; a 422 is the source's refusal with its sentence; a 404 the announcement gone")
@@ -195,7 +201,7 @@ struct MastodonAnnouncementsTests {
         for name in ["blobcat", "blob_cat2", "🤔", "👍🏽", "👨‍👩‍👧", "❤️", "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "1️⃣"] {
             #expect(MastodonAnnouncements.isReactionName(name), "\(name)")
         }
-        for name in ["", "a b", "a/b", "..", "%2F", "a?b", "a#b", "a\u{202E}b", "é", String(repeating: "a", count: 65)] {
+        for name in ["", "a b", "a/b", "..", "%2F", "a?b", "a#b", "a\u{202E}b", "é", "\u{FE0F}", "\u{200D}\u{FE0F}", "a\u{FE0F}", String(repeating: "a", count: 65)] {
             #expect(!MastodonAnnouncements.isReactionName(name), "\(name)")
         }
     }
