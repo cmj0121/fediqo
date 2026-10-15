@@ -370,18 +370,28 @@ public struct MastodonOwnAccount: Sendable {
             followWithoutAsking: wire.locked?.value.map(!),
             findable: source.discoverable?.value ?? wire.discoverable?.value,
             listsShown: (source.hideCollections?.value ?? wire.hideCollections?.value).map(!),
-            picture: held(wire.avatar?.value, standIn: "/avatars/original/missing.png"),
-            header: held(wire.header?.value, standIn: "/headers/original/missing.png")
+            picture: held(wire.avatar?.value, .picture),
+            header: held(wire.header?.value, .header)
         )
     }
 
     /// A picture's address where it is one the account holds: a web address, and not the
-    /// host's own stand-in for none (Mastodon's ends `standIn`).
-    private static func held(_ address: String?, standIn: String) -> URL? {
+    /// host's own stand-in for none.
+    private static func held(_ address: String?, _ which: OwnPicture) -> URL? {
         guard let address, let url = URL(string: address), ["https", "http"].contains(url.scheme?.lowercased()),
-              url.host() != nil, !url.path().hasSuffix(standIn)
+              url.host() != nil, !isStandIn(url.path(), which)
         else { return nil }
         return url
+    }
+
+    /// Whether `path` is a host's own stand-in for no picture: a Mastodon's ends
+    /// `/original/missing.png`; a GoToSocial's is one of its own drawings, under
+    /// `/assets/default_avatars/` or `/assets/default_header.webp` (asked of 0.22.2).
+    static func isStandIn(_ path: String, _ which: OwnPicture) -> Bool {
+        switch which {
+        case .picture: path.hasSuffix("/avatars/original/missing.png") || path.hasPrefix("/assets/default_avatars/")
+        case .header: path.hasSuffix("/headers/original/missing.png") || path == "/assets/default_header.webp"
+        }
     }
 
     /// The limits a host's document states for an own account; a document that states none,
