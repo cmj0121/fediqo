@@ -273,6 +273,13 @@ struct ProfileDraftTests {
         let gone = URL.temporaryDirectory.appending(path: "fediqo-\(UUID().uuidString).png")
         #expect(await ProfilePictureFile.read(gone, limit: (10, true)) == .refused(.unreadable(name: gone.lastPathComponent)))
 
+        let photo = ProfilePhotoFile(size: png.count, ext: "png", data: png)
+        #expect(photo.picked(limit: (10, true)) == .refused(.tooLarge(name: "photo.png", size: png.count, limit: 10, stated: true)))
+        #expect(photo.picked(limit: (OwnPicture.byteLimit, false)) == .read(png, type: .png, name: "photo.png"))
+        let huge = ProfilePhotoFile(size: OwnPicture.byteLimit + 1, ext: "", data: nil)
+        #expect(huge.picked(limit: (OwnPicture.byteLimit, false))
+            == .refused(.tooLarge(name: "photo.jpg", size: OwnPicture.byteLimit + 1, limit: OwnPicture.byteLimit, stated: false)), "never read")
+
         var draft = ProfileDraft(Self.held)
         draft.take(.picture, .read(png, type: .png, name: "me.png"))
         let staged = draft.stage(of: .picture)

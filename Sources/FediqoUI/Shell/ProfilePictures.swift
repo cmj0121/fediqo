@@ -369,9 +369,7 @@ struct ProfilePicturesBlock: View {
                 onPicked(which, .refused(.unreadable(name: "photo")))
                 return
             }
-            defer { try? FileManager.default.removeItem(at: file.url) }
-            let name = "photo." + (file.url.pathExtension.isEmpty ? "jpg" : file.url.pathExtension)
-            onPicked(which, await ProfilePictureFile.read(file.url, limit: limit, name: name))
+            onPicked(which, file.picked(limit: limit))
         }
     }
 }
@@ -381,8 +379,8 @@ struct ProfilePicturesBlock: View {
 /// **Its size is asked of the file before any of it is read**: one over the limit is refused
 /// without loading it.
 enum ProfilePictureFile {
-    static func read(_ url: URL, limit: (bytes: Int, stated: Bool), name: String? = nil) async -> PicturePicked {
-        let name = name ?? url.lastPathComponent
+    static func read(_ url: URL, limit: (bytes: Int, stated: Bool)) async -> PicturePicked {
+        let name = url.lastPathComponent
         let reached = url.startAccessingSecurityScopedResource()
         defer { if reached { url.stopAccessingSecurityScopedResource() } }
         let said = try? url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
@@ -394,17 +392,31 @@ enum ProfilePictureFile {
     }
 }
 
-/// A photo handed over as a file, copied out of the picker's own before it is let go — so its
-/// size is known before its bytes are read, as a file's is.
+/// A photo handed over as a file, measured while the picker still holds it — so its size is
+/// known before its bytes are read, as a file's is, and no more than this app ever sends is read.
 struct ProfilePhotoFile: Transferable {
-    let url: URL
+    let size: Int?
+    let ext: String
+    /// Its bytes, where it is no larger than this app sends; nothing where it is.
+    let data: Data?
 
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(importedContentType: .image) { received in
-            let copy = URL.temporaryDirectory.appending(path: UUID().uuidString).appendingPathExtension(received.file.pathExtension)
-            try FileManager.default.copyItem(at: received.file, to: copy)
-            return ProfilePhotoFile(url: copy)
+            let size = try? received.file.resourceValues(forKeys: [.fileSizeKey]).fileSize
+            let within = size.map { $0 <= OwnPicture.byteLimit } ?? false
+            return ProfilePhotoFile(
+                size: size, ext: received.file.pathExtension,
+                data: within ? try Data(contentsOf: received.file, options: .mappedIfSafe) : nil
+            )
         }
+    }
+
+    /// What came of it against `limit`.
+    func picked(limit: (bytes: Int, stated: Bool)) -> PicturePicked {
+        let name = "photo." + (ext.isEmpty ? "jpg" : ext)
+        if let size, size > limit.bytes { return .refused(.tooLarge(name: name, size: size, limit: limit.bytes, stated: limit.stated)) }
+        guard let data else { return .refused(.unreadable(name: name)) }
+        return .read(data, type: ProfilePicturePreview.type(of: data) ?? .jpeg, name: name)
     }
 }
 
