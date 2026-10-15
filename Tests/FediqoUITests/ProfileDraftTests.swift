@@ -261,6 +261,27 @@ struct ProfileDraftTests {
         #expect(over == (OwnPicture.byteLimit, false), "a host stating more than this app sends: this app's own")
     }
 
+    @Test("A picked file is measured before it is read: one over the limit is refused by its size, one within is read as the type its bytes say; a choice refused once staged goes back to what was read")
+    func aPickedFileIsMeasuredFirst() async throws {
+        let png = Self.png()
+        let url = URL.temporaryDirectory.appending(path: "fediqo-\(UUID().uuidString).png")
+        try png.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let name = url.lastPathComponent
+        #expect(await ProfilePictureFile.read(url, limit: (10, true)) == .refused(.tooLarge(name: name, size: png.count, limit: 10, stated: true)))
+        #expect(await ProfilePictureFile.read(url, limit: (OwnPicture.byteLimit, false)) == .read(png, type: .png, name: name))
+        let gone = URL.temporaryDirectory.appending(path: "fediqo-\(UUID().uuidString).png")
+        #expect(await ProfilePictureFile.read(gone, limit: (10, true)) == .refused(.unreadable(name: gone.lastPathComponent)))
+
+        var draft = ProfileDraft(Self.held)
+        draft.take(.picture, .read(png, type: .png, name: "me.png"))
+        let staged = draft.stage(of: .picture)
+        draft.take(.picture, .read(png, type: .png, name: "me.png"))
+        #expect(draft.stage(of: .picture) != staged, "two choices of the same file are two choices, told apart without the bytes")
+        draft.refuse(.picture, .tooLarge(name: "me.png", size: png.count, limit: 10, stated: true))
+        #expect(draft.stage(of: .picture) == .held(Self.held.picture) && draft.refusals[.picture] != nil && !draft.changed)
+    }
+
     @Test("Saved in part: Save stays live, Cancel asks, the line is in full ink and names what was not taken off, in each language")
     func savedInPart() {
         var draft = ProfileDraft(Self.held)

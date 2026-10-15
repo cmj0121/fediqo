@@ -49,6 +49,8 @@ final class ShellProfile {
     private(set) var state: ProfileState = .asking
     /// What the sheet edits, once the read has landed.
     var draft: ProfileDraft?
+    /// The pictures whose files are being read.
+    private(set) var readingPictures: Set<OwnPicture> = []
 
     @ObservationIgnored private var askedAs: AskedAs = .nobody
     /// The id the source gave the reader the sheet was opened for, where it had said.
@@ -84,7 +86,10 @@ final class ShellProfile {
         // The part asked for again and held: the sheet is as it was before the refusal.
         let now: ProfileState = state == .partGone && lock == nil ? .read : state
         let waiting = session.mastodon.asking(host: open.host).flatMap { $0 > 0 ? $0 : nil }
-        return ProfileSaid(host: open.host, state: now, draft: draft, waiting: waiting, lock: now == .partGone ? lock : nil)
+        return ProfileSaid(
+            host: open.host, state: now, draft: draft, waiting: waiting, lock: now == .partGone ? lock : nil, opening: open.id,
+            reading: readingPictures
+        )
     }
 
     // MARK: - Asking
@@ -198,7 +203,7 @@ final class ShellProfile {
             guard awaits == errand, open?.host == host else { return }
             for (which, sent) in change.pictures {
                 guard case .chosen(let data, _, let name) = sent, data.count > large.limit else { continue }
-                draft?.refusals[which] = .tooLarge(name: name, size: data.count, limit: large.limit, stated: large.stated)
+                draft?.refuse(which, .tooLarge(name: name, size: data.count, limit: large.limit, stated: large.stated))
             }
             state = .read
         } catch {
@@ -274,6 +279,24 @@ final class ShellProfile {
         return now == askedAs && now != .reader(nil)
     }
 
+    // MARK: - A picture picked
+
+    /// A file is being read for `which` in the sheet's opening `opening`: Save waits for it.
+    func reading(_ which: OwnPicture, opening: Int) {
+        guard open?.id == opening, draft != nil, state != .sending else { return }
+        readingPictures.insert(which)
+    }
+
+    /// What came of reading it. **Taken only by the opening it was picked in, while nothing is
+    /// out**: a read that lands after Cancel, after the sheet closed on an answer, or while a
+    /// change is on the wire changes nothing.
+    func picked(_ which: OwnPicture, _ picked: PicturePicked, opening: Int) {
+        guard open?.id == opening else { return }
+        readingPictures.remove(which)
+        guard draft != nil, state != .sending else { return }
+        draft?.take(which, picked)
+    }
+
     /// The press on the lock where the sign-in no longer holds the account part.
     func askForPart(in session: ShellSession) {
         guard let open else { return }
@@ -292,6 +315,7 @@ final class ShellProfile {
         awaits = errands.next()
         open = nil
         draft = nil
+        readingPictures = []
         state = .asking
     }
 }

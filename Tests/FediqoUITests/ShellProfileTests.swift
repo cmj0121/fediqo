@@ -593,6 +593,75 @@ struct ShellProfileTests {
         #expect(await wire.arrivals(of: Self.change) == 1)
     }
 
+    @Test("Save waits while a picked file is read; a read that lands after Cancel, or in a later opening, changes nothing, and one that lands while a change is out is not laid on what is sent")
+    func aLateReadLandsNowhere() async throws {
+        let (session, server) = await session()
+        try await signIn(session)
+        let (pages, _) = try await ownPage(session)
+        let profile = pages.profile
+        let first = try await opened(pages, session).opening
+        let png = ProfileDraftTests.png()
+        profile.draft?.name = "River Me"
+        profile.reading(.picture, opening: first)
+        #expect(profile.said(in: session)?.canSave == false && profile.save(in: session) == nil, "Save waits for the read")
+        profile.putDown()
+        profile.picked(.picture, .read(png, type: .png, name: "me.png"), opening: first)
+        #expect(profile.open == nil && profile.draft == nil, "after Cancel: no sheet, no draft")
+
+        let second = try await opened(pages, session).opening
+        #expect(second != first && profile.said(in: session)?.reading.isEmpty == true)
+        profile.picked(.picture, .read(png, type: .png, name: "me.png"), opening: first)
+        #expect(profile.draft?.stage(of: .picture) == .held(nil), "a read of an earlier opening is not this one's")
+
+        profile.draft?.name = "River Me"
+        await server.hold(Self.change)
+        let held = watching("the change, held at its server") { await server.release(Self.change) }
+        defer { held.cancel() }
+        let saving = try #require(profile.save(in: session))
+        await server.arrival(of: Self.change, by: saving)
+        profile.reading(.picture, opening: second)
+        profile.picked(.picture, .read(png, type: .png, name: "me.png"), opening: second)
+        #expect(profile.draft?.stage(of: .picture) == .held(nil) && profile.said(in: session)?.reading.isEmpty == true, "nothing laid on what is out")
+        await server.release(Self.change)
+        await saving.value
+        #expect(profile.open == nil)
+        #expect(await !server.sent.contains { $0.body.contains("avatar") })
+    }
+
+    @Test("A change saved in part whose answer lands after the reader became another account lands for nobody: the sheet goes down and the new account's page is its own")
+    func aPartlyAnswerForAnotherAccountLandsNowhere() async throws {
+        let other = #"{"id":"8","acct":"other","username":"other","display_name":"Other","locked":true,"source":{"note":"","fields":[],"follow_requests_count":5}}"#
+        let (session, server) = await session(Self.served([
+            Self.who: PageServer.Answer(body: Self.pictured()),
+            Self.change: PageServer.Answer(body: Self.pictured(name: "River Me")),
+            Self.header: PageServer.Answer(body: "", status: 502),
+            "/api/v1/accounts/lookup?acct=other": PageServer.Answer(body: other),
+        ]))
+        try await signIn(session)
+        let (pages, _) = try await ownPage(session)
+        var heard: [String] = []
+        pages.profile.announce = { heard.append($0) }
+        _ = try await opened(pages, session)
+        pages.profile.draft?.name = "River Me"
+        pages.profile.draft?.remove(.header)
+        await server.hold(Self.header)
+        let held = watching("the removal, held at its server") { await server.release(Self.header) }
+        defer { held.cancel() }
+        let saving = try #require(pages.profile.save(in: session))
+        await server.arrival(of: Self.header, by: saving)
+
+        await server.answer(Self.who, PageServer.Answer(body: other))
+        try await signIn(session, as: "tok2")
+        let them = try #require(ShellPersonPages.own(at: Self.host, in: session))
+        await pages.opened(them, in: session)
+        await server.release(Self.header)
+        await saving.value
+
+        #expect(pages.profile.open == nil && heard.isEmpty)
+        #expect(pages.head(of: them, in: session).name == "Other", "the first account's answer is not drawn on theirs")
+        #expect(session.mastodon.asking(host: Self.host) == 5)
+    }
+
     @Test("Where the source has named neither reader, a sign-in replaced by another's while the sheet is up is not taken for the reader: Save sends nothing and the sheet goes down")
     func anUnnamedReaderIsTheSignInItself() async throws {
         let (session, server) = await session()

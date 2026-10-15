@@ -108,6 +108,8 @@ struct ProfileDraft: Equatable {
     /// Why the last choice of each was not taken, until the next choice, Keep current or Save.
     var refusals: [OwnPicture: PictureRefusal] = [:]
     private var made: Int
+    /// How many choices have been staged: each one's id.
+    private var chosen = 0
 
     init(_ account: OwnAccount, limits: OwnLimits = .none) {
         before = account
@@ -186,13 +188,28 @@ struct ProfileDraft: Equatable {
         if data.count > limit.bytes {
             refusal = .tooLarge(name: name, size: data.count, limit: limit.bytes, stated: limit.stated)
         } else if let image = ProfilePicturePreview.decode(data) {
-            pictures[which] = .chosen(PictureChosen(data: data, type: type, name: name, image: image))
+            chosen += 1
+            pictures[which] = .chosen(PictureChosen(id: chosen, data: data, type: type, name: name, image: image))
             return nil
         } else {
             refusal = .unreadable(name: name)
         }
         refusals[which] = refusal
         return refusal
+    }
+
+    /// What came of reading a picked file, taken: staged, or refused and what was there kept.
+    mutating func take(_ which: OwnPicture, _ picked: PicturePicked) {
+        switch picked {
+        case .read(let data, let type, let name): stage(which, data: data, type: type, name: name)
+        case .refused(let refusal): refusals[which] = refusal
+        }
+    }
+
+    /// A choice refused once staged: put back to what was read, and why said under it.
+    mutating func refuse(_ which: OwnPicture, _ refusal: PictureRefusal) {
+        keep(which)
+        refusals[which] = refusal
     }
 
     /// Whether Remove stands: something is held or chosen.
@@ -262,6 +279,10 @@ struct ProfileSaid: Equatable {
     var waiting: Int?
     /// The lock of the account part, where the sign-in no longer holds it.
     var lock: PartWords.Place?
+    /// Which opening of the sheet this is: what a late read is told apart by.
+    var opening = 0
+    /// The pictures whose files are being read: Save waits for them.
+    var reading: Set<OwnPicture> = []
 
     /// Whether the rows are drawn: there is an account read to edit.
     var drawsRows: Bool { draft != nil && state != .asking && state != .readFailed }
@@ -271,7 +292,7 @@ struct ProfileSaid: Equatable {
     var offersSave: Bool { state != .ended }
 
     var canSave: Bool {
-        guard draft?.changed == true else { return false }
+        guard reading.isEmpty, draft?.changed == true else { return false }
         switch state {
         case .read, .refused, .forbidden, .failed, .partly: return true
         case .asking, .readFailed, .sending, .partGone, .ended: return false
@@ -369,6 +390,10 @@ struct ProfileSheetActs {
     var onAgain: () -> Void = {}
     /// The lock's press, where the sign-in no longer holds the account part.
     var onAsk: () -> Void = {}
+    /// A file is being read for a picture, in the sheet's opening of that number.
+    var onReading: (Int, OwnPicture) -> Void = { _, _ in }
+    /// What came of it, for that opening.
+    var onPicked: (Int, OwnPicture, PicturePicked) -> Void = { _, _, _ in }
 }
 
 /// The three switches, by the row each is.
@@ -537,7 +562,7 @@ struct ProfileSheet: View {
     @ViewBuilder
     private var rows: some View {
         VStack(alignment: .leading, spacing: ShellSpace.step) {
-            ProfilePicturesBlock(said: said, draft: $draft)
+            picturesBlock
             ShellRule()
             nameRow
             wordsRow
@@ -549,6 +574,14 @@ struct ProfileSheet: View {
             ForEach(ProfileSwitch.allCases, id: \.self) { which in switchRow(which) }
         }
         .disabled(!said.editable)
+    }
+
+    /// The picture and the header, their reads told which opening they belong to.
+    private var picturesBlock: ProfilePicturesBlock {
+        let (opening, acts) = (said.opening, acts)
+        return ProfilePicturesBlock(
+            said: said, draft: $draft, onReading: { acts.onReading(opening, $0) }, onPicked: { acts.onPicked(opening, $0, $1) }
+        )
     }
 
     /// A row's name, and its count beside it where one is drawn — under it where both do not fit.
@@ -929,7 +962,7 @@ private struct ProfileSheetHost: View {
     }
 
     private var draft: Binding<ProfileDraft> {
-        Binding(get: { profile.draft ?? ProfileDraft(OwnAccount()) }, set: { profile.draft = $0 })
+        Binding(get: { profile.draft ?? ProfileDraft(OwnAccount()) }, set: { if profile.draft != nil { profile.draft = $0 } })
     }
 
     private var acts: ProfileSheetActs {
@@ -937,7 +970,9 @@ private struct ProfileSheetHost: View {
             onSave: { profile.save(in: session) },
             onClose: { profile.putDown() },
             onAgain: { profile.readAgain(in: session) },
-            onAsk: { profile.askForPart(in: session) }
+            onAsk: { profile.askForPart(in: session) },
+            onReading: { profile.reading($1, opening: $0) },
+            onPicked: { profile.picked($1, $2, opening: $0) }
         )
     }
 }

@@ -21,14 +21,22 @@ enum PictureStage: Equatable {
 
 /// A file chosen as a picture: its bytes as they go, and the image drawn before Save.
 struct PictureChosen: Equatable {
+    /// Which choice of the draft's this is: what tells two apart, never the bytes.
+    let id: Int
     let data: Data
     let type: UTType
     let name: String
     let image: CGImage
 
     static func == (lhs: PictureChosen, rhs: PictureChosen) -> Bool {
-        lhs.data == rhs.data && lhs.type == rhs.type && lhs.name == rhs.name
+        lhs.id == rhs.id && lhs.type == rhs.type && lhs.name == rhs.name
     }
+}
+
+/// What came of reading a file the person picked.
+enum PicturePicked: Equatable {
+    case read(Data, type: UTType, name: String)
+    case refused(PictureRefusal)
 }
 
 /// Why a choice was not taken: nothing was staged, and what was there stays.
@@ -116,15 +124,19 @@ extension OwnPicture {
 struct ProfilePicturesBlock: View {
     let said: ProfileSaid
     @Binding var draft: ProfileDraft
+    /// A file is being read for `which`: Save waits for it.
+    var onReading: (OwnPicture) -> Void = { _ in }
+    /// What came of it: handed to whoever holds the sheet, which takes it only while the same
+    /// sheet is up and nothing is out.
+    var onPicked: (OwnPicture, PicturePicked) -> Void = { _, _ in }
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ShellMetric(relativeTo: .body) private var faceSide: CGFloat = 56
     @ShellMetric(relativeTo: .body) private var bandHeight: CGFloat = 96
     @AccessibilityFocusState private var refusalFocused: OwnPicture?
-    /// The one being chosen, while its picker is up or its bytes are read.
+    /// The one being chosen, while its picker is up.
     @State private var choosing: OwnPicture?
-    @State private var reading: OwnPicture?
     @State private var filesUp = false
     @State private var photosUp = false
     @State private var photo: PhotosPickerItem?
@@ -207,7 +219,7 @@ struct ProfilePicturesBlock: View {
             .frame(width: which == .picture ? faceSide : nil, height: which == .picture ? faceSide : bandHeight)
             .frame(maxWidth: which == .header ? .infinity : nil)
             .clipShape(RoundedRectangle(cornerRadius: DummyItemRow.Box.plate, style: .continuous))
-            .overlay { if reading == which { ProgressView().controlSize(.small) } }
+            .overlay { if said.reading.contains(which) { ProgressView().controlSize(.small) } }
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: draft.stage(of: which))
             .accessibilityElement()
             .accessibilityLabel(String(format: L10n.t(which == .picture ? "profile.picture.spoken" : "profile.header.spoken"), said.host))
@@ -256,7 +268,7 @@ struct ProfilePicturesBlock: View {
             HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) { pressList(which) }
             VStack(alignment: .leading, spacing: ShellSpace.tight) { pressList(which) }
         }
-        .disabled(reading != nil)
+        .disabled(!said.reading.isEmpty)
     }
 
     @ViewBuilder
@@ -341,51 +353,58 @@ struct ProfilePicturesBlock: View {
         guard let which = choosing else { return }
         choosing = nil
         guard case .success(let url) = result else { return }
-        reading = which
-        Task {
-            let read = await ProfilePictureFile.read(url)
-            reading = nil
-            let name = url.lastPathComponent
-            guard let read else {
-                draft.refusals[which] = .unreadable(name: name)
-                return
-            }
-            draft.stage(which, data: read.data, type: read.type, name: name)
-        }
+        let (limit, onPicked) = (draft.pictureLimit, onPicked)
+        onReading(which)
+        Task { onPicked(which, await ProfilePictureFile.read(url, limit: limit)) }
     }
 
     private func pickedPhoto(_ item: PhotosPickerItem) {
         guard let which = choosing else { return }
         choosing = nil
         photo = nil
-        reading = which
+        let (limit, onPicked) = (draft.pictureLimit, onPicked)
+        onReading(which)
         Task {
-            let data = try? await item.loadTransferable(type: Data.self)
-            reading = nil
-            let type = data.flatMap(ProfilePicturePreview.type(of:)) ?? item.supportedContentTypes.first ?? .jpeg
-            let name = "photo." + (type.preferredFilenameExtension ?? "jpg")
-            guard let data else {
-                draft.refusals[which] = .unreadable(name: name)
+            guard let file = try? await item.loadTransferable(type: ProfilePhotoFile.self) else {
+                onPicked(which, .refused(.unreadable(name: "photo")))
                 return
             }
-            draft.stage(which, data: data, type: type, name: name)
+            defer { try? FileManager.default.removeItem(at: file.url) }
+            let name = "photo." + (file.url.pathExtension.isEmpty ? "jpg" : file.url.pathExtension)
+            onPicked(which, await ProfilePictureFile.read(file.url, limit: limit, name: name))
         }
     }
 }
 
 /// A file the person picked, read once: reached through the sandbox's leave for that one file.
+///
+/// **Its size is asked of the file before any of it is read**: one over the limit is refused
+/// without loading it.
 enum ProfilePictureFile {
-    struct Read: Sendable {
-        let data: Data
-        let type: UTType
-    }
-
-    static func read(_ url: URL) async -> Read? {
+    static func read(_ url: URL, limit: (bytes: Int, stated: Bool), name: String? = nil) async -> PicturePicked {
+        let name = name ?? url.lastPathComponent
         let reached = url.startAccessingSecurityScopedResource()
         defer { if reached { url.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        let named = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType
-        return Read(data: data, type: ProfilePicturePreview.type(of: data) ?? named ?? .jpeg)
+        let said = try? url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
+        if let size = said?.fileSize, size > limit.bytes {
+            return .refused(.tooLarge(name: name, size: size, limit: limit.bytes, stated: limit.stated))
+        }
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return .refused(.unreadable(name: name)) }
+        return .read(data, type: ProfilePicturePreview.type(of: data) ?? said?.contentType ?? .jpeg, name: name)
+    }
+}
+
+/// A photo handed over as a file, copied out of the picker's own before it is let go — so its
+/// size is known before its bytes are read, as a file's is.
+struct ProfilePhotoFile: Transferable {
+    let url: URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .image) { received in
+            let copy = URL.temporaryDirectory.appending(path: UUID().uuidString).appendingPathExtension(received.file.pathExtension)
+            try FileManager.default.copyItem(at: received.file, to: copy)
+            return ProfilePhotoFile(url: copy)
+        }
     }
 }
 
