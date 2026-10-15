@@ -324,8 +324,9 @@ A Mastodon source can be signed in to from its row on Account, so its Home and y
 be read. Before the server's page opens, Fediqo asks which sign-in you want, and says which
 part is which: reading alone, or reading and writing. Reading brings in your Home and your
 lists. Writing lets you post, reply, boost, favourite and bookmark from Fediqo, and take any of
-them back — and nothing else: no sign-in asks to follow anybody unasked, and Fediqo never asks
-to change your profile or touch your filters. Choosing reading alone asks for exactly what
+them back — and nothing else: no sign-in asks to follow anybody unasked, signing in never asks
+to change your profile — that is asked apart, at Change, below — and Fediqo never asks to touch
+your filters. Choosing reading alone asks for exactly what
 Fediqo asked for before it could write at all, so refusing the writing part changes nothing
 about reading. Signing in again is how you change your answer.
 
