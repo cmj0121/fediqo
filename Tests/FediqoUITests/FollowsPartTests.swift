@@ -400,7 +400,8 @@ struct FollowsPartTests {
         let was = try kept(tokens)
 
         try await allow(session, through: PartPage(.close))
-        #expect(await server.registered == ["\(Self.before) \(Self.f)"])
+        #expect(await server.registered == [MastodonParts.everything])
+        #expect(MastodonParts.everything.hasPrefix("\(Self.before) \(Self.f)"))
         #expect(try kept(tokens) == was, "the sign-in held was touched by a page closed")
         #expect(await server.revoked.isEmpty)
         #expect(try tokens.left(host: host).isEmpty)
