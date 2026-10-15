@@ -377,14 +377,16 @@ struct ProfilePicturesBlock: View {
 /// A file the person picked, read once: reached through the sandbox's leave for that one file.
 ///
 /// **Its size is asked of the file before any of it is read**: one over the limit is refused
-/// without loading it.
+/// without loading it, and **one whose size the file does not say is refused as unreadable** —
+/// never read whole to find out.
 enum ProfilePictureFile {
     static func read(_ url: URL, limit: (bytes: Int, stated: Bool)) async -> PicturePicked {
         let name = url.lastPathComponent
         let reached = url.startAccessingSecurityScopedResource()
         defer { if reached { url.stopAccessingSecurityScopedResource() } }
         let said = try? url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
-        if let size = said?.fileSize, size > limit.bytes {
+        guard let size = said?.fileSize else { return .refused(.unreadable(name: name)) }
+        if size > limit.bytes {
             return .refused(.tooLarge(name: name, size: size, limit: limit.bytes, stated: limit.stated))
         }
         guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return .refused(.unreadable(name: name)) }

@@ -378,9 +378,8 @@ public struct MastodonOwnAccount: Sendable {
     /// A picture's address where it is one the account holds: a web address, and not the
     /// host's own stand-in for none.
     private static func held(_ address: String?, _ which: OwnPicture) -> URL? {
-        guard let address, let url = URL(string: address), ["https", "http"].contains(url.scheme?.lowercased()),
-              url.host() != nil, !isStandIn(url.path(), which)
-        else { return nil }
+        // Fetched as every other picture is: https only, to a host that is one.
+        guard let url = Host.fetchableURL(address), !isStandIn(url.path(), which) else { return nil }
         return url
     }
 

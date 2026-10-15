@@ -256,11 +256,11 @@ final class ShellFeatures {
     ) async {
         do {
             let tags = try await through.featuredTags(of: accountID, source: source)
-            guard theirs[id]?.awaits == errand else { return }
+            guard stillTheirs(id, of: accountID, errand: errand, at: source, in: session) else { return }
             theirs[id]?.tags = tags
             theirs[id]?.tagsFailed = false
         } catch {
-            guard theirs[id]?.awaits == errand else { return }
+            guard stillTheirs(id, of: accountID, errand: errand, at: source, in: session) else { return }
             // Not found, or refused to a reader with no sign-in: no block, and nothing of the host.
             if !Cancellation.happened(error), !Self.saysNothingOfThem(error, signedIn: askedAs != .nobody) {
                 ShellPersonPages.concluded(error, at: source, askedAs: askedAs, in: session)
@@ -276,13 +276,28 @@ final class ShellFeatures {
     ) async {
         do {
             let stretch = try await through.featuredPeople(of: accountID, source: source, limit: 1)
-            guard theirs[id]?.awaits == errand else { return }
+            guard stillTheirs(id, of: accountID, errand: errand, at: source, in: session) else { return }
             theirs[id]?.anyFeatured = !stretch.people.isEmpty
         } catch {
-            guard theirs[id]?.awaits == errand else { return }
+            guard stillTheirs(id, of: accountID, errand: errand, at: source, in: session) else { return }
             if (error as? MastodonHostMoreError) == .noSuchAddress { hosts.notFound(.featuredPeople, at: source.host, round: round) }
         }
     }
+
+    /// Whether a read's answer may land: it is still the one the page awaits, **the source is
+    /// still here, and whoever would ask now is still who it was asked as**. Otherwise what
+    /// was kept is let go, and the answer lands nowhere.
+    private func stillTheirs(_ id: String, of accountID: String, errand: Int, at source: Source, in session: ShellSession) -> Bool {
+        guard theirs[id]?.awaits == errand else { return false }
+        guard ShellPersonPages.source(at: source.host, in: session) != nil,
+              standing(id, of: accountID, at: source.host, in: session) != nil
+        else {
+            theirs[id] = nil
+            return false
+        }
+        return true
+    }
+
 
     /// Whether `error` from asking what somebody features says only that there is nothing to
     /// draw: an address or an account not found, or a refusal of a reader with no sign-in. A

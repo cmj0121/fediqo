@@ -261,7 +261,7 @@ struct ProfileDraftTests {
         #expect(over == (OwnPicture.byteLimit, false), "a host stating more than this app sends: this app's own")
     }
 
-    @Test("A picked file is measured before it is read: one over the limit is refused by its size, one within is read as the type its bytes say; a choice refused once staged goes back to what was read")
+    @Test("A picked file is measured before it is read: one over the limit is refused by its size, one whose size it does not say as unreadable, one within is read as the type its bytes say; a choice refused once staged goes back to what was read")
     func aPickedFileIsMeasuredFirst() async throws {
         let png = Self.png()
         let url = URL.temporaryDirectory.appending(path: "fediqo-\(UUID().uuidString).png")
@@ -272,6 +272,12 @@ struct ProfileDraftTests {
         #expect(await ProfilePictureFile.read(url, limit: (OwnPicture.byteLimit, false)) == .read(png, type: .png, name: name))
         let gone = URL.temporaryDirectory.appending(path: "fediqo-\(UUID().uuidString).png")
         #expect(await ProfilePictureFile.read(gone, limit: (10, true)) == .refused(.unreadable(name: gone.lastPathComponent)))
+        // One whose size it does not say is refused, never read whole to find out.
+        let sizeless = URL.temporaryDirectory.appending(path: "fediqo-\(UUID().uuidString).png", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: sizeless, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: sizeless) }
+        #expect(try sizeless.resourceValues(forKeys: [.fileSizeKey]).fileSize == nil)
+        #expect(await ProfilePictureFile.read(sizeless, limit: (OwnPicture.byteLimit, false)) == .refused(.unreadable(name: sizeless.lastPathComponent)))
 
         let photo = ProfilePhotoFile(size: png.count, ext: "png", data: png)
         #expect(photo.picked(limit: (10, true)) == .refused(.tooLarge(name: "photo.png", size: png.count, limit: 10, stated: true)))

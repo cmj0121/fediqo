@@ -323,7 +323,7 @@ struct MastodonOwnAccountTests {
         #expect(MastodonOwnAccount.limits(from: Data(#"{"configuration":{"accounts":{"max_profile_fields":6}}}"#.utf8)) == OwnLimits(fields: 6))
     }
 
-    @Test("The picture and the header are read where the account holds them; the host's stand-in for none — a real Mastodon's and a GoToSocial's among them — is none, and so is an address that is no web address or nothing said")
+    @Test("The picture and the header are read where the account holds them; the host's stand-in for none — a real Mastodon's and a GoToSocial's among them — is none, and so is an address that is no web address, one in the clear (http), or nothing said")
     func picturesRead() throws {
         let real = try MastodonOwnAccount.account(from: Data(MastodonPartsCaptures.taken.utf8))
         #expect(real.picture == URL(string: "https://mastodon.localhost/system/accounts/avatars/117/419/563/845/369/311/original/e956f8d85d609ba7.png"))
@@ -334,6 +334,11 @@ struct MastodonOwnAccountTests {
         let none = try MastodonOwnAccount.account(from: Data(Self.answer(avatar: "https://social.example/avatars/original/missing.png", header: "javascript:alert(1)").utf8))
         #expect(none.picture == nil && none.header == nil)
         #expect(try MastodonOwnAccount.account(from: Data(Self.answer().utf8)).picture == nil)
+        // Fetched as every other picture is: an address in the clear is none.
+        let clear = try MastodonOwnAccount.account(from: Data(Self.answer(
+            avatar: "http://social.example/avatars/a.png", header: "http://social.example/headers/b.png"
+        ).utf8))
+        #expect(clear.picture == nil && clear.header == nil)
 
         // A GoToSocial 0.22.2 draws one of its own for none: as it answered with none held.
         let drawn = try MastodonOwnAccount.account(from: Data(Self.answer(

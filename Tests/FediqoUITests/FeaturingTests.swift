@@ -649,7 +649,46 @@ struct FeaturingTests {
         #expect(all.featured(of: people[0], in: session)?.tags.map(\.name) == ["swift"])
     }
 
+    @Test("What somebody features, answered after the sign-in changed while it was out, lands nowhere: the next reader is shown none of it, and is asked for their own")
+    func aLateAnswerLandsNowhere() async throws {
+        let (session, server, _) = await session([
+            Self.theirTags: PageServer.Answer(body: "[\(Self.featured())]"),
+            Self.theirPeople: PageServer.Answer(body: #"[{"id":"9","acct":"bea"}]"#),
+        ])
+        try await signIn(session)
+        let features = ShellPersonPages().features
+        let page = try Self.page()
+        await server.hold(Self.theirTags)
+        await server.hold(Self.theirPeople)
+        defer { Task { await server.release(Self.theirTags); await server.release(Self.theirPeople) } }
+        let heldGuard = watching("the asks of what Ada features, held at their server") {
+            await server.release(Self.theirTags)
+            await server.release(Self.theirPeople)
+        }
+        defer { heldGuard.cancel() }
+        let out = Task { await features.opened(Self.ada, said: page, in: session) }
+        await server.arrival(of: Self.theirTags, by: out)
+        await server.arrival(of: Self.theirPeople, by: out)
+
+        // Signed in afresh, as somebody else, while both are out.
+        if let held = try session.mastodon.tokens.token(host: Self.host) { _ = try session.mastodon.tokens.forget(held) }
+        try session.mastodon.tokens.save(MastodonToken(
+            host: Self.host, accessToken: "other", clientID: "c", clientSecret: "s", scopes: Self.featuring, asked: Self.featuring
+        ))
+        session.mastodon.refresh()
+        await server.release(Self.theirTags)
+        await server.release(Self.theirPeople)
+        await out.value
+        #expect(features.said(of: Self.ada, said: page, own: false, in: session) == nil, "what was asked as the reader before is not the next one's")
+
+        await features.opened(Self.ada, said: page, in: session)
+        #expect(await server.asked.filter { $0 == Self.theirTags }.count == 2, "asked afresh, as them")
+        #expect(await server.bearers.last == "Bearer other")
+        #expect(features.said(of: Self.ada, said: page, own: false, in: session)?.tags.map(\.name) == ["swift"])
+    }
+
     // MARK: - Words and drawing
+
 
 
 
