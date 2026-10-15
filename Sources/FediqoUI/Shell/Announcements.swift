@@ -112,12 +112,16 @@ extension AnnouncementsSaid {
     }
 
     /// The one emoji typed into Add a reaction's field, or nothing where it is not exactly one:
-    /// one grapheme whose first scalar is an emoji and not a digit, `#` or `*`.
+    /// one grapheme drawn as an emoji — its first scalar is one by default, or it asks to be one
+    /// (U+FE0F) or joins several (U+200D). A digit, `#`, `*`, or a sign drawn as text by default
+    /// (©, ®, ™, ‼) is not.
     static func oneEmoji(_ typed: String) -> String? {
         let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count == 1, let first = trimmed.unicodeScalars.first, first.properties.isEmoji, !first.isASCII
         else { return nil }
-        return trimmed
+        let drawnAsEmoji = first.properties.isEmojiPresentation
+            || trimmed.unicodeScalars.contains { $0.value == 0xFE0F || $0.value == 0x200D }
+        return drawnAsEmoji ? trimmed : nil
     }
 
     /// Dismiss's question.
@@ -404,7 +408,7 @@ private struct ReactionPill: View {
 }
 
 /// Add a reaction: the press, and the field it opens — a popover on a Mac, a medium sheet on a
-/// phone. A modifier-free view of its own, so the presenter's closure is in no long chain.
+/// phone. A view of its own, so the presenter's closure stands in this short body and in no long chain.
 private struct AddReactionButton: View {
     @Binding var adding: Bool
     let pressing: Bool

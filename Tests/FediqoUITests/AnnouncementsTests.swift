@@ -250,6 +250,25 @@ struct AnnouncementsTests {
         #expect(await server.asked.count == 3, "nothing failed: Try again asks nothing")
     }
 
+    @Test("After a failure a round within fifteen minutes asks nothing, and one after them asks again")
+    func aFailureWaitsForTheRound() async throws {
+        let (session, server, _) = await session([Self.asked: PageServer.Answer(body: "", status: 500)])
+        try signIn(session)
+        let clock = Clock()
+        let announcements = pages(clock)
+        await announcements.checked(Self.host, in: session)?.value
+        #expect(announcements.said(at: Self.host, in: session)?.reading == .failed)
+        clock.turn(.seconds(14 * 60))
+        #expect(announcements.checked(Self.host, in: session) == nil)
+        #expect(await server.asked.count == 1, "within fifteen minutes: no second ask")
+        await server.answer(Self.asked, Self.listed())
+        clock.turn(.seconds(60))
+        let round = try #require(announcements.checked(Self.host, in: session))
+        await round.value
+        #expect(await server.asked.count == 2)
+        #expect(announcements.said(at: Self.host, in: session)?.reading == .said)
+    }
+
     // MARK: - Seen, and the mark
 
     @Test("The mark is lit by what is neither seen nor dismissed, as last asked, and drawing it asks nothing; the page opened marks them seen — New while it stays open, not New when it opens again — and nothing is sent for it")
@@ -441,7 +460,8 @@ struct AnnouncementsTests {
         #expect(AnnouncementsSaid.reactionHint(mine, language: .english) == "Takes yours back")
         #expect(AnnouncementsSaid.oneEmoji("👍") == "👍" && AnnouncementsSaid.oneEmoji(" 🎉 ") == "🎉")
         #expect(AnnouncementsSaid.oneEmoji("👍🏽") == "👍🏽" && AnnouncementsSaid.oneEmoji("👨‍👩‍👧") == "👨‍👩‍👧")
-        for typed in ["", "1", "#", "a", "👍👍", "ok", "*"] {
+        #expect(AnnouncementsSaid.oneEmoji("❤️") == "❤️" && AnnouncementsSaid.oneEmoji("©️") == "©️", "asked to be drawn as one")
+        for typed in ["", "1", "#", "a", "👍👍", "ok", "*", "©", "®", "™", "‼"] {
             #expect(AnnouncementsSaid.oneEmoji(typed) == nil, "\(typed)")
         }
     }
