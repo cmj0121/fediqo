@@ -610,6 +610,7 @@ struct TimelinePane: View {
             onAct: { act in Task { await people?.act(act, on: person, in: session) } },
             onAskFollows: { session.askFor([PersonAct.follow.needs], host: person.host) },
             onStandingAgain: { Task { await people?.standsAgain(to: person, in: session) } },
+            onChange: { people?.changeOwn(person, in: session) },
             onReadOn: { Task { await people?.readOn(person, in: session) } },
             onPinnedAgain: { Task { await people?.tabs.asked(person, beside: people?.said(of: person, in: session), again: true, in: session) } },
             onPinnedReadOn: { Task { await people?.pinnedReadOn(person, in: session) } },

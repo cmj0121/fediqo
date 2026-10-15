@@ -225,6 +225,12 @@ struct SourceReach {
         MastodonSettings(door: door)
     }
 
+    /// The reader's own account as its owner sees it, and a change to it (#312), which is only
+    /// ever asked as them, through `door`.
+    func ownAccount(_ door: MastodonAuthorized) -> MastodonOwnAccount {
+        MastodonOwnAccount(door: door)
+    }
+
     /// What is under a tag, as the reader, through `door`.
     func tag(_ door: MastodonAuthorized) -> MastodonTag {
         MastodonTag(door: door)

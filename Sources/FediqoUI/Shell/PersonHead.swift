@@ -28,6 +28,8 @@ struct PersonHeadSaid: Equatable {
     var figures: [PersonSaid.Figure] = []
     /// How the reader stands to them, or nothing where nobody stands to them here.
     var standing: PersonActing?
+    /// Change, where the page is the reader's own: what stands where Follow would.
+    var change: OwnChangeEntry?
 
     /// What the head is handed, from what the page was: what their row carried until the
     /// source has said who they are, and its word from then on — the name, the handle and the
@@ -119,6 +121,8 @@ struct PersonHead: View {
     var onAskFollows: () -> Void = {}
     /// "Try again", where the source could not be asked how the reader stands to them.
     var onStandingAgain: () -> Void = {}
+    /// Change pressed, on the reader's own page: the sheet, or the question for the account part.
+    var onChange: () -> Void = {}
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.shellLayout) private var shellLayout
@@ -245,7 +249,7 @@ struct PersonHead: View {
                 }
             }
             figures
-            if stands != nil || acting.map(PersonHeadActs.draws) == true {
+            if stands != nil || acting.map(PersonHeadActs.draws) == true || head.change != nil {
                 // On one line where both fit whole, and one under the other where they do not.
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .center, spacing: ShellSpace.step) {
@@ -468,7 +472,10 @@ struct PersonHead: View {
     /// The head's press and the page's `…`, as they were built (`PersonHeadActs`).
     @ViewBuilder
     private var acts: some View {
-        if let acting, PersonHeadActs.draws(acting) {
+        if let change = head.change {
+            OwnChangeAct(entry: change, onChange: onChange)
+                .modifier(HeadProbed(.acts, probe: probe))
+        } else if let acting, PersonHeadActs.draws(acting) {
             PersonHeadActs(acting: acting, head: head.menuHead, onAct: onAct, onAsk: onAskFollows)
                 .modifier(HeadProbed(.acts, probe: probe))
         }
@@ -485,6 +492,47 @@ struct PersonHead: View {
                     .foregroundStyle(ShellChrome.ink(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+}
+
+/// Change, on the reader's own page: a press that opens the sheet — or, where the sign-in does
+/// not hold the account part, its lock: dim, with the mark of a sign-in asked for more, and the
+/// press that asks where it may be asked. No `…` beside it: nothing on it is dangerous.
+private struct OwnChangeAct: View {
+    let entry: OwnChangeEntry
+    let onChange: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if let words = entry.lockWords() {
+            locked(words, asks: entry.lock?.asks == true)
+        } else {
+            ShellLinkButton(L10n.t("profile.change"), action: onChange)
+                .help(L10n.t("profile.change.help"))
+                .accessibilityLabel(entry.spoken())
+                .fixedSize()
+        }
+    }
+
+    @ViewBuilder
+    private func locked(_ words: String, asks: Bool) -> some View {
+        let label = Label(L10n.t("profile.change"), systemImage: SourceRow.permissionSymbol)
+            .shellFont(.meta, weight: .medium)
+            .foregroundStyle(ShellChrome.markDim(colorScheme))
+        if asks {
+            Button(action: onChange) { label.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .help(ShellMark.said(words, L10n.t("mark.dim.askAgain")))
+                .accessibilityLabel(words)
+                .accessibilityHint(L10n.t("mark.dim.askAgain"))
+                .fixedSize()
+        } else {
+            label
+                .help(words)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(words)
+                .fixedSize()
         }
     }
 }

@@ -386,10 +386,12 @@ extension ShellPersonPages {
 
     /// The head of the page of `who`.
     func head(of who: DummyPerson, in session: ShellSession) -> PersonHeadSaid {
-        PersonHeadSaid.made(
+        var head = PersonHeadSaid.made(
             of: who, said: said(of: who, in: session), tabs: tabs(of: who, in: session),
             held: session.heldPosts(of: who).count, standing: stands(to: who, in: session)
         )
+        head.change = changeEntry(of: who, in: session)
+        return head
     }
 
     /// What the About tab of the page of `who` is handed, or nothing where their source is not

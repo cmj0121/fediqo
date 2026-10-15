@@ -652,8 +652,10 @@ extension ShellPersonPages {
     }
 
     /// `l` on the page of `who`: follows them where the page offers that, and raises the
-    /// sign-in's question where the page's Follow is its lock. Whether the key did anything.
+    /// sign-in's question where the page's Follow is its lock — and on the reader's own page
+    /// does what a press on Change does. Whether the key did anything.
     func followByKey(_ who: DummyPerson, in session: ShellSession) -> Bool {
+        if changeOwn(who, in: session) { return true }
         guard let standing = stands(to: who, in: session) else { return false }
         switch standing.press {
         case .follow: Task { await act(.follow, on: who, in: session) }
