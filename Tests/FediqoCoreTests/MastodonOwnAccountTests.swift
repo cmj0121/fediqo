@@ -423,9 +423,12 @@ struct MastodonOwnAccountTests {
         var after = Self.before
         after.name = "taken"
         let taken = try MastodonOwnAccount.answer(from: Data(Self.answer(name: "taken").utf8), host: MastodonFixture.host)
-        await #expect(throws: OwnChangedInPart(answer: taken, failed: [.picture, .header])) {
+        let both = try await #require(throws: OwnChangedInPart.self) {
             try await reader.change(from: Self.before, to: after, pictures: [.picture: .removed, .header: .removed])
         }
+        #expect(both.answer == taken)
+        #expect(Set(both.failed.keys) == [.picture, .header])
+        #expect(both.failed.values.allSatisfy { ($0 as? MastodonAuthError) == .http(500) }, "each with what it threw")
         #expect(await server.paths == [Self.change, Self.avatar, Self.header])
 
         let (first, asked, _) = try Self.reader([Self.avatar: .json("{}", status: 500), Self.header: .json(Self.answer())])
@@ -436,9 +439,41 @@ struct MastodonOwnAccountTests {
 
         let (second, _, _) = try Self.reader([Self.avatar: .json(Self.answer(name: "picture gone")), Self.header: .json("", status: 403)])
         let gone = try MastodonOwnAccount.answer(from: Data(Self.answer(name: "picture gone").utf8), host: MastodonFixture.host)
-        await #expect(throws: OwnChangedInPart(answer: gone, failed: [.header])) {
+        let header = try await #require(throws: OwnChangedInPart.self) {
             try await second.change(from: Self.before, to: Self.before, pictures: [.picture: .removed, .header: .removed])
         }
+        #expect(header.answer == gone)
+        #expect(Array(header.failed.keys) == [.header])
+        #expect((header.failed[.header] as? OwnAccountError) == .forbidden, "said as the source's refusal")
+
+        let token = MastodonFixture.token(scopes: "\(Self.r) \(Self.a)")
+        let tokens = MemoryMastodonTokens()
+        try tokens.save(token)
+        let walked = MastodonOwnAccount(door: MastodonAuthorized(token: token, sender: WalksAwayAtTheDelete(), store: tokens))
+        await #expect(throws: CancellationError.self) {
+            try await walked.change(from: Self.before, to: after, pictures: [.picture: .removed])
+        }
+    }
+
+    /// Answers a change with an account, and a removal as a reader walking away.
+    private struct WalksAwayAtTheDelete: HTTPSender {
+        func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+            guard request.httpMethod != "DELETE", let url = request.url,
+                  let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)
+            else { throw CancellationError() }
+            return (Data(MastodonOwnAccountTests.answer().utf8), response)
+        }
+    }
+
+    @Test("A limit of nothing or less passed in is none stated: this app's bound stands, named as this app's", arguments: [0, -1])
+    func limitOfNothing(limit: Int) async throws {
+        let (reader, server, _) = try Self.reader([Self.change: .json(Self.answer())])
+        _ = try await reader.change(from: Self.before, to: Self.before, pictures: [.picture: .chosen(Self.pixel, type: "image/png", name: "a.png")], limit: limit)
+        #expect(await server.requests.count == 1)
+        await #expect(throws: OwnPictureTooLarge(limit: OwnPicture.byteLimit, stated: false)) {
+            try await reader.change(from: Self.before, to: Self.before, pictures: [.picture: .chosen(Data(count: OwnPicture.byteLimit + 1), type: "image/png", name: "a.png")], limit: limit)
+        }
+        #expect(await server.requests.count == 1)
     }
 
     @Test("A picture the source will not take (422) is its refusal on the picture's row, a real Mastodon's words; a 403 is the lock without the part and the source forbidding it with it, to a picture sent and one taken away alike")

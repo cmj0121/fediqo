@@ -183,12 +183,13 @@ public struct OwnPictureTooLarge: Error, Equatable, Sendable {
 }
 
 /// A change that landed in part: what was sent with the rows — or a removal before — was taken
-/// and `answer` is the source's word after it, but taking `failed` away was not.
-public struct OwnChangedInPart: Error, Equatable, Sendable {
+/// and `answer` is the source's word after it, but taking `failed` away was not: each with what
+/// its removal threw, as `change` throws (`OwnAccountError`, `MastodonAuthError`, the door's).
+public struct OwnChangedInPart: Error, Sendable {
     public let answer: OwnAnswer
-    public let failed: Set<OwnPicture>
+    public let failed: [OwnPicture: any Error]
 
-    public init(answer: OwnAnswer, failed: Set<OwnPicture>) {
+    public init(answer: OwnAnswer, failed: [OwnPicture: any Error]) {
         self.answer = answer
         self.failed = failed
     }
@@ -237,7 +238,8 @@ public struct MastodonOwnAccount: Sendable {
     /// (`OwnLimits.picture`), nothing where it states none; this app's own bound
     /// (`OwnPicture.byteLimit`) stands where the host states more or nothing. A removal that
     /// fails once something was taken throws `OwnChangedInPart` with the answer and what was
-    /// not taken away; before, it throws as the change does.
+    /// not taken away; before, it throws as the change does — and a cancelled one is always
+    /// thrown as it is.
     public func change(
         from before: OwnAccount, to after: OwnAccount, pictures: [OwnPicture: OwnPictureChange] = [:],
         limit: Int? = nil
@@ -248,8 +250,10 @@ public struct MastodonOwnAccount: Sendable {
             return .file(which.said, named: name, type: type, data)
         }
         let removed = OwnPicture.allCases.filter { pictures[$0] == .removed }
-        let stated = limit.map { $0 <= OwnPicture.byteLimit } ?? false
-        let bound = stated ? limit ?? OwnPicture.byteLimit : OwnPicture.byteLimit
+        // A limit of nothing or less is no limit stated.
+        let host = limit.flatMap { $0 > 0 ? $0 : nil }
+        let stated = host.map { $0 <= OwnPicture.byteLimit } ?? false
+        let bound = stated ? host ?? OwnPicture.byteLimit : OwnPicture.byteLimit
         for case .chosen(let data, _, _) in pictures.values where data.count > bound {
             throw OwnPictureTooLarge(limit: bound, stated: stated)
         }
@@ -261,14 +265,15 @@ public struct MastodonOwnAccount: Sendable {
         } else if !form.isEmpty {
             answer = try await answered { try await door.patch(path: Self.changePath, form: form) }
         }
-        var failed: Set<OwnPicture> = []
+        var failed: [OwnPicture: any Error] = [:]
         for which in removed {
             do {
                 answer = try await answered { try await door.delete(path: Self.removePath(which)) }
             } catch {
-                // Nothing taken yet: nothing changed, and the failure is the change's.
-                guard answer != nil else { throw error }
-                failed.insert(which)
+                // Nothing taken yet: nothing changed, and the failure is the change's. A reader
+                // who walked away is told so, whatever was taken.
+                guard answer != nil, !Cancellation.happened(error) else { throw error }
+                failed[which] = error
             }
         }
         if let answer, !failed.isEmpty { throw OwnChangedInPart(answer: answer, failed: failed) }
