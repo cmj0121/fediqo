@@ -101,10 +101,12 @@ public enum MultipartError: Error, Equatable, Sendable {
 public struct MultipartBody: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible,
     CustomReflectable
 {
-    /// 32 MiB, on the whole body. A last line and not a working size: Mastodon takes a picture
-    /// and a header of 8 MB each, so nothing a source accepts comes near it, and a caller that
-    /// knows its source's own limit says that one first.
-    public static let byteLimit = 32 << 20
+    /// 66 MiB, on the whole body: a picture and a header of the most this app sends as one
+    /// (`OwnPicture.byteLimit`), and room beside them for the rest of a change — so a picture
+    /// under its own bound is never refused for the body's size. A last line and not a working
+    /// size: Mastodon takes a picture and a header of 8 MB each, and a caller that knows its
+    /// source's own limit says that one first.
+    public static let byteLimit = 2 * OwnPicture.byteLimit + (2 << 20)
 
     /// How many boundaries are drawn before giving up. A random one stands in a part by chance
     /// about never; several in a row means the draw is not random.
