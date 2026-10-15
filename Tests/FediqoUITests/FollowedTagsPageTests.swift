@@ -7,8 +7,8 @@ import Testing
 
 /// F10, the hashtags followed: a page of its own in the frame every opened page stands in, with
 /// no tabs, no timelines' head over it, a bar that holds the way back and the mark that asks the
-/// source again — never Stop — a figure of how many are shown that opens nothing, Tab that turns
-/// nothing, and unfollow kept in each row's `…`.
+/// source again — never Stop — a head with no figure, Tab that turns nothing, and unfollow kept
+/// in each row's `…`.
 ///
 /// **No check here waits on anything but the call it makes**: each hosts a view and lays it
 /// out, asks a value, or awaits an ask the server answers at once.
@@ -43,24 +43,33 @@ struct FollowedTagsPageTests {
 
     // MARK: - What the page says
 
-    @Test("How many are shown is the head's figure — the glyph and the number on no well, opening nothing, its sentence its name — counted from the rows drawn; with no row there is none, and the list says in words why")
-    func theFigureIsWhatIsShown() throws {
-        let said = FollowedTagsSaid(page: Self.page, reading: .said, rows: Self.rows(1204), foot: .farthest)
-        let figure = try #require(said.figure(language: .english))
-        #expect(figure.symbol == "number" && figure.figure == "1,204" && figure.spoken == "1,204 shown")
-        #expect(!figure.opens && !figure.lit, "it opens nothing, and is never lit")
-        #expect(said.figure(language: .taiwanese)?.spoken == "顯示 1,204 個")
-        // Never nought: no row, no figure — and what stands there instead is a sentence.
+    @Test("The head draws no figure: with 1,204 rows or none, asked or failed, it is the title and the source's pill alone, as tall either way at every width; with no row the list says in words why")
+    func theHeadDrawsNoFigure() {
         let none = FollowedTagsSaid(page: Self.page, reading: .said)
-        #expect(none.figure() == nil && none.nothing(language: .english) == "m.example lists no hashtags you follow.")
-        for reading in [FollowedTagsSaid.Reading.asking, .failed] {
-            let waiting = FollowedTagsSaid(page: Self.page, reading: reading)
-            #expect(waiting.figure() == nil && waiting.stateLine() != nil, "\(reading)")
+        #expect(none.nothing(language: .english) == "m.example lists no hashtags you follow.")
+        let saids = [
+            FollowedTagsSaid(page: Self.page, reading: .said, rows: Self.rows(1204), foot: .farthest),
+            FollowedTagsSaid(page: Self.page, reading: .said, rows: Self.rows(1)),
+            FollowedTagsSaid(page: Self.page), FollowedTagsSaid(page: Self.page, reading: .failed),
+        ]
+        for width in [CGFloat(720), 390, 320] {
+            let bare = headHeight(none, width: width)
+            #expect(bare > 0, "\(width)")
+            for said in saids {
+                #expect(headHeight(said, width: width) == bare, "\(said.rows.count) rows, \(said.reading), at \(width)")
+            }
         }
     }
 
-    @Test("A row unfollowed here stays shown, said as not followed, so the figure still counts it — as many as are drawn, never a figure the rows contradict; unfollow stays in the row's `…`, with Follow back once it is done")
-    func theFigureFollowsAnUnfollow() async throws {
+    private func headHeight(_ said: FollowedTagsSaid, width: CGFloat) -> CGFloat {
+        let view = NSHostingView(rootView: FollowedTagsHead(said: said).frame(width: width).fixedSize(horizontal: false, vertical: true))
+        view.frame = NSRect(x: 0, y: 0, width: width, height: 400)
+        view.layoutSubtreeIfNeeded()
+        return view.fittingSize.height
+    }
+
+    @Test("A row unfollowed here stays shown, said as not followed; unfollow stays in the row's `…`, with Follow back once it is done")
+    func aRowUnfollowedStays() async throws {
         let names = ["birds", "cats"]
         let server = PageServer([
             "/api/v1/accounts/verify_credentials": PageServer.Answer(body: #"{"id":"7","acct":"me","username":"me"}"#),
@@ -73,15 +82,37 @@ struct FollowedTagsPageTests {
         let list = ShellPersonPages().followed
         await list.opened(Self.page, in: session)
         let before = try #require(list.said(of: Self.page, in: session))
-        #expect(before.figure()?.figure == "2")
+        #expect(before.rows.count == 2)
         let birds = try #require(before.rows.first)
-        #expect(before.more(for: birds, act: {}, ask: {})?.items.map(\.name) == [L10n.t("tag.follow.unfollow")])
+        // The item is the page's own: what it offered is handed on, and only that is sent.
+        var sent: Task<Void, Never>?
+        let menu = try #require(before.more(for: birds, act: { to in
+            sent = Task { await list.press(birds.id, on: Self.page, only: to, in: session) }
+        }, ask: {}))
+        #expect(menu.items.map(\.name) == [L10n.t("tag.follow.unfollow")])
+        // The item About's row holds: one glyph, red, asking which hashtag at which source first.
+        let about = TagFollowLine(host: Self.host, tag: birds.tag, standing: .said(true)).more(act: {})
+        #expect(menu.items.map(\.symbol) == about?.items.map(\.symbol) && menu.dangers.count == 1)
+        #expect(menu.items.first?.question == ShellQuestion.unfollow(birds.tag, at: Self.host))
+        var put: ShellMoreAsk?
+        menu.items.first?.press { put = $0 }
+        let ask = try #require(put)
+        ask.answered("not the yes")
+        #expect(sent == nil, "No sends nothing")
+        ask.answered(ShellQuestion.yes)
+        await sent?.value
+        #expect(await server.asked.filter { $0.hasPrefix("/api/v1/tags/") } == ["/api/v1/tags/birds/unfollow"], "yes sends one unfollow")
 
-        await list.press(birds.id, on: Self.page, in: session)
         let after = try #require(list.said(of: Self.page, in: session))
         #expect(after.rows.map(\.tag.name) == names && after.rows.first?.standing == .unfollowed)
-        #expect(after.figure()?.figure == "\(after.rows.count)" && after.figure()?.spoken == after.shown())
-        #expect(after.more(for: after.rows[0], act: {}, ask: {})?.items.map(\.name) == [L10n.t("tag.follow.follow")])
+        #expect(after.more(for: after.rows[0], act: { _ in }, ask: {})?.items.map(\.name) == [L10n.t("tag.follow.follow")])
+        // The question put while the row was followed, answered yes again now that it is not:
+        // it only ever unfollows, so nothing is sent — never a follow.
+        sent = nil
+        ask.answered(ShellQuestion.yes)
+        await sent?.value
+        #expect(await server.asked.filter { $0.hasPrefix("/api/v1/tags/") } == ["/api/v1/tags/birds/unfollow"], "a stale Unfollow sends no follow")
+        #expect(list.said(of: Self.page, in: session)?.rows.first?.standing == .unfollowed)
     }
 
     @Test("The bar's mark asks the list's source again, named by it, where `r` would ask; with nobody to ask there is no mark; the bar never holds Stop")

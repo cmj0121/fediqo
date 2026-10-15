@@ -440,6 +440,18 @@ enum ShellQuestion {
         )
     }
 
+    /// Unfollowing a hashtag at one source. **Asked first, and drawn as a loss**, as unfollowing
+    /// somebody who must agree is: its posts stop coming in from there.
+    static func unfollow(_ tag: PostTag, at host: String, language: DummyLanguage? = nil) -> ShellConfirmation {
+        ShellConfirmation(
+            symbol: "minus.circle",
+            title: String(format: L10n.t("tag.follow.unfollow.ask.title", language: language), tag.text, host),
+            line: L10n.t("tag.follow.unfollow.ask.line", language: language), help: nil,
+            choices: [.init(yes, L10n.t("tag.follow.unfollow", language: language), role: .destructive)],
+            cancel: L10n.t("board.choose.cancel", language: language)
+        )
+    }
+
     /// Refusing somebody's request to follow the reader, or removing somebody from following
     /// them (#313): each takes something from another person, so each is asked about first
     /// and says what it does. `named` is their handle, already made fit for a line.

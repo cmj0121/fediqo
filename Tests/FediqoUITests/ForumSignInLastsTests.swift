@@ -97,7 +97,7 @@ struct ForumSignInLastsTests {
         forums.signInAgain(hosts: ["BBS.Example.ORG", "nothing.example"], attempt: attempts.attempt)
         #expect(forums.isSigningInAgain(host: Self.host), "not registered before returning")
         #expect(!forums.isSigningInAgain(host: "nothing.example"), "a forum with nothing kept was held")
-        await forums.settled(host: Self.host)
+        await forums.signInEnds(host: Self.host)
 
         #expect(attempts.hosts == [Self.host])
         #expect(forums.reachedSignIn(host: Self.host))
@@ -117,7 +117,7 @@ struct ForumSignInLastsTests {
         let attempts = Attempts(.signedIn)
 
         forums.signInAgain(hosts: [Self.host], attempt: attempts.attempt)
-        await forums.settled(host: Self.host)
+        await forums.signInEnds(host: Self.host)
         #expect(attempts.hosts.isEmpty, "a forum still signed in spent a sign-in attempt")
     }
 
@@ -130,7 +130,7 @@ struct ForumSignInLastsTests {
         let attempts = Attempts(.handOver(.refused(nil)))
 
         forums.signInAgain(hosts: [Self.host], attempt: attempts.attempt)
-        await forums.settled(host: Self.host)
+        await forums.signInEnds(host: Self.host)
 
         #expect(forums.notice(host: Self.host) == .lapsed(.refused(nil)))
         #expect(!session.isSignedIn(host: Self.host), "the row would offer Sign out, not Sign in")
@@ -174,6 +174,7 @@ struct ForumSignInLastsTests {
         let forums = ForumSessions(credentials: credentials)
         let http = FixtureHTTP([Self.thread: .text(Self.words)])
         let posts = ForumPosts(http: http, through: forums)
+        forums.limitSleep = TurnedClock().sleep
         let gate = Gate()
         let attempts = Attempts(.handOver(.unreachable), gate: gate)
 
@@ -226,6 +227,222 @@ struct ForumSignInLastsTests {
         #expect(posts.reading(Self.ref) == .coming, "a guest's answer landed under a signed-in forum")
         #expect(posts.generation > generation)
     }
+
+    // MARK: - A launch sign-in held past the hold
+
+    /// A forum with a kept password and a launch sign-in held at `gate`, its hold on `clock`, and
+    /// what a member reads afterwards answered by `member` — never a browser.
+    private static func heldLaunch(
+        gate: Gate, clock: TurnedClock, member: FixtureHTTP, outcome: ForumSignInOutcome = .signedIn
+    ) throws -> (ForumSessions, Attempts) {
+        let credentials = MemoryCredentials()
+        try credentials.save(ForumCredential(host: host, username: "reader", password: "p"))
+        let forums = ForumSessions(credentials: credentials)
+        forums.limitSleep = clock.sleep
+        forums.memberRead = { _ in member }
+        let attempts = Attempts(outcome, gate: gate)
+        forums.signInAgain(hosts: [host], attempt: attempts.attempt)
+        return (forums, attempts)
+    }
+
+    @Test("Past the hold the wait for a launch sign-in ends, and the sign-in goes on")
+    func theHoldEndsTheWait() async throws {
+        let gate = Gate()
+        let guardTask = watching(gate, "the launch sign-in, held past the hold")
+        defer { guardTask.cancel() }
+        let clock = TurnedClock()
+        let (forums, attempts) = try Self.heldLaunch(gate: gate, clock: clock, member: FixtureHTTP())
+
+        let returned = Returned()
+        let settling = Task { await forums.settled(host: Self.host); returned.yes = true }
+        await met("the hold is asleep", by: settling) { clock.sleeping == 1 }
+        #expect(clock.asked == [ForumSessions.launchHold])
+        clock.turn()
+        // No `by:`: the wait under check is the very work that would not end.
+        await met("the wait has returned at the hold") { returned.yes }
+
+        #expect(forums.isSigningInAgain(host: Self.host), "the sign-in was ended with the wait")
+        await gate.open()
+        await met("the sign-in has ended by itself") { !forums.isSigningInAgain(host: Self.host) }
+        #expect(attempts.hosts == [Self.host])
+        #expect(forums.reachedSignIn(host: Self.host), "the sign-in did not land")
+    }
+
+    @Test("The hold is counted once, from the launch's sign-in: a wait begun after it has passed is not held again")
+    func theHoldIsCountedOnce() async throws {
+        let gate = Gate()
+        let guardTask = watching(gate, "the launch sign-in, held past the hold")
+        defer { guardTask.cancel() }
+        let clock = TurnedClock()
+        let (forums, _) = try Self.heldLaunch(gate: gate, clock: clock, member: FixtureHTTP())
+
+        let first = Returned()
+        let firstWait = Task { await forums.settled(host: Self.host); first.yes = true }
+        await met("the hold is asleep", by: firstWait) { clock.sleeping == 1 }
+        clock.turn()
+        await met("the first wait has returned at the hold", by: firstWait) { first.yes }
+
+        let later = Returned()
+        let laterWait = Task { await forums.settled(host: Self.host); later.yes = true }
+        // No `by:`: the wait under check is the very work that would not end.
+        await met("a wait begun after the hold has returned at once") { later.yes }
+        await laterWait.value
+        #expect(clock.asked == [ForumSessions.launchHold], "a wait begun after the hold was held a hold of its own")
+        #expect(forums.isSigningInAgain(host: Self.host), "the sign-in was ended with the wait")
+    }
+
+    @Test("Past the hold a post kept is drawn, not the guest's withheld one, and is read again as the sign-in lands")
+    func keptWordsOutlastTheHold() async throws {
+        let gate = Gate()
+        let guardTask = watching(gate, "the launch sign-in, held past the hold")
+        defer { guardTask.cancel() }
+        let clock = TurnedClock()
+        let member = FixtureHTTP([Self.thread: .text(Self.words)])
+        let (forums, _) = try Self.heldLaunch(gate: gate, clock: clock, member: member)
+        let guest = FixtureHTTP([Self.thread: .text(Self.locked)])
+        let posts = ForumPosts(http: guest, through: forums)
+        posts.deadlineSleep = TurnedClock().sleep
+        let kept = ForumThreadRef(host: Self.host, tid: 88012, kept: ForumOpening(words: "先前讀過的字。"))
+
+        let fetching = Task { await posts.fetch(kept) }
+        await met("the launch's hold is asleep", by: fetching) { clock.sleeping == 1 }
+        clock.turn()
+        await met("the guest's answer waits for the sign-in", by: fetching) { forums.waitingOnSignIn == 1 }
+        #expect(await guest.requested.count == 1)
+        #expect(posts.reading(kept) == .words("先前讀過的字。"), "the guest's answer took the kept words' place")
+        #expect(forums.isSigningInAgain(host: Self.host), "the sign-in was cancelled")
+        let generation = posts.generation
+
+        await gate.open()
+        await fetching.value
+        #expect(posts.reading(kept) == .words("先前讀過的字。"))
+        #expect(posts.generation > generation, "the band on screen would not ask again")
+        // What the band asks once the generation moves.
+        await posts.fetch(kept)
+        #expect(await member.requested.count == 1, "the post was not read again as a member")
+        #expect(posts.reading(kept) == .words("旧插座该换了。"))
+    }
+
+    @Test("Past the hold a topic's kept replies stay drawn, and its page is read again as the sign-in lands")
+    func keptRepliesOutlastTheHold() async throws {
+        let gate = Gate()
+        let guardTask = watching(gate, "the launch sign-in, held past the hold")
+        defer { guardTask.cancel() }
+        let clock = TurnedClock()
+        let member = FixtureHTTP([Self.thread: .text(Self.words + Self.reply(locked: false))])
+        let (forums, _) = try Self.heldLaunch(gate: gate, clock: clock, member: member)
+        let guest = FixtureHTTP([Self.thread: .text(Self.words + Self.reply(locked: true))])
+        let posts = ForumPosts(http: guest, through: forums)
+        posts.deadlineSleep = TurnedClock().sleep
+        let stored = DiscuzPost(
+            pid: 19102, tid: 88012, floor: 2, author: "老王", handle: "@老王@\(Self.host)", body: "先前讀過的回覆。"
+        )
+        posts.reading = { _, _ in [stored] }
+        await posts.open(Self.ref)
+        #expect(Self.bodies(posts) == ["先前讀過的回覆。"], "the premise: the kept reply is drawn")
+
+        let renewing = Task { await posts.renew(Self.ref) }
+        await met("the launch's hold is asleep", by: renewing) { clock.sleeping == 1 }
+        clock.turn()
+        await met("the guest's page waits for the sign-in", by: renewing) { forums.waitingOnSignIn == 1 }
+        #expect(await guest.requested.count == 1)
+        #expect(Self.bodies(posts) == ["先前讀過的回覆。"], "the guest's withheld reply took the kept one's place")
+        #expect(posts.further(of: Self.ref) == .coming, "the foot said something the sign-in takes back")
+
+        await gate.open()
+        await renewing.value
+        #expect(await member.requested.count == 1, "the page was not read again as a member")
+        #expect(Self.bodies(posts) == ["换了，三孔的。"])
+    }
+
+    @Test("Past the hold a blog the guest is refused is still on its way, and reads as the sign-in lands")
+    func aRefusedBlogWaitsForTheSignIn() async throws {
+        let gate = Gate()
+        let guardTask = watching(gate, "the launch sign-in, held past the hold")
+        defer { guardTask.cancel() }
+        let clock = TurnedClock()
+        let member = FixtureHTTP([Self.blog: .text(Self.blogPage)])
+        let (forums, _) = try Self.heldLaunch(gate: gate, clock: clock, member: member)
+        let guest = FixtureHTTP([Self.blog: .text(#"<html><body><div id="messagetext"><p>只有好友才能查看。</p></div></body></html>"#)])
+        let blogs = ForumBlogs(http: guest, through: forums)
+        blogs.work = SourceWork()
+        let row = DummyItem(Note(
+            id: DiscuzBlogRow.id(host: Self.host, blog: 500), source: Source(host: Self.host, kind: .discuz),
+            author: "某人", handle: "@某人@\(Self.host)", body: "摘要……", title: "一篇日誌",
+            postedAt: Date(timeIntervalSince1970: 0), categories: [.trends], url: URL(string: Self.blog)
+        ))
+
+        let opening = Task { await blogs.open(row) }
+        await met("the launch's hold is asleep", by: opening) { clock.sleeping == 1 }
+        clock.turn()
+        await met("the guest's refusal waits for the sign-in", by: opening) { forums.waitingOnSignIn == 1 }
+        #expect(await guest.requested.count == 1)
+        #expect(blogs.reading(of: row) == .coming, "a refusal the sign-in takes back was drawn")
+
+        await gate.open()
+        await opening.value
+        #expect(await member.requested.count == 1, "the blog was not read again as a member")
+        #expect(blogs.reading(of: row) == .read)
+    }
+
+    @Test("Past the hold, a launch sign-in that fails leaves the guest's answer drawn")
+    func aFailedSignInLeavesTheGuestAnswer() async throws {
+        let gate = Gate()
+        let guardTask = watching(gate, "the launch sign-in, held past the hold")
+        defer { guardTask.cancel() }
+        let clock = TurnedClock()
+        let member = FixtureHTTP()
+        let (forums, _) = try Self.heldLaunch(gate: gate, clock: clock, member: member, outcome: .handOver(.unreachable))
+        let guest = FixtureHTTP([Self.thread: .text(Self.locked)])
+        let posts = ForumPosts(http: guest, through: forums)
+        posts.deadlineSleep = TurnedClock().sleep
+
+        let fetching = Task { await posts.fetch(Self.ref) }
+        await met("the launch's hold is asleep", by: fetching) { clock.sleeping == 1 }
+        clock.turn()
+        await met("the guest's answer waits for the sign-in", by: fetching) { forums.waitingOnSignIn == 1 }
+        #expect(await guest.requested.count == 1)
+        #expect(posts.reading(Self.ref) == .coming, "a withheld answer the sign-in may take back was drawn")
+
+        await gate.open()
+        await fetching.value
+        #expect(posts.reading(Self.ref) == .withheld, "with no sign-in, the guest's answer is the answer")
+        #expect(await member.requested.isEmpty)
+    }
+
+    private static func bodies(_ posts: ForumPosts) -> [String] {
+        guard case .loaded(let replies) = posts.standing(of: ref) else { return [] }
+        return replies.map { $0.isWithheld ? "withheld" : $0.body }
+    }
+
+    static func reply(locked: Bool) -> String {
+        let words = locked
+            ? #"<div class="locked">游客请<a href="member.php?mod=logging&action=login">登录</a>后查看回复内容</div>"#
+            : "换了，三孔的。"
+        return """
+        <div class="comiis_postli" id="pid19102">
+        <div class="comiis_postli_top"><h2><a href="home.php?mod=space&uid=72">老王</a></h2></div>
+        <div class="comiis_postli_time"><span>20&nbsp;分钟前</span></div>
+        <div class="comiis_a comiis_message_table cl">\(words)</div>
+        </div>
+        """
+    }
+
+    static let blog = "https://\(host)/home.php?mod=space&uid=21&do=blog&id=500"
+
+    static let blogPage = #"""
+    <html><body>
+    <div id="pt" class="bm cl"><div class="z"><a href="./">論壇</a> <em>&rsaquo;</em>
+    <a href="home.php?mod=space&amp;uid=21">某人</a> <em>&rsaquo;</em>
+    <a href="home.php?mod=space&amp;uid=21&amp;do=blog&amp;view=me">日誌</a></div></div>
+    <div class="vw mbm"><div class="h pbm">
+    <h1 class="ph">一篇日誌</h1>
+    <p class="xg2"><span class="xg1">2026-9-10 21:30</span></p>
+    </div>
+    <div id="blog_article" class="d cl">整篇日誌的字。</div>
+    </div>
+    </body></html>
+    """#
 
     // MARK: - Clear, Remove and Sign out still take everything
 
@@ -282,6 +499,12 @@ struct ForumSignInLastsTests {
     static func lockedPost(host: String) -> DiscuzPost {
         DiscuzPost(pid: 1, tid: 1, floor: 1, author: "a", handle: "@a@\(host)", body: "", isWithheld: true)
     }
+}
+
+/// Whether a wait under check has returned.
+@MainActor
+final class Returned {
+    var yes = false
 }
 
 /// A launch's sign-in, answered as the test says and counted, optionally held at a gate.

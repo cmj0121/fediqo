@@ -227,7 +227,7 @@ public final class ForumSessions {
     /// Where a launch's signing in again is shown while it runs (#164). The app's own; a test
     /// hands in another.
     @ObservationIgnored var work: SourceWork = .shared
-    /// What the limits here are waited on (`bounded`, `settled(host:within:)`): `Task.sleep` but
+    /// What the limits here are waited on (`bounded`, the launch's hold in `launchHolds`): `Task.sleep` but
     /// for a test, which turns it by hand.
     @ObservationIgnored var limitSleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
 
@@ -304,6 +304,11 @@ public final class ForumSessions {
     /// Which of them is the current one per host, so one ended by a forget does not take the
     /// entry of another begun after it.
     @ObservationIgnored private var relaunchIDs: [String: UUID] = [:]
+    /// Each launch sign-in's hold, counted once from when it began and ended with it: a read
+    /// begun after it has passed does not wait for it again. See `settled(host:)`.
+    @ObservationIgnored private var launchHolds: [String: Task<Void, Never>] = [:]
+    /// How many reads are waiting for a launch sign-in to end (`signInEnds`). Asked by tests only.
+    @ObservationIgnored private(set) var waitingOnSignIn = 0
 
     /// How many times each host has been forgotten — a sign-out, a Clear, a Remove. A sign-in
     /// that started before one does not finish after it (#221): it posts no password and records
@@ -423,8 +428,12 @@ public final class ForumSessions {
     /// building anything, so a microblog still starts no web process.
     func readTransport(host: String, else plain: any HTTPClient) -> any HTTPClient {
         guard readsThroughEngine(host: host) else { return plain }
-        return ForumJoinTransport(transport(host: host))
+        return memberRead?(host) ?? ForumJoinTransport(transport(host: host))
     }
+
+    /// What a read through the forum's browser goes through instead, for a test that reads as a
+    /// member without standing a browser up. Nothing in the app: the browser.
+    @ObservationIgnored var memberRead: (@MainActor (String) -> any HTTPClient)?
 
     /// Types a blog's password into that forum, through the browser that holds its sign-in —
     /// **only where there is one** (#213). A forum read without one never sees a password here:
@@ -639,7 +648,7 @@ public final class ForumSessions {
     ///
     /// **Started here and not awaited**, and registered before this returns, so a post fetch for
     /// the same forum that starts a moment later finds it running and waits for it —
-    /// `settled(host:within:)`. What it cannot do is said on the row (`notices`), and the row
+    /// `settled(host:)`. What it cannot do is said on the row (`notices`), and the row
     /// still offers Sign in, because it reads signed out.
     ///
     /// `attempt` is the sign-in itself, handed in by a test; the app's is `signIn(host:)`.
@@ -668,6 +677,9 @@ public final class ForumSessions {
             // Read now, not as the task starts: a forget landing before it runs must still count.
             let asked = forgets[host, default: 0]
             let sweeping = sweeping
+            let sleep = limitSleep
+            launchHolds[host]?.cancel()
+            launchHolds[host] = Task.detached { try? await sleep(Self.launchHold) }
             relaunching[host] = Task { [weak self, work] in
                 defer { work.end(token) }
                 // Not until the launch's sweep of an earlier run's store is done (#219).
@@ -677,6 +689,7 @@ public final class ForumSessions {
                 if let self, self.relaunchIDs[host] == id {
                     self.relaunching[host] = nil
                     self.relaunchIDs[host] = nil
+                    self.launchHolds.removeValue(forKey: host)?.cancel()
                 }
             }
         }
@@ -733,24 +746,50 @@ public final class ForumSessions {
             .map(\.domain)
     }
 
-    /// Returns once this host's launch sign-in has settled, or once `limit` has passed, whichever
-    /// is first. Immediately where there is none.
+    /// Returns once this host's launch sign-in has settled, or once its hold has passed, whichever
+    /// is first — or once the caller is cancelled. Immediately where there is none. **The sign-in
+    /// itself goes on**: only the wait for it ends.
     ///
     /// **Bounded**, because a forum behind a browser check can hold a sign-in for most of a
-    /// minute before it gives up, and a reader should not look at empty rows for that long. What
-    /// is read before the sign-in lands is read again when it does — `ForumPosts.signedIn`.
-    func settled(host: String, within limit: Duration = ForumSessions.launchHold) async {
-        guard let running = relaunching[host.lowercased()] else { return }
-        let sleep = limitSleep
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await running.value }
-            group.addTask { try? await sleep(limit) }
-            await group.next()
-            group.cancelAll()
+    /// minute before it gives up, and a reader should not look at empty rows for that long. **The
+    /// hold is counted once, from when the sign-in began** (`launchHolds`): a row reached twenty
+    /// seconds in does not wait twelve more. Past the hold what the device holds is drawn; a
+    /// guest's answer the sign-in could change waits for it (`signInEnds(host:)`), and
+    /// what is read before the sign-in lands is read again when it does — `ForumPosts.signedIn`.
+    func settled(host: String) async {
+        let host = host.lowercased()
+        guard let running = relaunching[host] else { return }
+        await Self.first(of: [running, launchHolds[host]].compactMap { $0 })
+    }
+
+    /// Returns once this host's launch sign-in has ended, however long it takes, or once the
+    /// caller is cancelled — for a guest's answer read past the hold that the sign-in could change.
+    func signInEnds(host: String) async {
+        let host = host.lowercased()
+        guard let running = relaunching[host] else { return }
+        waitingOnSignIn += 1
+        defer { waitingOnSignIn -= 1 }
+        await Self.first(of: [running])
+    }
+
+    /// Waits for the first of `shared` to end, or for the caller to be cancelled. **None of them
+    /// is cancelled**: they are a sign-in and its hold, which other reads wait on too.
+    ///
+    /// Not a task group: a group waits for every child at its end, and a task's `value` is not
+    /// cancelled by cancelling whoever awaits it.
+    private static func first(of shared: [Task<Void, Never>]) async {
+        let first = FirstOf()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                first.hold(continuation)
+                for task in shared { first.race(Task { await task.value }) }
+            }
+        } onCancel: {
+            first.finish()
         }
     }
 
-    /// How long a forum's posts wait for its launch sign-in. See `settled(host:within:)`.
+    /// How long a forum's posts wait for its launch sign-in. See `settled(host:)`.
     nonisolated static let launchHold: Duration = .seconds(12)
 
     /// Whether this host's launch sign-in is still running.
@@ -774,6 +813,7 @@ public final class ForumSessions {
         // A launch's sign-in still running for it ends here rather than signing back in (#221).
         relaunching.removeValue(forKey: host.lowercased())?.cancel()
         relaunchIDs[host.lowercased()] = nil
+        launchHolds.removeValue(forKey: host.lowercased())?.cancel()
         engines.removeValue(forKey: host.lowercased())?.stopAndBlank()
         // No engine this run is no evidence of no cookies: the store persists, and a host signed
         // in to last launch holds its session before anything asks for its page. A store never
@@ -882,5 +922,52 @@ private final class CookieWatcher: NSObject, WKHTTPCookieStoreObserver {
 
     func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
         Task { @MainActor in changed() }
+    }
+}
+
+/// The first of the work raced to end lets the one waiter go, and the rest is cancelled.
+/// `ForumSessions.settled(host:)`.
+private final class FirstOf: Sendable {
+    private struct Held {
+        var waiter: CheckedContinuation<Void, Never>?
+        var racing: [Task<Void, Never>] = []
+        var done = false
+    }
+
+    private let held = OSAllocatedUnfairLock(initialState: Held())
+
+    func hold(_ waiter: CheckedContinuation<Void, Never>) {
+        let late = held.withLock { state -> Bool in
+            guard !state.done else { return true }
+            state.waiter = waiter
+            return false
+        }
+        if late { waiter.resume() }
+    }
+
+    func race(_ work: Task<Void, Never>) {
+        let late = held.withLock { state -> Bool in
+            guard !state.done else { return true }
+            state.racing.append(work)
+            return false
+        }
+        guard !late else { return work.cancel() }
+        Task {
+            await work.value
+            self.finish()
+        }
+    }
+
+    func finish() {
+        let (waiter, racing) = held.withLock { state in
+            defer {
+                state.done = true
+                state.waiter = nil
+                state.racing = []
+            }
+            return (state.waiter, state.racing)
+        }
+        for work in racing { work.cancel() }
+        waiter?.resume()
     }
 }

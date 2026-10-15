@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The About tab of a hashtag's page (F10): where the hashtag is followed — one row for each
-/// source that has a line, with the press to follow or unfollow there, or how its sign-in
-/// stands and the press that asks — and which sources the page's posts were asked of.
+/// source that has a line, with the press to follow there or the `…` that unfollows, or how its
+/// sign-in stands and the press that asks — and which sources the page's posts were asked of.
 ///
 /// **Each a block the lamp stops on.** It draws what it is handed (`TagAboutSaid`) and asks
 /// nothing: the asking and the presses are `ShellTagFollow`'s, and a row is the one a
@@ -12,8 +12,10 @@ struct TagAbout<Lead: View>: View {
     /// The block the lamp is on.
     var lit: String?
     var jumpToTop: Int = 0
-    /// A row's press at its source: follow or unfollow, or ask again whether it is followed.
+    /// A row's press at its source: follow, or ask again whether it is followed.
     var onPress: (TagFollowLine) -> Void = { _ in }
+    /// The item of a row's `…` that unfollows.
+    var onUnfollow: (TagFollowLine) -> Void = { _ in }
     /// A lock's press: the question that asks that source's sign-in for who the reader follows.
     var onAsk: (String) -> Void = { _ in }
     /// What stands over the blocks and scrolls away with them: the page's head, at a text
@@ -31,7 +33,7 @@ struct TagAbout<Lead: View>: View {
                     Color.clear.frame(height: 0).id(Self.top).accessibilityHidden(true)
                     lead
                     ForEach(said.follows) { line in
-                        TagFollowRow(line: line, onPress: { onPress(line) }, onAsk: { onAsk(line.host) })
+                        TagFollowRow(line: line, onPress: { onPress(line) }, onUnfollow: { onUnfollow(line) }, onAsk: { onAsk(line.host) })
                             .modifier(TagAboutBlock(id: TagAboutSaid.lamp(on: line), lit: lit))
                     }
                     if let reach = said.reach {
@@ -63,6 +65,10 @@ struct TagAbout<Lead: View>: View {
 @MainActor
 final class TagAboutProbe {
     var sizes: [String: CGSize] = [:]
+    /// The press each source's row drew beside its line, by host: its words.
+    var presses: [String: String] = [:]
+    /// The `…` each source's row drew, by host: what it is called.
+    var menus: [String: String] = [:]
 }
 
 extension EnvironmentValues {

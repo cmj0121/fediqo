@@ -193,14 +193,17 @@ struct FollowedTagsSaid: Equatable {
         }
     }
 
-    /// The menu of `row`: its one item, or — where the sign-in's standing is said and cannot
-    /// be asked about — that sentence at its head.
-    func more(for row: FollowedTagRow, act: @escaping () -> Void, ask: @escaping () -> Void) -> ShellMore? {
+    /// The menu of `row`: its one item — the one About's row holds, Unfollow red and asked
+    /// about first — or, where the sign-in's standing is said and cannot be asked about, that
+    /// sentence at its head. `act` is handed what the item offered when the menu was built,
+    /// so a press only ever does that.
+    @MainActor
+    func more(for row: FollowedTagRow, act: @escaping (Bool) -> Void, ask: @escaping () -> Void) -> ShellMore? {
         guard let offer = offer(for: row) else { return nil }
         let name = Self.name(of: offer, on: row)
         switch offer {
         case .act(let to):
-            return ShellMore(items: [.plain(to ? "plus.circle" : "minus.circle", name, act: act)])
+            return ShellMore(items: [TagFollowLine.item(to: to, tag: row.tag, at: row.host) { act(to) }])
         case .locked(let place):
             guard place.asks else { return ShellMore(head: [name], items: []) }
             return ShellMore(items: [.plain(SourceRow.permissionSymbol, name, act: ask)])
@@ -211,11 +214,6 @@ struct FollowedTagsSaid: Equatable {
 
     static func title(language: DummyLanguage? = nil) -> String {
         L10n.t("followed.tags.title", language: language)
-    }
-
-    /// How many hashtags are shown, or nothing where none is.
-    func shown(language: DummyLanguage? = nil) -> String? {
-        rows.isEmpty ? nil : String(format: L10n.t("followed.tags.shown", language: language), L10n.grouped(rows.count, language: language))
     }
 
     /// What is said above the rows: that the list is being asked for, that it could not be —
@@ -635,10 +633,11 @@ final class ShellFollowedTags {
     /// The item in a row's `…` chosen: unfollows the hashtag, or follows it again — **by the
     /// hashtag page's own press**, which guards it and sends it. Nothing where the list as it
     /// is drawn does not hold the row, a press of it is out, or the sign-in may not change
-    /// who the reader follows.
-    func press(_ id: String, on page: FollowedTags, in session: ShellSession) async {
+    /// who the reader follows — or, `only` given, where the row no longer offers that: an
+    /// Unfollow answered after the row stopped being followed sends nothing, never a follow.
+    func press(_ id: String, on page: FollowedTags, only: Bool? = nil, in session: ShellSession) async {
         guard let said = said(of: page, in: session), let row = said.rows.first(where: { $0.id == id }),
-              case .act(let wanted) = said.offer(for: row)
+              case .act(let wanted) = said.offer(for: row), only == nil || only == wanted
         else { return }
         await tags.press(row.tag, at: page.host, to: wanted, in: session)
     }

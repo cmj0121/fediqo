@@ -1,25 +1,10 @@
 import FediqoCore
 import SwiftUI
 
-extension FollowedTagsSaid {
-    static let figureSymbol = "number"
-
-    /// The head's figure: how many hashtags are shown, a glyph and the number on no well,
-    /// opening nothing (F10 §10, 6) — its sentence told to a pointer and a listener. **Counted
-    /// from the rows drawn**, so it is never other than what the list shows: a row unfollowed
-    /// here stays shown, said as not followed, and is counted. Nothing where no row is: the
-    /// list then says in words that the source listed none, or why it has not.
-    func figure(language: DummyLanguage? = nil) -> PageFigure? {
-        shown(language: language).map {
-            PageFigure(symbol: Self.figureSymbol, figure: L10n.grouped(rows.count, language: language), spoken: $0, opens: false)
-        }
-    }
-}
-
 /// The hashtags the reader follows at a source, opened: a page of its own (F10), drawn in the
 /// frame every opened page stands in (`OpenedPage`), with no tabs. Its bar holds the way back
-/// and the mark that asks the source again; its head says what the list is, which source keeps
-/// it and how many of it are shown; under them are the hashtags, as a page of rising ones draws
+/// and the mark that asks the source again; its head says what the list is and which source
+/// keeps it, and draws no figure; under them are the hashtags, as a page of rising ones draws
 /// them, each with its `…`.
 ///
 /// **A step of the walk like somebody's page.** It draws what it is handed and asks nothing:
@@ -43,8 +28,9 @@ struct FollowedTagsPane: View {
     var onPull: () async -> Void = {}
     /// The foot's press: the next stretch.
     var onReadOn: () -> Void = {}
-    /// The item of a row's `…` that follows or unfollows.
-    var onAct: (FollowedTagRow) -> Void = { _ in }
+    /// The item of a row's `…` that follows (true) or unfollows (false): what it offered when
+    /// the menu was built, and only that.
+    var onAct: (FollowedTagRow, Bool) -> Void = { _, _ in }
     /// The item that asks the sign-in for the rest of who the reader follows.
     var onAsk: () -> Void = {}
     var jumpToTop: Int = 0
@@ -92,23 +78,20 @@ struct FollowedTagsPane: View {
     }
 }
 
-/// The head of the hashtags followed: what the list is and which source keeps it, and under
-/// them how many of it are shown — its figure (`PageFigure`), a glyph and the number opening
-/// nothing, only where a row is shown. One heading to a listener, the source's pill within it.
+/// The head of the hashtags followed: what the list is and which source keeps it — **and no
+/// figure**: how many are shown is the rows themselves. One heading to a listener, the source's
+/// pill within it.
 struct FollowedTagsHead: View {
     let said: FollowedTagsSaid
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: ShellSpace.step) {
-            VStack(alignment: .leading, spacing: ShellSpace.tight) {
-                Text(FollowedTagsSaid.title())
-                    .shellFont(.name)
-                    .foregroundStyle(ShellChrome.ink(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                if let figure = said.figure() { PageFigureView(figure: figure) }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(FollowedTagsSaid.title())
+                .shellFont(.name)
+                .foregroundStyle(ShellChrome.ink(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             ShellWellPill(said.page.host).fixedSize()
         }
         .padding(.horizontal, ShellSpace.pad)
@@ -123,7 +106,7 @@ struct FollowedTagsActs {
     var onOpen: (RisingRow) -> Void
     var onAskAgain: () -> Void
     var onReadOn: () -> Void
-    var onAct: (FollowedTagRow) -> Void
+    var onAct: (FollowedTagRow, Bool) -> Void
     var onAsk: () -> Void
 }
 
@@ -214,7 +197,7 @@ struct FollowedTagsList<Lead: View>: View {
         // The menu is built when it is opened; what `…` is called is known without it.
         let offer = said.offer(for: row)
         let menu = offer.map { _ in
-            NoticeRow.Menu(more: { said.more(for: row, act: { acts.onAct(row) }, ask: acts.onAsk) ?? ShellMore(items: []) }, asks: $asked)
+            NoticeRow.Menu(more: { said.more(for: row, act: { acts.onAct(row, $0) }, ask: acts.onAsk) ?? ShellMore(items: []) }, asks: $asked)
         }
         return RisingRowView(
             row: row.listed,

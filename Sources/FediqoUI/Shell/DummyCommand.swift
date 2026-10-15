@@ -85,7 +85,8 @@ public enum DummyCommand: String, Hashable, Sendable, CaseIterable {
     case openRising
     /// `l` — follow whoever's page is in front, or the hashtag whose page is (#313, #318): the
     /// press a finger makes on Follow there. Free, and beside `j` and `k` under the hand.
-    /// **It only ever follows**: unfollowing is in the page's `…` and on the hashtag's line.
+    /// **It only ever follows**: unfollowing is in the page's `…`, and in the `…` of a hashtag's
+    /// line on its About.
     case follow
     case showShortcuts
     /// `/` — search what this device holds (#32). `?` is still the keys list; see `typed`.

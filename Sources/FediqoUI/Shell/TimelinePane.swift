@@ -811,7 +811,7 @@ struct TimelinePane: View {
             // Pulled down, the list is asked from the top as `r` asks it.
             onPull: { await followed.again(page, in: session) },
             onReadOn: { Task { await followed.readOn(page, in: session) } },
-            onAct: { row in Task { await followed.press(row.id, on: page, in: session) } },
+            onAct: { row, to in Task { await followed.press(row.id, on: page, only: to, in: session) } },
             onAsk: { session.askFor([.follows], host: page.host) },
             jumpToTop: jumpToTop,
             onBack: onBack
@@ -841,6 +841,7 @@ struct TimelinePane: View {
                 // The head's Follow only ever follows, as `l` does.
                 onHeadFollow: { line in _ = people?.tags.pressed(line, only: true, in: session) },
                 onFollow: { line in _ = people?.tags.pressed(line, in: session) },
+                onUnfollow: { line in _ = people?.tags.unfollowed(line, in: session) },
                 onAskFollows: { host in session.askFor([.follows], host: host) },
                 // Asked again of the timeline in front, as the press asked it.
                 onRetry: {

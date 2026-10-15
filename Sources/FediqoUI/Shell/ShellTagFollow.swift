@@ -87,6 +87,36 @@ struct TagFollowLine: Equatable, Identifiable {
         }
     }
 
+    /// The row's own press, and Return's with the lamp on it: what it offers, **but
+    /// unfollowing** — that is in the row's `…` (`more`), as unfollowing somebody is in their
+    /// page's, and no key reaches it.
+    var press: Offer? { offers == .unfollow ? nil : offers }
+
+    /// The row's `…`: unfollowing, where the source said it is followed — red, and asked about
+    /// first, as unfollowing somebody who must agree is. Nothing otherwise, and then no `…` is
+    /// drawn.
+    @MainActor
+    func more(act: @escaping () -> Void) -> ShellMore? {
+        offers == .unfollow ? ShellMore(items: [Self.item(to: false, tag: tag, at: host, act: act)]) : nil
+    }
+
+    /// What the row's `…` is called: its one item, and of what at which source — two rows of
+    /// About are told apart by it.
+    func moreLabel(language: DummyLanguage? = nil) -> String {
+        let named = String(format: L10n.t("tag.follow.unfollow.spoken", language: language), tag.text, host)
+        return ShellMore.label(only: named, language: language)
+    }
+
+    /// The item of a `…` that follows `tag` at `host`, or with `to` false stops: one glyph and
+    /// one name wherever it stands — About's row, a row of the hashtags followed. **Stopping is
+    /// red and asks first** (`ShellQuestion.unfollow(_:at:)`), naming the hashtag and the
+    /// source; only its yes reaches `act`.
+    @MainActor
+    static func item(to: Bool, tag: PostTag, at host: String, act: @escaping () -> Void) -> ShellMoreItem {
+        guard !to else { return .plain("plus.circle", L10n.t("tag.follow.follow"), act: act) }
+        return .danger("minus.circle", L10n.t("tag.follow.unfollow"), asks: ShellQuestion.unfollow(tag, at: host), act: act)
+    }
+
     /// Whether the line is drawn dim with the lock: it says how a sign-in stands, not how the
     /// hashtag does.
     var isLocked: Bool {
@@ -108,26 +138,24 @@ struct TagFollowLine: Equatable, Identifiable {
         return String(format: L10n.t("tag.follow.at", language: language), host, stands)
     }
 
-    /// The word of the press beside the line, or nothing: there is none, or the line itself
-    /// is the press, as a lock's is.
+    /// The word of the press beside the line, or nothing: there is none, the line itself is
+    /// the press, as a lock's is, or what it offers is in its `…`.
     func pressWords(language: DummyLanguage? = nil) -> String? {
-        switch offers {
+        switch press {
         case .follow: L10n.t("tag.follow.follow", language: language)
-        case .unfollow: L10n.t("tag.follow.unfollow", language: language)
         case .again: L10n.t("tag.retry", language: language)
-        case .ask, nil: nil
+        case .unfollow, .ask, nil: nil
         }
     }
 
     /// What the press is called to a listener, who hears it apart from the line.
     func pressSpoken(language: DummyLanguage? = nil) -> String? {
-        switch offers {
+        switch press {
         case .follow: String(format: L10n.t("tag.follow.follow.spoken", language: language), tag.text, host)
-        case .unfollow: String(format: L10n.t("tag.follow.unfollow.spoken", language: language), tag.text, host)
         // "Try again" alone says neither what nor where: two sources that failed would be
         // two presses of one name.
         case .again: String(format: L10n.t("tag.again.spoken", language: language), tag.text, host)
-        case .ask, nil: pressWords(language: language)
+        case .unfollow, .ask, nil: pressWords(language: language)
         }
     }
 
@@ -381,6 +409,14 @@ final class ShellTagFollow {
         case nil: break
         }
         return nil
+    }
+
+    /// The item of a line's `…` that unfollows, chosen: **only ever an unfollow**, held against
+    /// what the source says where the press is taken — so a menu opened over a followed line
+    /// that has since become not followed sends nothing, and never a follow.
+    @discardableResult
+    func unfollowed(_ line: TagFollowLine, in session: ShellSession) -> Task<Void, Never>? {
+        pressed(line, only: false, in: session)
     }
 
     /// The walk has left the page of `tag`: which tab was in front, and each tab's lamp, are

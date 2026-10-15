@@ -808,16 +808,22 @@ final class ForumPosts {
         // The rules `work` states for the first page, in its order: a forum still signing in is
         // waited for, the reader is chosen after it, and the gate is taken last.
         if let forums { await forums.settled(host: key.host) }
-        let client = client(for: key.host, part: .replies, within: nil)
-        await enter()
-        let answer: Result<DiscuzReplies, Absence>
-        do {
-            answer = .success(try await client.replies(tid: key.tid, page: number))
-        } catch {
-            answer = .failure(Self.absence(for: error))
-        }
-        leave()
+        let asked = forums?.signIns(host: key.host) ?? 0
+        var answer = await ask(number, of: key)
         guard !clearedPages.contains(key) else { return }
+        // **Past the hold, a guest's page the sign-in could change waits for it** (#153): landed,
+        // its withheld replies would take the place of words already drawn, or its foot would
+        // say what the sign-in takes back. The replies drawn stay, and once a sign-in lands the
+        // page is asked again as the member the reader now is.
+        if let forums, Self.isGuestShaped(answer.map(\.posts)),
+           forums.isSigningInAgain(host: key.host) || forums.signIns(host: key.host) != asked {
+            await forums.signInEnds(host: key.host)
+            guard !clearedPages.contains(key) else { return }
+            if !Task.isCancelled, forums.signIns(host: key.host) != asked {
+                answer = await ask(number, of: key)
+                guard !clearedPages.contains(key) else { return }
+            }
+        }
         // Stopped: nothing it brought lands, and the foot is as it was before it asked.
         guard !Task.isCancelled else {
             paging[key] = before
@@ -839,6 +845,19 @@ final class ForumPosts {
             // The page that was to come next stays the one asked for next: a renewal's page is the
             // last read again, and failing it does not move the foot back onto it.
             paging[key] = Paging(last: before.last, next: before.next, further: .failed(absence))
+        }
+    }
+
+    /// One page of a topic's replies asked of the forum, through the reader it should be read
+    /// through now, with a slot of the gate.
+    private func ask(_ number: Int, of key: Key) async -> Result<DiscuzReplies, Absence> {
+        let client = client(for: key.host, part: .replies, within: nil)
+        await enter()
+        defer { leave() }
+        do {
+            return .success(try await client.replies(tid: key.tid, page: number))
+        } catch {
+            return .failure(Self.absence(for: error))
         }
     }
 
@@ -956,6 +975,16 @@ final class ForumPosts {
             // under the forum the reader has just emptied, and they would have to press Clear a
             // second time to undo the first one's own wake.
             guard !self.cleared.contains(key) else { return }
+
+            // **Past the hold, a guest's answer the sign-in could change waits for it.** Drawn
+            // now, a withheld post would take the place of the words kept with the row, and a
+            // refusal would be said where the sign-in is about to take it back. Meanwhile the
+            // row draws what the device holds; the guard below then drops the answer where a
+            // sign-in landed, and the band asks again as the member the reader now is.
+            if let forums = self.forums, Self.isGuestShaped(answer), forums.isSigningInAgain(host: key.host) {
+                await forums.signInEnds(host: key.host)
+                guard !Task.isCancelled, !self.cleared.contains(key) else { return }
+            }
 
             // **A guest's answer that lands after a sign-in is not kept** (#153). It was asked for
             // before the forum knew who this was, and it is the answer the sign-in changes; kept,

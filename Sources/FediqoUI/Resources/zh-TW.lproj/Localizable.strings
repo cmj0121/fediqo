@@ -976,10 +976,11 @@
 "tag.follow.unfollow" = "取消追蹤";
 "tag.follow.follow.spoken" = "在 %2$@ 追蹤 %1$@";
 "tag.follow.unfollow.spoken" = "在 %2$@ 取消追蹤 %1$@";
+"tag.follow.unfollow.ask.title" = "在 %2$@ 取消追蹤 %1$@？";
+"tag.follow.unfollow.ask.line" = "那裡的貼文不會再只因為帶著它而進到你的首頁。";
 "tag.follow.failed.follow" = "無法在 %2$@ 追蹤 %1$@。";
 "tag.follow.failed.unfollow" = "無法在 %2$@ 取消追蹤 %1$@。";
 "followed.tags.title" = "你追蹤的主題標籤";
-"followed.tags.shown" = "顯示 %@ 個";
 "followed.tags.asking" = "正在向 %@ 詢問你追蹤的主題標籤…";
 "followed.tags.failed" = "無法向 %@ 詢問你追蹤的主題標籤。";
 "followed.tags.again.failed" = "無法再向 %@ 詢問一次。它先前列出的仍然都在。";

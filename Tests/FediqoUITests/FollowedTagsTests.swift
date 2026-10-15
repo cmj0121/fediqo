@@ -181,7 +181,7 @@ struct FollowedTagsTests {
 
     // MARK: - Reading on
 
-    @Test("Opening the list asks its source for one stretch, as the reader, of that host, listed in the run's record under the purpose a hashtag's follow has; the foot's press reads the next by the place the source's Link named, a stretch a press, to the end — and then says the end, and how many are shown; nothing is asked past it, or by opening the list again")
+    @Test("Opening the list asks its source for one stretch, as the reader, of that host, listed in the run's record under the purpose a hashtag's follow has; the foot's press reads the next by the place the source's Link named, a stretch a press, to the end — and then says the end; nothing is asked past it, or by opening the list again")
     func itReadsOnToItsEnd() async throws {
         let (session, server, work) = await session(Self.whole)
         try signIn(session)
@@ -197,7 +197,7 @@ struct FollowedTagsTests {
         #expect(shown(list, in: session) == Array(Self.names.prefix(2)), "the one followed last first")
         var said = try #require(list.said(of: Self.page, in: session))
         #expect(said.reading == .said && said.foot == .more && said.stateLine() == nil)
-        #expect(said.shown(language: .english) == "2 shown")
+        #expect(said.rows.count == 2)
         #expect(said.footWords(.more, language: .english) == "More hashtags can be read. Press here to read them.")
 
         await list.opened(Self.page, in: session)
@@ -213,8 +213,7 @@ struct FollowedTagsTests {
         #expect(said.rows.map(\.tag.name) == Self.names)
         #expect(said.foot == .end)
         #expect(said.footWords(.end, language: .english) == "No more hashtags: m.example has sent all it gives.")
-        #expect(said.shown(language: .english) == "5 shown")
-        #expect(said.shown(language: .taiwanese) == "顯示 5 個")
+        #expect(said.rows.count == 5)
         #expect(said.rows.allSatisfy { $0.standing == .followed && $0.words() == nil })
         #expect(list.walked(Self.page, in: session) == said.rows.map(\.id))
 
@@ -234,7 +233,6 @@ struct FollowedTagsTests {
         var said = try #require(list.said(of: Self.page, in: session))
         #expect(said.rows.isEmpty && said.foot == nil)
         #expect(said.nothing(language: .english) == "m.example lists no hashtags you follow.")
-        #expect(said.shown() == nil, "nothing shown is not counted")
 
         await server.answer(Self.first, Self.down)
         await list.again(Self.page, in: session)
@@ -308,7 +306,7 @@ struct FollowedTagsTests {
         var said = try #require(list.said(of: Self.page, in: session))
         #expect(said.rows.map(\.tag.name) == ["a", "b", "c"])
         #expect(said.foot == .farthest)
-        #expect(said.shown(language: .english) == "3 shown")
+        #expect(said.rows.count == 3)
         #expect(said.footWords(.farthest, language: .english) == "Fediqo reads the first 3 hashtags you follow. m.example may list more.")
         #expect(list.walked(Self.page, in: session).count == 3)
         await list.readOn(Self.page, in: session)
@@ -385,7 +383,7 @@ struct FollowedTagsTests {
         #expect(after.words(language: .english) == "At m.example: not followed.")
         #expect(shown(list, in: session) == Array(Self.names.prefix(2)), "the row stays where it stood")
         #expect(list.said(of: Self.page, in: session)?.offer(for: after) == .act(true), "Follow: the way back")
-        #expect(list.said(of: Self.page, in: session)?.shown(language: .english) == "2 shown")
+        #expect(list.said(of: Self.page, in: session)?.rows.count == 2)
         #expect(work.record.map(\.purpose) == [.followedTags, .write])
 
         // The hashtag's own page, opened after, asks as it always does: the list's word is no page's.
@@ -569,7 +567,7 @@ struct FollowedTagsTests {
         await again.value
         #expect(shown(list, in: session) == Array(Self.names.prefix(3)), "the row is kept, in the place it had")
         #expect(row(name, of: list, in: session)?.standing == .followed)
-        #expect(list.said(of: Self.page, in: session)?.shown(language: .english) == "3 shown")
+        #expect(list.said(of: Self.page, in: session)?.rows.count == 3)
 
         // Read again after: the read is the newer word, and lists it or does not.
         await list.again(Self.page, in: session)
@@ -800,17 +798,20 @@ struct FollowedTagsTests {
         var row = FollowedTagRow(tag: tag, host: Self.host)
         var said = FollowedTagsSaid(page: Self.page, reading: .said, rows: [row])
         var acted = 0, asked = 0
-        let unfollow = try #require(said.more(for: row, act: { acted += 1 }, ask: { asked += 1 }))
+        let unfollow = try #require(said.more(for: row, act: { _ in acted += 1 }, ask: { asked += 1 }))
         #expect(unfollow.head.isEmpty)
         #expect(unfollow.items.map(\.name) == [L10n.t("tag.follow.unfollow")])
+        // Red, asking first which hashtag at which source, as About's row does.
+        #expect(unfollow.dangers.count == 1 && unfollow.items.first?.question == ShellQuestion.unfollow(tag, at: Self.host))
         row.standing = .unfollowed
-        #expect(said.more(for: row, act: {}, ask: {})?.items.map(\.name) == [L10n.t("tag.follow.follow")])
+        let follow = try #require(said.more(for: row, act: { _ in }, ask: {}))
+        #expect(follow.items.map(\.name) == [L10n.t("tag.follow.follow")] && follow.dangers.isEmpty, "following again asks nothing")
         row.standing = .doing(false)
-        #expect(said.more(for: row, act: {}, ask: {}) == nil)
+        #expect(said.more(for: row, act: { _ in }, ask: {}) == nil)
 
         row.standing = .followed
         said.changing = PartWords.Place(kind: .partly, key: "part.follows.partly.changing")
-        let asks = try #require(said.more(for: row, act: { acted += 1 }, ask: { asked += 1 }))
+        let asks = try #require(said.more(for: row, act: { _ in acted += 1 }, ask: { asked += 1 }))
         #expect(asks.head.isEmpty)
         #expect(asks.items.map(\.name) == [String(format: L10n.t("part.follows.partly.changing"), Self.host)])
 
@@ -818,7 +819,7 @@ struct FollowedTagsTests {
         let never = PartWords.Place(kind: .none, key: "part.ask.none")
         #expect(never.asks == false)
         said.changing = never
-        let head = try #require(said.more(for: row, act: { acted += 1 }, ask: { asked += 1 }))
+        let head = try #require(said.more(for: row, act: { _ in acted += 1 }, ask: { asked += 1 }))
         #expect(head.head == [String(format: L10n.t("part.ask.none"), Self.host)])
         #expect(head.items.isEmpty)
         #expect(acted == 0)
@@ -848,7 +849,7 @@ struct FollowedTagsTests {
     @Test("Every sentence of the list is in each language, and the two tables of Chinese are the same; following is the word the hashtag's page uses")
     func everySentenceIsInEachLanguage() throws {
         let keys = [
-            "followed.tags.title", "followed.tags.shown", "followed.tags.asking", "followed.tags.failed",
+            "followed.tags.title", "followed.tags.asking", "followed.tags.failed",
             "followed.tags.again.failed", "followed.tags.none", "followed.tags.foot.more", "followed.tags.foot.reading",
             "followed.tags.foot.end", "followed.tags.foot.failed", "followed.tags.foot.stopped", "followed.tags.foot.farthest",
         ]
