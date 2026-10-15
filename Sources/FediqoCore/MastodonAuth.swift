@@ -802,6 +802,14 @@ public struct MastodonAuthorized: Sendable {
         return try await finish(result, path: path)
     }
 
+    /// A PUT with no body through the same door (#321): a reaction put on an announcement. As
+    /// `patch(path:form:)`, a 422 throws `MastodonUnprocessable` with the source's answer.
+    public func put(path: String) async throws -> Data {
+        let result = try await send(path: path, method: "PUT")
+        if result.status == 422 { throw MastodonUnprocessable(body: result.body) }
+        return try await finish(result, path: path)
+    }
+
     /// Who the reader is on this source, as `@user@host` — the spelling `Note.handle` takes, so a
     /// post can be told to be theirs by comparing the two (#109).
     ///
