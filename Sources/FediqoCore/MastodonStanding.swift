@@ -224,7 +224,7 @@ public struct MastodonStanding: Sendable {
         let blockedBy: Bool?
         let showingReblogs: Bool?
         let notifying: Bool?
-        let endorsed: Bool?
+        let endorsed: StatusDTO.Lenient<Bool>?
 
         /// The standing, where the source said every part of it. What is taken from them is
         /// no such part: a source that leaves it out has said the rest.
@@ -234,7 +234,7 @@ public struct MastodonStanding: Sendable {
                 accountID: id, following: following, followedBy: followedBy, requested: requested, muting: muting,
                 mutedUntil: muting ? mutingExpiresAt?.value : nil, blocking: blocking, blockedBy: blockedBy,
                 showsBoosts: following ? showingReblogs : nil, notifies: following ? notifying : nil,
-                featured: following ? endorsed : nil
+                featured: following ? endorsed?.value : nil
             )
         }
     }

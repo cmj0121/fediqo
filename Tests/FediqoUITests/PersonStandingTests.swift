@@ -37,7 +37,7 @@ struct PersonStandingTests {
         following: Bool = false, followedBy: Bool = false, requested: Bool = false, muting: Bool = false,
         until: String? = nil, blocking: Bool = false, blockedBy: Bool = false
     ) -> String {
-        #"{"id":"42","following":\#(following),"showing_reblogs":\#(following),"notifying":false,"languages":null,"followed_by":\#(followedBy),"blocking":\#(blocking),"blocked_by":\#(blockedBy),"muting":\#(muting),"muting_notifications":\#(muting),"muting_expires_at":\#(until.map { "\"\($0)\"" } ?? "null"),"requested":\#(requested),"requested_by":false,"domain_blocking":false,"note":""}"#
+        #"{"id":"42","following":\#(following),"showing_reblogs":\#(following),"notifying":false,"languages":null,"followed_by":\#(followedBy),"blocking":\#(blocking),"blocked_by":\#(blockedBy),"muting":\#(muting),"muting_notifications":\#(muting),"muting_expires_at":\#(until.map { "\"\($0)\"" } ?? "null"),"requested":\#(requested),"requested_by":false,"domain_blocking":false,"endorsed":false,"note":""}"#
     }
 
     private static func said(_ standing: String) -> PageServer.Answer { PageServer.Answer(body: "[\(standing)]") }
@@ -390,7 +390,7 @@ struct PersonStandingTests {
         #expect(work.record.last?.purpose == .write)
 
         let followed = try #require(acts.acting(of: Self.ada, said: page, in: session))
-        #expect(followed.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false)) && followed.doing == nil)
+        #expect(followed.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false, featured: false)) && followed.doing == nil)
         #expect(followed.press == nil && followed.more == [.unfollow] && followed.missed == nil)
         #expect(!followed.asksBefore(.unfollow), "somebody anyone may follow is unfollowed in one press")
         let menu = followed.menu(head: ["Ada"], act: { _ in })
@@ -572,7 +572,7 @@ struct PersonStandingTests {
         await server.release(Self.stands)
         await reading.value
         let after = try #require(acts.acting(of: Self.ada, said: page, in: session))
-        #expect(after.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false)), "the read is told to nobody")
+        #expect(after.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false, featured: false)), "the read is told to nobody")
         #expect(after.more == [.unfollow] && after.press == nil && after.missed == nil)
         await acts.opened(Self.ada, said: page, in: session)
         #expect(await asked(server).count == 3, "and the page is left asking nothing")
@@ -600,7 +600,7 @@ struct PersonStandingTests {
 
         await server.release(Self.follow)
         await pressed.value
-        #expect(acts.acting(of: Self.ada, said: page, in: session)?.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false)))
+        #expect(acts.acting(of: Self.ada, said: page, in: session)?.reading == .said(PersonStanding(accountID: "42", following: true, showsBoosts: true, notifies: false, featured: false)))
     }
 
     @Test("A press the source refused, or that did not arrive, leaves the page as the source last said and says so under the heading, in both languages; pressed again the sentence goes; and an answer that is not what was pressed for is said as not done")
@@ -854,11 +854,11 @@ struct PersonStandingTests {
     /// real server's has (`MastodonStandingCaptures.narrowed`).
     private static func narrowed(boosts: Bool?, notify: Bool?, following: Bool = true, requested: Bool = false) -> String {
         let taken = [boosts.map { #""showing_reblogs":\#($0),"# }, notify.map { #""notifying":\#($0),"# }].compactMap { $0 }.joined()
-        return #"{"id":"42","following":\#(following),\#(taken)"languages":null,"followed_by":false,"blocking":false,"blocked_by":false,"muting":false,"muting_notifications":false,"muting_expires_at":null,"requested":\#(requested),"requested_by":false,"domain_blocking":false,"note":""}"#
+        return #"{"id":"42","following":\#(following),\#(taken)"languages":null,"followed_by":false,"blocking":false,"blocked_by":false,"muting":false,"muting_notifications":false,"muting_expires_at":null,"requested":\#(requested),"requested_by":false,"domain_blocking":false,"endorsed":false,"note":""}"#
     }
 
     private static func followed(boosts: Bool? = true, notify: Bool? = false) -> PersonStanding {
-        PersonStanding(accountID: "42", following: true, showsBoosts: boosts, notifies: notify)
+        PersonStanding(accountID: "42", following: true, showsBoosts: boosts, notifies: notify, featured: false)
     }
 
     @Test("What is taken from somebody followed is two rows, each as the source last said and in words: their boosts, a notice of each post — only of somebody the reader follows, not one only asked or not followed; only what the source said; and only where the sign-in may change who the reader follows. On About they stand under how the reader stands, each a block the lamp stops on, and Return on one is its press")

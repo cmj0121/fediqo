@@ -193,6 +193,9 @@ struct MastodonFeaturingTests {
         let unsaid = Self.relationship().replacingOccurrences(of: #""endorsed":true,"#, with: "")
         #expect(try await standing("[\(unsaid)]")?.featured == nil)
         #expect(try await standing("[\(unsaid)]")?.following == true)
+        // A word of another shape costs that word alone, never the standing.
+        let odd = try #require(try await standing("[\(Self.relationship(endorsed: #""yes""#))]"))
+        #expect(odd.featured == nil && odd.following == true)
         // Said only of a follow: somebody not followed is not featured, and is not said to be "not".
         #expect(try await standing("[\(Self.relationship(following: false, endorsed: "true"))]")?.featured == nil)
     }
