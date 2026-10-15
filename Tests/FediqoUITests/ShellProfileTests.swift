@@ -483,4 +483,26 @@ struct ShellProfileTests {
         #expect(pages.head(of: them, in: session).name == "Other", "the first account's answer is not drawn on theirs")
         #expect(session.mastodon.asking(host: Self.host) == 5, "nor counted for them")
     }
+
+    @Test("Where the source has named neither reader, a sign-in replaced by another's while the sheet is up is not taken for the reader: Save sends nothing and the sheet goes down")
+    func anUnnamedReaderIsTheSignInItself() async throws {
+        let (session, server) = await session()
+        try session.mastodon.tokens.save(MastodonToken(
+            host: Self.host, accessToken: "tok", clientID: "c", clientSecret: "s", scopes: Self.all, asked: Self.all
+        ))
+        session.mastodon.refresh()
+        let profile = ShellPersonPages().profile
+        await profile.open(Self.host, in: session)?.value
+        #expect(session.mastodon.reader(host: Self.host) == nil, "nobody named")
+        profile.draft?.name = "River Me"
+        #expect(profile.said(in: session)?.canSave == true)
+        if let held = try session.mastodon.tokens.token(host: Self.host) { _ = try session.mastodon.tokens.forget(held) }
+        try session.mastodon.tokens.save(MastodonToken(
+            host: Self.host, accessToken: "theirs", clientID: "c", clientSecret: "s", scopes: Self.all, asked: Self.all
+        ))
+        session.mastodon.refresh()
+        #expect(profile.save(in: session) == nil)
+        #expect(profile.open == nil)
+        #expect(await server.arrivals(of: Self.change) == 0)
+    }
 }

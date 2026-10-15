@@ -49,6 +49,9 @@ final class ShellProfile {
     @ObservationIgnored private var askedAs: AskedAs = .nobody
     /// The id the source gave the reader the sheet was opened for, where it had said.
     @ObservationIgnored private var accountID: String?
+    /// The sign-in the sheet was opened through, as a mark made for this run alone — a hash of
+    /// its token, never the token: what tells a reader nobody has named yet from another.
+    @ObservationIgnored private var through: Int?
     @ObservationIgnored private var task: Task<Void, Never>?
     /// The number of the ask whose answer the sheet awaits.
     @ObservationIgnored private var awaits = 0
@@ -92,6 +95,7 @@ final class ShellProfile {
         else { return nil }
         askedAs = ShellPersonPages.askedAs(at: source.host, in: session)
         accountID = session.mastodon.reader(host: source.host)?.id
+        through = held.accessToken.hashValue
         open = ProfileOpen(host: source.host, id: errands.next())
         return read(source, with: held, in: session)
     }
@@ -135,7 +139,7 @@ final class ShellProfile {
         } catch {
             _ = await limits
             guard awaits == errand, open?.host == source.host, !Cancellation.happened(error) else { return }
-            guard isTheReader(at: source.host, in: session) else {
+            guard (error as? MastodonAuthError) == .signedOut || isTheReader(at: source.host, in: session) else {
                 close()
                 return
             }
@@ -186,7 +190,8 @@ final class ShellProfile {
             await answered?(answer.person, host, session)
         } catch {
             guard awaits == errand, open?.host == host, !Cancellation.happened(error) else { return }
-            guard isTheReader(at: host, in: session) else {
+            // An ending is of the very sign-in the change went through, which is gone with it.
+            guard (error as? MastodonAuthError) == .signedOut || isTheReader(at: host, in: session) else {
                 close()
                 return
             }
@@ -215,20 +220,25 @@ final class ShellProfile {
             return nil
         }
         if accountID == nil { accountID = session.mastodon.reader(host: source.host)?.id }
+        through = held.accessToken.hashValue
         return held
     }
 
     /// Whether whoever is signed in at `host` now is the account the sheet was opened for.
-    /// **At a press, a reader not named yet is the same reader** — asking for the account part
-    /// hands back a new sign-in the source names a moment later — and another only where the
-    /// handle or the id says so. **`strictly`, for an answer about to be drawn**, only a reader
+    /// **At a press, by the id where both are known** — asking for the account part hands back
+    /// a new sign-in for the same account, named as it is kept — **and where either is not, only
+    /// through the very sign-in the sheet was opened through**: a sign-out and a sign-in as
+    /// somebody else, not named yet, is never taken for the reader. **`strictly`, for an answer about to be drawn**, only a reader
     /// named the same way is: an answer drawn for nobody is asked again by the page, and one
     /// drawn for somebody else is a page of the wrong account.
     private func isTheReader(at host: String, strictly: Bool = false, in session: ShellSession) -> Bool {
         let now = ShellPersonPages.askedAs(at: host, in: session)
         let was = accountID, id = session.mastodon.reader(host: host)?.id
         guard now.isTheSame(as: askedAs) else { return false }
-        guard strictly else { return was == nil || id == nil || was == id }
+        guard strictly else {
+            if let was, let id { return was == id }
+            return session.mastodon.token(host: host).map { $0.accessToken.hashValue } == through
+        }
         if let was { return id == was }
         return now == askedAs && now != .reader(nil)
     }
