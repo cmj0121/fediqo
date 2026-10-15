@@ -916,8 +916,8 @@
 "part.account.name" = "你的個人檔案";
 "profile.change" = "修改";
 "profile.change.help" = "修改你的名稱、自我介紹、欄位，以及別人可以做的事";
-"profile.change.spoken" = "修改你在 %@ 的帳號";
-"profile.title" = "你的帳號";
+"profile.change.spoken" = "修改你在 %@ 的個人檔案";
+"profile.title" = "你的個人檔案";
 "profile.whose" = "%@ 現在保存的樣子。";
 "profile.save" = "儲存";
 "profile.cancel" = "取消";
@@ -948,13 +948,13 @@
 "profile.switch.unsaid" = "%@ 沒有說";
 "profile.switch.unsaid.help" = "%@ 沒有說這一項目前如何。選「可以」或「不行」來設定；不動它就什麼都不會送出。";
 "profile.switch.follow.waiting" = "有 %1$d 個人要求跟隨你；開啟這一項後，%2$@ 會立刻讓他們跟隨你。";
-"profile.asking" = "正在向 %@ 詢問你的帳號…";
-"profile.readFailed" = "無法向 %@ 詢問你的帳號，所以還不能修改。";
+"profile.asking" = "正在向 %@ 詢問你的個人檔案…";
+"profile.readFailed" = "無法向 %@ 詢問你的個人檔案，所以還不能修改。";
 "profile.saving" = "正在儲存到 %@…";
-"profile.saved" = "%@ 已儲存你的帳號。";
+"profile.saved" = "%@ 已儲存你的個人檔案。";
 "profile.refused" = "%@ 拒絕了。你輸入的內容都還在。";
 "profile.refused.said" = "%1$@ 說：%2$@";
-"profile.refused.forbidden" = "%@ 不讓這個登入修改你的帳號。你輸入的內容都還在。";
+"profile.refused.forbidden" = "%@ 不讓這個登入修改你的個人檔案。你輸入的內容都還在。";
 "profile.failed" = "%@ 沒有回應，不知道它是否收下了修改。你輸入的內容都還在：按「儲存」會再送一次。";
 "profile.ended" = "%@ 的登入已經結束。你輸入的內容會留到你關掉這裡為止。";
 "profile.discard.title" = "捨棄你的修改？";
@@ -1898,7 +1898,7 @@
 "person.act.withdraw.failed" = "無法在 %2$@ 撤回對 %1$@ 的跟隨請求。";
 "person.unfollow.ask.title" = "在 %2$@ 取消跟隨 %1$@？";
 "person.unfollow.ask.line" = "要跟隨他們得先經過同意。之後想再跟隨，就得重新請求。";
-"shortcut.follow" = "跟隨眼前這一頁的人，或這一頁的主題標籤——在你自己的頁面上，則是修改你的帳號";
+"shortcut.follow" = "跟隨眼前這一頁的人，或這一頁的主題標籤——在你自己的頁面上，則是修改你的個人檔案";
 "person.tab.about" = "關於";
 "person.tab.following" = "跟隨中";
 "person.tab.followers" = "跟隨者";

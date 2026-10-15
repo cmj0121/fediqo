@@ -94,12 +94,12 @@ struct ProfileDraftTests {
         changed.name = "River Me"
         let en = DummyLanguage.english
         let lines: [(ProfileState, String, Bool, Bool, Bool)] = [
-            (.asking, "Asking m.example for your account…", false, false, false),
-            (.readFailed, "Could not ask m.example for your account, so nothing can be changed yet.", false, false, true),
+            (.asking, "Asking m.example for your profile…", false, false, false),
+            (.readFailed, "Could not ask m.example for your profile, so nothing can be changed yet.", false, false, true),
             (.read, "As m.example holds it now.", true, true, false),
             (.sending, "Saving to m.example…", false, false, false),
             (.refused(sentence: "", rows: [:]), "m.example refused this. What you typed is kept.", true, true, true),
-            (.forbidden, "m.example would not let this sign-in change your account. What you typed is kept.", true, true, true),
+            (.forbidden, "m.example would not let this sign-in change your profile. What you typed is kept.", true, true, true),
             (.failed, "m.example did not answer, so whether it took the change is not known. What you typed is kept: Save sends it again.", true, true, true),
             (.ended, "The sign-in at m.example has ended. What you typed is kept until you close this.", false, false, true),
         ]
@@ -181,6 +181,8 @@ struct ProfileDraftTests {
             }
         }
         #expect(tables[1] == tables[2])
-        #expect(L10n.t("shortcut.follow", language: .english).hasSuffix("— or, on your own page, change your account"))
+        #expect(L10n.t("shortcut.follow", language: .english).hasSuffix("— or, on your own page, change your profile"))
+        #expect(L10n.t("profile.title", language: .english) == "Your profile" && L10n.t("profile.title", language: .taiwanese) == "你的個人檔案")
+        #expect(!keys.contains { L10n.t($0, language: .taiwanese).contains("帳號") }, "the profile is 個人檔案, as the part's own words say")
     }
 }

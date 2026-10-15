@@ -119,7 +119,7 @@ struct ShellProfileTests {
         #expect(pages.head(of: me, in: session).change == nil, "not while asking who they are")
         await pages.opened(me, in: session)
         #expect(pages.head(of: me, in: session).change == OwnChangeEntry(host: Self.host, lock: nil))
-        #expect(OwnChangeEntry(host: Self.host).spoken(language: .english) == "Change your account at m.example")
+        #expect(OwnChangeEntry(host: Self.host).spoken(language: .english) == "Change your profile at m.example")
         let ada = try #require(DummyPerson(handle: "@ada@m.example", host: Self.host))
         #expect(pages.changeEntry(of: ada, in: session) == nil, "somebody else's page has Follow")
 
@@ -168,7 +168,7 @@ struct ShellProfileTests {
         await server.arrival(of: Self.who, times: checks + 1, by: reading)
         let asking = try #require(profile.said(in: session))
         #expect(asking.state == .asking && !asking.drawsRows && !asking.canSave && !asking.cancelAsks)
-        #expect(asking.stateLine(language: .english) == "Asking m.example for your account…")
+        #expect(asking.stateLine(language: .english) == "Asking m.example for your profile…")
         #expect(profile.save(in: session) == nil, "Save waits for the read")
         await server.release(Self.who)
         await reading.value
@@ -200,7 +200,7 @@ struct ShellProfileTests {
         await server.answer(Self.who, PageServer.Answer(body: "{}", status: 500))
         let failed = try await opened(pages, session)
         #expect(failed.state == .readFailed && !failed.drawsRows && !failed.canSave && !failed.cancelAsks && failed.lineWarns)
-        #expect(failed.stateLine(language: .english) == "Could not ask m.example for your account, so nothing can be changed yet.")
+        #expect(failed.stateLine(language: .english) == "Could not ask m.example for your profile, so nothing can be changed yet.")
         await server.answer(Self.who, PageServer.Answer(body: Self.own()))
         await pages.profile.readAgain(in: session)?.value
         #expect(pages.profile.said(in: session)?.state == .read)
@@ -239,7 +239,7 @@ struct ShellProfileTests {
         #expect(await form(server) == ["display_name": "River Me", "locked": "false"], "only what changed")
         #expect(await server.sent.last?.method == "PATCH")
         #expect(pages.profile.open == nil, "the sheet closes")
-        #expect(heard == ["m.example saved your account."])
+        #expect(heard == ["m.example saved your profile."])
         let head = pages.head(of: me, in: session)
         #expect(head.name == "River Me" && head.marks.isEmpty, "the head takes the answer")
         #expect(pages.about(of: me, in: session)?.person?.name == "River Me", "and About")
@@ -310,7 +310,7 @@ struct ShellProfileTests {
         await pages.profile.save(in: session)?.value
         let said = try #require(pages.profile.said(in: session))
         #expect(said.state == .forbidden && said.draft?.words == "Rivers, mostly." && said.canSave)
-        #expect(said.stateLine(language: .english) == "m.example would not let this sign-in change your account. What you typed is kept.")
+        #expect(said.stateLine(language: .english) == "m.example would not let this sign-in change your profile. What you typed is kept.")
 
         let (lacking, wire) = await self.session(Self.served([Self.change: forbidden]))
         try await signIn(lacking, holding: Self.reads)
@@ -338,7 +338,7 @@ struct ShellProfileTests {
         #expect(await wire.arrivals(of: Self.change) == 2)
         #expect(others.profile.open == nil)
         #expect(await form(wire) == ["note": "Rivers, mostly."])
-        #expect(heard == ["m.example saved your account."], "the answer landed on the sheet that sent it")
+        #expect(heard == ["m.example saved your profile."], "the answer landed on the sheet that sent it")
     }
 
     @Test("A change that gets no answer says whether it took is not known, keeps what was typed and changes nothing held — the page stays as last read — and Save sends the same again")

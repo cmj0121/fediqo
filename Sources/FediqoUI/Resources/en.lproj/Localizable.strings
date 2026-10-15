@@ -936,8 +936,8 @@
 "part.account.name" = "your profile";
 "profile.change" = "Change";
 "profile.change.help" = "Change your name, your words, your fields and what others can do";
-"profile.change.spoken" = "Change your account at %@";
-"profile.title" = "Your account";
+"profile.change.spoken" = "Change your profile at %@";
+"profile.title" = "Your profile";
 "profile.whose" = "As %@ holds it now.";
 "profile.save" = "Save";
 "profile.cancel" = "Cancel";
@@ -969,13 +969,13 @@
 "profile.switch.unsaid.help" = "%@ did not say how this stands. Choose Yes or No to set it; left as it is, nothing is sent.";
 "profile.switch.follow.waiting" = "%1$d people ask to follow you; with this on, %2$@ lets them follow you at once.";
 "profile.switch.follow.waiting.one" = "%1$d person asks to follow you; with this on, %2$@ lets them follow you at once.";
-"profile.asking" = "Asking %@ for your account…";
-"profile.readFailed" = "Could not ask %@ for your account, so nothing can be changed yet.";
+"profile.asking" = "Asking %@ for your profile…";
+"profile.readFailed" = "Could not ask %@ for your profile, so nothing can be changed yet.";
 "profile.saving" = "Saving to %@…";
-"profile.saved" = "%@ saved your account.";
+"profile.saved" = "%@ saved your profile.";
 "profile.refused" = "%@ refused this. What you typed is kept.";
 "profile.refused.said" = "%1$@ says: %2$@";
-"profile.refused.forbidden" = "%@ would not let this sign-in change your account. What you typed is kept.";
+"profile.refused.forbidden" = "%@ would not let this sign-in change your profile. What you typed is kept.";
 "profile.failed" = "%@ did not answer, so whether it took the change is not known. What you typed is kept: Save sends it again.";
 "profile.ended" = "The sign-in at %@ has ended. What you typed is kept until you close this.";
 "profile.discard.title" = "Discard your changes?";
@@ -1944,7 +1944,7 @@
 "person.act.withdraw.failed" = "Could not withdraw your request to follow %1$@ at %2$@.";
 "person.unfollow.ask.title" = "Unfollow %1$@ at %2$@?";
 "person.unfollow.ask.line" = "They ask before anyone may follow them. To follow them again, you would have to ask again.";
-"shortcut.follow" = "Follow whoever's page, or the hashtag whose page, is in front — or, on your own page, change your account";
+"shortcut.follow" = "Follow whoever's page, or the hashtag whose page, is in front — or, on your own page, change your profile";
 "person.tab.about" = "About";
 "person.tab.following" = "Following";
 "person.tab.followers" = "Followers";
