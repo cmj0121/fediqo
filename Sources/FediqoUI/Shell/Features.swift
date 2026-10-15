@@ -18,6 +18,13 @@ struct FeaturedSaid: Equatable {
     var tagsFailed = false
     /// The list of the people they feature, where the source said there is somebody in it.
     var people: PeopleList?
+    /// Whether a row's `…` holds Take off your profile: on the reader's own page alone.
+    var takesOff = false
+    /// How the sign-in stands where it lacks the account part Take off wants: the item is dim
+    /// with this lock, and its press asks where it may. Nothing where it holds it.
+    var accountLock: PartWords.Place?
+    /// The sentences of a taking off that did not arrive, said under the hashtags.
+    var missed: [String] = []
 
     /// Whether the hashtags have a block: some to draw, or the ask's own sentence.
     var tagsDrawn: Bool { !tags.isEmpty || tagsAsking || tagsFailed }
@@ -69,6 +76,30 @@ struct FeaturedSaid: Equatable {
         tagsFailed ? String(format: L10n.t("person.featured.tags.failed", language: language), source) : nil
     }
 
+    /// The `…` of the row of `featured` (#318), on the reader's own page alone: Take off your
+    /// profile, plain and at once — its press is `act` — or dim with the account part's lock,
+    /// the part's sentence at the head, its press `act` too where the part may be asked for.
+    @MainActor
+    func more(of featured: FeaturedTag, act: @escaping () -> Void, language: DummyLanguage? = nil) -> ShellMore? {
+        guard takesOff else { return nil }
+        let name = L10n.t("tag.feature.unfeature", language: language)
+        guard let lock = accountLock else {
+            return ShellMore(items: [.plain(PersonActing.featuredSymbol, name, act: act)])
+        }
+        return ShellMore.ending(
+            in: .plain(ShellMark(SourceRow.permissionSymbol, name, look: .dim(.askAgain)), ask: lock.asks ? act : nil, act: {}),
+            dimFor: String(format: L10n.t(lock.key, language: language), source)
+        )
+    }
+
+    /// What the row's `…` is called: what it takes off, and where.
+    func moreLabel(of featured: FeaturedTag, language: DummyLanguage? = nil) -> String {
+        ShellMore.label(
+            only: String(format: L10n.t("tag.feature.unfeature.spoken", language: language), featured.tag.text, source),
+            language: language
+        )
+    }
+
     /// What Return does with the lamp on the row `id`, where that row is one of these.
     func press(on id: String) -> FeaturedPress? {
         if id == Self.peopleID, let people { return .people(people) }
@@ -83,7 +114,10 @@ enum FeaturedPress: Equatable {
     case tag(PostTag)
     case people(PeopleList)
     case again
+    /// Take off your profile, from the `…` of a row of the reader's own (#318).
+    case takeOff(PostTag)
 }
+
 
 /// One source's feature row on a hashtag's About (#318): at which source, whether the reader
 /// features the hashtag on their profile there, and the press for the other — Take off is in

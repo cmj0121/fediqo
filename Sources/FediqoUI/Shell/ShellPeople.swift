@@ -398,6 +398,10 @@ final class ShellPeoplePages {
         handed.acts = Self.rowActs(of: handed, at: source, in: session)
         handed.lock = Self.rowLock(of: handed, at: source, in: session)
         if list.which == .suggested { handed.dismissing = Self.dismissOffer(at: source.host, in: session) }
+        if Self.takesOff(handed, at: source), !ShellPersonActs.features(at: source.host, in: session) {
+            handed.accountLock = session.mastodon.place(PersonAct.unfeature.needs, host: source.host)
+                ?? PartWords.Place(kind: .none, key: "part.account.unasked")
+        }
         let page = self.standing(list, at: source, in: session)
         // How many ask is the source's word only where the sign-in's account check said it: the
         // figure the way to this list carried, said again over it, and never worked out from rows.
@@ -418,9 +422,9 @@ final class ShellPeoplePages {
         handed.againFailed = page.answered && page.failed
         handed.people = page.read.people.filter { person in
             page.gone[person.accountID] == nil && dismissing.shown(Self.dismissKey(list, person.accountID)) == nil
-                && acts?.isLeaving(DummyPerson(person).id, at: source.host, in: session) != true
+                && acts?.isLeaving(DummyPerson(person).id, from: list.which, at: source.host, in: session) != true
         }
-        handed.missed = Self.missed(among: handed.people, by: acts, at: source.host)
+        handed.missed = Self.missed(among: handed.people, of: list.which, by: acts, at: source.host)
         for person in handed.people where dismissMissed.contains(Self.dismissKey(list, person.accountID)) {
             handed.missed[person.accountID] = PersonActing.missedWords(.dismissSuggestion, named: person.lineHandle, at: source.host)
         }
@@ -472,12 +476,19 @@ final class ShellPeoplePages {
     /// on the requests, removing on the reader's own followers — and nothing on anybody
     /// else's list, on any other, or to a sign-in that may not change who follows whom.
     private static func rowActs(of said: PeopleSaid, at source: Source, in session: ShellSession) -> [PersonAct] {
+        if takesOff(said, at: source) { return ShellPersonActs.features(at: source.host, in: session) ? [.unfeature] : [] }
         guard offersRows(said, at: source), ShellPersonActs.changes(at: source.host, in: session) else { return [] }
         switch said.list.which {
         case .requests: return [.acceptRequest, .refuseRequest]
         case .followers: return [.removeFollower]
         case .following, .directory, .found, .suggested, .featured: return []
         }
+    }
+
+    /// Whether the rows of `said` offer Take off your profile (#315): the reader's own people
+    /// featured, at a source where somebody is followed — only somebody followed is featured.
+    private static func takesOff(_ said: PeopleSaid, at source: Source) -> Bool {
+        said.own && said.list.which == .featured && ShellPersonActs.offersFollowing(source)
     }
 
     /// How "Don't suggest" stands on a row of the people a source suggests (#315): offered
@@ -495,11 +506,14 @@ final class ShellPeoplePages {
     }
 
     /// The sentence of each row whose press did not arrive, by the id the source knows them by.
-    private static func missed(among people: [Person], by acts: ShellPersonActs?, at host: String) -> [String: String] {
+    private static func missed(
+        among people: [Person], of which: PeopleList.Which, by acts: ShellPersonActs?, at host: String
+    ) -> [String: String] {
         guard let acts else { return [:] }
         var said: [String: String] = [:]
         for person in people {
-            guard let act = acts.missedOnARow(DummyPerson(person).id) else { continue }
+            guard let act = acts.missedOnARow(DummyPerson(person).id), ShellPersonActs.isOfARow(act, on: which) else { continue }
+
             said[person.accountID] = PersonActing.missedWords(act, named: person.lineHandle, at: host)
         }
         return said
@@ -519,6 +533,12 @@ final class ShellPeoplePages {
             await dismiss(person, of: list, in: session)
             return
         }
+        // Take off your profile where the sign-in lacks the account part only asks for it.
+        if act == .unfeature, let lock = said(of: list, in: session)?.accountLock {
+            if lock.asks { session.askFor([act.needs], host: list.host) }
+            return
+        }
+
         guard let acts, let source = ShellPersonPages.source(at: list.host, in: session),
               let page = self.standing(list, at: source, in: session),
               let offered = said(of: list, in: session), offered.acts.contains(act),

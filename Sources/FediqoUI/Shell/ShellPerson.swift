@@ -846,6 +846,7 @@ final class ShellPersonPages {
             asks[gone] = nil
             postAsks[gone] = nil
             tabs.forget(gone)
+            features.forget(gone)
         }
     }
 }

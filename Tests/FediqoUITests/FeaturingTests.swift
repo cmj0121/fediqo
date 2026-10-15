@@ -210,7 +210,7 @@ struct FeaturingTests {
             "Could not feature @ada@m.example on your profile at m.example.",
             "m.example says: Validation failed: You must be following that person",
         ])
-        #expect(refused.missedWords(language: .taiwanese) == "無法在 m.example 的個人檔案上推薦 @ada@m.example。")
+        #expect(refused.missedWords(language: .taiwanese) == "無法在 m.example 把 @ada@m.example 推薦到你的個人檔案上。")
 
         await server.answer(Self.endorse, Self.notFound)
         #expect(await !all.acts.press(.feature, on: Self.ada, said: page, in: session))
@@ -414,7 +414,165 @@ struct FeaturingTests {
         #expect(ShellPersonPages().tags.featureLines(of: Self.swift, in: unsigned).isEmpty)
     }
 
+    @Test("A signed-in reader refused what somebody features goes the way every read does — said as a failure, not as nothing; and a page let go of what it was told is asked afresh when it opens again")
+    func aSignedInRefusalAndAPageLetGo() async throws {
+        let (session, server, _) = await session([
+            Self.theirTags: PageServer.Answer(body: #"{"error":"Unauthorized"}"#, status: 401),
+            Self.theirPeople: PageServer.Answer(body: "[]"),
+        ])
+        try await signIn(session)
+        let features = ShellPersonPages().features
+        let page = try Self.page()
+        await features.opened(Self.ada, said: page, in: session)
+        #expect(features.said(of: Self.ada, said: page, own: false, in: session)?.tagsFailed == true)
+
+        features.forget(Self.ada.id)
+        #expect(features.said(of: Self.ada, said: page, own: false, in: session) == nil)
+        await features.opened(Self.ada, said: page, in: session)
+        #expect(await server.asked.filter { $0 == Self.theirTags }.count == 2, "asked afresh")
+    }
+
+    @Test("A hashtag featured while a read of it is on its way stays featured when that read lands saying otherwise: the press is the newer word")
+    func aHashtagFeaturedOverARead() async throws {
+        let (session, server, _) = await session([
+            Self.tagAsked: Self.tag(featuring: false), Self.ownTags: PageServer.Answer(body: Self.featured()),
+        ])
+        try await signIn(session)
+        let tags = ShellPersonPages().tags
+        await tags.featuresOpened(Self.swift, in: session)
+        let line = try #require(tags.featureLines(of: Self.swift, in: session).first)
+
+        await server.hold(Self.ownTags)
+        defer { Task { await server.release(Self.ownTags) } }
+        let ownGuard = watching("the ask of \(Self.ownTags), held at its server") { await server.release(Self.ownTags) }
+        defer { ownGuard.cancel() }
+        let press = tags.featurePressed(line, in: session)
+        await server.arrival(of: Self.ownTags, by: try #require(press))
+        #expect(tags.featureLines(of: Self.swift, in: session).map(\.standing) == [.doing(true)])
+
+        // The page left and opened again while the press is out: its hashtag read again, and held.
+        tags.closed(Self.swift)
+        await server.hold(Self.tagAsked)
+        defer { Task { await server.release(Self.tagAsked) } }
+        let tagGuard = watching("the ask of \(Self.tagAsked), held at its server") { await server.release(Self.tagAsked) }
+        defer { tagGuard.cancel() }
+        let reading = Task { await tags.opened(Self.swift, in: session) }
+        await server.arrival(of: Self.tagAsked, times: 2, by: reading)
+        await server.release(Self.ownTags)
+        await press?.value
+        await server.release(Self.tagAsked)
+        await reading.value
+        #expect(tags.featureLines(of: Self.swift, in: session).map(\.standing) == [.said(true)], "the read on its way does not undo it")
+    }
+
+    // MARK: - On the reader's own page
+
+    private static let me = DummyPerson(handle: "@me@m.example", host: host)!
+    private static let myTags = "/api/v1/accounts/7/featured_tags"
+    private static let myPeople = "/api/v1/accounts/7/endorsements?limit=1"
+    private static let myList = "/api/v1/accounts/7/endorsements?limit=80"
+
+    private static func myPage() throws -> PersonSaid {
+        let person = try MastodonPeople.person(from: Data(#"{"id":"7","acct":"me","display_name":"Me"}"#.utf8), source: source)
+        return PersonSaid(source: host, reading: .said(person), posts: [])
+    }
+
+    @Test("On the reader's own page a featured hashtag's row has Take off your profile in its `…`: plain, by the featuring's own id, the row leaving at the press and gone once answered, back with a sentence where it did not arrive; without the account part it is dim with the lock and its press asks; on anybody else's page there is no `…`")
+    func takeOffOnYourOwnPage() async throws {
+        let (session, server, _) = await session([
+            Self.myTags: PageServer.Answer(body: "[\(Self.featured()),\(Self.featured("maps", id: "6"))]"),
+            Self.myPeople: PageServer.Answer(body: "[]"),
+            "/api/v1/featured_tags/5": PageServer.Answer(body: "{}"),
+            "/api/v1/featured_tags/6": Self.down,
+        ])
+        try await signIn(session)
+        let all = ShellPersonPages()
+        let page = try Self.myPage()
+        #expect(ShellPersonPages.own(at: Self.host, in: session)?.id == Self.me.id)
+        await all.features.opened(Self.me, said: page, in: session)
+        let said = try #require(all.featured(of: Self.me, in: session) ?? all.features.said(of: Self.me, said: page, own: true, in: session))
+        #expect(said.own && said.takesOff && said.accountLock == nil)
+        #expect(said.tagsTitle(language: .english) == "Hashtags you feature")
+        let swift = try #require(said.tags.first)
+        let more = try #require(said.more(of: swift, act: {}, language: .english))
+        #expect(more.items.map(\.name) == ["Take off your profile"] && more.items.first?.isDanger == false)
+        #expect(FeaturedSaid(source: Self.host, tags: said.tags).more(of: swift, act: {}) == nil, "nobody else's page has it")
+
+        await all.features.takeOff(Self.swift, of: Self.me, said: page, in: session)
+        #expect(await server.asked.contains("/api/v1/featured_tags/5"))
+        let after = try #require(all.features.said(of: Self.me, said: page, own: true, in: session))
+        #expect(after.tags.map(\.name) == ["maps"])
+
+        await all.features.takeOff(PostTag("#maps")!, of: Self.me, said: page, in: session)
+        let failed = try #require(all.features.said(of: Self.me, said: page, own: true, in: session))
+        #expect(failed.tags.map(\.name) == ["maps"])
+        #expect(failed.missed == [String(format: L10n.t("tag.feature.failed.unfeature"), "#maps", Self.host)])
+
+        // Without the account part: dim with the lock, and the press asks.
+        try await signIn(session, holding: Self.follows)
+        await all.features.opened(Self.me, said: page, in: session)
+        let locked = try #require(all.features.said(of: Self.me, said: page, own: true, in: session))
+        let lock = try #require(locked.accountLock)
+        #expect(lock.asks)
+        let tag = try #require(locked.tags.first)
+        let dim = try #require(locked.more(of: tag, act: {})?.items.first)
+        #expect(dim.look == .dim(.askAgain) && dim.symbol == SourceRow.permissionSymbol)
+        let sent = await server.asked.count
+        await all.features.takeOff(tag.tag, of: Self.me, said: page, in: session)
+        #expect(session.partAsks.open?.ticked == [.account])
+        #expect(await server.asked.count == sent, "nothing is sent")
+    }
+
+    @Test("The reader's own people featured are their own list — titled so — and a row's `…` holds Take off your profile, plain, sent through the one sequence a press on somebody's page is: the row leaves and is gone once answered; without the account part it is dim and asks")
+    func takeOffOnYourOwnList() async throws {
+        let bea = #"{"id":"9","acct":"bea","display_name":"Bea"}"#
+        let beaStands = "/api/v1/accounts/relationships?id%5B%5D=9"
+        let standing = Self.standing(endorsed: true).replacingOccurrences(of: #""id":"42""#, with: #""id":"9""#)
+        let unstanding = Self.standing(endorsed: false).replacingOccurrences(of: #""id":"42""#, with: #""id":"9""#)
+        let (session, server, work) = await session([
+            Self.myList: PageServer.Answer(body: "[\(bea)]"),
+            beaStands: PageServer.Answer(body: "[\(standing)]"),
+            "/api/v1/accounts/9/unendorse": PageServer.Answer(body: unstanding),
+        ])
+        try await signIn(session)
+        let lists = ShellPersonPages().lists
+        let me = try #require(try Self.myPage().person)
+        let list = PeopleList(featuredBy: me)
+        await lists.opened(list, in: session)
+        let said = try #require(lists.said(of: list, in: session))
+        #expect(said.own && said.acts == [.unfeature] && said.takesOff && said.accountLock == nil)
+        #expect(said.title(language: .english) == "People you feature at m.example")
+        #expect(said.title(language: .taiwanese) == "你在 m.example 推薦的人")
+        #expect(PeopleSaid.title(list, language: .english) == "People @me@m.example features")
+        let person = try #require(said.people.first)
+        let menu = try #require(PeoplePane.menu(for: said, of: person, asks: .constant(nil)) { _ in })
+        #expect(menu.more().items.map(\.name) == [PersonActing.name(.unfeature)] && menu.more().dangers.isEmpty)
+
+        await lists.press(.unfeature, on: person, of: list, in: session)
+        #expect(await server.asked.contains("/api/v1/accounts/9/unendorse"))
+        #expect(work.record.contains { $0.purpose == .write })
+        #expect(lists.said(of: list, in: session)?.people.isEmpty == true, "gone once answered")
+
+        // Without the account part.
+        try await signIn(session, holding: Self.follows)
+        await lists.again(list, in: session)
+        let locked = try #require(lists.said(of: list, in: session))
+        #expect(locked.acts.isEmpty && locked.accountLock?.asks == true)
+        let row = try #require(locked.people.first)
+        let dim = try #require(PeoplePane.menu(for: locked, of: row, asks: .constant(nil)) { _ in }?.more().items.first)
+        #expect(dim.look == .dim(.askAgain))
+        let sent = await server.asked.count
+        await lists.press(.unfeature, on: row, of: list, in: session)
+        let after = await server.asked.count
+        #expect(session.partAsks.open?.ticked == [.account] && after == sent)
+
+        // Somebody else's list of the people they feature has no such item.
+        let theirs = PeopleSaid(list: PeopleList(featuredBy: Person(source: Self.source, accountID: "42", handle: "@ada@m.example", name: "Ada")), reading: .said)
+        #expect(!theirs.takesOff)
+    }
+
     // MARK: - Words and drawing
+
 
     @Test("Every sentence of featuring is written in each language the app speaks, with the places it fills, and the two Chinese tables alike")
     func theWords() throws {
@@ -429,7 +587,7 @@ struct FeaturingTests {
             guard prefixes.contains(where: { line.hasPrefix($0) }) else { return nil }
             return line.dropFirst().split(separator: "\"").first.map(String.init)
         }
-        #expect(keys.count == 32)
+        #expect(keys.count == 33)
         func places(_ text: String) -> [String] {
             text.matches(of: /%(\d\$)?[@d]/).map { String($0.output.0) }.sorted()
         }

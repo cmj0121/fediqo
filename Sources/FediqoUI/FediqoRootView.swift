@@ -2037,7 +2037,7 @@ public struct FediqoRootView: View {
             else { return false }
             selectedItemID = nil
             return true
-        case .again:
+        case .again, .takeOff:
             return false
         }
     }

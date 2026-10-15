@@ -2015,8 +2015,8 @@
 
 "person.act.feature" = "在個人檔案上推薦";
 "person.act.unfeature" = "從個人檔案上拿掉";
-"person.act.feature.failed" = "無法在 %2$@ 的個人檔案上推薦 %1$@。";
-"person.act.unfeature.failed" = "無法從 %2$@ 的個人檔案上拿掉 %1$@。";
+"person.act.feature.failed" = "無法在 %2$@ 把 %1$@ 推薦到你的個人檔案上。";
+"person.act.unfeature.failed" = "無法在 %2$@ 把 %1$@ 從你的個人檔案上拿掉。";
 "person.stands.featured" = "在你的個人檔案上";
 "person.featured.tags" = "他們推薦的主題標籤";
 "person.featured.tags.own" = "你推薦的主題標籤";
@@ -2029,6 +2029,7 @@
 "person.featured.people" = "他們推薦的人";
 "person.featured.people.own" = "你推薦的人";
 "people.title.featured" = "%@ 推薦的人";
+"people.title.featured.own" = "你在 %@ 推薦的人";
 "people.featured.asking" = "正在向 %@ 詢問被推薦的人…";
 "people.featured.failed" = "無法向 %@ 詢問被推薦的人。";
 "people.featured.absent" = "%@ 沒有在個人檔案上推薦人的功能。";
@@ -2041,7 +2042,7 @@
 "tag.feature.unfeaturing" = "拿掉中…";
 "tag.feature.feature" = "推薦";
 "tag.feature.unfeature" = "從個人檔案上拿掉";
-"tag.feature.feature.spoken" = "在 %2$@ 的個人檔案上推薦 %1$@";
-"tag.feature.unfeature.spoken" = "從 %2$@ 的個人檔案上拿掉 %1$@";
-"tag.feature.failed.feature" = "無法在 %2$@ 的個人檔案上推薦 %1$@。";
-"tag.feature.failed.unfeature" = "無法從 %2$@ 的個人檔案上拿掉 %1$@。";
+"tag.feature.feature.spoken" = "在 %2$@ 把 %1$@ 推薦到你的個人檔案上";
+"tag.feature.unfeature.spoken" = "在 %2$@ 把 %1$@ 從你的個人檔案上拿掉";
+"tag.feature.failed.feature" = "無法在 %2$@ 把 %1$@ 推薦到你的個人檔案上。";
+"tag.feature.failed.unfeature" = "無法在 %2$@ 把 %1$@ 從你的個人檔案上拿掉。";

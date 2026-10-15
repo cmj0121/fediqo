@@ -123,6 +123,14 @@ final class ShellFeatures {
         refused = refused.filter { !$0.key.hasPrefix(prefix) }
     }
 
+    /// What the page `id` names was told of what they feature let go, and its asks called
+    /// off: it is no longer one of the pages kept, and opened again it is asked afresh.
+    func forget(_ id: String) {
+        asks[id]?.cancel()
+        asks[id] = nil
+        theirs[id] = nil
+    }
+
     /// The page of `tag` left: what its presses came to is let go at every source. A press
     /// still out stays out, and its answer lands nowhere.
     func closed(_ tag: PostTag) {
@@ -158,9 +166,20 @@ final class ShellFeatures {
         else { return nil }
         var handed = FeaturedSaid(source: source.host, own: isOwn)
         if hosts.has(.featuredTags, at: source.host) != .absent {
-            handed.tags = page.tags
+            // One being taken off leaves at the press.
+            handed.tags = page.tags.filter { presses.shown(Self.key($0.tag, source.host)) != false }
             handed.tagsAsking = page.tagsAsking
             handed.tagsFailed = page.tagsFailed && !page.tagsAsking
+            if isOwn {
+                handed.takesOff = true
+                if !Self.features(at: source.host, in: session) {
+                    handed.accountLock = session.mastodon.place(.account, host: source.host)
+                        ?? PartWords.Place(kind: .none, key: "part.account.unasked")
+                }
+                handed.missed = handed.tags.filter { missed[Self.key($0.tag, source.host)] == false }.map {
+                    String(format: L10n.t("tag.feature.failed.unfeature"), $0.tag.text, source.host)
+                }
+            }
         }
         if page.anyFeatured, hosts.has(.featuredPeople, at: source.host) != .absent {
             handed.people = PeopleList(featuredBy: person)
@@ -230,7 +249,7 @@ final class ShellFeatures {
         } catch {
             guard theirs[id]?.awaits == errand else { return }
             // Not found, or refused to a reader with no sign-in: no block, and nothing of the host.
-            if !Cancellation.happened(error), !Self.saysNothingOfThem(error) {
+            if !Cancellation.happened(error), !Self.saysNothingOfThem(error, signedIn: askedAs != .nobody) {
                 ShellPersonPages.concluded(error, at: source, askedAs: askedAs, in: session)
                 theirs[id]?.tagsFailed = true
             }
@@ -253,18 +272,79 @@ final class ShellFeatures {
     }
 
     /// Whether `error` from asking what somebody features says only that there is nothing to
-    /// draw: an address or an account not found, or a refusal of a reader with no sign-in.
-    private static func saysNothingOfThem(_ error: any Error) -> Bool {
+    /// draw: an address or an account not found, or a refusal of a reader with no sign-in. A
+    /// refusal of a reader signed in goes the way every read's does (`concluded`).
+    private static func saysNothingOfThem(_ error: any Error, signedIn: Bool) -> Bool {
         if (error as? MastodonHostMoreError) == .noSuchAddress { return true }
         let status: Int? = switch error {
         case MastodonAuthError.http(let code): code
         case MastodonRequestError.http(let code): code
         default: nil
         }
-        return status == 401 || status == 404
+        return status == 404 || (status == 401 && !signedIn)
+    }
+
+    /// Take off your profile, from the `…` of the row of `tag` on the reader's own page
+    /// (#318): **only of one their page lists, as the reader it was listed to, with the account
+    /// part held** — where it is not held the press only asks for it. Taken off by the id of
+    /// the featuring that list gave, under the one guard a hashtag's feature row is pressed
+    /// under. The row leaves at the press, comes back with a sentence where it did not arrive,
+    /// and is gone once the source has answered.
+    func takeOff(_ tag: PostTag, of who: DummyPerson, said: PersonSaid?, in session: ShellSession) async {
+        guard let person = said?.person, let source = ShellPersonPages.source(of: who, in: session),
+              ShellPersonPages.own(at: source.host, in: session)?.id == who.id,
+              let page = standing(who.id, of: person.accountID, at: source.host, in: session),
+              let featured = FeaturedTag.of(tag, in: page.tags)
+        else { return }
+        let host = source.host
+        guard Self.features(at: host, in: session) else {
+            if session.mastodon.place(.account, host: host)?.asks == true { session.askFor([.account], host: host) }
+            return
+        }
+        let looked = readers.look(at: host, in: session)
+        let key = Self.key(tag, host)
+        guard let held = looked.held, !looked.changed, let flight = presses.begin(key, showing: false) else { return }
+        missed[key] = nil
+        refused[key] = nil
+        let under = ShellPersonPages.signIns(at: host, in: session)
+        pressedUnder[key] = under
+        let through = session.reach.featuring(session.mastodon.authorized(token: held, within: deadline, for: .write))
+        let round = hosts.round(at: host)
+        let askedAs = page.askedAs
+        let id = who.id
+        await Task {
+            var done = false, absent = false
+            do {
+                try await through.unfeature(featured)
+                done = true
+            } catch {
+                ShellPersonPages.concluded(error, at: source, askedAs: askedAs, in: session)
+                if case .refused(let sentence) = error as? AccountPartError { self.refused[key] = sentence }
+                absent = Self.hasNoSuchThing(error)
+            }
+            guard self.presses.isStill(flight, key) else { return }
+            self.presses.settle(key)
+            self.pressedUnder[key] = nil
+            guard session.mastodon.token(host: host)?.accessToken == held.accessToken,
+                  ShellPersonPages.signIns(at: host, in: session) == under
+            else { return }
+            if absent {
+                self.hosts.notFound(.featuredTags, at: host, round: round)
+                return
+            }
+            guard done else {
+                self.missed[key] = false
+                return
+            }
+            let folded = MastodonRising.folded(tag)
+            self.theirs[id]?.tags.removeAll { MastodonRising.folded($0.tag) == folded }
+            self.own[host]?.tags?.removeAll { MastodonRising.folded($0.tag) == folded }
+            self.answered[key] = false
+        }.value
     }
 
     // MARK: - A hashtag's page
+
 
     /// The feature rows of the page of `tag`, one under each of `follows` that is not absent,
     /// where the host keeps hashtags featured. `featuring` is what the hashtag's own answer

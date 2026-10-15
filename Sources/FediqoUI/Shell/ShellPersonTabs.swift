@@ -504,7 +504,7 @@ extension ShellPersonPages {
         case .act(let pressed): Task { await act(pressed, on: who, in: session) }
         case .featured(.again): Task { await features.again(who, said: said(of: who, in: session), in: session) }
         // A hashtag's page and the list of people are steps of the walk: whoever holds it takes them.
-        case .featured(.tag), .featured(.people): return false
+        case .featured(.tag), .featured(.people), .featured(.takeOff): return false
         }
         return true
     }

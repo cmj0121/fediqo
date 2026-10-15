@@ -409,31 +409,48 @@ struct PersonAbout<Lead: View>: View {
                     marked(PersonHead.failedSymbol, failed, ink: ShellChrome.ink(colorScheme))
                     ShellLinkButton(L10n.t("person.retry")) { onFeatured(.again) }.fixedSize()
                 }
-                ForEach(featured.tags, id: \.self) { tag in
-                    Button { onFeatured(.tag(tag.tag)) } label: {
-                        VStack(alignment: .leading, spacing: ShellSpace.hair) {
-                            Text(tag.tag.text).shellFont(.body).foregroundStyle(ShellChrome.ink(colorScheme))
-                            if let words = featured.said(of: tag) {
-                                Text(words).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
-                            }
-                        }
+                ForEach(featured.tags, id: \.self) { tag in featuredRow(tag, of: featured) }
+                ForEach(featured.missed, id: \.self) { missed in
+                    Text(missed)
+                        .shellFont(.meta)
+                        .foregroundStyle(ShellChrome.ink(colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, ShellSpace.pad)
-                        .padding(.vertical, ShellSpace.hair)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .modifier(AboutBlockLit(lit: FeaturedSaid.lamp(of: tag.tag) == lit))
-                    .padding(.horizontal, -ShellSpace.pad)
-                    .id(FeaturedSaid.lamp(of: tag.tag))
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(featured.spoken(tag))
-                    .accessibilityAddTraits(.isButton)
                 }
             }
         }
     }
+
+    /// One hashtag they feature: its press opens the hashtag's page, and on the reader's own
+    /// page its `…` holds Take off your profile.
+    private func featuredRow(_ tag: FeaturedTag, of featured: FeaturedSaid) -> some View {
+        HStack(alignment: .center, spacing: ShellSpace.step) {
+            Button { onFeatured(.tag(tag.tag)) } label: {
+                VStack(alignment: .leading, spacing: ShellSpace.hair) {
+                    Text(tag.tag.text).shellFont(.body).foregroundStyle(ShellChrome.ink(colorScheme))
+                    if let words = featured.said(of: tag) {
+                        Text(words).shellFont(.meta).foregroundStyle(ShellChrome.inkDim(colorScheme))
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(featured.spoken(tag))
+            .accessibilityAddTraits(.isButton)
+            if let more = featured.more(of: tag, act: { onFeatured(.takeOff(tag.tag)) }) {
+                ShellMoreButton(label: featured.moreLabel(of: tag)) { more }
+                    .fixedSize()
+            }
+        }
+        .padding(.horizontal, ShellSpace.pad)
+        .padding(.vertical, ShellSpace.hair)
+        .modifier(AboutBlockLit(lit: FeaturedSaid.lamp(of: tag.tag) == lit))
+        .padding(.horizontal, -ShellSpace.pad)
+        .id(FeaturedSaid.lamp(of: tag.tag))
+    }
+
 
     /// The way to the people they feature: words, and the mark that says it leads on.
     @ViewBuilder

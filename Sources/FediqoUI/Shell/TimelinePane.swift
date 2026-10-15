@@ -610,12 +610,16 @@ struct TimelinePane: View {
             onFollowed: onFollowed,
             onRequests: onRequests,
             onFeatured: { press in
-                if press == .again {
+                switch press {
+                case .again:
                     Task { await people?.features.again(person, said: people?.said(of: person, in: session), in: session) }
-                } else {
+                case .takeOff(let tag):
+                    Task { await people?.features.takeOff(tag, of: person, said: people?.said(of: person, in: session), in: session) }
+                case .tag, .people:
                     onOpenFeatured(press)
                 }
             },
+
             onListAct: { act, listed in
                 guard let people, let list = people.list(people.front(of: person, in: session), of: person, in: session) else { return }
                 Task { await people.lists.press(act, on: listed, of: list, in: session) }

@@ -536,8 +536,9 @@ final class ShellPersonActs {
     /// Whether `act` is one a row of a list offers, and no page of somebody's.
     static func isOfARow(_ act: PersonAct) -> Bool {
         switch act {
-        case .acceptRequest, .refuseRequest, .removeFollower: true
-        case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .feature, .unfeature,
+        // Taking somebody off the reader's profile is a row's too, on the people they feature (#315).
+        case .acceptRequest, .refuseRequest, .removeFollower, .unfeature: true
+        case .follow, .unfollow, .withdraw, .showBoosts, .hideBoosts, .notify, .stopNotifying, .feature,
              .dismissSuggestion: false
         }
     }
@@ -574,10 +575,23 @@ final class ShellPersonActs {
         return await press(act, on: who, said: PersonSaid(source: source.host, reading: .said(person)), listed: listed, in: session)
     }
 
-    /// Whether the row of the person `key` names is leaving its list: a press of theirs that
-    /// takes them off it is out, made by whoever would ask now.
-    func isLeaving(_ key: String, at host: String, in session: ShellSession) -> Bool {
-        guard let out = presses.shown(key), Self.isOfARow(out) else { return false }
+    /// Whether `act` is one that takes a row off the list `which`: a request answered off the
+    /// requests, a follower off the followers, somebody taken off the reader's profile off the
+    /// people they feature.
+    static func isOfARow(_ act: PersonAct, on which: PeopleList.Which) -> Bool {
+        switch act {
+        case .acceptRequest, .refuseRequest: which == .requests
+        case .removeFollower: which == .followers
+        case .unfeature: which == .featured
+        default: false
+        }
+    }
+
+    /// Whether the row of the person `key` names is leaving the list `which`: a press of
+    /// theirs that takes them off it is out, made by whoever would ask now.
+    func isLeaving(_ key: String, from which: PeopleList.Which, at host: String, in session: ShellSession) -> Bool {
+        guard let out = presses.shown(key), Self.isOfARow(out, on: which) else { return false }
+
         return pressed[key]?.under == ShellPersonPages.signIns(at: host, in: session)
     }
 
@@ -611,7 +625,10 @@ final class ShellPersonActs {
                 : listed == .followers && offered.changes && offered.doing == nil && offered.shown?.followedBy != false
         case .follow: offered.press == .follow
         case .unfollow, .withdraw: offered.more.contains(act)
-        case .feature, .unfeature: offered.more.contains(act) && !offered.asksForPart(act)
+        case .feature: listed == nil && offered.more.contains(act) && !offered.asksForPart(act)
+        case .unfeature:
+            (listed == nil || listed == .featured) && offered.more.contains(act) && !offered.asksForPart(act)
+
         case .showBoosts, .hideBoosts, .notify, .stopNotifying:
             offered.narrowsTakePress && offered.narrows().contains { $0.act == act }
         // A suggestion is told apart on its list, and never from here (`ShellPeoplePages.dismiss`).

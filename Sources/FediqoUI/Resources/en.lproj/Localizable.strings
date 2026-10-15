@@ -2075,6 +2075,7 @@
 "person.featured.people" = "People they feature";
 "person.featured.people.own" = "People you feature";
 "people.title.featured" = "People %@ features";
+"people.title.featured.own" = "People you feature at %@";
 "people.featured.asking" = "Asking %@ for the people featured…";
 "people.featured.failed" = "Could not ask %@ for the people featured.";
 "people.featured.absent" = "%@ does not keep people featured on a profile.";
