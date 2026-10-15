@@ -75,7 +75,11 @@ struct FollowedTagsPageTests {
         let before = try #require(list.said(of: Self.page, in: session))
         #expect(before.figure()?.figure == "2")
         let birds = try #require(before.rows.first)
-        #expect(before.more(for: birds, act: {}, ask: {})?.items.map(\.name) == [L10n.t("tag.follow.unfollow")])
+        let menu = try #require(before.more(for: birds, act: {}, ask: {}))
+        #expect(menu.items.map(\.name) == [L10n.t("tag.follow.unfollow")])
+        // The item About's row holds, as a person's unfollow is: one glyph, ordinary, asking nothing.
+        let about = TagFollowLine(host: Self.host, tag: birds.tag, standing: .said(true)).more(act: {})
+        #expect(menu.items.map(\.symbol) == about?.items.map(\.symbol) && menu.dangers.isEmpty && menu.items.first?.question == nil)
 
         await list.press(birds.id, on: Self.page, in: session)
         let after = try #require(list.said(of: Self.page, in: session))

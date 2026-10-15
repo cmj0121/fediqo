@@ -84,9 +84,9 @@ struct TagAboutSaid: Equatable {
     }
 
     /// The line whose press Return makes with the lamp on the block `id`, or nothing where the
-    /// block is words.
+    /// block is words — or where all it offers is unfollowing, which is in its `…`.
     func press(on id: String) -> TagFollowLine? {
-        follows.first { Self.lamp(on: $0) == id && $0.offers != nil }
+        follows.first { Self.lamp(on: $0) == id && $0.press != nil }
     }
 }
 
@@ -226,8 +226,10 @@ struct TagPageActs {
     var onTab: (TagTab) -> Void = { _ in }
     /// The head's Follow, at the one source that offers it.
     var onHeadFollow: (TagFollowLine) -> Void = { _ in }
-    /// A line's press at one source: follow or unfollow, or ask again whether it is followed.
+    /// A line's press at one source: follow, or ask again whether it is followed.
     var onFollow: (TagFollowLine) -> Void = { _ in }
+    /// The item of a line's `…` that unfollows: it only ever unfollows.
+    var onUnfollow: (TagFollowLine) -> Void = { _ in }
     /// A lock's press: the question that asks that source's sign-in for who the reader follows.
     var onAskFollows: (String) -> Void = { _ in }
     /// Asks the sources again, after a failure.

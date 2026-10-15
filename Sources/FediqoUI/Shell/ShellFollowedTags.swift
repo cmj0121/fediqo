@@ -193,14 +193,15 @@ struct FollowedTagsSaid: Equatable {
         }
     }
 
-    /// The menu of `row`: its one item, or — where the sign-in's standing is said and cannot
-    /// be asked about — that sentence at its head.
+    /// The menu of `row`: its one item — the one About's row holds, as plain as a person's
+    /// unfollow — or, where the sign-in's standing is said and cannot be asked about, that
+    /// sentence at its head.
     func more(for row: FollowedTagRow, act: @escaping () -> Void, ask: @escaping () -> Void) -> ShellMore? {
         guard let offer = offer(for: row) else { return nil }
         let name = Self.name(of: offer, on: row)
         switch offer {
         case .act(let to):
-            return ShellMore(items: [.plain(to ? "plus.circle" : "minus.circle", name, act: act)])
+            return ShellMore(items: [TagFollowLine.item(to: to, act: act)])
         case .locked(let place):
             guard place.asks else { return ShellMore(head: [name], items: []) }
             return ShellMore(items: [.plain(SourceRow.permissionSymbol, name, act: ask)])

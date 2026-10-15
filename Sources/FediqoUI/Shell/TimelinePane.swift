@@ -841,6 +841,7 @@ struct TimelinePane: View {
                 // The head's Follow only ever follows, as `l` does.
                 onHeadFollow: { line in _ = people?.tags.pressed(line, only: true, in: session) },
                 onFollow: { line in _ = people?.tags.pressed(line, in: session) },
+                onUnfollow: { line in _ = people?.tags.unfollowed(line, in: session) },
                 onAskFollows: { host in session.askFor([.follows], host: host) },
                 // Asked again of the timeline in front, as the press asked it.
                 onRetry: {

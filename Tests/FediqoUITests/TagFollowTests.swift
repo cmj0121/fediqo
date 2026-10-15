@@ -665,9 +665,14 @@ struct TagFollowTests {
         #expect(line.pressSpoken(language: .taiwanese) == "在 m.example 追蹤 #swift")
         #expect(line.missedWords(language: .taiwanese) == "無法在 m.example 追蹤 #swift。")
         let followed = TagFollowLine(host: Self.host, tag: Self.swift, standing: .said(true), missed: false)
-        #expect(followed.pressWords(language: .english) == "Unfollow")
-        #expect(followed.pressWords(language: .taiwanese) == "取消追蹤")
-        #expect(followed.pressSpoken(language: .english) == "Unfollow #swift at m.example")
+        // Followed, the row has no press: Unfollow is the one item of its `…`, named there by
+        // what it does and where, and as plain as a person's unfollow — asking nothing first.
+        #expect(followed.press == nil && followed.pressWords(language: .english) == nil && followed.pressSpoken() == nil)
+        let more = try #require(followed.more(act: {}))
+        #expect(more.items.map(\.name) == [L10n.t("tag.follow.unfollow")] && more.dangers.isEmpty && more.head.isEmpty)
+        #expect(followed.moreLabel(language: .english) == "More: Unfollow #swift at m.example")
+        #expect(followed.moreLabel(language: .taiwanese) == "更多：在 m.example 取消追蹤 #swift")
+        #expect(line.more(act: {}) == nil && line.press == .follow, "not followed, there is no `…`")
         #expect(followed.missedWords(language: .taiwanese) == "無法在 m.example 取消追蹤 #swift。")
         #expect(TagFollowLine(host: Self.host, tag: Self.swift, standing: .unknown).pressWords(language: .english) == "Try again")
         #expect(TagFollowLine(host: Self.host, tag: Self.swift, standing: .asking).pressWords(language: .english) == nil)
@@ -712,9 +717,24 @@ struct TagFollowTests {
         #expect(TagPageSaid.made(of: Self.swift, held: 0).about == nil, "handed none, the page has no About to draw one on")
         #expect(TagPageSaid.made(of: Self.swift, held: 0, follows: line(.said(false))).about?.follows == line(.said(false)))
 
+        // Followed, a row draws its `…`, named by what it holds, and no Unfollow beside the line;
+        // not followed, it draws Follow and no `…`.
+        func drew(_ follows: [TagFollowLine]) -> TagAboutProbe {
+            let probe = TagAboutProbe()
+            let about = TagAbout(said: TagAboutSaid(follows: follows)) { EmptyView() }
+            let hosted = NSHostingView(rootView: about.frame(width: 460, height: 400).environment(\.tagAboutProbe, probe))
+            hosted.layoutSubtreeIfNeeded()
+            return probe
+        }
+        let followed = drew(line(.said(true)))
+        #expect(followed.menus == [Self.host: line(.said(true))[0].moreLabel()] && followed.presses.isEmpty)
+        let notFollowed = drew(line(.said(false)))
+        #expect(notFollowed.presses == [Self.host: L10n.t("tag.follow.follow")] && notFollowed.menus.isEmpty)
+
         let pane = try String(contentsOf: Self.shell.appending(path: "Shell/TimelinePane.swift"), encoding: .utf8)
         #expect(pane.contains(".task(id: people?.tags.opening(tag, in: session)) { await people?.tags.opened(tag, in: session) }"))
         #expect(pane.contains(".onDisappear { people?.tags.closed(tag) }"))
         #expect(pane.contains("onAskFollows: { host in session.askFor([.follows], host: host) }"))
+        #expect(pane.contains("onUnfollow: { line in _ = people?.tags.unfollowed(line, in: session) }"), "the `…` only ever unfollows")
     }
 }

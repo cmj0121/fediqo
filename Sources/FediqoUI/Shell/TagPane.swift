@@ -198,7 +198,7 @@ struct TagPane: View {
         switch said.front {
         case .about:
             if let about = said.about {
-                TagAbout(said: about, lit: selectedID, jumpToTop: jumpToTop, onPress: acts.onFollow, onAsk: acts.onAskFollows, lead: lead)
+                TagAbout(said: about, lit: selectedID, jumpToTop: jumpToTop, onPress: acts.onFollow, onUnfollow: acts.onUnfollow, onAsk: acts.onAskFollows, lead: lead)
             }
         case .posts:
             rows(lead: lead())
@@ -350,16 +350,20 @@ struct TagPageLine: View {
 }
 
 /// One source's row on a hashtag's About (#318, F10): at which source, whether the reader
-/// follows the hashtag there as the source last said, and the press for the other — or, where
-/// the sign-in does not hold who the reader follows, how it stands, dim with the lock.
+/// follows the hashtag there as the source last said, and Follow where it is not — or, where it
+/// is, the row's `…` with Unfollow in it, as a person's page has it — or, where the sign-in
+/// does not hold who the reader follows, how it stands, dim with the lock.
 ///
 /// It draws what it is handed and asks nothing: the asking and the press are
 /// `ShellTagFollow`'s.
 struct TagFollowRow: View {
     let line: TagFollowLine
     var onPress: () -> Void
+    /// The item of the `…` that unfollows.
+    var onUnfollow: () -> Void = {}
     var onAsk: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.tagAboutProbe) private var probe
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -388,6 +392,8 @@ struct TagFollowRow: View {
             .accessibilityAddTraits(line.offers == nil ? .updatesFrequently : [])
     }
 
+    /// The row's press — follow, or ask again — or, where it is followed, its `…`, which holds
+    /// unfollowing: no press stands for it on the row.
     @ViewBuilder
     private var press: some View {
         if let word = line.pressWords() {
@@ -396,7 +402,26 @@ struct TagFollowRow: View {
                 .accessibilityLabel(spoken)
                 .help(spoken)
                 .fixedSize()
+                .background(drawn { $0.presses[line.host] = word })
+        } else if line.offers == .unfollow {
+            let label = line.moreLabel()
+            ShellMoreButton(label: label, more: menu)
+                .fixedSize()
+                .background(drawn { $0.menus[line.host] = label })
         }
+    }
+
+    /// Tells a hosted About's probe what was drawn. Nothing in the app.
+    private func drawn(_ record: @escaping (TagAboutProbe) -> Void) -> some View {
+        GeometryReader { _ in
+            let _ = probe.map(record)
+            Color.clear
+        }
+    }
+
+    /// The `…`, built when it is opened: its one item unfollows, and only that.
+    private func menu() -> ShellMore {
+        line.more(act: onUnfollow) ?? ShellMore(items: [])
     }
 
     /// How the sign-in stands, dim, after the glyph a source's row draws where its sign-in

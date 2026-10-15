@@ -290,7 +290,7 @@ struct TagPageTests {
 
     // MARK: - About
 
-    @Test("About's blocks are a row for each source and the sentence of which were asked, each one the lamp stops on; Return on a row makes its press — follow, unfollow, ask again — and does nothing on words or on a row with no press")
+    @Test("About's blocks are a row for each source and the sentence of which were asked, each one the lamp stops on; Return on a row makes its press — follow, ask again — and does nothing on words, on a row with no press, or on a followed row, whose Unfollow is only in its `…`")
     func aboutAndItsPresses() async throws {
         let (session, server) = await session([Self.asked: Self.answer(true), Self.unfollow: Self.answer(false), Self.follow: Self.answer(true)])
         try signIn(session)
@@ -299,7 +299,8 @@ struct TagPageTests {
         let row = TagAboutSaid.lamp(on: Self.line(.said(true)))
         let about = TagAboutSaid(follows: [Self.line(.said(true)), Self.line(.asking, at: Self.other)], reach: "Asked m.example.")
         #expect(about.walked == [row, "tag.about.follow:two.example", TagAboutSaid.reachID])
-        #expect(about.press(on: row)?.offers == .unfollow)
+        #expect(about.press(on: row) == nil, "a followed row's Unfollow is in its `…`, which no key reaches")
+        #expect(TagAboutSaid(follows: [Self.line(.said(false))]).press(on: row)?.offers == .follow)
         #expect(about.press(on: "tag.about.follow:two.example") == nil && about.press(on: TagAboutSaid.reachID) == nil)
         #expect(TagAboutSaid(follows: [Self.line(.unknown)]).walked == ["tag.about.follow:m.example"])
 
@@ -309,10 +310,23 @@ struct TagPageTests {
         #expect(tags.turn(Self.swift, to: .about, lamp: &lamp, in: session))
         #expect(tags.walkedAbout(of: Self.swift, in: session) == [row])
         #expect(!tags.pressAbout("tag.about.follow:two.example", of: Self.swift, in: session))
-        // The row's press unfollows, as it did where the row stood before: the source's word is the row's.
-        let line = try #require(tags.about(of: Self.swift, in: session)?.press(on: row))
-        await tags.pressed(line, in: session)?.value
+        // Return on the followed row does nothing; the item of its `…` unfollows, and the
+        // source's word is the row's.
+        #expect(!tags.pressAbout(row, of: Self.swift, in: session))
+        let line = try #require(tags.about(of: Self.swift, in: session)?.follows.first)
+        #expect(line.offers == .unfollow && line.pressWords() == nil)
+        var sent: Task<Void, Never>?
+        let item = try #require(line.more { sent = tags.unfollowed(line, in: session) }?.items.first)
+        item.press { _ in Issue.record("Unfollow asks nothing first") }
+        await sent?.value
         #expect(await server.asked == [Self.asked, Self.unfollow])
+        #expect(tags.lines(of: Self.swift, in: session) == [Self.line(.said(false))])
+        // The same menu, built over the line while it was followed and chosen again now that it
+        // is not: it only ever unfollows, so nothing is sent — never a follow.
+        sent = nil
+        item.press { _ in Issue.record("Unfollow asks nothing first") }
+        await sent?.value
+        #expect(await server.asked == [Self.asked, Self.unfollow], "a stale Unfollow sends no follow")
         #expect(tags.lines(of: Self.swift, in: session) == [Self.line(.said(false))])
         #expect(tags.said(of: Self.swift, held: 0, in: session).followed.isEmpty, "and its mark is gone from the head")
         #expect(tags.pressAbout(row, of: Self.swift, in: session), "Return on the row is that press")
