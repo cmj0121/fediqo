@@ -811,7 +811,7 @@ struct TimelinePane: View {
             // Pulled down, the list is asked from the top as `r` asks it.
             onPull: { await followed.again(page, in: session) },
             onReadOn: { Task { await followed.readOn(page, in: session) } },
-            onAct: { row in Task { await followed.press(row.id, on: page, in: session) } },
+            onAct: { row, to in Task { await followed.press(row.id, on: page, only: to, in: session) } },
             onAsk: { session.askFor([.follows], host: page.host) },
             jumpToTop: jumpToTop,
             onBack: onBack

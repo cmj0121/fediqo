@@ -317,14 +317,23 @@ struct TagPageTests {
         #expect(line.offers == .unfollow && line.pressWords() == nil)
         var sent: Task<Void, Never>?
         let item = try #require(line.more { sent = tags.unfollowed(line, in: session) }?.items.first)
-        item.press { _ in Issue.record("Unfollow asks nothing first") }
+        // Red, and it asks first: chosen, it puts its question and sends nothing.
+        #expect(item.isDanger && item.question == ShellQuestion.unfollow(Self.swift, at: Self.host))
+        var put: ShellMoreAsk?
+        item.press { put = $0 }
+        let ask = try #require(put)
+        #expect(sent == nil)
+        // No sends nothing; yes unfollows, once.
+        ask.answered("not the yes")
+        #expect(sent == nil)
+        ask.answered(ShellQuestion.yes)
         await sent?.value
         #expect(await server.asked == [Self.asked, Self.unfollow])
         #expect(tags.lines(of: Self.swift, in: session) == [Self.line(.said(false))])
-        // The same menu, built over the line while it was followed and chosen again now that it
+        // The same question, put while the line was followed and answered yes again now that it
         // is not: it only ever unfollows, so nothing is sent — never a follow.
         sent = nil
-        item.press { _ in Issue.record("Unfollow asks nothing first") }
+        ask.answered(ShellQuestion.yes)
         await sent?.value
         #expect(await server.asked == [Self.asked, Self.unfollow], "a stale Unfollow sends no follow")
         #expect(tags.lines(of: Self.swift, in: session) == [Self.line(.said(false))])

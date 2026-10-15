@@ -798,17 +798,20 @@ struct FollowedTagsTests {
         var row = FollowedTagRow(tag: tag, host: Self.host)
         var said = FollowedTagsSaid(page: Self.page, reading: .said, rows: [row])
         var acted = 0, asked = 0
-        let unfollow = try #require(said.more(for: row, act: { acted += 1 }, ask: { asked += 1 }))
+        let unfollow = try #require(said.more(for: row, act: { _ in acted += 1 }, ask: { asked += 1 }))
         #expect(unfollow.head.isEmpty)
         #expect(unfollow.items.map(\.name) == [L10n.t("tag.follow.unfollow")])
+        // Red, asking first which hashtag at which source, as About's row does.
+        #expect(unfollow.dangers.count == 1 && unfollow.items.first?.question == ShellQuestion.unfollow(tag, at: Self.host))
         row.standing = .unfollowed
-        #expect(said.more(for: row, act: {}, ask: {})?.items.map(\.name) == [L10n.t("tag.follow.follow")])
+        let follow = try #require(said.more(for: row, act: { _ in }, ask: {}))
+        #expect(follow.items.map(\.name) == [L10n.t("tag.follow.follow")] && follow.dangers.isEmpty, "following again asks nothing")
         row.standing = .doing(false)
-        #expect(said.more(for: row, act: {}, ask: {}) == nil)
+        #expect(said.more(for: row, act: { _ in }, ask: {}) == nil)
 
         row.standing = .followed
         said.changing = PartWords.Place(kind: .partly, key: "part.follows.partly.changing")
-        let asks = try #require(said.more(for: row, act: { acted += 1 }, ask: { asked += 1 }))
+        let asks = try #require(said.more(for: row, act: { _ in acted += 1 }, ask: { asked += 1 }))
         #expect(asks.head.isEmpty)
         #expect(asks.items.map(\.name) == [String(format: L10n.t("part.follows.partly.changing"), Self.host)])
 
@@ -816,7 +819,7 @@ struct FollowedTagsTests {
         let never = PartWords.Place(kind: .none, key: "part.ask.none")
         #expect(never.asks == false)
         said.changing = never
-        let head = try #require(said.more(for: row, act: { acted += 1 }, ask: { asked += 1 }))
+        let head = try #require(said.more(for: row, act: { _ in acted += 1 }, ask: { asked += 1 }))
         #expect(head.head == [String(format: L10n.t("part.ask.none"), Self.host)])
         #expect(head.items.isEmpty)
         #expect(acted == 0)

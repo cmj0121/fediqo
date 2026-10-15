@@ -997,6 +997,8 @@
 "tag.follow.unfollow" = "Unfollow";
 "tag.follow.follow.spoken" = "Follow %1$@ at %2$@";
 "tag.follow.unfollow.spoken" = "Unfollow %1$@ at %2$@";
+"tag.follow.unfollow.ask.title" = "Unfollow %1$@ at %2$@?";
+"tag.follow.unfollow.ask.line" = "Posts from there will no longer come into your Home just because they carry it.";
 "tag.follow.failed.follow" = "Could not follow %1$@ at %2$@.";
 "tag.follow.failed.unfollow" = "Could not unfollow %1$@ at %2$@.";
 "followed.tags.title" = "Hashtags you follow";

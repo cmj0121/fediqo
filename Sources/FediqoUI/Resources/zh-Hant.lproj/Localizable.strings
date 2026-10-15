@@ -976,6 +976,8 @@
 "tag.follow.unfollow" = "取消追蹤";
 "tag.follow.follow.spoken" = "在 %2$@ 追蹤 %1$@";
 "tag.follow.unfollow.spoken" = "在 %2$@ 取消追蹤 %1$@";
+"tag.follow.unfollow.ask.title" = "在 %2$@ 取消追蹤 %1$@？";
+"tag.follow.unfollow.ask.line" = "那裡的貼文不會再只因為帶著它而進到你的首頁。";
 "tag.follow.failed.follow" = "無法在 %2$@ 追蹤 %1$@。";
 "tag.follow.failed.unfollow" = "無法在 %2$@ 取消追蹤 %1$@。";
 "followed.tags.title" = "你追蹤的主題標籤";

@@ -28,8 +28,9 @@ struct FollowedTagsPane: View {
     var onPull: () async -> Void = {}
     /// The foot's press: the next stretch.
     var onReadOn: () -> Void = {}
-    /// The item of a row's `…` that follows or unfollows.
-    var onAct: (FollowedTagRow) -> Void = { _ in }
+    /// The item of a row's `…` that follows (true) or unfollows (false): what it offered when
+    /// the menu was built, and only that.
+    var onAct: (FollowedTagRow, Bool) -> Void = { _, _ in }
     /// The item that asks the sign-in for the rest of who the reader follows.
     var onAsk: () -> Void = {}
     var jumpToTop: Int = 0
@@ -105,7 +106,7 @@ struct FollowedTagsActs {
     var onOpen: (RisingRow) -> Void
     var onAskAgain: () -> Void
     var onReadOn: () -> Void
-    var onAct: (FollowedTagRow) -> Void
+    var onAct: (FollowedTagRow, Bool) -> Void
     var onAsk: () -> Void
 }
 
@@ -196,7 +197,7 @@ struct FollowedTagsList<Lead: View>: View {
         // The menu is built when it is opened; what `…` is called is known without it.
         let offer = said.offer(for: row)
         let menu = offer.map { _ in
-            NoticeRow.Menu(more: { said.more(for: row, act: { acts.onAct(row) }, ask: acts.onAsk) ?? ShellMore(items: []) }, asks: $asked)
+            NoticeRow.Menu(more: { said.more(for: row, act: { acts.onAct(row, $0) }, ask: acts.onAsk) ?? ShellMore(items: []) }, asks: $asked)
         }
         return RisingRowView(
             row: row.listed,

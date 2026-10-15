@@ -84,16 +84,35 @@ struct FollowedTagsPageTests {
         let before = try #require(list.said(of: Self.page, in: session))
         #expect(before.rows.count == 2)
         let birds = try #require(before.rows.first)
-        let menu = try #require(before.more(for: birds, act: {}, ask: {}))
+        // The item is the page's own: what it offered is handed on, and only that is sent.
+        var sent: Task<Void, Never>?
+        let menu = try #require(before.more(for: birds, act: { to in
+            sent = Task { await list.press(birds.id, on: Self.page, only: to, in: session) }
+        }, ask: {}))
         #expect(menu.items.map(\.name) == [L10n.t("tag.follow.unfollow")])
-        // The item About's row holds, as a person's unfollow is: one glyph, ordinary, asking nothing.
+        // The item About's row holds: one glyph, red, asking which hashtag at which source first.
         let about = TagFollowLine(host: Self.host, tag: birds.tag, standing: .said(true)).more(act: {})
-        #expect(menu.items.map(\.symbol) == about?.items.map(\.symbol) && menu.dangers.isEmpty && menu.items.first?.question == nil)
+        #expect(menu.items.map(\.symbol) == about?.items.map(\.symbol) && menu.dangers.count == 1)
+        #expect(menu.items.first?.question == ShellQuestion.unfollow(birds.tag, at: Self.host))
+        var put: ShellMoreAsk?
+        menu.items.first?.press { put = $0 }
+        let ask = try #require(put)
+        ask.answered("not the yes")
+        #expect(sent == nil, "No sends nothing")
+        ask.answered(ShellQuestion.yes)
+        await sent?.value
+        #expect(await server.asked.filter { $0.hasPrefix("/api/v1/tags/") } == ["/api/v1/tags/birds/unfollow"], "yes sends one unfollow")
 
-        await list.press(birds.id, on: Self.page, in: session)
         let after = try #require(list.said(of: Self.page, in: session))
         #expect(after.rows.map(\.tag.name) == names && after.rows.first?.standing == .unfollowed)
-        #expect(after.more(for: after.rows[0], act: {}, ask: {})?.items.map(\.name) == [L10n.t("tag.follow.follow")])
+        #expect(after.more(for: after.rows[0], act: { _ in }, ask: {})?.items.map(\.name) == [L10n.t("tag.follow.follow")])
+        // The question put while the row was followed, answered yes again now that it is not:
+        // it only ever unfollows, so nothing is sent — never a follow.
+        sent = nil
+        ask.answered(ShellQuestion.yes)
+        await sent?.value
+        #expect(await server.asked.filter { $0.hasPrefix("/api/v1/tags/") } == ["/api/v1/tags/birds/unfollow"], "a stale Unfollow sends no follow")
+        #expect(list.said(of: Self.page, in: session)?.rows.first?.standing == .unfollowed)
     }
 
     @Test("The bar's mark asks the list's source again, named by it, where `r` would ask; with nobody to ask there is no mark; the bar never holds Stop")

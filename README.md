@@ -486,7 +486,8 @@ so, and the others still land. The selected post stays selected.
 it follows them, or asks to where they must agree. On a hashtag's page it follows the hashtag
 at the first of your sources that offers it. Unfollowing is never a key: it is behind the
 three dots on a person's page, behind the three dots of a source's row on a hashtag's About,
-and behind the three dots of its row among the hashtags you follow.
+and behind the three dots of its row among the hashtags you follow. Unfollowing a hashtag
+asks first, naming the hashtag and the source.
 
 Reading toward the end of a timeline asks its sources for the next stretch, with no key
 pressed. On Trends that is the next stretch of what is rising on each Mastodon source: what
@@ -633,10 +634,10 @@ what it counts to a pointer and to VoiceOver. What a kind of source does not hav
 
 A hashtag's head counts the posts this device holds under it and marks each source that says
 you follow it; About says how it stands at each of them, with Follow where you do not, and
-Unfollow behind that row's three dots where you do; a hashtag read where nothing keeps follows
-is one list. What is rising opens from Trends, by `h` or the line at its head, and a tab
-never brought in front asks nothing. What a search found opens from
-either "All" press under the search's results; People is there only where a sign-in at that
+Unfollow behind that row's three dots where you do, which asks first; a hashtag read where
+nothing keeps follows is one list. What is rising opens from Trends, by `h` or the line at its
+head, and a tab never brought in front asks nothing. What a search found opens from either
+"All" press under the search's results; People is there only where a sign-in at that
 source may search. A kind of which a source gave none has no tab, and a page left with one tab
 draws no strip. On a page with no tabs Tab does nothing: leave the page to change timeline. Esc
 or `q` leaves any of them in one press, from any tab.

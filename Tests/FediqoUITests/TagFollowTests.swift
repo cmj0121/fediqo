@@ -666,10 +666,19 @@ struct TagFollowTests {
         #expect(line.missedWords(language: .taiwanese) == "無法在 m.example 追蹤 #swift。")
         let followed = TagFollowLine(host: Self.host, tag: Self.swift, standing: .said(true), missed: false)
         // Followed, the row has no press: Unfollow is the one item of its `…`, named there by
-        // what it does and where, and as plain as a person's unfollow — asking nothing first.
+        // what it does and where — red, and asking first which hashtag at which source.
         #expect(followed.press == nil && followed.pressWords(language: .english) == nil && followed.pressSpoken() == nil)
         let more = try #require(followed.more(act: {}))
-        #expect(more.items.map(\.name) == [L10n.t("tag.follow.unfollow")] && more.dangers.isEmpty && more.head.isEmpty)
+        #expect(more.items.map(\.name) == [L10n.t("tag.follow.unfollow")] && more.dangers.count == 1 && more.head.isEmpty)
+        let question = try #require(more.items.first?.question)
+        #expect(question == ShellQuestion.unfollow(Self.swift, at: Self.host))
+        #expect(question.chorded?.id == ShellQuestion.yes && question.chorded?.role == .destructive)
+        let english = ShellQuestion.unfollow(Self.swift, at: Self.host, language: .english)
+        #expect(english.title == "Unfollow #swift at m.example?" && english.choices.map(\.label) == ["Unfollow"] && english.cancel == "Cancel")
+        #expect(english.line == "Posts from there will no longer come into your Home just because they carry it.")
+        let taiwanese = ShellQuestion.unfollow(Self.swift, at: Self.host, language: .taiwanese)
+        #expect(taiwanese.title == "在 m.example 取消追蹤 #swift？" && taiwanese.choices.map(\.label) == ["取消追蹤"] && taiwanese.cancel == "取消")
+        #expect(taiwanese.line == "那裡的貼文不會再只因為帶著它而進到你的首頁。")
         #expect(followed.moreLabel(language: .english) == "More: Unfollow #swift at m.example")
         #expect(followed.moreLabel(language: .taiwanese) == "更多：在 m.example 取消追蹤 #swift")
         #expect(line.more(act: {}) == nil && line.press == .follow, "not followed, there is no `…`")
@@ -687,7 +696,7 @@ struct TagFollowTests {
             return table.components(separatedBy: "\n").filter { $0.hasPrefix("\"tag.follow.") || $0.hasPrefix("\"work.purpose.followedTags\"") }
         }
         let english = try ours("en"), taiwanese = try ours("zh-TW"), hant = try ours("zh-Hant")
-        #expect(english.count == 15)
+        #expect(english.count == 17)
         #expect(taiwanese == hant)
         func keys(_ lines: [String]) -> [String] { lines.compactMap { $0.components(separatedBy: "\"").dropFirst().first } }
         #expect(keys(english) == keys(taiwanese))

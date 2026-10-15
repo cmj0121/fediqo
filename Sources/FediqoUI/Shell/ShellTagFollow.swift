@@ -92,11 +92,12 @@ struct TagFollowLine: Equatable, Identifiable {
     /// page's, and no key reaches it.
     var press: Offer? { offers == .unfollow ? nil : offers }
 
-    /// The row's `…`: unfollowing, where the source said it is followed — an item as plain as a
-    /// person's unfollow, which asks nothing first since following again is one press. Nothing
-    /// otherwise, and then no `…` is drawn.
+    /// The row's `…`: unfollowing, where the source said it is followed — red, and asked about
+    /// first, as unfollowing somebody who must agree is. Nothing otherwise, and then no `…` is
+    /// drawn.
+    @MainActor
     func more(act: @escaping () -> Void) -> ShellMore? {
-        offers == .unfollow ? ShellMore(items: [Self.item(to: false, act: act)]) : nil
+        offers == .unfollow ? ShellMore(items: [Self.item(to: false, tag: tag, at: host, act: act)]) : nil
     }
 
     /// What the row's `…` is called: its one item, and of what at which source — two rows of
@@ -106,10 +107,14 @@ struct TagFollowLine: Equatable, Identifiable {
         return ShellMore.label(only: named, language: language)
     }
 
-    /// The item of a `…` that follows a hashtag, or with `to` false stops: one glyph and one
-    /// name wherever it stands — About's row, a row of the hashtags followed.
-    static func item(to: Bool, act: @escaping () -> Void) -> ShellMoreItem {
-        .plain(to ? "plus.circle" : "minus.circle", L10n.t(to ? "tag.follow.follow" : "tag.follow.unfollow"), act: act)
+    /// The item of a `…` that follows `tag` at `host`, or with `to` false stops: one glyph and
+    /// one name wherever it stands — About's row, a row of the hashtags followed. **Stopping is
+    /// red and asks first** (`ShellQuestion.unfollow(_:at:)`), naming the hashtag and the
+    /// source; only its yes reaches `act`.
+    @MainActor
+    static func item(to: Bool, tag: PostTag, at host: String, act: @escaping () -> Void) -> ShellMoreItem {
+        guard !to else { return .plain("plus.circle", L10n.t("tag.follow.follow"), act: act) }
+        return .danger("minus.circle", L10n.t("tag.follow.unfollow"), asks: ShellQuestion.unfollow(tag, at: host), act: act)
     }
 
     /// Whether the line is drawn dim with the lock: it says how a sign-in stands, not how the
