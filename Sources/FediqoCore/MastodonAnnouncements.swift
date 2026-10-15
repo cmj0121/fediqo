@@ -161,10 +161,19 @@ public struct MastodonAnnouncements: Sendable {
     }
 
     /// Takes the reader's reaction `name` off `id`. Rides the acting part.
+    ///
+    /// **A reaction that is not there is taken off already**: a Mastodon answers its absence
+    /// with the same 404 as an announcement withdrawn (asked of 4.6.6: `Record not found` for
+    /// both), so neither is told as the announcement gone — the reader's reaction is not on it,
+    /// which is what was wanted.
     public func unreact(_ id: String, with name: String) async throws {
         let path = try Self.reactionPath(id, name)
-        try await act(part: .acting) {
-            _ = try await door.delete(path: path)
+        do {
+            try await act(part: .acting) {
+                _ = try await door.delete(path: path)
+            }
+        } catch AnnouncementError.gone {
+            return
         }
     }
 

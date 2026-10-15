@@ -176,7 +176,7 @@ struct MastodonAnnouncementsTests {
         #expect(await server.requests.first?.url?.absoluteString == "https://\(MastodonFixture.host)\(Self.list)/8/reactions/%F0%9F%A4%94")
     }
 
-    @Test("A reaction's 403 is the acting part's lock only where it is not held — the account part is no stand-in — and the source forbidding it where it is; a 422 is the source's refusal with its sentence; a 404 the announcement gone")
+    @Test("A reaction's 403 is the acting part's lock only where it is not held — the account part is no stand-in — and the source forbidding it where it is; a 422 is the source's refusal with its sentence; a 404 the announcement gone when putting one on, and done when taking one off")
     func reactionRefusals() async throws {
         let path = "\(Self.list)/8/reactions/🤔"
         let (without, _) = try Self.reader([path: .json("", status: 403)], scopes: "\(Self.r) \(Self.a)")
@@ -192,8 +192,12 @@ struct MastodonAnnouncementsTests {
         let (unsaid, _) = try Self.reader([path: .json("<html>", status: 422)])
         await #expect(throws: AnnouncementError.refused(sentence: "")) { try await unsaid.react("8", with: "🤔") }
 
-        let (gone, _) = try Self.reader([path: .json(#"{"error":"Record not found"}"#, status: 404)])
-        await #expect(throws: AnnouncementError.gone) { try await gone.unreact("8", with: "🤔") }
+        // A real Mastodon's 404 for a reaction of the reader's that is not there, and for an
+        // announcement withdrawn, alike: putting one on is refused as gone; taking one off is done.
+        let (gone, server) = try Self.reader([path: .json(#"{"error":"Record not found"}"#, status: 404)])
+        await #expect(throws: AnnouncementError.gone) { try await gone.react("8", with: "🤔") }
+        try await gone.unreact("8", with: "🤔")
+        #expect(await server.requests.map(\.httpMethod) == ["PUT", "DELETE"], "asked once each, and nothing more")
     }
 
     @Test("A reaction's name is a shortcode or an emoji, and nothing that could be more than one segment of a path")
