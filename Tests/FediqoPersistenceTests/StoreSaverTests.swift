@@ -13,7 +13,7 @@ import Testing
         let gate = Gate()
         let guardTask = watching(gate, "the first save's write")
         defer { guardTask.cancel() }
-        let saver = StoreSaver(store: store, write: { _, _, _ in
+        let saver = StoreSaver(store: store, write: { _ in
             order.add("save")
             await gate.wait()
         })
@@ -89,13 +89,13 @@ struct StoreSaverTests {
         defer { guardTask.cancel() }
         let landed = Landed()
         let calls = Mutexed()
-        let saver = StoreSaver(store: store) { sources, notes, _ in
+        let saver = StoreSaver(store: store) { changes in
             if calls.next() == 1 {
                 begun.add("first")
                 await release.wait()
             }
-            try await file.save(sources: sources, notes: notes)
-            _ = await landed.record(notes)
+            try await file.save(changes)
+            _ = await landed.record(changes.upserts)
         }
 
         let first = Task { try await saver.save() }
@@ -106,7 +106,7 @@ struct StoreSaverTests {
         try await first.value
         try await second.value
 
-        #expect(await landed.writes.last == ["1", "2"])
+        #expect(await landed.writes.last == ["2"])
         #expect(StoreFile.open(at: dir).notes.map(\.id).sorted() == ["1", "2"])
     }
 
@@ -114,14 +114,14 @@ struct StoreSaverTests {
     func unchangedIsNotWrittenAgain() async throws {
         let landed = Landed()
         let store = ItemStore(sources: [alpha], notes: [note("1", from: alpha)])
-        let saver = StoreSaver(store: store) { _, notes, _ in _ = await landed.record(notes) }
+        let saver = StoreSaver(store: store) { changes in let notes = changes.upserts; _ = await landed.record(notes) }
         try await saver.save()
         try await saver.save()
         #expect(await landed.writes.count == 1)
 
         await store.ingest([note("2", from: alpha)])
         try await saver.save()
-        #expect(await landed.writes == [["1"], ["1", "2"]])
+        #expect(await landed.writes == [["1"], ["2"]], "a row that did not change was written again")
     }
 
     @Test("Saves asked for while one is held run after it, and write what the store holds then")
@@ -133,7 +133,8 @@ struct StoreSaverTests {
         let landed = Landed()
         let calls = Mutexed()
         let store = ItemStore(sources: [alpha], notes: [note("1", from: alpha)])
-        let saver = StoreSaver(store: store) { _, notes, _ in
+        let saver = StoreSaver(store: store) { changes in
+            let notes = changes.upserts
             if calls.next() == 1 {
                 begun.add("first")
                 await release.wait()
@@ -147,14 +148,15 @@ struct StoreSaverTests {
         await release.open()
         try await first.value
         for task in waiting { try await task.value }
-        #expect(await landed.writes == [["1"], ["1", "2"]])
+        #expect(await landed.writes == [["1"], ["2"]])
     }
 
     @Test("A write that fails is thrown to the caller, and the next save still lands")
     func failureIsReported() async throws {
         let landed = Landed()
         let calls = Mutexed()
-        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [note("1", from: alpha)])) { _, notes, _ in
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [note("1", from: alpha)])) { changes in
+            let notes = changes.upserts
             if calls.next() == 1 { throw Refused() }
             _ = await landed.record(notes)
         }
@@ -213,7 +215,8 @@ struct StoreSaverTests {
         defer { guardTask.cancel() }
         let begun = Order()
         let landed = Landed()
-        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [note("1", from: alpha)])) { _, notes, _ in
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [note("1", from: alpha)])) { changes in
+            let notes = changes.upserts
             begun.add("write")
             await release.wait()
             _ = await landed.record(notes)
@@ -236,7 +239,7 @@ struct StoreSaverTests {
         let guardTask = watching(never, "the write that hangs")
         defer { guardTask.cancel() }
         let begun = Order()
-        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _, _ in
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _ in
             begun.add("write")
             await never.wait()
         }
@@ -254,7 +257,7 @@ struct StoreSaverTests {
 
     @Test("A write that fails still lets a flush answer, and says so")
     func flushReportsFailure() async {
-        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _, _, _ in throw Refused() }
+        let saver = StoreSaver(store: ItemStore(sources: [alpha], notes: [])) { _ in throw Refused() }
         #expect(await Self.flushed(saver) == .failed)
     }
 
@@ -274,7 +277,7 @@ struct StoreSaverTests {
         let broken = Mutex(true)
         let saver = StoreSaver(
             store: store,
-            write: { _, notes, _ in await parts.add("items:\(notes.count)") },
+            write: { changes in let notes = changes.upserts; await parts.add("items:\(notes.count)") },
             writeUnsent: { texts in
                 if failing == "texts", broken.withLock({ $0 }) { throw Refused() }
                 await parts.add("texts:\(texts.count)")

@@ -174,7 +174,7 @@ extension ShellReload {
 
     /// Whether the timeline in front still says what `reach` was reached for.
     static func says(_ reach: GapReach, in session: ShellSession) -> Bool {
-        let marks = session.gapMarks(in: session.timelineItems(latest: nil)).values
+        let marks = session.gapMarks(in: session.timelineItemsAsDrawn()).values
         switch reach {
         case .more(let stretch):
             return marks.contains { $0.above.contains(stretch) }

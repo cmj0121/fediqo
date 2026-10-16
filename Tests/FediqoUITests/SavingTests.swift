@@ -102,12 +102,12 @@ struct SavingTests {
         defer { watchdog.cancel() }
         let release = Gate()
         let writes = Writes()
-        let saver = StoreSaver(store: session.store) { sources, notes, said in
+        let saver = StoreSaver(store: session.store) { changes in
             if writes.next() == 1 {
                 await entered.open()
                 await release.wait()
             }
-            try await file.save(sources: sources, notes: notes, said: said)
+            try await file.save(changes)
         }
         session.persist = { (try? await saver.save()) != nil }
 
@@ -132,7 +132,7 @@ struct SavingTests {
         defer { watchdog.cancel() }
         let release = Gate()
         let writes = Writes()
-        let saver = StoreSaver(store: session.store) { _, _, _ in
+        let saver = StoreSaver(store: session.store) { _ in
             if writes.next() == 1 {
                 await entered.open()
                 await release.wait()
@@ -280,7 +280,7 @@ struct SavingTests {
         let session = await Self.shell(4)
         session.said.announce = { _ in }
         let failing = Mutex(true)
-        let saver = StoreSaver(store: session.store) { _, _, _ in
+        let saver = StoreSaver(store: session.store) { _ in
             if failing.withLock({ $0 }) { throw CancellationError() }
         }
         session.persist = { (try? await saver.save()) != nil }

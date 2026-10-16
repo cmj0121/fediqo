@@ -132,6 +132,8 @@
 "thread.reload.notfound" = "這篇無法重新載入：%@ 找不到它。";
 "thread.reload.scope" = "這篇無法重新載入：請重新登入 %@，讓 Fediqo 能找到它。";
 "timeline.empty.title" = "還沒有東西進來";
+"timeline.reading" = "正在從這台裝置讀出這條時間軸…";
+"timeline.reading.on" = "正在往下讀…";
 "timeline.empty.detail" = "到「帳號」加一個來源。它的公開貼文會落在這裡，新的在上面。";
 "timeline.empty.trends.title" = "目前沒有趨勢";
 "timeline.empty.trends.detail" = "來源標為趨勢的貼文會落在這裡，依發文時間排列。";
@@ -522,6 +524,7 @@
 "prefs.cache.footer" = "這些大多會向各來源重新讀取：表情符號名稱會在一天後自行重新讀取，其他則在你需要時再讀。登入留下的兩樣東西只存在這台裝置上。你登入過的論壇會把登入 Cookie 留在這裡，下次開啟 Fediqo 時你仍是登入狀態；它們不會被備份，也不會跟著你的 Apple 帳號走。你要求 Fediqo 存起來的密碼放在這台裝置的鑰匙圈裡，永遠不會複製到 iCloud。按「清除」時，兩者都會和其他東西一起刪掉。";
 "prefs.held.posts" = "%d 則貼文";
 "prefs.held.posts.none" = "未存貼文";
+"prefs.held.posts.atLeast.none" = "還沒讀到";
 "prefs.held.total" = "所有來源";
 "prefs.held.earlier" = "修改過的貼文之前說的";
 "prefs.held.earlier.count" = "%d 個版本";
@@ -687,6 +690,8 @@
 "account.remove.line.boards" = "它的文章會不見，你挑的 %d 個版塊也不會回來。";
 "account.remove.line.kept" = "它的文章和這個裝置為它留的東西會不見；你留下的 %d 則會保留。";
 "account.remove.line.kept.boards" = "它的文章和你挑的 %2$@ 個版塊會不見；你留下的 %1$d 則會保留。";
+"account.remove.line.kept.atLeast" = "它的文章和這個裝置為它留的東西會不見；你留下的至少 %d 則會保留。";
+"account.remove.line.kept.boards.atLeast" = "它的文章和你挑的 %2$@ 個版塊會不見；你留下的至少 %1$d 則會保留。";
 "account.remove.detail.counted" = "它的文章，還有這個裝置為它留的東西，都會跟著一起不見。";
 "account.remove.detail.boards.counted" = "它的文章、這個裝置為它留的東西，還有你挑的 %d 個版塊，都會跟著一起不見。版塊不會自己回來。";
 "account.remove.confirm" = "移除";
@@ -1244,12 +1249,15 @@
 "usage.kept.removed" = "%@ · 來源已移除";
 "usage.kept.figure" = "%1$@ · 文字 %2$@";
 "usage.kept.posts" = "留下 %d 則";
+"usage.kept.posts.atLeast" = "至少留下 %d 則";
 "usage.kept.stop" = "不再留下";
 "usage.kept.stop.from" = "不再留下 %@ 的貼文";
 "usage.kept.went" = "%d 則貼文不再留下。";
 "usage.kept.went.none" = "沒有留下的貼文。";
 "usage.kept.elsewhere" = "有 %d 則還透過另一個來源留著。";
+"usage.kept.elsewhere.atLeast" = "至少有 %d 則還透過另一個來源留著。";
 "usage.kept.ask" = "不再留下 %d 則貼文？";
+"usage.kept.ask.atLeast" = "不再留下至少 %d 則貼文？";
 "usage.kept.ask.line" = "來自%@。現在不會放下任何東西。";
 "usage.kept.ask.detail" = "它們會變回一般的貼文。按下去的當下，這台裝置不會放下任何東西；下一次上限生效，或你下一次放下貼文時，可能會帶走它們。要再留下其中一則，按它的標記就可以。";
 "question.join" = "%1$@%2$@";
@@ -2046,3 +2054,6 @@
 "tag.feature.unfeature.spoken" = "在 %2$@ 把 %1$@ 從你的個人檔案上拿掉";
 "tag.feature.failed.feature" = "無法在 %2$@ 把 %1$@ 推薦到你的個人檔案上。";
 "tag.feature.failed.unfeature" = "無法在 %2$@ 把 %1$@ 從你的個人檔案上拿掉。";
+"carry.refused.heldInPart.title" = "現在還不能帶走";
+"carry.refused.heldInPart.line" = "現在只會帶走已讀進的貼文，不會是全部。沒有任何改變。";
+"prefs.span.atLeast" = "至少 %d 則貼文";

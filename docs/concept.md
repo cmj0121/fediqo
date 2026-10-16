@@ -180,6 +180,9 @@ What is held is yours. It leaves as one file in your own hands or moves to anoth
 devices when both agree, and it passes through nowhere of ours. Limits you set let the oldest
 go, and say which limit did.
 
+What is held is read a page at a time, as far as a timeline is read; nothing waits for all of
+it to be read at once.
+
 ## Later
 
 The same thing from two sources is one item. That is true today where two sources name it

@@ -132,6 +132,8 @@
 "thread.reload.notfound" = "This post can't be reloaded: %@ did not find it.";
 "thread.reload.scope" = "This post can't be reloaded: sign in to %@ again to let Fediqo find it.";
 "timeline.empty.title" = "Nothing has arrived";
+"timeline.reading" = "Reading this timeline from this device…";
+"timeline.reading.on" = "Reading further down…";
 "timeline.empty.detail" = "Add a source on Account. Public notes from it land here, newest first.";
 "timeline.empty.trends.title" = "Nothing is trending";
 "timeline.empty.trends.detail" = "Notes your sources hand over as trending land here, in the order they were posted.";
@@ -526,6 +528,7 @@
 "prefs.held.posts" = "%d posts";
 "prefs.held.posts.none" = "No posts held";
 "prefs.held.posts.one" = "%d post";
+"prefs.held.posts.atLeast.none" = "None read yet";
 "prefs.cache.pictures.one" = "%d picture";
 "prefs.held.total" = "All sources";
 "prefs.held.earlier" = "What changed posts said before";
@@ -706,6 +709,10 @@
 "account.remove.line.kept.one" = "Its posts and what is held for it go; the one you keep stays.";
 "account.remove.line.kept.boards" = "Its posts and the %2$@ boards you picked go; the %1$d you keep stay.";
 "account.remove.line.kept.boards.one" = "Its posts and the %2$@ boards you picked go; the one you keep stays.";
+"account.remove.line.kept.atLeast" = "Its posts and what is held for it go; at least %d that you keep stay.";
+"account.remove.line.kept.atLeast.one" = "Its posts and what is held for it go; at least %d that you keep stays.";
+"account.remove.line.kept.boards.atLeast" = "Its posts and the %2$@ boards you picked go; at least %1$d that you keep stay.";
+"account.remove.line.kept.boards.atLeast.one" = "Its posts and the %2$@ boards you picked go; at least %1$d that you keep stays.";
 "account.remove.detail.counted" = "Its posts and what this device holds for it go.";
 "account.remove.detail.boards.counted" = "Its posts, everything this device holds for it, and the %d boards you picked go with it. The boards do not come back.";
 "account.remove.confirm" = "Remove";
@@ -1266,6 +1273,7 @@
 "usage.kept.removed" = "%@ · source removed";
 "usage.kept.figure" = "%1$@ · %2$@ of words";
 "usage.kept.posts" = "%d kept";
+"usage.kept.posts.atLeast" = "At least %d kept";
 "usage.kept.stop" = "Stop keeping";
 "usage.kept.stop.from" = "Stop keeping posts from %@";
 "usage.kept.went" = "%d posts are no longer kept.";
@@ -1273,8 +1281,12 @@
 "usage.kept.went.none" = "None was kept.";
 "usage.kept.elsewhere" = "%d stay kept through another source.";
 "usage.kept.elsewhere.one" = "%d stays kept through another source.";
+"usage.kept.elsewhere.atLeast" = "At least %d stay kept through another source.";
+"usage.kept.elsewhere.atLeast.one" = "At least %d stays kept through another source.";
 "usage.kept.ask" = "Stop keeping %d posts?";
 "usage.kept.ask.one" = "Stop keeping %d post?";
+"usage.kept.ask.atLeast" = "Stop keeping at least %d posts?";
+"usage.kept.ask.atLeast.one" = "Stop keeping at least %d post?";
 "usage.kept.ask.line" = "From %@. Nothing goes now.";
 "usage.kept.ask.detail" = "They become ordinary posts. Nothing goes from this device at this press; the next limit to act, or the next time you let posts go, may take them. To keep one again, press its mark.";
 "question.join" = "%1$@ %2$@";
@@ -2092,3 +2104,7 @@
 "tag.feature.unfeature.spoken" = "Take %1$@ off your profile at %2$@";
 "tag.feature.failed.feature" = "Could not feature %1$@ on your profile at %2$@.";
 "tag.feature.failed.unfeature" = "Could not take %1$@ off your profile at %2$@.";
+"carry.refused.heldInPart.title" = "Not ready to take away yet";
+"carry.refused.heldInPart.line" = "It would carry only the posts read so far. Nothing changed.";
+"prefs.span.atLeast" = "At least %d posts";
+"prefs.span.atLeast.one" = "At least %d post";

@@ -76,8 +76,10 @@ enum ShellQuestion {
     /// kept posts are kept through another source too, they stay kept, and the question says how
     /// many rather than counting them in.
     static func stopKeeping(_ ask: KeptAsk, language: DummyLanguage? = nil) -> ShellConfirmation {
+        // Over what this run has read of a store held in part, every count is "at least" (C11).
+        let least = ask.atLeast ? ".atLeast" : ""
         let (line, help) = saying(
-            ask.elsewhere > 0 ? L10n.count("usage.kept.elsewhere", ask.elsewhere, language: language) : nil,
+            ask.elsewhere > 0 ? L10n.count("usage.kept.elsewhere" + least, ask.elsewhere, language: language) : nil,
             line: String(
                 format: L10n.t("usage.kept.ask.line", language: language),
                 SpanSection.whereLabel(ask.host, language: language)
@@ -85,7 +87,7 @@ enum ShellQuestion {
             help: L10n.t("usage.kept.ask.detail", language: language), language: language
         )
         return ShellConfirmation(
-            symbol: "bookmark.slash", title: L10n.count("usage.kept.ask", ask.posts, language: language),
+            symbol: "bookmark.slash", title: L10n.count("usage.kept.ask" + least, ask.posts, language: language),
             line: line,
             help: help,
             choices: [.init(yes, L10n.t("usage.kept.stop", language: language), role: .destructive)],
@@ -160,9 +162,12 @@ enum ShellQuestion {
     ///
     /// `unsent` is how many texts wait to be sent to it (`ShellOutbox`): they are deleted with
     /// it, and the question says how many — on the line where the line can take it.
+    ///
+    /// `atLeast`: the kept count is of what this run has read of a store held in part (C11),
+    /// and says "at least".
     static func remove(
         host: String, boards: Int, postsStay: Bool = false, kept: Int = 0, unsent: Int = 0,
-        language: DummyLanguage? = nil
+        atLeast: Bool = false, language: DummyLanguage? = nil
     ) -> ShellConfirmation {
         let stay = postsStay ? ".stay" : ""
         // Only the boards keys carry a count to format; the rest are said as written.
@@ -174,9 +179,10 @@ enum ShellQuestion {
         var line = postsStay || boards > 0 ? said("account.remove.line") : L10n.t("account.remove.detail", language: language)
         var help = postsStay || boards > 0 ? said("account.remove.detail") : nil
         if kept > 0, !postsStay {
+            let least = atLeast ? ".atLeast" : ""
             line = boards > 0
-                ? counted("account.remove.line.kept.boards", kept, String(boards), language: language)
-                : L10n.count("account.remove.line.kept", kept, language: language)
+                ? counted("account.remove.line.kept.boards" + least, kept, String(boards), language: language)
+                : L10n.count("account.remove.line.kept" + least, kept, language: language)
             // The line has said how many stay; the (?) says the rest without saying it again.
             help = boards > 0
                 ? String(format: L10n.t("account.remove.detail.boards.counted", language: language), boards)
@@ -532,7 +538,8 @@ enum ShellQuestion {
 
     /// Letting go of the posts of a span of days, from one source or every one (#248): the title
     /// counts them, the line names the days and where they come from and that they do not come
-    /// back, and the (?) says what stays.
+    /// back, and the (?) says what stays. **The count is every post that goes**, whatever the
+    /// store has read (C14: `ShellSession.spanGoing`).
     static func letGo(_ ask: SpanAsk, language: DummyLanguage? = nil) -> ShellConfirmation {
         let (line, help) = saying(
             keptStay(ask.kept, language: language),
@@ -756,6 +763,9 @@ enum ShellQuestion {
         case .nothingToTake:
             key = "carry.refused.nothingToTake"
             line = L10n.t(key + ".line", language: language)
+        case .heldInPart:
+            key = "carry.refused.heldInPart"
+            line = L10n.t(key + ".line", language: language)
         case .locked:
             key = "carry.refused.locked"
             line = L10n.t(key + ".line", language: language)
@@ -865,6 +875,8 @@ enum ShellQuestion {
             return carryRefused(.storeNotOpened, language: language)
         case .nothingToTake:
             return carryRefused(.nothingToTake, language: language)
+        case .heldInPart:
+            return carryRefused(.heldInPart, language: language)
         case .locked:
             return carryRefused(.locked, language: language)
         case .notAllowed, .wrongCode, .refusedThere, .lost, .malformed, .unsure, .guessing, .timedOut:

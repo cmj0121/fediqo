@@ -378,9 +378,10 @@ struct StoreGateTests {
         #expect(code.contains("precondition(shared == nil,"))
         #expect(count(" Launch(") == 1 && count("= Launch(opened)") == 1, "made in one place")
         // One store of the run's; the other is a launch staged for a picture, which opens nothing.
-        #expect(count("ItemStore(") == 2 && count("store = ItemStore(") == 1 && count("store: ItemStore(") == 1)
+        // Over the file where there is one (#357), and holding what the run brings where not.
+        #expect(count("ItemStore(") == 3 && count("store = Self.store(of: opened)") == 1 && count("store: ItemStore(") == 1)
         let made = try #require(code.range(of: "private init(_ opened: StoreFile.Opened) {"))
-        let store = try #require(code.range(of: "store = ItemStore("))
+        let store = try #require(code.range(of: "store = Self.store(of: opened)"))
         #expect(made.upperBound < store.lowerBound)
         #expect(count("Launch.shared.") == 0, "a quit or a backgrounding before the store is opened must not build the run")
         #expect(count("Launch.shared?.end()") == 2 && count("Launch.shared?.pause(") == 0)
@@ -400,7 +401,10 @@ struct StoreGateTests {
         #expect(code.contains("saver: saver, protected: protected\n        )"))
         // And a save a lock refused is written at a wake-up too: both ask the canary themselves.
         #expect(code.contains("for await _ in protected.changes() {\n                await carrier.finishOwed()\n                await saver.owedNow()\n            }"))
-        #expect(code.contains("saver = StoreSaver(\n            store: store, file: opened.file, protected: protected,\n            holding: opened.setAside == nil ? (opened.sources, opened.notes) : nil\n        )"))
+        #expect(code.contains("saver = StoreSaver(store: store, file: opened.file, protected: protected)"))
+        // No row read (#357): the store is a pool over the file, and no row is owed a write until
+        // it changes.
+        #expect(code.contains("unsent: opened.unsent, rows: file\n        )"))
     }
 
     /// **Held to the source**, as the test above is. What signs the person in is in the

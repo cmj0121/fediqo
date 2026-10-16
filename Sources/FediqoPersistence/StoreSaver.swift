@@ -7,10 +7,15 @@ import Synchronization
 /// The one owner of writing the store to disk. The app's scene phase, its quit, and a drop by
 /// time all come here, and nothing else writes the index.
 ///
+/// **A save writes what changed, by row** (#357): the store hands over each row a change reached
+/// since the last write that landed (`ItemStore.takeChanges`), and the file writes them in one
+/// transaction (`StoreFile.save(_:)`) — so a save costs what changed, whatever the store weighs.
+/// A write that fails hands them back (`ItemStore.putBack`), and the next save writes them.
+///
 /// **Saves are serialized, and each one reads the store only once the write before it has
-/// landed.** Two saves that each took a snapshot and then raced to write could land in either
-/// order, and the older snapshot landing last would put back what the newer one had dropped. So
-/// every save waits for the one before it and only then takes its snapshot: whatever lands last
+/// landed.** Two saves that each took their changes and then raced to write could land in
+/// either order, and the older landing last would put back what the newer one had dropped. So
+/// every save waits for the one before it and only then takes its changes: whatever lands last
 /// was read last.
 ///
 /// **At most one save waits.** A save asked for while another is already waiting to start joins
@@ -18,7 +23,7 @@ import Synchronization
 /// thing twice. And a save that finds the store at the revision it last wrote writes nothing.
 ///
 /// **Nobody has to ask.** `follow()` listens to the store and saves behind it — late and seldom,
-/// because a save writes every note down again — so a landing no caller thought to save is on
+/// so that a read landing page after page is one write — and a landing no caller thought to save is on
 /// disk within the minute. What is this device's alone, and whoever is about to read the file,
 /// still asks: `save()` and `flush(deadline:)` write at once and take the followed save with them.
 ///
@@ -46,11 +51,8 @@ import Synchronization
 /// **And a write that failed is owed another** (`follow`): tried again by the follower, with
 /// nobody asking, a `gap` later — `retries` times at most, until one lands.
 public actor StoreSaver {
-    /// Writes one snapshot to the index.
-    typealias WriteOwn = @Sendable (OwnChanges) async throws -> Void
-    public typealias Write = @Sendable (
-        _ sources: [Source], _ notes: [Note], _ said: [SourceProfile]
-    ) async throws -> Void
+    /// Writes what changed to the index.
+    public typealias Write = @Sendable (_ changes: RowChanges) async throws -> Void
 
     /// Writes the texts the person pressed to send, in the place of the ones written before.
     public typealias WriteUnsent = @Sendable (_ unsent: [Unsent]) async throws -> Void
@@ -72,8 +74,8 @@ public actor StoreSaver {
     /// After a change, before the save that follows it starts: a read lands page after page, and
     /// the burst is one write.
     public static let quiet: Duration = .seconds(2)
-    /// The least time between two followed saves. A save is every note written again, so reading
-    /// on for an hour is at most sixty of them; the one knob, set against the durations logged.
+    /// The least time between two followed saves: reading on for an hour is at most sixty of
+    /// them; the one knob, set against the durations logged.
     public static let gap: Duration = .seconds(60)
     /// How many times running a write that failed is tried again by the follower, a `gap`
     /// apart, before it is left to the next change or the next ask.
@@ -85,32 +87,9 @@ public actor StoreSaver {
     private let write: Write?
     private let writeUnsent: WriteUnsent?
     private let writeNotices: WriteNotices?
-    /// Writes only what is this device's alone and changed (`StoreFile.save(own:)`).
-    private let writeOwn: WriteOwn?
-    /// **What the index holds of the device's own, as of the last write that landed** — a full
-    /// save, or the small one ahead of it: which rows are there, which of them are kept, and
-    /// the sources. What is this device's alone and changed is found by setting what the
-    /// store holds now against this; nothing in the store has to remember what it did.
-    ///
-    /// Nil until something says what the index holds: what a launch read, handed in
-    /// (`init(store:file:protected:holding:)`), or the first full save to land. Until then
-    /// nothing is written ahead of the full save, which writes it all anyway.
-    ///
-    /// **What it costs**: one entry for each row the index holds — its key, shared with the
-    /// store's own, and one flag — for as long as the run lasts; and, for the length of one
-    /// save, a second such set taken from the store to set against it.
-    private var landed: Landed?
-    /// How many times the store has been asked for all it holds, or all of its own: for the
-    /// checks, which hold a save with nothing new to asking for neither.
-    private(set) var snapshots = 0
-    /// What a launch read, kept as it was handed in until the first save turns it into `landed`.
-    private var read: [(key: NoteKey, kept: Bool)]?
-    private var readSources: [Source] = []
-
-    private struct Landed {
-        var held: [NoteKey: Bool]
-        var sources: [Source]
-    }
+    /// How many times the store has been asked for what changed: for the checks, which hold a
+    /// save with nothing new to asking for nothing.
+    private(set) var takes = 0
     /// Whether what this device keeps can be read: **asked of the canary, only when a write
     /// has failed or something says the device may be back** — never before a write, a probe
     /// being a file made and unlinked on a phone, and never of the system's flag, which on a
@@ -224,16 +203,6 @@ public actor StoreSaver {
         _ = try? await saveAndTell()
     }
 
-    /// **The index was replaced through the file, and not by a save of this saver's** (#344):
-    /// a read back writing a package's store, or its undo writing the old one back. What was
-    /// known of what the index holds is no longer true of it — set against it, every post
-    /// the old store held would be "let go", one delete each, ahead of the items — so it is
-    /// forgotten, and known again when the full save that follows has landed.
-    func indexReplaced() {
-        landed = nil
-        read = nil
-    }
-
     /// Whether a write is owed and held for a lock: for the checks, and nothing the app reads.
     var isHeldForALock: Bool { unlanded && locked }
 
@@ -254,13 +223,8 @@ public actor StoreSaver {
     /// this run opened supplies one (`init(store:file:protected:)`) — and a check.
     init(
         store: ItemStore, write: Write?, writeUnsent: WriteUnsent?, writeNotices: WriteNotices?,
-        protected: ProtectedData, remake: (@Sendable () throws -> Void)?,
-        writeOwn: WriteOwn? = nil, holding read: (sources: [Source], notes: [Note])? = nil
+        protected: ProtectedData, remake: (@Sendable () throws -> Void)?
     ) {
-        self.writeOwn = writeOwn
-        // One pass, and no copy of a post kept: its key and whether it is kept.
-        self.read = read.map { $0.notes.map { ($0.key, $0.kept) } }
-        self.readSources = read?.sources ?? []
         self.protected = protected
         self.remake = remake
         self.store = store
@@ -273,34 +237,22 @@ public actor StoreSaver {
     }
 
     /// Saves into `file`, or nowhere when it is `nil`.
-    ///
-    /// `holding` is what the launch read out of `file` — exactly what the index holds as this
-    /// run begins — so that from the first save on, what is this device's alone is written
-    /// ahead of everything else. Left out, that begins with the first full save to land.
-    public init(
-        store: ItemStore, file: StoreFile?, protected: ProtectedData = .always,
-        holding read: (sources: [Source], notes: [Note])? = nil
-    ) {
+    public init(store: ItemStore, file: StoreFile?, protected: ProtectedData = .always) {
         var write: Write?
         var writeUnsent: WriteUnsent?
         var writeNotices: WriteNotices?
         var remake: (@Sendable () throws -> Void)?
-        var writeOwn: WriteOwn?
         if let file {
-            write = { sources, notes, said in
-                try await file.save(sources: sources, notes: notes, said: said)
-            }
+            write = { try await file.save($0) }
             writeUnsent = { try await file.save(unsent: $0) }
             writeNotices = { try await file.save(notices: $0) }
             remake = { try file.remakeConnection() }
-            writeOwn = { try await file.save(own: $0) }
         }
         // The re-make is the file's own, and there is one only where there is a file: a run
         // that opened no store is handed nothing that could open one.
         self.init(
             store: store, write: write, writeUnsent: writeUnsent, writeNotices: writeNotices,
-            protected: protected, remake: remake,
-            writeOwn: writeOwn, holding: file == nil ? nil : read
+            protected: protected, remake: remake
         )
     }
 
@@ -345,8 +297,8 @@ public actor StoreSaver {
     /// Writes the texts the person pressed to send, where they have moved, and nothing else:
     /// where a save would run — after every save asked for before it, and never inside a read
     /// back's commit — but no post is written again for it. **What a send waits for** before
-    /// its request leaves, so that a text the source may have taken is on disk first; a full
-    /// save would have the request wait for every note to be written.
+    /// its request leaves, so that a text the source may have taken is on disk first; a save
+    /// would have the request wait for whatever rows changed to be written too.
     ///
     /// **Says whether the texts are on disk as the store holds them**: false where this run
     /// writes nowhere, and a write that failed throws. A send asks, and does not leave on a no.
@@ -355,6 +307,8 @@ public actor StoreSaver {
     /// (`StoreFile.save(sources:notes:said:)`), which touches no text, and `ItemStore.replace`
     /// leaves the texts held: the table and the store agree before it and after, so the
     /// revision last written stays true. Where this run has no file it writes no text at all.
+    /// Nor does it for the rows: `ItemStore.replace` says which rows the file holds otherwise
+    /// than the store does, and nothing else is owed.
     @discardableResult
     public func saveUnsent() async throws -> Bool {
         try await exclusively { try await self.writeUnsentNow() }
@@ -543,7 +497,7 @@ public actor StoreSaver {
     /// the store was at when this last looked; throws only what `sleep` throws.
     ///
     /// **A page of notices arms a save as a landing does** and owes no gap: the gap is the price
-    /// of writing every note again, and a save that found only the notices moved wrote none.
+    /// of writing the posts, and a save that found only the notices moved wrote none.
     ///
     /// **Only a change arms one.** A wake that is a write having failed finds no revision moved
     /// since this last looked and arms nothing here, whichever part failed: every part's
@@ -599,9 +553,8 @@ public actor StoreSaver {
         var failure: (any Error)?
         do { try await writeUnsentNow() } catch { failure = error }
         do { try await writeNoticesNow() } catch { failure = failure ?? error }
-        do { try await writeOwnNow() } catch { failure = failure ?? error }
         var wrote = false
-        do { wrote = try await writeItemsNow() } catch { failure = failure ?? error }
+        do { wrote = try await writeRowsNow() } catch { failure = failure ?? error }
         if let failure { throw failure }
         if unlanded {
             unlanded = false
@@ -614,66 +567,6 @@ public actor StoreSaver {
         return wrote
     }
 
-    /// **What is this device's alone, written first** (#344): after the words waiting to be
-    /// sent and the notices, and ahead of the items, in a transaction of its own.
-    ///
-    /// A full save rewrites every row, and takes as long as the store is large — longer, past
-    /// a few hundred megabytes, than a locking phone or a quit allows. Cut off, it rolls
-    /// back; and nearly all of what it would have written is the sources' own word, read
-    /// again. **What is not** is small and is the person's: a post they keep, a post they let
-    /// go (which must not be back on disk), a source they added or removed, what a source
-    /// follows. Those are written here, in a transaction that stays small whatever the store
-    /// weighs — so they are on disk whether or not the full save that follows gets to its end.
-    ///
-    /// **Found by comparing**, not by anything having kept a list: what the store holds now,
-    /// against what the index held when a write last landed (`landed`). So it is right
-    /// whatever happened between two saves — a post kept and then let go is a row gone, one
-    /// let go that came back from its source is a row still there — and a save that fails
-    /// leaves `landed` as it was, and the same set owed.
-    private func writeOwnNow() async throws {
-        guard let writeOwn else { return }
-        if landed == nil, let read {
-            landed = Landed(held: Dictionary(read, uniquingKeysWith: { first, _ in first }), sources: readSources)
-            self.read = nil
-        }
-        guard var known = landed else { return }
-        // Asked first, and of one number: where nothing has changed since what was written,
-        // nothing of the store is copied to find that out.
-        guard await store.revision != written else { return }
-        snapshots += 1
-        let now = await store.ownSnapshot()
-        var changes = OwnChanges()
-        for (key, wasKept) in known.held {
-            guard let kept = now.held[key] else {
-                changes.gone.append(key)
-                continue
-            }
-            if kept != wasKept { changes.kept.append(.init(key: key, kept: kept)) }
-        }
-        if now.sources != known.sources {
-            let before = Dictionary(known.sources.map { ($0.host, $0) }, uniquingKeysWith: { first, _ in first })
-            let hosts = Set(now.sources.map(\.host))
-            let said = Dictionary(now.said.map { ($0.host, $0) }, uniquingKeysWith: { first, _ in first })
-            changes.removed = known.sources.map(\.host).filter { !hosts.contains($0) }
-            changes.sources = now.sources.filter { before[$0.host] != $0 }.map { .init(source: $0, said: said[$0.host]) }
-        }
-        guard !changes.isEmpty else { return }
-        do {
-            try await writeOwn(changes)
-        } catch {
-            // What kind of failure and SQLite's own number for it, and nothing the error says
-            // in words: this write is of keeps and sources, and an error's words may name them.
-            Self.log.error("Saving what is this device's own failed: \(Self.kind(of: error), privacy: .public)")
-            owe()
-            throw error
-        }
-        // What the index holds now: as it was, with exactly these applied.
-        for key in changes.gone { known.held[key] = nil }
-        for row in changes.kept { known.held[row.key] = row.kept }
-        known.sources = now.sources
-        landed = known
-    }
-
     /// What may be said of `error` in a public log line: its type, and SQLite's result code
     /// where SQLite raised it. Never its own words, which can carry what was being written.
     static func kind(of error: any Error) -> String {
@@ -682,31 +575,30 @@ public actor StoreSaver {
         return "\(type) \(raised.extendedResultCode.rawValue)"
     }
 
-    private func writeItemsNow() async throws -> Bool {
+    /// The rows that changed since the last write that landed, and the sources where they moved,
+    /// in one transaction. **What is this device's own** (#344) — a post kept or let go, a
+    /// source added or removed — is no longer written ahead of the rest: the whole write is the
+    /// size of what changed, so a lock or a quit cuts off milliseconds of it, all or nothing.
+    private func writeRowsNow() async throws -> Bool {
         guard let write else { return false }
+        // Asked first, and of one number: where nothing has changed since what was written,
+        // nothing of the store is taken to find that out.
         guard await store.revision != written else { return false }
-        snapshots += 1
-        let snapshot = await store.snapshot()
-        // Written between the asking and the taking: the same answer, of what was taken.
-        guard snapshot.revision != written else { return false }
+        takes += 1
+        let (changes, revision) = await store.takeChanges()
         do {
             let began = ContinuousClock.now
-            try await write(snapshot.sources, snapshot.notes, snapshot.said)
-            written = snapshot.revision
-            // Every row is now as the store held it: what the next comparison is made against.
-            if writeOwn != nil {
-                landed = Landed(
-                    held: Dictionary(snapshot.notes.map { ($0.key, $0.kept) }, uniquingKeysWith: { first, _ in first }),
-                    sources: snapshot.sources
-                )
-                read = nil
-            }
-            // Only a count and a time: what `gap` is set by.
+            try await write(changes)
+            written = revision
+            // Only counts and a time: what `gap` is set by.
             let took = ContinuousClock.now - began
-            Self.log.info("Saved \(snapshot.notes.count, privacy: .public) note(s) in \(String(describing: took), privacy: .public)")
+            Self.log.info("Saved \(changes.upserts.count, privacy: .public) row(s) and let \(changes.deletes.count, privacy: .public) go in \(String(describing: took), privacy: .public)")
             return true
         } catch {
-            Self.log.error("Saving the index failed: \(String(describing: error), privacy: .public)")
+            await store.putBack(changes)
+            // What kind of failure and SQLite's own number for it, and nothing the error says
+            // in words: an error's words may name what was being written.
+            Self.log.error("Saving the index failed: \(Self.kind(of: error), privacy: .public)")
             owe()
             throw error
         }

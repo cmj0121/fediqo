@@ -316,6 +316,45 @@ public struct CompiledTimeline: Sendable {
     /// One entry per kind — and per field (#287) — that has includes, in the order they are tried.
     private let groups: [[Matcher]]
 
+    /// What a store may narrow its rows by before `verdict` is asked (#357): the rules it can
+    /// say exactly, and nothing it cannot. **A superset, always**: a row this lets through may
+    /// still be hidden, and a row it stops is one `verdict` would hide.
+    public struct Prefilter: Sendable, Equatable {
+        /// One rule as a store can ask it of a row's own columns. `host` is the rule's scope.
+        public enum Member: Sendable, Equatable {
+            case host(String)
+            case category(Category, host: String?)
+            /// A handle as a rule folds one (`Fold.handle`).
+            case handle(String, host: String?)
+        }
+
+        /// Hides that a store can say: a row any of these matches is hidden.
+        public let excludes: [Member]
+        /// The include groups a store can say whole: a row that matches no member of one is
+        /// hidden. A group with a rule on words or a field is left out, since it may let anything
+        /// through.
+        public let groups: [[Member]]
+        /// Whether a rule here is asked of the post a reblog reblogs (`verdict`), so whoever
+        /// judges a reblog must hand that post in.
+        public let readsWhatIsSaid: Bool
+    }
+
+    public var prefilter: Prefilter {
+        func member(_ matcher: Matcher) -> Prefilter.Member? {
+            switch matcher.check {
+            case .host(let host): .host(host)
+            case .category(let category): .category(category, host: matcher.host)
+            case .handle(let handle): .handle(handle, host: matcher.host)
+            case .keyword, .field: nil
+            }
+        }
+        let said = groups.compactMap { group -> [Prefilter.Member]? in
+            let members = group.compactMap(member)
+            return members.count == group.count ? members : nil
+        }
+        return Prefilter(excludes: excludes.compactMap(member), groups: said, readsWhatIsSaid: readsWhatIsSaid)
+    }
+
     public init(_ definition: TimelineDefinition, sources: [Source]) {
         self.definition = definition
         self.sources = sources

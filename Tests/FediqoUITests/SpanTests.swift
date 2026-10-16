@@ -142,9 +142,32 @@ struct SpanTests {
             #expect(L10n.t(key, language: language) != key, "\(key) in \(language)")
         }
         #expect(SpanSection.countLine(0, language: language) == L10n.t("usage.span.none", language: language))
-        #expect(SpanSection.countLine(4, language: language).contains("4"))
+        #expect(SpanSection.countLine(4, language: language)?.contains("4") == true)
         #expect(SpanSection.wentLine(2, language: language).contains("2"))
         #expect(SpanSection.wentLine(1, language: language).contains("1"))
+    }
+
+    @Test("Over a store that counts only what it has read, the row says at least, and the question names every post that goes",
+          arguments: [DummyLanguage.english, .taiwanese])
+    func atLeastWhereHeldInPart(_ language: DummyLanguage) async {
+        let atLeast = language == .english ? "at least" : "至少"
+        let from = Self.day(6), to = Self.day(4)
+        for posts in [1, 3] {
+            #expect(SpanSection.countLine(posts, atLeast: true, language: language)?.lowercased().contains(atLeast) == true)
+        }
+        // None read is not none there: the row says nothing, and the press is not dim.
+        #expect(SpanSection.countLine(0, atLeast: true, language: language) == nil)
+        let ask = SpanAsk(from: from, to: to, host: nil, atLeast: true)
+        let more = SpanSection.more(ask, figure: 0, count: { _ in (posts: 12, kept: 0) }, none: {}, go: {}, language: language)
+        #expect(more.head.isEmpty && more.items[0].look == .live)
+        // The question names the count asked at the press, exactly (C14).
+        let title = await more.items[0].counted()?.question.title
+        #expect(title == L10n.count("prefs.span.ask", 12, language: language))
+        #expect(title?.lowercased().contains(atLeast) == false)
+        // And where the press finds none at all, it says so and asks nothing.
+        var none = 0
+        let empty = SpanSection.more(ask, figure: 0, count: { _ in (posts: 0, kept: 0) }, none: { none += 1 }, go: {}, language: language)
+        #expect(await empty.items[0].counted() == nil && none == 1)
     }
 }
 

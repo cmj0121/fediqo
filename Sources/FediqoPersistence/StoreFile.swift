@@ -54,7 +54,104 @@ public struct StoreFile: Sendable {
             lock.lock()
             defer { lock.unlock() }
             current = fresh
+            sources = nil
         }
+
+        /// The sources by host as last read (`sourcesByHost(cached:)`), with what they were read
+        /// as of: the connection's `data_version`, which another connection's commit moves, and
+        /// how many of this one's own writes there had been, which it does not.
+        private var sources: (version: Int, writes: Int, byHost: [String: Source])?
+        private var writes = 0
+        private var besideQueue: DatabaseQueue?
+        private var pageIndexTask: Task<Void, any Error>?
+
+        /// The one making of the pages' index (`makePageIndex`): the one already on its way, or
+        /// `make`'s, so that every caller waits for one, and one connection reads beside it.
+        func pageIndexBuild(_ make: () -> Task<Void, any Error>) -> Task<Void, any Error> {
+            lock.lock()
+            defer { lock.unlock() }
+            if let pageIndexTask { return pageIndexTask }
+            let made = make()
+            pageIndexTask = made
+            return made
+        }
+
+        /// The making ended, made or failed: the next caller asks the file again.
+        func pageIndexEnded() {
+            lock.lock()
+            defer { lock.unlock() }
+            pageIndexTask = nil
+        }
+
+        /// A connection that reads beside this one while it is held by a long write (#357, C15):
+        /// the pages' index being made. Nothing where none is.
+        var beside: DatabaseQueue? {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return besideQueue
+            }
+            set {
+                lock.lock()
+                defer { lock.unlock() }
+                besideQueue = newValue
+            }
+        }
+
+        /// This connection has written, or tried to: the sources it holds may have changed.
+        func wrote() {
+            lock.lock()
+            defer { lock.unlock() }
+            writes += 1
+        }
+
+        func sources(at version: Int) -> [String: Source]? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let sources, sources.version == version, sources.writes == writes else { return nil }
+            return sources.byHost
+        }
+
+        func keep(_ byHost: [String: Source], at version: Int) {
+            lock.lock()
+            defer { lock.unlock() }
+            sources = (version, writes, byHost)
+        }
+    }
+
+    /// The connection reads go to beside a long write, while there is one (`Held.beside`).
+    /// **Never closed by hand**: let go here, it closes once the last read holding it is done.
+    var beside: DatabaseQueue? {
+        get { held.beside }
+        nonmutating set { held.beside = newValue }
+    }
+
+    /// The one making of the pages' index, whoever asks (`Held.pageIndexBuild`).
+    func pageIndexBuild(_ make: () -> Task<Void, any Error>) -> Task<Void, any Error> {
+        held.pageIndexBuild(make)
+    }
+
+    func pageIndexEnded() {
+        held.pageIndexEnded()
+    }
+
+    /// A connection of its own to this store's file, **for reading alone** (#357, C15), made as
+    /// every connection to it is (`configuration`). In the rollback journal the index keeps
+    /// (#292), it reads what the file held at the last commit while another connection holds a
+    /// write that has not had to touch the file yet. Throws for a store not opened on disk.
+    func readingConnection() throws -> DatabaseQueue {
+        guard let origin = held.origin else { throw Remake.notOpenedOnDisk }
+        return try DatabaseQueue(path: origin.path, configuration: Self.configuration(readOnly: true, busyWait: origin.busyWait))
+    }
+
+    /// `sourcesByHost`, read again only where the source table may have changed since: a
+    /// handful of rows, read for each lookup of the pool otherwise.
+    func sourcesByHost(cached db: Database) throws -> [String: Source] {
+        let version = try Int.fetchOne(db, sql: "PRAGMA data_version") ?? 0
+        if let byHost = held.sources(at: version) { return byHost }
+        let byHost = try Self.sourcesByHost(db)
+        held.keep(byHost, at: version)
+        return byHost
     }
 
     /// Why a connection could not be made again.
@@ -257,6 +354,38 @@ public struct StoreFile: Sendable {
         }
     }
 
+    /// `scrub()` where it is due, **on GRDB's queue and never the caller's** (#357, C1): asked once
+    /// the timeline in front shows, and no longer by every open. A file this build never rebuilt
+    /// is rebuilt whatever it holds free, once — what an older build left inside its pages is not
+    /// this one's to vouch for. After that, only past `scrubbedPast` of free pages: what this
+    /// build frees is zeroed as it goes (`secure_delete`), so a rebuild gives back room and
+    /// nothing else, and a few pages are not worth the whole file rewritten while pages wait.
+    public func scrubIfDue() async {
+        let due = (try? await db.read { db -> Bool in
+            let version = try Int.fetchOne(db, sql: "PRAGMA user_version") ?? 0
+            let free = try Int.fetchOne(db, sql: "PRAGMA freelist_count") ?? 0
+            let pages = try Int.fetchOne(db, sql: "PRAGMA page_count") ?? 0
+            let size = try Int.fetchOne(db, sql: "PRAGMA page_size") ?? 0
+            return Self.scrubDue(version: version, free: free, pages: pages, pageSize: size)
+        }) ?? false
+        guard due else { return }
+        try? await db.writeWithoutTransaction { db in
+            try db.execute(sql: "VACUUM")
+            try db.execute(sql: "PRAGMA user_version = \(Self.scrubbed)")
+        }
+    }
+
+    /// Whether a file of `pages` pages, `free` of them free, is rebuilt (`scrubIfDue`).
+    static func scrubDue(version: Int, free: Int, pages: Int, pageSize: Int) -> Bool {
+        if version < scrubbed { return true }
+        guard free > 0 else { return false }
+        return free * pageSize > scrubbedPast.bytes || free > pages / scrubbedPast.share
+    }
+
+    /// The free pages past which a file is rebuilt: more than 16 MB of them, or more than a
+    /// tenth of the file.
+    static let scrubbedPast = (bytes: 16 * 1024 * 1024, share: 10)
+
     /// The index's `user_version` once this build has rebuilt it. **A number in the file's
     /// header and not a migration**: the tables are as they were, so a build before this one
     /// still opens the store — a migration id would have made it refuse to.
@@ -300,6 +429,9 @@ public struct StoreFile: Sendable {
         public let file: StoreFile?
         public let sources: [Source]
         public let notes: [Note]
+        /// The rows the file holds that are no item (`load`): owed a delete by the first save,
+        /// as the full save that rewrote every row once let them go (`ItemStore.init`).
+        public let skipped: [NoteKey]
         /// What each source last said about itself, as of when (#188).
         public let said: [SourceProfile]
         /// What the person pressed to send and no source had said landed (`Unsent`).
@@ -318,7 +450,7 @@ public struct StoreFile: Sendable {
 
         init(
             file: StoreFile?, sources: [Source] = [], notes: [Note] = [], said: [SourceProfile] = [],
-            unsent: [Unsent] = [], notices: [NoticeReach] = [],
+            skipped: [NoteKey] = [], unsent: [Unsent] = [], notices: [NoticeReach] = [],
             setAside: URL? = nil, storeIsNewer: Bool = false, trouble: StoreTrouble? = nil
         ) {
             self.unsent = unsent
@@ -327,6 +459,7 @@ public struct StoreFile: Sendable {
             self.file = file
             self.sources = sources
             self.notes = notes
+            self.skipped = skipped
             self.said = said
             self.setAside = setAside
             self.storeIsNewer = storeIsNewer
@@ -336,9 +469,10 @@ public struct StoreFile: Sendable {
     /// Opens the index in `directory` and reads it, failing closed — and says what it found
     /// where that is anything but a store opened (`Opened.trouble`, #295).
     ///
-    /// **An index that cannot be read is never written over.** `save` begins by emptying both
-    /// tables, so a launch that shrugged off a failed read and started empty would, at the first
-    /// save, turn one bad launch into everything the reader had, gone.
+    /// **An index that cannot be read is never written over.** A launch that shrugged off a
+    /// failed read and started empty would save into a file it never read — and a read back,
+    /// which empties both tables (`save(sources:notes:said:)`), would turn one bad launch into
+    /// everything the reader had, gone.
     ///
     /// **Why it could not be read decides what is done** (`cause(of:)`):
     ///
@@ -356,11 +490,18 @@ public struct StoreFile: Sendable {
     /// **A read back left unsettled opens nothing** (#292): see `StorePackager.settleHalfCommits`.
     ///
     /// The decision lives here rather than in the app so it can be tested against a real file.
+    ///
+    /// **`rows: false` reads no row** (#357): the sources, what each said, the texts and the
+    /// notices — a launch's, which reads each row once it is wanted (`page`, `HeldRows`). A row
+    /// that will not decode is then never met here, and is not what sets a store aside: a page
+    /// passes it over.
     public static func open(
         at directory: URL, now: Date = Date(), busyWait: TimeInterval = StoreFile.busyWait,
-        protected: ProtectedData = .always, unlocked: Bool = false
+        protected: ProtectedData = .always, unlocked: Bool = false, rows: Bool = true
     ) -> Opened {
-        open(at: directory, now: now, protected: protected, unlocked: unlocked) { try StoreFile(at: $0, busyWait: busyWait) }
+        open(at: directory, now: now, protected: protected, unlocked: unlocked, rows: rows) {
+            try StoreFile(at: $0, busyWait: busyWait)
+        }
     }
 
     /// What `open` reads, in order, each of which may be what fails.
@@ -391,7 +532,7 @@ public struct StoreFile: Sendable {
     ///   moment. Nothing is put aside in such a launch.
     static func open(
         at directory: URL, now: Date, protected: ProtectedData = .always, unlocked: Bool = false,
-        opening: (URL) throws -> StoreFile
+        rows: Bool = true, opening: (URL) throws -> StoreFile
     ) -> Opened {
         let canary: Bool
         switch protected.canary() {
@@ -427,7 +568,7 @@ public struct StoreFile: Sendable {
             return notDamage(error)
         }
         var file: StoreFile?
-        var snapshot: (sources: [Source], notes: [Note], said: [SourceProfile]) = ([], [], [])
+        var snapshot: (sources: [Source], notes: [Note], said: [SourceProfile], skipped: [NoteKey]) = ([], [], [], [])
         var unsent: [Unsent] = []
         var notices: [NoticeReach] = []
         var reading = Reading.opening
@@ -438,7 +579,12 @@ public struct StoreFile: Sendable {
             file = opened
             if first <= .items {
                 reading = .items
-                snapshot = try opened.load()
+                if rows {
+                    snapshot = try opened.loadRows()
+                } else {
+                    let read = try opened.loadSources()
+                    snapshot = (read.sources, [], read.said, [])
+                }
             }
             if first <= .unsent {
                 reading = .unsent
@@ -465,8 +611,6 @@ public struct StoreFile: Sendable {
                 }
             }
             guard let file else { return Opened(file: nil, trouble: .unreachable(.outOfReach)) }
-            // Read, and so not about to be set aside: only now is it rewritten (#292).
-            file.scrub()
             // One put aside by a launch that was quit before it could say so is said now — and
             // said truly: where the other of two stores took its place, not that an empty one did.
             let untold = putAside(in: directory).filter { !$0.told }
@@ -475,7 +619,7 @@ public struct StoreFile: Sendable {
             }
             return Opened(
                 file: file, sources: snapshot.sources, notes: snapshot.notes, said: snapshot.said,
-                unsent: unsent, notices: notices,
+                skipped: snapshot.skipped, unsent: unsent, notices: notices,
                 trouble: untold.isEmpty ? nil : .damaged(replacedBy: restored ? .otherStore : .empty)
             )
         } catch {
@@ -539,8 +683,9 @@ public struct StoreFile: Sendable {
     }
 
     /// `open(at:now:)` on the index this app keeps in Application Support.
+    /// **Reading no row** (#357): every launch's, whatever the store weighs.
     public static func openApplicationSupport(protected: ProtectedData = .always, unlocked: Bool = false) -> Opened {
-        open(at: applicationSupportDirectory, protected: protected, unlocked: unlocked)
+        open(at: applicationSupportDirectory, protected: protected, unlocked: unlocked, rows: false)
     }
 
     /// Where the index this app keeps lives, and what sits beside it (the limits' account, #251).
@@ -647,60 +792,83 @@ public struct StoreFile: Sendable {
     }
 
     public func load() throws -> (sources: [Source], notes: [Note], said: [SourceProfile]) {
+        let rows = try loadRows()
+        return (rows.sources, rows.notes, rows.said)
+    }
+
+    /// `load()`, and the keys of the rows it left out: no item to draw — nothing in it, or a
+    /// host with no source row and no kind (`NoteRecord.note(from:)`).
+    func loadRows() throws -> (sources: [Source], notes: [Note], said: [SourceProfile], skipped: [NoteKey]) {
         try db.read { db in
-            let records = try SourceRecord.fetchAll(db)
-            let sources = records.map(\.source)
-            let said = records.compactMap(\.saidProfile)
+            let (sources, said) = try Self.sources(db)
             let byHost = Dictionary(uniqueKeysWithValues: sources.map { ($0.host, $0) })
             // In the order they were written, which `ItemStore.snapshot` made the order they
             // arrived in: the copy of a post a merged row is drawn as is the one that came
             // first (#114), and a table read in no stated order is read in whatever order
             // SQLite likes. Stated, so that it is a guarantee rather than a habit.
+            var skipped: [NoteKey] = []
             let notes = try NoteRecord.order(Column.rowID).fetchAll(db).compactMap { record in
-                (byHost[record.host] ?? record.formerSource).flatMap(record.note(from:))
+                let note = (byHost[record.host] ?? record.formerSource).flatMap(record.note(from:))
+                if note == nil { skipped.append(NoteKey(host: record.host, id: record.id)) }
+                return note
             }
-            return (sources, notes, said)
+            return (sources, notes, said, skipped)
         }
     }
 
-    /// **Only what is this device's alone and changed** (#344), in one small transaction:
-    /// the rows let go deleted — zeroed as they go, `secure_delete` being on — the rows whose
-    /// `kept` changed updated in that one column, and the source rows that changed written or
-    /// removed. Nothing else is touched. What a full save would also write, ahead of it: so
-    /// that these are on disk where the full save, which rewrites every row and takes as long
-    /// as the store is large, is cut off by a device locking or a quit that will not wait.
+    /// The sources and what each last said of itself, and no row (#357): what a launch reads.
+    /// Every row is read by the page, or by key, once it is wanted (`page`, `HeldRows`).
+    func loadSources() throws -> (sources: [Source], said: [SourceProfile]) {
+        try db.read(Self.sources)
+    }
+
+    private static func sources(_ db: Database) throws -> (sources: [Source], said: [SourceProfile]) {
+        let records = try SourceRecord.fetchAll(db)
+        return (records.map(\.source), records.compactMap(\.saidProfile))
+    }
+
+    /// **What changed, and nothing else** (#357), in one transaction on GRDB's queue: the
+    /// sources removed deleted and the sources written where any moved, then each row let go
+    /// deleted by its key — zeroed as it goes, `secure_delete` being on — then each row
+    /// written as it stands. So a save costs what changed, whatever the store weighs, and a
+    /// lock or a quit that cuts it off cuts off a transaction of milliseconds: all of it, or
+    /// none.
     ///
-    /// Every row here is one a full save writes the same way, and the full save that follows
-    /// rewrites them all. **Between the two the index is neither the store as it was nor as it
-    /// is** — the device's own brought up to date, the sources' word as last saved — and that
-    /// is the point: it is the state a save cut off there leaves, and every row of it is one
-    /// that was true, with nothing the person let go still in it.
+    /// **A row written again keeps its place** (`ON CONFLICT … DO UPDATE`, never a replace,
+    /// which would delete it and add it at the end): the file's order is the order the rows
+    /// arrived in (#114), and a row new to the file is added after every row before it.
+    ///
+    /// Written even where nothing changed, for what a save does besides (`dropWhatWasReplaced`).
     ///
     /// **What is not here, because it is not in the index at all**: where the reader was
     /// standing on each timeline, and which posts were read this run. Both are kept for the
-    /// run alone, in memory (`TimelinePlaces`, `ItemStore.readAt`), and no save — whole or cut
-    /// off — writes or loses them.
-    func save(own changes: OwnChanges) async throws {
+    /// run alone, in memory (`TimelinePlaces`, `ItemStore.readAt`), and no save writes or loses
+    /// them.
+    public func save(_ changes: RowChanges) async throws {
+        let said = Dictionary(changes.said.map { ($0.host, $0) }, uniquingKeysWith: { a, _ in a })
+        defer { held.wrote() }
         try await db.write { db in
-            for host in changes.removed {
+            for host in changes.removedHosts {
                 try db.execute(sql: "DELETE FROM source WHERE host = ?", arguments: [host])
             }
-            for row in changes.sources {
-                try SourceRecord(row.source, said: row.said).save(db)
+            for source in changes.sources ?? [] {
+                try SourceRecord(source, said: said[source.host]).upsert(db)
             }
-            for key in changes.gone {
+            for key in changes.deletes {
                 try db.execute(sql: "DELETE FROM note WHERE host = ? AND id = ?", arguments: [key.host, key.id])
             }
-            for row in changes.kept {
-                try db.execute(sql: "UPDATE note SET kept = ? WHERE host = ? AND id = ?", arguments: [row.kept, row.key.host, row.key.id])
+            for op in changes.ops { try Self.make(op, in: db) }
+            for note in changes.upserts {
+                try NoteRecord(note).upsert(db)
             }
         }
+        dropWhatWasReplaced()
     }
 
     /// Empties both tables and writes `sources` and `notes` in their place, in one transaction,
     /// on GRDB's queue rather than the caller's. `said` is what each source last said about
     /// itself (#188), written on its source's row; one of a host not in `sources` goes nowhere.
-    /// The app saves through `StoreSaver`.
+    /// What a read back writes; the app saves through `StoreSaver`, by row (`save(_:)`).
     public func save(sources: [Source], notes: [Note], said: [SourceProfile] = []) async throws {
         try await save(sources: sources, notes: notes, said: said, replacingNotices: nil)
     }
@@ -712,6 +880,7 @@ public struct StoreFile: Sendable {
         sources: [Source], notes: [Note], said: [SourceProfile], replacingNotices notices: [NoticeReach]?
     ) async throws {
         let saidByHost = Dictionary(said.map { ($0.host, $0) }, uniquingKeysWith: { a, _ in a })
+        defer { held.wrote() }
         try await db.write { db in
             if let notices { try Self.write(notices: notices, in: db) }
             try NoteRecord.deleteAll(db)
@@ -776,31 +945,6 @@ public struct StoreFile: Sendable {
     /// replacing into, are named by.
     static let unreadablePrefix = "index-unreadable-"
     static let readBackAsidePrefix = "incoming-aside-"
-}
-
-/// What is this device's alone and has changed since the last write that landed (#344): what
-/// `StoreFile.save(own:)` writes ahead of a full save.
-struct OwnChanges: Sendable, Equatable {
-    struct Kept: Sendable, Equatable {
-        let key: NoteKey
-        let kept: Bool
-    }
-
-    struct SourceRow: Sendable, Equatable {
-        let source: Source
-        let said: SourceProfile?
-    }
-
-    /// Rows let go: by hand, by a limit, with their source.
-    var gone: [NoteKey] = []
-    /// Rows the person keeps, or no longer does.
-    var kept: [Kept] = []
-    /// Sources added, or following something else now.
-    var sources: [SourceRow] = []
-    /// Sources removed, by host.
-    var removed: [String] = []
-
-    var isEmpty: Bool { gone.isEmpty && kept.isEmpty && sources.isEmpty && removed.isEmpty }
 }
 
 private var migrator: DatabaseMigrator {
@@ -1191,6 +1335,25 @@ private var migrator: DatabaseMigrator {
     return migrator
 }
 
+extension StoreFile {
+    /// Every source by host, as `loadRows` stamps the rows it reads with.
+    static func sourcesByHost(_ db: Database) throws -> [String: Source] {
+        Dictionary(try SourceRecord.fetchAll(db).map { ($0.host, $0.source) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// A row of `note` — every column, and its `rowid` as `rowid` — as `loadRows` reads it:
+    /// stamped with its source, or with the one it was kept past (#250). Nothing where it holds
+    /// no item (`NoteRecord.note(from:)`); a throw where it will not decode.
+    static func heldRow(_ row: Row, sources: [String: Source]) throws -> HeldRow? {
+        let record = try NoteRecord(row: row)
+        guard let note = (sources[record.host] ?? record.formerSource).flatMap(record.note(from:)) else { return nil }
+        let rowid: Int64 = row["rowid"]
+        let place = String.fromDatabaseValue(row["posted_at"] as DatabaseValue)
+            .map { PageCursor(postedAt: $0, id: record.id, rowid: rowid) }
+        return HeldRow(note: note, arrival: rowid, place: place)
+    }
+}
+
 /// The post a notice's line is about, as that line's own cell holds it: **the one encoding of a
 /// post** (`NoteRecord`), as JSON. Not a row of `note` — it stands in no timeline, and is an
 /// item only once somebody opens it.
@@ -1293,7 +1456,7 @@ private struct ReferenceRow: Codable {
 /// save would then lose it for good; the `v2-categories` migration id is what makes a build
 /// that knows fewer kinds refuse the store instead. So a kind added after a release must also
 /// register a new migration id, even an empty one.
-private struct CategoryRow: Codable, Comparable {
+struct CategoryRow: Codable, Comparable {
     var kind: String
     var id: String?
 
@@ -1804,7 +1967,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     /// The note this row holds, stamped with `source` — the row `load()` read for this host, or
     /// `formerSource` where that row has gone and the reader kept the posts (#250). The note
     /// table keeps no copy of a source's boards; `load()` drops a note whose host has neither,
-    /// since a note from a server nobody follows is one nothing should draw.
+    /// since a note from a server nobody follows is one nothing should draw — and the first
+    /// save deletes its row (`Opened.skipped`).
     ///
     /// Categories come back as they went in, an empty set included: what a note arrived through
     /// is a fact about it, and filling in `.public` for none would put it somewhere it was never
@@ -1828,8 +1992,8 @@ private struct NoteRecord: Codable, FetchableRecord, PersistableRecord {
     ///   A reblog is exactly such a row but for its reference (#290),
     ///   so one whose reference was lost would otherwise open as an empty post by whoever
     ///   reblogged — under the reblog's name, with the reblog's own id as an id to send. Kept
-    ///   or not: there is nothing of it to keep. Since a save writes the rows held, the next
-    ///   one writes the file without it.
+    ///   or not: there is nothing of it to keep. A launch hands its key on as skipped
+    ///   (`Opened.skipped`), and the first save deletes it.
     /// - **A forum topic's reply says what it answers by its id** (`Note.init`), whatever its
     ///   cell says.
     func note(from source: Source) -> Note? {

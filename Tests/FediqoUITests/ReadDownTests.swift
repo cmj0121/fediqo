@@ -109,6 +109,8 @@ struct ReadDownTests {
     @Test("A place reached while an ask for more is out waits for it, then reads down")
     func reachedWhileMore() async {
         let (session, server) = await marked()
+        // The place is reached on a timeline drawn, as its row is: what is kept asks that one.
+        #expect(marks(session)[Self.key(31).rowID]?.below == [Self.stretch])
         await server.post(1...30)
         let asked = await server.cursors.filter { $0 == "max_id=31" }.count
         await server.hold("max_id=1")

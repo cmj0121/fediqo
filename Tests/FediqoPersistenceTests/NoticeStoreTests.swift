@@ -298,7 +298,7 @@ struct NoticeStoreTests {
         let wrote = Wrote()
         let saver = StoreSaver(
             store: store,
-            write: { _, notes, _ in wrote.add("posts:\(notes.count)") },
+            write: { changes in let notes = changes.upserts; wrote.add("posts:\(notes.count)") },
             writeUnsent: { wrote.add("texts:\($0.count)") },
             writeNotices: { wrote.add("notices:" + $0.flatMap(\.notices).map(\.newestID).joined(separator: ",")) }
         )
@@ -309,7 +309,7 @@ struct NoticeStoreTests {
 
         await store.ingest([PackagerFixture.note("2")])
         try await saver.save()
-        #expect(wrote.list.last == "posts:2" && wrote.list.count == 4, "notices that did not move are not written again")
+        #expect(wrote.list.last == "posts:1" && wrote.list.count == 4, "notices that did not move are not written again")
 
         await store.hold(Self.reach([Self.line(1)]))
         try await saver.save()
@@ -323,7 +323,7 @@ struct NoticeStoreTests {
         let slept = Wrote()
         let saver = StoreSaver(
             store: store,
-            write: { _, notes, _ in wrote.add("posts:\(notes.count)") },
+            write: { changes in let notes = changes.upserts; wrote.add("posts:\(notes.count)") },
             writeNotices: { wrote.add("notices:\($0.flatMap(\.notices).count)") }
         )
         let following = Task {
@@ -344,7 +344,7 @@ struct NoticeStoreTests {
         let store = ItemStore(sources: [Self.mastodon], notes: [])
         let wrote = Wrote()
         let slept = Wrote()
-        let saver = StoreSaver(store: store, write: { _, _, _ in wrote.add("posts") })
+        let saver = StoreSaver(store: store, write: { _ in wrote.add("posts") })
         let following = Task { await saver.follow { slept.add("\($0)") } }
         defer { following.cancel() }
 

@@ -57,7 +57,7 @@ struct UsageSourceList: View {
     /// detail would say first — the posts held and the pictures, or, of a source removed, that it
     /// was and the posts that stayed.
     static func spoken(_ source: Source, in session: ShellSession, onDisk: [String: Int]?, removed: Bool) -> String {
-        let posts = UsagePane.postsLine(session.holdings.posts(host: source.host))
+        let posts = UsagePane.postsLine(session.holdings.posts(host: source.host), atLeast: session.store.heldInPart)
         let rest = removed
             ? [L10n.t("item.left"), posts]
             : [posts, UsagePane.picturesLine(source, in: session, onDisk: onDisk)]
@@ -108,7 +108,7 @@ struct UsageRemovedSourceDetail: View {
             }
         }
         Section {
-            ShellReadingLine(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
+            ShellReadingLine(Text(UsagePane.postsLine(session.holdings.posts(host: source.host), atLeast: session.store.heldInPart)))
             ShellReadingLine(Text(L10n.t("usage.removed.line")))
         } header: {
             ShellSectionHead(title: "prefs.cache", line: "item.left", help: "usage.removed.help")
@@ -141,7 +141,7 @@ struct UsageSourceDetail: View {
         Section { masthead }
         Section {
             if cataloguesRead { catalogueLine }
-            ShellReadingLine(Text(UsagePane.postsLine(session.holdings.posts(host: source.host))))
+            ShellReadingLine(Text(UsagePane.postsLine(session.holdings.posts(host: source.host), atLeast: session.store.heldInPart)))
             ShellReadingLine(Text(UsagePane.picturesLine(source, in: session, onDisk: onDisk)))
             postLine
             noticesLine
