@@ -10,8 +10,16 @@ public actor ItemStore {
     /// which the next successful ask replaces whole and a Remove takes away with the rest. Kept
     /// apart, a server restating its size does not make every source look changed.
     private var saidByHost: [String: SourceProfile] = [:]
-    /// One row per `NoteKey`: two hosts carrying the same Mastodon URI are two rows (#10).
-    private var notes: [NoteKey: Note] = [:]
+    /// One row per `NoteKey`: two hosts carrying the same Mastodon URI are two rows (#10). Each
+    /// row a change reaches is remembered until a save takes it (`takeChanges`), so a save
+    /// writes the rows that changed and no others (#357).
+    private var notes = HeldNotes()
+    /// The sources as the last write that landed left them on disk, with what each said of
+    /// itself — nil where that is not known, and the next save writes every source. What a save
+    /// finds the sources changed by, without every way of changing one having to say so.
+    private var sourcesWritten: (sources: [Source], said: [String: SourceProfile])?
+    /// Hosts removed whose removal a write did not land: deleted by the next.
+    private var hostsOwed: Set<String> = []
     /// When each row first arrived, as a count that only goes up. Nothing reads the number; what
     /// is read is which of two is the smaller.
     ///
@@ -25,8 +33,9 @@ public actor ItemStore {
     /// backwards; the order two copies were taken in is a fact about this store, and it is the
     /// only one being asked for.
     ///
-    /// It survives a relaunch as an order rather than as a number: `snapshot` hands the rows over
-    /// oldest first, a save writes them in that order, and `init(sources:notes:)` counts the rows
+    /// It survives a relaunch as an order rather than as a number: a save adds the rows new to
+    /// the file oldest first (`takeChanges`) and keeps each row it writes again where it was, so
+    /// the file holds them in the order they arrived; and `init(sources:notes:)` counts the rows
     /// back in the order it is given them. So the numbers a second run uses are not the first
     /// run's, and the answer they give is.
     private var arrival: [NoteKey: Int] = [:]
@@ -217,9 +226,14 @@ public actor ItemStore {
     /// **Notices come in only of a source still here**, the first reach of a host winning. Whether
     /// anybody is still signed in to it is not known here: the sweep that lets a gone reader's
     /// marks go lets their notices go with them (`forgetReaderMarks`).
+    ///
+    /// **`readFromDisk` says the rows are what the file holds** — a launch's — so none is owed a
+    /// write until it changes. Left out, every row and source here is owed one: a store made of
+    /// rows the file may not hold, which the first save writes whole. `skipped` are rows the
+    /// file holds that are no item (`Opened.skipped`): the first save deletes them.
     public init(
         sources: [Source], notes incoming: [Note], said: [SourceProfile] = [], notices: [NoticeReach] = [],
-        unsent: [Unsent] = []
+        unsent: [Unsent] = [], readFromDisk: Bool = false, skipped: [NoteKey] = []
     ) {
         for text in unsent where !self.unsent.contains(where: { $0.id == text.id }) {
             self.unsent.append(text)
@@ -236,13 +250,17 @@ public actor ItemStore {
         for reach in notices where hosts.contains(reach.host) {
             if reaches[reach.host] == nil { reaches[reach.host] = reach.bounded() }
         }
-        notes = Dictionary(incoming.map { note in
+        notes = HeldNotes(Dictionary(incoming.map { note in
             // A row holds nothing of another post (`Note.brought`): what a snapshot's rows
             // refer to is among its rows, or is not held.
             var row = note
             row.brought = []
             return (row.key, row)
-        }, uniquingKeysWith: { _, new in new })
+        }, uniquingKeysWith: { _, new in new }), owed: !readFromDisk)
+        var unheld: [NoteKey] = []
+        for key in skipped where notes[key] == nil { unheld.append(key) }
+        notes.owe(unheld)
+        if readFromDisk { sourcesWritten = (sourceList, saidByHost) }
         // The order the rows are handed over is the order they arrived in: the run that wrote
         // this snapshot wrote them oldest first. A row named twice keeps the first mention's
         // place, the way `ingest` keeps a row's place when it is met again.
@@ -252,7 +270,8 @@ public actor ItemStore {
         }
         // What the file says is owed is settled against what the file holds (#293): a post
         // waited for that is here is named and no longer owed, and a row that could never have
-        // owed — a reblog, one with nothing to ask for — does not go on saying it does.
+        // owed — a reblog, one with nothing to ask for — does not go on saying it does. A row
+        // settled here, or given its board below, is owed a write as any change is.
         Self.settleOwing(in: &notes, of: nil)
         // A reply kept before replies were items says what board it came through (#297).
         for (key, note) in notes where note.source.kind == .discuz {
@@ -275,7 +294,7 @@ public actor ItemStore {
         }
     }
 
-    private static func throughItsBoard(_ note: Note, in notes: [NoteKey: Note], or landing: [NoteKey: Note] = [:]) -> Note {
+    private static func throughItsBoard(_ note: Note, in notes: HeldNotes, or landing: [NoteKey: Note] = [:]) -> Note {
         guard let topic = note.topicKey, !note.isPartOfTopic, let held = notes[topic] ?? landing[topic] else { return note }
         let boards = Self.boards(of: held.categories)
         guard !boards.isSubset(of: note.categories) else { return note }
@@ -321,10 +340,17 @@ public actor ItemStore {
         let entering = incoming.filter { $0.kept || withinRetention($0) }
         let reblogs = Set(incoming.lazy.filter(\.isReblog).map(\.key))
         let shown = Set(entering.flatMap(\.heldWith)).subtracting(reblogs)
-        notes = Dictionary(
+        notes = HeldNotes(Dictionary(
             incoming.filter { $0.kept || withinRetention($0) || shown.contains($0.key) }.map { ($0.key, $0) },
             uniquingKeysWith: { _, new in new }
-        )
+        ))
+        // The file holds the package's rows as they came (`StorePackager`): what differs here —
+        // a row past the window, one that owed a load — is owed a write; so is every source.
+        let owedLoad = Set(arriving.lazy.filter(\.refsDue).map(\.key))
+        let differing = incoming.map(\.key).filter { notes[$0] == nil || owedLoad.contains($0) }
+        notes.owe(differing)
+        sourcesWritten = nil
+        hostsOwed = []
         arrival = [:]
         arrivals = 0
         for note in incoming where notes[note.key] != nil && arrival[note.key] == nil {
@@ -910,6 +936,8 @@ public actor ItemStore {
         let host = raw.lowercased()
         sourceList.removeAll { $0.host == host }
         saidByHost[host] = nil
+        // Deleted by the next save whether or not this store knows the file to hold it.
+        hostsOwed.insert(host)
         let told = letNoticesGo(host: host)
         sourcesWatcher?(sourceList.map(\.host))
         if keepingPosts {
@@ -1005,18 +1033,15 @@ public actor ItemStore {
         // has passed it, the quote's has not.
         let quoted = Set(notes.values.filter { $0.kept || $0.postedAt >= retention }.flatMap(\.heldWith))
             .filter { notes[$0]?.isReblog != true }
-        var kept: [NoteKey: Note] = [:]
+        var going: [NoteKey] = []
         var gone: Set<String> = []
         var replies = false
-        for (key, note) in notes {
-            if note.kept || note.postedAt >= retention || quoted.contains(key) {
-                kept[key] = note
-            } else {
-                gone.insert(key.host)
-                replies = replies || note.isPartOfTopic
-            }
+        for (key, note) in notes where !(note.kept || note.postedAt >= retention || quoted.contains(key)) {
+            going.append(key)
+            gone.insert(key.host)
+            replies = replies || note.isPartOfTopic
         }
-        notes = kept
+        for key in going { notes[key] = nil }
         if notes.count != before {
             arrival = arrival.filter { notes[$0.key] != nil }
             changed(shown: true, replies: replies)
@@ -1144,29 +1169,68 @@ public actor ItemStore {
             && span.contains(note.postedAt) && (host == nil || note.source.host == host)
     }
 
-    /// Everything this store holds, read in one hop — what a save writes to disk.
-    ///
-    /// **In the order the rows arrived, and taken at one moment.** A save does not draw anything,
-    /// so it has no use for `all()`'s order; what it does need is the order the rows came in, so
-    /// that the run reading them back knows which copy of a post arrived first (#114). And asking
-    /// for the sources and the notes in two awaits would let an ingest or a remove land between
-    /// them, writing notes whose source is gone. This is the counterpart of
-    /// `init(sources:notes:)`. `revision` is the one this snapshot is of, read in the same hop.
-    /// **What is this device's alone**, as it stands (#344): which posts are held and which of
-    /// them the person keeps, and the sources with what each follows. Everything else a post
-    /// or a source carries is the source's own word and can be read again; these cannot.
-    /// No order and no copy of a post: one pass, for a save that writes these few things
-    /// ahead of everything else.
-    public func ownSnapshot() -> (sources: [Source], said: [SourceProfile], held: [NoteKey: Bool], revision: Int) {
-        (sourceList, Array(saidByHost.values), notes.mapValues(\.kept), revision)
-    }
-
+    /// Everything this store holds, read in one hop, the rows in the order they arrived: what a
+    /// take-away writes into a store of its own. A save writes what changed (`takeChanges`).
     public func snapshot() -> (sources: [Source], notes: [Note], said: [SourceProfile], revision: Int) {
         let arrival = self.arrival
         let ordered = notes.values.sorted { (arrival[$0.key] ?? 0) < (arrival[$1.key] ?? 0) }
         // By host, so one state of the store is always written one way.
         let said = saidByHost.values.sorted { $0.host < $1.host }
         return (sourceList, ordered, said, revision)
+    }
+
+    /// **What changed since the last take, and the revision it is of** (#357), in one hop: each
+    /// row a change reached, as it stands now or as a key to delete; and the sources, whole, where
+    /// any of them moved. Taken, it is owed no more — a save that cannot write it hands it back
+    /// (`putBack`). A row changed again after this is taken again, as it then stands.
+    ///
+    /// **Rows new to the file in the order they arrived**, so the file keeps that order (#114).
+    public func takeChanges() -> (changes: RowChanges, revision: Int) {
+        var changes = RowChanges()
+        var upserts: [Note] = []
+        let taken = notes.take()
+        for key in taken.touched {
+            if let note = notes[key] { upserts.append(note) }
+            if notes[key] == nil || taken.dropped.contains(key) { changes.deletes.append(key) }
+        }
+        let arrival = self.arrival
+        changes.upserts = upserts.sorted { (arrival[$0.key] ?? 0) < (arrival[$1.key] ?? 0) }
+        changes.deletes.sort { ($0.host, $0.id) < ($1.host, $1.id) }
+        let hosts = Set(sourceList.map(\.host))
+        var removed = hostsOwed
+        if let written = sourcesWritten { removed.formUnion(written.sources.map(\.host)) }
+        changes.removedHosts = removed.subtracting(hosts).sorted()
+        if sourcesWritten.map({ $0.sources != sourceList || $0.said != saidByHost }) ?? true {
+            changes.sources = sourceList
+            // By host, so one state of the store is always written one way.
+            changes.said = saidByHost.values.sorted { $0.host < $1.host }
+        }
+        sourcesWritten = (sourceList, saidByHost)
+        hostsOwed = []
+        return (changes, revision)
+    }
+
+    /// `changes`, taken and not written: owed again. Each row is written as it stands at the next
+    /// take, so one changed meanwhile is written with its newer word, and one let go meanwhile
+    /// is deleted.
+    public func putBack(_ changes: RowChanges) {
+        notes.owe(changes.upserts.map(\.key) + changes.deletes, dropped: changes.deletes)
+        hostsOwed.formUnion(changes.removedHosts)
+        if changes.sources != nil { sourcesWritten = nil }
+    }
+
+    /// **The file put back to an older store behind this one** — a read back's undo writing
+    /// back what the index held when it began, which a save may have written over since
+    /// (#344): every row and source held is owed a write, and of `fileHolds`, what the file now
+    /// holds, every row this store does not hold is owed a delete. So whatever was saved in
+    /// between is written again, and nothing the file was put back to that was let go stays.
+    public func oweEverything(fileHolds keys: [NoteKey], hosts: [String]) {
+        let held = Array(notes.keys)
+        let gone = keys.filter { notes[$0] == nil }
+        notes.owe(held + gone)
+        sourcesWritten = nil
+        hostsOwed.formUnion(hosts)
+        changed(shown: false, replies: false)
     }
 
     /// Holds a text pressed to send, or what is now known of one already held — in its place.
@@ -1423,7 +1487,7 @@ public actor ItemStore {
     private var refused: [NoteKey: Set<String>] = [:]
 
     /// The name of every post among `notes` held from each of `hosts`, by its source's own id.
-    private static func named(in notes: [NoteKey: Note], of hosts: Set<String>) -> [String: [String: String]] {
+    private static func named(in notes: HeldNotes, of hosts: Set<String>) -> [String: [String: String]] {
         var names: [String: [String: String]] = [:]
         for note in notes.values where hosts.contains(note.key.host) && !note.isReblog {
             if let id = note.statusID { names[note.key.host, default: [:]][id] = note.id }
@@ -1445,7 +1509,7 @@ public actor ItemStore {
     /// which is nearly always, that pass is all — then one pass over their hosts' items for the
     /// names. Returns the items that changed.
     @discardableResult
-    private static func settleOwing(in notes: inout [NoteKey: Note], of hosts: Set<String>?) -> [NoteKey] {
+    private static func settleOwing(in notes: inout HeldNotes, of hosts: Set<String>?) -> [NoteKey] {
         // Items that owe — and items that say a post is gone: said once, on one answer, and
         // taken back where the post turns up after all.
         let owing = notes.values.filter {

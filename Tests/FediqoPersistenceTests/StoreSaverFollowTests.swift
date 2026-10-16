@@ -71,7 +71,7 @@ struct StoreSaverFollowTests {
         let store = ItemStore(sources: [alpha], notes: notes)
         let landed = Landed()
         let waits = Waits()
-        let saver = StoreSaver(store: store) { _, notes, _ in await landed.record(notes) }
+        let saver = StoreSaver(store: store) { changes in let notes = changes.upserts; await landed.record(notes) }
         try await saver.save()
         let following = Task {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }
@@ -188,7 +188,7 @@ struct StoreSaverFollowTests {
         #expect(await landed.writes.count == 2, "saved the moment the gap ended, with no quiet")
         await waits.wake()
         await waits.asked(4, by: following)
-        #expect(await landed.writes == [[], ["1"], ["1", "2", "3"]])
+        #expect(await landed.writes == [[], ["1"], ["2", "3"]])
         #expect(await waits.asked == [Self.quiet, Self.gap - Self.quiet, Self.quiet, Self.gap - Self.quiet])
         await end(following, waits)
     }
@@ -218,7 +218,8 @@ struct StoreSaverFollowTests {
         let door = Door(holding: 2)
         let guardTask = watching("the second write, held") { await door.open() }
         defer { guardTask.cancel() }
-        let saver = StoreSaver(store: store) { _, notes, _ in
+        let saver = StoreSaver(store: store) { changes in
+            let notes = changes.upserts
             _ = await door.pass()
             await landed.record(notes)
         }
@@ -250,7 +251,8 @@ struct StoreSaverFollowTests {
         let door = Door(holding: 2)
         let guardTask = watching("the second write, held") { await door.open() }
         defer { guardTask.cancel() }
-        let saver = StoreSaver(store: store) { _, notes, _ in
+        let saver = StoreSaver(store: store) { changes in
+            let notes = changes.upserts
             _ = await door.pass()
             await landed.record(notes)
         }
@@ -272,7 +274,7 @@ struct StoreSaverFollowTests {
         await waits.asked(3, by: following)
         await waits.wake()
         await waits.asked(4, by: following)
-        #expect(await landed.writes == [[], ["1"], ["1", "2"]])
+        #expect(await landed.writes == [[], ["1"], ["2"]])
         #expect(await waits.asked == [Self.quiet, Self.gap - Self.quiet, Self.quiet, Self.gap - Self.quiet])
         await end(following, waits)
     }
@@ -283,7 +285,8 @@ struct StoreSaverFollowTests {
         let landed = Landed()
         let waits = Waits()
         let door = Door()
-        let saver = StoreSaver(store: store) { _, notes, _ in
+        let saver = StoreSaver(store: store) { changes in
+            let notes = changes.upserts
             if await door.pass() == 2 { throw Refused() }
             await landed.record(notes)
         }
@@ -315,7 +318,8 @@ struct StoreSaverFollowTests {
         let waits = Waits()
         let failing = Flag(true)
         let tries = Counter()
-        let saver = StoreSaver(store: store) { _, notes, _ in
+        let saver = StoreSaver(store: store) { changes in
+            let notes = changes.upserts
             await tries.bump()
             if await failing.isOn { throw Refused() }
             await landed.record(notes)
@@ -359,7 +363,7 @@ struct StoreSaverFollowTests {
         let tries = Counter()
         let posts = Counter()
         let saver = StoreSaver(
-            store: store, write: { _, _, _ in await posts.bump() },
+            store: store, write: { _ in await posts.bump() },
             writeNotices: { _ in
                 await tries.bump()
                 throw Refused()
@@ -399,7 +403,7 @@ struct StoreSaverFollowTests {
     func aLandingAfterAFailureIsTold() async throws {
         let store = ItemStore(sources: [alpha], notes: [])
         let failing = Flag(true)
-        let saver = StoreSaver(store: store) { _, _, _ in
+        let saver = StoreSaver(store: store) { _ in
             if await failing.isOn { throw Refused() }
         }
         let told = Counter()
@@ -430,7 +434,8 @@ struct StoreSaverFollowTests {
         let landed = Landed()
         let waits = Waits()
         let door = Door()
-        let saver = StoreSaver(store: store) { _, notes, _ in
+        let saver = StoreSaver(store: store) { changes in
+            let notes = changes.upserts
             if await door.pass() == 1 { throw Refused() }
             await landed.record(notes)
         }
@@ -453,7 +458,8 @@ struct StoreSaverFollowTests {
         let landed = Landed()
         let waits = Waits()
         let door = Door()
-        let saver = StoreSaver(store: store) { _, notes, _ in
+        let saver = StoreSaver(store: store) { changes in
+            let notes = changes.upserts
             if await door.pass() == 1 { throw Refused() }
             await landed.record(notes)
         }
@@ -516,7 +522,7 @@ struct StoreSaverFollowTests {
         let store = ItemStore(sources: [alpha], notes: [])
         let landed = Landed()
         let waits = Waits()
-        let saver = StoreSaver(store: store) { _, notes, _ in await landed.record(notes) }
+        let saver = StoreSaver(store: store) { changes in let notes = changes.upserts; await landed.record(notes) }
         try await saver.save()
         await store.ingest([note("1")])
         let following = Task {
@@ -534,7 +540,7 @@ struct StoreSaverFollowTests {
         let store = ItemStore(sources: [alpha], notes: [])
         let landed = Landed()
         let waits = Waits()
-        let saver = StoreSaver(store: store) { _, notes, _ in await landed.record(notes) }
+        let saver = StoreSaver(store: store) { changes in let notes = changes.upserts; await landed.record(notes) }
         await store.ingest([note("1")])
         let following = Task {
             await saver.follow(quiet: Self.quiet, gap: Self.gap) { try await waits.sleep($0) }

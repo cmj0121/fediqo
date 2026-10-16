@@ -16,6 +16,9 @@ public enum NetLog {
     /// What would not take the protection class (#344): a count, or a fixed line, and never a
     /// file's name.
     public static let protection = Logger(subsystem: "Fediqo", category: "protection")
+    /// What a read of the index passed over (#357): a fixed line and an error's class, and never
+    /// what the row held.
+    public static let index = Logger(subsystem: "Fediqo", category: "index")
 
     /// What stands where a host is not named: an ask of a server nobody added.
     public static let unnamed = "(unnamed)"

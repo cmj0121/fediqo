@@ -400,7 +400,9 @@ struct StoreGateTests {
         #expect(code.contains("saver: saver, protected: protected\n        )"))
         // And a save a lock refused is written at a wake-up too: both ask the canary themselves.
         #expect(code.contains("for await _ in protected.changes() {\n                await carrier.finishOwed()\n                await saver.owedNow()\n            }"))
-        #expect(code.contains("saver = StoreSaver(\n            store: store, file: opened.file, protected: protected,\n            holding: opened.setAside == nil ? (opened.sources, opened.notes) : nil\n        )"))
+        #expect(code.contains("saver = StoreSaver(store: store, file: opened.file, protected: protected)"))
+        // What the launch read is what the file holds: no row is owed a write until it changes.
+        #expect(code.contains("unsent: opened.unsent, readFromDisk: true, skipped: opened.skipped\n        )"))
     }
 
     /// **Held to the source**, as the test above is. What signs the person in is in the

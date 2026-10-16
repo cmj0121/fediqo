@@ -253,7 +253,7 @@ struct UnsentStoreTests {
         let wrote = Wrote()
         let saver = StoreSaver(
             store: store,
-            write: { _, notes, _ in wrote.add("posts:\(notes.count)") },
+            write: { changes in let notes = changes.upserts; wrote.add("posts:\(notes.count)") },
             writeUnsent: { wrote.add("texts:" + $0.map(\.text).joined(separator: ",")) }
         )
 
@@ -272,7 +272,7 @@ struct UnsentStoreTests {
         #expect(wrote.list == ["texts:one", "texts:one,two", "posts:2"], "the texts go first")
         await store.ingest([PackagerFixture.note("3")])
         try await saver.save()
-        #expect(wrote.list.last == "posts:3" && wrote.list.count == 4, "texts that did not move are not written again")
+        #expect(wrote.list.last == "posts:1" && wrote.list.count == 4, "texts that did not move are not written again")
     }
 
     @Test("A write of the texts that fails throws, and the next one writes them")

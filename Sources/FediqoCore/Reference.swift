@@ -211,7 +211,7 @@ extension Note {
     ///
     /// **And the post it answers, once that post was loaded for it** (#293): the reference then
     /// names it, and a post fetched because this item arrived is not let go from under it.
-    var heldWith: [NoteKey] {
+    public var heldWith: [NoteKey] {
         var keys = [reblogKey].compactMap { $0 }
         for reference in refs where reference.kind != .reblogs {
             if let id = reference.id { keys.append(NoteKey(host: source.host, id: id)) }

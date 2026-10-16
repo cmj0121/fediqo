@@ -105,7 +105,7 @@ struct LeavingTests {
         let record = Record(), held = HeldWrite(), grant = Grant(record)
         let saver = StoreSaver(
             store: await store(),
-            write: { _, _, _ in
+            write: { _ in
                 record.note("items begun")
                 await held.hold()
                 record.note("items written")
@@ -140,7 +140,7 @@ struct LeavingTests {
     func theRestIsSkipped() async throws {
         func leave(canary: CanaryTurned, took: Duration) async -> (did: [String], ended: Int) {
             let record = Record(), grant = Grant(record)
-            let saver = StoreSaver(store: await store(), write: { _, _, _ in record.note("saved") }, protected: canary.protected)
+            let saver = StoreSaver(store: await store(), write: { _ in record.note("saved") }, protected: canary.protected)
             let began = ContinuousClock.now
             var asked = 0
             await Leaving.leave(
@@ -170,7 +170,7 @@ struct LeavingTests {
     func cameBack() async throws {
         let record = Record(), grant = Grant(record)
         let canary = CanaryTurned(.reads)
-        let saver = StoreSaver(store: await store(), write: { _, _, _ in record.note("saved") }, protected: canary.protected)
+        let saver = StoreSaver(store: await store(), write: { _ in record.note("saved") }, protected: canary.protected)
         await Leaving.leave(
             holding: grant, decide: {}, saver: saver, protected: canary.protected, stillLeft: { false },
             then: { record.note("the rest of leaving") }
@@ -186,7 +186,7 @@ struct LeavingTests {
         let record = Record(), grant = Grant(record)
         let canary = CanaryTurned(.refused)
         let saver = StoreSaver(
-            store: await store(), write: { _, _, _ in
+            store: await store(), write: { _ in
                 record.note("items tried")
                 throw Refused()
             },

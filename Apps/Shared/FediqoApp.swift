@@ -116,19 +116,15 @@ final class Launch {
         // The one the gate asked: made once for the store, and the same one here.
         let protected = ProtectedSignals.protected(store: StoreFile.applicationSupportDirectory)
         self.protected = protected
+        // What was read is what the file holds: a save writes only what changes from here.
         store = ItemStore(
             sources: opened.sources, notes: opened.notes, said: opened.said, notices: opened.notices,
-            unsent: opened.unsent
+            unsent: opened.unsent, readFromDisk: true, skipped: opened.skipped
         )
         // `nil` when the index could not be read and could not be set aside either: this run
         // then saves nothing, so what is on disk survives it (`StoreFile.open(at:now:)`).
         // It is also `nil` when the index was written by a newer build, which is left as found.
-        // Handed what was read, so that from the first save what is this device's alone — a
-        // post kept or let go, a source added or removed — is written ahead of everything else.
-        saver = StoreSaver(
-            store: store, file: opened.file, protected: protected,
-            holding: opened.setAside == nil ? (opened.sources, opened.notes) : nil
-        )
+        saver = StoreSaver(store: store, file: opened.file, protected: protected)
         file = opened.file
         // Only beside an index this run writes: a run that must not write the index (a newer
         // build's, or one that could not be set aside) writes no lines about it either.

@@ -55,7 +55,7 @@ struct OwedSaveTests {
     private func saver(_ disk: Disk, _ canary: CanaryTurned) -> StoreSaver {
         StoreSaver(
             store: ItemStore(sources: [Self.source], notes: []),
-            write: { _, _, _ in try disk.write() }, protected: canary.protected
+            write: { _ in try disk.write() }, protected: canary.protected
         )
     }
 
@@ -124,7 +124,7 @@ struct OwedSaveTests {
         let made = OSAllocatedUnfairLock(initialState: 0)
         let saver = StoreSaver(
             store: ItemStore(sources: [Self.source], notes: []),
-            write: { _, _, _ in
+            write: { _ in
                 // The write is refused — and by then the canary is too.
                 canary.turn(.refused)
                 try disk.write()
@@ -141,7 +141,7 @@ struct OwedSaveTests {
         #expect(made.withLock { $0 } == 0, "a connection made again behind a lock")
         // And where it reads before the failure and after, it is made again, and the save tried.
         let steady = StoreSaver(
-            store: ItemStore(sources: [Self.source], notes: []), write: { _, _, _ in try disk.write() },
+            store: ItemStore(sources: [Self.source], notes: []), write: { _ in try disk.write() },
             writeUnsent: nil, writeNotices: nil, protected: canary.protected, remake: { made.withLock { $0 += 1 } }
         )
         canary.turn(.refused)
@@ -177,7 +177,7 @@ struct OwedSaveTests {
         let disk = Disk(), canary = CanaryTurned(.reads)
         let made = OSAllocatedUnfairLock(initialState: 0)
         let saver = StoreSaver(
-            store: ItemStore(sources: [Self.source], notes: []), write: { _, _, _ in try disk.write() },
+            store: ItemStore(sources: [Self.source], notes: []), write: { _ in try disk.write() },
             writeUnsent: nil, writeNotices: nil, protected: canary.protected, remake: { made.withLock { $0 += 1 } }
         )
         disk.refuse(true)
@@ -349,7 +349,7 @@ struct OwedSaveTests {
 
 /// #344: a save's failure is said in the log by its kind and SQLite's number — never by the
 /// error's own words, which can carry what was being written.
-@Suite("A failed save of what is this device's own is logged by its kind alone")
+@Suite("A failed save is logged by its kind alone")
 struct SaveFailureLogTests {
     @Test("What is said of an error is its type and SQLite's code, and nothing of its message, its statement or its arguments")
     func kind() {
@@ -364,12 +364,12 @@ struct SaveFailureLogTests {
         #expect(StoreSaver.kind(of: Refusal()) == "Refusal")
     }
 
-    @Test("The line for what is this device's own says only that, in public")
+    @Test("The line for a save that failed says only its kind, in public")
     func theLine() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let code = try String(contentsOf: root.appendingPathComponent("Sources/FediqoPersistence/StoreSaver.swift"), encoding: .utf8)
-        let line = try #require(code.split(separator: "\n").first { $0.contains("Saving what is this device's own failed") })
+        let line = try #require(code.split(separator: "\n").first { $0.contains("Saving the index failed") })
         #expect(line.contains("\\(Self.kind(of: error), privacy: .public)") && !line.contains("String(describing: error)"))
     }
 }

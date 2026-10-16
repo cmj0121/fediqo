@@ -1409,9 +1409,10 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
     ///
     /// **Where the index was among them, the store is then saved again.** The undo writes
     /// what the index held when the read back began; the session has gone on since, and what
-    /// it holds now is the store — so that is written over the snapshot, once, by the saver's
-    /// own `resave`. It cannot go round: a save asks nothing of this, and nothing is owed any
-    /// more for that step when it is asked.
+    /// it holds now is the store — so the undo leaves every row of it owed a write
+    /// (`ItemStore.oweEverything`), and the saver's own `resave` writes them over the file,
+    /// once. It cannot go round: a save asks nothing of this, and nothing is owed any more for
+    /// that step when it is asked.
     ///
     /// **The person is not told that it was done.** They were told at the time that parts
     /// were not put back; that they since were is written to the log and nowhere they see —
@@ -1602,14 +1603,18 @@ public struct StorePackager: StoreCarrier, @unchecked Sendable {
             try await file.save(
                 sources: contents.sources, notes: contents.notes, said: contents.said, replacingNotices: []
             )
-            // Written through the file, past the saver: what it knew the index to hold is not
-            // what the index holds now (`StoreSaver.indexReplaced`).
-            await saver?.indexReplaced()
-            return ({ [saver] in
+            // Written through the file, past the saver: the store says what of it differs once
+            // it is replaced (`ItemStore.replace`), and is owed nothing else.
+            return ({ [store] in
                 try await file.save(
                     sources: previous.sources, notes: previous.notes, said: previous.said, replacingNotices: told
                 )
-                await saver?.indexReplaced()
+                // Put back as it was when the read back began — and an undo a lock held may
+                // come after saves that wrote into the package's store: what they wrote is
+                // owed again, and what the file was put back to that is let go since is too.
+                await store.oweEverything(
+                    fileHolds: previous.notes.map(\.key), hosts: previous.sources.map(\.host)
+                )
             }, {})
         }
         guard let index = staged.index else { return ({}, {}) }

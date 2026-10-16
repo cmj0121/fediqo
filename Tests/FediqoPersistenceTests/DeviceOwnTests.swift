@@ -5,10 +5,10 @@ import os
 import Testing
 @testable import FediqoPersistence
 
-/// #344: what is this device's alone — a post kept, a post let go, a source added or removed —
-/// is written ahead of the full save, in a transaction that stays small, so that it is on
-/// disk whether or not the full save gets to its end before a lock or a quit.
-@Suite("What is this device's alone is written first")
+/// #357: a save writes what changed, by row, in one transaction — so what is this device's
+/// alone (#344), a post kept, a post let go, a source added or removed, is on disk with a
+/// write the size of the change, whatever the store weighs.
+@Suite("A save writes what changed, by row")
 struct DeviceOwnTests {
     private static let alpha = Source(host: "alpha.test", kind: .mastodon)
     private static let beta = Source(host: "beta.test", kind: .mastodon)
@@ -34,74 +34,16 @@ struct DeviceOwnTests {
 
     /// What was asked of the disk, in order.
     private final class Record: Sendable {
-        private let state = OSAllocatedUnfairLock(initialState: (said: [String](), own: [OwnChanges]()))
+        private let state = OSAllocatedUnfairLock(initialState: (said: [String](), rows: [RowChanges]()))
         func note(_ what: String) { state.withLock { $0.said.append(what) } }
-        func own(_ changes: OwnChanges) { state.withLock { $0.own.append(changes) } }
+        func rows(_ changes: RowChanges) { state.withLock { $0.rows.append(changes) } }
         var said: [String] { state.withLock { $0.said } }
-        var own: [OwnChanges] { state.withLock { $0.own } }
-    }
-
-    /// The items write, held shut: it says when it has been reached, and ends when let go — or
-    /// answers at once that the save ended without reaching it.
-    private final class HeldItems: Sendable {
-        private struct State {
-            var began = false, over = false, released = false
-            var reached: [CheckedContinuation<Bool, Never>] = []
-            var parked: [CheckedContinuation<Void, Never>] = []
-        }
-        private let state = OSAllocatedUnfairLock(initialState: State())
-
-        func hold() async {
-            let waiting = state.withLock { state in
-                state.began = true
-                defer { state.reached = [] }
-                return state.reached
-            }
-            waiting.forEach { $0.resume(returning: true) }
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                let free = state.withLock { state in
-                    if state.released { return true }
-                    state.parked.append(continuation)
-                    return false
-                }
-                if free { continuation.resume() }
-            }
-        }
-
-        func reached() async -> Bool {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-                let known: Bool? = state.withLock { state in
-                    if state.began { return true }
-                    if state.over { return false }
-                    state.reached.append(continuation)
-                    return nil
-                }
-                if let known { continuation.resume(returning: known) }
-            }
-        }
-
-        func release() {
-            let parked = state.withLock { state in
-                state.released = true
-                defer { state.parked = [] }
-                return state.parked
-            }
-            parked.forEach { $0.resume() }
-        }
-
-        func over() {
-            let waiting = state.withLock { state in
-                state.over = true
-                defer { state.reached = [] }
-                return state.reached
-            }
-            waiting.forEach { $0.resume(returning: false) }
-        }
+        var rows: [RowChanges] { state.withLock { $0.rows } }
     }
 
     /// A store on disk holding `notes` from two sources, read as a launch reads it, and a
-    /// saver on it whose items write the check holds.
-    private func launched(in dir: URL, _ record: Record, _ held: HeldItems?) async throws -> (store: ItemStore, saver: StoreSaver, file: StoreFile) {
+    /// saver on it that says what it was asked to write.
+    private func launched(in dir: URL, _ record: Record) async throws -> (store: ItemStore, saver: StoreSaver, file: StoreFile) {
         do {
             let first = try StoreFile(at: dir)
             try await first.save(sources: [Self.alpha, Self.beta], notes: Self.notes)
@@ -109,16 +51,15 @@ struct DeviceOwnTests {
         }
         let opened = StoreFile.open(at: dir)
         let file = try #require(opened.file)
-        let store = ItemStore(sources: opened.sources, notes: opened.notes)
+        let store = ItemStore(sources: opened.sources, notes: opened.notes, readFromDisk: true)
         await store.hold(Unsent(host: Self.alpha.host, text: "words", audience: .everyone))
         await store.hold(NoticeReach(host: Self.alpha.host, before: "9", gathered: true))
         let saver = StoreSaver(
             store: store,
-            write: { sources, notes, said in
-                record.note("items begun")
-                if let held { await held.hold() }
-                try await file.save(sources: sources, notes: notes, said: said)
-                record.note("items written")
+            write: { changes in
+                record.rows(changes)
+                try await file.save(changes)
+                record.note("rows")
             },
             writeUnsent: { texts in
                 record.note("words")
@@ -127,229 +68,271 @@ struct DeviceOwnTests {
             writeNotices: { reaches in
                 record.note("notices")
                 try await file.save(notices: reaches)
-            },
-            protected: .always, remake: nil,
-            writeOwn: { changes in
-                record.note("the device's own")
-                record.own(changes)
-                try await file.save(own: changes)
-            },
-            holding: (opened.sources, opened.notes)
+            }
         )
         return (store, saver, file)
     }
 
-    @Test("With the full save held — or never finished — a post kept, a post let go and a source removed are already on disk, after the words and the notices")
-    func onDiskBeforeTheItems() async throws {
-        let dir = scratch()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let record = Record(), held = HeldItems()
-        let (store, saver, _) = try await launched(in: dir, record, held)
-        // What the person did a moment before leaving, or quitting.
-        let kept = Self.notes[0].key
-        #expect(await store.setKept(true, for: kept))
-        await letGo(Self.notes[1], in: store)
-        await store.remove(host: Self.beta.host)
-        let saving = Task {
-            _ = await saver.finished()
-            held.over()
-        }
-        try #require(await held.reached(), "the save ended without the full write ever beginning")
-        #expect(record.said == ["words", "notices", "the device's own", "items begun"])
-        // The index as it is on disk, with the full save still not written: read by a
-        // connection of its own, as the next launch would.
-        let path = dir.appendingPathComponent("index.sqlite").path
-        let disk = try DatabaseQueue(path: path, configuration: StoreFile.configuration(readOnly: true))
-        let rows = try await disk.read { db in
-            try Row.fetchAll(db, sql: "SELECT host, id, kept FROM note ORDER BY id").map { ($0["id"] as String, $0["kept"] as Bool) }
-        }
-        let hosts = try await disk.read { try String.fetchAll($0, sql: "SELECT host FROM source ORDER BY host") }
-        #expect(hosts == [Self.alpha.host], "the removed source is still on disk, its token gone")
-        #expect(rows.map(\.0) == [Self.notes[0].id, Self.notes[2].id, Self.notes[3].id], "the post let go, or the removed source's posts, are still on disk")
-        #expect(rows.first { $0.0 == kept.id }?.1 == true, "the keep was not written")
-        #expect(rows.filter(\.1).count == 1)
-        try disk.close()
-        // And when the full save does land it says the same, and nothing is written twice over.
-        held.release()
-        await saving.value
-        #expect(record.said == ["words", "notices", "the device's own", "items begun", "items written"])
-        let whole = StoreFile.open(at: dir)
-        #expect(whole.sources.map(\.host) == [Self.alpha.host])
-        #expect(Set(whole.notes.map(\.id)) == [Self.notes[0].id, Self.notes[2].id, Self.notes[3].id])
-        #expect(whole.notes.first { $0.id == kept.id }?.kept == true)
+    /// How many rows the file's own connection has inserted, changed or deleted so far.
+    private func changesCount(_ file: StoreFile) async throws -> Int {
+        try await file.db.read { $0.totalChangesCount }
     }
 
-    @Test("Only what changed is in it, however it came about between two saves — and nothing where nothing of the device's own changed")
+    private func rowid(_ key: NoteKey, in file: StoreFile) async throws -> Int64? {
+        try await file.db.read { db in
+            try Int64.fetchOne(db, sql: "SELECT rowid FROM note WHERE host = ? AND id = ?", arguments: [key.host, key.id])
+        }
+    }
+
+    @Test("A save after one post changed writes that one row, and the row keeps its place; a post new to the file is one row too, added last")
+    func oneChangeOneRow() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (store, saver, file) = try await launched(in: dir, Record())
+        try await saver.save()
+        let kept = Self.notes[2].key
+        let place = try #require(try await rowid(kept, in: file))
+        var before = try await changesCount(file)
+        #expect(await store.setKept(true, for: kept))
+        try await saver.save()
+        #expect(try await changesCount(file) - before == 1, "more than the one row written for one post kept")
+        #expect(try await rowid(kept, in: file) == place, "the row was written again somewhere else")
+
+        before = try await changesCount(file)
+        let arrived = Self.note(9, from: Self.alpha)
+        await store.ingest([arrived])
+        try await saver.save()
+        #expect(try await changesCount(file) - before == 1)
+        let last = try await file.db.read { try Int64.fetchOne($0, sql: "SELECT max(rowid) FROM note") }
+        #expect(try await rowid(arrived.key, in: file) == last, "a post that arrived last is not the file's last row")
+
+        before = try await changesCount(file)
+        await letGo(Self.notes[0], in: store)
+        try await saver.save()
+        #expect(try await changesCount(file) - before == 1)
+        // Nothing moved: nothing written at all.
+        before = try await changesCount(file)
+        try await saver.save()
+        #expect(try await changesCount(file) == before)
+    }
+
+    @Test("A post kept, a post let go and a source removed are on disk after one save, written after the words and the notices — and survive the next launch")
+    func theDevicesOwnOnDisk() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let record = Record()
+        let (store, saver, file) = try await launched(in: dir, record)
+        let kept = Self.notes[0].key
+        #expect(await store.setKept(true, for: kept))
+        #expect(await store.markGone(Self.notes[3].key))
+        await letGo(Self.notes[1], in: store)
+        await store.remove(host: Self.beta.host)
+        #expect(await saver.finished())
+        #expect(record.said == ["words", "notices", "rows"])
+        try file.db.close()
+        let whole = StoreFile.open(at: dir)
+        #expect(whole.sources.map(\.host) == [Self.alpha.host], "the removed source is still on disk")
+        #expect(whole.notes.map(\.id) == [Self.notes[0].id, Self.notes[2].id, Self.notes[3].id], "a post let go, or the removed source's, is still on disk — or the order the rows arrived in is not kept")
+        #expect(whole.notes.first { $0.id == kept.id }?.kept == true, "the keep was not written")
+        #expect(whole.notes.filter(\.kept).count == 1)
+        #expect(whole.notes.first { $0.id == Self.notes[3].id }?.goneSince != nil, "the mark that the post is gone was not written")
+    }
+
+    @Test("Only what changed is in it, however it came about between two saves")
     func whatIsInIt() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let record = Record()
-        let (store, saver, _) = try await launched(in: dir, record, nil)
+        let (store, saver, _) = try await launched(in: dir, record)
         // Kept and then let go between saves: a row gone, and no keep of a row that is not there.
-        let first = Self.notes[0].key, second = Self.notes[1].key, third = Self.notes[2]
+        let first = Self.notes[0].key, second = Self.notes[1].key
         _ = await store.setKept(true, for: first)
         _ = await store.setKept(false, for: first)
         await letGo(Self.notes[0], in: store)
-        // Let go, and back from its source before the save: a row still there.
-        await letGo(third, in: store)
-        await store.ingest([third])
         // Kept, and still held.
         _ = await store.setKept(true, for: second)
         try await saver.save()
-        try #require(record.own.count == 1)
-        #expect(record.own[0] == OwnChanges(gone: [first], kept: [.init(key: second, kept: true)]))
-        // What the sources say, read again, is none of it: no small write, only the full one.
-        await store.ingest([Self.note(9, from: Self.alpha)])
-        try await saver.save()
-        #expect(record.own.count == 1)
-        // A source added, with what it follows; and one removed.
+        try #require(record.rows.count == 1)
+        #expect(record.rows[0].deletes == [first])
+        #expect(record.rows[0].upserts.map(\.key) == [second] && record.rows[0].upserts[0].kept)
+        #expect(record.rows[0].sources == nil && record.rows[0].removedHosts.isEmpty, "the sources written, none of them changed")
+        // A source added; and one removed, its posts with it.
         let gamma = Source(host: "gamma.test", kind: .mastodon)
         await store.add(gamma)
         _ = await store.remove(host: Self.beta.host)
         try await saver.save()
-        try #require(record.own.count == 2)
-        #expect(record.own[1].removed == [Self.beta.host])
-        #expect(record.own[1].sources.map(\.source.host) == [gamma.host])
-        #expect(Set(record.own[1].gone) == Set(Self.notes[4...].map(\.key)), "its posts go with it")
-        #expect(record.own[1].kept.isEmpty)
-        // Nothing moved: nothing asked of the disk.
-        let before = record.said
+        try #require(record.rows.count == 2)
+        #expect(record.rows[1].removedHosts == [Self.beta.host])
+        #expect(record.rows[1].sources?.map(\.host) == [Self.alpha.host, gamma.host])
+        #expect(Set(record.rows[1].deletes) == Set(Self.notes[4...].map(\.key)), "its posts go with it")
+        #expect(record.rows[1].upserts.isEmpty)
+        // Added and removed between two saves: never on disk, so nothing to remove.
+        let delta = Source(host: "delta.test", kind: .mastodon)
+        await store.add(delta)
+        _ = await store.remove(host: delta.host)
         try await saver.save()
-        #expect(record.said == before)
-        // A post that arrived since the launch, and was written by a full save, is a row like
-        // any other: let go, it is in the small write too.
-        let arrived = Self.note(9, from: Self.alpha)
-        await letGo(arrived, in: store)
-        try await saver.save()
-        #expect(record.own.last == OwnChanges(gone: [arrived.key]))
+        #expect(record.rows.count == 3 && record.rows[2].sources == nil)
+        #expect(record.rows[2].removedHosts == [delta.host], "a removal is deleted whether or not the file held it")
     }
 
-    @Test("A small write that fails is still owed, whole: the same set is written by the next save")
+    @Test("A write that fails is still owed, whole — and a row changed again meanwhile is written as it stands then")
     func stillOwedAfterAFailure() async throws {
-        let dir = scratch()
-        defer { try? FileManager.default.removeItem(at: dir) }
         struct Refused: Error {}
-        let opened: StoreFile.Opened
-        do {
-            let first = try StoreFile(at: dir)
-            try await first.save(sources: [Self.alpha], notes: Array(Self.notes[..<4]))
-            try first.db.close()
-            opened = StoreFile.open(at: dir)
-        }
-        let store = ItemStore(sources: opened.sources, notes: opened.notes)
+        let store = ItemStore(sources: [Self.alpha], notes: Array(Self.notes[..<4]), readFromDisk: true)
         let record = Record()
         let refusing = OSAllocatedUnfairLock(initialState: true)
-        let saver = StoreSaver(
-            store: store,
-            write: { _, _, _ in
-                if refusing.withLock({ $0 }) { throw Refused() }
-                record.note("items written")
-            },
-            writeUnsent: nil, writeNotices: nil, protected: .always, remake: nil,
-            writeOwn: { changes in
-                record.own(changes)
-                if refusing.withLock({ $0 }) { throw Refused() }
-            },
-            holding: (opened.sources, opened.notes)
-        )
+        let saver = StoreSaver(store: store, write: { changes in
+            record.rows(changes)
+            if refusing.withLock({ $0 }) { throw Refused() }
+        })
         _ = await store.setKept(true, for: Self.notes[0].key)
         await letGo(Self.notes[1], in: store)
+        _ = await store.remove(host: Self.beta.host)
         await #expect(throws: Refused.self) { try await saver.save() }
         refusing.withLock { $0 = false }
         try await saver.resave()
-        try #require(record.own.count == 2)
-        #expect(record.own[0] == record.own[1], "what a failed write did not land is owed again, the same")
-        #expect(record.own[0].gone == [Self.notes[1].key] && record.own[0].kept == [.init(key: Self.notes[0].key, kept: true)])
+        try #require(record.rows.count == 2)
+        #expect(record.rows[0] == record.rows[1], "what a failed write did not land is owed again, the same")
+        #expect(record.rows[0].deletes == [Self.notes[1].key] && record.rows[0].upserts.map(\.key) == [Self.notes[0].key])
         // Landed: owed no more.
         try await saver.resave()
-        #expect(record.own.count == 2)
-    }
+        #expect(record.rows.count == 3 && record.rows[2].isEmpty)
 
-    @Test("What the small write landed is not written again when the full save after it fails: only what is still not on disk is owed")
-    func landedThoughTheItemsDidNot() async throws {
-        struct Refused: Error {}
-        let store = ItemStore(sources: [Self.alpha], notes: Array(Self.notes[..<4]))
-        let record = Record()
-        let refusing = OSAllocatedUnfairLock(initialState: true)
-        let saver = StoreSaver(
-            store: store,
-            write: { _, _, _ in
-                if refusing.withLock({ $0 }) { throw Refused() }
-                record.note("items written")
-            },
-            writeUnsent: nil, writeNotices: nil, protected: .always, remake: nil,
-            writeOwn: { record.own($0) }, holding: ([Self.alpha], Array(Self.notes[..<4]))
-        )
-        _ = await store.setKept(true, for: Self.notes[0].key)
+        // Failed once more, and the kept post kept no longer before the next try: the newer word.
+        refusing.withLock { $0 = true }
+        _ = await store.setKept(true, for: Self.notes[2].key)
         await #expect(throws: Refused.self) { try await saver.save() }
-        #expect(record.own == [OwnChanges(kept: [.init(key: Self.notes[0].key, kept: true)])])
-        // The full save is tried again, cut off again: the keep is on disk already, and is not sent twice.
-        await #expect(throws: Refused.self) { try await saver.resave() }
-        #expect(record.own.count == 1)
-        // Something more of the device's own meanwhile: that, and only that.
-        await letGo(Self.notes[1], in: store)
+        _ = await store.setKept(false, for: Self.notes[2].key)
         refusing.withLock { $0 = false }
         try await saver.save()
-        #expect(record.own.count == 2 && record.own[1] == OwnChanges(gone: [Self.notes[1].key]))
+        #expect(record.rows.last?.upserts.map(\.kept) == [false])
     }
 
-    @Test("An index replaced through the file, past the saver, is not set against what the saver knew: nothing is written ahead until a full save has said what it holds")
+    @Test("A read back writes the package's rows through the file: the next save writes only the rows the store holds otherwise, and nothing of the store before it")
     func theIndexReplaced() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let record = Record()
-        let (store, saver, _) = try await launched(in: dir, record, nil)
-        // A read back: the package's store written through the file, and the store in memory replaced.
-        await saver.indexReplaced()
-        let theirs = (20...23).map { Self.note($0, from: Self.alpha) }
+        let (store, saver, file) = try await launched(in: dir, record)
+        // Changed and never saved before the read back: the package's store replaces it.
+        _ = await store.setKept(true, for: Self.notes[0].key)
+        var theirs = (20...23).map { Self.note($0, from: Self.alpha) }
+        theirs[1].refsDue = true
+        try await file.save(sources: [Self.alpha], notes: theirs)
         await store.replace(sources: [Self.alpha], notes: theirs)
         try await saver.save()
-        #expect(record.own.isEmpty, "every post of the old store sent to be deleted, one by one, ahead of the items")
-        #expect(record.said.last == "items written")
-        // From that full save on it is known again.
-        await letGo(theirs[0], in: store)
-        try await saver.save()
-        #expect(record.own == [OwnChanges(gone: [theirs[0].key])])
-        // Held to the source: the packager says so where it writes the index itself, and where it writes it back.
+        try #require(record.rows.count == 1)
+        #expect(record.rows[0].upserts.map(\.key) == [theirs[1].key], "only the row the store holds otherwise — no longer owing a load")
+        #expect(record.rows[0].upserts.first?.refsDue == false)
+        #expect(record.rows[0].deletes.isEmpty)
+        try file.db.close()
+        #expect(Set(StoreFile.open(at: dir).notes.map(\.id)) == Set(theirs.map(\.id)))
+        // Held to the source: the packager no longer tells the saver anything.
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let packager = try String(contentsOf: root.appendingPathComponent("Sources/FediqoPersistence/StorePackager.swift"), encoding: .utf8)
-        #expect(packager.components(separatedBy: "await saver?.indexReplaced()").count - 1 == 2)
-        #expect(packager.contains("replacingNotices: []\n            )\n            // Written through the file, past the saver"))
+        #expect(!packager.contains("indexReplaced"))
     }
 
-    @Test("A save with nothing new copies nothing out of the store to find that out — and neither does leaving")
-    @MainActor
-    func nothingNewNothingCopied() async throws {
+    @Test("A post let go and taken in again before a save is written where it now arrived, after every row before it")
+    func letGoAndBack() async throws {
         let dir = scratch()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let record = Record()
-        let (store, saver, _) = try await launched(in: dir, record, nil)
+        let (store, saver, file) = try await launched(in: dir, Record())
+        await letGo(Self.notes[0], in: store)
+        await store.ingest([Self.notes[0]])
+        try await saver.save()
+        let last = try await file.db.read { try Int64.fetchOne($0, sql: "SELECT max(rowid) FROM note") }
+        #expect(try await rowid(Self.notes[0].key, in: file) == last, "kept where it stood before it was let go")
+        try file.db.close()
+        #expect(StoreFile.open(at: dir).notes.last?.id == Self.notes[0].id)
+    }
+
+    @Test("A row the file holds that is no item — a host with no source row, and no kind — is deleted by the first save after the launch that skipped it")
+    func skippedRowsGo() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        do {
+            let first = try StoreFile(at: dir)
+            try await first.save(sources: [Self.alpha, Self.beta], notes: Self.notes)
+            // Beta forgotten by a build before the kind was written on every row.
+            try await first.db.write { db in
+                try db.execute(sql: "DELETE FROM source WHERE host = ?", arguments: [Self.beta.host])
+                try db.execute(sql: "UPDATE note SET facts = json_remove(facts, '$.kind') WHERE host = ?", arguments: [Self.beta.host])
+            }
+            try first.db.close()
+        }
+        let opened = StoreFile.open(at: dir)
+        #expect(Set(opened.skipped) == Set(Self.notes[4...].map(\.key)))
+        let store = ItemStore(sources: opened.sources, notes: opened.notes, readFromDisk: true, skipped: opened.skipped)
+        let file = try #require(opened.file)
+        try await StoreSaver(store: store, file: file).save()
+        let left = try await file.db.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM note WHERE host = ?", arguments: [Self.beta.host]) }
+        #expect(left == 0, "a row nothing draws stays on disk")
+        #expect(try await file.db.read { try Int.fetchOne($0, sql: "SELECT count(*) FROM note") } == 4)
+    }
+
+    /// The index undo of a read back, as `StorePackager.commitIndex` makes it, where a lock held
+    /// it past a save: the package's store written through the file, a save landing into it,
+    /// then the file put back to what it held when the read back began.
+    @Test("An index undo done after a save landed into the package's store leaves nothing that save wrote off disk, and nothing let go on it")
+    func anUndoAfterASave() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (store, saver, file) = try await launched(in: dir, Record())
+        try await saver.save()
+        let previous = try file.load()
+        let told = try file.loadNotices(of: previous.sources)
+        let theirs = (20...23).map { Self.note($0, from: Self.alpha) }
+        try await file.save(sources: [Self.alpha], notes: theirs, said: [], replacingNotices: [])
+        // Meanwhile, the session goes on and its save lands in the package's file.
+        let arrived = Self.note(9, from: Self.alpha)
+        #expect(await store.setKept(true, for: Self.notes[2].key))
+        await store.ingest([arrived])
+        await letGo(Self.notes[1], in: store)
+        try await saver.save()
+        // The undo, done at last; then the packager's own resave.
+        try await file.save(sources: previous.sources, notes: previous.notes, said: previous.said, replacingNotices: told)
+        await store.oweEverything(fileHolds: previous.notes.map(\.key), hosts: previous.sources.map(\.host))
+        try await saver.resave()
+        try file.db.close()
+        let whole = StoreFile.open(at: dir)
+        let ids = Set(whole.notes.map(\.id))
+        #expect(ids == Set((Self.notes.map(\.id) + [arrived.id]).filter { $0 != Self.notes[1].id }))
+        #expect(whole.notes.first { $0.id == Self.notes[2].id }?.kept == true)
+        #expect(whole.sources.map(\.host) == [Self.alpha.host, Self.beta.host])
+        // Held to the source: the packager's undo owes the store again after writing it back.
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let packager = try String(contentsOf: root.appendingPathComponent("Sources/FediqoPersistence/StorePackager.swift"), encoding: .utf8)
+        #expect(packager.contains("replacingNotices: told\n                )\n                // Put back as it was"))
+        #expect(packager.contains("await store.oweEverything(\n                    fileHolds: previous.notes.map(\\.key), hosts: previous.sources.map(\\.host)\n                )"))
+    }
+
+    @Test("A save with nothing new takes nothing out of the store to find that out — and neither does leaving")
+    @MainActor
+    func nothingNewNothingTaken() async throws {
+        let dir = scratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (store, saver, _) = try await launched(in: dir, Record())
         _ = await store.setKept(true, for: Self.notes[0].key)
         try await saver.save()
-        let taken = await saver.snapshots
-        #expect(taken == 2, "once for what is the device's own, once for the items")
+        let taken = await saver.takes
+        #expect(taken == 1)
         try await saver.save()
         _ = await saver.finished()
         final class Grant: BackgroundGranting { func end() {} }
         await Leaving.leave(holding: Grant(), decide: {}, saver: saver, protected: .always, then: {})
-        #expect(await saver.snapshots == taken, "the whole store copied to learn that nothing had changed")
+        #expect(await saver.takes == taken, "the store asked for what changed with nothing changed")
     }
 
-    @Test("Where nothing says what the index holds — a saver handed nothing a launch read — the first full save does, and the small write begins after it")
-    func withoutWhatALaunchRead() async throws {
+    @Test("A store made of rows the file may not hold owes every one of them: its first save writes them all")
+    func madeOfRowsOwesThem() async throws {
         let store = ItemStore(sources: [Self.alpha], notes: Array(Self.notes[..<4]))
         let record = Record()
-        let saver = StoreSaver(
-            store: store, write: { _, _, _ in record.note("items written") },
-            writeUnsent: nil, writeNotices: nil, protected: .always, remake: nil,
-            writeOwn: { record.own($0) }, holding: nil
-        )
-        _ = await store.setKept(true, for: Self.notes[0].key)
+        let saver = StoreSaver(store: store, write: { record.rows($0) })
         try await saver.save()
-        #expect(record.own.isEmpty && record.said == ["items written"], "written ahead on a guess at what the index held")
-        _ = await store.setKept(true, for: Self.notes[1].key)
-        try await saver.save()
-        #expect(record.own == [OwnChanges(kept: [.init(key: Self.notes[1].key, kept: true)])])
+        #expect(record.rows.first?.upserts.map(\.key) == Self.notes[..<4].map(\.key), "not every row, or not in the order they arrived")
+        #expect(record.rows.first?.sources == [Self.alpha])
     }
 }
